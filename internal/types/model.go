@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -88,4 +89,16 @@ func (c *ModelParameters) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, c)
+}
+
+// BeforeCreate is a GORM hook that runs before creating a new model record
+// Automatically generates a UUID for new models
+// Parameters:
+//   - tx: GORM database transaction
+//
+// Returns:
+//   - error: Any error encountered during the hook execution
+func (m *Model) BeforeCreate(tx *gorm.DB) (err error) {
+	m.ID = uuid.New().String()
+	return nil
 }

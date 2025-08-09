@@ -659,21 +659,58 @@ attachment
 
 #### POST `/models` - 创建模型
 
-请求体:
+创建对话模型（KnowledgeQA）请求体:
 
 ```json
 {
   "name": "模型名称",
-  "type": "LLM",
-  "source": "OPENAI",
+  "type": "KnowledgeQA",  
+  "source": "remote",     # remote / local
   "description": "模型描述",
   "parameters": {
     "model": "gpt-4",
     "api_key": "sk-xxxxx",
-    "base_url": "https://api.openai.com"
+    "base_url": "xxx"
   }
 }
 ```
+
+创建嵌入模型（Embedding）请求体:
+
+```json
+{
+  "name": "模型名称",
+  "type": "Embedding",  
+  "source": "remote",     # remote / local
+  "description": "模型描述",
+  "parameters": {
+    "model": "bge-m3",
+    "api_key": "sk-xxxxx",
+    "base_url": "xxx",
+    "embedding_parameters": {
+      "dimension": 768,
+      "truncate_prompt_tokens": 512
+    }
+  }
+}
+```
+
+创建排序模型（Rerank）请求体:
+
+```json
+{
+  "name": "模型名称",
+  "type": "Rerank",  
+  "source": "remote",     # remote / local
+  "description": "模型描述",
+  "parameters": {
+    "model": "gte-reranker",
+    "api_key": "sk-xxxxx",
+    "base_url": "xxx"
+  }
+}
+```
+
 
 响应:
 
