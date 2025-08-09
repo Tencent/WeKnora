@@ -50,10 +50,10 @@ type SearchResult struct {
 
 // SearchParams represents the search parameters
 type SearchParams struct {
-	QueryText        string
-	VectorThreshold  float64
-	KeywordThreshold float64
-	MatchCount       int
+	QueryText        string  `json:"query_text"`
+	VectorThreshold  float64 `json:"vector_threshold"`
+	KeywordThreshold float64 `json:"keyword_threshold"`
+	MatchCount       int     `json:"match_count"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

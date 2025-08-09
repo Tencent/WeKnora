@@ -30,14 +30,6 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 
 	logger.Info(ctx, "Start hybrid search")
 
-	// Validate query parameter existence
-	query := c.Query("query")
-	if query == "" {
-		logger.Error(ctx, "Query parameter is empty")
-		c.Error(errors.NewBadRequestError("Query parameter cannot be empty"))
-		return
-	}
-
 	// Validate knowledge base ID
 	id := c.Param("id")
 	if id == "" {
@@ -46,15 +38,18 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s", id, query)
+	// Parse request body
+	var req types.SearchParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s", id, req.QueryText)
 
 	// Execute hybrid search with default search parameters
-	results, err := h.service.HybridSearch(ctx, id, types.SearchParams{
-		QueryText:        query,
-		KeywordThreshold: 0.5,
-		VectorThreshold:  0.3,
-		MatchCount:       10,
-	})
+	results, err := h.service.HybridSearch(ctx, id, req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
