@@ -81,24 +81,38 @@ export default function () {
             MessagePlugin.info("上传成功！");
             getKnowled();
           } else {
-            // 检查错误码，如果是重复文件则显示特定提示
-            if (result.code === 'duplicate_file') {
-              MessagePlugin.error("文件已存在");
-            } else {
-              MessagePlugin.error(result.message || (result.error && result.error.message) || "上传失败！");
+            // 改进错误信息提取逻辑
+            let errorMessage = "上传失败！";
+            
+            // 优先从 error 对象中获取错误信息
+            if (result.error && result.error.message) {
+              errorMessage = result.error.message;
+            } else if (result.message) {
+              errorMessage = result.message;
             }
+            
+            // 检查错误码，如果是重复文件则显示特定提示
+            if (result.code === 'duplicate_file' || (result.error && result.error.code === 'duplicate_file')) {
+              errorMessage = "文件已存在";
+            }
+            
+            MessagePlugin.error(errorMessage);
           }
           uploadInput.value.value = "";
         })
         .catch((err: any) => {
-          // 检查错误响应中的错误码
+          // 改进 catch 中的错误处理
+          let errorMessage = "上传失败！";
+          
           if (err.code === 'duplicate_file') {
-            MessagePlugin.error("文件已存在");
+            errorMessage = "文件已存在";
+          } else if (err.error && err.error.message) {
+            errorMessage = err.error.message;
           } else if (err.message) {
-            MessagePlugin.error(err.message);
-          } else {
-            MessagePlugin.error("上传失败！");
+            errorMessage = err.message;
           }
+          
+          MessagePlugin.error(errorMessage);
           uploadInput.value.value = "";
         });
     } else {
