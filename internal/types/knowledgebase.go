@@ -8,6 +8,10 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	InitDefaultKnowledgeBaseID = "kb-00000001"
+)
+
 // KnowledgeBase represents a knowledge base
 type KnowledgeBase struct {
 	// Unique identifier of the knowledge base
@@ -26,6 +30,14 @@ type KnowledgeBase struct {
 	EmbeddingModelID string `yaml:"embedding_model_id" json:"embedding_model_id"`
 	// Summary model ID
 	SummaryModelID string `yaml:"summary_model_id" json:"summary_model_id"`
+	// Rerank model ID
+	RerankModelID string `yaml:"rerank_model_id" json:"rerank_model_id"`
+	// VLM model ID
+	VLMModelID string `yaml:"vlm_model_id" json:"vlm_model_id"`
+	// VLM config
+	VLMConfig VLMConfig `yaml:"vlm_config" json:"vlm_config" gorm:"type:json"`
+	// COS config
+	COSConfig COSConfig `yaml:"cos_config" json:"cos_config" gorm:"type:json"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 	// Last updated time of the knowledge base
@@ -52,6 +64,37 @@ type ChunkingConfig struct {
 	Separators []string `yaml:"separators" json:"separators"`
 	// Enable multimodal
 	EnableMultimodal bool `yaml:"enable_multimodal" json:"enable_multimodal"`
+}
+
+// COSConfig represents the COS configuration
+type COSConfig struct {
+	// Secret ID
+	SecretID string `yaml:"secret_id" json:"secret_id"`
+	// Secret Key
+	SecretKey string `yaml:"secret_key" json:"secret_key"`
+	// Region
+	Region string `yaml:"region" json:"region"`
+	// Bucket Name
+	BucketName string `yaml:"bucket_name" json:"bucket_name"`
+	// App ID
+	AppID string `yaml:"app_id" json:"app_id"`
+	// Path Prefix
+	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
+}
+
+func (c *COSConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+func (c *COSConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
 }
 
 // ImageProcessingConfig represents the image processing configuration
@@ -84,6 +127,35 @@ func (c ImageProcessingConfig) Value() (driver.Value, error) {
 
 // Scan implements the sql.Scanner interface, used to convert database value to ImageProcessingConfig
 func (c *ImageProcessingConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+// VLMConfig represents the VLM configuration
+type VLMConfig struct {
+	// Model Name
+	ModelName string `yaml:"model_name" json:"model_name"`
+	// Base URL
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	// API Key
+	APIKey string `yaml:"api_key" json:"api_key"`
+	// Interface Type: "ollama" or "openai"
+	InterfaceType string `yaml:"interface_type" json:"interface_type"`
+}
+
+// Value implements the driver.Valuer interface, used to convert VLMConfig to database value
+func (c VLMConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+// Scan implements the sql.Scanner interface, used to convert database value to VLMConfig
+func (c *VLMConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}

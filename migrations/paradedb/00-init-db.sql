@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS tenants (
     deleted_at TIMESTAMP WITH TIME ZONE
 );
 
+-- Set the starting value for tenants id sequence
+ALTER SEQUENCE tenants_id_seq RESTART WITH 10000;
+
 -- Add indexes
 CREATE INDEX IF NOT EXISTS idx_tenants_api_key ON tenants(api_key);
 CREATE INDEX IF NOT EXISTS idx_tenants_status ON tenants(status);
@@ -55,6 +58,10 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     image_processing_config JSONB NOT NULL DEFAULT '{"enable_multimodal": false, "model_id": ""}',
     embedding_model_id VARCHAR(64) NOT NULL,
     summary_model_id VARCHAR(64) NOT NULL,
+    rerank_model_id VARCHAR(64) NOT NULL,
+    vlm_model_id VARCHAR(64) NOT NULL,
+    cos_config JSONB NOT NULL DEFAULT '{}',
+    vlm_config JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE

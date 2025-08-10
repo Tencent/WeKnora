@@ -47,7 +47,9 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
 	// Generate UUID and set creation timestamps
-	kb.ID = uuid.New().String()
+	if kb.ID == "" {
+		kb.ID = uuid.New().String()
+	}
 	kb.CreatedAt = time.Now()
 	kb.TenantID = ctx.Value(types.TenantIDContextKey).(uint)
 	kb.UpdatedAt = time.Now()
@@ -245,6 +247,9 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			ImageProcessingConfig: sourceKB.ImageProcessingConfig,
 			EmbeddingModelID:      sourceKB.EmbeddingModelID,
 			SummaryModelID:        sourceKB.SummaryModelID,
+			RerankModelID:         sourceKB.RerankModelID,
+			VLMModelID:            sourceKB.VLMModelID,
+			COSConfig:             sourceKB.COSConfig,
 		}
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
 			return nil, nil, err

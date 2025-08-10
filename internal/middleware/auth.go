@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -15,14 +16,20 @@ import (
 
 // 无需认证的API列表
 var noAuthAPI = map[string][]string{
-	"/api/v1/test-data": {"GET"},
-	"/api/v1/tenants":   {"POST"},
+	"/api/v1/test-data":        {"GET"},
+	"/api/v1/tenants":          {"POST"},
+	"/api/v1/initialization/*": {"GET", "POST"},
 }
 
 // 检查请求是否在无需认证的API列表中
 func isNoAuthAPI(path string, method string) bool {
 	for api, methods := range noAuthAPI {
-		if api == path && slices.Contains(methods, method) {
+		// 如果以*结尾，按照前缀匹配，否则按照全路径匹配
+		if strings.HasSuffix(api, "*") {
+			if strings.HasPrefix(path, strings.TrimSuffix(api, "*")) && slices.Contains(methods, method) {
+				return true
+			}
+		} else if path == api && slices.Contains(methods, method) {
 			return true
 		}
 	}

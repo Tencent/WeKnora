@@ -63,7 +63,9 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 			chatReq.Options["num_predict"] = opts.MaxTokens
 		}
 		if opts.Thinking != nil {
-			chatReq.Options["think"] = *opts.Thinking
+			chatReq.Think = &ollamaapi.ThinkValue{
+				Value: *opts.Thinking,
+			}
 		}
 	}
 

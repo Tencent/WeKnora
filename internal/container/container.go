@@ -115,6 +115,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewTestDataHandler))
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
+	must(container.Provide(handler.NewInitializationHandler))
 
 	// Router configuration
 	must(container.Provide(router.NewRouter))

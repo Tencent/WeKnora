@@ -87,6 +87,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.docreader
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
     container_name: WeKnora-docreader
     ports:
       - "50051:50051"
@@ -104,6 +106,8 @@ services:
     networks:
       - WeKnora-network
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   jaeger:
     image: jaegertracing/all-in-one:latest

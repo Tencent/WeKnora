@@ -18,11 +18,12 @@ import (
 
 // SessionHandler handles all HTTP requests related to conversation sessions
 type SessionHandler struct {
-	messageService  interfaces.MessageService // Service for managing messages
-	sessionService  interfaces.SessionService // Service for managing sessions
-	streamManager   interfaces.StreamManager  // Manager for handling streaming responses
-	config          *config.Config            // Application configuration
-	testDataService *service.TestDataService  // Service for test data (models, etc.)
+	messageService       interfaces.MessageService // Service for managing messages
+	sessionService       interfaces.SessionService // Service for managing sessions
+	streamManager        interfaces.StreamManager  // Manager for handling streaming responses
+	config               *config.Config            // Application configuration
+	testDataService      *service.TestDataService  // Service for test data (models, etc.)
+	knowledgebaseService interfaces.KnowledgeBaseService
 }
 
 // NewSessionHandler creates a new instance of SessionHandler with all necessary dependencies
@@ -32,13 +33,15 @@ func NewSessionHandler(
 	streamManager interfaces.StreamManager,
 	config *config.Config,
 	testDataService *service.TestDataService,
+	knowledgebaseService interfaces.KnowledgeBaseService,
 ) *SessionHandler {
 	return &SessionHandler{
-		sessionService:  sessionService,
-		messageService:  messageService,
-		streamManager:   streamManager,
-		config:          config,
-		testDataService: testDataService,
+		sessionService:       sessionService,
+		messageService:       messageService,
+		streamManager:        streamManager,
+		config:               config,
+		testDataService:      testDataService,
+		knowledgebaseService: knowledgebaseService,
 	}
 }
 
@@ -191,27 +194,24 @@ func (h *SessionHandler) CreateSession(c *gin.Context) {
 		logger.Debug(ctx, "Using default session strategy")
 	}
 
-	// Get model IDs from test data service if not provided
+	kb, err := h.knowledgebaseService.GetKnowledgeBaseByID(ctx, request.KnowledgeBaseID)
+	if err != nil {
+		logger.Error(ctx, "Failed to get knowledge base", err)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	// Get model IDs from knowledge base if not provided
 	if createdSession.SummaryModelID == "" {
-		if h.testDataService != nil {
-			createdSession.SummaryModelID = h.testDataService.LLMModel.GetModelID()
-			logger.Debug(ctx, "Using summary model ID from test data service")
-		} else {
-			logger.Error(ctx, "Summary model ID is empty and cannot get default value")
-			c.Error(errors.NewBadRequestError("Summary model ID cannot be empty"))
-			return
-		}
+		createdSession.SummaryModelID = kb.SummaryModelID
 	}
 	if createdSession.RerankModelID == "" {
-		if h.testDataService != nil && h.testDataService.RerankModel != nil {
-			createdSession.RerankModelID = h.testDataService.RerankModel.GetModelID()
-			logger.Debug(ctx, "Using rerank model ID from test data service")
-		}
+		createdSession.RerankModelID = kb.RerankModelID
 	}
 
 	// Call service to create session
 	logger.Infof(ctx, "Calling session service to create session")
-	createdSession, err := h.sessionService.CreateSession(ctx, createdSession)
+	createdSession, err = h.sessionService.CreateSession(ctx, createdSession)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

@@ -30,6 +30,8 @@ class ChunkingConfig:
     enable_multimodal: bool = (
         False  # Whether to enable multimodal processing (text + images)
     )
+    cos_config: dict = None  # COS configuration for file storage
+    vlm_config: dict = None  # VLM configuration for image captioning
 
 
 @dataclass
@@ -138,6 +140,7 @@ class Parser:
                 enable_multimodal=config.enable_multimodal,
                 max_image_size=1920,  # Limit image size to 1920px
                 max_concurrent_tasks=5,  # Limit concurrent tasks to 5
+                chunking_config=config,  # Pass the entire chunking config
             )
 
             logger.info(f"Starting to parse file content, size: {len(content)} bytes")
@@ -197,6 +200,7 @@ class Parser:
                 enable_multimodal=config.enable_multimodal,
                 max_image_size=1920,  # Limit image size
                 max_concurrent_tasks=5,  # Limit concurrent tasks
+                chunking_config=config,
             )
 
             logger.info(f"Starting to parse URL content")

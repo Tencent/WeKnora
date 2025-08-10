@@ -8,6 +8,10 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	InitDefaultTenantID uint = 1
+)
+
 // Tenant represents the tenant
 type Tenant struct {
 	// ID

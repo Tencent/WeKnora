@@ -13,7 +13,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.25.1
 	github.com/minio/minio-go/v7 v7.0.90
-	github.com/ollama/ollama v0.9.6
+	github.com/ollama/ollama v0.11.4
 	github.com/panjf2000/ants/v2 v2.11.2
 	github.com/parquet-go/parquet-go v0.25.0
 	github.com/pgvector/pgvector-go v0.3.0

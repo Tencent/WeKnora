@@ -17,17 +17,18 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config            *config.Config
-	KBHandler         *handler.KnowledgeBaseHandler
-	KnowledgeHandler  *handler.KnowledgeHandler
-	TenantHandler     *handler.TenantHandler
-	TenantService     interfaces.TenantService
-	ChunkHandler      *handler.ChunkHandler
-	SessionHandler    *handler.SessionHandler
-	MessageHandler    *handler.MessageHandler
-	TestDataHandler   *handler.TestDataHandler
-	ModelHandler      *handler.ModelHandler
-	EvaluationHandler *handler.EvaluationHandler
+	Config                *config.Config
+	KBHandler             *handler.KnowledgeBaseHandler
+	KnowledgeHandler      *handler.KnowledgeHandler
+	TenantHandler         *handler.TenantHandler
+	TenantService         interfaces.TenantService
+	ChunkHandler          *handler.ChunkHandler
+	SessionHandler        *handler.SessionHandler
+	MessageHandler        *handler.MessageHandler
+	TestDataHandler       *handler.TestDataHandler
+	ModelHandler          *handler.ModelHandler
+	EvaluationHandler     *handler.EvaluationHandler
+	InitializationHandler *handler.InitializationHandler
 }
 
 // NewRouter 创建新的路由
@@ -61,6 +62,23 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// 测试数据接口（不需要认证）
 	r.GET("/api/v1/test-data", params.TestDataHandler.GetTestData)
+
+	// 初始化接口（不需要认证）
+	r.GET("/api/v1/initialization/status", params.InitializationHandler.CheckStatus)
+	r.GET("/api/v1/initialization/config", params.InitializationHandler.GetCurrentConfig)
+	r.POST("/api/v1/initialization/initialize", params.InitializationHandler.Initialize)
+
+	// Ollama相关接口（不需要认证）
+	r.GET("/api/v1/initialization/ollama/status", params.InitializationHandler.CheckOllamaStatus)
+	r.POST("/api/v1/initialization/ollama/models/check", params.InitializationHandler.CheckOllamaModels)
+	r.POST("/api/v1/initialization/ollama/models/download", params.InitializationHandler.DownloadOllamaModel)
+	r.GET("/api/v1/initialization/ollama/download/progress/:taskId", params.InitializationHandler.GetDownloadProgress)
+	r.GET("/api/v1/initialization/ollama/download/tasks", params.InitializationHandler.ListDownloadTasks)
+
+	// 远程API相关接口（不需要认证）
+	r.POST("/api/v1/initialization/remote/check", params.InitializationHandler.CheckRemoteModel)
+	r.POST("/api/v1/initialization/rerank/check", params.InitializationHandler.CheckRerankModel)
+	r.POST("/api/v1/initialization/multimodal/test", params.InitializationHandler.TestMultimodalFunction)
 
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")

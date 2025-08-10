@@ -227,12 +227,24 @@ start_docker() {
     source "$PROJECT_ROOT/.env"
     storage_type=${STORAGE_TYPE:-local}
 
+    # 检测当前系统平台
+    log_info "检测系统平台信息..."
+    if [ "$(uname -m)" = "x86_64" ]; then
+        export PLATFORM="linux/amd64"
+    elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+        export PLATFORM="linux/arm64"
+    else
+        log_warning "未识别的平台类型：$(uname -m)，将使用默认平台 linux/amd64"
+        export PLATFORM="linux/amd64"
+    fi
+    log_info "当前平台：$PLATFORM"
+    
     # 进入项目根目录再执行docker-compose命令
     cd "$PROJECT_ROOT"
     
     # 启动基本服务
     log_info "启动核心服务容器..."
-    docker-compose up --build -d
+    PLATFORM=$PLATFORM docker-compose up --build -d
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
         return 1

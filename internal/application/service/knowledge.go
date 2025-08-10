@@ -19,6 +19,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
+	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/utils"
@@ -103,6 +104,28 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
+	}
+
+	// 检查多模态配置完整性 - 只在图片文件时校验
+	// 检查是否为图片文件
+	if !IsImageType(getFileType(file.Filename)) {
+		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
+	} else {
+		// 检查COS配置
+		if kb.COSConfig.SecretID == "" || kb.COSConfig.SecretKey == "" ||
+			kb.COSConfig.Region == "" || kb.COSConfig.BucketName == "" ||
+			kb.COSConfig.AppID == "" {
+			logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
+			return nil, werrors.NewBadRequestError("上传图片文件需要完整的COS配置信息")
+		}
+
+		// 检查VLM配置
+		if kb.VLMConfig.ModelName == "" || kb.VLMConfig.BaseURL == "" {
+			logger.Error(ctx, "VLM configuration incomplete for image multimodal processing")
+			return nil, werrors.NewBadRequestError("上传图片文件需要完整的VLM配置信息")
+		}
+
+		logger.Info(ctx, "Image multimodal configuration validation passed")
 	}
 
 	// Validate file type
@@ -647,6 +670,20 @@ func (s *knowledgeService) processDocument(ctx context.Context,
 			ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
 			Separators:       kb.ChunkingConfig.Separators,
 			EnableMultimodal: enableMultimodel,
+			CosConfig: &proto.COSConfig{
+				SecretId:   kb.COSConfig.SecretID,
+				SecretKey:  kb.COSConfig.SecretKey,
+				Region:     kb.COSConfig.Region,
+				BucketName: kb.COSConfig.BucketName,
+				AppId:      kb.COSConfig.AppID,
+				PathPrefix: kb.COSConfig.PathPrefix,
+			},
+			VlmConfig: &proto.VLMConfig{
+				ModelName:     kb.VLMConfig.ModelName,
+				BaseUrl:       kb.VLMConfig.BaseURL,
+				ApiKey:        kb.VLMConfig.APIKey,
+				InterfaceType: kb.VLMConfig.InterfaceType,
+			},
 		},
 		RequestId: ctx.Value(types.RequestIDContextKey).(string),
 	})
@@ -687,6 +724,20 @@ func (s *knowledgeService) processDocumentFromURL(ctx context.Context,
 			ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
 			Separators:       kb.ChunkingConfig.Separators,
 			EnableMultimodal: enableMultimodel,
+			CosConfig: &proto.COSConfig{
+				SecretId:   kb.COSConfig.SecretID,
+				SecretKey:  kb.COSConfig.SecretKey,
+				Region:     kb.COSConfig.Region,
+				BucketName: kb.COSConfig.BucketName,
+				AppId:      kb.COSConfig.AppID,
+				PathPrefix: kb.COSConfig.PathPrefix,
+			},
+			VlmConfig: &proto.VLMConfig{
+				ModelName:     kb.VLMConfig.ModelName,
+				BaseUrl:       kb.VLMConfig.BaseURL,
+				ApiKey:        kb.VLMConfig.APIKey,
+				InterfaceType: kb.VLMConfig.InterfaceType,
+			},
 		},
 		RequestId: ctx.Value(types.RequestIDContextKey).(string),
 	})
@@ -1145,7 +1196,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		chunkContents = chunkContents + imageAnnotations
 	}
 
-	if len(chunkContents) < 30 {
+	if len(chunkContents) < 300 {
 		return chunkContents, nil
 	}
 

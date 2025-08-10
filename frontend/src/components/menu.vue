@@ -173,7 +173,12 @@ const getIcon = (path) => {
 getIcon(route.name)
 const gotopage = (path) => {
     pathPrefix.value = path;
-    router.push(`/platform/${path}`);
+    // 如果是系统设置，跳转到初始化配置页面
+    if (path === 'settings') {
+        router.push('/initialization');
+    } else {
+        router.push(`/platform/${path}`);
+    }
     getIcon(path)
 }
 

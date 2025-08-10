@@ -13,7 +13,6 @@ urllib3
 markdownify
 mistletoe
 goose3[all]
-# paddlepaddle==3.0.0  (普通CPU版本已被注释)
 paddleocr==3.0.0
 markdown
 pypdf
@@ -21,6 +20,10 @@ cos-python-sdk-v5
 textract
 antiword
 openai
+ollama
 
---extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
-paddlepaddle-gpu==3.0.0 
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+paddlepaddle==3.0.0
+
+# --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+# paddlepaddle-gpu==3.0.0 

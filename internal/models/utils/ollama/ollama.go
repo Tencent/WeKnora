@@ -309,3 +309,8 @@ func (s *OllamaService) Generate(ctx context.Context, req *api.GenerateRequest, 
 	// Use official client Generate method
 	return s.client.Generate(ctx, req, fn)
 }
+
+// GetClient returns the underlying ollama client for advanced operations
+func (s *OllamaService) GetClient() *api.Client {
+	return s.client
+}

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from PIL import Image
 import io
 import numpy as np
+from .image_utils import image_to_base64
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -161,35 +162,6 @@ class NanonetsOCRBackend(OCRBackend):
             logger.error(f"Failed to initialize Nanonets OCR: {str(e)}")
             self.client = None
     
-    def _encode_image(self, image: Union[str, bytes, Image.Image]) -> str:
-        """Encode image to base64
-        
-        Args:
-            image: Image file path, bytes, or PIL Image object
-            
-        Returns:
-            Base64 encoded image
-        """
-        try:
-            if isinstance(image, str):
-                # It's a file path
-                with open(image, "rb") as image_file:
-                    return base64.b64encode(image_file.read()).decode("utf-8")
-            elif isinstance(image, bytes):
-                # It's bytes data
-                return base64.b64encode(image).decode("utf-8")
-            elif isinstance(image, Image.Image):
-                # It's a PIL Image
-                buffer = io.BytesIO()
-                image.save(buffer, format="PNG")
-                return base64.b64encode(buffer.getvalue()).decode("utf-8")
-            else:
-                logger.error(f"Unsupported image type: {type(image)}")
-                return ""
-        except Exception as e:
-            logger.error(f"Error encoding image: {str(e)}")
-            return ""
-    
     def predict(self, image: Union[str, bytes, Image.Image]) -> str:
         """Extract text from an image using Nanonets OCR
         
@@ -205,7 +177,7 @@ class NanonetsOCRBackend(OCRBackend):
         
         try:
             # Encode image to base64
-            img_base64 = self._encode_image(image)
+            img_base64 = image_to_base64(image)
             if not img_base64:
                 return ""
             

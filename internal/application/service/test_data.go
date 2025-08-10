@@ -144,6 +144,7 @@ func (s *TestDataService) initKnowledgeBase(ctx context.Context) error {
 		},
 		EmbeddingModelID: s.EmbedModel.GetModelID(),
 		SummaryModelID:   s.LLMModel.GetModelID(),
+		RerankModelID:    s.RerankModel.GetModelID(),
 	}
 
 	// 初始化测试知识库

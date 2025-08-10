@@ -14,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/runtime"
@@ -42,7 +41,6 @@ func main() {
 		cfg *config.Config,
 		router *gin.Engine,
 		tracer *tracing.Tracer,
-		testDataService *service.TestDataService,
 		resourceCleaner interfaces.ResourceCleaner,
 	) error {
 		// Create context for resource cleanup
@@ -57,13 +55,6 @@ func main() {
 		resourceCleaner.RegisterWithName("Tracer", func() error {
 			return tracer.Cleanup(cleanupCtx)
 		})
-
-		// Initialize test data
-		if testDataService != nil {
-			if err := testDataService.InitializeTestData(context.Background()); err != nil {
-				log.Printf("Failed to initialize test data: %v", err)
-			}
-		}
 
 		// Create HTTP server
 		server := &http.Server{

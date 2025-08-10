@@ -37,7 +37,13 @@ class ImageParser(BaseParser):
             # Upload image to storage service
             logger.info("Uploading image to storage")
             _, ext = os.path.splitext(self.file_name)
-            image_url = self.upload_bytes(content, file_ext=ext)
+            
+            # Get COS config from chunking config if available
+            cos_config = None
+            if hasattr(self, 'chunking_config') and self.chunking_config and hasattr(self.chunking_config, 'cos_config'):
+                cos_config = self.chunking_config.cos_config
+            
+            image_url = self.upload_bytes(content, file_ext=ext, cos_config=cos_config)
             if not image_url:
                 logger.error("Failed to upload image to storage")
                 return ""

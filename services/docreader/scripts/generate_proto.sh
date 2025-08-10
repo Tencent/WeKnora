@@ -7,7 +7,7 @@ PYTHON_OUT="src/proto"
 GO_OUT="src/proto"
 
 # 生成Python代码
-python -m grpc_tools.protoc -I${PROTO_DIR} \
+python3 -m grpc_tools.protoc -I${PROTO_DIR} \
     --python_out=${PYTHON_OUT} \
     --grpc_python_out=${PYTHON_OUT} \
     ${PROTO_DIR}/docreader.proto

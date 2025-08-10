@@ -1,10 +1,13 @@
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 import requests
+import ollama
+
 
 logger = logging.getLogger(__name__)
 
@@ -168,39 +171,108 @@ class Caption:
     Uses an external API to process images and return textual descriptions.
     """
 
-    def __init__(self):
-        """Initialize the Caption service with configuration from environment variables."""
+    def __init__(self, vlm_config=None):
+        """Initialize the Caption service with configuration from parameters or environment variables."""
         logger.info("Initializing Caption service")
         self.prompt = """简单凝炼的描述图片的主要内容"""
-        if os.getenv("VLM_MODEL_BASE_URL") == "" or os.getenv("VLM_MODEL_NAME") == "":
-            logger.error("VLM_MODEL_BASE_URL or VLM_MODEL_NAME is not set")
-            return
-        self.completion_url = os.getenv("VLM_MODEL_BASE_URL") + "/v1/chat/completions"
-        self.model = os.getenv("VLM_MODEL_NAME")
-        self.api_key = os.getenv("VLM_MODEL_API_KEY")
+        
+        # Use provided VLM config if available, otherwise fall back to environment variables
+        if vlm_config:
+            self.completion_url = vlm_config.get("base_url", "") + "/chat/completions"
+            self.model = vlm_config.get("model_name", "")
+            self.api_key = vlm_config.get("api_key", "")
+            self.interface_type = vlm_config.get("interface_type", "openai").lower()
+        else:
+            if os.getenv("VLM_MODEL_BASE_URL") == "" or os.getenv("VLM_MODEL_NAME") == "":
+                logger.error("VLM_MODEL_BASE_URL or VLM_MODEL_NAME is not set")
+                return
+            self.completion_url = os.getenv("VLM_MODEL_BASE_URL") + "/chat/completions"
+            self.model = os.getenv("VLM_MODEL_NAME")
+            self.api_key = os.getenv("VLM_MODEL_API_KEY")
+            self.interface_type = os.getenv("VLM_INTERFACE_TYPE", "openai").lower()
+        
+        # 验证接口类型
+        if self.interface_type not in ["ollama", "openai"]:
+            logger.warning(f"Unknown interface type: {self.interface_type}, defaulting to openai")
+            self.interface_type = "openai"
+        
         logger.info(
-            f"Service configured with model: {self.model}, endpoint: {self.completion_url}"
+            f"Service configured with model: {self.model}, endpoint: {self.completion_url}, interface: {self.interface_type}"
         )
 
-    def _call_caption_api(self, image_url: str) -> Optional[CaptionChatResp]:
+    def _call_caption_api(self, image_data: str) -> Optional[CaptionChatResp]:
         """
         Call the Caption API to generate a description for the given image.
 
         Args:
-            image_url: URL of the image to be captioned
+            image_data: URL of the image or base64 encoded image data
 
         Returns:
             CaptionChatResp object if successful, None otherwise
         """
         logger.info(f"Calling Caption API for image captioning")
-        logger.info(f"Processing image from URL: {image_url}")
+        logger.info(f"Processing image data: {image_data[:50] if len(image_data) > 50 else image_data}")
 
+        # 根据接口类型选择调用方式
+        if self.interface_type == "ollama":
+            return self._call_ollama_api(image_data)
+        else:
+            return self._call_openai_api(image_data)
+
+    def _call_ollama_api(self, image_base64: str) -> Optional[CaptionChatResp]:
+        """Call Ollama API for image captioning using base64 encoded image data."""
+
+        host = self.completion_url.replace("/v1/chat/completions", "")
+
+        client = ollama.Client(
+            host=host,
+        )
+        
+        try:
+            logger.info(f"Calling Ollama API with model: {self.model}")
+            
+            # 调用Ollama API，使用images参数传递base64编码的图片
+            response = client.generate(
+                model=self.model,
+                prompt="简单凝炼的描述图片的主要内容",
+                images=[image_base64], # image_base64是base64编码的图片数据
+                options={"temperature": 0.1},
+                stream=False,
+            )
+            
+            # 构造响应对象
+            caption_resp = CaptionChatResp(
+                id="ollama_response",
+                created=int(time.time()),
+                model=self.model,
+                object="chat.completion",
+                choices=[
+                    Choice(
+                        message=Message(
+                            role="assistant",
+                            content=response.response
+                        )
+                    )
+                ]
+            )
+            
+            logger.info("Successfully received response from Ollama API")
+            return caption_resp
+            
+        except Exception as e:
+            logger.error(f"Error calling Ollama API: {e}")
+            return None
+
+    def _call_openai_api(self, image_base64: str) -> Optional[CaptionChatResp]:
+        """Call OpenAI-compatible API for image captioning."""
+        logger.info(f"Calling OpenAI-compatible API with model: {self.model}")
+        
         user_msg = UserMessage(
             role="user",
             content=[
                 Content(type="text", text=self.prompt),
                 Content(
-                    type="image_url", image_url=ImageUrl(url=image_url, detail="auto")
+                    type="image_url", image_url=ImageUrl(url="data:image/png;base64," + image_base64, detail="auto")
                 ),
             ],
         )
@@ -223,7 +295,7 @@ class Caption:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         try:
-            logger.info(f"Sending request to Caption API with model: {self.model}")
+            logger.info(f"Sending request to OpenAI-compatible API with model: {self.model}")
             response = requests.post(
                 self.completion_url,
                 data=json.dumps(gpt_req, default=lambda o: o.__dict__, indent=4),
@@ -232,12 +304,12 @@ class Caption:
             )
             if response.status_code != 200:
                 logger.error(
-                    f"Caption API returned non-200 status code: {response.status_code}"
+                    f"OpenAI-compatible API returned non-200 status code: {response.status_code}"
                 )
                 response.raise_for_status()
 
             logger.info(
-                f"Successfully received response from Caption API with status: {response.status_code}"
+                f"Successfully received response from OpenAI-compatible API with status: {response.status_code}"
             )
             logger.info(f"Converting response to CaptionChatResp object")
             caption_resp = CaptionChatResp.from_json(response.json())
@@ -250,33 +322,30 @@ class Caption:
 
             return caption_resp
         except requests.exceptions.Timeout:
-            logger.error(f"Timeout while calling Caption API after 30 seconds")
+            logger.error(f"Timeout while calling OpenAI-compatible API after 30 seconds")
             return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request error calling Caption API: {e}")
+            logger.error(f"Request error calling OpenAI-compatible API: {e}")
             return None
         except Exception as e:
-            logger.error(f"Error calling Caption API: {str(e)}")
-            logger.info(
-                f"Request details: model={self.model}, URL={self.completion_url}"
-            )
+            logger.error(f"Unexpected error calling OpenAI-compatible API: {e}")
             return None
 
-    def get_caption(self, image_url: str) -> str:
+    def get_caption(self, image_data: str) -> str:
         """
-        Get a caption for the provided image URL.
+        Get a caption for the provided image data.
 
         Args:
-            image_url: URL of the image to be captioned
+            image_data: URL of the image or base64 encoded image data
 
         Returns:
             Caption text as string, or empty string if captioning failed
         """
         logger.info("Getting caption for image")
-        if not image_url or self.completion_url is None:
-            logger.error("Image URL is not set")
+        if not image_data or self.completion_url is None:
+            logger.error("Image data is not set")
             return ""
-        caption_resp = self._call_caption_api(image_url)
+        caption_resp = self._call_caption_api(image_data)
         if caption_resp:
             caption = caption_resp.choice_data()
             caption_length = len(caption)

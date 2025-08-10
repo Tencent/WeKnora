@@ -93,14 +93,29 @@ RUN apt-get update && apt-get install -y \
 # 下载并安装最新版本的 LibreOffice 25.2.4
 RUN mkdir -p /tmp/libreoffice && \
     cd /tmp/libreoffice && \
-    wget -q https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.4/deb/x86_64/LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
-    tar -xzf LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
-    cd LibreOffice_25.2.4*_Linux_x86-64_deb/DEBS && \
-    dpkg -i *.deb && \
+    if [ "$(uname -m)" = "x86_64" ]; then \
+        wget -q https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.4/deb/x86_64/LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
+        tar -xzf LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
+        cd LibreOffice_25.2.4*_Linux_x86-64_deb/DEBS && \
+        dpkg -i *.deb; \
+    elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
+        wget -q https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.2_Linux_aarch64_deb.tar.gz && \
+        tar -xzf LibreOffice_25.8.0.2_Linux_aarch64_deb.tar.gz && \
+        cd LibreOffice_25.8.0*_Linux_aarch64_deb/DEBS && \
+        dpkg -i *.deb; \
+    else \
+        echo "Unsupported architecture: $(uname -m)" && exit 1; \
+    fi && \
     cd / && \
     rm -rf /tmp/libreoffice
 
 # 设置 LibreOffice 环境变量
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+        echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment; \
+    elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
+        echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment; \
+    fi
+
 ENV LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice
 
 # 从构建阶段复制已安装的依赖和生成的代码
