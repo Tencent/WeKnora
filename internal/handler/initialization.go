@@ -1304,14 +1304,7 @@ func (h *InitializationHandler) checkRerankModelConnection(ctx context.Context,
 	}
 
 	// 构造重排API端点
-	rerankEndpoint := ""
-	if strings.Contains(baseURL, "v1") {
-		// 去除v1
-		baseURL = strings.Replace(baseURL, "/v1", "", 1)
-		rerankEndpoint = baseURL + "/rerank"
-	} else {
-		rerankEndpoint = baseURL + "/rerank"
-	}
+	rerankEndpoint := baseURL + "/rerank"
 
 	// Mock测试数据
 	testQuery := "什么是人工智能？"
