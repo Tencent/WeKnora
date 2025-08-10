@@ -116,13 +116,13 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 			kb.COSConfig.Region == "" || kb.COSConfig.BucketName == "" ||
 			kb.COSConfig.AppID == "" {
 			logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-			return nil, werrors.NewBadRequestError("上传图片文件需要完整的COS配置信息")
+			return nil, werrors.NewBadRequestError("上传图片文件需要完整的COS配置信息, 请前往系统设置页面进行补全")
 		}
 
 		// 检查VLM配置
 		if kb.VLMConfig.ModelName == "" || kb.VLMConfig.BaseURL == "" {
 			logger.Error(ctx, "VLM configuration incomplete for image multimodal processing")
-			return nil, werrors.NewBadRequestError("上传图片文件需要完整的VLM配置信息")
+			return nil, werrors.NewBadRequestError("上传图片文件需要完整的VLM配置信息, 请前往系统设置页面进行补全")
 		}
 
 		logger.Info(ctx, "Image multimodal configuration validation passed")
