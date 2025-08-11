@@ -140,7 +140,7 @@ start_ollama() {
     else
         log_info "启动Ollama服务..."
         export OLLAMA_HOST=0.0.0.0:11435
-        ollama serve > /dev/null 2>&1 &
+        ollama serve >/dev/null 2>&1 &
         
         # 等待服务启动
         MAX_RETRIES=30
