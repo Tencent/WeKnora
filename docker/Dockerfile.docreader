@@ -56,7 +56,7 @@ COPY services/docreader/scripts/ /app/scripts/
 RUN ls -la /root/.paddlex/official_models
 
 # 生成 protobuf 代码
-RUN chmod +x /app/scripts/generate_proto.sh && /app/scripts/generate_proto.sh
+RUN chmod +x /app/scripts/generate_proto.sh && bash /app/scripts/generate_proto.sh
 
 # 运行阶段
 FROM --platform=${PLATFORM} python:3.9-slim AS runner
