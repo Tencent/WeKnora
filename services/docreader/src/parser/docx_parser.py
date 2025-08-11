@@ -42,6 +42,7 @@ class DocxParser(BaseParser):
         max_image_size: int = 1920,
         max_concurrent_tasks: int = 5,
         max_pages: int = 100,  # Maximum number of pages to process, default to 50 pages
+        chunking_config = None,
     ):
         """Initialize DOCX document parser
 
@@ -69,6 +70,7 @@ class DocxParser(BaseParser):
             ocr_config=ocr_config,
             max_image_size=max_image_size,
             max_concurrent_tasks=max_concurrent_tasks,
+            chunking_config=chunking_config,
         )
         self.max_pages = max_pages
         logger.info(f"DocxParser initialized with max_pages={max_pages}")
