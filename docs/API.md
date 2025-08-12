@@ -95,7 +95,7 @@ WeKnora API 按功能分为以下几类：
 
 #### POST `/tenants` - 创建新租户
 
-**请求体**:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/tenants' \
@@ -151,16 +151,10 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
     "success": true
 }
 ```
-```json
-{
-  "name": "租户名称",
-  "description": "租户描述"
-}
-```
 
 #### GET `/tenants/:id` - 获取指定租户信息
 
-**请求体**:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/tenants/10000' \
@@ -201,13 +195,11 @@ curl --location 'http://localhost:8080/api/v1/tenants/10000' \
 }
 ```
 
-**响应**:
-
 #### PUT `/tenants/:id` - 更新租户信息
 
 注意 API Key 会变更
 
-**请求体**:
+**请求**:
 
 ```curl
 curl --location --request PUT 'http://localhost:8080/api/v1/tenants/10000' \
@@ -349,7 +341,7 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
 
 #### POST `/knowledge-bases` - 创建知识库
 
-**请求体**:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
@@ -564,7 +556,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
 
 #### PUT `/knowledge-bases/:id` - 更新知识库
 
-**请求体**:
+**请求**:
 
 ```curl
 curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b5829e4a-3845-4624-a7fb-ea3b35e843b0' \
@@ -773,7 +765,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 #### POST `/knowledge-bases/:id/knowledge/url` - 从 URL 创建知识
 
-请求体:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/url' \
@@ -785,7 +777,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 }'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -819,7 +811,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 #### GET `/knowledge-bases/:id/knowledge?page=&page_size` - 获取知识库下的知识列表
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge?page_size=1&page=1' \
@@ -827,7 +819,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 --header 'Content-Type: application/json'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -868,7 +860,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 #### GET `/knowledge/:id` - 获取知识详情
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
@@ -876,7 +868,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-
 --header 'Content-Type: application/json'
 ```
 
-**响应**
+**响应**:
 
 ```json
 {
@@ -910,7 +902,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-
 
 #### GET `/knowledge/batch` - 批量获取知识
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge/batch?ids=9c8af585-ae15-44ce-8f73-45ad18394651&ids=4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
@@ -918,7 +910,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/batch?ids=9c8af585-ae15-
 --header 'Content-Type: application/json'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -978,7 +970,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/batch?ids=9c8af585-ae15-
 
 #### DELETE `/knowledge/:id` - 删除知识
 
-**请求**
+**请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge/9c8af585-ae15-44ce-8f73-45ad18394651' \
@@ -986,7 +978,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge/9c8af58
 --header 'Content-Type: application/json'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -997,7 +989,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge/9c8af58
 
 #### GET `/knowledge/:id/download` - 下载知识文件
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/download' \
@@ -1005,7 +997,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-
 --header 'Content-Type: application/json'
 ```
 
-**响应**
+**响应**:
 
 ```
 attachment
@@ -1086,8 +1078,7 @@ curl --location 'http://localhost:8080/api/v1/models' \
 }'
 ```
 
-
-响应:
+**响应**:
 
 ```json
 {
@@ -1118,7 +1109,7 @@ curl --location 'http://localhost:8080/api/v1/models' \
 
 #### GET `/models` - 获取模型列表
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/models' \
@@ -1126,7 +1117,8 @@ curl --location 'http://localhost:8080/api/v1/models' \
 --header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
 ```
 
-**响应**
+**响应**:
+
 ```json
 {
     "data": [
@@ -1179,7 +1171,7 @@ curl --location 'http://localhost:8080/api/v1/models' \
 
 #### GET `/models/:id` - 获取模型详情
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3' \
@@ -1187,7 +1179,7 @@ curl --location 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd9
 --header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
 ```
 
-**响应**
+**响应**:
 
 ```json
 {
@@ -1218,7 +1210,7 @@ curl --location 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd9
 
 #### PUT `/models/:id` - 更新模型
 
-请求体:
+**请求**:
 
 ```curl
 curl --location --request PUT 'http://localhost:8080/api/v1/models/8fdc464d-8eaa-44d4-a85b-094b28af5330' \
@@ -1235,7 +1227,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/models/8fdc464d-8eaa
 }'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -1266,7 +1258,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/models/8fdc464d-8eaa
 
 #### DELETE `/models/:id` - 删除模型
 
-**请求**
+**请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8eaa-44d4-a85b-094b28af5330' \
@@ -1274,7 +1266,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8
 --header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
 ```
 
-**响应**
+**响应**:
 
 ```json
 {
@@ -1295,7 +1287,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8
 
 #### GET `/chunks/:knowledge_id?page=&page_size=` - 获取知识的分块列表
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5?page=1&page_size=1' \
@@ -1303,7 +1295,7 @@ curl --location 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b
 --header 'Content-Type: application/json'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -1339,7 +1331,7 @@ curl --location 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b
 
 #### DELETE `/chunks/:knowledge_id/:id` - 删除分块
 
-**请求**
+**请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/df10b37d-cd05-4b14-ba8a-e1bd0eb3bbd7' \
@@ -1358,7 +1350,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/chunks/4c4e7c1a-0
 
 #### DELETE `/chunks/:knowledge_id` - 删除知识下的所有分块
 
-**请求**
+**请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
@@ -1391,7 +1383,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/chunks/4c4e7c1a-0
 
 #### POST `/sessions` - 创建会话
 
-请求体:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/sessions' \
@@ -1430,7 +1422,7 @@ curl --location 'http://localhost:8080/api/v1/sessions' \
 }'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -1475,7 +1467,7 @@ curl --location 'http://localhost:8080/api/v1/sessions' \
 
 #### GET `/sessions/:id` - 获取会话详情
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b' \
@@ -1483,7 +1475,7 @@ curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-f
 --header 'Content-Type: application/json'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -1528,7 +1520,7 @@ curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-f
 
 #### GET `/sessions?page=&page_size=` - 获取租户的会话列表
 
-**请求**
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/sessions?page=1&page_size=1' \
@@ -1536,7 +1528,7 @@ curl --location 'http://localhost:8080/api/v1/sessions?page=1&page_size=1' \
 --header 'Content-Type: application/json'
 ```
 
-**响应**
+**响应**:
 
 ```json
 {
@@ -1586,7 +1578,7 @@ curl --location 'http://localhost:8080/api/v1/sessions?page=1&page_size=1' \
 
 #### PUT `/sessions/:id` - 更新会话
 
-**请求**
+**请求**:
 
 ```curl
 curl --location --request PUT 'http://localhost:8080/api/v1/sessions/411d6b70-9a85-4d03-bb74-aab0fd8bd12f' \
@@ -1624,7 +1616,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/sessions/411d6b70-9a
 }'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -1669,7 +1661,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/sessions/411d6b70-9a
 
 #### DELETE `/sessions/:id` - 删除会话
 
-**请求**
+**请求**:
 
 ```curl
 curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/411d6b70-9a85-4d03-bb74-aab0fd8bd12f' \
@@ -1677,7 +1669,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/411d6b70
 --header 'Content-Type: application/json'
 ```
 
-**响应**
+**响应**:
 
 ```json
 {
@@ -1688,7 +1680,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/411d6b70
 
 #### POST `/sessions/:session_id/generate_title` - 生成会话标题
 
-请求体:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b/generate_title' \
@@ -1708,7 +1700,7 @@ curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-f
 }'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
@@ -1744,7 +1736,7 @@ curl --location 'http://localhost:8080/api/v1/sessions/continue-stream/ceb9babb-
 
 #### POST `/knowledge-chat/:session_id` - 基于知识库的问答
 
-**请求体**:
+**请求**:
 
 ```curl
 curl --location 'http://localhost:8080/api/v1/knowledge-chat/ceb9babb-1e30-41d7-817d-fd584954304b' \
@@ -1758,7 +1750,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-chat/ceb9babb-1e30-41d7-
 **响应格式**:
 服务器端事件流（Server-Sent Events，Content-Type: text/event-stream）
 
-**响应示例**:
+**响应**:
 
 ```
 event: message
@@ -1788,10 +1780,12 @@ data: {"id":"3475c004-0ada-4306-9d30-d7f5efce50d2","response_type":"answer","con
 
 #### GET `/messages/:session_id/load?before_time=2025-04-18T11:57:31.310671+08:00&limit=20` - 获取最近的会话消息列表
 
-查询参数:
+**查询参数**:
 
 - `before_time`: 上一次拉取的最早一条消息的 created_at 字段，为空拉取最近的消息
 - `limit`: 每页条数(默认 20)
+
+**请求**:
 
 ```curl
 curl --location --request GET 'http://localhost:8080/api/v1/messages/ceb9babb-1e30-41d7-817d-fd584954304b/load?limit=3&before_time=2030-08-12T14%3A35%3A42.123456789Z' \
@@ -1968,7 +1962,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/messages/ceb9babb
 - `task_id`: 从 `POST /evaluation` 接口中获取到的任务 ID
 - `X-API-Key`: 用户 API Key
 
-**请求示例**:
+**请求**:
 
 ```bash
 curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4858-b72e-e92beb80becb' \
@@ -1976,7 +1970,7 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
 --header 'Content-Type: application/json'
 ```
 
-**响应示例**:
+**响应**:
 
 ```json
 {
@@ -2044,12 +2038,12 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
 #### POST `/evaluation` - 创建评估任务
 
 **请求参数**:
-- `embedding_id`（可选）: 评估使用的嵌入模型，默认使用 model-embedding-00000001 模型
-- `chat_id`（可选）: 评估使用的对话模型，默认使用 model-knowledgeqa-00000003 模型
-- `rerank_id`（可选）: 评估使用的重排序模型，默认使用 model-rerank-00000002 模型
-- `dataset_id`（可选）: 评估使用的数据集，暂时只支持官方测试数据集
+- `dataset_id`: 评估使用的数据集，暂时只支持官方测试数据集 `default`
+- `knowledge_base_id`: 评估使用的知识库
+- `chat_id`: 评估使用的对话模型
+- `rerank_id`: 评估使用的重排序模型
 
-**请求示例**:
+**请求**:
 
 ```bash
 curl --location 'http://localhost:8080/api/v1/evaluation' \
@@ -2063,7 +2057,7 @@ curl --location 'http://localhost:8080/api/v1/evaluation' \
 }'
 ```
 
-**响应示例**:
+**响应**:
 
 ```json
 {
