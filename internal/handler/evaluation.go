@@ -22,10 +22,10 @@ func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *Evalu
 
 // EvaluationRequest contains parameters for evaluation request
 type EvaluationRequest struct {
-	DatasetID        string `json:"dataset_id"`   // ID of dataset to evaluate
-	EmbeddingModelID string `json:"embedding_id"` // ID of embedding model to use
-	ChatModelID      string `json:"chat_id"`      // ID of chat model to use
-	RerankModelID    string `json:"rerank_id"`    // ID of rerank model to use
+	DatasetID       string `json:"dataset_id"`        // ID of dataset to evaluate
+	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
+	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
+	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
 }
 
 // Evaluation handles evaluation request
@@ -48,12 +48,12 @@ func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Executing evaluation, tenant: %v, dataset: %s, embedding: %s, chat: %s, rerank: %s",
-		tenantID, request.DatasetID, request.EmbeddingModelID, request.ChatModelID, request.RerankModelID)
+	logger.Infof(ctx, "Executing evaluation, tenant: %v, dataset: %s, knowledge_base: %s, chat: %s, rerank: %s",
+		tenantID, request.DatasetID, request.KnowledgeBaseID, request.ChatModelID, request.RerankModelID)
 
 	task, err := e.evaluationService.Evaluation(ctx,
 		request.DatasetID,
-		request.EmbeddingModelID,
+		request.KnowledgeBaseID,
 		request.ChatModelID,
 		request.RerankModelID,
 	)

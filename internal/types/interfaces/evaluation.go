@@ -9,7 +9,7 @@ import (
 // EvaluationService defines operations for evaluation tasks
 type EvaluationService interface {
 	// Evaluation starts a new evaluation task
-	Evaluation(ctx context.Context, datasetID string, embeddingModelID string,
+	Evaluation(ctx context.Context, datasetID string, knowledgeBaseID string,
 		chatModelID string, rerankModelID string,
 	) (*types.EvaluationDetail, error)
 	// EvaluationResult retrieves evaluation result by task ID

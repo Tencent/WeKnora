@@ -46,22 +46,7 @@ X-Request-ID: unique_request_id
 
 获取 API Key 有以下方式：
 
-1. **创建租户时获取**：通过 `POST /api/v1/tenants` 接口创建新租户时，响应中会自动返回生成的 API Key。
-   ```json
-   {
-     "success": true,
-     "data": {
-       "id": 1,
-       "name": "租户名称",
-       "description": "租户描述",
-       "api_key": "生成的API密钥",
-       "created_at": "2023-01-01T00:00:00Z",
-       "updated_at": "2023-01-01T00:00:00Z"
-     }
-   }
-   ```
-
-2. **查看现有租户信息**：通过 `GET /api/v1/tenants/:id` 接口查看已有租户的详细信息，响应中包含 API Key。
+**创建租户时获取**：通过 `POST /api/v1/tenants` 接口创建新租户时，响应中会自动返回生成的 API Key。
 
 请妥善保管您的 API Key，避免泄露。API Key 代表您的账户身份，拥有完整的 API 访问权限。
 
@@ -110,114 +95,233 @@ WeKnora API 按功能分为以下几类：
 
 #### POST `/tenants` - 创建新租户
 
-**请求体**:
+**请求**:
 
-```json
-{
-  "name": "租户名称",
-  "description": "租户描述"
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants' \
+--header 'Content-Type: application/json' \
+--data '{
+    "name": "weknora",
+    "description": "weknora tenants",
+    "business": "wechat",
+    "retriever_engines": {
+        "engines": [
+            {
+                "retriever_type": "keywords",
+                "retriever_engine_type": "postgres"
+            },
+            {
+                "retriever_type": "vector",
+                "retriever_engine_type": "postgres"
+            }
+        ]
+    }
+}'
 ```
 
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": 1,
-    "name": "租户名称",
-    "description": "租户描述",
-    "api_key": "生成的API密钥",
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "data": {
+        "id": 10000,
+        "name": "weknora",
+        "description": "weknora tenants",
+        "api_key": "sk-aaLRAgvCRJcmtiL2vLMeB1FB5UV0Q-qB7DlTE1pJ9KA93XZG",
+        "status": "active",
+        "retriever_engines": {
+            "engines": [
+                {
+                    "retriever_engine_type": "postgres",
+                    "retriever_type": "keywords"
+                },
+                {
+                    "retriever_engine_type": "postgres",
+                    "retriever_type": "vector"
+                }
+            ]
+        },
+        "business": "wechat",
+        "storage_quota": 10737418240,
+        "storage_used": 0,
+        "created_at": "2025-08-11T20:37:28.396980093+08:00",
+        "updated_at": "2025-08-11T20:37:28.396980301+08:00",
+        "deleted_at": null
+    },
+    "success": true
 }
 ```
 
 #### GET `/tenants/:id` - 获取指定租户信息
 
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants/10000' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-aaLRAgvCRJcmtiL2vLMeB1FB5UV0Q-qB7DlTE1pJ9KA93XZG'
+```
+
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": 1,
-    "name": "租户名称",
-    "description": "租户描述",
-    "api_key": "API密钥",
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "data": {
+        "id": 10000,
+        "name": "weknora",
+        "description": "weknora tenants",
+        "api_key": "sk-aaLRAgvCRJcmtiL2vLMeB1FB5UV0Q-qB7DlTE1pJ9KA93XZG",
+        "status": "active",
+        "retriever_engines": {
+            "engines": [
+                {
+                    "retriever_engine_type": "postgres",
+                    "retriever_type": "keywords"
+                },
+                {
+                    "retriever_engine_type": "postgres",
+                    "retriever_type": "vector"
+                }
+            ]
+        },
+        "business": "wechat",
+        "storage_quota": 10737418240,
+        "storage_used": 0,
+        "created_at": "2025-08-11T20:37:28.39698+08:00",
+        "updated_at": "2025-08-11T20:37:28.405693+08:00",
+        "deleted_at": null
+    },
+    "success": true
 }
 ```
 
 #### PUT `/tenants/:id` - 更新租户信息
 
-**请求体**:
+注意 API Key 会变更
 
-```json
-{
-  "name": "新租户名称",
-  "description": "新租户描述"
-}
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/tenants/10000' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-KREi84yPtahKxMtIMOW-Cxx2dxb9xROpUuDSpi3vbiC1QVDe' \
+--data '{
+    "name": "weknora new",
+    "description": "weknora tenants new",
+    "status": "active",
+    "retriever_engines": {
+        "engines": [
+            {
+                "retriever_engine_type": "postgres",
+                "retriever_type": "keywords"
+            },
+            {
+                "retriever_engine_type": "postgres",
+                "retriever_type": "vector"
+            }
+        ]
+    },
+    "business": "wechat",
+    "storage_quota": 10737418240
+}'
 ```
 
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": 1,
-    "name": "新租户名称",
-    "description": "新租户描述",
-    "api_key": "API密钥",
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "data": {
+        "id": 10000,
+        "name": "weknora new",
+        "description": "weknora tenants new",
+        "api_key": "sk-IKtd9JGV4-aPGQ6RiL8YJu9Vzb3-ae4lgFkjFJZmhvUn2mLu",
+        "status": "active",
+        "retriever_engines": {
+            "engines": [
+                {
+                    "retriever_engine_type": "postgres",
+                    "retriever_type": "keywords"
+                },
+                {
+                    "retriever_engine_type": "postgres",
+                    "retriever_type": "vector"
+                }
+            ]
+        },
+        "business": "wechat",
+        "storage_quota": 10737418240,
+        "storage_used": 0,
+        "created_at": "0001-01-01T00:00:00Z",
+        "updated_at": "2025-08-11T20:49:02.13421034+08:00",
+        "deleted_at": null
+    },
+    "success": true
 }
 ```
 
 #### DELETE `/tenants/:id` - 删除租户
 
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/tenants/10000' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-IKtd9JGV4-aPGQ6RiL8YJu9Vzb3-ae4lgFkjFJZmhvUn2mLu'
+```
+
 **响应**:
 
 ```json
 {
-  "success": true,
-  "message": "租户删除成功"
+    "message": "Tenant deleted successfully",
+    "success": true
 }
 ```
 
 #### GET `/tenants` - 获取租户列表
 
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-An7_t_izCKFIJ4iht9Xjcjnj_MC48ILvwezEDki9ScfIa7KA'
+```
+
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "items": [
-      {
-        "id": 1,
-        "name": "租户1",
-        "description": "租户1描述",
-        "api_key": "API密钥1",
-        "created_at": "2023-01-01T00:00:00Z",
-        "updated_at": "2023-01-01T00:00:00Z"
-      },
-      {
-        "id": 2,
-        "name": "租户2",
-        "description": "租户2描述",
-        "api_key": "API密钥2",
-        "created_at": "2023-01-01T00:00:00Z",
-        "updated_at": "2023-01-01T00:00:00Z"
-      }
-    ]
-  }
+    "data": {
+        "items": [
+            {
+                "id": 10002,
+                "name": "weknora",
+                "description": "weknora tenants",
+                "api_key": "sk-An7_t_izCKFIJ4iht9Xjcjnj_MC48ILvwezEDki9ScfIa7KA",
+                "status": "active",
+                "retriever_engines": {
+                    "engines": [
+                        {
+                            "retriever_engine_type": "postgres",
+                            "retriever_type": "keywords"
+                        },
+                        {
+                            "retriever_engine_type": "postgres",
+                            "retriever_type": "vector"
+                        }
+                    ]
+                },
+                "business": "wechat",
+                "storage_quota": 10737418240,
+                "storage_used": 0,
+                "created_at": "2025-08-11T20:52:58.05679+08:00",
+                "updated_at": "2025-08-11T20:52:58.060495+08:00",
+                "deleted_at": null
+            }
+        ]
+    },
+    "success": true
 }
 ```
 
@@ -237,181 +341,365 @@ WeKnora API 按功能分为以下几类：
 
 #### POST `/knowledge-bases` - 创建知识库
 
-**请求体**:
+**请求**:
 
-```json
-{
-  "name": "知识库名称",
-  "description": "知识库描述",
-  "config": {
-    "chunk_size": 1000,
-    "chunk_overlap": 200
-  },
-  "embedding_model_id": "模型ID"
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "name": "weknora",
+    "description": "weknora description",
+    "chunking_config": {
+        "chunk_size": 1000,
+        "chunk_overlap": 200,
+        "separators": [
+            "."
+        ],
+        "enable_multimodal": true
+    },
+    "image_processing_config": {
+        "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
+    },
+    "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+    "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+    "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+    "vlm_model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e",
+    "vlm_config": {
+        "model_name": "qwen2.5vl:3b",
+        "interface_type": "ollama",
+        "base_url": "",
+        "api_key": ""
+    },
+    "cos_config": {
+        "secret_id": "",
+        "secret_key": "",
+        "region": "",
+        "bucket_name": "",
+        "app_id": "",
+        "path_prefix": ""
+    }
+}'
 ```
 
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "知识库ID",
-    "tenant_id": 1,
-    "name": "知识库名称",
-    "description": "知识库描述",
-    "config": {
-      "chunk_size": 1000,
-      "chunk_overlap": 200
+    "data": {
+        "id": "b5829e4a-3845-4624-a7fb-ea3b35e843b0",
+        "name": "weknora",
+        "description": "weknora description",
+        "tenant_id": 1,
+        "chunking_config": {
+            "chunk_size": 1000,
+            "chunk_overlap": 200,
+            "separators": [
+                "."
+            ],
+            "enable_multimodal": true
+        },
+        "image_processing_config": {
+            "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
+        },
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+        "vlm_model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e",
+        "vlm_config": {
+            "model_name": "qwen2.5vl:3b",
+            "base_url": "",
+            "api_key": "",
+            "interface_type": "ollama"
+        },
+        "cos_config": {
+            "secret_id": "",
+            "secret_key": "",
+            "region": "",
+            "bucket_name": "",
+            "app_id": "",
+            "path_prefix": ""
+        },
+        "created_at": "2025-08-12T11:30:09.206238645+08:00",
+        "updated_at": "2025-08-12T11:30:09.206238854+08:00",
+        "deleted_at": null
     },
-    "embedding_model_id": "模型ID",
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### GET `/knowledge-bases` - 获取知识库列表
 
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
+```
+
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "知识库ID1",
-      "tenant_id": 1,
-      "name": "知识库1",
-      "description": "知识库1描述",
-      "config": {
-        "chunk_size": 1000,
-        "chunk_overlap": 200
-      },
-      "embedding_model_id": "模型ID",
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    },
-    {
-      "id": "知识库ID2",
-      "tenant_id": 1,
-      "name": "知识库2",
-      "description": "知识库2描述",
-      "config": {
-        "chunk_size": 1000,
-        "chunk_overlap": 200
-      },
-      "embedding_model_id": "模型ID",
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    }
-  ]
+    "data": [
+        {
+            "id": "kb-00000001",
+            "name": "Default Knowledge Base",
+            "description": "System Default Knowledge Base",
+            "tenant_id": 1,
+            "chunking_config": {
+                "chunk_size": 1000,
+                "chunk_overlap": 200,
+                "separators": [
+                    "\n\n",
+                    "\n",
+                    "。",
+                    "！",
+                    "？",
+                    ";",
+                    "；"
+                ],
+                "enable_multimodal": true
+            },
+            "image_processing_config": {
+                "model_id": ""
+            },
+            "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+            "vlm_model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e",
+            "vlm_config": {
+                "model_name": "qwen2.5vl:3b",
+                "base_url": "http://host.docker.internal:11435/v1",
+                "api_key": "",
+                "interface_type": "ollama"
+            },
+            "cos_config": {
+                "secret_id": "",
+                "secret_key": "",
+                "region": "",
+                "bucket_name": "",
+                "app_id": "",
+                "path_prefix": ""
+            },
+            "created_at": "2025-08-11T20:10:41.817794+08:00",
+            "updated_at": "2025-08-12T11:23:00.593097+08:00",
+            "deleted_at": null
+        }
+    ],
+    "success": true
 }
 ```
 
 #### GET `/knowledge-bases/:id` - 获取知识库详情
 
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
+```
+
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "知识库ID",
-    "tenant_id": 1,
-    "name": "知识库名称",
-    "description": "知识库描述",
-    "config": {
-      "chunk_size": 1000,
-      "chunk_overlap": 200
+    "data": {
+        "id": "kb-00000001",
+        "name": "Default Knowledge Base",
+        "description": "System Default Knowledge Base",
+        "tenant_id": 1,
+        "chunking_config": {
+            "chunk_size": 1000,
+            "chunk_overlap": 200,
+            "separators": [
+                "\n\n",
+                "\n",
+                "。",
+                "！",
+                "？",
+                ";",
+                "；"
+            ],
+            "enable_multimodal": true
+        },
+        "image_processing_config": {
+            "model_id": ""
+        },
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+        "vlm_model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e",
+        "vlm_config": {
+            "model_name": "qwen2.5vl:3b",
+            "base_url": "http://host.docker.internal:11435/v1",
+            "api_key": "",
+            "interface_type": "ollama"
+        },
+        "cos_config": {
+            "secret_id": "",
+            "secret_key": "",
+            "region": "",
+            "bucket_name": "",
+            "app_id": "",
+            "path_prefix": ""
+        },
+        "created_at": "2025-08-11T20:10:41.817794+08:00",
+        "updated_at": "2025-08-12T11:23:00.593097+08:00",
+        "deleted_at": null
     },
-    "embedding_model_id": "模型ID",
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### PUT `/knowledge-bases/:id` - 更新知识库
 
-**请求体**:
+**请求**:
 
-```json
-{
-  "name": "新知识库名称",
-  "description": "新知识库描述",
-  "config": {
-    "chunk_size": 800,
-    "chunk_overlap": 150
-  }
-}
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b5829e4a-3845-4624-a7fb-ea3b35e843b0' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "name": "weknora new",
+    "description": "weknora description new",
+    "config": {
+        "chunking_config": {
+            "chunk_size": 1000,
+            "chunk_overlap": 200,
+            "separators": [
+                "\n\n",
+                "\n",
+                "。",
+                "！",
+                "？",
+                ";",
+                "；"
+            ],
+            "enable_multimodal": true
+        },
+        "image_processing_config": {
+            "model_id": ""
+        }
+    }
+}'
 ```
 
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "知识库ID",
-    "tenant_id": 1,
-    "name": "新知识库名称",
-    "description": "新知识库描述",
-    "config": {
-      "chunk_size": 800,
-      "chunk_overlap": 150
+    "data": {
+        "id": "b5829e4a-3845-4624-a7fb-ea3b35e843b0",
+        "name": "weknora new",
+        "description": "weknora description new",
+        "tenant_id": 1,
+        "chunking_config": {
+            "chunk_size": 1000,
+            "chunk_overlap": 200,
+            "separators": [
+                "\n\n",
+                "\n",
+                "。",
+                "！",
+                "？",
+                ";",
+                "；"
+            ],
+            "enable_multimodal": true
+        },
+        "image_processing_config": {
+            "model_id": ""
+        },
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+        "vlm_model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e",
+        "vlm_config": {
+            "model_name": "qwen2.5vl:3b",
+            "base_url": "",
+            "api_key": "",
+            "interface_type": "ollama"
+        },
+        "cos_config": {
+            "secret_id": "",
+            "secret_key": "",
+            "region": "",
+            "bucket_name": "",
+            "app_id": "",
+            "path_prefix": ""
+        },
+        "created_at": "2025-08-12T11:30:09.206238+08:00",
+        "updated_at": "2025-08-12T11:36:09.083577609+08:00",
+        "deleted_at": null
     },
-    "embedding_model_id": "模型ID",
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### DELETE `/knowledge-bases/:id` - 删除知识库
 
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/b5829e4a-3845-4624-a7fb-ea3b35e843b0' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
+```
+
 **响应**:
 
 ```json
 {
-  "success": true
+    "message": "Knowledge base deleted successfully",
+    "success": true
 }
 ```
 
 #### GET `/knowledge-bases/:id/hybrid-search` - 混合搜索知识库内容
 
-**查询参数**:
+**请求**:
 
-- `query`: 搜索关键词(必填)
+```curl
+curl --location --request GET 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/hybrid-search' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "query_text": "彗星",
+    "vector_threshold": 0.1,
+    "keyword_threshold": 0.1,
+    "match_count": 1
+}'
+```
 
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "分块ID",
-      "content": "匹配到的内容片段",
-      "metadata": {
-        "source": "来源文件",
-        "page": 1
-      },
-      "knowledge_title": "人工智能导论.pdf",
-      "score": 0.92
-    },
-    {
-      "id": "分块ID",
-      "content": "匹配到的内容片段",
-      "metadata": {
-        "source": "来源文件",
-        "page": 2
-      },
-      "knowledge_title": "人工智能导论.pdf",
-      "score": 0.88
-    }
-  ]
+    "data": [
+        {
+            "id": "7d955251-3f79-4fd5-a6aa-02f81e044091",
+            "content": "有几位后来xxxxx",
+            "knowledge_id": "a6790b93-4700-4676-bd48-0d4804e1456b",
+            "chunk_index": 3,
+            "knowledge_title": "彗星.txt",
+            "start_at": 2287,
+            "end_at": 2760,
+            "seq": 3,
+            "score": 0.7402352891601821,
+            "match_type": 2,
+            "sub_chunk_id": null,
+            "metadata": {},
+            "chunk_type": "text",
+            "parent_chunk_id": "",
+            "image_info": "",
+            "knowledge_filename": "彗星.txt",
+            "knowledge_source": ""
+        }
+    ],
+    "success": true
 }
 ```
 
@@ -433,112 +721,138 @@ WeKnora API 按功能分为以下几类：
 
 #### POST `/knowledge-bases/:id/knowledge/file` - 从文件创建知识
 
-**请求格式**:
+**请求**:
 
-```
-Content-Type: multipart/form-data
-
-file: [上传的文件]
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/file' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--form 'file=@"/Users/xxxx/tests/彗星.txt"' \
+--form 'enable_multimodel="true"'
 ```
 
 **响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "4f0845e3-8f6e-4d5a-816b-196e34070617",
-    "tenant_id": 1,
-    "knowledge_base_id": "kb-00000003",
-    "type": "file",
-    "title": "彗星.txt",
-    "description": "",
-    "source": "",
-    "parse_status": "failed",
-    "enable_status": "disabled",
-    "embedding_model_id": "model-embedding-00000001",
-    "file_name": "彗星.txt",
-    "file_type": "txt",
-    "file_size": 7710,
-    "file_path": "",
-    "created_at": "2025-04-16T04:15:01.633797Z",
-    "updated_at": "2025-04-16T04:15:03.24784Z",
-    "processed_at": null,
-    "error_message": "EmbedBatch API error: Http Status 403 Forbidden"
-  }
+    "data": {
+        "id": "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+        "tenant_id": 1,
+        "knowledge_base_id": "kb-00000001",
+        "type": "file",
+        "title": "彗星.txt",
+        "description": "",
+        "source": "",
+        "parse_status": "processing",
+        "enable_status": "disabled",
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "file_name": "彗星.txt",
+        "file_type": "txt",
+        "file_size": 7710,
+        "file_hash": "d69476ddbba45223a5e97e786539952c",
+        "file_path": "data/files/1/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/1754970756171067621.txt",
+        "storage_size": 0,
+        "metadata": null,
+        "created_at": "2025-08-12T11:52:36.168632288+08:00",
+        "updated_at": "2025-08-12T11:52:36.173612121+08:00",
+        "processed_at": null,
+        "error_message": "",
+        "deleted_at": null
+    },
+    "success": true
 }
 ```
 
 #### POST `/knowledge-bases/:id/knowledge/url` - 从 URL 创建知识
 
-请求体:
+**请求**:
 
-```json
-{
-  "url": "https://example.com/document.pdf"
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/url' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "url":"https://github.com/Tencent/WeKnora",
+    "enable_multimodel":true
+}'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "4f0845e3-8f6e-4d5a-816b-196e34070617",
-    "tenant_id": 1,
-    "knowledge_base_id": "kb-00000003",
-    "type": "file",
-    "title": "彗星.txt",
-    "description": "",
-    "source": "",
-    "parse_status": "failed",
-    "enable_status": "disabled",
-    "embedding_model_id": "model-embedding-00000001",
-    "file_name": "彗星.txt",
-    "file_type": "txt",
-    "file_size": 7710,
-    "file_path": "",
-    "created_at": "2025-04-16T04:15:01.633797Z",
-    "updated_at": "2025-04-16T04:15:03.24784Z",
-    "processed_at": null,
-    "error_message": "EmbedBatch API error: Http Status 403 Forbidden"
-  }
+    "data": {
+        "id": "9c8af585-ae15-44ce-8f73-45ad18394651",
+        "tenant_id": 1,
+        "knowledge_base_id": "kb-00000001",
+        "type": "url",
+        "title": "",
+        "description": "",
+        "source": "https://github.com/Tencent/WeKnora",
+        "parse_status": "processing",
+        "enable_status": "disabled",
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "file_name": "",
+        "file_type": "",
+        "file_size": 0,
+        "file_hash": "",
+        "file_path": "",
+        "storage_size": 0,
+        "metadata": null,
+        "created_at": "2025-08-12T11:55:05.709266776+08:00",
+        "updated_at": "2025-08-12T11:55:05.712918234+08:00",
+        "processed_at": null,
+        "error_message": "",
+        "deleted_at": null
+    },
+    "success": true
 }
 ```
 
 #### GET `/knowledge-bases/:id/knowledge?page=&page_size` - 获取知识库下的知识列表
 
-响应:
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge?page_size=1&page=1' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "4f0845e3-8f6e-4d5a-816b-196e34070617",
-      "tenant_id": 1,
-      "knowledge_base_id": "kb-00000003",
-      "type": "file",
-      "title": "彗星.txt",
-      "description": "",
-      "source": "",
-      "parse_status": "failed",
-      "enable_status": "disabled",
-      "embedding_model_id": "model-embedding-00000001",
-      "file_name": "彗星.txt",
-      "file_type": "txt",
-      "file_size": 7710,
-      "file_path": "",
-      "created_at": "2025-04-16T04:15:01.633797Z",
-      "updated_at": "2025-04-16T04:15:03.24784Z",
-      "processed_at": null,
-      "error_message": "EmbedBatch API error: Http Status 403 Forbidden"
-    }
-  ],
-  "total": 98,
-  "page": 1,
-  "page_size": 20
+    "data": [
+        {
+            "id": "9c8af585-ae15-44ce-8f73-45ad18394651",
+            "tenant_id": 1,
+            "knowledge_base_id": "kb-00000001",
+            "type": "url",
+            "title": "",
+            "description": "",
+            "source": "https://github.com/Tencent/WeKnora",
+            "parse_status": "pending",
+            "enable_status": "disabled",
+            "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "file_name": "",
+            "file_type": "",
+            "file_size": 0,
+            "file_hash": "",
+            "file_path": "",
+            "storage_size": 0,
+            "metadata": null,
+            "created_at": "2025-08-12T11:55:05.709266+08:00",
+            "updated_at": "2025-08-12T11:55:05.709266+08:00",
+            "processed_at": null,
+            "error_message": "",
+            "deleted_at": null
+        }
+    ],
+    "page": 1,
+    "page_size": 1,
+    "success": true,
+    "total": 2
 }
 ```
 
@@ -546,100 +860,144 @@ file: [上传的文件]
 
 #### GET `/knowledge/:id` - 获取知识详情
 
-响应:
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "4f0845e3-8f6e-4d5a-816b-196e34070617",
-    "tenant_id": 1,
-    "knowledge_base_id": "kb-00000003",
-    "type": "file",
-    "title": "彗星.txt",
-    "description": "",
-    "source": "",
-    "parse_status": "failed",
-    "enable_status": "disabled",
-    "embedding_model_id": "model-embedding-00000001",
-    "file_name": "彗星.txt",
-    "file_type": "txt",
-    "file_size": 7710,
-    "file_path": "",
-    "created_at": "2025-04-16T04:15:01.633797Z",
-    "updated_at": "2025-04-16T04:15:03.24784Z",
-    "processed_at": null,
-    "error_message": "EmbedBatch API error: Http Status 403 Forbidden"
-  }
+    "data": {
+        "id": "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+        "tenant_id": 1,
+        "knowledge_base_id": "kb-00000001",
+        "type": "file",
+        "title": "彗星.txt",
+        "description": "彗星是由冰和尘埃构成的太阳系小天体，接近太阳时会形成彗发和彗尾。其轨道周期差异大，来源包括柯伊伯带和奥尔特云。彗星与小行星的区别逐渐模糊，部分彗星已失去挥发物质，类似小行星。截至2019年，已知彗星超6600颗，数量庞大。彗星在古代被视为凶兆，现代研究揭示其复杂结构与起源。",
+        "source": "",
+        "parse_status": "completed",
+        "enable_status": "enabled",
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "file_name": "彗星.txt",
+        "file_type": "txt",
+        "file_size": 7710,
+        "file_hash": "d69476ddbba45223a5e97e786539952c",
+        "file_path": "data/files/1/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/1754970756171067621.txt",
+        "storage_size": 33689,
+        "metadata": null,
+        "created_at": "2025-08-12T11:52:36.168632+08:00",
+        "updated_at": "2025-08-12T11:52:53.376871+08:00",
+        "processed_at": "2025-08-12T11:52:53.376573+08:00",
+        "error_message": "",
+        "deleted_at": null
+    },
+    "success": true
 }
 ```
 
 #### GET `/knowledge/batch` - 批量获取知识
 
-查询参数:
+**请求**:
 
-- `ids`: 知识 ID 列表，例如：`?ids=knowledge_id_1&ids=knowledge_id_2`
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge/batch?ids=9c8af585-ae15-44ce-8f73-45ad18394651&ids=4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
 
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "知识ID1",
-      "tenant_id": 1,
-      "knowledge_base_id": "知识库ID",
-      "type": "file",
-      "title": "文档1.pdf",
-      "description": "",
-      "source": "",
-      "parse_status": "completed",
-      "enable_status": "enabled",
-      "embedding_model_id": "model-embedding-00000001",
-      "file_name": "文档1.pdf",
-      "file_type": "pdf",
-      "file_size": 1024,
-      "file_path": "",
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z",
-      "processed_at": "2023-01-01T00:00:01Z",
-      "error_message": ""
-    },
-    {
-      "id": "知识ID2",
-      "tenant_id": 1,
-      "knowledge_base_id": "知识库ID",
-      "type": "url",
-      "title": "网页文档",
-      "description": "",
-      "source": "https://example.com/doc",
-      "parse_status": "completed",
-      "enable_status": "enabled",
-      "embedding_model_id": "model-embedding-00000001",
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z",
-      "processed_at": "2023-01-01T00:00:01Z",
-      "error_message": ""
-    }
-  ]
+    "data": [
+        {
+            "id": "9c8af585-ae15-44ce-8f73-45ad18394651",
+            "tenant_id": 1,
+            "knowledge_base_id": "kb-00000001",
+            "type": "url",
+            "title": "",
+            "description": "",
+            "source": "https://github.com/Tencent/WeKnora",
+            "parse_status": "pending",
+            "enable_status": "disabled",
+            "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "file_name": "",
+            "file_type": "",
+            "file_size": 0,
+            "file_hash": "",
+            "file_path": "",
+            "storage_size": 0,
+            "metadata": null,
+            "created_at": "2025-08-12T11:55:05.709266+08:00",
+            "updated_at": "2025-08-12T11:55:05.709266+08:00",
+            "processed_at": null,
+            "error_message": "",
+            "deleted_at": null
+        },
+        {
+            "id": "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+            "tenant_id": 1,
+            "knowledge_base_id": "kb-00000001",
+            "type": "file",
+            "title": "彗星.txt",
+            "description": "彗星是由冰和尘埃构成的太阳系小天体，接近太阳时会形成彗发和彗尾。其轨道周期差异大，来源包括柯伊伯带和奥尔特云。彗星与小行星的区别逐渐模糊，部分彗星已失去挥发物质，类似小行星。截至2019年，已知彗星超6600颗，数量庞大。彗星在古代被视为凶兆，现代研究揭示其复杂结构与起源。",
+            "source": "",
+            "parse_status": "completed",
+            "enable_status": "enabled",
+            "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "file_name": "彗星.txt",
+            "file_type": "txt",
+            "file_size": 7710,
+            "file_hash": "d69476ddbba45223a5e97e786539952c",
+            "file_path": "data/files/1/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/1754970756171067621.txt",
+            "storage_size": 33689,
+            "metadata": null,
+            "created_at": "2025-08-12T11:52:36.168632+08:00",
+            "updated_at": "2025-08-12T11:52:53.376871+08:00",
+            "processed_at": "2025-08-12T11:52:53.376573+08:00",
+            "error_message": "",
+            "deleted_at": null
+        }
+    ],
+    "success": true
 }
 ```
 
 #### DELETE `/knowledge/:id` - 删除知识
 
-响应:
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge/9c8af585-ae15-44ce-8f73-45ad18394651' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "message": "删除成功"
+    "message": "Deleted successfully",
+    "success": true
 }
 ```
 
 #### GET `/knowledge/:id/download` - 下载知识文件
 
-响应
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/download' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```
 attachment
@@ -661,196 +1019,259 @@ attachment
 
 创建对话模型（KnowledgeQA）请求体:
 
-```json
-{
-  "name": "模型名称",
-  "type": "KnowledgeQA",  
-  "source": "remote",     # remote / local
-  "description": "模型描述",
-  "parameters": {
-    "model": "gpt-4",
-    "api_key": "sk-xxxxx",
-    "base_url": "xxx"
-  }
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/models' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "name": "qwen3:8b",
+    "type": "KnowledgeQA",
+    "source": "local",
+    "description": "LLM Model for Knowledge QA",
+    "parameters": {
+        "base_url": "",
+        "api_key": ""
+    },
+    "is_default": false
+}'
 ```
 
 创建嵌入模型（Embedding）请求体:
 
-```json
-{
-  "name": "模型名称",
-  "type": "Embedding",  
-  "source": "remote",     # remote / local
-  "description": "模型描述",
-  "parameters": {
-    "model": "bge-m3",
-    "api_key": "sk-xxxxx",
-    "base_url": "xxx",
-    "embedding_parameters": {
-      "dimension": 768,
-      "truncate_prompt_tokens": 512
-    }
-  }
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/models' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "name": "nomic-embed-text:latest",
+    "type": "Embedding",
+    "source": "local",
+    "description": "Embedding Model",
+    "parameters": {
+        "base_url": "",
+        "api_key": "",
+        "embedding_parameters": {
+            "dimension": 768,
+            "truncate_prompt_tokens": 0
+        }
+    },
+    "is_default": false
+}'
 ```
 
 创建排序模型（Rerank）请求体:
 
-```json
-{
-  "name": "模型名称",
-  "type": "Rerank",  
-  "source": "remote",     # remote / local
-  "description": "模型描述",
-  "parameters": {
-    "model": "gte-reranker",
-    "api_key": "sk-xxxxx",
-    "base_url": "xxx"
-  }
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/models' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "name": "linux6200/bge-reranker-v2-m3:latest",
+    "type": "Rerank",
+    "source": "local",
+    "description": "Rerank Model for Knowledge QA",
+    "parameters": {
+        "base_url": "",
+        "api_key": ""
+    },
+    "is_default": false
+}'
 ```
 
-
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "模型ID",
-    "tenant_id": 1,
-    "name": "模型名称",
-    "type": "LLM",
-    "source": "OPENAI",
-    "description": "模型描述",
-    "parameters": {
-      "model": "gpt-4",
-      "api_key": "sk-xxxxx",
-      "base_url": "https://api.openai.com"
+    "data": {
+        "id": "09c5a1d6-ee8b-4657-9a17-d3dcbd5c70cb",
+        "tenant_id": 1,
+        "name": "nomic-embed-text:latest3",
+        "type": "Embedding",
+        "source": "local",
+        "description": "Embedding Model",
+        "parameters": {
+            "base_url": "",
+            "api_key": "",
+            "embedding_parameters": {
+                "dimension": 768,
+                "truncate_prompt_tokens": 0
+            }
+        },
+        "is_default": false,
+        "status": "downloading",
+        "created_at": "2025-08-12T10:39:01.454591766+08:00",
+        "updated_at": "2025-08-12T10:39:01.454591766+08:00",
+        "deleted_at": null
     },
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### GET `/models` - 获取模型列表
 
-响应:
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/models' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "模型ID1",
-      "tenant_id": 1,
-      "name": "模型1",
-      "type": "LLM",
-      "source": "OPENAI",
-      "description": "模型1描述",
-      "parameters": {
-        "model": "gpt-4",
-        "api_key": "sk-xxxxx",
-        "base_url": "https://api.openai.com"
-      },
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    },
-    {
-      "id": "模型ID2",
-      "tenant_id": 1,
-      "name": "模型2",
-      "type": "EMBEDDING",
-      "source": "OPENAI",
-      "description": "模型2描述",
-      "parameters": {
-        "model": "text-embedding-ada-002",
-        "api_key": "sk-xxxxx",
-        "base_url": "https://api.openai.com"
-      },
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    }
-  ]
+    "data": [
+        {
+            "id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "tenant_id": 1,
+            "name": "nomic-embed-text:latest",
+            "type": "Embedding",
+            "source": "local",
+            "description": "Embedding Model",
+            "parameters": {
+                "base_url": "",
+                "api_key": "",
+                "embedding_parameters": {
+                    "dimension": 768,
+                    "truncate_prompt_tokens": 0
+                }
+            },
+            "is_default": true,
+            "status": "active",
+            "created_at": "2025-08-11T20:10:41.813832+08:00",
+            "updated_at": "2025-08-11T20:10:41.822354+08:00",
+            "deleted_at": null
+        },
+        {
+            "id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "tenant_id": 1,
+            "name": "qwen3:8b",
+            "type": "KnowledgeQA",
+            "source": "local",
+            "description": "LLM Model for Knowledge QA",
+            "parameters": {
+                "base_url": "",
+                "api_key": "",
+                "embedding_parameters": {
+                    "dimension": 0,
+                    "truncate_prompt_tokens": 0
+                }
+            },
+            "is_default": true,
+            "status": "active",
+            "created_at": "2025-08-11T20:10:41.811761+08:00",
+            "updated_at": "2025-08-11T20:10:41.825381+08:00",
+            "deleted_at": null
+        }
+    ],
+    "success": true
 }
 ```
 
 #### GET `/models/:id` - 获取模型详情
 
-响应:
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/models/dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "模型ID",
-    "tenant_id": 1,
-    "name": "模型名称",
-    "type": "LLM",
-    "source": "OPENAI",
-    "description": "模型描述",
-    "parameters": {
-      "model": "gpt-4",
-      "api_key": "sk-xxxxx",
-      "base_url": "https://api.openai.com"
+    "data": {
+        "id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "tenant_id": 1,
+        "name": "nomic-embed-text:latest",
+        "type": "Embedding",
+        "source": "local",
+        "description": "Embedding Model",
+        "parameters": {
+            "base_url": "",
+            "api_key": "",
+            "embedding_parameters": {
+                "dimension": 768,
+                "truncate_prompt_tokens": 0
+            }
+        },
+        "is_default": true,
+        "status": "active",
+        "created_at": "2025-08-11T20:10:41.813832+08:00",
+        "updated_at": "2025-08-11T20:10:41.822354+08:00",
+        "deleted_at": null
     },
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### PUT `/models/:id` - 更新模型
 
-请求体:
+**请求**:
 
-```json
-{
-  "name": "新模型名称",
-  "description": "新模型描述",
-  "parameters": {
-    "model": "gpt-4-turbo",
-    "api_key": "sk-xxxxx",
-    "base_url": "https://api.openai.com"
-  },
-  "is_default": false
-}
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/models/8fdc464d-8eaa-44d4-a85b-094b28af5330' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--data '{
+    "name": "linux6200/bge-reranker-v2-m3:latest",
+    "description": "Rerank Model for Knowledge QA new",
+    "parameters": {
+        "base_url": "",
+        "api_key": ""
+    },
+    "is_default": false
+}'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "模型ID",
-    "tenant_id": 1,
-    "name": "新模型名称",
-    "type": "LLM",
-    "source": "OPENAI",
-    "description": "新模型描述",
-    "parameters": {
-      "model": "gpt-4-turbo",
-      "api_key": "sk-xxxxx",
-      "base_url": "https://api.openai.com"
+    "data": {
+        "id": "8fdc464d-8eaa-44d4-a85b-094b28af5330",
+        "tenant_id": 1,
+        "name": "linux6200/bge-reranker-v2-m3:latest",
+        "type": "Rerank",
+        "source": "local",
+        "description": "Rerank Model for Knowledge QA new",
+        "parameters": {
+            "base_url": "",
+            "api_key": "",
+            "embedding_parameters": {
+                "dimension": 0,
+                "truncate_prompt_tokens": 0
+            }
+        },
+        "is_default": false,
+        "status": "active",
+        "created_at": "2025-08-12T10:57:39.512681+08:00",
+        "updated_at": "2025-08-12T11:00:27.271678+08:00",
+        "deleted_at": null
     },
-    "is_default": false,
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### DELETE `/models/:id` - 删除模型
 
-响应:
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/models/8fdc464d-8eaa-44d4-a85b-094b28af5330' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "message": "模型删除成功"
+    "message": "Model deleted",
+    "success": true
 }
 ```
 
@@ -861,100 +1282,88 @@ attachment
 | 方法   | 路径                        | 描述                     |
 | ------ | --------------------------- | ------------------------ |
 | GET    | `/chunks/:knowledge_id`     | 获取知识的分块列表       |
-| PUT    | `/chunks/:knowledge_id/:id` | 更新分块                 |
 | DELETE | `/chunks/:knowledge_id/:id` | 删除分块                 |
 | DELETE | `/chunks/:knowledge_id`     | 删除知识下的所有分块     |
 
 #### GET `/chunks/:knowledge_id?page=&page_size=` - 获取知识的分块列表
 
-查询参数:
+**请求**:
 
-- `page`: 页码(默认 1)
-- `page_size`: 每页条数(默认 20)
-
-响应:
-
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "分块ID1",
-      "knowledge_id": "知识ID",
-      "content": "分块1内容...",
-      "is_enabled": true,
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    },
-    {
-      "id": "分块ID2",
-      "knowledge_id": "知识ID",
-      "content": "分块2内容...",
-      "is_enable": true,
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    }
-  ],
-  "total": 50,
-  "page": 1,
-  "page_size": 20
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5?page=1&page_size=1' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
 ```
 
-#### PUT `/chunks/:knowledge_id/:id` - 更新分块
-
-请求体:
+**响应**:
 
 ```json
 {
-  "content": "更新后的分块内容",
-  "metadata": {
+    "data": [
+        {
+            "id": "df10b37d-cd05-4b14-ba8a-e1bd0eb3bbd7",
+            "tenant_id": 0,
+            "knowledge_id": "4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5",
+            "knowledge_base_id": "kb-00000001",
+            "content": "彗星xxxx",
+            "chunk_index": 0,
+            "is_enabled": true,
+            "start_at": 0,
+            "end_at": 964,
+            "pre_chunk_id": "",
+            "next_chunk_id": "",
+            "chunk_type": "text",
+            "parent_chunk_id": "",
+            "relation_chunks": null,
+            "indirect_relation_chunks": null,
+            "image_info": "",
+            "created_at": "0001-01-01T00:00:00Z",
+            "updated_at": "0001-01-01T00:00:00Z",
+            "deleted_at": null
+        }
+    ],
     "page": 1,
-    "position": "top",
-    "custom_field": "自定义字段"
-  }
-}
-```
-
-响应:
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "分块ID",
-    "knowledge_id": "知识ID",
-    "content": "更新后的分块内容",
-    "metadata": {
-      "page": 1,
-      "position": "top",
-      "custom_field": "自定义字段"
-    },
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "page_size": 1,
+    "success": true,
+    "total": 5
 }
 ```
 
 #### DELETE `/chunks/:knowledge_id/:id` - 删除分块
 
-响应:
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5/df10b37d-cd05-4b14-ba8a-e1bd0eb3bbd7' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "message": "分块删除成功"
+    "message": "Chunk deleted",
+    "success": true
 }
 ```
 
 #### DELETE `/chunks/:knowledge_id` - 删除知识下的所有分块
 
-响应:
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/chunks/4c4e7c1a-09cf-485b-a7b5-24b8cdc5acf5' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "message": "所有分块删除成功"
+    "message": "All chunks under knowledge deleted",
+    "success": true
 }
 ```
 
@@ -974,219 +1383,310 @@ attachment
 
 #### POST `/sessions` - 创建会话
 
-请求体:
+**请求**:
 
-```json
-{
-  "knowledge_base_id": "知识库ID",
-  "session_strategy": {
-    "max_rounds": 5,
-    "enable_rewrite": true,
-    "fallback_strategy": "FIXED_RESPONSE",
-    "fallback_response": "对不起，我无法回答这个问题",
-    "keyword_threshold": 0.5,
-    "vector_threshold": 0.7,
-    "rerank_model_id": "排序模型ID",
-    "rerank_top_k": 3,
-    "summary_model_id": "总结模型ID",
-    "summary_parameters": {
-      "max_tokens": 100,
-      "top_p": 0.9,
-      "top_k": 40,
-      "frequency_penalty": 0.0,
-      "presence_penalty": 0.0,
-      "repeat_penalty": 1.1,
-      "prompt": "总结对话内容",
-      "context_template": "上下文模板"
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "knowledge_base_id": "kb-00000001",
+    "session_strategy": {
+        "max_rounds": 5,
+        "enable_rewrite": true,
+        "fallback_strategy": "FIXED_RESPONSE",
+        "fallback_response": "对不起，我无法回答这个问题",
+        "embedding_top_k": 10,
+        "keyword_threshold": 0.5,
+        "vector_threshold": 0.7,
+        "rerank_model_id": "排序模型ID",
+        "rerank_top_k": 3,
+        "rerank_threshold": 0.7,
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "summary_parameters": {
+            "max_tokens": 0,
+            "repeat_penalty": 1,
+            "top_k": 0,
+            "top_p": 0,
+            "frequency_penalty": 0,
+            "presence_penalty": 0,
+            "prompt": "这是用户和助手之间的对话。xxx",
+            "context_template": "你是一个专业的智能信息检索助手xxx",
+            "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+            "temperature": 0.3,
+            "seed": 0,
+            "max_completion_tokens": 2048
+        },
+        "no_match_prefix": "<think>\n</think>\nNO_MATCH"
     }
-  }
-}
+}'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "会话ID",
-    "tenant_id": 1,
-    "knowledge_base_id": "知识库ID",
-    "title": "未命名会话",
-    "max_rounds": 5,
-    "enable_rewrite": true,
-    "fallback_strategy": "FIXED_RESPONSE",
-    "fallback_response": "对不起，我无法回答这个问题",
-    "keyword_threshold": 0.5,
-    "vector_threshold": 0.7,
-    "rerank_model_id": "排序模型ID",
-    "rerank_top_k": 3,
-    "summary_model_id": "总结模型ID",
-    "summary_parameters": {
-      "max_tokens": 100,
-      "top_p": 0.9,
-      "top_k": 40,
-      "frequency_penalty": 0.0,
-      "presence_penalty": 0.0,
-      "repeat_penalty": 1.1,
-      "prompt": "总结对话内容",
-      "context_template": "上下文模板"
+    "data": {
+        "id": "411d6b70-9a85-4d03-bb74-aab0fd8bd12f",
+        "title": "",
+        "description": "",
+        "tenant_id": 1,
+        "knowledge_base_id": "kb-00000001",
+        "max_rounds": 5,
+        "enable_rewrite": true,
+        "fallback_strategy": "FIXED_RESPONSE",
+        "fallback_response": "对不起，我无法回答这个问题",
+        "embedding_top_k": 10,
+        "keyword_threshold": 0.5,
+        "vector_threshold": 0.7,
+        "rerank_model_id": "排序模型ID",
+        "rerank_top_k": 3,
+        "rerank_threshold": 0.7,
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "summary_parameters": {
+            "max_tokens": 0,
+            "repeat_penalty": 1,
+            "top_k": 0,
+            "top_p": 0,
+            "frequency_penalty": 0,
+            "presence_penalty": 0,
+            "prompt": "这是用户和助手之间的对话。xxx",
+            "context_template": "你是一个专业的智能信息检索助手xxx",
+            "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+            "temperature": 0.3,
+            "seed": 0,
+            "max_completion_tokens": 2048
+        },
+        "created_at": "2025-08-12T12:26:19.611616669+08:00",
+        "updated_at": "2025-08-12T12:26:19.611616919+08:00",
+        "deleted_at": null
     },
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### GET `/sessions/:id` - 获取会话详情
 
-响应:
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "会话ID",
-    "tenant_id": 1,
-    "knowledge_base_id": "知识库ID",
-    "title": "会话标题",
-    "max_rounds": 5,
-    "enable_rewrite": true,
-    "fallback_strategy": "FIXED_RESPONSE",
-    "fallback_response": "对不起，我无法回答这个问题",
-    "keyword_threshold": 0.5,
-    "vector_threshold": 0.7,
-    "rerank_model_id": "排序模型ID",
-    "rerank_top_k": 3,
-    "summary_model_id": "总结模型ID",
-    "summary_parameters": {
-      "max_tokens": 100,
-      "top_p": 0.9,
-      "top_k": 40,
-      "frequency_penalty": 0.0,
-      "presence_penalty": 0.0,
-      "repeat_penalty": 1.1,
-      "prompt": "总结对话内容",
-      "context_template": "上下文模板"
+    "data": {
+        "id": "ceb9babb-1e30-41d7-817d-fd584954304b",
+        "title": "模型优化策略",
+        "description": "",
+        "tenant_id": 1,
+        "knowledge_base_id": "kb-00000001",
+        "max_rounds": 5,
+        "enable_rewrite": true,
+        "fallback_strategy": "fixed",
+        "fallback_response": "抱歉，我无法回答这个问题。",
+        "embedding_top_k": 10,
+        "keyword_threshold": 0.3,
+        "vector_threshold": 0.5,
+        "rerank_model_id": "",
+        "rerank_top_k": 5,
+        "rerank_threshold": 0.7,
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "summary_parameters": {
+            "max_tokens": 0,
+            "repeat_penalty": 1,
+            "top_k": 0,
+            "top_p": 0,
+            "frequency_penalty": 0,
+            "presence_penalty": 0,
+            "prompt": "这是用户和助手之间的对话",
+            "context_template": "你是一个专业的智能信息检索助手",
+            "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+            "temperature": 0.3,
+            "seed": 0,
+            "max_completion_tokens": 2048
+        },
+        "created_at": "2025-08-12T10:24:38.308596+08:00",
+        "updated_at": "2025-08-12T10:25:41.317761+08:00",
+        "deleted_at": null
     },
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### GET `/sessions?page=&page_size=` - 获取租户的会话列表
 
-响应:
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions?page=1&page_size=1' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "id": "会话ID1",
-      "tenant_id": 1,
-      "knowledge_base_id": "知识库ID",
-      "title": "会话1",
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    },
-    {
-      "id": "会话ID2",
-      "tenant_id": 1,
-      "knowledge_base_id": "知识库ID",
-      "title": "会话2",
-      "created_at": "2023-01-01T00:00:00Z",
-      "updated_at": "2023-01-01T00:00:00Z"
-    }
-  ],
-  "total": 98,
-  "page": 1,
-  "page_size": 20
+    "data": [
+        {
+            "id": "411d6b70-9a85-4d03-bb74-aab0fd8bd12f",
+            "title": "",
+            "description": "",
+            "tenant_id": 1,
+            "knowledge_base_id": "kb-00000001",
+            "max_rounds": 5,
+            "enable_rewrite": true,
+            "fallback_strategy": "FIXED_RESPONSE",
+            "fallback_response": "对不起，我无法回答这个问题",
+            "embedding_top_k": 10,
+            "keyword_threshold": 0.5,
+            "vector_threshold": 0.7,
+            "rerank_model_id": "排序模型ID",
+            "rerank_top_k": 3,
+            "rerank_threshold": 0.7,
+            "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "summary_parameters": {
+                "max_tokens": 0,
+                "repeat_penalty": 1,
+                "top_k": 0,
+                "top_p": 0,
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
+                "prompt": "这是用户和助手之间的对话。xxx",
+                "context_template": "你是一个专业的智能信息检索助手xxx",
+                "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+                "temperature": 0.3,
+                "seed": 0,
+                "max_completion_tokens": 2048
+            },
+            "created_at": "2025-08-12T12:26:19.611616+08:00",
+            "updated_at": "2025-08-12T12:26:19.611616+08:00",
+            "deleted_at": null
+        }
+    ],
+    "page": 1,
+    "page_size": 1,
+    "success": true,
+    "total": 2
 }
 ```
 
 #### PUT `/sessions/:id` - 更新会话
 
-请求体:
+**请求**:
 
-```json
-{
-  "title": "新会话标题",
-  "max_rounds": 10,
-  "enable_rewrite": false,
-  "fallback_strategy": "NO_FALLBACK",
-  "fallback_response": "",
-  "keyword_threshold": 0.6,
-  "vector_threshold": 0.8,
-  "rerank_model_id": "新排序模型ID",
-  "rerank_top_k": 5,
-  "summary_model_id": "新总结模型ID",
-  "summary_parameters": {
-    "max_tokens": 150,
-    "top_p": 0.8,
-    "top_k": 50,
-    "frequency_penalty": 0.1,
-    "presence_penalty": 0.1,
-    "repeat_penalty": 1.2,
-    "prompt": "总结这段对话",
-    "context_template": "新上下文模板"
-  }
-}
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/sessions/411d6b70-9a85-4d03-bb74-aab0fd8bd12f' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "title": "weknora",
+    "description": "weknora description",
+    "knowledge_base_id": "kb-00000001",
+    "max_rounds": 5,
+    "enable_rewrite": true,
+    "fallback_strategy": "FIXED_RESPONSE",
+    "fallback_response": "对不起，我无法回答这个问题",
+    "embedding_top_k": 10,
+    "keyword_threshold": 0.5,
+    "vector_threshold": 0.7,
+    "rerank_model_id": "排序模型ID",
+    "rerank_top_k": 3,
+    "rerank_threshold": 0.7,
+    "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+    "summary_parameters": {
+        "max_tokens": 0,
+        "repeat_penalty": 1,
+        "top_k": 0,
+        "top_p": 0,
+        "frequency_penalty": 0,
+        "presence_penalty": 0,
+        "prompt": "这是用户和助手之间的对话。xxx",
+        "context_template": "你是一个专业的智能信息检索助手xxx",
+        "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+        "temperature": 0.3,
+        "seed": 0,
+        "max_completion_tokens": 2048
+    }
+}'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": "会话ID",
-    "tenant_id": 1,
-    "knowledge_base_id": "知识库ID",
-    "title": "新会话标题",
-    "max_rounds": 10,
-    "enable_rewrite": false,
-    "fallback_strategy": "NO_FALLBACK",
-    "fallback_response": "",
-    "keyword_threshold": 0.6,
-    "vector_threshold": 0.8,
-    "rerank_model_id": "新排序模型ID",
-    "rerank_top_k": 5,
-    "summary_model_id": "新总结模型ID",
-    "summary_parameters": {
-      "max_tokens": 150,
-      "top_p": 0.8,
-      "top_k": 50,
-      "frequency_penalty": 0.1,
-      "presence_penalty": 0.1,
-      "repeat_penalty": 1.2,
-      "prompt": "总结这段对话",
-      "context_template": "新上下文模板"
+    "data": {
+        "id": "411d6b70-9a85-4d03-bb74-aab0fd8bd12f",
+        "title": "weknora",
+        "description": "weknora description",
+        "tenant_id": 1,
+        "knowledge_base_id": "kb-00000001",
+        "max_rounds": 5,
+        "enable_rewrite": true,
+        "fallback_strategy": "FIXED_RESPONSE",
+        "fallback_response": "对不起，我无法回答这个问题",
+        "embedding_top_k": 10,
+        "keyword_threshold": 0.5,
+        "vector_threshold": 0.7,
+        "rerank_model_id": "排序模型ID",
+        "rerank_top_k": 3,
+        "rerank_threshold": 0.7,
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "summary_parameters": {
+            "max_tokens": 0,
+            "repeat_penalty": 1,
+            "top_k": 0,
+            "top_p": 0,
+            "frequency_penalty": 0,
+            "presence_penalty": 0,
+            "prompt": "这是用户和助手之间的对话。xxx",
+            "context_template": "你是一个专业的智能信息检索助手xxx",
+            "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+            "temperature": 0.3,
+            "seed": 0,
+            "max_completion_tokens": 2048
+        },
+        "created_at": "0001-01-01T00:00:00Z",
+        "updated_at": "2025-08-12T14:20:56.738424351+08:00",
+        "deleted_at": null
     },
-    "created_at": "2023-01-01T00:00:00Z",
-    "updated_at": "2023-01-01T00:00:00Z"
-  }
+    "success": true
 }
 ```
 
 #### DELETE `/sessions/:id` - 删除会话
 
-响应:
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/411d6b70-9a85-4d03-bb74-aab0fd8bd12f' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "message": "会话删除成功"
+    "message": "Session deleted successfully",
+    "success": true
 }
 ```
 
 #### POST `/sessions/:session_id/generate_title` - 生成会话标题
 
-请求体:
+**请求**:
 
-```json
-{
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b/generate_title' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
   "messages": [
     {
       "role": "user",
@@ -1197,15 +1697,15 @@ attachment
       "content": "人工智能是计算机科学的一个分支..."
     }
   ]
-}
+}'
 ```
 
-响应:
+**响应**:
 
 ```json
 {
-  "success": true,
-  "data": "关于人工智能的对话"
+    "data": "模型优化策略",
+    "success": true
 }
 ```
 
@@ -1213,6 +1713,14 @@ attachment
 
 **查询参数**:
 - `message_id`: 从 `/messages/:session_id/load` 接口中获取的 `is_completed` 为 `false` 的消息 ID
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions/continue-stream/ceb9babb-1e30-41d7-817d-fd584954304b?message_id=b8b90eeb-7dd5-4cf9-81c6-5ebcbd759451' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
 
 **响应格式**:
 服务器端事件流（Server-Sent Events），与 `/knowledge-chat/:session_id` 返回结果一致
@@ -1228,34 +1736,37 @@ attachment
 
 #### POST `/knowledge-chat/:session_id` - 基于知识库的问答
 
-**请求体**:
+**请求**:
 
-```json
-{
-  "query": "人工智能的定义是什么？"
-}
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-chat/ceb9babb-1e30-41d7-817d-fd584954304b' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "query": "彗尾的形状"
+}'
 ```
 
 **响应格式**:
 服务器端事件流（Server-Sent Events，Content-Type: text/event-stream）
 
-**响应示例**:
+**响应**:
 
 ```
 event: message
-data: {"id":"消息ID","response_type":"references","done":false,"knowledge_references":[{"id":"分块ID1","content":"人工智能的定义...","knowledge_title":"人工智能导论.pdf"},{"id":"分块ID2","content":"关于AI的更多信息...","knowledge_title":"人工智能导论.pdf"}]}
+data: {"id":"3475c004-0ada-4306-9d30-d7f5efce50d2","response_type":"references","content":"","done":false,"knowledge_references":[{"id":"c8347bef-127f-4a22-b962-edf5a75386ec","content":"彗星xxx。","knowledge_id":"a6790b93-4700-4676-bd48-0d4804e1456b","chunk_index":0,"knowledge_title":"彗星.txt","start_at":0,"end_at":2760,"seq":0,"score":4.038836479187012,"match_type":3,"sub_chunk_id":["688821f0-40bf-428e-8cb6-541531ebeb76","c1e9903e-2b4d-4281-be15-0149288d45c2","7d955251-3f79-4fd5-a6aa-02f81e044091"],"metadata":{},"chunk_type":"text","parent_chunk_id":"","image_info":"","knowledge_filename":"彗星.txt","knowledge_source":""},{"id":"fa3aadee-cadb-4a84-9941-c839edc3e626","content":"# 文档名称\n彗星.txt\n\n# 摘要\n彗星是由冰和尘埃构成的太阳系小天体，接近太阳时会释放气体形成彗发和彗尾。其轨道周期差异大，来源包括柯伊伯带和奥尔特云。彗星与小行星的区别逐渐模糊，部分彗星已失去挥发物质，类似小行星。目前已知彗星数量众多，且存在系外彗星。彗星在古代被视为凶兆，现代研究揭示其复杂结构与起源。","knowledge_id":"a6790b93-4700-4676-bd48-0d4804e1456b","chunk_index":6,"knowledge_title":"彗星.txt","start_at":0,"end_at":0,"seq":6,"score":0.6131043121858466,"match_type":3,"sub_chunk_id":null,"metadata":{},"chunk_type":"summary","parent_chunk_id":"c8347bef-127f-4a22-b962-edf5a75386ec","image_info":"","knowledge_filename":"彗星.txt","knowledge_source":""}]}
 
 event: message
-data: {"id":"消息ID","content":"人工","created_at":"2023-01-01T00:00:00Z","done":false}
+data: {"id":"3475c004-0ada-4306-9d30-d7f5efce50d2","response_type":"answer","content":"表现为","done":false,"knowledge_references":null}
 
 event: message
-data: {"id":"消息ID","content":"人工智能是","created_at":"2023-01-01T00:00:00Z","done":false}
+data: {"id":"3475c004-0ada-4306-9d30-d7f5efce50d2","response_type":"answer","content":"结构","done":false,"knowledge_references":null}
 
 event: message
-data: {"id":"消息ID","content":"人工智能是研究...","created_at":"2023-01-01T00:00:00Z","done":false}
+data: {"id":"3475c004-0ada-4306-9d30-d7f5efce50d2","response_type":"answer","content":"。","done":false,"knowledge_references":null}
 
 event: message
-data: {"id":"消息ID","content":"人工智能是研究、开发用于模拟、延伸和扩展人的智能的理论、方法、技术及应用系统的一门新的技术科学...","created_at":"2023-01-01T00:00:00Z","done":true}
+data: {"id":"3475c004-0ada-4306-9d30-d7f5efce50d2","response_type":"answer","content":"","done":true,"knowledge_references":null}
 ```
 
 <div align="right"><a href="#weknora-api-文档">返回顶部 ↑</a></div>
@@ -1269,64 +1780,170 @@ data: {"id":"消息ID","content":"人工智能是研究、开发用于模拟、�
 
 #### GET `/messages/:session_id/load?before_time=2025-04-18T11:57:31.310671+08:00&limit=20` - 获取最近的会话消息列表
 
-查询参数:
+**查询参数**:
 
 - `before_time`: 上一次拉取的最早一条消息的 created_at 字段，为空拉取最近的消息
 - `limit`: 每页条数(默认 20)
 
-响应:
+**请求**:
+
+```curl
+curl --location --request GET 'http://localhost:8080/api/v1/messages/ceb9babb-1e30-41d7-817d-fd584954304b/load?limit=3&before_time=2030-08-12T14%3A35%3A42.123456789Z' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "query": "彗尾的形状"
+}'
+```
+
+**响应**:
 
 ```json
 {
-  "data": [
-    {
-      "id": "22bafcce-a9c0-4dbd-8ce7-a881a2943e5f",
-      "session_id": "76218775-0af1-4933-9f76-40d0a6622e76",
-      "request_id": "6965bdcc-8264-43d5-b9f4-6bd844aa3aa7",
-      "content": "印度的国土面积",
-      "role": "user",
-      "knowledge_references": null,
-      "created_at": "2025-04-18T11:57:31.310671+08:00",
-      "updated_at": "2025-04-18T11:57:31.320384+08:00",
-      "is_completed": true
-    },
-    {
-      "id": "6c9564c8-4801-47d6-86ee-2ed58c1e331e",
-      "session_id": "76218775-0af1-4933-9f76-40d0a6622e76",
-      "request_id": "6965bdcc-8264-43d5-b9f4-6bd844aa3aa7",
-      "content": "",
-      "role": "assistant",
-      "knowledge_references": [
+    "data": [
         {
-          "id": "b3f489f8-278c-4f67-83ca-97b7bc39f35b",
-          "content": "",
-          "knowledge_id": "6c595abb-3086-408c-9e2e-40c543af23b6",
-          "knowledge_tite": "openaiassets_cfa8f2941d6b41cc79b91b4553ff8a4f_110591700536724035.txt"
+            "id": "b8b90eeb-7dd5-4cf9-81c6-5ebcbd759451",
+            "session_id": "ceb9babb-1e30-41d7-817d-fd584954304b",
+            "request_id": "hCA8SDjxcAvv",
+            "content": "<think>\n好的",
+            "role": "assistant",
+            "knowledge_references": [
+                {
+                    "id": "c8347bef-127f-4a22-b962-edf5a75386ec",
+                    "content": "彗星xxx",
+                    "knowledge_id": "a6790b93-4700-4676-bd48-0d4804e1456b",
+                    "chunk_index": 0,
+                    "knowledge_title": "彗星.txt",
+                    "start_at": 0,
+                    "end_at": 2760,
+                    "seq": 0,
+                    "score": 4.038836479187012,
+                    "match_type": 4,
+                    "sub_chunk_id": [
+                        "688821f0-40bf-428e-8cb6-541531ebeb76",
+                        "c1e9903e-2b4d-4281-be15-0149288d45c2",
+                        "7d955251-3f79-4fd5-a6aa-02f81e044091"
+                    ],
+                    "metadata": {},
+                    "chunk_type": "text",
+                    "parent_chunk_id": "",
+                    "image_info": "",
+                    "knowledge_filename": "彗星.txt",
+                    "knowledge_source": ""
+                },
+                {
+                    "id": "fa3aadee-cadb-4a84-9941-c839edc3e626",
+                    "content": "# 文档名称\n彗星.txt\n\n# 摘要\n彗星是由冰和尘埃构成的太阳系小天体，接近太阳时会释放气体形成彗发和彗尾。其轨道周期差异大，来源包括柯伊伯带和奥尔特云。彗星与小行星的区别逐渐模糊，部分彗星已失去挥发物质，类似小行星。目前已知彗星数量众多，且存在系外彗星。彗星在古代被视为凶兆，现代研究揭示其复杂结构与起源。",
+                    "knowledge_id": "a6790b93-4700-4676-bd48-0d4804e1456b",
+                    "chunk_index": 6,
+                    "knowledge_title": "彗星.txt",
+                    "start_at": 0,
+                    "end_at": 0,
+                    "seq": 6,
+                    "score": 0.6131043121858466,
+                    "match_type": 0,
+                    "sub_chunk_id": null,
+                    "metadata": {},
+                    "chunk_type": "summary",
+                    "parent_chunk_id": "c8347bef-127f-4a22-b962-edf5a75386ec",
+                    "image_info": "",
+                    "knowledge_filename": "彗星.txt",
+                    "knowledge_source": ""
+                }
+            ],
+            "is_completed": true,
+            "created_at": "2025-08-12T10:24:38.370548+08:00",
+            "updated_at": "2025-08-12T10:25:40.416382+08:00",
+            "deleted_at": null
         },
         {
-          "id": "71008e5c-12bd-4da3-bd8b-799b6af0c112",
-          "content": "",
-          "knowledge_id": "6c595abb-3086-408c-9e2e-40c543af23b6",
-          "knowledge_tite": "openaiassets_cfa8f2941d6b41cc79b91b4553ff8a4f_110591700536724035.txt"
+            "id": "7fa136ae-a045-424e-baac-52113d92ae94",
+            "session_id": "ceb9babb-1e30-41d7-817d-fd584954304b",
+            "request_id": "3475c004-0ada-4306-9d30-d7f5efce50d2",
+            "content": "彗尾的形状",
+            "role": "user",
+            "knowledge_references": [],
+            "is_completed": true,
+            "created_at": "2025-08-12T14:30:39.732246+08:00",
+            "updated_at": "2025-08-12T14:30:39.733277+08:00",
+            "deleted_at": null
+        },
+        {
+            "id": "9bcafbcf-a758-40af-a9a3-c4d8e0f49439",
+            "session_id": "ceb9babb-1e30-41d7-817d-fd584954304b",
+            "request_id": "3475c004-0ada-4306-9d30-d7f5efce50d2",
+            "content": "<think>\n好的",
+            "role": "assistant",
+            "knowledge_references": [
+                {
+                    "id": "c8347bef-127f-4a22-b962-edf5a75386ec",
+                    "content": "彗星xxx",
+                    "knowledge_id": "a6790b93-4700-4676-bd48-0d4804e1456b",
+                    "chunk_index": 0,
+                    "knowledge_title": "彗星.txt",
+                    "start_at": 0,
+                    "end_at": 2760,
+                    "seq": 0,
+                    "score": 4.038836479187012,
+                    "match_type": 3,
+                    "sub_chunk_id": [
+                        "688821f0-40bf-428e-8cb6-541531ebeb76",
+                        "c1e9903e-2b4d-4281-be15-0149288d45c2",
+                        "7d955251-3f79-4fd5-a6aa-02f81e044091"
+                    ],
+                    "metadata": {},
+                    "chunk_type": "text",
+                    "parent_chunk_id": "",
+                    "image_info": "",
+                    "knowledge_filename": "彗星.txt",
+                    "knowledge_source": ""
+                },
+                {
+                    "id": "fa3aadee-cadb-4a84-9941-c839edc3e626",
+                    "content": "# 文档名称\n彗星.txt\n\n# 摘要\n彗星是由冰和尘埃构成的太阳系小天体，接近太阳时会释放气体形成彗发和彗尾。其轨道周期差异大，来源包括柯伊伯带和奥尔特云。彗星与小行星的区别逐渐模糊，部分彗星已失去挥发物质，类似小行星。目前已知彗星数量众多，且存在系外彗星。彗星在古代被视为凶兆，现代研究揭示其复杂结构与起源。",
+                    "knowledge_id": "a6790b93-4700-4676-bd48-0d4804e1456b",
+                    "chunk_index": 6,
+                    "knowledge_title": "彗星.txt",
+                    "start_at": 0,
+                    "end_at": 0,
+                    "seq": 6,
+                    "score": 0.6131043121858466,
+                    "match_type": 3,
+                    "sub_chunk_id": null,
+                    "metadata": {},
+                    "chunk_type": "summary",
+                    "parent_chunk_id": "c8347bef-127f-4a22-b962-edf5a75386ec",
+                    "image_info": "",
+                    "knowledge_filename": "彗星.txt",
+                    "knowledge_source": ""
+                }
+            ],
+            "is_completed": true,
+            "created_at": "2025-08-12T14:30:39.735108+08:00",
+            "updated_at": "2025-08-12T14:31:17.829926+08:00",
+            "deleted_at": null
         }
-      ],
-      "created_at": "2025-04-18T11:57:45.499279+08:00",
-      "updated_at": "2025-04-18T11:57:45.513845+08:00",
-      "is_completed": false
-    }
-  ],
-  "success": true
+    ],
+    "success": true
 }
 ```
 
 #### DELETE `/messages/:session_id/:id` - 删除消息
 
-响应:
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/messages/ceb9babb-1e30-41d7-817d-fd584954304b/9bcafbcf-a758-40af-a9a3-c4d8e0f49439' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
 
 ```json
 {
-  "success": true,
-  "message": "消息删除成功"
+    "message": "Message deleted successfully",
+    "success": true
 }
 ```
 
@@ -1345,81 +1962,143 @@ data: {"id":"消息ID","content":"人工智能是研究、开发用于模拟、�
 - `task_id`: 从 `POST /evaluation` 接口中获取到的任务 ID
 - `X-API-Key`: 用户 API Key
 
-**请求示例**:
+**请求**:
 
 ```bash
-curl --location 'http://localhost:8080/api/v1/evaluation/?task_id=:task_id' \
---header 'X-API-Key: sk-00000001abcdefg123456'
+curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4858-b72e-e92beb80becb' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
 ```
 
-**响应示例**:
+**响应**:
 
 ```json
 {
-  "data": {
-    "id": ":task_id",
-    "tenant_id": 1,
-    "embedding_id": "default",
-    "rerank_id": "default",
-    "chat_id": "default",
-    "start_time": "2025-04-27T17:59:35.662145114+08:00",
-    "status": 1,
-    "total": 100,
-    "finished": 27,
-    "metric": {
-      "retrieval_metrics": {
-        "precision": 0.26419753086419756,
-        "recall": 1,
-        "ndcg3": 0.9716533097411622,
-        "ndcg10": 0.9914200384804508,
-        "mrr": 1,
-        "map": 0.9808641975308641
-      },
-      "generation_metrics": {
-        "bleu1": 0.07886284400848455,
-        "bleu2": 0.06475994660439699,
-        "bleu4": 0.046991784754461315,
-        "rouge1": 0.1922821051422303,
-        "rouge2": 0.0941559283518759,
-        "rougel": 0.1837134727619397
-      }
-    }
-  },
-  "success": true
+    "data": {
+        "task": {
+            "id": "c34563ad-b09f-4858-b72e-e92beb80becb",
+            "tenant_id": 1,
+            "dataset_id": "default",
+            "start_time": "2025-08-12T14:54:26.221804768+08:00",
+            "status": 2,
+            "total": 1,
+            "finished": 1
+        },
+        "params": {
+            "session_id": "",
+            "knowledge_base_id": "2ef57434-8c8d-4442-b967-2f7fc578a2fc",
+            "vector_threshold": 0.5,
+            "keyword_threshold": 0.3,
+            "embedding_top_k": 10,
+            "vector_database": "",
+            "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+            "rerank_top_k": 5,
+            "rerank_threshold": 0.7,
+            "chat_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "summary_config": {
+                "max_tokens": 0,
+                "repeat_penalty": 1,
+                "top_k": 0,
+                "top_p": 0,
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
+                "prompt": "这是用户和助手之间的对话。",
+                "context_template": "你是一个专业的智能信息检索助手",
+                "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+                "temperature": 0.3,
+                "seed": 0,
+                "max_completion_tokens": 2048
+            },
+            "fallback_strategy": "",
+            "fallback_response": "抱歉，我无法回答这个问题。"
+        },
+        "metric": {
+            "retrieval_metrics": {
+                "precision": 0,
+                "recall": 0,
+                "ndcg3": 0,
+                "ndcg10": 0,
+                "mrr": 0,
+                "map": 0
+            },
+            "generation_metrics": {
+                "bleu1": 0.037656734016532384,
+                "bleu2": 0.04067392145167686,
+                "bleu4": 0.048963321289052536,
+                "rouge1": 0,
+                "rouge2": 0,
+                "rougel": 0
+            }
+        }
+    },
+    "success": true
 }
 ```
 
 #### POST `/evaluation` - 创建评估任务
 
 **请求参数**:
-- `embedding_id`（可选）: 评估使用的嵌入模型，默认使用 model-embedding-00000001 模型
-- `chat_id`（可选）: 评估使用的对话模型，默认使用 model-knowledgeqa-00000003 模型
-- `rerank_id`（可选）: 评估使用的重排序模型，默认使用 model-rerank-00000002 模型
-- `dataset_id`（可选）: 评估使用的数据集，暂时只支持官方测试数据集
+- `dataset_id`: 评估使用的数据集，暂时只支持官方测试数据集 `default`
+- `knowledge_base_id`: 评估使用的知识库
+- `chat_id`: 评估使用的对话模型
+- `rerank_id`: 评估使用的重排序模型
 
-**请求示例**:
+**请求**:
 
 ```bash
 curl --location 'http://localhost:8080/api/v1/evaluation' \
---header 'X-API-Key: sk-00000001abcdefg123456' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
 --header 'Content-Type: application/json' \
---data '{}'
+--data '{
+    "dataset_id": "default",
+    "knowledge_base_id": "kb-00000001",
+    "chat_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+    "rerank_id": "b30171a1-787b-426e-a293-735cd5ac16c0"
+}'
 ```
 
-**响应示例**:
+**响应**:
 
 ```json
 {
-  "data": {
-    "id": "6f43d272-d65f-4005-96ad-104b7761ea65",
-    "tenant_id": 1,
-    "embedding_id": "default",
-    "rerank_id": "default",
-    "chat_id": "default",
-    "start_time": "2025-04-27T17:59:35.662145114+08:00",
-    "status": 1
-  },
-  "success": true
+    "data": {
+        "task": {
+            "id": "c34563ad-b09f-4858-b72e-e92beb80becb",
+            "tenant_id": 1,
+            "dataset_id": "default",
+            "start_time": "2025-08-12T14:54:26.221804768+08:00",
+            "status": 1
+        },
+        "params": {
+            "session_id": "",
+            "knowledge_base_id": "2ef57434-8c8d-4442-b967-2f7fc578a2fc",
+            "vector_threshold": 0.5,
+            "keyword_threshold": 0.3,
+            "embedding_top_k": 10,
+            "vector_database": "",
+            "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
+            "rerank_top_k": 5,
+            "rerank_threshold": 0.7,
+            "chat_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "summary_config": {
+                "max_tokens": 0,
+                "repeat_penalty": 1,
+                "top_k": 0,
+                "top_p": 0,
+                "frequency_penalty": 0,
+                "presence_penalty": 0,
+                "prompt": "这是用户和助手之间的对话。",
+                "context_template": "你是一个专业的智能信息检索助手，xxx",
+                "no_match_prefix": "<think>\n</think>\nNO_MATCH",
+                "temperature": 0.3,
+                "seed": 0,
+                "max_completion_tokens": 2048
+            },
+            "fallback_strategy": "",
+            "fallback_response": "抱歉，我无法回答这个问题。"
+        }
+    },
+    "success": true
 }
 ```
 

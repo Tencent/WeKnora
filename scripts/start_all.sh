@@ -13,7 +13,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
 # 版本信息
-VERSION="1.0.0"
+VERSION="1.0.1" # 版本更新
 SCRIPT_NAME=$(basename "$0")
 
 # 显示帮助信息
@@ -135,25 +135,26 @@ start_ollama() {
     fi
 
     # 检查Ollama服务是否已运行
-    if curl -s http://localhost:11435/api/version &> /dev/null; then
+    if curl -s http://localhost:11434/api/tags &> /dev/null; then
         log_success "Ollama服务已经在运行"
     else
         log_info "启动Ollama服务..."
-        export OLLAMA_HOST=0.0.0.0:11435
-        ollama serve > /dev/null 2>&1 &
+        # 注意：官方推荐使用 systemctl 或 launchctl 管理服务，直接后台运行仅用于临时场景
+        systemctl restart ollama || (ollama serve > /dev/null 2>&1 &)
         
         # 等待服务启动
         MAX_RETRIES=30
         COUNT=0
         while [ $COUNT -lt $MAX_RETRIES ]; do
-            if curl -s http://localhost:11435/api/version &> /dev/null; then
+            if curl -s http://localhost:11434/api/tags &> /dev/null; then
                 log_success "Ollama服务已成功启动"
                 break
             fi
-            echo "等待Ollama服务启动... ($COUNT/$MAX_RETRIES)"
+            echo -ne "等待Ollama服务启动... ($COUNT/$MAX_RETRIES)\r"
             sleep 1
             COUNT=$((COUNT + 1))
         done
+        echo "" # 换行
         
         if [ $COUNT -eq $MAX_RETRIES ]; then
             log_error "Ollama服务启动失败"
@@ -161,7 +162,7 @@ start_ollama() {
         fi
     fi
 
-    log_success "Ollama服务地址: http://localhost:11435"
+    log_success "Ollama服务地址: http://localhost:11434"
     return 0
 }
 
@@ -177,7 +178,12 @@ stop_ollama() {
     
     # 查找并终止Ollama进程
     if pgrep -x "ollama" > /dev/null; then
-        pkill -f "ollama serve"
+        # 优先使用systemctl
+        if command -v systemctl &> /dev/null; then
+            sudo systemctl stop ollama
+        else
+            pkill -f "ollama serve"
+        fi
         log_success "Ollama服务已停止"
     else
         log_info "Ollama服务未运行"
@@ -195,8 +201,9 @@ check_docker() {
         return 1
     fi
     
-    if ! command -v docker-compose &> /dev/null; then
-        log_error "未安装docker-compose，请先安装docker-compose"
+    # *** 修改点: 使用新命令检查Docker Compose插件 ***
+    if ! docker compose version &> /dev/null; then
+        log_error "未安装Docker Compose插件，请参照官方文档安装"
         return 1
     fi
     
@@ -244,7 +251,8 @@ start_docker() {
     
     # 启动基本服务
     log_info "启动核心服务容器..."
-    PLATFORM=$PLATFORM docker-compose up --build -d
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    PLATFORM=$PLATFORM docker compose up --build -d
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
         return 1
@@ -253,7 +261,8 @@ start_docker() {
     # 如果存储类型是minio，则启动MinIO服务
     if [ "$storage_type" == "minio" ]; then
         log_info "检测到MinIO存储配置，启动MinIO服务..."
-        docker-compose -f ./docker/docker-compose.minio.yml up --build -d
+        # *** 修改点: 使用新的 docker compose 命令 ***
+        docker compose -f ./docker/docker-compose.minio.yml up --build -d
         if [ $? -ne 0 ]; then
             log_error "MinIO服务启动失败"
             return 1
@@ -267,7 +276,8 @@ start_docker() {
     
     # 显示容器状态
     log_info "当前容器状态:"
-    docker-compose ps
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    docker compose ps
     
     return 0
 }
@@ -279,14 +289,16 @@ stop_docker() {
     # 检查Docker环境
     check_docker
     if [ $? -ne 0 ]; then
-        return 1
+        # 即使检查失败也尝试停止，以防万一
+        log_warning "Docker环境检查失败，仍将尝试停止容器..."
     fi
     
     # 进入项目根目录再执行docker-compose命令
     cd "$PROJECT_ROOT"
     
     # 停止所有容器
-    docker-compose down --remove-orphans
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    docker compose down --remove-orphans
     if [ $? -ne 0 ]; then
         log_error "Docker容器停止失败"
         return 1
@@ -294,7 +306,8 @@ stop_docker() {
     
     # 如果存在minio配置，也停止minio
     if [ -f "$PROJECT_ROOT/docker/docker-compose.minio.yml" ]; then
-        docker-compose -f "./docker/docker-compose.minio.yml" down
+        # *** 修改点: 使用新的 docker compose 命令 ***
+        docker compose -f "./docker/docker-compose.minio.yml" down
     fi
     
     log_success "所有Docker容器已停止"
@@ -316,7 +329,8 @@ list_containers() {
     
     # 列出所有容器
     echo -e "${BLUE}当前正在运行的容器:${NC}"
-    docker-compose ps --services | sort
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    docker compose ps --services | sort
     
     return 0
 }
@@ -344,7 +358,8 @@ restart_container() {
     cd "$PROJECT_ROOT"
     
     # 检查容器是否存在
-    if ! docker-compose ps --services | grep -q "^$container_name$"; then
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    if ! docker compose ps --services | grep -q "^$container_name$"; then
         log_error "容器 '$container_name' 不存在或未运行"
         echo "可用的容器有:"
         list_containers
@@ -353,14 +368,16 @@ restart_container() {
     
     # 构建并重启容器
     log_info "正在重新构建容器 '$container_name'..."
-    docker-compose build "$container_name"
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    docker compose build "$container_name"
     if [ $? -ne 0 ]; then
         log_error "容器 '$container_name' 构建失败"
         return 1
     fi
     
     log_info "正在重启容器 '$container_name'..."
-    docker-compose up -d --no-deps "$container_name"
+    # *** 修改点: 使用新的 docker compose 命令 ***
+    docker compose up -d --no-deps "$container_name"
     if [ $? -ne 0 ]; then
         log_error "容器 '$container_name' 重启失败"
         return 1
@@ -387,8 +404,8 @@ check_environment() {
     # 检查Ollama
     if command -v ollama &> /dev/null; then
         log_success "Ollama已安装"
-        if curl -s http://localhost:11435/api/version &> /dev/null; then
-            version=$(curl -s http://localhost:11435/api/version | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        if curl -s http://localhost:11434/api/tags &> /dev/null; then
+            version=$(curl -s http://localhost:11434/api/tags | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
             log_success "Ollama服务正在运行，版本: $version"
         else
             log_warning "Ollama已安装但服务未运行"
@@ -421,7 +438,7 @@ check_environment() {
     
     # 检查容器状态
     log_info "检查容器状态..."
-    if docker ps &> /dev/null; then
+    if docker info &> /dev/null; then
         docker ps -a
     else
         log_warning "无法获取容器状态，Docker可能未运行"
@@ -521,6 +538,8 @@ if [ "$STOP_SERVICES" = true ]; then
     log_success "服务停止完成。"
 else
     # 启动服务
+    OLLAMA_RESULT=1
+    DOCKER_RESULT=1
     if [ "$START_OLLAMA" = true ]; then
         start_ollama
         OLLAMA_RESULT=$?
@@ -561,7 +580,7 @@ else
         fi
     elif [ "$START_OLLAMA" = true ] && [ $OLLAMA_RESULT -eq 0 ]; then
         log_success "Ollama服务启动完成，可通过以下地址访问:"
-        echo -e "${GREEN}  - Ollama API: http://localhost:11435${NC}"
+        echo -e "${GREEN}  - Ollama API: http://localhost:11434${NC}"
     elif [ "$START_DOCKER" = true ] && [ $DOCKER_RESULT -eq 0 ]; then
         log_success "Docker容器启动完成，可通过以下地址访问:"
         echo -e "${GREEN}  - 前端界面: http://localhost${NC}"
@@ -570,4 +589,4 @@ else
     fi
 fi
 
-exit 0 
+exit 0
