@@ -4,7 +4,8 @@ FROM golang:1.24-alpine AS builder
 WORKDIR /app
 
 # Install dependencies
-RUN apk add --no-cache git build-base
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories && \
+    apk add --no-cache git build-base
 
 # 通过构建参数接收敏感信息
 ARG GOPRIVATE_ARG

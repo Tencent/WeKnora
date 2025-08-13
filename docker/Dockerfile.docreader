@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     libpq-dev \
     libffi-dev \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     wget \
     antiword \
@@ -31,7 +31,7 @@ RUN curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.19
 COPY services/docreader/requirements.txt .
 
 # 安装依赖
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip cache purge && pip install --no-cache-dir -r requirements.txt
 
 # 预下载 PP-OCRv5 模型
 RUN mkdir -p /root/.paddlex/official_models
@@ -69,7 +69,7 @@ RUN apt-get update && apt-get install -y \
     libpq5 \
     wget \
     gnupg \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     antiword \
     supervisor \
@@ -127,7 +127,7 @@ COPY --from=builder /root/.paddlex/official_models /root/.paddlex/official_model
 
 # 安装 Playwright 浏览器
 RUN python -m playwright install webkit
-RUN python -m playwright install-deps webkit
+#RUN python -m playwright install-deps webkit
 
 COPY --from=builder /app/src /app/src
 
