@@ -17,6 +17,7 @@ paddleocr==3.0.0
 markdown
 pypdf
 cos-python-sdk-v5
+minio
 textract
 antiword
 openai

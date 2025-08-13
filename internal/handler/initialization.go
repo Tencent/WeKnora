@@ -80,7 +80,9 @@ func NewInitializationHandler(
 
 // InitializationRequest 初始化请求结构
 type InitializationRequest struct {
-	LLM struct {
+	// 前端传入的存储类型：cos 或 minio
+	StorageType string `json:"storageType"`
+	LLM         struct {
 		Source    string `json:"source" binding:"required"`
 		ModelName string `json:"modelName" binding:"required"`
 		BaseURL   string `json:"baseUrl"`
@@ -118,6 +120,10 @@ type InitializationRequest struct {
 			AppID      string `json:"appId"`
 			PathPrefix string `json:"pathPrefix"`
 		} `json:"cos,omitempty"`
+		Minio *struct {
+			BucketName string `json:"bucketName"`
+			PathPrefix string `json:"pathPrefix"`
+		} `json:"minio,omitempty"`
 	} `json:"multimodal"`
 
 	DocumentSplitting struct {
@@ -195,9 +201,10 @@ func (h *InitializationHandler) Initialize(c *gin.Context) {
 
 	// 验证多模态配置
 	if req.Multimodal.Enabled {
-		if req.Multimodal.VLM == nil || req.Multimodal.COS == nil {
-			logger.Error(ctx, "Multimodal enabled but missing VLM or COS configuration")
-			c.Error(errors.NewBadRequestError("启用多模态时需要配置VLM和COS信息"))
+		storageType := strings.ToLower(req.StorageType)
+		if req.Multimodal.VLM == nil {
+			logger.Error(ctx, "Multimodal enabled but missing VLM configuration")
+			c.Error(errors.NewBadRequestError("启用多模态时需要配置VLM信息"))
 			return
 		}
 		if req.Multimodal.VLM.InterfaceType == "ollama" {
@@ -208,12 +215,22 @@ func (h *InitializationHandler) Initialize(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("VLM配置不完整"))
 			return
 		}
-		if req.Multimodal.COS.SecretID == "" || req.Multimodal.COS.SecretKey == "" ||
-			req.Multimodal.COS.Region == "" || req.Multimodal.COS.BucketName == "" ||
-			req.Multimodal.COS.AppID == "" {
-			logger.Error(ctx, "COS configuration incomplete")
-			c.Error(errors.NewBadRequestError("COS配置不完整"))
-			return
+		switch storageType {
+		case "cos":
+			if req.Multimodal.COS == nil || req.Multimodal.COS.SecretID == "" || req.Multimodal.COS.SecretKey == "" ||
+				req.Multimodal.COS.Region == "" || req.Multimodal.COS.BucketName == "" ||
+				req.Multimodal.COS.AppID == "" {
+				logger.Error(ctx, "COS configuration incomplete")
+				c.Error(errors.NewBadRequestError("COS配置不完整"))
+				return
+			}
+		case "minio":
+			if req.Multimodal.Minio == nil || req.Multimodal.Minio.BucketName == "" ||
+				os.Getenv("MINIO_ACCESS_KEY_ID") == "" || os.Getenv("MINIO_SECRET_ACCESS_KEY") == "" {
+				logger.Error(ctx, "MinIO configuration incomplete")
+				c.Error(errors.NewBadRequestError("MinIO配置不完整"))
+				return
+			}
 		}
 	}
 
@@ -520,14 +537,30 @@ func (h *InitializationHandler) Initialize(c *gin.Context) {
 				APIKey:        req.Multimodal.VLM.APIKey,
 				InterfaceType: req.Multimodal.VLM.InterfaceType,
 			},
-			COSConfig: types.COSConfig{
-				SecretID:   req.Multimodal.COS.SecretID,
-				SecretKey:  req.Multimodal.COS.SecretKey,
-				Region:     req.Multimodal.COS.Region,
-				BucketName: req.Multimodal.COS.BucketName,
-				AppID:      req.Multimodal.COS.AppID,
-				PathPrefix: req.Multimodal.COS.PathPrefix,
-			},
+		}
+		switch req.StorageType {
+		case "cos":
+			if req.Multimodal.COS != nil {
+				kb.StorageConfig = types.StorageConfig{
+					Provider:   req.StorageType,
+					BucketName: req.Multimodal.COS.BucketName,
+					AppID:      req.Multimodal.COS.AppID,
+					PathPrefix: req.Multimodal.COS.PathPrefix,
+					SecretID:   req.Multimodal.COS.SecretID,
+					SecretKey:  req.Multimodal.COS.SecretKey,
+					Region:     req.Multimodal.COS.Region,
+				}
+			}
+		case "minio":
+			if req.Multimodal.Minio != nil {
+				kb.StorageConfig = types.StorageConfig{
+					Provider:   req.StorageType,
+					BucketName: req.Multimodal.Minio.BucketName,
+					PathPrefix: req.Multimodal.Minio.PathPrefix,
+					SecretID:   os.Getenv("MINIO_ACCESS_KEY_ID"),
+					SecretKey:  os.Getenv("MINIO_SECRET_ACCESS_KEY"),
+				}
+			}
 		}
 
 		_, err = h.kbService.CreateKnowledgeBase(newCtx, kb)
@@ -562,19 +595,35 @@ func (h *InitializationHandler) Initialize(c *gin.Context) {
 				APIKey:        req.Multimodal.VLM.APIKey,
 				InterfaceType: req.Multimodal.VLM.InterfaceType,
 			}
-			kb.COSConfig = types.COSConfig{
-				SecretID:   req.Multimodal.COS.SecretID,
-				SecretKey:  req.Multimodal.COS.SecretKey,
-				Region:     req.Multimodal.COS.Region,
-				BucketName: req.Multimodal.COS.BucketName,
-				AppID:      req.Multimodal.COS.AppID,
-				PathPrefix: req.Multimodal.COS.PathPrefix,
+			switch req.StorageType {
+			case "cos":
+				if req.Multimodal.COS != nil {
+					kb.StorageConfig = types.StorageConfig{
+						Provider:   req.StorageType,
+						SecretID:   req.Multimodal.COS.SecretID,
+						SecretKey:  req.Multimodal.COS.SecretKey,
+						Region:     req.Multimodal.COS.Region,
+						BucketName: req.Multimodal.COS.BucketName,
+						AppID:      req.Multimodal.COS.AppID,
+						PathPrefix: req.Multimodal.COS.PathPrefix,
+					}
+				}
+			case "minio":
+				if req.Multimodal.Minio != nil {
+					kb.StorageConfig = types.StorageConfig{
+						Provider:   req.StorageType,
+						BucketName: req.Multimodal.Minio.BucketName,
+						PathPrefix: req.Multimodal.Minio.PathPrefix,
+						SecretID:   os.Getenv("MINIO_ACCESS_KEY_ID"),
+						SecretKey:  os.Getenv("MINIO_SECRET_ACCESS_KEY"),
+					}
+				}
 			}
 		} else {
 			kb.VLMModelID = "" // 清空VLM模型ID
 			// 清空VLM配置
 			kb.VLMConfig = types.VLMConfig{}
-			kb.COSConfig = types.COSConfig{}
+			kb.StorageConfig = types.StorageConfig{}
 		}
 		if !hasFiles {
 			kb.EmbeddingModelID = embeddingModelID
@@ -642,6 +691,12 @@ func (h *InitializationHandler) CheckOllamaStatus(c *gin.Context) {
 
 	logger.Info(ctx, "Checking Ollama service status")
 
+	// Determine Ollama base URL for display
+	baseURL := os.Getenv("OLLAMA_BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://host.docker.internal:11434"
+	}
+
 	// 检查Ollama服务是否可用
 	err := h.ollamaService.StartService(ctx)
 	if err != nil {
@@ -651,6 +706,7 @@ func (h *InitializationHandler) CheckOllamaStatus(c *gin.Context) {
 			"data": gin.H{
 				"available": false,
 				"error":     err.Error(),
+				"baseUrl":   baseURL,
 			},
 		})
 		return
@@ -668,6 +724,7 @@ func (h *InitializationHandler) CheckOllamaStatus(c *gin.Context) {
 		"data": gin.H{
 			"available": h.ollamaService.IsAvailable(),
 			"version":   version,
+			"baseUrl":   baseURL,
 		},
 	})
 }
@@ -702,7 +759,11 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 
 	// 检查每个模型是否存在
 	for _, modelName := range req.Models {
-		available, err := h.ollamaService.IsModelAvailable(ctx, modelName)
+		checkModelName := modelName
+		if !strings.Contains(modelName, ":") {
+			checkModelName = modelName + ":latest"
+		}
+		available, err := h.ollamaService.IsModelAvailable(ctx, checkModelName)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"model_name": modelName,
@@ -867,6 +928,36 @@ func (h *InitializationHandler) ListDownloadTasks(c *gin.Context) {
 	})
 }
 
+// ListOllamaModels 列出已安装的 Ollama 模型
+func (h *InitializationHandler) ListOllamaModels(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Listing installed Ollama models")
+
+	// 确保服务可用
+	if !h.ollamaService.IsAvailable() {
+		if err := h.ollamaService.StartService(ctx); err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			return
+		}
+	}
+
+	models, err := h.ollamaService.ListModels(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("获取模型列表失败: " + err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"models": models,
+		},
+	})
+}
+
 // downloadModelAsync 异步下载模型
 func (h *InitializationHandler) downloadModelAsync(ctx context.Context,
 	taskID, modelName string,
@@ -970,20 +1061,6 @@ func (h *InitializationHandler) updateTaskStatus(
 		if status == "completed" || status == "failed" {
 			now := time.Now()
 			task.EndTime = &now
-		}
-	}
-}
-
-// 清理过期任务 (可以在后台定期执行)
-func (h *InitializationHandler) cleanupExpiredTasks() {
-	tasksMutex.Lock()
-	defer tasksMutex.Unlock()
-
-	cutoff := time.Now().Add(-24 * time.Hour) // 保留24小时内的任务
-
-	for id, task := range downloadTasks {
-		if task.EndTime != nil && task.EndTime.Before(cutoff) {
-			delete(downloadTasks, id)
 		}
 	}
 }
@@ -1109,20 +1186,29 @@ func buildConfigResponse(models []*types.Model,
 		}
 
 		// 添加多模态的COS配置信息
-		if kb.COSConfig.SecretID != "" {
+		if kb.StorageConfig.SecretID != "" {
 			if config["multimodal"] == nil {
 				config["multimodal"] = map[string]interface{}{
 					"enabled": true,
 				}
 			}
 			multimodal := config["multimodal"].(map[string]interface{})
-			multimodal["cos"] = map[string]interface{}{
-				"secretId":   kb.COSConfig.SecretID,
-				"secretKey":  kb.COSConfig.SecretKey,
-				"region":     kb.COSConfig.Region,
-				"bucketName": kb.COSConfig.BucketName,
-				"appId":      kb.COSConfig.AppID,
-				"pathPrefix": kb.COSConfig.PathPrefix,
+			multimodal["storageType"] = kb.StorageConfig.Provider
+			switch kb.StorageConfig.Provider {
+			case "cos":
+				multimodal["cos"] = map[string]interface{}{
+					"secretId":   kb.StorageConfig.SecretID,
+					"secretKey":  kb.StorageConfig.SecretKey,
+					"region":     kb.StorageConfig.Region,
+					"bucketName": kb.StorageConfig.BucketName,
+					"appId":      kb.StorageConfig.AppID,
+					"pathPrefix": kb.StorageConfig.PathPrefix,
+				}
+			case "minio":
+				multimodal["minio"] = map[string]interface{}{
+					"bucketName": kb.StorageConfig.BucketName,
+					"pathPrefix": kb.StorageConfig.PathPrefix,
+				}
 			}
 		}
 	}
@@ -1434,110 +1520,84 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	})
 }
 
+// 使用结构体解析表单数据
+type testMultimodalForm struct {
+	VLMModel         string `form:"vlm_model"`
+	VLMBaseURL       string `form:"vlm_base_url"`
+	VLMAPIKey        string `form:"vlm_api_key"`
+	VLMInterfaceType string `form:"vlm_interface_type"`
+
+	StorageType string `form:"storage_type"`
+
+	// COS 配置
+	COSSecretID   string `form:"cos_secret_id"`
+	COSSecretKey  string `form:"cos_secret_key"`
+	COSRegion     string `form:"cos_region"`
+	COSBucketName string `form:"cos_bucket_name"`
+	COSAppID      string `form:"cos_app_id"`
+	COSPathPrefix string `form:"cos_path_prefix"`
+
+	// MinIO 配置（当存储为 minio 时）
+	MinioBucketName string `form:"minio_bucket_name"`
+	MinioPathPrefix string `form:"minio_path_prefix"`
+
+	// 文档切分配置（字符串后续自行解析，以避免类型绑定失败）
+	ChunkSize     string `form:"chunk_size"`
+	ChunkOverlap  string `form:"chunk_overlap"`
+	SeparatorsRaw string `form:"separators"`
+}
+
 // TestMultimodalFunction 测试多模态功能
 func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	logger.Info(ctx, "Testing multimodal functionality")
 
-	// 解析表单数据
-	vlmModel := c.PostForm("vlm_model")
-	vlmBaseURL := c.PostForm("vlm_base_url")
-	vlmAPIKey := c.PostForm("vlm_api_key")
-	vlmInterfaceType := c.PostForm("vlm_interface_type")
-
-	if vlmInterfaceType == "ollama" {
-		vlmBaseURL = os.Getenv("OLLAMA_BASE_URL") + "/v1"
+	var req testMultimodalForm
+	if err := c.ShouldBind(&req); err != nil {
+		logger.Error(ctx, "Failed to parse form data", err)
+		c.Error(errors.NewBadRequestError("表单参数解析失败"))
+		return
+	}
+	// ollama 场景自动拼接 base url
+	if req.VLMInterfaceType == "ollama" {
+		req.VLMBaseURL = os.Getenv("OLLAMA_BASE_URL") + "/v1"
 	}
 
-	// 如果没有提供VLM配置，尝试从KnowledgeBase获取
-	if vlmModel == "" || vlmBaseURL == "" {
-		logger.Info(ctx, "VLM configuration not provided, trying to get from KnowledgeBase")
+	req.StorageType = strings.ToLower(req.StorageType)
 
-		// 获取默认知识库
-		kb, err := h.kbService.GetKnowledgeBaseByID(ctx, types.InitDefaultKnowledgeBaseID)
-		if err != nil {
-			logger.Error(ctx, "Failed to get KnowledgeBase", err)
-			c.Error(errors.NewBadRequestError("获取知识库配置失败"))
-			return
-		}
-
-		// 使用知识库中的VLM配置
-		if kb.VLMConfig.ModelName != "" && kb.VLMConfig.BaseURL != "" {
-			vlmModel = kb.VLMConfig.ModelName
-			vlmBaseURL = kb.VLMConfig.BaseURL
-			vlmAPIKey = kb.VLMConfig.APIKey
-			vlmInterfaceType = kb.VLMConfig.InterfaceType
-			logger.Infof(ctx, "Using VLM config from KnowledgeBase: Model=%s, URL=%s, Type=%s",
-				vlmModel, vlmBaseURL, vlmInterfaceType)
-		} else {
-			logger.Error(ctx, "VLM configuration not found in KnowledgeBase")
-			c.Error(errors.NewBadRequestError("知识库中未找到VLM配置信息"))
-			return
-		}
-	}
-
-	// COS配置
-	cosSecretID := c.PostForm("cos_secret_id")
-	cosSecretKey := c.PostForm("cos_secret_key")
-	cosRegion := c.PostForm("cos_region")
-	cosBucketName := c.PostForm("cos_bucket_name")
-	cosAppID := c.PostForm("cos_app_id")
-	cosPathPrefix := c.PostForm("cos_path_prefix")
-
-	// 如果没有提供COS配置，尝试从KnowledgeBase获取
-	if cosSecretID == "" || cosSecretKey == "" ||
-		cosRegion == "" || cosBucketName == "" || cosAppID == "" {
-		logger.Info(ctx, "COS configuration not provided, trying to get from KnowledgeBase")
-
-		// 获取默认知识库
-		kb, err := h.kbService.GetKnowledgeBaseByID(ctx, types.InitDefaultKnowledgeBaseID)
-		if err != nil {
-			logger.Error(ctx, "Failed to get KnowledgeBase", err)
-			c.Error(errors.NewBadRequestError("获取知识库配置失败"))
-			return
-		}
-
-		// 使用知识库中的COS配置
-		if kb.COSConfig.SecretID != "" && kb.COSConfig.SecretKey != "" {
-			cosSecretID = kb.COSConfig.SecretID
-			cosSecretKey = kb.COSConfig.SecretKey
-			cosRegion = kb.COSConfig.Region
-			cosBucketName = kb.COSConfig.BucketName
-			cosAppID = kb.COSConfig.AppID
-			cosPathPrefix = kb.COSConfig.PathPrefix
-			logger.Infof(ctx, "Using COS config from KnowledgeBase: Region=%s, Bucket=%s, App=%s",
-				cosRegion, cosBucketName, cosAppID)
-		} else {
-			logger.Error(ctx, "COS configuration not found in KnowledgeBase")
-			c.Error(errors.NewBadRequestError("知识库中未找到COS配置信息"))
-			return
-		}
-	}
-
-	// 文档分割配置
-	chunkSizeStr := c.PostForm("chunk_size")
-	chunkOverlapStr := c.PostForm("chunk_overlap")
-	separatorsStr := c.PostForm("separators")
-
-	if vlmModel == "" || vlmBaseURL == "" {
+	if req.VLMModel == "" || req.VLMBaseURL == "" {
 		logger.Error(ctx, "VLM model name and base URL are required")
 		c.Error(errors.NewBadRequestError("VLM模型名称和Base URL不能为空"))
 		return
 	}
-
-	if cosSecretID == "" || cosSecretKey == "" ||
-		cosRegion == "" || cosBucketName == "" || cosAppID == "" {
-		logger.Error(ctx, "COS configuration is required")
-		c.Error(errors.NewBadRequestError("COS配置信息不能为空"))
+	switch req.StorageType {
+	case "cos":
+		logger.Infof(ctx, "COS config: ID=%s, Region=%s, Bucket=%s, App=%s, Prefix=%s",
+			req.COSSecretID, req.COSRegion, req.COSBucketName, req.COSAppID, req.COSPathPrefix)
+		// 必填：SecretID/SecretKey/Region/BucketName/AppID；PathPrefix 可选
+		if req.COSSecretID == "" || req.COSSecretKey == "" ||
+			req.COSRegion == "" || req.COSBucketName == "" ||
+			req.COSAppID == "" {
+			logger.Error(ctx, "COS configuration is required")
+			c.Error(errors.NewBadRequestError("COS配置信息不能为空"))
+			return
+		}
+	case "minio":
+		logger.Infof(ctx, "MinIO config: Bucket=%s, PathPrefix=%s", req.MinioBucketName, req.MinioPathPrefix)
+		if req.MinioBucketName == "" {
+			logger.Error(ctx, "MinIO configuration is required")
+			c.Error(errors.NewBadRequestError("MinIO配置信息不能为空"))
+			return
+		}
+	default:
+		logger.Error(ctx, "Invalid storage type")
+		c.Error(errors.NewBadRequestError("无效的存储类型"))
 		return
 	}
 
-	// 记录COS配置信息用于日志
-	logger.Infof(ctx, "COS config: ID=%s, Region=%s, Bucket=%s, App=%s, Prefix=%s",
-		cosSecretID, cosRegion, cosBucketName, cosAppID, cosPathPrefix)
 	logger.Infof(ctx, "VLM config: Model=%s, URL=%s, HasKey=%v, Type=%s",
-		vlmModel, vlmBaseURL, vlmAPIKey != "", vlmInterfaceType)
+		req.VLMModel, req.VLMBaseURL, req.VLMAPIKey != "", req.VLMInterfaceType)
 
 	// 获取上传的图片文件
 	file, header, err := c.Request.FormFile("image")
@@ -1561,27 +1621,26 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("图片文件大小不能超过10MB"))
 		return
 	}
-
 	logger.Infof(ctx, "Processing image: %s, size: %d bytes", header.Filename, header.Size)
 
 	// 解析文档分割配置
-	chunkSize, err := strconv.Atoi(chunkSizeStr)
+	chunkSize, err := strconv.Atoi(req.ChunkSize)
 	if err != nil || chunkSize < 100 || chunkSize > 10000 {
-		chunkSize = 1000 // 默认值
+		chunkSize = 1000
 	}
 
-	chunkOverlap, err := strconv.Atoi(chunkOverlapStr)
+	chunkOverlap, err := strconv.Atoi(req.ChunkOverlap)
 	if err != nil || chunkOverlap < 0 || chunkOverlap >= chunkSize {
-		chunkOverlap = 200 // 默认值
+		chunkOverlap = 200
 	}
 
 	var separators []string
-	if separatorsStr != "" {
-		if err := json.Unmarshal([]byte(separatorsStr), &separators); err != nil {
-			separators = []string{"\n\n", "\n", "。", "！", "？", ";", "；"} // 默认值
+	if req.SeparatorsRaw != "" {
+		if err := json.Unmarshal([]byte(req.SeparatorsRaw), &separators); err != nil {
+			separators = []string{"\n\n", "\n", "。", "！", "？", ";", "；"}
 		}
 	} else {
-		separators = []string{"\n\n", "\n", "。", "！", "？", ";", "；"} // 默认值
+		separators = []string{"\n\n", "\n", "。", "！", "？", ";", "；"}
 	}
 
 	// 读取图片文件内容
@@ -1594,16 +1653,17 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 
 	// 调用多模态测试
 	startTime := time.Now()
-	result, err := h.testMultimodalWithDocReader(ctx, imageContent, header.Filename,
-		chunkSize, chunkOverlap, separators,
-		vlmModel, vlmBaseURL, vlmAPIKey, vlmInterfaceType,
-		cosSecretID, cosSecretKey, cosRegion, cosBucketName, cosAppID, cosPathPrefix)
+	result, err := h.testMultimodalWithDocReader(
+		ctx,
+		imageContent, header.Filename,
+		chunkSize, chunkOverlap, separators, &req,
+	)
 	processingTime := time.Since(startTime).Milliseconds()
 
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"vlm_model":    vlmModel,
-			"vlm_base_url": vlmBaseURL,
+			"vlm_model":    req.VLMModel,
+			"vlm_base_url": req.VLMBaseURL,
 			"filename":     header.Filename,
 		})
 		c.JSON(http.StatusOK, gin.H{
@@ -1631,12 +1691,12 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 }
 
 // testMultimodalWithDocReader 调用docreader服务进行多模态处理
-func (h *InitializationHandler) testMultimodalWithDocReader(ctx context.Context,
+func (h *InitializationHandler) testMultimodalWithDocReader(
+	ctx context.Context,
 	imageContent []byte, filename string,
 	chunkSize, chunkOverlap int, separators []string,
-	vlmModel, vlmBaseURL, vlmAPIKey, vlmInterfaceType,
-	cosSecretID, cosSecretKey, cosRegion, cosBucketName, cosAppID, cosPathPrefix string) (
-	map[string]string, error) {
+	req *testMultimodalForm,
+) (map[string]string, error) {
 	// 获取文件扩展名
 	fileExt := ""
 	if idx := strings.LastIndex(filename, "."); idx != -1 {
@@ -1659,21 +1719,35 @@ func (h *InitializationHandler) testMultimodalWithDocReader(ctx context.Context,
 			Separators:       separators,
 			EnableMultimodal: true, // 启用多模态处理
 			VlmConfig: &proto.VLMConfig{
-				ModelName:     vlmModel,
-				BaseUrl:       vlmBaseURL,
-				ApiKey:        vlmAPIKey,
-				InterfaceType: vlmInterfaceType,
-			},
-			CosConfig: &proto.COSConfig{
-				SecretId:   cosSecretID,
-				SecretKey:  cosSecretKey,
-				Region:     cosRegion,
-				BucketName: cosBucketName,
-				AppId:      cosAppID,
-				PathPrefix: cosPathPrefix,
+				ModelName:     req.VLMModel,
+				BaseUrl:       req.VLMBaseURL,
+				ApiKey:        req.VLMAPIKey,
+				InterfaceType: req.VLMInterfaceType,
 			},
 		},
 		RequestId: ctx.Value(types.RequestIDContextKey).(string),
+	}
+
+	// 设置对象存储配置（通用）
+	switch strings.ToLower(req.StorageType) {
+	case "cos":
+		request.ReadConfig.StorageConfig = &proto.StorageConfig{
+			Provider:        proto.StorageProvider_COS,
+			Region:          req.COSRegion,
+			BucketName:      req.COSBucketName,
+			AccessKeyId:     req.COSSecretID,
+			SecretAccessKey: req.COSSecretKey,
+			AppId:           req.COSAppID,
+			PathPrefix:      req.COSPathPrefix,
+		}
+	case "minio":
+		request.ReadConfig.StorageConfig = &proto.StorageConfig{
+			Provider:        proto.StorageProvider_MINIO,
+			BucketName:      req.MinioBucketName,
+			PathPrefix:      req.MinioPathPrefix,
+			AccessKeyId:     os.Getenv("MINIO_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("MINIO_SECRET_ACCESS_KEY"),
+		}
 	}
 
 	// 调用docreader服务

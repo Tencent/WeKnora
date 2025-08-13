@@ -1,7 +1,7 @@
 import logging
 import os
 import io
-from typing import Any, List, Iterator, Optional, Mapping, Tuple, Dict
+from typing import Any, List, Iterator, Optional, Mapping, Tuple, Dict, Union
 
 from pypdf import PdfReader
 from .base_parser import BaseParser
@@ -16,7 +16,7 @@ class PDFParser(BaseParser):
     It uses the pypdf library for simple text extraction.
     """
 
-    def parse_into_text(self, content: bytes) -> str:
+    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """
         Parse PDF document content into text
 

@@ -22,6 +22,7 @@ export interface InitializationConfig {
     };
     multimodal: {
         enabled: boolean;
+        storageType: 'cos' | 'minio';
         vlm?: {
             modelName: string;
             baseUrl: string;
@@ -36,12 +37,18 @@ export interface InitializationConfig {
             appId: string;
             pathPrefix?: string;
         };
+        minio?: {
+            bucketName: string;
+            pathPrefix?: string;
+        };
     };
     documentSplitting: {
         chunkSize: number;
         chunkOverlap: number;
         separators: string[];
     };
+    // Frontend-only hint for storage selection UI
+    storageType?: 'cos' | 'minio';
 }
 
 // 下载任务状态类型
@@ -88,7 +95,7 @@ export function initializeSystem(config: InitializationConfig): Promise<any> {
 }
 
 // 检查Ollama服务状态
-export function checkOllamaStatus(): Promise<{ available: boolean; version?: string; error?: string }> {
+export function checkOllamaStatus(): Promise<{ available: boolean; version?: string; error?: string; baseUrl?: string }> {
     return new Promise((resolve, reject) => {
         get('/api/v1/initialization/ollama/status')
             .then((response: any) => {
@@ -97,6 +104,20 @@ export function checkOllamaStatus(): Promise<{ available: boolean; version?: str
             .catch((error: any) => {
                 console.error('检查Ollama状态失败:', error);
                 resolve({ available: false, error: error.message || '检查失败' });
+            });
+    });
+}
+
+// 列出已安装的 Ollama 模型
+export function listOllamaModels(): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+        get('/api/v1/initialization/ollama/models')
+            .then((response: any) => {
+                resolve((response.data && response.data.models) || []);
+            })
+            .catch((error: any) => {
+                console.error('获取 Ollama 模型列表失败:', error);
+                resolve([]);
             });
     });
 }
@@ -218,12 +239,17 @@ export function testMultimodalFunction(testData: {
     vlm_base_url: string;
     vlm_api_key?: string;
     vlm_interface_type?: string;
-    cos_secret_id: string;
-    cos_secret_key: string;
-    cos_region: string;
-    cos_bucket_name: string;
-    cos_app_id: string;
+    storage_type?: 'cos'|'minio';
+    // COS optional fields (required only when storage_type === 'cos')
+    cos_secret_id?: string;
+    cos_secret_key?: string;
+    cos_region?: string;
+    cos_bucket_name?: string;
+    cos_app_id?: string;
     cos_path_prefix?: string;
+    // MinIO optional fields
+    minio_bucket_name?: string;
+    minio_path_prefix?: string;
     chunk_size: number;
     chunk_overlap: number;
     separators: string[];
@@ -245,14 +271,21 @@ export function testMultimodalFunction(testData: {
         if (testData.vlm_interface_type) {
             formData.append('vlm_interface_type', testData.vlm_interface_type);
         }
-        formData.append('cos_secret_id', testData.cos_secret_id);
-        formData.append('cos_secret_key', testData.cos_secret_key);
-        formData.append('cos_region', testData.cos_region);
-        formData.append('cos_bucket_name', testData.cos_bucket_name);
-        formData.append('cos_app_id', testData.cos_app_id);
-        if (testData.cos_path_prefix) {
-            formData.append('cos_path_prefix', testData.cos_path_prefix);
+        if (testData.storage_type) {
+            formData.append('storage_type', testData.storage_type);
         }
+        // Append COS fields only when storage_type is COS
+        if (testData.storage_type === 'cos') {
+            if (testData.cos_secret_id) formData.append('cos_secret_id', testData.cos_secret_id);
+            if (testData.cos_secret_key) formData.append('cos_secret_key', testData.cos_secret_key);
+            if (testData.cos_region) formData.append('cos_region', testData.cos_region);
+            if (testData.cos_bucket_name) formData.append('cos_bucket_name', testData.cos_bucket_name);
+            if (testData.cos_app_id) formData.append('cos_app_id', testData.cos_app_id);
+            if (testData.cos_path_prefix) formData.append('cos_path_prefix', testData.cos_path_prefix);
+        }
+        // MinIO fields
+        if (testData.minio_bucket_name) formData.append('minio_bucket_name', testData.minio_bucket_name);
+        if (testData.minio_path_prefix) formData.append('minio_path_prefix', testData.minio_path_prefix);
         formData.append('chunk_size', testData.chunk_size.toString());
         formData.append('chunk_overlap', testData.chunk_overlap.toString());
         formData.append('separators', JSON.stringify(testData.separators));

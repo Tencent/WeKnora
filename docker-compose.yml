@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   app:
     build:
@@ -13,9 +11,9 @@ services:
       - ./config:/app/config
     environment:
       - GIN_MODE=${GIN_MODE}
-      - DB_DRIVER=${DB_DRIVER}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
+      - DB_DRIVER=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
@@ -34,13 +32,13 @@ services:
       - DOCREADER_ADDR=docreader:50051
       - STORAGE_TYPE=${STORAGE_TYPE}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR}
-      - MINIO_ENDPOINT=${MINIO_ENDPOINT}
-      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID}
-      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
+      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       - STREAM_MANAGER_TYPE=${STREAM_MANAGER_TYPE}
-      - REDIS_ADDR=${REDIS_HOST}:${REDIS_PORT}
+      - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - REDIS_DB=${REDIS_DB}
       - REDIS_PREFIX=${REDIS_PREFIX}
@@ -57,18 +55,38 @@ services:
       - INIT_RERANK_MODEL_NAME=${INIT_RERANK_MODEL_NAME}
       - INIT_RERANK_MODEL_BASE_URL=${INIT_RERANK_MODEL_BASE_URL}
       - INIT_RERANK_MODEL_API_KEY=${INIT_RERANK_MODEL_API_KEY}
-      - INIT_TEST_TENANT_ID=${INIT_TEST_TENANT_ID}
-      - INIT_TEST_KNOWLEDGE_BASE_ID=${INIT_TEST_KNOWLEDGE_BASE_ID}
     depends_on:
       redis:
         condition: service_started
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_started
     networks:
       - WeKnora-network
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  minio:
+    image: minio/minio:latest
+    container_name: WeKnora-minio
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY_ID:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+    command: server --console-address ":9001" /data
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - WeKnora-network
 
   frontend:
     build:
@@ -103,6 +121,13 @@ services:
       - VLM_MODEL_BASE_URL=${VLM_MODEL_BASE_URL}
       - VLM_MODEL_NAME=${VLM_MODEL_NAME}
       - VLM_MODEL_API_KEY=${VLM_MODEL_API_KEY}
+      - STORAGE_TYPE=${STORAGE_TYPE}
+      - MINIO_PUBLIC_ENDPOINT=http://localhost:${MINIO_PORT:-9000}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
+      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
+      - MINIO_USE_SSL=${MINIO_USE_SSL}
     networks:
       - WeKnora-network
     restart: unless-stopped
@@ -175,3 +200,4 @@ volumes:
   data-files:
   jaeger_data:
   redis_data:
+  minio_data:

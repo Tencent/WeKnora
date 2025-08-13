@@ -158,7 +158,7 @@ function splitMarkdownByImages(markdown) {
 function isLink(str) {
     const trimmedStr = str.trim();
     // 正则表达式匹配常见链接格式
-    const urlPattern = /^(https?:\/\/|ftp:\/\/|www\.)[\w-]+(\.[\w-]+)+([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?/i;
+    const urlPattern = /^(https?:\/\/|ftp:\/\/|www\.)(?:(?:[\w-]+(?:\.[\w-]+)*)|(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|(?:\[[a-fA-F0-9:]+\]))(?::\d{1,5})?(?:[\/\w.,@?^=%&:~+#-]*[\w@?^=%&\/~+#-])?/i;
     return urlPattern.test(trimmedStr);
 }
 

@@ -1,13 +1,57 @@
 <template>
     <div class="initialization-container">
+        <!-- 页面标题区域 -->
         <div class="initialization-header">
             <h1>WeKnora 系统初始化配置</h1>
             <p>首次使用需要配置模型和服务信息，完成后即可开始使用系统</p>
         </div>
         
+        <!-- 页面主体两栏布局：左侧导航 + 右侧内容 -->
+        <div class="init-layout">
+            <!-- 左侧导航 -->
+            <aside class="sidebar">
+                <div class="sidebar-card">
+                    <div class="nav-title">配置导航</div>
+                    <ul class="nav-list">
+                        <li v-for="s in sections" :key="s.id" :class="['nav-item', { active: activeSectionId === s.id }]" @click="goToSection(s.id)">
+                            <span class="dot" />{{ s.label }}
+                        </li>
+                    </ul>
+                </div>
+            </aside>
+            <div class="init-main">
+        <!-- 顶部公共区域：Ollama 服务状态与已安装模型 -->
+        <div class="ollama-summary-card" id="section-ollama">
+            <div class="summary-header">
+                <span class="title"><t-icon name="server" />Ollama 服务状态</span>
+                <t-tag :theme="ollamaStatus.available ? 'success' : 'danger'" size="small" class="state">
+                    {{ ollamaStatus.available ? `正常 (${ollamaStatus.version||'v?'} )` : (ollamaStatus.error || '未运行') }}
+                </t-tag>
+                <t-tooltip content="刷新状态">
+                    <t-icon name="refresh" class="refresh-icon" :class="{ spinning: summaryRefreshing }" @click="refreshOllamaSummary" />
+                </t-tooltip>
+            </div>
+            <div class="summary-body">
+                <div class="models">
+                    <span class="label">Ollama 服务地址</span>
+                    <div class="model-list">
+                        <t-tag size="small" theme="default" class="model-pill">{{ ollamaStatus.baseUrl || '未配置' }}</t-tag>
+                    </div>
+                </div>
+                <div class="models">
+                    <span class="label">已安装模型</span>
+                    <div class="model-list">
+                        <t-tag v-for="m in installedModels" :key="m" size="small" theme="default" class="model-pill">{{ m }}</t-tag>
+                        <span v-if="installedModels.length===0" class="empty">暂无</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主配置表单 -->
         <t-form ref="form" :data="formData" :rules="rules" @submit.prevent layout="vertical">
-            <!-- LLM 模型配置 -->
-            <div class="config-section">
+            <!-- LLM 大语言模型配置区域 -->
+            <div class="config-section" id="section-llm">
                 <h3><t-icon name="chat" class="section-icon" />LLM 大语言模型配置</h3>
                 <div class="form-row">
                     <t-form-item label="模型来源" name="llm.source">
@@ -20,63 +64,91 @@
                 
                 <div class="form-row">
                     <t-form-item label="模型名称" name="llm.modelName">
-                        <t-input v-model="formData.llm.modelName" placeholder="例如: qwen3:0.6b" 
-                                 @blur="onModelNameChange('llm')" 
-                                 @input="onModelNameInput('llm')"
-                                 @keyup.enter="onModelNameChange('llm')" />
-                    </t-form-item>
-                </div>
-                
-                <!-- Ollama模型状态检查 -->
-                <div v-if="formData.llm.source === 'local'" class="ollama-status">
-                    <div class="status-item">
-                        <div class="status-header">
-                            <span class="status-label">Ollama服务状态:</span>
-                            <t-tag v-if="ollamaStatus.checked" :theme="ollamaStatus.available ? 'success' : 'danger'">
-                                {{ ollamaStatus.available ? `运行中 (${ollamaStatus.version})` : '未运行' }}
-                            </t-tag>
-                            <t-tag v-else theme="default">检查中...</t-tag>
-                            <t-button v-if="!ollamaStatus.available && ollamaStatus.checked" 
-                                      theme="primary" variant="text" size="small" @click="checkOllama">
-                                重新检查
-                            </t-button>
-                        </div>
-                    </div>
-                    
-                    <div v-if="formData.llm.modelName" class="status-item">
-                        <div class="status-header">
-                            <span class="status-label">LLM模型状态:</span>
-                            <t-tag v-if="modelStatus.llm.checked" :theme="modelStatus.llm.available ? 'success' : 'warning'">
-                                {{ modelStatus.llm.available ? '已安装' : '未安装' }}
-                            </t-tag>
-                            <t-tag v-else theme="default">检查中...</t-tag>
+                        <div class="model-input-with-status">
+                            <t-input v-model="formData.llm.modelName" placeholder="例如: qwen3:0.6b" 
+                                     @blur="onModelNameChange('llm')" 
+                                     @input="onModelNameInput('llm')"
+                                     @keyup.enter="onModelNameChange('llm')" />
+                            <div class="model-status-icon">
+                                <t-icon 
+                                    v-if="formData.llm.source === 'local' && formData.llm.modelName && modelStatus.llm.checked" 
+                                    :name="modelStatus.llm.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                    :class="['status-icon', modelStatus.llm.available ? 'installed' : 'not-installed']" 
+                                    :title="modelStatus.llm.available ? '已安装' : '未安装'"
+                                />
+                                <t-icon 
+                                    v-else-if="formData.llm.source === 'local' && formData.llm.modelName && !modelStatus.llm.checked" 
+                                    name="help-circle" 
+                                    class="status-icon unknown" 
+                                    title="未检查"
+                                />
+                                <t-icon 
+                                    v-else-if="formData.llm.source === 'local' && formData.llm.modelName && modelStatus.llm.downloading" 
+                                    name="loading" 
+                                    class="status-icon downloading spinning" 
+                                    title="下载中"
+                                />
+                            </div>
+                            <!-- 下载按钮：未安装时显示 -->
+                            <div v-if="formData.llm.source === 'local' && formData.llm.modelName && modelStatus.llm.checked && !modelStatus.llm.available && !modelStatus.llm.downloading" class="download-action">
+                                <t-tooltip content="下载模型">
+                                    <t-button 
+                                        size="small" 
+                                        theme="primary" 
+                                        @click="downloadModel('llm', formData.llm.modelName)"
+                                        class="download-btn"
+                                        :disabled="modelStatus.llm.downloading"
+                                    >
+                                        <t-icon name="download" />
+                                    </t-button>
+                                </t-tooltip>
+                            </div>
                             
-                            <t-button v-if="!modelStatus.llm.available && modelStatus.llm.checked && ollamaStatus.available && !modelStatus.llm.downloading" 
-                                      theme="primary" size="small"
-                                      @click="downloadModel('llm', formData.llm.modelName)">
-                                下载模型
-                            </t-button>
                         </div>
-                        
-                        <!-- 下载进度显示 -->
-                        <div v-if="modelStatus.llm.downloading" class="download-progress">
-                            <t-progress 
-                                :percentage="modelStatus.llm.progress" 
-                                :label="false"
-                                size="small"
-                                status="active">
-                            </t-progress>
-                            <span class="progress-text">{{ modelStatus.llm.message }} ({{ modelStatus.llm.progress.toFixed(1) }}%)</span>
+                    </t-form-item>
+                    
+                    <!-- 下载进度：下载中时显示 -->
+                    <div v-if="formData.llm.source === 'local' && formData.llm.modelName && modelStatus.llm.downloading" class="download-progress">
+                        <div class="progress-info">
+                            <t-icon name="loading" class="loading-icon spinning" />
+                            <span class="progress-text">下载中</span>
                         </div>
+                        <t-progress :percentage="Number(modelStatus.llm.progress.toFixed(1))" :show-info="false" size="small" class="progress-bar" />
+                        <div class="progress-message">{{ modelStatus.llm.message }}</div>
                     </div>
                 </div>
                 
+                <!-- 远程 API 配置区域 -->
                 <div v-if="formData.llm.source === 'remote'" class="remote-config">
                     <div class="form-row">
                         <t-form-item label="Base URL" name="llm.baseUrl">
-                            <t-input v-model="formData.llm.baseUrl" placeholder="例如: https://api.openai.com/v1, 去除末尾/chat/completions路径后的URL的前面部分" 
-                                     @blur="onRemoteConfigChange('llm')"
-                                     @input="onRemoteConfigInput('llm')" />
+                            <div class="url-input-with-check">
+                                <t-input v-model="formData.llm.baseUrl" placeholder="例如: https://api.openai.com/v1, 去除末尾/chat/completions路径后的URL的前面部分" 
+                                         @blur="onRemoteConfigChange('llm')"
+                                         @input="onRemoteConfigInput('llm')" />
+                                <div v-if="formData.llm.modelName && formData.llm.baseUrl" class="check-action">
+                                    <t-tooltip v-if="!modelStatus.llm.available && modelStatus.llm.checked" content="重新检查连接">
+                                        <t-icon 
+                                            name="refresh" 
+                                            class="refresh-icon" 
+                                            :class="{ spinning: modelStatus.llm.checking }"
+                                            @click="checkRemoteModelStatus('llm')" 
+                                        />
+                                    </t-tooltip>
+                                    <t-icon 
+                                        v-else-if="modelStatus.llm.checked" 
+                                        :name="modelStatus.llm.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                        :class="['status-icon', modelStatus.llm.available ? 'installed' : 'not-installed']" 
+                                        :title="modelStatus.llm.available ? '连接正常' : '连接失败'"
+                                    />
+                                    <t-icon 
+                                        v-else 
+                                        name="loading" 
+                                        class="status-icon checking spinning" 
+                                        title="检查连接中"
+                                    />
+                                </div>
+                            </div>
                         </t-form-item>
                     </div>
                     <div class="form-row">
@@ -87,37 +159,21 @@
                         </t-form-item>
                     </div>
                     
-                    <!-- Remote API模型状态检查 -->
-                    <div v-if="formData.llm.modelName && formData.llm.baseUrl" class="remote-status">
-                        <t-tag v-if="modelStatus.llm.checked" :theme="modelStatus.llm.available ? 'success' : 'danger'" size="small">
-                            <t-icon :name="modelStatus.llm.available ? 'check-circle' : 'close-circle'" />
-                            {{ modelStatus.llm.available ? '连接正常' : '连接失败' }}
-                        </t-tag>
-                        <t-tag v-else theme="default" size="small">
-                            <t-icon name="loading" />
-                            检查连接中...
-                        </t-tag>
-                        
-                        <t-button v-if="!modelStatus.llm.available && modelStatus.llm.checked" 
-                                  theme="primary" variant="text" size="small" 
-                                  @click="checkRemoteModelStatus('llm')">
-                            重新检查
-                        </t-button>
-                        
-                        <div v-if="modelStatus.llm.checked && !modelStatus.llm.available && modelStatus.llm.message" 
-                             class="error-message">
-                            <t-icon name="error-circle" />
-                            {{ modelStatus.llm.message }}
-                        </div>
+                    <!-- 错误信息显示 -->
+                    <div v-if="modelStatus.llm.checked && !modelStatus.llm.available && modelStatus.llm.message" class="error-message">
+                        <t-icon name="error-circle" />
+                        <span>{{ modelStatus.llm.message }}</span>
                     </div>
+                    
+
                 </div>
             </div>
 
-            <!-- Embedding 模型配置 -->
-            <div class="config-section">
+            <!-- Embedding 嵌入模型配置区域 -->
+            <div class="config-section" id="section-embedding">
                 <h3><t-icon name="layers" class="section-icon" />Embedding 嵌入模型配置</h3>
                 
-                <!-- 禁用提示 -->
+                <!-- 已有文件时的禁用提示 -->
                 <div v-if="hasFiles" class="embedding-warning">
                     <t-alert theme="warning" message="知识库中已有文件，无法修改Embedding模型配置" />
                 </div>
@@ -133,45 +189,53 @@
                 
                 <div class="form-row">
                     <t-form-item label="模型名称" name="embedding.modelName">
-                        <t-input v-model="formData.embedding.modelName" placeholder="例如: nomic-embed-text:latest" 
-                                 @blur="onModelNameChange('embedding')" 
-                                 @input="onModelNameInput('embedding')"
-                                 @keyup.enter="onModelNameChange('embedding')"
-                                 :disabled="hasFiles" />
-                    </t-form-item>
-                </div>
-                
-                <!-- Ollama模型状态检查 -->
-                <div v-if="formData.embedding.source === 'local' && formData.embedding.modelName" class="ollama-status">
-                    <div class="status-item">
-                        <div class="status-header">
-                            <span class="status-label">Embedding模型状态:</span>
-                            <t-tag v-if="modelStatus.embedding.checked" :theme="modelStatus.embedding.available ? 'success' : 'warning'">
-                                {{ modelStatus.embedding.available ? '已安装' : '未安装' }}
-                            </t-tag>
-                            <t-tag v-else theme="default">检查中...</t-tag>
+                        <div class="model-input-with-status">
+                            <t-input v-model="formData.embedding.modelName" placeholder="例如: nomic-embed-text:latest" 
+                                     @blur="onModelNameChange('embedding')" 
+                                     @input="onModelNameInput('embedding')"
+                                     @keyup.enter="onModelNameChange('embedding')"
+                                     :disabled="hasFiles" />
+                            <div class="model-status-icon">
+                                <t-icon 
+                                    v-if="formData.embedding.source === 'local' && formData.embedding.modelName && modelStatus.embedding.checked" 
+                                    :name="modelStatus.embedding.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                    :class="['status-icon', modelStatus.embedding.available ? 'installed' : 'not-installed']" 
+                                    :title="modelStatus.embedding.available ? '已安装' : '未安装'"
+                                />
+                                <t-icon 
+                                    v-else-if="formData.embedding.source === 'local' && formData.embedding.modelName && !modelStatus.embedding.checked" 
+                                    name="help-circle" 
+                                    class="status-icon unknown" 
+                                    title="未检查"
+                                />
+                                <t-icon 
+                                    v-else-if="formData.embedding.source === 'local' && formData.embedding.modelName && modelStatus.embedding.downloading" 
+                                    name="loading" 
+                                    class="status-icon downloading spinning" 
+                                    title="下载中"
+                                />
+                            </div>
+                            <!-- 下载按钮：未安装时显示 -->
+                            <div v-if="formData.embedding.source === 'local' && formData.embedding.modelName && modelStatus.embedding.checked && !modelStatus.embedding.available && !modelStatus.embedding.downloading" class="download-action">
+                                <t-tooltip content="下载模型">
+                                    <t-button 
+                                        size="small" 
+                                        theme="primary" 
+                                        @click="downloadModel('embedding', formData.embedding.modelName)"
+                                        class="download-btn"
+                                        :disabled="modelStatus.embedding.downloading"
+                                    >
+                                        <t-icon name="download" />
+                                    </t-button>
+                                </t-tooltip>
+                            </div>
                             
-                            <t-button v-if="!modelStatus.embedding.available && modelStatus.embedding.checked && ollamaStatus.available && !modelStatus.embedding.downloading" 
-                                      theme="primary" size="small"
-                                      @click="downloadModel('embedding', formData.embedding.modelName)">
-                                下载模型
-                            </t-button>
                         </div>
-                        
-                        <!-- 下载进度显示 -->
-                        <div v-if="modelStatus.embedding.downloading" class="download-progress">
-                            <t-progress 
-                                :percentage="modelStatus.embedding.progress" 
-                                :label="false"
-                                size="small"
-                                status="active">
-                            </t-progress>
-                            <span class="progress-text">{{ modelStatus.embedding.message }} ({{ modelStatus.embedding.progress.toFixed(1) }}%)</span>
-                        </div>
-                    </div>
+                    </t-form-item>
+                    
                 </div>
                 
-                <!-- 维度设置 -->
+                <!-- 向量维度设置 -->
                 <div class="form-row">
                     <t-form-item label="维度" name="embedding.dimension">
                         <t-input v-model="formData.embedding.dimension" 
@@ -180,14 +244,49 @@
                                  style="width: 100px;"
                                  @input="onDimensionInput" />
                     </t-form-item>
+
+                    <!-- 下载进度：下载中时显示 -->
+                    <div v-if="formData.embedding.source === 'local' && formData.embedding.modelName && modelStatus.embedding.downloading" class="download-progress">
+                        <div class="progress-info">
+                            <t-icon name="loading" class="loading-icon spinning" />
+                            <span class="progress-text">下载中 {{ modelStatus.embedding.progress.toFixed(1) }}%</span>
+                        </div>
+                        <t-progress :percentage="Number(modelStatus.embedding.progress.toFixed(1))" :show-info="false" size="small" class="progress-bar" />
+                        <div class="progress-message">{{ modelStatus.embedding.message }}</div>
+                    </div>
                 </div>
                 
+                <!-- 远程 Embedding API 配置 -->
                 <div v-if="formData.embedding.source === 'remote'" class="remote-config">
                     <div class="form-row">
                         <t-form-item label="Base URL" name="embedding.baseUrl">
-                            <t-input v-model="formData.embedding.baseUrl" placeholder="例如: https://api.openai.com/v1, 去除末尾/embeddings路径后的URL的前面部分" 
-                                     :disabled="hasFiles" @blur="onRemoteConfigChange('embedding')"
-                                     @input="onRemoteConfigInput('embedding')" />
+                            <div class="url-input-with-check">
+                                <t-input v-model="formData.embedding.baseUrl" placeholder="例如: https://api.openai.com/v1, 去除末尾/embeddings路径后的URL的前面部分" 
+                                         :disabled="hasFiles" @blur="onRemoteConfigChange('embedding')"
+                                         @input="onRemoteConfigInput('embedding')" />
+                                <div v-if="formData.embedding.modelName && formData.embedding.baseUrl && !hasFiles" class="check-action">
+                                    <t-tooltip v-if="!modelStatus.embedding.available && modelStatus.embedding.checked" content="重新检查连接">
+                                        <t-icon 
+                                            name="refresh" 
+                                            class="refresh-icon" 
+                                            :class="{ spinning: modelStatus.embedding.checking }"
+                                            @click="checkRemoteModelStatus('embedding')" 
+                                        />
+                                    </t-tooltip>
+                                    <t-icon 
+                                        v-else-if="modelStatus.embedding.checked" 
+                                        :name="modelStatus.embedding.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                        :class="['status-icon', modelStatus.embedding.available ? 'installed' : 'not-installed']" 
+                                        :title="modelStatus.embedding.available ? '连接正常' : '连接失败'"
+                                    />
+                                    <t-icon 
+                                        v-else 
+                                        name="loading" 
+                                        class="input-icon checking spinning" 
+                                        title="检查连接中"
+                                    />
+                                </div>
+                            </div>
                         </t-form-item>
                     </div>
                     <div class="form-row">
@@ -198,34 +297,18 @@
                         </t-form-item>
                     </div>
                     
-                    <!-- Remote API模型状态检查 -->
-                    <div v-if="formData.embedding.modelName && formData.embedding.baseUrl && !hasFiles" class="remote-status">
-                        <t-tag v-if="modelStatus.embedding.checked" :theme="modelStatus.embedding.available ? 'success' : 'danger'" size="small">
-                            <t-icon :name="modelStatus.embedding.available ? 'check-circle' : 'close-circle'" />
-                            {{ modelStatus.embedding.available ? '连接正常' : '连接失败' }}
-                        </t-tag>
-                        <t-tag v-else theme="default" size="small">
-                            <t-icon name="loading" />
-                            检查连接中...
-                        </t-tag>
-                        
-                        <t-button v-if="!modelStatus.embedding.available && modelStatus.embedding.checked" 
-                                  theme="primary" variant="text" size="small" 
-                                  @click="checkRemoteModelStatus('embedding')">
-                            重新检查
-                        </t-button>
-                        
-                        <div v-if="modelStatus.embedding.checked && !modelStatus.embedding.available && modelStatus.embedding.message" 
-                             class="error-message">
-                            <t-icon name="error-circle" />
-                            {{ modelStatus.embedding.message }}
-                        </div>
+                    <!-- 错误信息显示 -->
+                    <div v-if="modelStatus.embedding.checked && !modelStatus.embedding.available && modelStatus.embedding.message" class="error-message">
+                        <t-icon name="error-circle" />
+                        <span>{{ modelStatus.embedding.message }}</span>
                     </div>
+                    
+
                 </div>
             </div>
 
-            <!-- Rerank 模型配置 -->
-            <div class="config-section">
+            <!-- Rerank 重排模型配置区域 -->
+            <div class="config-section" id="section-rerank">
                 <h3><t-icon name="swap" class="section-icon" />Rerank 重排模型配置</h3>
                 
                 <div class="form-row">
@@ -237,20 +320,61 @@
                     </t-form-item>
                 </div>
                 
+                <!-- Rerank 详细配置 -->
                 <div v-if="formData.rerank.enabled" class="rerank-config">
                     <div class="form-row">
                         <t-form-item label="模型名称" name="rerank.modelName">
-                            <t-input v-model="formData.rerank.modelName" placeholder="例如: bge-reranker-v2-m3" 
-                                     @blur="onRerankConfigChange"
-                                     @input="onRerankConfigInput" />
+                            <div class="model-input-with-status">
+                                <t-input v-model="formData.rerank.modelName" placeholder="例如: bge-reranker-v2-m3" 
+                                         @blur="onRerankConfigChange"
+                                         @input="onRerankConfigInput" />
+                                <div class="model-status-icon">
+                                    <t-icon 
+                                        v-if="formData.rerank.modelName && modelStatus.rerank.checked" 
+                                        :name="modelStatus.rerank.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                        :class="['status-icon', modelStatus.rerank.available ? 'installed' : 'not-installed']" 
+                                        :title="modelStatus.rerank.available ? '连接正常' : '连接失败'"
+                                    />
+                                    <t-icon 
+                                        v-else-if="formData.rerank.modelName && !modelStatus.rerank.checked" 
+                                        name="help-circle" 
+                                        class="status-icon unknown" 
+                                        title="未检查"
+                                    />
+                                </div>
+                            </div>
                         </t-form-item>
                     </div>
                     
                     <div class="form-row">
                         <t-form-item label="Base URL" name="rerank.baseUrl">
-                            <t-input v-model="formData.rerank.baseUrl" placeholder="例如: http://localhost:11434, 去除末尾/rerank路径后的URL的前面部分" 
-                                     @blur="onRerankConfigChange"
-                                     @input="onRerankConfigInput" />
+                            <div class="url-input-with-check">
+                                <t-input v-model="formData.rerank.baseUrl" placeholder="例如: http://localhost:11434, 去除末尾/rerank路径后的URL的前面部分" 
+                                         @blur="onRerankConfigChange"
+                                         @input="onRerankConfigInput" />
+                                <div v-if="formData.rerank.modelName && formData.rerank.baseUrl" class="check-action">
+                                    <t-tooltip v-if="!modelStatus.rerank.available && modelStatus.rerank.checked" content="重新检查连接">
+                                        <t-icon 
+                                            name="refresh" 
+                                            class="refresh-icon" 
+                                            :class="{ spinning: modelStatus.rerank.checking }"
+                                            @click="checkRerankModelStatus" 
+                                        />
+                                    </t-tooltip>
+                                    <t-icon 
+                                        v-else-if="modelStatus.rerank.checked" 
+                                        :name="modelStatus.rerank.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                        :class="['status-icon', modelStatus.rerank.available ? 'installed' : 'not-installed']" 
+                                        :title="modelStatus.rerank.available ? '连接正常' : '连接失败'"
+                                    />
+                                    <t-icon 
+                                        v-else 
+                                        name="loading" 
+                                        class="input-icon checking spinning" 
+                                        title="检查连接中"
+                                    />
+                                </div>
+                            </div>
                         </t-form-item>
                     </div>
                     
@@ -262,34 +386,18 @@
                         </t-form-item>
                     </div>
                     
-                    <!-- Rerank模型状态检查 -->
-                    <div v-if="formData.rerank.modelName && formData.rerank.baseUrl" class="remote-status">
-                        <t-tag v-if="modelStatus.rerank.checked" :theme="modelStatus.rerank.available ? 'success' : 'danger'" size="small">
-                            <t-icon :name="modelStatus.rerank.available ? 'check-circle' : 'close-circle'" />
-                            {{ modelStatus.rerank.available ? '连接正常' : '连接失败' }}
-                        </t-tag>
-                        <t-tag v-else theme="default" size="small">
-                            <t-icon name="loading" />
-                            检查连接中...
-                        </t-tag>
-                        
-                        <t-button v-if="!modelStatus.rerank.available && modelStatus.rerank.checked" 
-                                  theme="primary" variant="text" size="small" 
-                                  @click="checkRerankModelStatus">
-                            重新检查
-                        </t-button>
-                        
-                        <div v-if="modelStatus.rerank.checked && !modelStatus.rerank.available && modelStatus.rerank.message" 
-                             class="error-message">
-                            <t-icon name="error-circle" />
-                            {{ modelStatus.rerank.message }}
-                        </div>
+                    <!-- 错误信息显示 -->
+                    <div v-if="modelStatus.rerank.checked && !modelStatus.rerank.available && modelStatus.rerank.message" class="error-message">
+                        <t-icon name="error-circle" />
+                        <span>{{ modelStatus.rerank.message }}</span>
                     </div>
+                    
+
                 </div>
             </div>
 
-            <!-- 多模态配置 -->
-            <div class="config-section">
+            <!-- 多模态配置区域 -->
+            <div class="config-section" id="section-multimodal">
                 <h3><t-icon name="image" class="section-icon" />多模态配置</h3>
                 <div class="form-row">
                     <t-form-item name="multimodal.enabled">
@@ -300,19 +408,67 @@
                     </t-form-item>
                 </div>
                 
+                <!-- 多模态详细配置 -->
                 <div v-if="formData.multimodal.enabled" class="multimodal-config">
-                    <!-- VLM 模型配置 -->
+                    <!-- VLM 视觉语言模型配置 -->
                     <h4>视觉语言模型配置</h4>
-                    <div class="form-row">
-                        <t-form-item label="VLM 模型名称" name="multimodal.vlm.modelName">
+                                    <div class="form-row">
+                    <t-form-item label="模型名称" name="multimodal.vlm.modelName">
+                        <div class="model-input-with-status">
                             <t-input v-model="formData.multimodal.vlm.modelName" placeholder="例如: llava:13b" 
                                      @blur="onModelNameChange('vlm')" 
                                      @input="onModelNameInput('vlm')"
                                      @keyup.enter="onModelNameChange('vlm')" />
-                        </t-form-item>
+                            <div class="model-status-icon">
+                                <t-icon 
+                                    v-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && modelStatus.vlm.checked" 
+                                    :name="modelStatus.vlm.available ? 'check-circle-filled' : 'close-circle-filled'" 
+                                    :class="['status-icon', modelStatus.vlm.available ? 'installed' : 'not-installed']" 
+                                    :title="modelStatus.vlm.available ? '已安装' : '未安装'"
+                                />
+                                <t-icon 
+                                    v-else-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && !modelStatus.vlm.checked" 
+                                    name="help-circle" 
+                                    class="status-icon unknown" 
+                                    title="未检查"
+                                />
+                                <t-icon 
+                                    v-else-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && modelStatus.vlm.downloading" 
+                                    name="loading" 
+                                    class="status-icon downloading spinning" 
+                                    title="下载中"
+                                />
+                            </div>
+                            <!-- 下载按钮：未安装时显示 -->
+                            <div v-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && modelStatus.vlm.checked && !modelStatus.vlm.available && !modelStatus.vlm.downloading" class="download-action">
+                                <t-tooltip content="下载模型">
+                                    <t-button 
+                                        size="small" 
+                                        theme="primary" 
+                                        @click="downloadModel('vlm', formData.multimodal.vlm.modelName)"
+                                        class="download-btn"
+                                        :disabled="modelStatus.vlm.downloading"
+                                    >
+                                        <t-icon name="download" />
+                                    </t-button>
+                                </t-tooltip>
+                            </div>
+                            
+                        </div>
+                    </t-form-item>
+                    
+                    <!-- 下载进度：下载中时显示 -->
+                    <div v-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && modelStatus.vlm.downloading" class="download-progress">
+                        <div class="progress-info">
+                            <t-icon name="loading" class="loading-icon spinning" />
+                            <span class="progress-text">下载中 {{ modelStatus.vlm.progress.toFixed(1) }}%</span>
+                        </div>
+                        <t-progress :percentage="Number(modelStatus.vlm.progress.toFixed(1))" :show-info="false" size="small" class="progress-bar" />
+                        <div class="progress-message">{{ modelStatus.vlm.message }}</div>
                     </div>
+                </div>
                     <div class="form-row">
-                        <t-form-item label="VLM 接口类型" name="multimodal.vlm.interfaceType">
+                        <t-form-item label="接口类型" name="multimodal.vlm.interfaceType">
                             <t-radio-group v-model="formData.multimodal.vlm.interfaceType" @change="onVlmInterfaceTypeChange">
                                 <t-radio value="ollama">Ollama (本地)</t-radio>
                                 <t-radio value="openai">OpenAI 兼容接口</t-radio>
@@ -320,98 +476,95 @@
                         </t-form-item>
                     </div>
                     <div class="form-row" v-if="formData.multimodal.vlm.interfaceType === 'openai'">
-                        <t-form-item label="VLM Base URL" name="multimodal.vlm.baseUrl">
+                        <t-form-item label="Base URL" name="multimodal.vlm.baseUrl">
                             <t-input v-model="formData.multimodal.vlm.baseUrl" placeholder="例如: http://localhost:11434/v1，去除末尾/chat/completions路径后的URL的前面部分"
                                      @blur="onVlmBaseUrlChange"
                                      @input="onVlmBaseUrlInput" />
                         </t-form-item>
                     </div>
                     <div class="form-row" v-if="formData.multimodal.vlm.interfaceType === 'openai'">
-                        <t-form-item label="VLM API Key" name="multimodal.vlm.apiKey">
+                        <t-form-item label="API Key" name="multimodal.vlm.apiKey">
                             <t-input v-model="formData.multimodal.vlm.apiKey" type="password" placeholder="请输入API Key (可选)"
                                      @blur="onVlmApiKeyChange" />
                         </t-form-item>
                     </div>
                     
-                    <!-- VLM模型状态检查 -->
-                    <div v-if="formData.multimodal.vlm.modelName && isVlmOllama" class="ollama-status">
-                        <div class="status-item">
-                            <div class="status-header">
-                                <span class="status-label">VLM模型状态:</span>
-                                <t-tag v-if="modelStatus.vlm.checked" :theme="modelStatus.vlm.available ? 'success' : 'warning'">
-                                    {{ modelStatus.vlm.available ? '已安装' : '未安装' }}
-                                </t-tag>
-                                <t-tag v-else theme="default">检查中...</t-tag>
-                                
-                                <t-button v-if="!modelStatus.vlm.available && modelStatus.vlm.checked && ollamaStatus.available && !modelStatus.vlm.downloading" 
-                                          theme="primary" size="small"
-                                          @click="downloadModel('vlm', formData.multimodal.vlm.modelName)">
-                                    下载模型
-                                </t-button>
-                            </div>
-                            
-                            <!-- 下载进度显示 -->
-                            <div v-if="modelStatus.vlm.downloading" class="download-progress">
-                                <t-progress 
-                                    :percentage="modelStatus.vlm.progress" 
-                                    :label="false"
-                                    size="small"
-                                    status="active">
-                                </t-progress>
-                                <span class="progress-text">{{ modelStatus.vlm.message }} ({{ modelStatus.vlm.progress.toFixed(1) }}%)</span>
-                            </div>
+
+                    
+                    <!-- 对象存储服务配置 -->
+                    <h4>对象存储服务配置</h4>
+                    <div class="form-row">
+                        <t-form-item label="存储类型">
+                            <t-radio-group v-model="formData.storageType" @change="onStorageTypeChange">
+                                <t-radio value="cos">COS</t-radio>
+                                <t-radio value="minio">MinIO</t-radio>
+                            </t-radio-group>
+                        </t-form-item>
+                    </div>
+                    
+                    <!-- MinIO 配置区域 -->
+                    <div v-if="formData.storageType === 'minio'">
+                        <div class="form-row">
+                            <t-form-item label="Bucket Name" name="multimodal.minio.bucketName">
+                                <t-input v-model="formData.multimodal.minio.bucketName" placeholder="请输入Bucket名称" />
+                            </t-form-item>
+                        </div>
+
+                        <div class="form-row">
+                            <t-form-item label="Path Prefix" name="multimodal.minio.pathPrefix">
+                                <t-input v-model="formData.multimodal.minio.pathPrefix" placeholder="例如: images/" />
+                            </t-form-item>
                         </div>
                     </div>
                     
-                    <!-- COS 配置 -->
-                    <h4>对象存储服务 (COS) 配置</h4>
+                    <!-- COS 配置区域 -->
                     <div class="form-row">
-                        <t-form-item label="Secret ID" name="multimodal.cos.secretId">
+                        <t-form-item v-if="formData.storageType === 'cos'" label="Secret ID" name="multimodal.cos.secretId">
                             <t-input v-model="formData.multimodal.cos.secretId" placeholder="请输入COS Secret ID"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="Secret Key" name="multimodal.cos.secretKey">
+                        <t-form-item v-if="formData.storageType === 'cos'" label="Secret Key" name="multimodal.cos.secretKey">
                             <t-input v-model="formData.multimodal.cos.secretKey" type="password" placeholder="请输入COS Secret Key"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="Region" name="multimodal.cos.region">
+                        <t-form-item v-if="formData.storageType === 'cos'" label="Region" name="multimodal.cos.region">
                             <t-input v-model="formData.multimodal.cos.region" placeholder="例如: ap-beijing"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="Bucket Name" name="multimodal.cos.bucketName">
+                        <t-form-item v-if="formData.storageType === 'cos'" label="Bucket Name" name="multimodal.cos.bucketName">
                             <t-input v-model="formData.multimodal.cos.bucketName" placeholder="请输入Bucket名称"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="App ID" name="multimodal.cos.appId">
+                        <t-form-item v-if="formData.storageType === 'cos'" label="App ID" name="multimodal.cos.appId">
                             <t-input v-model="formData.multimodal.cos.appId" placeholder="请输入App ID"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="Path Prefix" name="multimodal.cos.pathPrefix">
+                        <t-form-item v-if="formData.storageType === 'cos'" label="Path Prefix" name="multimodal.cos.pathPrefix">
                             <t-input v-model="formData.multimodal.cos.pathPrefix" placeholder="例如: images/"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     
-                    <!-- 多模态测试功能 -->
+                    <!-- 多模态功能测试区域 -->
                     <div v-if="canTestMultimodal" class="multimodal-test">
                         <h5>多模态功能测试</h5>
                         <div class="test-description">
                             <p>上传一张测试图片，验证VLM模型的Caption生成和OCR文字识别功能</p>
                         </div>
                         
-                        <!-- 测试操作区 -->
+                        <!-- 测试操作区域 -->
                         <div class="multimodal-test-container">
-                            <!-- 左侧：图片上传和预览区 -->
+                            <!-- 左侧：图片上传和预览区域 -->
                             <div class="test-image-section">
                                 <div class="test-upload">
                                     <t-upload
@@ -487,8 +640,8 @@
                 </div>
             </div>
 
-            <!-- 文档分割配置 -->
-            <div class="config-section">
+            <!-- 文档分割配置区域 -->
+            <div class="config-section" id="section-docsplit">
                 <h3><t-icon name="cut" class="section-icon" />文档分割配置</h3>
                 
                 <!-- 预设配置选择 -->
@@ -520,10 +673,10 @@
                                 </div>
                             </t-radio>
                         </t-radio-group>
-                        <div class="form-tip">选择适合您场景的文档分割策略</div>
                     </t-form-item>
                 </div>
                 
+                <!-- 参数配置网格 -->
                 <div class="parameters-grid" :class="{ 'disabled-grid': selectedPreset !== 'custom' }">
                     <div class="parameter-group">
                         <div class="parameter-label">分块大小</div>
@@ -532,7 +685,7 @@
                                 v-model="formData.documentSplitting.chunkSize" 
                                 :min="100" 
                                 :max="4000" 
-                                :step="100"
+                                :step="1"
                                 :disabled="selectedPreset !== 'custom'"
                                 :marks="{ 100: '100', 1000: '1000', 2000: '2000', 4000: '4000' }"
                                 class="parameter-slider"
@@ -549,7 +702,7 @@
                                 v-model="formData.documentSplitting.chunkOverlap" 
                                 :min="0" 
                                 :max="1000" 
-                                :step="50"
+                                :step="1"
                                 :disabled="selectedPreset !== 'custom'"
                                 :marks="{ 0: '0', 200: '200', 500: '500', 1000: '1000' }"
                                 class="parameter-slider"
@@ -573,18 +726,17 @@
                                 :options="separatorOptions"
                             />
                         </div>
-                        <div class="parameter-desc">选择文档分割的优先级分隔符，支持自定义</div>
                     </div>
                 </div>
                 
             </div>
 
-            <!-- 提交按钮 -->
-            <div class="submit-section">
+            <!-- 提交按钮区域 -->
+            <div class="submit-section" id="section-submit">
                 <t-button theme="primary" type="button" size="large" 
-                          :loading="submitting" :disabled="!canSubmit"
+                          :loading="submitting" :disabled="!canSubmit || isSubmitDebounced"
                           @click="handleSubmit">
-                    {{ isUpdateMode ? '更新初始化配置' : '完成初始化配置' }}
+                    {{ isUpdateMode ? '更新配置信息' : '完成初始化配置' }}
                 </t-button>
                 
                 <!-- 提交状态提示 -->
@@ -592,15 +744,22 @@
                     <t-icon name="info-circle" class="tip-icon" />
                     <span>请等待所有Ollama模型下载完成后再进行初始化</span>
                 </div>
+                
+
             </div>
         </t-form>
+            </div> <!-- .init-main -->
+        </div> <!-- .init-layout -->
     </div>
 </template>
 
 <script setup lang="ts">
+/**
+ * 导入必要的 Vue 组合式 API 和外部依赖
+ */
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { MessagePlugin, FormRule } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
 import { 
     initializeSystem, 
     checkOllamaStatus, 
@@ -611,22 +770,35 @@ import {
     checkRemoteModel,
     type DownloadTask,
     checkRerankModel,
-    testMultimodalFunction
+    testMultimodalFunction,
+    listOllamaModels
 } from '@/api/initialization';
 
 const router = useRouter();
-const form = ref(null);
+type TFormRef = {
+    validate: (fields?: string[] | undefined) => Promise<true | any>;
+    clearValidate?: (fields?: string | string[]) => void;
+} | null;
+const form = ref<TFormRef>(null);
 const submitting = ref(false);
 const hasFiles = ref(false);
 const isUpdateMode = ref(false); // 是否为更新模式
+
+// 防抖机制：防止按钮快速重复点击
+const submitDebounceTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const isSubmitDebounced = ref(false);
 
 // Ollama服务状态
 const ollamaStatus = reactive({
     checked: false,
     available: false,
     version: '',
-    error: ''
+    error: '',
+    baseUrl: ''
 });
+// 顶部摘要：已安装模型
+const installedModels = ref<string[]>([]);
+const summaryRefreshing = ref<boolean>(false);
 
 // 下载任务管理
 const downloadTasks = reactive<Record<string, DownloadTask>>({});
@@ -638,6 +810,7 @@ const modelStatus = reactive({
         checked: false,
         available: false,
         downloading: false,
+        checking: false,
         taskId: '',
         progress: 0,
         message: ''
@@ -646,6 +819,7 @@ const modelStatus = reactive({
         checked: false,
         available: false,
         downloading: false,
+        checking: false,
         taskId: '',
         progress: 0,
         message: ''
@@ -654,6 +828,7 @@ const modelStatus = reactive({
         checked: false,
         available: false,
         downloading: false,
+        checking: false,
         taskId: '',
         progress: 0,
         message: ''
@@ -662,6 +837,7 @@ const modelStatus = reactive({
         checked: false,
         available: false,
         downloading: false,
+        checking: false,
         taskId: '',
         progress: 0,
         message: ''
@@ -704,13 +880,19 @@ const formData = reactive({
             bucketName: '',
             appId: '',
             pathPrefix: ''
+        },
+        minio: {
+            bucketName: '',
+            useSSL: false,
+            pathPrefix: ''
         }
     },
     documentSplitting: {
         chunkSize: 1000, 
         chunkOverlap: 200,
         separators: ['\n\n', '\n', '。', '！', '？', ';', '；']
-    }
+    },
+    storageType: 'minio'
 });
 
 // 预设配置选择
@@ -743,6 +925,41 @@ const multimodalTest = reactive({
 
 const imageUpload = ref(null);
 
+// 左侧导航区段
+type Section = { id: string; label: string };
+const sections: Section[] = [
+    { id: 'ollama', label: 'Ollama 服务' },
+    { id: 'llm', label: 'LLM 模型' },
+    { id: 'embedding', label: 'Embedding 模型' },
+    { id: 'rerank', label: 'Rerank 配置' },
+    { id: 'multimodal', label: '多模态配置' },
+    { id: 'docsplit', label: '文档分割' },
+    { id: 'submit', label: '完成配置' },
+];
+
+const activeSectionId = ref<string>('ollama');
+const goToSection = (id: string) => {
+    const el = document.getElementById(`section-${id}`);
+    if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        activeSectionId.value = id;
+    }
+};
+
+// 监听滚动，高亮当前区块
+const onScroll = () => {
+    const order = ['ollama','llm','embedding','rerank','multimodal','docsplit','submit'];
+    for (const id of order) {
+        const el = document.getElementById(`section-${id}`);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= 120 && rect.bottom >= 120) {
+            activeSectionId.value = id;
+            break;
+        }
+    }
+};
+
 // 配置回填
 const loadCurrentConfig = async () => {
     try {
@@ -765,6 +982,7 @@ const loadCurrentConfig = async () => {
         if (config.rerank) {
             Object.assign(formData.rerank, config.rerank);
         }
+        formData.storageType = config.multimodal.storageType;
         if (config.multimodal) {
             formData.multimodal.enabled = config.multimodal.enabled || false;
             if (config.multimodal.vlm) {
@@ -774,8 +992,10 @@ const loadCurrentConfig = async () => {
                     formData.multimodal.vlm.interfaceType = 'ollama';
                 }
             }
-            if (config.multimodal.cos) {
+            if (config.multimodal.storageType === 'cos') {
                 Object.assign(formData.multimodal.cos, config.multimodal.cos);
+            } else if (config.multimodal.storageType === 'minio') {
+                Object.assign(formData.multimodal.minio, config.multimodal.minio);
             }
         }
         if (config.documentSplitting) {
@@ -893,19 +1113,22 @@ const rules = {
         { required: (t: any) => formData.multimodal.enabled && formData.multimodal.vlm.interfaceType === 'openai', message: '请输入VLM BaseURL', type: 'error' }
     ],
     'multimodal.cos.secretId': [
-        { required: (t: any) => formData.multimodal.enabled, message: '请输入COS Secret ID', type: 'error' }
+        { required: (t: any) => formData.multimodal.enabled && formData.storageType === 'cos', message: '请输入COS Secret ID', type: 'error' }
     ],
     'multimodal.cos.secretKey': [
-        { required: (t: any) => formData.multimodal.enabled, message: '请输入COS Secret Key', type: 'error' }
+        { required: (t: any) => formData.multimodal.enabled && formData.storageType === 'cos', message: '请输入COS Secret Key', type: 'error' }
     ],
     'multimodal.cos.region': [
-        { required: (t: any) => formData.multimodal.enabled, message: '请输入COS Region', type: 'error' }
+        { required: (t: any) => formData.multimodal.enabled && formData.storageType === 'cos', message: '请输入COS Region', type: 'error' }
     ],
     'multimodal.cos.bucketName': [
-        { required: (t: any) => formData.multimodal.enabled, message: '请输入COS Bucket Name', type: 'error' }
+        { required: (t: any) => formData.multimodal.enabled && formData.storageType === 'cos', message: '请输入COS Bucket Name', type: 'error' }
     ],
     'multimodal.cos.appId': [
-        { required: (t: any) => formData.multimodal.enabled, message: '请输入COS App ID', type: 'error' }
+        { required: (t: any) => formData.multimodal.enabled && formData.storageType === 'cos', message: '请输入COS App ID', type: 'error' }
+    ],
+    'multimodal.minio.bucketName': [
+        { required: (t: any) => formData.multimodal.enabled && formData.storageType === 'minio', message: '请输入Bucket Name', type: 'error' }
     ]
 };
 
@@ -917,6 +1140,7 @@ const checkOllama = async () => {
         ollamaStatus.available = result.available;
         ollamaStatus.version = result.version || '';
         ollamaStatus.error = result.error || '';
+        ollamaStatus.baseUrl = result.baseUrl || '';
         
         if (ollamaStatus.available) {
             // 如果Ollama可用，检查已配置的模型
@@ -927,6 +1151,22 @@ const checkOllama = async () => {
         ollamaStatus.checked = true;
         ollamaStatus.available = false;
         ollamaStatus.error = '检查失败';
+    }
+};
+
+// 刷新顶部摘要（状态 + 已安装模型）
+const refreshOllamaSummary = async () => {
+    if (summaryRefreshing.value) return;
+    summaryRefreshing.value = true;
+    try {
+        await checkOllama();
+        const models = await listOllamaModels();
+        installedModels.value = models;
+    } catch (e) {
+        installedModels.value = [];
+    } finally {
+        // 略延时以保证旋转动画可见
+        setTimeout(() => { summaryRefreshing.value = false; }, 300);
     }
 };
 
@@ -973,14 +1213,23 @@ const checkAllOllamaModels = async () => {
 
 // 下载模型
 const downloadModel = async (type: 'llm' | 'embedding' | 'vlm', modelName: string) => {
+    // 防止重复点击
+    if (modelStatus[type].downloading) {
+        return;
+    }
+    
     try {
+        // 立即更新状态，防止重复点击
+        modelStatus[type].downloading = true;
+        modelStatus[type].progress = 0;
+        modelStatus[type].message = '正在启动下载...';
+        
         // 启动下载任务
         const result = await downloadOllamaModel(modelName);
         
-        // 更新模型状态
-        modelStatus[type].downloading = true;
+        // 更新任务ID和初始进度
         modelStatus[type].taskId = result.taskId;
-        modelStatus[type].progress = result.progress;
+        modelStatus[type].progress = result.progress || 0;
         modelStatus[type].message = '下载已开始';
         
         // 如果已经完成，直接更新状态
@@ -1000,6 +1249,7 @@ const downloadModel = async (type: 'llm' | 'embedding' | 'vlm', modelName: strin
         console.error(`启动模型 ${modelName} 下载失败:`, error);
         MessagePlugin.error(`启动模型 ${modelName} 下载失败`);
         modelStatus[type].downloading = false;
+        modelStatus[type].message = '下载启动失败';
     }
 };
 
@@ -1073,6 +1323,14 @@ onUnmounted(() => {
             delete inputDebounceTimers[key];
         }
     });
+    
+    // 清理提交防抖定时器
+    if (submitDebounceTimer.value) {
+        clearTimeout(submitDebounceTimer.value);
+        submitDebounceTimer.value = null;
+    }
+    
+    window.removeEventListener('scroll', onScroll);
 });
 
 // 事件处理
@@ -1236,6 +1494,7 @@ const checkRemoteModelStatus = async (type: 'llm' | 'embedding') => {
     }
     
     try {
+        modelStatus[type].checking = true;
         modelStatus[type].checked = false;
         modelStatus[type].available = false;
         modelStatus[type].message = '';
@@ -1259,7 +1518,10 @@ const checkRemoteModelStatus = async (type: 'llm' | 'embedding') => {
         console.error(`检查远程${type}模型失败:`, error);
         modelStatus[type].checked = true;
         modelStatus[type].available = false;
-        modelStatus[type].message = error.message || '网络连接失败';
+        const err = error as any;
+        modelStatus[type].message = (err && err.message) || '网络连接失败';
+    } finally {
+        modelStatus[type].checking = false;
     }
 };
 
@@ -1287,7 +1549,8 @@ const onSeparatorsChange = (value: string) => {
 // 最终模型检查
 const performFinalModelCheck = async () => {
     // 收集需要检查的本地模型
-    const modelsToCheck = [];
+    type ModelItem = { name: string; type: string };
+    const modelsToCheck: ModelItem[] = [];
     
     if (formData.llm.source === 'local' && formData.llm.modelName) {
         modelsToCheck.push({ name: formData.llm.modelName, type: 'LLM' });
@@ -1313,14 +1576,62 @@ const performFinalModelCheck = async () => {
         };
     }
     
+    // 快速检查：如果所有模型状态已知且可用，直接返回成功
+    let allModelsAvailable = true;
+    const quickCheckResults = [];
+    
+    if (formData.llm.source === 'local' && formData.llm.modelName) {
+        if (modelStatus.llm.checked && modelStatus.llm.available && !modelStatus.llm.downloading) {
+            quickCheckResults.push({ name: formData.llm.modelName, type: 'LLM', available: true });
+        } else if (modelStatus.llm.downloading) {
+            return { 
+                success: false, 
+                message: 'LLM模型正在下载中，请等待下载完成后再提交配置。' 
+            };
+        } else {
+            allModelsAvailable = false;
+        }
+    }
+    
+    if (formData.embedding.source === 'local' && formData.embedding.modelName) {
+        if (modelStatus.embedding.checked && modelStatus.embedding.available && !modelStatus.embedding.downloading) {
+            quickCheckResults.push({ name: formData.embedding.modelName, type: 'Embedding', available: true });
+        } else if (modelStatus.embedding.downloading) {
+            return { 
+                success: false, 
+                message: 'Embedding模型正在下载中，请等待下载完成后再提交配置。' 
+            };
+        } else {
+            allModelsAvailable = false;
+        }
+    }
+    
+    if (formData.multimodal.enabled && isVlmOllama.value && formData.multimodal.vlm.modelName) {
+        if (modelStatus.vlm.checked && modelStatus.vlm.available && !modelStatus.vlm.downloading) {
+            quickCheckResults.push({ name: formData.multimodal.vlm.modelName, type: 'VLM', available: true });
+        } else if (modelStatus.vlm.downloading) {
+            return { 
+                success: false, 
+                message: 'VLM模型正在下载中，请等待下载完成后再提交配置。' 
+            };
+        } else {
+            allModelsAvailable = false;
+        }
+    }
+    
+    // 如果所有模型状态已知且可用，直接返回成功
+    if (allModelsAvailable && quickCheckResults.length === modelsToCheck.length) {
+        return { success: true };
+    }
+    
+    // 需要重新检查的模型
     try {
-        // 重新检查所有模型状态
         const modelNames = modelsToCheck.map(m => m.name);
         const result = await checkOllamaModels(modelNames);
         
         // 检查是否有未安装的模型
-        const unavailableModels = [];
-        modelsToCheck.forEach(model => {
+        const unavailableModels: ModelItem[] = [];
+        modelsToCheck.forEach((model: ModelItem) => {
             if (!result.models[model.name]) {
                 unavailableModels.push(model);
             }
@@ -1331,25 +1642,6 @@ const performFinalModelCheck = async () => {
             return { 
                 success: false, 
                 message: `以下模型未安装：${modelList}。请先下载这些模型或选择其他已安装的模型。` 
-            };
-        }
-        
-        // 检查是否有正在下载的模型
-        const downloadingModels = [];
-        if (formData.llm.source === 'local' && modelStatus.llm.downloading) {
-            downloadingModels.push('LLM');
-        }
-        if (formData.embedding.source === 'local' && modelStatus.embedding.downloading) {
-            downloadingModels.push('Embedding');
-        }
-        if (formData.multimodal.enabled && isVlmOllama.value && modelStatus.vlm.downloading) {
-            downloadingModels.push('VLM');
-        }
-        
-        if (downloadingModels.length > 0) {
-            return { 
-                success: false, 
-                message: `${downloadingModels.join('、')}模型正在下载中，请等待下载完成后再提交配置。` 
             };
         }
         
@@ -1366,6 +1658,20 @@ const performFinalModelCheck = async () => {
 
 // 处理按钮提交
 const handleSubmit = async () => {
+    // 防止重复提交和防抖
+    if (submitting.value || isSubmitDebounced.value) {
+        return;
+    }
+    
+    // 设置防抖状态
+    isSubmitDebounced.value = true;
+    if (submitDebounceTimer.value) {
+        clearTimeout(submitDebounceTimer.value);
+    }
+    submitDebounceTimer.value = setTimeout(() => {
+        isSubmitDebounced.value = false;
+    }, 500); // 500ms防抖
+    
     // 先进行表单验证
     const validateResult = await form.value?.validate();
     
@@ -1393,17 +1699,18 @@ const handleSubmit = async () => {
         }
         
         submitting.value = true;
+        
         try {
             // 最终检查：确保所有本地模型都已下载完成
             const finalCheck = await performFinalModelCheck();
             if (!finalCheck.success) {
-                MessagePlugin.error(finalCheck.message);
-                submitting.value = false;
+                MessagePlugin.error(finalCheck.message || '模型检查失败');
                 return;
             }
             
             // 调用初始化API
-            await initializeSystem(formData);
+            const payload: any = JSON.parse(JSON.stringify(formData));
+            await initializeSystem(payload);
             
             const successMessage = isUpdateMode.value ? '配置更新成功！' : '系统初始化成功！';
             MessagePlugin.success(successMessage);
@@ -1411,15 +1718,16 @@ const handleSubmit = async () => {
             // 记录初始化状态，强制刷新路由状态
             localStorage.setItem('system_initialized', 'true');
             
-            // 跳转到知识库页面
-            setTimeout(() => {
-                router.replace('/platform/knowledgeBase');
-            }, 300);
+            // 立即跳转到知识库页面，减少延迟感
+            router.replace('/platform/knowledgeBase');
+            
         } catch (error) {
             console.error('初始化失败:', error);
             const errorMessage = isUpdateMode.value ? '配置更新失败，请检查配置并重试' : '初始化失败，请检查配置并重试';
-            MessagePlugin.error(error.message || errorMessage);
+            const err = error as any;
+            MessagePlugin.error((err && err.message) || errorMessage);
         } finally {
+            // 确保在所有情况下都重置提交状态
             submitting.value = false;
         }
     }
@@ -1441,11 +1749,14 @@ onMounted(async () => {
         (formData.multimodal.enabled && formData.multimodal.vlm.interfaceType === 'ollama');
     
     if (needOllamaCheck) {
-        await checkOllama();
+        await refreshOllamaSummary();
     }
     
     // 检查已配置模型状态
     await checkAllConfiguredModels();
+
+    // 绑定滚动监听，用于左侧导航高亮
+    window.addEventListener('scroll', onScroll, { passive: true });
 });
 
 const onRerankChange = () => {
@@ -1498,6 +1809,7 @@ const checkRerankModelStatus = async () => {
     }
     
     try {
+        modelStatus.rerank.checking = true;
         modelStatus.rerank.checked = false;
         modelStatus.rerank.available = false;
         modelStatus.rerank.message = '';
@@ -1521,7 +1833,10 @@ const checkRerankModelStatus = async () => {
         console.error('检查Rerank模型失败:', error);
         modelStatus.rerank.checked = true;
         modelStatus.rerank.available = false;
-        modelStatus.rerank.message = error.message || '网络连接失败';
+        const err = error as any;
+        modelStatus.rerank.message = (err && err.message) || '网络连接失败';
+    } finally {
+        modelStatus.rerank.checking = false;
     }
 };
 
@@ -1537,23 +1852,17 @@ const getTestUploadData = () => {
 const onImageChange = (files: any) => {
     if (files && files.length > 0) {
         // 检查多模态配置是否完整
-        const missingConfigs = [];
+        const missingConfigs: string[] = [];
         
-        // 检查COS配置
-        if (!formData.multimodal.cos.secretId) {
-            missingConfigs.push('COS Secret ID');
-        }
-        if (!formData.multimodal.cos.secretKey) {
-            missingConfigs.push('COS Secret Key');
-        }
-        if (!formData.multimodal.cos.region) {
-            missingConfigs.push('COS Region');
-        }
-        if (!formData.multimodal.cos.bucketName) {
-            missingConfigs.push('COS Bucket Name');
-        }
-        if (!formData.multimodal.cos.appId) {
-            missingConfigs.push('COS App ID');
+        // 根据存储类型检查必填项
+        if (formData.storageType === 'cos') {
+            if (!formData.multimodal.cos.secretId) missingConfigs.push('COS Secret ID');
+            if (!formData.multimodal.cos.secretKey) missingConfigs.push('COS Secret Key');
+            if (!formData.multimodal.cos.region) missingConfigs.push('COS Region');
+            if (!formData.multimodal.cos.bucketName) missingConfigs.push('COS Bucket Name');
+            if (!formData.multimodal.cos.appId) missingConfigs.push('COS App ID');
+        } else if (formData.storageType === 'minio') {
+            if (!formData.multimodal.minio.bucketName) missingConfigs.push('MinIO Bucket Name');
         }
         
         // 检查VLM配置
@@ -1605,12 +1914,16 @@ const startMultimodalTest = async () => {
             vlm_base_url: string;
             vlm_api_key: string;
             vlm_interface_type: string;
-            cos_secret_id: string;
-            cos_secret_key: string;
-            cos_region: string;
-            cos_bucket_name: string;
-            cos_app_id: string;
-            cos_path_prefix: string;
+            storage_type?: 'cos' | 'minio';
+            cos_secret_id?: string;
+            cos_secret_key?: string;
+            cos_region?: string;
+            cos_bucket_name?: string;
+            cos_app_id?: string;
+            cos_path_prefix?: string;
+            minio_bucket_name?: string;
+            minio_use_ssl?: boolean;
+            minio_path_prefix?: string;
             chunk_size: number;
             chunk_overlap: number;
             separators: string[];
@@ -1620,16 +1933,26 @@ const startMultimodalTest = async () => {
             vlm_base_url: '',  // 将在下方设置
             vlm_api_key: '',   // 将在下方设置
             vlm_interface_type: formData.multimodal.vlm.interfaceType,
-            cos_secret_id: formData.multimodal.cos.secretId,
-            cos_secret_key: formData.multimodal.cos.secretKey,
-            cos_region: formData.multimodal.cos.region,
-            cos_bucket_name: formData.multimodal.cos.bucketName,
-            cos_app_id: formData.multimodal.cos.appId,
-            cos_path_prefix: formData.multimodal.cos.pathPrefix || '',
             chunk_size: formData.documentSplitting.chunkSize,
             chunk_overlap: formData.documentSplitting.chunkOverlap,
             separators: formData.documentSplitting.separators
         };
+
+        // 根据存储类型附带不同的参数
+        if (formData.storageType === 'cos') {
+            apiParams.storage_type = 'cos';
+            apiParams.cos_secret_id = formData.multimodal.cos.secretId;
+            apiParams.cos_secret_key = formData.multimodal.cos.secretKey;
+            apiParams.cos_region = formData.multimodal.cos.region;
+            apiParams.cos_bucket_name = formData.multimodal.cos.bucketName;
+            apiParams.cos_app_id = formData.multimodal.cos.appId;
+            apiParams.cos_path_prefix = formData.multimodal.cos.pathPrefix || '';
+        } else if (formData.storageType === 'minio') {
+            apiParams.storage_type = 'minio';
+            apiParams.minio_bucket_name = formData.multimodal.minio.bucketName;
+            apiParams.minio_use_ssl = formData.multimodal.minio.useSSL;
+            apiParams.minio_path_prefix = formData.multimodal.minio.pathPrefix;
+        }
         
         // 如果是OpenAI兼容接口，设置baseUrl和apiKey
         if (formData.multimodal.vlm.interfaceType === 'openai') {
@@ -1654,7 +1977,7 @@ const startMultimodalTest = async () => {
         console.error('多模态测试失败:', error);
         multimodalTest.result = {
             success: false,
-            message: error.message || '测试过程中发生错误'
+            message: (error as any)?.message || '测试过程中发生错误'
         };
         MessagePlugin.error('多模态测试失败');
     } finally {
@@ -1683,12 +2006,18 @@ const canTestMultimodal = computed(() => {
     const baseUrlValid = formData.multimodal.vlm.interfaceType === 'ollama' || 
                         (formData.multimodal.vlm.interfaceType === 'openai' && formData.multimodal.vlm.baseUrl);
                         
-    return formData.multimodal.cos.secretId && 
-           formData.multimodal.cos.secretKey && 
-           formData.multimodal.cos.region && 
-           formData.multimodal.cos.bucketName && 
-           formData.multimodal.cos.appId && 
-           formData.multimodal.vlm.modelName && 
+    const cosReady = formData.storageType == 'cos' && 
+        formData.multimodal.cos.secretId && 
+        formData.multimodal.cos.secretKey && 
+        formData.multimodal.cos.region && 
+        formData.multimodal.cos.bucketName && 
+        formData.multimodal.cos.appId;
+
+    const minioReady = formData.storageType == 'minio' && 
+        formData.multimodal.minio.bucketName;
+
+    return (cosReady || minioReady) &&
+           !!formData.multimodal.vlm.modelName && 
            baseUrlValid;
 });
 
@@ -1707,10 +2036,7 @@ const onVlmInterfaceTypeChange = () => {
             checkVlmModelStatus();
         }
     } else {
-        // 如果是OpenAI兼容接口，清空Base URL让用户输入
-        if (formData.multimodal.vlm.baseUrl.includes('localhost:11434')) {
-            formData.multimodal.vlm.baseUrl = '';
-        }
+        formData.multimodal.vlm.baseUrl = '';
         // 重置模型状态检查
         modelStatus.vlm.checked = false;
         modelStatus.vlm.available = false;
@@ -1748,7 +2074,8 @@ const checkVlmModelStatus = async () => {
         console.error('检查VLM模型状态失败:', error);
         modelStatus.vlm.checked = true;
         modelStatus.vlm.available = false;
-        modelStatus.vlm.message = error.message || '网络连接失败';
+        const err = error as any;
+        modelStatus.vlm.message = (err && err.message) || '网络连接失败';
     }
 };
 
@@ -1837,16 +2164,36 @@ const onVlmApiKeyChange = () => {
 const onCosConfigChange = () => {
     // 触发表单验证，确保COS配置的完整性
     setTimeout(() => {
-        form.value?.validate([
+        if (formData.storageType === 'cos') {
+            form.value?.validate([
+                'multimodal.cos.secretId',
+                'multimodal.cos.secretKey',
+                'multimodal.cos.region',
+                'multimodal.cos.bucketName',
+                'multimodal.cos.appId'
+            ]);
+        }
+    }, 100);
+    
+    console.log('COS config changed:', formData.multimodal.cos);
+};
+
+const onStorageTypeChange = () => {
+    // 切换到 MinIO 时，清理 COS 校验状态
+    if (formData.storageType === 'minio') {
+        form.value?.clearValidate?.([
             'multimodal.cos.secretId',
             'multimodal.cos.secretKey',
             'multimodal.cos.region',
             'multimodal.cos.bucketName',
             'multimodal.cos.appId'
         ]);
-    }, 100);
-    
-    console.log('COS config changed:', formData.multimodal.cos);
+    } else {
+        form.value?.clearValidate?.([
+            'multimodal.minio.bucketName',
+            'multimodal.minio.pathPrefix'
+        ]);
+    }
 };
 
 // 检查所有已配置模型的状态
@@ -1889,9 +2236,137 @@ const onDimensionInput = (event: any) => {
 
 <style lang="less" scoped>
 .initialization-container {
+    .init-layout {
+        display: grid;
+        grid-template-columns: 220px 1fr;
+        gap: 16px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .sidebar {
+        position: sticky;
+        top: 20px;
+        height: fit-content;
+        padding-right: 20px;
+    }
+
+    .sidebar-card {
+        background: #fff;
+        border: 1px solid #e8f5e8;
+        border-radius: 14px;
+        box-shadow: 0 8px 24px rgba(7, 192, 95, 0.08);
+        padding: 16px 12px;
+    }
+
+    .nav-title {
+        font-weight: 600;
+        color: #2c5234;
+        padding: 8px 10px 12px;
+        border-bottom: 2px solid #f0fdf4;
+        margin-bottom: 12px;
+        font-size: 15px;
+    }
+
+    .nav-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .nav-item {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #6b7280;
+        padding: 10px 12px;
+        border-radius: 10px;
+        transition: all 0.2s ease;
+        font-size: 14px;
+        font-weight: 500;
+    }
+
+    .nav-item:hover {
+        background: #f0fdf4;
+        color: #166534;
+        transform: translateX(2px);
+    }
+
+    .nav-item.active {
+        background: linear-gradient(135deg, #07c05f, #00a651);
+        color: white;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(7, 192, 95, 0.2);
+        transform: translateX(2px);
+    }
+
+    .nav-item .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        transition: all 0.2s ease;
+    }
+    
+    .nav-item.active .dot {
+        background: white;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+    }
+
+    .init-main { min-width: 0; }
+    .ollama-summary-card {
+        max-width: 960px;
+        margin: 0 auto 16px auto;
+        background: #ffffff;
+        border: 1px solid #e9edf5;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+        padding: 14px 16px;
+
+        .summary-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+
+            .title {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-weight: 600;
+                color: #1f2937;
+            }
+            .state{ margin-left: 4px; }
+            .refresh-icon{
+                margin-left: 4px;
+                cursor: pointer;
+                color: #6b7280;
+                transition: transform .2s ease, color .2s ease;
+            }
+            .refresh-icon:hover{ color: #0ea5e9; }
+            .refresh-icon.spinning{ animation: spin 1s linear infinite; }
+        }
+
+        .summary-body {
+            .models {
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                .label { color:#6b7280; font-size: 12px; margin-top: 2px; }
+                .model-list { display: flex; gap: 6px; flex-wrap: wrap; }
+                .model-pill { border-radius: 10px; }
+                .empty { color:#9ca3af; font-size:12px; }
+            }
+        }
+    }
     min-height: 100vh;
-    background: linear-gradient(135deg, #f0f9f0 0%, #e8f5e8 100%);
-    padding: 40px 20px;
+    /* 更柔和的浅色背景，贴近截图的干净感 */
+    background: linear-gradient(180deg, #f7fbff 0%, #f8fff9 100%);
+    padding: 48px 20px;
     
     .initialization-header {
         text-align: center;
@@ -1930,19 +2405,20 @@ const onDimensionInput = (event: any) => {
     }
     
     :deep(.t-form) {
-        max-width: 800px;
+        /* 表单容器卡片化：更宽一点、更浅的阴影与细边框 */
+        max-width: 960px;
         margin: 0 auto;
-        background: white;
-        padding: 40px;
-        border-radius: 16px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-        backdrop-filter: blur(10px);
+        background: #fff;
+        padding: 32px 36px;
+        border-radius: 14px;
+        border: 1px solid #e9edf5;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
     }
     
     .config-section {
-        margin-bottom: 40px;
-        border-bottom: 1px solid #e8f5e8;
-        padding-bottom: 30px;
+        margin-bottom: 32px;
+        border-bottom: 1px solid #eef2f7;
+        padding-bottom: 24px;
         
         &:last-of-type {
             border-bottom: none;
@@ -1953,12 +2429,13 @@ const onDimensionInput = (event: any) => {
             color: #07c05f;
             font-size: 18px;
             font-weight: 600;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
             padding: 10px 16px;
-            background: linear-gradient(90deg, #e8f5e8, #f0faf0);
-            border-radius: 8px;
+            /* 标题条更清爽的浅色渐变 */
+            background: linear-gradient(90deg, #f6f9ff, #f4fff6);
+            border-radius: 10px;
             border-left: 4px solid #07c05f;
             
             .section-icon {
@@ -1978,12 +2455,12 @@ const onDimensionInput = (event: any) => {
         }
     }
     
-    .remote-config, .multimodal-config {
-        margin-top: 20px;
-        padding: 20px;
-        background: #f8fdf8;
-        border-radius: 8px;
-        border-left: 4px solid #07c05f;
+    .remote-config, .multimodal-config, .rerank-config {
+        margin-top: 16px;
+        padding: 18px 16px;
+        background: #f9fcff;
+        border-radius: 12px;
+        border: 1px solid #edf2f7;
     }
     
     .ollama-status {
@@ -2018,21 +2495,26 @@ const onDimensionInput = (event: any) => {
                 
                 :deep(.t-tag) {
                     margin-right: 10px;
-                    
+                    border-radius: 8px;
+                    font-weight: 500;
                     &.t-tag--success {
                         background-color: #f6ffed;
                         border-color: #b7eb8f;
-                        color: #52c41a;
+                        color: #2f9a28;
+                    }
+                    &.t-tag--danger {
+                        background-color: #fff2f0;
+                        border-color: #ffccc7;
+                        color: #d4380d;
                     }
                 }
                 
                 :deep(.t-button) {
                     margin-bottom: 5px;
-                    
+                    border-radius: 10px;
                     &.t-button--theme-primary {
                         background-color: #07c05f;
                         border-color: #07c05f;
-                        
                         &:hover {
                             background-color: #00a651;
                             border-color: #00a651;
@@ -2046,11 +2528,6 @@ const onDimensionInput = (event: any) => {
                 width: 100%;
                 max-width: 400px;
                 
-                :deep(.t-progress) {
-                    .t-progress__bar {
-                        background-color: #07c05f;
-                    }
-                }
                 
                 .progress-text {
                     font-size: 12px;
@@ -2076,7 +2553,7 @@ const onDimensionInput = (event: any) => {
             align-items: center;
             gap: 4px;
             padding: 4px 8px;
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 12px;
             font-weight: 500;
             transition: all 0.3s ease;
@@ -2121,8 +2598,7 @@ const onDimensionInput = (event: any) => {
                 
                 &:hover {
                     color: #40a9ff;
-                    background-color: #f0f9ff;
-                    transform: translateY(-1px);
+                    background-color: #eef6ff;
                 }
             }
         }
@@ -2186,26 +2662,40 @@ const onDimensionInput = (event: any) => {
     .submit-section {
         text-align: center;
         padding-top: 20px;
-        border-top: 1px solid #e8f5e8;
         
         :deep(.t-button--theme-primary) {
             background: linear-gradient(135deg, #07c05f, #00a651);
             border: none;
-            border-radius: 8px;
+            border-radius: 12px;
             font-weight: 600;
             padding: 12px 32px;
             font-size: 16px;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
+            min-height: 48px;
+            min-width: 160px;
             
             &:hover:not(.t-is-disabled) {
                 background: linear-gradient(135deg, #00a651, #009645);
-                transform: translateY(-2px);
                 box-shadow: 0 8px 25px rgba(7, 192, 95, 0.3);
+            }
+            
+            &:active:not(.t-is-disabled) {
+                transform: translateY(0);
+                box-shadow: 0 4px 15px rgba(7, 192, 95, 0.2);
             }
             
             &.t-is-disabled {
                 background: #ccc;
                 color: #999;
+                transform: none;
+                box-shadow: none;
+            }
+            
+            &.t-is-loading {
+                background: linear-gradient(135deg, #07c05f, #00a651);
+                color: white;
+                transform: none;
+                box-shadow: 0 4px 15px rgba(7, 192, 95, 0.2);
             }
         }
         
@@ -2229,6 +2719,10 @@ const onDimensionInput = (event: any) => {
             
             .tip-icon {
                 margin-right: 5px;
+                
+                &.spinning {
+                    animation: spin 1s linear infinite;
+                }
             }
         }
     }
@@ -2270,11 +2764,6 @@ const onDimensionInput = (event: any) => {
         }
     }
     
-    :deep(.t-switch) {
-        &.t-is-checked .t-switch__handle::before {
-            background-color: #07c05f;
-        }
-    }
     
     :deep(.t-button) {
         min-width: 120px;
@@ -2287,6 +2776,315 @@ const onDimensionInput = (event: any) => {
         color: #888;
         margin-top: 4px;
         line-height: 1.4;
+    }
+
+    /* 模型输入框与状态图标布局 */
+    .model-input-with-status {
+        display: flex;
+        gap: 10px;
+    }
+    
+    /* 模型名称输入框样式 */
+    .model-input-with-status :deep(.t-input) {
+        flex: 1;
+        min-width: 300px;
+        
+        .t-input__inner {
+            height: 40px;
+            font-size: 14px;
+            padding: 8px 12px;
+        }
+    }
+    
+    /* 下载按钮样式 - 简化设计 */
+    .download-action {
+        flex-shrink: 0;
+    }
+    
+    .download-action .download-btn {
+        height: 22px;
+        width: 22px;
+        min-width: 22px;
+        padding: 0;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #07c05f, #00a651);
+        border: none;
+        color: white;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(7, 192, 95, 0.2);
+        
+        &:hover:not(:disabled) {
+            background: linear-gradient(135deg, #00a651, #008f47);
+            box-shadow: 0 4px 12px rgba(7, 192, 95, 0.3);
+        }
+        
+        &:active:not(:disabled) {
+            transform: translateY(0);
+            box-shadow: 0 2px 6px rgba(7, 192, 95, 0.2);
+        }
+        
+        &:disabled {
+            background: #e5e7eb;
+            color: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .t-icon {
+            font-size: 14px;
+        }
+    }
+    
+    /* 下载进度样式 */
+    .download-progress {
+        margin-top: 8px;
+        margin-bottom: 8px;
+        padding: 10px 12px;
+        background: linear-gradient(135deg, #f0fdf4, #f8fafc);
+        border-radius: 8px;
+        border: 1px solid #dcfce7;
+        box-shadow: 0 1px 4px rgba(7, 192, 95, 0.08);
+        width: 100%;
+        
+        .progress-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+            
+            .loading-icon {
+                color: #07c05f;
+                font-size: 14px;
+                animation: spin 1s linear infinite;
+            }
+            
+            .progress-text {
+                font-size: 12px;
+                color: #166534;
+                font-weight: 600;
+            }
+        }
+        
+        .progress-bar {
+            margin-bottom: 4px;
+            
+            :deep(.t-progress__bar) {
+                background: linear-gradient(90deg, #07c05f, #00a651);
+                border-radius: 4px;
+                height: 4px;
+                box-shadow: 0 1px 2px rgba(7, 192, 95, 0.2);
+            }
+            
+            :deep(.t-progress__track) {
+                background-color: #e5e7eb;
+                border-radius: 4px;
+                height: 4px;
+            }
+        }
+        
+        .progress-message {
+            font-size: 10px;
+            color: #6b7280;
+            text-align: center;
+            line-height: 1.2;
+            font-style: italic;
+        }
+    }
+    
+    /* URL输入框与检查按钮布局 */
+    .url-input-with-check {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+    }
+    
+    .url-input-with-check :deep(.t-input) {
+        flex: 1;
+        min-width: 0;
+        width: 100%;
+        
+        .t-input__inner {
+            height: 40px;
+            font-size: 14px;
+            padding: 8px 12px;
+            width: 100%;
+        }
+    }
+    
+    /* 检查按钮和状态图标样式 - 与Ollama状态图标保持一致 */
+    .check-action {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .check-action .status-icon,
+    .check-action .input-icon {
+        font-size: 18px;
+        cursor: help;
+        color: #666;
+    }
+    
+    .check-action .status-icon.installed,
+    .check-action .input-icon.installed {
+        color: #00a870;
+    }
+    
+    .check-action .status-icon.not-installed,
+    .check-action .input-icon.not-installed {
+        color: #e34d59;
+    }
+    
+    .check-action .status-icon.unknown,
+    .check-action .input-icon.unknown {
+        color: #d54941;
+    }
+    
+    .check-action .status-icon.checking,
+    .check-action .input-icon.checking {
+        color: #0052d9;
+    }
+    
+    /* 错误信息样式 */
+    .error-message {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        padding: 8px 12px;
+        background-color: #fff2f0;
+        border: 1px solid #ffccc7;
+        border-radius: 6px;
+        color: #d4380d;
+        font-size: 13px;
+        
+        .t-icon {
+            color: #d4380d;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        
+        span {
+            line-height: 1.4;
+        }
+    }
+    
+    /* 输入框样式优化 */
+    :deep(.t-input) {
+        border-radius: 8px;
+        
+        &.t-is-focused {
+            border-color: #07c05f;
+            box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+        }
+        
+        .t-input__inner {
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            
+            &:focus {
+                border-color: #07c05f;
+                box-shadow: none;
+                outline: none;
+            }
+            
+            &:hover {
+                border-color: #07c05f;
+            }
+        }
+    }
+    
+    :deep(.t-textarea) {
+        border-radius: 8px;
+        
+        &.t-is-focused {
+            border-color: #07c05f;
+            box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+        }
+        
+        .t-textarea__inner {
+            border-radius: 8px;
+            border: 1px solid #dcdcdc;
+            transition: all 0.2s ease;
+            
+            &:focus {
+                border-color: #07c05f;
+                box-shadow: none;
+                outline: none;
+            }
+            
+            &:hover {
+                border-color: #07c05f;
+            }
+        }
+    }
+    
+    .model-status-icon {
+        flex-shrink: 0;
+    }
+    
+    .model-status-icon .status-icon {
+        font-size: 18px;
+        cursor: help;
+    }
+    
+    .model-status-icon .status-icon.installed {
+        color: #00a870;
+    }
+    
+    .model-status-icon .status-icon.not-installed {
+        color: #e34d59;
+    }
+    
+    .model-status-icon .status-icon.unknown {
+        color: #d54941;
+    }
+    
+    .model-status-icon .status-icon.downloading {
+        color: #0052d9;
+    }
+
+    /* 紧随输入框的精简状态行 */
+    .inline-status-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 8px 0;
+    }
+
+    .inline-progress {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 180px;
+        padding: 4px 8px;
+        background: #f8f9fa;
+        border-radius: 12px;
+        border: 1px solid #e9ecef;
+        
+        :deep(.t-progress) {
+            flex: 1;
+            min-width: 100px;
+            
+            .t-progress__track {
+                background-color: #e9ecef;
+                border-radius: 6px;
+            }
+        }
+        
+        .progress-text {
+            font-size: 11px;
+            color: #6c757d;
+            font-weight: 500;
+            min-width: 45px;
+            text-align: right;
+        }
     }
 
     .form-row {
@@ -2311,7 +3109,8 @@ const onDimensionInput = (event: any) => {
     .switch-container {
         display: flex;
         align-items: center;
-        margin-top: 10px;
+        justify-content: flex-start;
+        margin-left: -100px;
 
         .switch-label {
             margin-left: 10px;
@@ -2345,9 +3144,8 @@ const onDimensionInput = (event: any) => {
         
         .preset-radio-group {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 15px;
-            margin-top: 15px;
             
             :deep(.t-radio) {
                 border: 2px solid #e8f5e8;
@@ -2360,7 +3158,6 @@ const onDimensionInput = (event: any) => {
                 &:hover {
                     border-color: #07c05f;
                     background-color: #f8fdf8;
-                    transform: translateY(-2px);
                     box-shadow: 0 4px 12px rgba(7, 192, 95, 0.1);
                 }
                 
@@ -2408,11 +3205,11 @@ const onDimensionInput = (event: any) => {
         flex-direction: column;
         gap: 24px;
         margin-top: 20px;
-        padding: 24px;
-        background: white;
+        padding: 20px 16px;
+        background: #fff;
         border-radius: 12px;
-        border: 2px solid #e8f5e8;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        border: 1px solid #edf2f7;
+        box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
         
         &.disabled-grid {
             opacity: 0.6;
@@ -2433,11 +3230,10 @@ const onDimensionInput = (event: any) => {
                 display: flex;
                 align-items: center;
                 gap: 12px;
-                margin-bottom: 12px;
+                margin-bottom: 20px;
                 
                 .parameter-slider {
-                    width: 100%;
-                    max-width: 300px;
+                    flex: 1;
                     
                     :deep(.t-slider__rail) {
                         background-color: #e8f5e8;
@@ -2463,8 +3259,7 @@ const onDimensionInput = (event: any) => {
                 }
 
                 .parameter-select {
-                    width: 100%;
-                    max-width: 400px;
+                    flex: 1;
                 }
             }
             
@@ -2472,19 +3267,11 @@ const onDimensionInput = (event: any) => {
                 font-size: 12px;
                 color: #999;
                 line-height: 1.4;
-                padding-left: 4px;
                 margin-top: 8px;
             }
         }
     }
 
-    .rerank-config {
-        margin-top: 20px;
-        padding: 20px;
-        background: #f8fdf8;
-        border-radius: 8px;
-        border-left: 4px solid #07c05f;
-    }
     
     .multimodal-test {
         margin-top: 20px;

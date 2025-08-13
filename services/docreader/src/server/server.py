@@ -14,7 +14,8 @@ if parent_dir not in sys.path:
 
 from proto.docreader_pb2 import ReadResponse, Chunk, Image
 from proto import docreader_pb2_grpc
-from parser import Parser, ChunkingConfig, OCREngine
+from parser import Parser, OCREngine
+from parser.config import ChunkingConfig
 from utils.request import request_id_context, init_logging_request_id
 
 # Ensure no existing handlers
@@ -74,38 +75,39 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     f"multimodal={enable_multimodal}"
                 )
 
-                # Get COS and VLM config from request
-                cos_config = None
+                # Get Storage and VLM config from request
+                storage_config = None
                 vlm_config = None
                 
-                if hasattr(request.read_config, 'cos_config') and request.read_config.cos_config:
-                    cos_config = {
-                        'secret_id': request.read_config.cos_config.secret_id,
-                        'secret_key': request.read_config.cos_config.secret_key,
-                        'region': request.read_config.cos_config.region,
-                        'bucket_name': request.read_config.cos_config.bucket_name,
-                        'app_id': request.read_config.cos_config.app_id,
-                        'path_prefix': request.read_config.cos_config.path_prefix or '',
-                    }
-                    logger.info(f"Using COS config: region={cos_config['region']}, bucket={cos_config['bucket_name']}")
+                sc = request.read_config.storage_config
+                # Keep parser-side key name as cos_config for backward compatibility
+                storage_config = {
+                    'provider': 'minio' if sc.provider == 2 else 'cos',
+                    'region': sc.region,
+                    'bucket_name': sc.bucket_name,
+                    'access_key_id': sc.access_key_id,
+                    'secret_access_key': sc.secret_access_key,
+                    'app_id': sc.app_id,
+                    'path_prefix': sc.path_prefix,
+                }
+                logger.info(f"Using Storage config: provider={storage_config.get('provider')}, bucket={storage_config['bucket_name']}")
                 
-                if hasattr(request.read_config, 'vlm_config') and request.read_config.vlm_config:
-                    vlm_config = {
-                        'model_name': request.read_config.vlm_config.model_name,
-                        'base_url': request.read_config.vlm_config.base_url,
-                        'api_key': request.read_config.vlm_config.api_key or '',
-                        'interface_type': request.read_config.vlm_config.interface_type or 'openai',
-                    }
-                    logger.info(f"Using VLM config: model={vlm_config['model_name']}, "
-                                 f"base_url={vlm_config['base_url']}, "
-                                 f"interface_type={vlm_config['interface_type']}")
+                vlm_config = {
+                    'model_name': request.read_config.vlm_config.model_name,
+                    'base_url': request.read_config.vlm_config.base_url,
+                    'api_key': request.read_config.vlm_config.api_key or '',
+                    'interface_type': request.read_config.vlm_config.interface_type or 'openai',
+                }
+                logger.info(f"Using VLM config: model={vlm_config['model_name']}, "
+                                f"base_url={vlm_config['base_url']}, "
+                                f"interface_type={vlm_config['interface_type']}")
 
                 chunking_config = ChunkingConfig(
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap,
                     separators=separators,
                     enable_multimodal=enable_multimodal,
-                    cos_config=cos_config,
+                    storage_config=storage_config,
                     vlm_config=vlm_config,
                 )
 
@@ -166,38 +168,38 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     f"multimodal={enable_multimodal}"
                 )
 
-                # Get COS and VLM config from request
-                cos_config = None
+                # Get Storage and VLM config from request
+                storage_config = None
                 vlm_config = None
                 
-                if hasattr(request.read_config, 'cos_config') and request.read_config.cos_config:
-                    cos_config = {
-                        'secret_id': request.read_config.cos_config.secret_id,
-                        'secret_key': request.read_config.cos_config.secret_key,
-                        'region': request.read_config.cos_config.region,
-                        'bucket_name': request.read_config.cos_config.bucket_name,
-                        'app_id': request.read_config.cos_config.app_id,
-                        'path_prefix': request.read_config.cos_config.path_prefix or '',
-                    }
-                    logger.info(f"Using COS config: region={cos_config['region']}, bucket={cos_config['bucket_name']}") 
+                sc = request.read_config.storage_config
+                storage_config = {
+                    'provider': 'minio' if sc.provider == 2 else 'cos',
+                    'region': sc.region,
+                    'bucket_name': sc.bucket_name,
+                    'access_key_id': sc.access_key_id,
+                    'secret_access_key': sc.secret_access_key,
+                    'app_id': sc.app_id,
+                    'path_prefix': sc.path_prefix,
+                }
+                logger.info(f"Using Storage config: provider={storage_config.get('provider')}, bucket={storage_config['bucket_name']}") 
 
-                if hasattr(request.read_config, 'vlm_config') and request.read_config.vlm_config:
-                    vlm_config = {
-                        'model_name': request.read_config.vlm_config.model_name,
-                        'base_url': request.read_config.vlm_config.base_url,
-                        'api_key': request.read_config.vlm_config.api_key or '',
-                        'interface_type': request.read_config.vlm_config.interface_type or 'openai',
-                    }
-                    logger.info(f"Using VLM config: model={vlm_config['model_name']}, "
-                                 f"base_url={vlm_config['base_url']}, "
-                                 f"interface_type={vlm_config['interface_type']}")
+                vlm_config = {
+                    'model_name': request.read_config.vlm_config.model_name,
+                    'base_url': request.read_config.vlm_config.base_url,
+                    'api_key': request.read_config.vlm_config.api_key or '',
+                    'interface_type': request.read_config.vlm_config.interface_type or 'openai',
+                }
+                logger.info(f"Using VLM config: model={vlm_config['model_name']}, "
+                                f"base_url={vlm_config['base_url']}, "
+                                f"interface_type={vlm_config['interface_type']}")
                     
                 chunking_config = ChunkingConfig(
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap,
                     separators=separators,
                     enable_multimodal=enable_multimodal,
-                    cos_config=cos_config,
+                    storage_config=storage_config,
                     vlm_config=vlm_config,
                 )
 

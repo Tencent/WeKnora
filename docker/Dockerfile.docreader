@@ -99,8 +99,8 @@ RUN mkdir -p /tmp/libreoffice && \
         cd LibreOffice_25.2.4*_Linux_x86-64_deb/DEBS && \
         dpkg -i *.deb; \
     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
-        wget -q https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.2_Linux_aarch64_deb.tar.gz && \
-        tar -xzf LibreOffice_25.8.0.2_Linux_aarch64_deb.tar.gz && \
+        wget -q https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
+        tar -xzf LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
         cd LibreOffice_25.8.0*_Linux_aarch64_deb/DEBS && \
         dpkg -i *.deb; \
     else \

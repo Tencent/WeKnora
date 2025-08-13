@@ -249,7 +249,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			SummaryModelID:        sourceKB.SummaryModelID,
 			RerankModelID:         sourceKB.RerankModelID,
 			VLMModelID:            sourceKB.VLMModelID,
-			COSConfig:             sourceKB.COSConfig,
+			StorageConfig:         sourceKB.StorageConfig,
 		}
 		if err := s.repo.CreateKnowledgeBase(ctx, targetKB); err != nil {
 			return nil, nil, err

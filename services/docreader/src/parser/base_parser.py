@@ -1,19 +1,22 @@
 # -*- coding: utf-8 -*-
 import re
 import os
-import uuid
 import asyncio
 from typing import List, Dict, Any, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import logging
-from qcloud_cos import CosConfig, CosS3Client
 import sys
 import traceback
 import numpy as np
 import time
+import io
+import json
 from .ocr_engine import OCREngine
 from .image_utils import image_to_base64
+from .config import ChunkingConfig
+from .storage import create_storage
+from PIL import Image
 
 # Add parent directory to Python path for src imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -101,7 +104,7 @@ class BaseParser(ABC):
         max_image_size: int = 1920,  # Maximum image size
         max_concurrent_tasks: int = 5,  # Max concurrent tasks
         max_chunks: int = 1000,  # Max number of returned chunks
-        chunking_config: object = None,  # Chunking configuration object
+        chunking_config: ChunkingConfig = None,  # Chunking configuration object
     ):
         """Initialize parser
 
@@ -118,6 +121,8 @@ class BaseParser(ABC):
             max_concurrent_tasks: Max concurrent tasks
             max_chunks: Max number of returned chunks
         """
+        # Storage client instance
+        self._storage = None
         self.file_name = file_name
         self.file_type = file_type or os.path.splitext(file_name)[1]
         self.enable_multimodal = enable_multimodal
@@ -144,12 +149,7 @@ class BaseParser(ABC):
         # Only initialize Caption service if multimodal is enabled
         if self.enable_multimodal:
             try:
-                # Get VLM config from chunking config if available
-                vlm_config = None
-                if self.chunking_config and hasattr(self.chunking_config, 'vlm_config'):
-                    vlm_config = self.chunking_config.vlm_config
-                
-                self.caption_parser = Caption(vlm_config)
+                self.caption_parser = Caption(self.chunking_config.vlm_config)
             except Exception as e:
                 logger.warning(f"Failed to initialize Caption service: {str(e)}")
                 self.caption_parser = None
@@ -526,70 +526,16 @@ class BaseParser(ABC):
         caption = self.get_image_caption(image_data)
         return image_data, caption
 
-    def _init_cos_client(self, cos_config=None):
-        """Initialize Tencent Cloud COS client"""
-        try:
-            # Use provided COS config if available, otherwise fall back to environment variables
-            if cos_config:
-                secret_id = cos_config.get("secret_id")
-                secret_key = cos_config.get("secret_key")
-                region = cos_config.get("region")
-                bucket_name = cos_config.get("bucket_name")
-                appid = cos_config.get("app_id")
-                prefix = cos_config.get("path_prefix", "")
-                enable_old_domain = cos_config.get("enable_old_domain", "true").lower() == "true"
-            else:
-                # Get COS configuration from environment variables
-                secret_id = os.getenv("COS_SECRET_ID")
-                secret_key = os.getenv("COS_SECRET_KEY")
-                region = os.getenv("COS_REGION")
-                bucket_name = os.getenv("COS_BUCKET_NAME")
-                appid = os.getenv("COS_APP_ID")
-                prefix = os.getenv("COS_PATH_PREFIX")
-                enable_old_domain = (
-                    os.getenv("COS_ENABLE_OLD_DOMAIN", "true").lower() == "true"
-                )
-
-            if not all([secret_id, secret_key, region, bucket_name, appid]):
-                logger.error(
-                    "Incomplete COS configuration, missing required environment variables"
-                )
-                return None, None, None, None
-
-            # Initialize COS configuration
-            logger.info(
-                f"Initializing COS client with region: {region}, bucket: {bucket_name}"
-            )
-            config = CosConfig(
-                Appid=appid,
-                Region=region,
-                SecretId=secret_id,
-                SecretKey=secret_key,
-                EnableOldDomain=enable_old_domain,
-            )
-
-            # Create client
-            client = CosS3Client(config)
-            return client, bucket_name, region, prefix
-        except Exception as e:
-            logger.error(f"Failed to initialize COS client: {str(e)}")
-            return None, None, None, None
-
-    def _get_file_url(self, bucket_name, region, object_key):
-        """Generate COS object URL
-
-        Args:
-            bucket_name: Bucket name
-            region: Region
-            object_key: Object key
-
-        Returns:
-            File URL
-        """
-        return f"https://{bucket_name}.cos.{region}.myqcloud.com/{object_key}"
+    def __init_storage(self):
+        """Initialize storage client based on configuration"""
+        if self._storage is None:
+            storage_config = self.chunking_config.storage_config if self.chunking_config else None
+            self._storage = create_storage(storage_config)
+            logger.info(f"Initialized storage client: {self._storage.__class__.__name__}")
+        return self._storage
 
     def upload_file(self, file_path: str) -> str:
-        """Upload file to Tencent Cloud COS
+        """Upload file to object storage
 
         Args:
             file_path: File path
@@ -597,84 +543,43 @@ class BaseParser(ABC):
         Returns:
             File URL
         """
-        logger.info(f"Uploading file to COS: {file_path}")
+        logger.info(f"Uploading file: {file_path}")
         try:
-            client, bucket_name, region, prefix = self._init_cos_client()
-            if not client:
-                return ""
-
-            # Generate object key, use UUID to avoid conflicts
-            file_name = os.path.basename(file_path)
-            object_key = (
-                f"{prefix}/images/{uuid.uuid4().hex}{os.path.splitext(file_name)[1]}"
-            )
-            logger.info(f"Generated object key: {object_key}")
-
-            # Upload file
-            logger.info("Attempting to upload file to COS")
-            response = client.upload_file(
-                Bucket=bucket_name, LocalFilePath=file_path, Key=object_key
-            )
-
-            # Get file URL
-            file_url = self._get_file_url(bucket_name, region, object_key)
-
-            logger.info(f"Successfully uploaded file to COS: {file_url}")
-            return file_url
-
+            storage = self.__init_storage()
+            return storage.upload_file(file_path)
         except Exception as e:
-            logger.error(f"Failed to upload file to COS: {str(e)}")
+            logger.error(f"Failed to upload file: {str(e)}")
             return ""
 
-    def upload_bytes(self, content: bytes, file_ext: str = ".png", cos_config=None) -> str:
-        """Directly upload file content to Tencent Cloud COS
+    def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
+        """Upload bytes to object storage
 
         Args:
-            content: File byte content
-            file_ext: File extension, default is .png
-            cos_config: COS configuration dictionary
+            content: Byte content to upload
+            file_ext: File extension
 
         Returns:
             File URL
         """
-        logger.info(
-            f"Uploading bytes content to COS, content size: {len(content)} bytes"
-        )
+        logger.info(f"Uploading bytes content, size: {len(content)} bytes")
         try:
-            client, bucket_name, region, prefix = self._init_cos_client(cos_config)
-            if not client:
-                return ""
-
-            # Generate object key, use UUID to avoid conflicts
-            object_key = f"{prefix}/images/{uuid.uuid4().hex}{file_ext}"
-            logger.info(f"Generated object key: {object_key}")
-
-            # Directly upload file content
-            logger.info("Attempting to upload bytes content to COS")
-            response = client.put_object(
-                Bucket=bucket_name, Body=content, Key=object_key
-            )
-
-            # Get file URL
-            file_url = self._get_file_url(bucket_name, region, object_key)
-
-            logger.info(f"Successfully uploaded bytes to COS: {file_url}")
-            return file_url
-
+            storage = self.__init_storage()
+            return storage.upload_bytes(content, file_ext)
         except Exception as e:
-            logger.error(f"Failed to upload bytes to COS: {str(e)}")
+            logger.error(f"Failed to upload bytes to storage: {str(e)}")
             traceback.print_exc()
             return ""
 
     @abstractmethod
-    def parse_into_text(self, content: bytes) -> str:
+    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """Parse document content
 
         Args:
             content: Document content
 
         Returns:
-            Parse result
+            Either a string containing the parsed text, or a tuple of (text, image_map)
+            where image_map is a dict mapping image URLs to Image objects
         """
         pass
 
@@ -690,7 +595,12 @@ class BaseParser(ABC):
         logger.info(
             f"Parsing document with {self.__class__.__name__}, content size: {len(content)} bytes"
         )
-        text = self.parse_into_text(content)
+        parse_result = self.parse_into_text(content)
+        if isinstance(parse_result, tuple):
+            text, image_map = parse_result
+        else:
+            text = parse_result
+            image_map = {}
         logger.info(f"Extracted {len(text)} characters of text from {self.file_name}")
         logger.info(f"Beginning chunking process for text")
         chunks = self.chunk_text(text)
@@ -725,7 +635,7 @@ class BaseParser(ABC):
             
             if file_ext in allowed_types:
                 logger.info(f"Processing images in each chunk for file type: {file_ext}")
-                chunks = self.process_chunks_images(chunks)
+                chunks = self.process_chunks_images(chunks, image_map)
             else:
                 logger.info(f"Skipping image processing for unsupported file type: {file_ext}")
             
@@ -1053,15 +963,16 @@ class BaseParser(ABC):
             
         return images_info
 
-    async def download_and_upload_image(self, img_url: str, current_request_id=None):
-        """Download image and upload to COS, if it's already a COS path or local path, use directly
+    async def download_and_upload_image(self, img_url: str, current_request_id=None, image_map=None):
+        """Download image and upload to object storage, if it's already an object storage path or local path, use directly
 
         Args:
             img_url: Image URL or local path
             current_request_id: Current request ID
+            image_map: Optional dictionary mapping image URLs to Image objects
 
         Returns:
-            tuple: (original URL, COS URL, image object), if failed returns (original URL, None, None)
+            tuple: (original URL, storage URL, image object), if failed returns (original URL, None, None)
         """
         # Set request ID context in the asynchronous task
         try:
@@ -1077,8 +988,14 @@ class BaseParser(ABC):
             from PIL import Image
             import io
             
-            # Check if it's already a COS path
-            if "cos" in img_url and "myqcloud.com" in img_url:
+            # Check if image is already in the image_map
+            if image_map and img_url in image_map:
+                logger.info(f"Image already in image_map: {img_url}, using cached object")
+                return img_url, img_url, image_map[img_url]
+                
+            # Check if it's already a storage URL (COS or MinIO)
+            is_storage_url = any(pattern in img_url for pattern in ["cos", "myqcloud.com", "minio", ".s3."])
+            if is_storage_url:
                 logger.info(f"Image already on COS: {img_url}, no need to re-upload")
                 try:
                     # Still need to get image object for OCR processing
@@ -1101,10 +1018,10 @@ class BaseParser(ABC):
                             # Image will be closed by the caller
                             pass
                     else:
-                        logger.warning(f"Failed to get COS image: {response.status_code}")
+                        logger.warning(f"Failed to get storage image: {response.status_code}")
                         return img_url, img_url, None
                 except Exception as e:
-                    logger.error(f"Error getting COS image: {str(e)}")
+                    logger.error(f"Error getting storage image: {str(e)}")
                     return img_url, img_url, None
             
             # Check if it's a local file path
@@ -1114,12 +1031,12 @@ class BaseParser(ABC):
                 try:
                     # Read local image
                     image = Image.open(img_url)
-                    # Upload to COS
+                    # Upload to storage
                     with open(img_url, 'rb') as f:
                         content = f.read()
-                    cos_url = self.upload_bytes(content)
-                    logger.info(f"Successfully uploaded local image to COS: {cos_url}")
-                    return img_url, cos_url, image
+                    storage_url = self.upload_bytes(content)
+                    logger.info(f"Successfully uploaded local image to storage: {storage_url}")
+                    return img_url, storage_url, image
                 except Exception as e:
                     logger.error(f"Error processing local image: {str(e)}")
                     if image and hasattr(image, 'close'):
@@ -1144,10 +1061,10 @@ class BaseParser(ABC):
                     # Download successful, create image object
                     image = Image.open(io.BytesIO(response.content))
                     try:
-                        # Upload to COS using the method in BaseParser
-                        cos_url = self.upload_bytes(response.content)
-                        logger.info(f"Successfully uploaded image to COS: {cos_url}")
-                        return img_url, cos_url, image
+                        # Upload to storage using the method in BaseParser
+                        storage_url = self.upload_bytes(response.content)
+                        logger.info(f"Successfully uploaded image to storage: {storage_url}")
+                        return img_url, storage_url, image
                     finally:
                         # Image will be closed by the caller
                         pass
@@ -1159,7 +1076,7 @@ class BaseParser(ABC):
             logger.error(f"Error downloading or processing image: {str(e)}")
             return img_url, None, None
 
-    async def process_chunk_images_async(self, chunk, chunk_idx, total_chunks, current_request_id=None):
+    async def process_chunk_images_async(self, chunk, chunk_idx, total_chunks, current_request_id=None, image_map=None):
         """Asynchronously process images in a single Chunk
 
         Args:
@@ -1201,7 +1118,7 @@ class BaseParser(ABC):
         loop = asyncio.get_event_loop()
         
         # Concurrent download and upload of images
-        tasks = [self.download_and_upload_image(url, current_request_id) for url in url_to_info_map.keys()]
+        tasks = [self.download_and_upload_image(url, current_request_id, image_map) for url in url_to_info_map.keys()]
         results = await asyncio.gather(*tasks)
         
         # Process download results, prepare for OCR processing
@@ -1248,7 +1165,7 @@ class BaseParser(ABC):
         logger.info(f"Completed image processing in Chunk #{chunk_idx+1}")
         return chunk
 
-    def process_chunks_images(self, chunks: List[Chunk]) -> List[Chunk]:
+    def process_chunks_images(self, chunks: List[Chunk], image_map=None) -> List[Chunk]:
         """Concurrent processing of images in all Chunks
 
         Args:
@@ -1282,7 +1199,7 @@ class BaseParser(ABC):
             async def process_with_limit(chunk, idx, total):
                 """Use semaphore to control concurrent processing of Chunks"""
                 async with semaphore:
-                    return await self.process_chunk_images_async(chunk, idx, total, current_request_id)
+                    return await self.process_chunk_images_async(chunk, idx, total, current_request_id, image_map)
             
             # Create tasks for all Chunks
             tasks = [

@@ -12,14 +12,22 @@ service DocReader {
   rpc ReadFromURL(ReadFromURLRequest) returns (ReadResponse) {}
 }
 
-// COS 配置
-message COSConfig {
-  string secret_id = 1;      // COS Secret ID
-  string secret_key = 2;     // COS Secret Key
-  string region = 3;         // COS Region
-  string bucket_name = 4;    // COS Bucket Name
-  string app_id = 5;         // COS App ID
-  string path_prefix = 6;    // COS Path Prefix
+// 对象存储提供方
+enum StorageProvider {
+  STORAGE_PROVIDER_UNSPECIFIED = 0;
+  COS = 1;     // 腾讯云 COS
+  MINIO = 2;   // MinIO/S3 兼容
+}
+
+// 通用对象存储配置，兼容 COS 与 MinIO
+message StorageConfig {
+  StorageProvider provider = 1;   // 存储提供方
+  string region = 2;              // 区域（COS 使用）
+  string bucket_name = 3;         // 桶名
+  string access_key_id = 4;       // 访问密钥 ID（MinIO/S3 使用）
+  string secret_access_key = 5;   // 访问密钥 Secret（MinIO/S3 使用）
+  string app_id = 6;              // 应用 ID（COS 使用）
+  string path_prefix = 7;         // 路径前缀
 }
 
 // VLM 配置
@@ -35,7 +43,7 @@ message ReadConfig {
   int32 chunk_overlap = 2; // 分块重叠
   repeated string separators = 3;    // 分隔符
   bool enable_multimodal = 4; // 多模态处理
-  COSConfig cos_config = 5;   // COS 配置
+  StorageConfig storage_config = 5;   // 对象存储配置（通用）
   VLMConfig vlm_config = 6;   // VLM 配置
 }
 

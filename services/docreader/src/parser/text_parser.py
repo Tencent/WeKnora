@@ -1,5 +1,6 @@
 import logging
 from .base_parser import BaseParser
+from typing import Dict, Any, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,7 @@ class TextParser(BaseParser):
     This parser handles text extraction and chunking from plain text documents.
     """
 
-    def parse_into_text(self, content: bytes) -> str:
+    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """
         Parse text document content by decoding bytes to string.
 

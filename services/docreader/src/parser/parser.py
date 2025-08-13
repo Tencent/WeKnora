@@ -10,29 +10,10 @@ from .markdown_parser import MarkdownParser
 from .text_parser import TextParser
 from .image_parser import ImageParser
 from .web_parser import WebParser
+from .config import ChunkingConfig
 import traceback
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ChunkingConfig:
-    """
-    Configuration for text chunking process.
-    Controls how documents are split into smaller pieces for processing.
-    """
-
-    chunk_size: int = 512  # Maximum size of each chunk in tokens/chars
-    chunk_overlap: int = 50  # Number of tokens/chars to overlap between chunks
-    separators: list = field(
-        default_factory=lambda: ["\n\n", "\n", "。"]
-    )  # Text separators in order of priority
-    enable_multimodal: bool = (
-        False  # Whether to enable multimodal processing (text + images)
-    )
-    cos_config: dict = None  # COS configuration for file storage
-    vlm_config: dict = None  # VLM configuration for image captioning
-
 
 @dataclass
 class Chunk:
@@ -100,7 +81,6 @@ class Parser:
         file_type: str,
         content: bytes,
         config: ChunkingConfig,
-        enable_multimodal: bool = False,
     ) -> Optional[ParseResult]:
         """
         Parse file content using appropriate parser based on file type.

@@ -36,8 +36,8 @@ type KnowledgeBase struct {
 	VLMModelID string `yaml:"vlm_model_id" json:"vlm_model_id"`
 	// VLM config
 	VLMConfig VLMConfig `yaml:"vlm_config" json:"vlm_config" gorm:"type:json"`
-	// COS config
-	COSConfig COSConfig `yaml:"cos_config" json:"cos_config" gorm:"type:json"`
+	// Storage config
+	StorageConfig StorageConfig `yaml:"cos_config" json:"cos_config" gorm:"column:cos_config;type:json"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 	// Last updated time of the knowledge base
@@ -67,7 +67,7 @@ type ChunkingConfig struct {
 }
 
 // COSConfig represents the COS configuration
-type COSConfig struct {
+type StorageConfig struct {
 	// Secret ID
 	SecretID string `yaml:"secret_id" json:"secret_id"`
 	// Secret Key
@@ -80,13 +80,15 @@ type COSConfig struct {
 	AppID string `yaml:"app_id" json:"app_id"`
 	// Path Prefix
 	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
+	// Provider
+	Provider string `yaml:"provider" json:"provider"`
 }
 
-func (c *COSConfig) Value() (driver.Value, error) {
+func (c *StorageConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-func (c *COSConfig) Scan(value interface{}) error {
+func (c *StorageConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}

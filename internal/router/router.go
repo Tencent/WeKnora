@@ -70,6 +70,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// Ollama相关接口（不需要认证）
 	r.GET("/api/v1/initialization/ollama/status", params.InitializationHandler.CheckOllamaStatus)
+	r.GET("/api/v1/initialization/ollama/models", params.InitializationHandler.ListOllamaModels)
 	r.POST("/api/v1/initialization/ollama/models/check", params.InitializationHandler.CheckOllamaModels)
 	r.POST("/api/v1/initialization/ollama/models/download", params.InitializationHandler.DownloadOllamaModel)
 	r.GET("/api/v1/initialization/ollama/download/progress/:taskId", params.InitializationHandler.GetDownloadProgress)

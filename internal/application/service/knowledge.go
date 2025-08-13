@@ -112,11 +112,19 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
 		// 检查COS配置
-		if kb.COSConfig.SecretID == "" || kb.COSConfig.SecretKey == "" ||
-			kb.COSConfig.Region == "" || kb.COSConfig.BucketName == "" ||
-			kb.COSConfig.AppID == "" {
-			logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-			return nil, werrors.NewBadRequestError("上传图片文件需要完整的COS配置信息, 请前往系统设置页面进行补全")
+		switch kb.StorageConfig.Provider {
+		case "cos":
+			if kb.StorageConfig.SecretID == "" || kb.StorageConfig.SecretKey == "" ||
+				kb.StorageConfig.Region == "" || kb.StorageConfig.BucketName == "" ||
+				kb.StorageConfig.AppID == "" {
+				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+			}
+		case "minio":
+			if kb.StorageConfig.BucketName == "" {
+				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+			}
 		}
 
 		// 检查VLM配置
@@ -317,7 +325,8 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	if enableMultimodel == nil {
 		enableMultimodel = &kb.ChunkingConfig.EnableMultimodal
 	}
-	go s.processDocumentFromURL(ctx, kb, knowledge, url, *enableMultimodel)
+	newCtx := logger.CloneContext(ctx)
+	go s.processDocumentFromURL(newCtx, kb, knowledge, url, *enableMultimodel)
 
 	logger.Infof(ctx, "Knowledge from URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
@@ -670,13 +679,14 @@ func (s *knowledgeService) processDocument(ctx context.Context,
 			ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
 			Separators:       kb.ChunkingConfig.Separators,
 			EnableMultimodal: enableMultimodel,
-			CosConfig: &proto.COSConfig{
-				SecretId:   kb.COSConfig.SecretID,
-				SecretKey:  kb.COSConfig.SecretKey,
-				Region:     kb.COSConfig.Region,
-				BucketName: kb.COSConfig.BucketName,
-				AppId:      kb.COSConfig.AppID,
-				PathPrefix: kb.COSConfig.PathPrefix,
+			StorageConfig: &proto.StorageConfig{
+				Provider:        proto.StorageProvider(proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)]),
+				Region:          kb.StorageConfig.Region,
+				BucketName:      kb.StorageConfig.BucketName,
+				AccessKeyId:     kb.StorageConfig.SecretID,
+				SecretAccessKey: kb.StorageConfig.SecretKey,
+				AppId:           kb.StorageConfig.AppID,
+				PathPrefix:      kb.StorageConfig.PathPrefix,
 			},
 			VlmConfig: &proto.VLMConfig{
 				ModelName:     kb.VLMConfig.ModelName,
@@ -724,13 +734,14 @@ func (s *knowledgeService) processDocumentFromURL(ctx context.Context,
 			ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
 			Separators:       kb.ChunkingConfig.Separators,
 			EnableMultimodal: enableMultimodel,
-			CosConfig: &proto.COSConfig{
-				SecretId:   kb.COSConfig.SecretID,
-				SecretKey:  kb.COSConfig.SecretKey,
-				Region:     kb.COSConfig.Region,
-				BucketName: kb.COSConfig.BucketName,
-				AppId:      kb.COSConfig.AppID,
-				PathPrefix: kb.COSConfig.PathPrefix,
+			StorageConfig: &proto.StorageConfig{
+				Provider:        proto.StorageProvider(proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)]),
+				Region:          kb.StorageConfig.Region,
+				BucketName:      kb.StorageConfig.BucketName,
+				AccessKeyId:     kb.StorageConfig.SecretID,
+				SecretAccessKey: kb.StorageConfig.SecretKey,
+				AppId:           kb.StorageConfig.AppID,
+				PathPrefix:      kb.StorageConfig.PathPrefix,
 			},
 			VlmConfig: &proto.VLMConfig{
 				ModelName:     kb.VLMConfig.ModelName,

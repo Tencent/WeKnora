@@ -21,7 +21,8 @@ from .markdown_parser import MarkdownParser
 from .text_parser import TextParser
 from .image_parser import ImageParser
 from .web_parser import WebParser
-from .parser import Parser, ChunkingConfig
+from .parser import Parser
+from .config import ChunkingConfig
 from .ocr_engine import OCREngine
 
 # Export public classes and modules

@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Tuple, Dict, Union
 
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
@@ -66,7 +66,7 @@ class WebParser(BaseParser):
             # Return empty BeautifulSoup object on error
             return BeautifulSoup("", "html.parser")
 
-    def parse_into_text(self, content: bytes) -> str:
+    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """Parse web page
 
         Args:
