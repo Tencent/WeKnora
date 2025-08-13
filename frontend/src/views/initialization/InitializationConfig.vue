@@ -557,16 +557,13 @@
                     
                     <!-- 多模态功能测试区域 -->
                     <div v-if="canTestMultimodal" class="multimodal-test">
-                        <h5>多模态功能测试</h5>
-                        <div class="test-description">
-                            <p>上传一张测试图片，验证VLM模型的Caption生成和OCR文字识别功能</p>
-                        </div>
+                        <h5>功能测试</h5>
+                        <p class="test-desc">上传图片测试VLM模型的图片描述和文字识别功能</p>
                         
-                        <!-- 测试操作区域 -->
-                        <div class="multimodal-test-container">
-                            <!-- 左侧：图片上传和预览区域 -->
-                            <div class="test-image-section">
-                                <div class="test-upload">
+                        <div class="test-area">
+                            <!-- 上传区域 -->
+                            <div class="upload-section">
+                                <div class="upload-buttons">
                                     <t-upload
                                         ref="imageUpload"
                                         v-model="multimodalTest.uploadedFiles"
@@ -578,58 +575,55 @@
                                     >
                                         <t-button theme="default" variant="outline" size="small">
                                             <t-icon name="upload" />
-                                            选择测试图片
+                                            选择图片
                                         </t-button>
                                     </t-upload>
-                                    
-                                    <t-button 
-                                        v-if="multimodalTest.selectedFile"
-                                        theme="primary" 
-                                        size="small" 
-                                        :loading="multimodalTest.testing"
-                                        @click="startMultimodalTest"
-                                        style="margin-left: 10px;"
-                                    >
-                                        开始测试
-                                    </t-button>
-                                </div>
-                                
-                                <!-- 选中的图片预览 -->
-                                <div v-if="multimodalTest.selectedFile" class="image-preview-container">
-                                    <div class="image-preview">
-                                        <img :src="multimodalTest.previewUrl" alt="测试图片" />
-                                    </div>
-                                    <div class="image-info">
-                                        <span>{{ multimodalTest.selectedFile.name }}</span>
-                                        <span>{{ formatFileSize(multimodalTest.selectedFile.size) }}</span>
-                                    </div>
                                 </div>
                             </div>
                             
-                            <!-- 右侧：测试结果显示 -->
-                            <div class="test-result-section" v-if="multimodalTest.result">
+                            <!-- 图片预览 -->
+                            <div v-if="multimodalTest.selectedFile" class="image-preview">
+                                <img :src="multimodalTest.previewUrl" alt="测试图片" />
+                                <div class="image-meta">
+                                    <span class="file-name">{{ multimodalTest.selectedFile.name }}</span>
+                                    <span class="file-size">{{ formatFileSize(multimodalTest.selectedFile.size) }}</span>
+                                </div>
+                            </div>
+                            
+                            <div class="test-button-wrapper">
+                                <t-button 
+                                    v-if="multimodalTest.selectedFile"
+                                    theme="primary" 
+                                    size="small" 
+                                    :loading="multimodalTest.testing"
+                                    @click="startMultimodalTest"
+                                >
+                                    开始测试
+                                </t-button>
+                            </div>
+                            <!-- 测试结果 -->
+                            <div v-if="multimodalTest.result" class="test-result">
                                 <div v-if="multimodalTest.result.success" class="result-success">
                                     <h6>测试结果</h6>
                                     
                                     <div v-if="multimodalTest.result.caption" class="result-item">
-                                        <label>图片描述 (Caption):</label>
-                                        <div class="result-content">{{ multimodalTest.result.caption }}</div>
+                                        <label>图片描述:</label>
+                                        <div class="result-text">{{ multimodalTest.result.caption }}</div>
                                     </div>
                                     
                                     <div v-if="multimodalTest.result.ocr" class="result-item">
-                                        <label>文字识别 (OCR):</label>
-                                        <div class="result-content">{{ multimodalTest.result.ocr }}</div>
+                                        <label>文字识别:</label>
+                                        <div class="result-text">{{ multimodalTest.result.ocr }}</div>
                                     </div>
                                     
-                                    <div v-if="multimodalTest.result.processing_time" class="result-item time-item">
-                                        <label>处理时间:</label>
-                                        <div class="result-content">{{ multimodalTest.result.processing_time }}ms</div>
+                                    <div v-if="multimodalTest.result.processing_time" class="result-time">
+                                        处理时间: {{ multimodalTest.result.processing_time }}ms
                                     </div>
                                 </div>
                                 
                                 <div v-else class="result-error">
                                     <h6>测试失败</h6>
-                                    <div class="error-content">
+                                    <div class="error-msg">
                                         <t-icon name="error-circle" />
                                         {{ multimodalTest.result.message || '多模态处理失败' }}
                                     </div>
@@ -3275,136 +3269,169 @@ const onDimensionInput = (event: any) => {
     
     .multimodal-test {
         margin-top: 20px;
-        padding: 15px;
-        background: #fcf3ea;
-        border-radius: 6px;
-        border-left: 3px solid #ff7000;
+        padding: 20px;
+        background: #f8fff9;
+        border-radius: 10px;
+        border: 1px solid #e8f5e8;
         
         h5 {
             font-size: 16px;
-            color: #d46b08;
-            margin-bottom: 10px;
+            color: #07c05f;
+            margin-bottom: 8px;
+            font-weight: 600;
         }
         
-        .test-description {
-            margin-bottom: 15px;
+        .test-desc {
+            margin-bottom: 16px;
             font-size: 13px;
-            color: #666;
+            color: #6b7280;
+            line-height: 1.4;
         }
         
-        .multimodal-test-container {
+        .test-area {
             display: flex;
-            flex-direction: row;
-            gap: 20px;
+            flex-direction: column;
+            gap: 16px;
+        }
+        
+        .upload-section {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
             
-            @media (max-width: 768px) {
-                flex-direction: column;
+            .upload-buttons {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+            }
+        }
+        
+        .image-preview {
+            text-align: center;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            border: 1px solid #e8f5e8;
+            box-shadow: 0 2px 8px rgba(7, 192, 95, 0.08);
+            
+            img {
+                max-width: 100%;
+                max-height: 200px;
+                object-fit: contain;
+                border-radius: 8px;
+                margin-bottom: 12px;
+                border: 1px solid #f0f0f0;
             }
             
-            .test-image-section {
-                flex: 1;
-                min-width: 0;
-                
-                .test-upload {
-                    margin-bottom: 15px;
-                    display: flex;
-                    align-items: center;
-                }
-            }
-            
-            .test-result-section {
-                flex: 1.5;
-                min-width: 0;
-                background: white;
+            .image-meta {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 12px;
+                background: #f8fff9;
                 border-radius: 6px;
-                padding: 15px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+                border: 1px solid #e8f5e8;
                 
-                h6 {
-                    font-size: 15px;
-                    margin-bottom: 12px;
-                    color: #262626;
+                .file-name {
+                    font-weight: 500;
+                    text-overflow: ellipsis;
+                    overflow: hidden;
+                    white-space: nowrap;
+                    max-width: 70%;
+                    color: #333;
+                    font-size: 13px;
+                }
+                
+                .file-size {
+                    color: #6b7280;
+                    font-size: 12px;
                     font-weight: 500;
                 }
+            }
+        }
+        
+        .test-button-wrapper {
+            text-align: center;
+            margin-top: 16px;
+            padding: 12px 20px;
+            background: #f8fff9;
+            border-radius: 8px;
+            border: 1px solid #e8f5e8;
+            
+            .t-button {
+                min-width: 100px;
+                height: 32px;
+                font-weight: 500;
+                font-size: 13px;
+            }
+        }
+        
+        .test-result {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid #e8f5e8;
+            box-shadow: 0 2px 8px rgba(7, 192, 95, 0.08);
+            
+            h6 {
+                font-size: 15px;
+                margin-bottom: 16px;
+                color: #07c05f;
+                font-weight: 600;
+                padding-bottom: 8px;
+                border-bottom: 2px solid #f0fdf4;
+            }
+            
+            .result-item {
+                margin-bottom: 16px;
                 
-                .result-item {
-                    margin-bottom: 12px;
-                    
-                    &.time-item {
-                        color: #666;
-                        font-size: 12px;
-                        text-align: right;
-                    }
-                    
-                    label {
-                        display: block;
-                        font-weight: 500;
-                        margin-bottom: 4px;
-                        color: #666;
-                    }
-                    
-                    .result-content {
-                        background: #f5f5f5;
-                        padding: 8px 10px;
-                        border-radius: 4px;
-                        color: #262626;
-                        white-space: pre-wrap;
-                        max-height: 120px;
-                        overflow-y: auto;
-                    }
+                label {
+                    display: block;
+                    font-weight: 600;
+                    margin-bottom: 8px;
+                    color: #333;
+                    font-size: 14px;
+                }
+                
+                .result-text {
+                    background: #f8fff9;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    color: #333;
+                    white-space: pre-wrap;
+                    max-height: 120px;
+                    overflow-y: auto;
+                    border: 1px solid #e8f5e8;
+                    font-size: 13px;
+                    line-height: 1.5;
                 }
             }
-
-            .image-preview-container {
-                border: 2px dashed #ffcba4;
-                border-radius: 8px;
-                background: #fffbf7;
-                padding: 10px;
-                text-align: center;
-                
-                .image-preview {
-                    margin-bottom: 10px;
-                    
-                    img {
-                        max-width: 100%;
-                        max-height: 200px;
-                        object-fit: contain;
-                        border-radius: 4px;
-                        box-shadow: 0 2px 8px rgba(255, 107, 53, 0.15);
-                    }
-                }
-                
-                .image-info {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 0 5px;
-                    font-size: 12px;
-                    color: #d46b08;
-                    
-                    span {
-                        &:first-child {
-                            font-weight: 500;
-                            text-overflow: ellipsis;
-                            overflow: hidden;
-                            white-space: nowrap;
-                            max-width: 70%;
-                        }
-                    }
-                }
+            
+            .result-time {
+                text-align: right;
+                color: #6b7280;
+                font-size: 12px;
+                margin-top: 12px;
+                padding: 8px 12px;
+                background: #f8f9fa;
+                border-radius: 6px;
+                border: 1px solid #e9ecef;
             }
             
             .result-error {
-                color: #d54941;
+                color: #e34d59;
                 
-                .error-content {
+                .error-msg {
                     display: flex;
                     align-items: center;
                     gap: 8px;
                     background: #fff2f0;
-                    padding: 10px;
-                    border-radius: 4px;
-                    border-left: 3px solid #d54941;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    border: 1px solid #ffccc7;
+                    font-size: 13px;
+                    line-height: 1.4;
                 }
             }
         }

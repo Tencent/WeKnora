@@ -37,10 +37,9 @@ FROM alpine:3.17
 WORKDIR /app
 
 # Install runtime dependencies
-RUN echo 'http://dl-cdn.alpinelinux.org/alpine/edge/main' > /etc/apk/repositories
-RUN apk update --allow-untrusted
-RUN apk upgrade --allow-untrusted
-RUN apk add --no-cache build-base postgresql17-client mysql-client ca-certificates tzdata sed curl bash supervisor vim wget curl --allow-untrusted
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories && \
+    apk update && apk upgrade && \
+    apk add --no-cache build-base postgresql-client mysql-client ca-certificates tzdata sed curl bash supervisor vim wget
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/WeKnora .
@@ -73,5 +72,3 @@ RUN mkdir -p /data/files && \
 
 # Run supervisor instead of direct application start
 CMD ["supervisord", "-c", "/etc/supervisor.d/supervisord.conf"]
-# CMD ["sh", "/app/scripts/start_app.sh"] 
-# CMD ["sleep", "infinity"]

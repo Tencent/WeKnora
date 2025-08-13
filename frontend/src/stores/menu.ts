@@ -20,6 +20,9 @@ export const useMenuStore = defineStore('menuStore', {
     }
     ),
     actions: {
+        clearMenuArr() {
+            this.menuArr[1].children = reactive<object[]>([]);
+        },
         updatemenuArr(obj: any) {
             this.menuArr[1].children?.push(obj);
         },

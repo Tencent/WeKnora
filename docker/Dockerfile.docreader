@@ -1,7 +1,13 @@
 ARG PLATFORM=linux/amd64
 
+# =========================
 # 构建阶段
+# =========================
 FROM --platform=${PLATFORM} python:3.9-slim AS builder
+
+# 切换 apt 源到清华
+RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's@http://security.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources
 
 WORKDIR /app
 
@@ -31,26 +37,21 @@ RUN curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.19
 COPY services/docreader/requirements.txt .
 
 # 安装依赖
-RUN pip cache purge && pip install --no-cache-dir -r requirements.txt
+RUN pip cache purge && pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 预下载 PP-OCRv5 模型
-RUN mkdir -p /root/.paddlex/official_models
-
-RUN wget https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_det_infer.tar \
-    -O /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar && \
+RUN mkdir -p /root/.paddlex/official_models && \
+    wget https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_det_infer.tar \
+        -O /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar && \
     wget https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_rec_infer.tar \
-    -O /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar
-
-# 解压模型文件
-RUN tar -xf /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar -C /root/.paddlex/official_models/ && \
-    tar -xf /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar -C /root/.paddlex/official_models/
+        -O /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar && \
+    tar -xf /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar -C /root/.paddlex/official_models/ && \
+    tar -xf /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar -C /root/.paddlex/official_models/ && \
+    rm -rf /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar
 
 # 复制源代码和生成脚本
 COPY services/docreader/src/ /app/src/
 COPY services/docreader/scripts/ /app/scripts/
-
-# 使用正确的Python模块路径运行ocr.py
-# RUN cd /app && PYTHONPATH=/app python -m src.parser.ocr
 
 # 确保模型目录存在
 RUN ls -la /root/.paddlex/official_models
@@ -58,8 +59,15 @@ RUN ls -la /root/.paddlex/official_models
 # 生成 protobuf 代码
 RUN chmod +x /app/scripts/generate_proto.sh && bash /app/scripts/generate_proto.sh
 
+
+# =========================
 # 运行阶段
+# =========================
 FROM --platform=${PLATFORM} python:3.9-slim AS runner
+
+# 切换 apt 源到清华
+RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's@http://security.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources
 
 WORKDIR /app
 
@@ -73,11 +81,6 @@ RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     antiword \
     supervisor \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装所需依赖
-RUN apt-get update && apt-get install -y \
-    wget \
     vim \
     tar \
     dpkg \
@@ -90,50 +93,35 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
-# 下载并安装最新版本的 LibreOffice 25.2.4
-RUN mkdir -p /tmp/libreoffice && \
-    cd /tmp/libreoffice && \
+# 下载并安装 LibreOffice（区分架构）
+RUN mkdir -p /tmp/libreoffice && cd /tmp/libreoffice && \
     if [ "$(uname -m)" = "x86_64" ]; then \
         wget -q https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.4/deb/x86_64/LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
         tar -xzf LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
-        cd LibreOffice_25.2.4*_Linux_x86-64_deb/DEBS && \
-        dpkg -i *.deb; \
+        cd LibreOffice_25.2.4*_Linux_x86-64_deb/DEBS && dpkg -i *.deb; \
     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
         wget -q https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
         tar -xzf LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
-        cd LibreOffice_25.8.0*_Linux_aarch64_deb/DEBS && \
-        dpkg -i *.deb; \
+        cd LibreOffice_25.8.0*_Linux_aarch64_deb/DEBS && dpkg -i *.deb; \
     else \
         echo "Unsupported architecture: $(uname -m)" && exit 1; \
     fi && \
-    cd / && \
-    rm -rf /tmp/libreoffice
+    cd / && rm -rf /tmp/libreoffice
 
 # 设置 LibreOffice 环境变量
-RUN if [ "$(uname -m)" = "x86_64" ]; then \
-        echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment; \
-    elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
-        echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment; \
-    fi
-
-ENV LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice
-
+RUN echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment;
+    
 # 从构建阶段复制已安装的依赖和生成的代码
 COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-
-# 复制 PaddleOCR 模型到运行阶段
 COPY --from=builder /root/.paddlex/official_models /root/.paddlex/official_models
+COPY --from=builder /app/src /app/src
 
 # 安装 Playwright 浏览器
 RUN python -m playwright install webkit
-#RUN python -m playwright install-deps webkit
-
-COPY --from=builder /app/src /app/src
 
 # 设置 Python 路径
 ENV PYTHONPATH=/app/src
-
 RUN cd /app/src && python -m download_deps
 
 # 创建supervisor配置
@@ -144,4 +132,4 @@ COPY services/docreader/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 EXPOSE 50051
 
 # 使用supervisor启动服务
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 
+CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -127,6 +127,7 @@ const handleScroll = debounce(checkScrollBottom, 200)
 const getMessageList = () => {
     if (loading.value) return;
     loading.value = true;
+    usemenuStore.clearMenuArr();
     getSessionsList(currentPage.value, page_size.value).then(res => {
         if (res.data && res.data.length) {
             res.data.forEach(item => {
