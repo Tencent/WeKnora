@@ -1,4 +1,5 @@
 from typing import Any, Optional, Tuple, Dict, Union
+import os
 
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
@@ -14,6 +15,7 @@ class WebParser(BaseParser):
 
     def __init__(self, title: str, **kwargs):
         self.title = title
+        self.proxy = os.environ.get("WEB_PROXY", "")
         super().__init__(file_name=title, **kwargs)
         logger.info(f"Initialized WebParser with title: {title}")
 
@@ -21,11 +23,11 @@ class WebParser(BaseParser):
         logger.info(f"Starting web page scraping for URL: {url}")
         try:
             async with async_playwright() as p:
-                args = [
-                    # "--single-process",
-                ]
+                kwargs = {}
+                if self.proxy:
+                    kwargs["proxy"] = {"server": self.proxy}
                 logger.info("Launching WebKit browser")
-                browser = await p.webkit.launch(args=args)
+                browser = await p.webkit.launch(**kwargs)
                 page = await browser.new_page()
 
                 logger.info(f"Navigating to URL: {url}")
@@ -38,15 +40,6 @@ class WebParser(BaseParser):
                     return BeautifulSoup(
                         "", "html.parser"
                     )  # Return empty soup on navigation error
-
-                try:
-                    logger.info("Waiting for network idle")
-                    await page.reload(wait_until="networkidle")
-                    logger.info("Page reload complete")
-                except Exception as e:
-                    logger.warning(
-                        f"Network idle wait failed: {str(e)}, proceeding with current page content"
-                    )
 
                 logger.info("Retrieving page HTML content")
                 content = await page.content()
@@ -117,6 +110,10 @@ class WebParser(BaseParser):
                     logger.info("No title found, using default")
 
             logger.info(f"Web page title: {title}")
+            text = "\n".join(
+                (line.strip() for line in text.splitlines() if line.strip())
+            )
+
             result = title + "\n\n" + text
             logger.info(
                 f"Web page parsing complete, total content: {len(result)} characters"
