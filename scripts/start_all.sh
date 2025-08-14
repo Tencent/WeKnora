@@ -56,6 +56,31 @@ log_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
+# 选择可用的 Docker Compose 命令（优先 docker compose，其次 docker-compose）
+DOCKER_COMPOSE_BIN=""
+DOCKER_COMPOSE_SUBCMD=""
+
+detect_compose_cmd() {
+	# 优先使用 Docker Compose 插件
+	if docker compose version &> /dev/null; then
+		DOCKER_COMPOSE_BIN="docker"
+		DOCKER_COMPOSE_SUBCMD="compose"
+		return 0
+	fi
+
+	# 回退到 docker-compose (v1)
+	if command -v docker-compose &> /dev/null; then
+		if docker-compose version &> /dev/null; then
+			DOCKER_COMPOSE_BIN="docker-compose"
+			DOCKER_COMPOSE_SUBCMD=""
+			return 0
+		fi
+	fi
+
+	# 都不可用
+	return 1
+}
+
 # 检查并创建.env文件
 check_env_file() {
     log_info "检查环境变量配置..."
@@ -247,11 +272,17 @@ check_docker() {
         return 1
     fi
     
-    # *** 修改点: 使用新命令检查Docker Compose插件 ***
-    if ! docker compose version &> /dev/null; then
-        log_error "未安装Docker Compose插件，请参照官方文档安装"
-        return 1
-    fi
+	# 检查并选择可用的 Docker Compose 命令
+	if detect_compose_cmd; then
+		if [ "$DOCKER_COMPOSE_BIN" = "docker" ]; then
+			log_info "已检测到 Docker Compose 插件 (docker compose)"
+		else
+			log_info "已检测到 docker-compose (v1)"
+		fi
+	else
+		log_error "未检测到 Docker Compose（既没有 docker compose 也没有 docker-compose）。请安装其中之一。"
+		return 1
+	fi
     
     # 检查Docker服务运行状态
     if ! docker info &> /dev/null; then
@@ -301,8 +332,8 @@ start_docker() {
     
     # 启动基本服务
     log_info "启动核心服务容器..."
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    PLATFORM=$PLATFORM docker compose up --build -d
+	# 统一通过已检测到的 Compose 命令启动
+	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build -d
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
         return 1
@@ -312,8 +343,7 @@ start_docker() {
     
     # 显示容器状态
     log_info "当前容器状态:"
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    docker compose ps
+	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps
     
     return 0
 }
@@ -333,8 +363,7 @@ stop_docker() {
     cd "$PROJECT_ROOT"
     
     # 停止所有容器
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    docker compose down --remove-orphans
+	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD down --remove-orphans
     if [ $? -ne 0 ]; then
         log_error "Docker容器停止失败"
         return 1
@@ -359,8 +388,7 @@ list_containers() {
     
     # 列出所有容器
     echo -e "${BLUE}当前正在运行的容器:${NC}"
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    docker compose ps --services | sort
+	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | sort
     
     return 0
 }
@@ -390,8 +418,7 @@ restart_container() {
     cd "$PROJECT_ROOT"
     
     # 检查容器是否存在
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    if ! docker compose ps --services | grep -q "^$container_name$"; then
+	if ! "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | grep -q "^$container_name$"; then
         log_error "容器 '$container_name' 不存在或未运行"
         echo "可用的容器有:"
         list_containers
@@ -400,16 +427,14 @@ restart_container() {
     
     # 构建并重启容器
     log_info "正在重新构建容器 '$container_name'..."
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    PLATFORM=$PLATFORM docker compose build "$container_name"
+	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD build "$container_name"
     if [ $? -ne 0 ]; then
         log_error "容器 '$container_name' 构建失败"
         return 1
     fi
     
     log_info "正在重启容器 '$container_name'..."
-    # *** 修改点: 使用新的 docker compose 命令 ***
-    PLATFORM=$PLATFORM docker compose up -d --no-deps "$container_name"
+	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up -d --no-deps "$container_name"
     if [ $? -ne 0 ]; then
         log_error "容器 '$container_name' 重启失败"
         return 1
