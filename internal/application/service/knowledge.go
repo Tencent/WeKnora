@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1326,7 +1326,7 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
 }
 
-// calculateFileHash calculates SHA256 hash of a file
+// calculateFileHash calculates MD5 hash of a file
 func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	f, err := file.Open()
 	if err != nil {
@@ -1334,7 +1334,7 @@ func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	}
 	defer f.Close()
 
-	h := sha256.New()
+	h := md5.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
@@ -1348,7 +1348,7 @@ func calculateFileHash(file *multipart.FileHeader) (string, error) {
 }
 
 func calculateStr(strList ...string) string {
-	h := sha256.New()
+	h := md5.New()
 	input := strings.Join(strList, "")
 	h.Write([]byte(input))
 	return hex.EncodeToString(h.Sum(nil))
