@@ -1634,8 +1634,8 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	}
 	switch req.StorageType {
 	case "cos":
-		logger.Infof(ctx, "COS config: ID=%s, Region=%s, Bucket=%s, App=%s, Prefix=%s",
-			req.COSSecretID, req.COSRegion, req.COSBucketName, req.COSAppID, req.COSPathPrefix)
+		logger.Infof(ctx, "COS config: Region=%s, Bucket=%s, App=%s, Prefix=%s",
+			req.COSRegion, req.COSBucketName, req.COSAppID, req.COSPathPrefix)
 		// 必填：SecretID/SecretKey/Region/BucketName/AppID；PathPrefix 可选
 		if req.COSSecretID == "" || req.COSSecretKey == "" ||
 			req.COSRegion == "" || req.COSBucketName == "" ||
