@@ -3,7 +3,7 @@ ARG PLATFORM=linux/amd64
 # =========================
 # 构建阶段
 # =========================
-FROM --platform=${PLATFORM} python:3.9-slim AS builder
+FROM --platform=${PLATFORM} python:3.10.18-bookworm AS builder
 
 # 切换 apt 源到清华
 RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \
@@ -63,7 +63,7 @@ RUN chmod +x /app/scripts/generate_proto.sh && bash /app/scripts/generate_proto.
 # =========================
 # 运行阶段
 # =========================
-FROM --platform=${PLATFORM} python:3.9-slim AS runner
+FROM --platform=${PLATFORM} python:3.10.18-bookworm AS runner
 
 # 切换 apt 源到清华
 RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \
@@ -96,13 +96,13 @@ RUN apt-get update && apt-get install -y \
 # 下载并安装 LibreOffice（区分架构）
 RUN mkdir -p /tmp/libreoffice && cd /tmp/libreoffice && \
     if [ "$(uname -m)" = "x86_64" ]; then \
-        wget -q https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.4/deb/x86_64/LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
-        tar -xzf LibreOffice_25.2.4_Linux_x86-64_deb.tar.gz && \
-        cd LibreOffice_25.2.4*_Linux_x86-64_deb/DEBS && dpkg -i *.deb; \
+        wget https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.5/deb/x86_64/LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
+        tar -xzf LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
+        cd LibreOffice_25.2.5.2_Linux_x86-64_deb/DEBS && dpkg -i *.deb; \
     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
-        wget -q https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
+        wget https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
         tar -xzf LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
-        cd LibreOffice_25.8.0*_Linux_aarch64_deb/DEBS && dpkg -i *.deb; \
+        cd LibreOffice_25.8.0.3_Linux_aarch64_deb/DEBS && dpkg -i *.deb; \
     else \
         echo "Unsupported architecture: $(uname -m)" && exit 1; \
     fi && \
@@ -112,13 +112,14 @@ RUN mkdir -p /tmp/libreoffice && cd /tmp/libreoffice && \
 RUN echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment;
     
 # 从构建阶段复制已安装的依赖和生成的代码
-COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.paddlex/official_models /root/.paddlex/official_models
 COPY --from=builder /app/src /app/src
 
 # 安装 Playwright 浏览器
 RUN python -m playwright install webkit
+RUN python -m playwright install-deps webkit
 
 # 设置 Python 路径
 ENV PYTHONPATH=/app/src
