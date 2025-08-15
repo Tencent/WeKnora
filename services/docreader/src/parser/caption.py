@@ -177,7 +177,7 @@ class Caption:
         self.prompt = """简单凝炼的描述图片的主要内容"""
         
         # Use provided VLM config if available, otherwise fall back to environment variables
-        if vlm_config:
+        if vlm_config and vlm_config.get("base_url") and vlm_config.get("model_name"):
             self.completion_url = vlm_config.get("base_url", "") + "/chat/completions"
             self.model = vlm_config.get("model_name", "")
             self.api_key = vlm_config.get("api_key", "")
