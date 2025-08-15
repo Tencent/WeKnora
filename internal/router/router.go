@@ -78,6 +78,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// 远程API相关接口（不需要认证）
 	r.POST("/api/v1/initialization/remote/check", params.InitializationHandler.CheckRemoteModel)
+	r.POST("/api/v1/initialization/embedding/test", params.InitializationHandler.TestEmbeddingModel)
 	r.POST("/api/v1/initialization/rerank/check", params.InitializationHandler.CheckRerankModel)
 	r.POST("/api/v1/initialization/multimodal/test", params.InitializationHandler.TestMultimodalFunction)
 

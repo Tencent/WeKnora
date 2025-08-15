@@ -208,7 +208,7 @@ class MinioStorage(Storage):
             secret_key = os.getenv("MINIO_SECRET_ACCESS_KEY")
             bucket_name = os.getenv("MINIO_BUCKET_NAME")
             use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
-            path_prefix = os.getenv("MINIO_PATH_PREFIX")
+            path_prefix = os.getenv("MINIO_PATH_PREFIX", "").strip().strip("/")
 
             # Attempt to override with new generic storage fields
             if self.storage_config:
@@ -216,7 +216,7 @@ class MinioStorage(Storage):
                 # Direct fields
                 endpoint = storage_config.get("endpoint", endpoint)
                 bucket_name = storage_config.get("bucket_name", bucket_name)
-                path_prefix = storage_config.get("path_prefix", path_prefix)
+                path_prefix = storage_config.get("path_prefix", path_prefix).strip().strip("/")
                 access_key = storage_config.get("access_key_id", access_key)
                 secret_key = storage_config.get("secret_access_key", secret_key)
 

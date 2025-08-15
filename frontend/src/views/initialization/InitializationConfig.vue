@@ -238,11 +238,23 @@
                 <!-- 向量维度设置 -->
                 <div class="form-row">
                     <t-form-item label="维度" name="embedding.dimension">
-                        <t-input v-model="formData.embedding.dimension" 
-                                 :disabled="hasFiles" 
-                                 placeholder="请输入向量维度" 
-                                 style="width: 100px;"
-                                 @input="onDimensionInput" />
+                        <div class="dimension-input-with-action">
+                            <t-input v-model="formData.embedding.dimension" 
+                                     :disabled="hasFiles" 
+                                     placeholder="请输入向量维度" 
+                                     style="width: 100px;"
+                                     @input="onDimensionInput" />
+                            <t-button 
+                                size="small" 
+                                variant="outline" 
+                                class="detect-dim-btn"
+                                :loading="embeddingDimDetecting"
+                                :disabled="hasFiles"
+                                @click="detectEmbeddingDimension"
+                            >
+                                检测维度
+                            </t-button>
+                        </div>
                     </t-form-item>
 
                     <!-- 下载进度：下载中时显示 -->
@@ -415,7 +427,7 @@
                                     <div class="form-row">
                     <t-form-item label="模型名称" name="multimodal.vlm.modelName">
                         <div class="model-input-with-status">
-                            <t-input v-model="formData.multimodal.vlm.modelName" placeholder="例如: llava:13b" 
+                            <t-input v-model="formData.multimodal.vlm.modelName" placeholder="例如: qwen2.5vl:3b" 
                                      @blur="onModelNameChange('vlm')" 
                                      @input="onModelNameInput('vlm')"
                                      @keyup.enter="onModelNameChange('vlm')" />
@@ -512,7 +524,7 @@
 
                         <div class="form-row">
                             <t-form-item label="Path Prefix" name="multimodal.minio.pathPrefix">
-                                <t-input v-model="formData.multimodal.minio.pathPrefix" placeholder="例如: images/" />
+                                <t-input v-model="formData.multimodal.minio.pathPrefix" placeholder="例如: images" />
                             </t-form-item>
                         </div>
                     </div>
@@ -550,7 +562,7 @@
                     </div>
                     <div class="form-row">
                         <t-form-item v-if="formData.storageType === 'cos'" label="Path Prefix" name="multimodal.cos.pathPrefix">
-                            <t-input v-model="formData.multimodal.cos.pathPrefix" placeholder="例如: images/"
+                            <t-input v-model="formData.multimodal.cos.pathPrefix" placeholder="例如: images"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
@@ -765,8 +777,9 @@ import {
     type DownloadTask,
     checkRerankModel,
     testMultimodalFunction,
-    listOllamaModels
-} from '@/api/initialization';
+    listOllamaModels,
+    testEmbeddingModel
+ } from '@/api/initialization';
 
 const router = useRouter();
 type TFormRef = {
@@ -918,6 +931,9 @@ const multimodalTest = reactive({
 });
 
 const imageUpload = ref(null);
+
+// Embedding 维度检测状态
+const embeddingDimDetecting = ref(false);
 
 // 左侧导航区段
 type Section = { id: string; label: string };
@@ -2226,6 +2242,49 @@ const checkAllConfiguredModels = async () => {
 const onDimensionInput = (event: any) => {
     formData.embedding.dimension = Number(event.target.value);
 };
+
+// 检测并自动填写 Embedding 维度
+const detectEmbeddingDimension = async () => {
+    if (hasFiles.value) return;
+    // 校验必填：模型来源 + 模型名称；若远程还需 BaseURL
+    const source = (formData.embedding.source || '').trim();
+    const modelName = (formData.embedding.modelName || '').trim();
+    const baseUrl = (formData.embedding.baseUrl || '').trim();
+
+    if (!source || !modelName || (source === 'remote' && !baseUrl)) {
+        // 触发对应字段校验提示
+        const fields: string[] = ['embedding.source', 'embedding.modelName'];
+        if (source === 'remote') fields.push('embedding.baseUrl');
+        try { await form.value?.validate(fields); } catch {}
+        MessagePlugin.warning('请先完整填写Embedding配置');
+        return;
+    }
+
+    embeddingDimDetecting.value = true;
+    try {
+        const res = await testEmbeddingModel({
+            source: source as 'local' | 'remote',
+            modelName,
+            baseUrl: source === 'remote' ? baseUrl : undefined,
+            apiKey: formData.embedding.apiKey || undefined,
+            dimension: formData.embedding.dimension || undefined,
+        });
+        const available = !!res.available;
+        const message = res.message || '';
+        const dim = Number(res.dimension || 0);
+        if (available && dim > 0) {
+            formData.embedding.dimension = dim;
+            MessagePlugin.success(`检测成功，维度已自动填写为 ${dim}`);
+        } else {
+            MessagePlugin.error(message || '检测失败');
+        }
+    } catch (e: any) {
+        const msg = e?.message || '检测失败，请检查配置';
+        MessagePlugin.error(msg);
+    } finally {
+        embeddingDimDetecting.value = false;
+    }
+};
 </script>
 
 <style lang="less" scoped>
@@ -2233,7 +2292,7 @@ const onDimensionInput = (event: any) => {
     .init-layout {
         display: grid;
         grid-template-columns: 220px 1fr;
-        gap: 16px;
+        gap: 24px;
         max-width: 1200px;
         margin: 0 auto;
     }
@@ -2311,10 +2370,13 @@ const onDimensionInput = (event: any) => {
         box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
     }
 
-    .init-main { min-width: 0; }
-    .ollama-summary-card {
+    .init-main { 
+        min-width: 0; 
         max-width: 960px;
-        margin: 0 auto 16px auto;
+    }
+    .ollama-summary-card {
+        max-width: 100%;
+        margin: 0 0 16px 0;
         background: #ffffff;
         border: 1px solid #e9edf5;
         border-radius: 12px;
@@ -2400,8 +2462,8 @@ const onDimensionInput = (event: any) => {
     
     :deep(.t-form) {
         /* 表单容器卡片化：更宽一点、更浅的阴影与细边框 */
-        max-width: 960px;
-        margin: 0 auto;
+        max-width: 100%;
+        margin: 0;
         background: #fff;
         padding: 32px 36px;
         border-radius: 14px;
@@ -2740,6 +2802,29 @@ const onDimensionInput = (event: any) => {
             }
         }
     }
+
+    /* 统一表单项上下间距 */
+    :deep(.t-form .t-form-item) {
+        margin-bottom: 16px;
+    }
+
+    /* 统一输入类控件高度与内边距（Input/Select/InputNumber） */
+    :deep(.t-input .t-input__inner),
+    :deep(.t-select .t-input__inner),
+    :deep(.t-input-number .t-input__inner) {
+        height: 40px;
+        padding: 8px 12px;
+    }
+
+    /* 统一按钮基础大小（不影响特制的提交按钮） */
+    :deep(.t-button) {
+        height: 36px;
+        padding: 0 14px;
+    }
+    :deep(.t-button.t-size-s) {
+        height: 28px;
+        padding: 0 10px;
+    }
     
     :deep(.t-radio-button) {
         .t-radio-button__inner {
@@ -2775,7 +2860,7 @@ const onDimensionInput = (event: any) => {
     /* 模型输入框与状态图标布局 */
     .model-input-with-status {
         display: flex;
-        gap: 10px;
+        gap: 8px;
     }
     
     /* 模型名称输入框样式 */
@@ -2893,8 +2978,21 @@ const onDimensionInput = (event: any) => {
     .url-input-with-check {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         width: 100%;
+    }
+
+    /* 维度输入框与“检测维度”按钮同一行布局 */
+    .dimension-input-with-action {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .dimension-input-with-action :deep(.t-input) {
+        flex: 0 0 auto;
+    }
+    .detect-dim-btn {
+        flex: 0 0 auto;
     }
     
     .url-input-with-check :deep(.t-input) {
@@ -2916,6 +3014,7 @@ const onDimensionInput = (event: any) => {
         display: flex;
         align-items: center;
         justify-content: center;
+        min-width: 22px;
     }
     
     .check-action .status-icon,
@@ -3021,6 +3120,10 @@ const onDimensionInput = (event: any) => {
     
     .model-status-icon {
         flex-shrink: 0;
+        width: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
     
     .model-status-icon .status-icon {
@@ -3082,7 +3185,7 @@ const onDimensionInput = (event: any) => {
     }
 
     .form-row {
-        margin-bottom: 20px;
+        margin-bottom: 16px;
     }
 
     .embedding-dimension {
@@ -3104,7 +3207,7 @@ const onDimensionInput = (event: any) => {
         display: flex;
         align-items: center;
         justify-content: flex-start;
-        margin-left: -100px;
+        margin-left: 0;
 
         .switch-label {
             margin-left: 10px;

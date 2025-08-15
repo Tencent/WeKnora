@@ -213,6 +213,27 @@ export function checkRemoteModel(modelConfig: {
     });
 }
 
+// 测试 Embedding 模型（本地/远程）是否可用
+export function testEmbeddingModel(modelConfig: {
+    source: 'local' | 'remote';
+    modelName: string;
+    baseUrl?: string;
+    apiKey?: string;
+    dimension?: number;
+}): Promise<{ available: boolean; message?: string; dimension?: number }> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/embedding/test', modelConfig)
+            .then((response: any) => {
+                resolve(response.data || {});
+            })
+            .catch((error: any) => {
+                console.error('测试Embedding模型失败:', error);
+                reject(error);
+            });
+    });
+}
+
+
 export function checkRerankModel(modelConfig: {
     modelName: string;
     baseUrl: string;
