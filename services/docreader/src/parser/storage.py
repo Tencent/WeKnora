@@ -203,22 +203,19 @@ class MinioStorage(Storage):
         prefer those values to override envs.
         """
         try:
-            if self.storage_config and self.storage_config.get("endpoint") and self.storage_config.get("bucket_name"):
+            endpoint = os.getenv("MINIO_ENDPOINT")
+            use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
+            if self.storage_config and self.storage_config.get("bucket_name"):
                 storage_config = self.storage_config
-                # Direct fields
-                endpoint = storage_config.get("endpoint")
                 bucket_name = storage_config.get("bucket_name")
                 path_prefix = storage_config.get("path_prefix").strip().strip("/")
                 access_key = storage_config.get("access_key_id")
                 secret_key = storage_config.get("secret_access_key")
             else:
-                endpoint = os.getenv("MINIO_ENDPOINT")
                 access_key = os.getenv("MINIO_ACCESS_KEY_ID")
                 secret_key = os.getenv("MINIO_SECRET_ACCESS_KEY")
                 bucket_name = os.getenv("MINIO_BUCKET_NAME")
-                use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
                 path_prefix = os.getenv("MINIO_PATH_PREFIX", "").strip().strip("/")
-
 
             if not all([endpoint, access_key, secret_key, bucket_name]):
                 logger.error("Incomplete MinIO configuration, missing required environment variables")

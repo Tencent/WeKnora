@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -318,10 +319,17 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 //   - Configured goroutine pool
 //   - Error if initialization fails
 func initAntsPool(cfg *config.Config) (*ants.Pool, error) {
-	// Default to 50 if not specified in config
-	poolSize := 300
+	// Default to 5 if not specified in config
+	poolSize := os.Getenv("CONCURRENCY_POOL_SIZE")
+	if poolSize == "" {
+		poolSize = "5"
+	}
+	poolSizeInt, err := strconv.Atoi(poolSize)
+	if err != nil {
+		return nil, err
+	}
 	// Set up the pool with pre-allocation for better performance
-	return ants.NewPool(poolSize, ants.WithPreAlloc(true))
+	return ants.NewPool(poolSizeInt, ants.WithPreAlloc(true))
 }
 
 // registerPoolCleanup registers the goroutine pool for cleanup

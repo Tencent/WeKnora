@@ -91,25 +91,26 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libglu1-mesa \
     libsm6 \
+    libreoffice \
     && rm -rf /var/lib/apt/lists/*
 
-# 下载并安装 LibreOffice（区分架构）
-RUN mkdir -p /tmp/libreoffice && cd /tmp/libreoffice && \
-    if [ "$(uname -m)" = "x86_64" ]; then \
-        wget https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.5/deb/x86_64/LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
-        tar -xzf LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
-        cd LibreOffice_25.2.5.2_Linux_x86-64_deb/DEBS && dpkg -i *.deb; \
-    elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
-        wget https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
-        tar -xzf LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
-        cd LibreOffice_25.8.0.3_Linux_aarch64_deb/DEBS && dpkg -i *.deb; \
-    else \
-        echo "Unsupported architecture: $(uname -m)" && exit 1; \
-    fi && \
-    cd / && rm -rf /tmp/libreoffice
+# # 下载并安装 LibreOffice（区分架构）
+# RUN mkdir -p /tmp/libreoffice && cd /tmp/libreoffice && \
+#     if [ "$(uname -m)" = "x86_64" ]; then \
+#         wget https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.5/deb/x86_64/LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
+#         tar -xzf LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
+#         cd LibreOffice_25.2.5.2_Linux_x86-64_deb/DEBS && dpkg -i *.deb; \
+#     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
+#         wget https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
+#         tar -xzf LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
+#         cd LibreOffice_25.8.0.3_Linux_aarch64_deb/DEBS && dpkg -i *.deb; \
+#     else \
+#         echo "Unsupported architecture: $(uname -m)" && exit 1; \
+#     fi && \
+#     cd / && rm -rf /tmp/libreoffice
 
 # 设置 LibreOffice 环境变量
-RUN echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment;
+# RUN echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment;
     
 # 从构建阶段复制已安装的依赖和生成的代码
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
