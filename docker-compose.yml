@@ -164,6 +164,7 @@ services:
       - "${DB_PORT}:5432"
     environment:
       - POSTGRES_USER=${DB_USER}
+      # NOCC:hardcode-password(工具误报)
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=${DB_NAME}
     volumes:
