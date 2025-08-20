@@ -1193,10 +1193,10 @@ def process_page_multiprocess(
         # Process content sequence to maintain order between processes
         processed_content = []
         temp_image_index = 0
+        image_data_list = []
 
         if enable_multimodal:
             # First pass: save all images to temporary files
-            image_data_list = []
             for i, image_object in enumerate(image_objects):
                 img_path = _save_image_to_temp(process_logger, image_object, page_num, i)
                 if img_path:
