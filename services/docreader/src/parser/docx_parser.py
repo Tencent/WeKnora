@@ -911,6 +911,7 @@ class Docx:
 
             # Process content in original sequence order
             for line_data in lines:
+                processed_content = []
                 if line_data.content_sequence:  # Check if we have processed_content
                     processed_content = line_data.content_sequence
                     page_num = line_data.page_num
