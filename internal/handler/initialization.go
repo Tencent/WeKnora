@@ -1348,15 +1348,7 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	// 根据不同的API类型构造测试请求
 	testEndpoint := ""
 	if model.Parameters.BaseURL != "" {
-		// 常见的API端点模式
-		if strings.Contains(model.Parameters.BaseURL, "openai.com") ||
-			strings.Contains(model.Parameters.BaseURL, "api.openai.com") {
-			testEndpoint = model.Parameters.BaseURL + "/models"
-		} else if strings.Contains(model.Parameters.BaseURL, "v1") {
-			testEndpoint = model.Parameters.BaseURL + "/models"
-		} else {
-			testEndpoint = model.Parameters.BaseURL + "/v1/models"
-		}
+		testEndpoint = model.Parameters.BaseURL + "/models"
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", testEndpoint, nil)
