@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.app
+    image: wechatopenai/weknora-app:{ARCH}-latest
     container_name: WeKnora-app
     ports:
       - "8080:8080"
@@ -90,9 +88,7 @@ services:
       - WeKnora-network
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: wechatopenai/weknora-ui:{ARCH}-latest
     container_name: WeKnora-frontend
     ports:
       - "80:80"
@@ -104,10 +100,7 @@ services:
 
   docreader:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.docreader
-      args:
-        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wechatopenai/weknora-docreader:{ARCH}-latest
     container_name: WeKnora-docreader
     ports:
       - "50051:50051"
