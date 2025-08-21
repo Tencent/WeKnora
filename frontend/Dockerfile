@@ -1,5 +1,5 @@
 # 构建阶段
-FROM node:20-alpine as build-stage
+FROM node:24-alpine as build-stage
 
 WORKDIR /app
 
@@ -11,13 +11,14 @@ ENV VITE_IS_DOCKER=true
 COPY package*.json ./
 
 # 安装依赖
-RUN npm install
+RUN corepack enable
+RUN pnpm install
 
 # 复制项目文件
 COPY . .
 
 # 构建应用
-RUN npm run build
+RUN pnpm run build
 
 # 生产阶段
 FROM nginx:stable-alpine as production-stage

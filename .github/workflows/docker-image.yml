@@ -1,0 +1,67 @@
+name: Build and Push Docker Image
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build-app:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service_name: ui
+            file: frontend/Dockerfile
+            context: ./frontend
+            arch: amd64
+            platform: linux/amd64
+          - service_name: app
+            file: docker/Dockerfile.app
+            context: .
+            arch: amd64
+            platform: linux/amd64
+          - service_name: docreader
+            file: docker/Dockerfile.docreader
+            context: .
+            arch: amd64
+            platform: linux/amd64
+          - service_name: ui
+            file: frontend/Dockerfile
+            context: ./frontend
+            arch: arm64
+            platform: linux/arm64
+          - service_name: app
+            file: docker/Dockerfile.app
+            context: .
+            arch: arm64
+            platform: linux/arm64
+          - service_name: docreader
+            file: docker/Dockerfile.docreader
+            context: .
+            arch: arm64
+            platform: linux/arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build ${{ matrix.service_name }} Image
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          platforms: ${{ matrix.platform }}
+          file: ${{ matrix.file }}
+          context: ${{ matrix.context }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:${{ matrix.arch }}-latest
+          build-args: |
+            PLATFORM=${{ matrix.platform }}
