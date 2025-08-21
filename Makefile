@@ -1,4 +1,42 @@
-.PHONY: build run test clean docker-build docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama
+.PHONY: help build run test clean docker-build docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images
+
+# Show help
+help:
+	@echo "WeKnora Makefile 帮助"
+	@echo ""
+	@echo "基础命令:"
+	@echo "  build             构建应用"
+	@echo "  run               运行应用"
+	@echo "  test              运行测试"
+	@echo "  clean             清理构建文件"
+	@echo ""
+	@echo "Docker 命令:"
+	@echo "  docker-build      构建 Docker 镜像"
+	@echo "  docker-run        运行 Docker 容器"
+	@echo "  docker-stop       停止 Docker 容器"
+	@echo "  docker-restart    重启 Docker 容器"
+	@echo ""
+	@echo "服务管理:"
+	@echo "  start-all         启动所有服务"
+	@echo "  stop-all          停止所有服务"
+	@echo "  start-ollama      仅启动 Ollama 服务"
+	@echo ""
+	@echo "镜像构建:"
+	@echo "  build-images      从源码构建所有镜像"
+	@echo "  build-images-app  从源码构建应用镜像"
+	@echo "  build-images-docreader 从源码构建文档读取器镜像"
+	@echo "  build-images-frontend  从源码构建前端镜像"
+	@echo "  clean-images      清理本地镜像"
+	@echo ""
+	@echo "数据库:"
+	@echo "  migrate-up        执行数据库迁移"
+	@echo "  migrate-down      回滚数据库迁移"
+	@echo ""
+	@echo "开发工具:"
+	@echo "  fmt               格式化代码"
+	@echo "  lint              代码检查"
+	@echo "  deps              安装依赖"
+	@echo "  docs              生成 API 文档"
 
 # Go related variables
 BINARY_NAME=WeKnora
@@ -52,6 +90,22 @@ stop-all:
 # Stop Docker container (传统方式)
 docker-stop:
 	docker-compose down
+
+# 从源码构建镜像相关命令
+build-images:
+	./scripts/build_images.sh
+
+build-images-app:
+	./scripts/build_images.sh --app
+
+build-images-docreader:
+	./scripts/build_images.sh --docreader
+
+build-images-frontend:
+	./scripts/build_images.sh --frontend
+
+clean-images:
+	./scripts/build_images.sh --clean
 
 # Restart Docker container (stop, rebuild, start)
 docker-restart:

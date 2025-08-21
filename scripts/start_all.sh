@@ -308,7 +308,7 @@ check_platform() {
         export PLATFORM="linux/amd64"
         export ARCH="amd64"
     fi
-    log_info "当前平台：$PLATFORM"   
+    log_info "当前平台：$PLATFORM"
 }
 
 # 启动Docker容器

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -21,6 +22,9 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 
 // CreateChunks creates multiple chunks in batches
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
+	for _, chunk := range chunks {
+		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+	}
 	return r.db.WithContext(ctx).CreateInBatches(chunks, 100).Error
 }
 

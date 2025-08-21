@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/pgvector/pgvector-go"
 )
@@ -59,7 +60,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		ChunkID:         indexInfo.ChunkID,
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
-		Content:         indexInfo.Content,
+		Content:         common.CleanInvalidUTF8(indexInfo.Content),
 	}
 	// Add embedding data if available in additionalParams
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
