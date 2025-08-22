@@ -1,9 +1,7 @@
-ARG PLATFORM=linux/amd64
-
 # =========================
 # 构建阶段
 # =========================
-FROM --platform=${PLATFORM} python:3.10.18-bookworm AS builder
+FROM python:3.10.18-bookworm AS builder
 
 # 切换 apt 源到清华
 RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \
@@ -63,7 +61,7 @@ RUN chmod +x /app/scripts/generate_proto.sh && bash /app/scripts/generate_proto.
 # =========================
 # 运行阶段
 # =========================
-FROM --platform=${PLATFORM} python:3.10.18-bookworm AS runner
+FROM python:3.10.18-bookworm AS runner
 
 # 切换 apt 源到清华
 RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list.d/debian.sources && \

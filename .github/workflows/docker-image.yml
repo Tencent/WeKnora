@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+
 jobs:
   build-app:
     runs-on: ubuntu-latest
@@ -12,33 +13,15 @@ jobs:
           - service_name: ui
             file: frontend/Dockerfile
             context: ./frontend
-            arch: amd64
-            platform: linux/amd64
+            platform: linux/amd64,linux/arm64
           - service_name: app
             file: docker/Dockerfile.app
             context: .
-            arch: amd64
-            platform: linux/amd64
+            platform: linux/amd64,linux/arm64
           - service_name: docreader
             file: docker/Dockerfile.docreader
             context: .
-            arch: amd64
-            platform: linux/amd64
-          - service_name: ui
-            file: frontend/Dockerfile
-            context: ./frontend
-            arch: arm64
-            platform: linux/arm64
-          - service_name: app
-            file: docker/Dockerfile.app
-            context: .
-            arch: arm64
-            platform: linux/arm64
-          - service_name: docreader
-            file: docker/Dockerfile.docreader
-            context: .
-            arch: arm64
-            platform: linux/arm64
+            platform: linux/amd64,linux/arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -62,6 +45,4 @@ jobs:
           platforms: ${{ matrix.platform }}
           file: ${{ matrix.file }}
           context: ${{ matrix.context }}
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:${{ matrix.arch }}-latest
-          build-args: |
-            PLATFORM=${{ matrix.platform }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:latest
