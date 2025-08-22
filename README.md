@@ -122,10 +122,8 @@ make start-all
 # 启动 ollama 服务 (可选)
 ollama serve > /dev/null 2>&1 &
 
-# 根据系统架构(amd64 或者 arm64)启动服务
-ARCH=amd64 docker compose up -d
-# 或
-ARCH=arm64 docker compose up -d
+# 启动服务
+docker compose up -d
 ```
 
 #### ④ 停止服务

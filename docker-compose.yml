@@ -1,6 +1,6 @@
 services:
   app:
-    image: wechatopenai/weknora-app:${ARCH}-latest
+    image: wechatopenai/weknora-app:latest
     container_name: WeKnora-app
     ports:
       - "8080:8080"
@@ -88,7 +88,7 @@ services:
       - WeKnora-network
 
   frontend:
-    image: wechatopenai/weknora-ui:${ARCH}-latest
+    image: wechatopenai/weknora-ui:latest
     container_name: WeKnora-frontend
     ports:
       - "80:80"
@@ -99,7 +99,7 @@ services:
     restart: unless-stopped
 
   docreader:
-    image: wechatopenai/weknora-docreader:${ARCH}-latest
+    image: wechatopenai/weknora-docreader:latest
     container_name: WeKnora-docreader
     ports:
       - "50051:50051"

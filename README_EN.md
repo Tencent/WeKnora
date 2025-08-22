@@ -122,10 +122,8 @@ make start-all
 # Start ollama services (Optional)
 ollama serve > /dev/null 2>&1 &
 
-# Start the service according to the system architecture (amd64 or arm64)
-ARCH=amd64 docker compose up -d
-# Or
-ARCH=arm64 docker compose up -d
+# Start the service
+docker compose up -d
 ```
 
 #### ④ Stop the services

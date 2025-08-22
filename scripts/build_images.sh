@@ -78,14 +78,11 @@ check_platform() {
     log_info "检测系统平台信息..."
     if [ "$(uname -m)" = "x86_64" ]; then
         export PLATFORM="linux/amd64"
-        export ARCH="amd64"
     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
         export PLATFORM="linux/arm64"
-        export ARCH="arm64"
     else
         log_warning "未识别的平台类型：$(uname -m)，将使用默认平台 linux/amd64"
         export PLATFORM="linux/amd64"
-        export ARCH="amd64"
     fi
     log_info "当前平台：$PLATFORM"
 }
@@ -102,7 +99,7 @@ build_app_image() {
         --build-arg GOPROXY_ARG=${GOPROXY:-"https://goproxy.cn,direct"} \
         --build-arg GOSUMDB_ARG=${GOSUMDB:-"off"} \
         -f docker/Dockerfile.app \
-        -t wechatopenai/weknora-app:${ARCH}-latest \
+        -t wechatopenai/weknora-app:latest \
         .
     
     if [ $? -eq 0 ]; then
@@ -124,7 +121,7 @@ build_docreader_image() {
         --platform $PLATFORM \
         --build-arg PLATFORM=$PLATFORM \
         -f docker/Dockerfile.docreader \
-        -t wechatopenai/weknora-docreader:${ARCH}-latest \
+        -t wechatopenai/weknora-docreader:latest \
         .
     
     if [ $? -eq 0 ]; then
@@ -145,7 +142,7 @@ build_frontend_image() {
     docker build \
         --platform $PLATFORM \
         -f frontend/Dockerfile \
-        -t wechatopenai/weknora-ui:${ARCH}-latest \
+        -t wechatopenai/weknora-ui:latest \
         frontend/
     
     if [ $? -eq 0 ]; then
@@ -213,21 +210,21 @@ clean_images() {
     
     # 停止相关容器
     log_info "停止相关容器..."
-    docker stop $(docker ps -q --filter "ancestor=wechatopenai/weknora-app:${ARCH}-latest" 2>/dev/null) 2>/dev/null || true
-    docker stop $(docker ps -q --filter "ancestor=wechatopenai/weknora-docreader:${ARCH}-latest" 2>/dev/null) 2>/dev/null || true
-    docker stop $(docker ps -q --filter "ancestor=wechatopenai/weknora-ui:${ARCH}-latest" 2>/dev/null) 2>/dev/null || true
+    docker stop $(docker ps -q --filter "ancestor=wechatopenai/weknora-app:latest" 2>/dev/null) 2>/dev/null || true
+    docker stop $(docker ps -q --filter "ancestor=wechatopenai/weknora-docreader:latest" 2>/dev/null) 2>/dev/null || true
+    docker stop $(docker ps -q --filter "ancestor=wechatopenai/weknora-ui:latest" 2>/dev/null) 2>/dev/null || true
     
     # 删除相关容器
     log_info "删除相关容器..."
-    docker rm $(docker ps -aq --filter "ancestor=wechatopenai/weknora-app:${ARCH}-latest" 2>/dev/null) 2>/dev/null || true
-    docker rm $(docker ps -aq --filter "ancestor=wechatopenai/weknora-docreader:${ARCH}-latest" 2>/dev/null) 2>/dev/null || true
-    docker rm $(docker ps -aq --filter "ancestor=wechatopenai/weknora-ui:${ARCH}-latest" 2>/dev/null) 2>/dev/null || true
+    docker rm $(docker ps -aq --filter "ancestor=wechatopenai/weknora-app:latest" 2>/dev/null) 2>/dev/null || true
+    docker rm $(docker ps -aq --filter "ancestor=wechatopenai/weknora-docreader:latest" 2>/dev/null) 2>/dev/null || true
+    docker rm $(docker ps -aq --filter "ancestor=wechatopenai/weknora-ui:latest" 2>/dev/null) 2>/dev/null || true
     
     # 删除镜像
     log_info "删除本地镜像..."
-    docker rmi wechatopenai/weknora-app:${ARCH}-latest 2>/dev/null || true
-    docker rmi wechatopenai/weknora-docreader:${ARCH}-latest 2>/dev/null || true
-    docker rmi wechatopenai/weknora-ui:${ARCH}-latest 2>/dev/null || true
+    docker rmi wechatopenai/weknora-app:latest 2>/dev/null || true
+    docker rmi wechatopenai/weknora-docreader:latest 2>/dev/null || true
+    docker rmi wechatopenai/weknora-ui:latest 2>/dev/null || true
     
     docker image prune -f
     

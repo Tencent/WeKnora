@@ -299,14 +299,11 @@ check_platform() {
     log_info "检测系统平台信息..."
     if [ "$(uname -m)" = "x86_64" ]; then
         export PLATFORM="linux/amd64"
-        export ARCH="amd64"
     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
         export PLATFORM="linux/arm64"
-        export ARCH="arm64"
     else
         log_warning "未识别的平台类型：$(uname -m)，将使用默认平台 linux/amd64"
         export PLATFORM="linux/amd64"
-        export ARCH="amd64"
     fi
     log_info "当前平台：$PLATFORM"
 }
