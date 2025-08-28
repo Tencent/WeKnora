@@ -70,12 +70,27 @@ class PaddleOCRBackend(OCRBackend):
             Extracted text string
         """
         try:
+            # # Ensure image is in RGB format
+            # if hasattr(image, "convert") and image.mode != "RGBA":
+            #     img_for_ocr = image.convert("RGBA")
+            #     logger.info(f"Converted image from {image.mode} to RGB format")
+            # else:
+            #     img_for_ocr = image
+            logger.info(f"Initial image mode: {image.mode if hasattr(image, 'mode') else 'N/A'}")
             # Ensure image is in RGB format
-            if hasattr(image, "convert") and image.mode != "RGBA":
-                img_for_ocr = image.convert("RGBA")
-                logger.info(f"Converted image from {image.mode} to RGB format")
+            if hasattr(image, "convert"):
+                if image.mode == "RGBA":
+                    img_for_ocr = image.convert("RGB") # 尝试转换为 RGB
+                    logger.info(f"Converted image from RGBA to RGB format for OCR.")
+                elif image.mode != "RGB": # 如果不是 RGBA 也不是 RGB，也尝试转 RGB
+                    img_for_ocr = image.convert("RGB")
+                    logger.info(f"Converted image from {image.mode} to RGB format for OCR.")
+                else:
+                    img_for_ocr = image
+                    logger.info(f"Image already in RGB format.")
             else:
                 img_for_ocr = image
+                logger.info(f"Image is not a PIL.Image object, assuming it's already suitable for OCR.")
 
             # Convert to numpy array if not already
             if hasattr(img_for_ocr, "convert"):
@@ -83,9 +98,9 @@ class PaddleOCRBackend(OCRBackend):
             else:
                 image_array = img_for_ocr
 
+            logger.info(f"Input array shape for OCR: {image_array.shape}, dtype: {image_array.dtype}")
             ocr_result = self.ocr.predict(image_array)
-            logger.info(f"ocr_result: {ocr_result}")
-
+            logger.info(f"OCR result type: {type(ocr_result)}")
             # Extract text
             if ocr_result and any(ocr_result):
                 ocr_text = ""
