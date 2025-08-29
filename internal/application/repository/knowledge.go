@@ -118,7 +118,7 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	params *types.KnowledgeCheckParams,
 ) (bool, *types.Knowledge, error) {
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND enable_status = ?", tenantID, kbID, "enabled")
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, "failed")
 
 	if params.Type == "file" {
 		// If file hash exists, prioritize exact match using hash
