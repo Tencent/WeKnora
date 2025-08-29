@@ -70,12 +70,6 @@ class PaddleOCRBackend(OCRBackend):
             Extracted text string
         """
         try:
-            # # Ensure image is in RGB format
-            # if hasattr(image, "convert") and image.mode != "RGBA":
-            #     img_for_ocr = image.convert("RGBA")
-            #     logger.info(f"Converted image from {image.mode} to RGB format")
-            # else:
-            #     img_for_ocr = image
             logger.info(f"Initial image mode: {image.mode if hasattr(image, 'mode') else 'N/A'}")
             # Ensure image is in RGB format
             if hasattr(image, "convert"):
@@ -98,9 +92,8 @@ class PaddleOCRBackend(OCRBackend):
             else:
                 image_array = img_for_ocr
 
-            logger.info(f"Input array shape for OCR: {image_array.shape}, dtype: {image_array.dtype}")
             ocr_result = self.ocr.predict(image_array)
-            logger.info(f"OCR result type: {type(ocr_result)}")
+   
             # Extract text
             if ocr_result and any(ocr_result):
                 ocr_text = ""
