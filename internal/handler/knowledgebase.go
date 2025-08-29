@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -279,13 +280,16 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 
 	logger.Infof(ctx, "Copy knowledge base, ID: %s to ID: %s", req.SourceID, req.TargetID)
 
-	err := h.knowledgeService.CloneKnowledgeBase(ctx, req.SourceID, req.TargetID)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
-	logger.Infof(ctx, "Knowledge base copy successfully, ID: %s to ID: %s", req.SourceID, req.TargetID)
+	go func(ctx context.Context) {
+		err := h.knowledgeService.CloneKnowledgeBase(ctx, req.SourceID, req.TargetID)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to copy knowledge base, ID: %s to ID: %s", req.SourceID, req.TargetID)
+			return
+		}
+		logger.Infof(ctx, "Knowledge base copy from ID: %s to ID: %s successfully", req.SourceID, req.TargetID)
+	}(logger.CloneContext(ctx))
+
+	logger.Infof(ctx, "Knowledge base start copy from ID: %s to ID: %s", req.SourceID, req.TargetID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Knowledge base copy successfully",

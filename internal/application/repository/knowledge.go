@@ -150,17 +150,29 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 			return true, &knowledge, nil
 		}
 	} else if params.Type == "url" {
+		// If file hash exists, prioritize exact match using hash
+		if params.FileHash != "" {
+			var knowledge types.Knowledge
+			err := query.Where("type = 'url' AND file_hash = ?", params.FileHash).First(&knowledge).Error
+			if err == nil && knowledge.ID != "" {
+				return true, &knowledge, nil
+			}
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil, err
+			}
+		}
+
 		if params.URL != "" {
 			var knowledge types.Knowledge
 			err := query.Where("type = 'url' AND source = ?", params.URL).First(&knowledge).Error
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return false, nil, nil
-				}
+			if err == nil && knowledge.ID != "" {
+				return true, &knowledge, nil
+			}
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return false, nil, err
 			}
-			return true, &knowledge, nil
 		}
+		return false, nil, nil
 	}
 
 	// No valid parameters, default to not existing
