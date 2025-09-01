@@ -84,7 +84,7 @@ type StorageConfig struct {
 	Provider string `yaml:"provider" json:"provider"`
 }
 
-func (c *StorageConfig) Value() (driver.Value, error) {
+func (c StorageConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
