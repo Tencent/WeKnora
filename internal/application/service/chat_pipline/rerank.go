@@ -121,6 +121,19 @@ func (p *PluginRerank) rerank(ctx context.Context,
 			rankFilter = append(rankFilter, result)
 		}
 	}
+	// 兜底逻辑：如果阈值过滤后没有任何结果，则取原始排序的前3名 
+	if len(rankFilter) == 0 && len(rerankResp) > 0 {
+		logger.Warnf(ctx, "No documents passed the rerank threshold of %.2f. Falling back to Top-3 results.", chatManage.RerankThreshold)
+		
+		// 确定要取的数量：最多3个，但不超过实际拥有的数量
+		topK := 3
+		if len(rerankResp) < topK {
+			topK = len(rerankResp)
+		}
+		
+		// 从 rerankResp (已排序的完整列表) 中截取前 topK 个
+		return rerankResp[:topK]
+	}
 	return rankFilter
 }
 
