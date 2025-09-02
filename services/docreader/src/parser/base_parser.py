@@ -102,7 +102,7 @@ class BaseParser(ABC):
         ocr_backend: str = "paddle",
         ocr_config: dict = None,
         max_image_size: int = 1920,  # Maximum image size
-        max_concurrent_tasks: int = 1,  # Max concurrent tasks
+        max_concurrent_tasks: int = 5,  # Max concurrent tasks
         max_chunks: int = 1000,  # Max number of returned chunks
         chunking_config: ChunkingConfig = None,  # Chunking configuration object
     ):
@@ -846,19 +846,7 @@ class BaseParser(ABC):
                         end=current_start + len(chunk_text),
                     )
                 )
-                # DEBUG: Print the information for the newly created chunk
-                new_chunk = chunks[-1]
-                debug_message = (
-                    f"\n{'='*20} CHUNK CREATED (in loop) {'='*20}\n"
-                    f"  [ Chunk Sequence ]: {new_chunk.seq}\n"
-                    f"  [ Character Range ]: {new_chunk.start} - {new_chunk.end}\n"
-                    f"  [ Chunk Size ]: {len(new_chunk.content)} characters\n"
-                    f"  [ Content ]:\n---\n{new_chunk.content}\n---\n"
-                    f"{'='*64}"
-            )
-                logger.info(debug_message)
-                # END DEBUG
-
+            
                 logger.info(f"Created chunk {len(chunks)}, size: {len(chunk_text)}")
 
                 # Keep overlap, ensuring structure integrity
@@ -934,18 +922,7 @@ class BaseParser(ABC):
                     end=current_start + len(chunk_text),
                 )
             )
-            # DEBUG: Print the information for the final chunk
-            final_chunk = chunks[-1]
-            debug_message = (
-                f"\n{'='*20} FINAL CHUNK CREATED {'='*20}\n"
-                f"  [ Chunk Sequence ]: {final_chunk.seq}\n"
-                f"  [ Character Range ]: {final_chunk.start} - {final_chunk.end}\n"
-                f"  [ Chunk Size ]: {len(final_chunk.content)} characters\n"
-                f"  [ Content ]:\n---\n{final_chunk.content}\n---\n"
-                f"{'='*62}"
-           )
-            logger.info(debug_message)
-            # END DEBUG
+
             logger.info(f"Created final chunk {len(chunks)}, size: {len(chunk_text)}")
 
         logger.info(f"Chunking complete, created {len(chunks)} chunks from text")
