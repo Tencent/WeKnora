@@ -102,7 +102,7 @@ class BaseParser(ABC):
         ocr_backend: str = "paddle",
         ocr_config: dict = None,
         max_image_size: int = 1920,  # Maximum image size
-        max_concurrent_tasks: int = 5,  # Max concurrent tasks
+        max_concurrent_tasks: int = 1,  # Max concurrent tasks
         max_chunks: int = 1000,  # Max number of returned chunks
         chunking_config: ChunkingConfig = None,  # Chunking configuration object
     ):
@@ -655,10 +655,14 @@ class BaseParser(ABC):
         image_pattern = r"!\[.*?\]\(.*?\)"
         # Match Markdown link syntax
         link_pattern = r"\[.*?\]\(.*?\)"
+        # This pattern looks for consecutive lines starting with a pipe '|'
+        table_pattern = r"(?:(?:^\|.*\|[ \t]*\n)+)"
 
         # First, find all structures that need to be kept intact
         images = re.finditer(image_pattern, text)
         links = re.finditer(link_pattern, text)
+        # Find tables using the multiline flag
+        tables = re.finditer(table_pattern, text, re.MULTILINE)
 
         # Record the start and end positions of all structures that need to be kept intact
         protected_ranges = []
@@ -666,10 +670,13 @@ class BaseParser(ABC):
             protected_ranges.append((match.start(), match.end()))
         for match in links:
             protected_ranges.append((match.start(), match.end()))
+        #Add tables to protected ranges
+        for match in tables:
+            protected_ranges.append((match.start(), match.end()))
 
         # Sort by start position
         protected_ranges.sort(key=lambda x: x[0])
-        logger.info(f"Found {len(protected_ranges)} protected ranges (images/links)")
+        logger.info(f"Found {len(protected_ranges)} protected ranges (images/links/tables)")
 
         # Remove ranges that are completely within other ranges, keep the largest range
         for start, end in protected_ranges[:]:  # Create a copy to iterate over
@@ -815,7 +822,7 @@ class BaseParser(ABC):
             f"Chunking parameters: size={self.chunk_size}, overlap={self.chunk_overlap}"
         )
 
-        # Split text into basic units
+        # 根据分隔符将文本切碎成“有意义”的原子单元，其中受保护的结构化内容不分割
         units = self._split_into_units(text)
         logger.info(f"Split text into {len(units)} basic units")
 
@@ -839,6 +846,19 @@ class BaseParser(ABC):
                         end=current_start + len(chunk_text),
                     )
                 )
+                # DEBUG: Print the information for the newly created chunk
+                new_chunk = chunks[-1]
+                debug_message = (
+                    f"\n{'='*20} CHUNK CREATED (in loop) {'='*20}\n"
+                    f"  [ Chunk Sequence ]: {new_chunk.seq}\n"
+                    f"  [ Character Range ]: {new_chunk.start} - {new_chunk.end}\n"
+                    f"  [ Chunk Size ]: {len(new_chunk.content)} characters\n"
+                    f"  [ Content ]:\n---\n{new_chunk.content}\n---\n"
+                    f"{'='*64}"
+            )
+                logger.info(debug_message)
+                # END DEBUG
+
                 logger.info(f"Created chunk {len(chunks)}, size: {len(chunk_text)}")
 
                 # Keep overlap, ensuring structure integrity
@@ -914,6 +934,18 @@ class BaseParser(ABC):
                     end=current_start + len(chunk_text),
                 )
             )
+            # DEBUG: Print the information for the final chunk
+            final_chunk = chunks[-1]
+            debug_message = (
+                f"\n{'='*20} FINAL CHUNK CREATED {'='*20}\n"
+                f"  [ Chunk Sequence ]: {final_chunk.seq}\n"
+                f"  [ Character Range ]: {final_chunk.start} - {final_chunk.end}\n"
+                f"  [ Chunk Size ]: {len(final_chunk.content)} characters\n"
+                f"  [ Content ]:\n---\n{final_chunk.content}\n---\n"
+                f"{'='*62}"
+           )
+            logger.info(debug_message)
+            # END DEBUG
             logger.info(f"Created final chunk {len(chunks)}, size: {len(chunk_text)}")
 
         logger.info(f"Chunking complete, created {len(chunks)} chunks from text")
