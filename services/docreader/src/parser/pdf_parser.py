@@ -16,7 +16,28 @@ class PDFParser(BaseParser):
     This parser handles PDF documents by extracting text content.
     It uses the pypdf library for simple text extraction.
     """
-
+    def _convert_table_to_markdown(self, table_data: list) -> str:
+    
+        if not table_data or not table_data[0]: return ""
+        def clean_cell(cell):
+            if cell is None: return ""
+            return str(cell).replace("\n", " <br> ")
+        try:
+            markdown = ""
+            header = [clean_cell(cell) for cell in table_data[0]]
+            markdown += "| " + " | ".join(header) + " |\n"
+            markdown += "| " + " | ".join(["---"] * len(header)) + " |\n"
+            for row in table_data[1:]:
+                if not row: continue
+                body_row = [clean_cell(cell) for cell in row]
+                if len(body_row) != len(header):
+                    logger.warning(f"Skipping malformed table row: {body_row}")
+                    continue
+                markdown += "| " + " | ".join(body_row) + " |\n"
+            return markdown
+        except Exception as e:
+            logger.error(f"Error converting table to markdown: {e}")
+            return ""
     def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
        
         logger.info(f"Parsing PDF with pdfplumber, content size: {len(content)} bytes")
@@ -83,6 +104,7 @@ class PDFParser(BaseParser):
             logger.error(f"Failed to parse PDF document: {str(e)}")
             return ""
         finally:
+            # This block is GUARANTEED to execute, preventing resource leaks.
             if os.path.exists(temp_pdf_path):
                 try:
                     os.remove(temp_pdf_path)
