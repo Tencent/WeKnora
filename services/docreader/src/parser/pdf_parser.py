@@ -82,3 +82,10 @@ class PDFParser(BaseParser):
         except Exception as e:
             logger.error(f"Failed to parse PDF document: {str(e)}")
             return ""
+        finally:
+            if os.path.exists(temp_pdf_path):
+                try:
+                    os.remove(temp_pdf_path)
+                    logger.info(f"Temporary file cleaned up: {temp_pdf_path}")
+                except OSError as e:
+                    logger.error(f"Error removing temporary file {temp_pdf_path}: {e}")
