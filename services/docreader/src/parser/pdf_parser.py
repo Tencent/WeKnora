@@ -3,7 +3,8 @@ import os
 import io
 from typing import Any, List, Iterator, Optional, Mapping, Tuple, Dict, Union
 
-from pypdf import PdfReader
+import pdfplumber
+import tempfile
 from .base_parser import BaseParser
 
 logger = logging.getLogger(__name__)
@@ -17,45 +18,66 @@ class PDFParser(BaseParser):
     """
 
     def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
-        """
-        Parse PDF document content into text
+       
+        logger.info(f"Parsing PDF with pdfplumber, content size: {len(content)} bytes")
 
-        This method processes a PDF document by extracting text content.
+        all_page_content = []
+     
 
-        Args:
-            content: PDF document content as bytes
-
-        Returns:
-            Extracted text content
-        """
-        logger.info(f"Parsing PDF document, content size: {len(content)} bytes")
-
+        temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        temp_pdf_path = temp_pdf.name
+        
         try:
-            # Use io.BytesIO to read content from bytes
-            pdf_file = io.BytesIO(content)
+            temp_pdf.write(content)
+            temp_pdf.close()
+            logger.info(f"PDF content written to temporary file: {temp_pdf_path}")
             
-            # Create PdfReader object
-            pdf_reader = PdfReader(pdf_file)
-            num_pages = len(pdf_reader.pages)
-            logger.info(f"PDF has {num_pages} pages")
+            with pdfplumber.open(temp_pdf_path) as pdf:
+                logger.info(f"PDF has {len(pdf.pages)} pages")
+                
+                for page_num, page in enumerate(pdf.pages):
+                    page_content_parts = []
+                    
+                    # Try-fallback strategy for table detection
+                    default_settings = { "vertical_strategy": "lines", "horizontal_strategy": "lines" }
+                    found_tables = page.find_tables(default_settings)
+                    if not found_tables:
+                        logger.info(f"Page {page_num+1}: Default strategy found no tables. Trying fallback strategy.")
+                        fallback_settings = { "vertical_strategy": "text", "horizontal_strategy": "lines" }
+                        found_tables = page.find_tables(fallback_settings)
+
+                    table_bboxes = [table.bbox for table in found_tables]
+                    # Define a filter function that keeps objects NOT inside any table bbox.
+                    def not_within_bboxes(obj):
+                        """Check if an object is outside all table bounding boxes."""
+                        for bbox in table_bboxes:
+                            # Check if the object's vertical center is within a bbox
+                            if bbox[1] <= (obj["top"] + obj["bottom"]) / 2 <= bbox[3]:
+                                return False # It's inside a table, so we DON'T keep it
+                        return True # It's outside all tables, so we DO keep it
+
+                    # that contains only the non-table text.
+                    non_table_page = page.filter(not_within_bboxes)
+
+                    # Now, extract text from this filtered page view.
+                    text = non_table_page.extract_text(x_tolerance=2)
+                    if text:
+                        page_content_parts.append(text)
+              
+                    # Process and append the structured Markdown tables
+                    if found_tables:
+                        logger.info(f"Found {len(found_tables)} tables on page {page_num + 1}")
+                        for table in found_tables:
+                            markdown_table = self._convert_table_to_markdown(table.extract())
+                            page_content_parts.append(f"\n\n{markdown_table}\n\n")
+                    
+                    
+                    all_page_content.append("".join(page_content_parts))
+
+            final_text = "\n\n--- Page Break ---\n\n".join(all_page_content)
+            logger.info(f"PDF parsing complete. Extracted {len(final_text)} text chars.")
             
-            # Extract text from all pages
-            all_text = []
-            for page_num, page in enumerate(pdf_reader.pages):
-                try:
-                    page_text = page.extract_text()
-                    if page_text:
-                        all_text.append(page_text)
-                        logger.info(f"Successfully extracted text from page {page_num+1}/{num_pages}")
-                    else:
-                        logger.warning(f"No text extracted from page {page_num+1}/{num_pages}")
-                except Exception as e:
-                    logger.error(f"Error extracting text from page {page_num+1}: {str(e)}")
-            
-            # Combine all extracted text
-            result = "\n\n".join(all_text)
-            logger.info(f"PDF parsing complete, extracted {len(result)} characters of text")
-            return result
+            return final_text
             
         except Exception as e:
             logger.error(f"Failed to parse PDF document: {str(e)}")

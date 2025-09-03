@@ -36,6 +36,8 @@ class PaddleOCRBackend(OCRBackend):
             from paddleocr import PaddleOCR
             # Default OCR configuration
             ocr_config = {
+                "text_det_limit_type": "max",  # Change from 'min' to 'max'
+                "text_det_limit_side_len": 960,  # A standard and safe limit for the longest side
                 "use_doc_orientation_classify": False,  # Do not use document image orientation classification
                 "use_doc_unwarping": False,  # Do not use document unwarping
                 "use_textline_orientation": False,  # Do not use textline orientation classification
@@ -43,8 +45,6 @@ class PaddleOCRBackend(OCRBackend):
                 "text_detection_model_name": "PP-OCRv5_server_det",
                 "text_recognition_model_dir": "/root/.paddlex/official_models/PP-OCRv5_server_rec_infer",
                 "text_detection_model_dir": "/root/.paddlex/official_models/PP-OCRv5_server_det_infer",
-                "text_det_limit_type": "min",  # Limit by short side
-                "text_det_limit_side_len": 736,  # Limit side length to 736
                 "text_det_thresh": 0.3,  # Text detection pixel threshold
                 "text_det_box_thresh": 0.6,  # Text detection box threshold
                 "text_det_unclip_ratio": 1.5,  # Text detection expansion ratio
