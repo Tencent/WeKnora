@@ -520,11 +520,16 @@ func (e *elasticsearchRepository) buildKeywordSearchQuery(ctx context.Context,
 	params typesLocal.RetrieveParams,
 ) (string, error) {
 	log := logger.GetLogger(ctx)
+	content, err := json.Marshal(params.Query)
+	if err != nil {
+		log.Errorf("[ElasticsearchV7] Failed to marshal query: %v", err)
+		return "", err
+	}
 
 	filter := e.getBaseConds(params)
 	query := fmt.Sprintf(
-		`{"query": {"bool": {"must": [{"match": {"content": "%s"}}], "filter": [%s]}}}`,
-		params.Query, filter,
+		`{"query": {"bool": {"must": [{"match": {"content": %s}}], "filter": [%s]}}}`,
+		string(content), filter,
 	)
 
 	log.Debugf("[ElasticsearchV7] Executing keyword search with query: %s", query)
