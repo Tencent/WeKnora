@@ -149,6 +149,34 @@ WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心
 - **零代码部署**：只需上传知识，即可在微信生态中快速部署智能问答服务，实现"即问即答"的体验
 - **高效问题管理**：支持高频问题的独立分类管理，提供丰富的数据工具，确保回答精准可靠且易于维护
 - **微信生态覆盖**：通过微信对话开放平台，WeKnora 的智能问答能力可无缝集成到公众号、小程序等微信场景中，提升用户交互体验
+### 🔗MCP服务器访问已经部署好的WEKnora
+#### 1️⃣克隆储存库
+```
+git clone https://github.com/Tencent/WeKnora
+```
+#### 2️⃣配置MCP服务器
+mcp客户端配置服务器
+```json
+{
+  "mcpServers": {
+    "weknora": {
+      "args": [
+        "path/to/WeKnora/mcp-server/run_server.py"
+      ],
+      "command": "python",
+      "env":{
+        "WEKNORA_API_KEY":"进入你的weknora实例，打开开发者工具，查看请求头x-api-key，以sk开头",
+        "WEKNORA_BASE_URL":"http(s)://你的weknora地址/api/v1"
+      }
+    }
+  }
+}
+```
+使用stdio命令直接运行
+```
+pip install weknora-mcp-server
+python -m weknora-mcp-server
+```
 
 ## 🔧 初始化配置引导
 
@@ -208,10 +236,9 @@ http://localhost
 </table>
 
 WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
-### 配套MCP服务器
-详见：
-https://github.com/NannaOlympicBroadcast/WeKnoraMCP
+### 配套MCP服务器调用效果
 <img width="950" height="2063" alt="118d078426f42f3d4983c13386085d7f" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />
+
 
 ## 📘 文档
 
