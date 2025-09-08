@@ -6,7 +6,7 @@ services:
       - "8080:8080"
     volumes:
       - data-files:/data/files
-      - ./config:/app/config
+      - ./config/config.yaml:/app/config/config.yaml
     environment:
       - GIN_MODE=${GIN_MODE}
       - DB_DRIVER=postgres
@@ -161,7 +161,8 @@ services:
       - POSTGRES_DB=${DB_NAME}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./migrations/paradedb:/docker-entrypoint-initdb.d
+      - ./migrations/paradedb/00-init-db.sql:/docker-entrypoint-initdb.d/00-init-db.sql
+      - ./migrations/paradedb/01-migrate-to-paradedb.sql:/docker-entrypoint-initdb.d/01-migrate-to-paradedb.sql
     networks:
       - WeKnora-network
     healthcheck:
