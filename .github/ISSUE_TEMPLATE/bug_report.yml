@@ -33,19 +33,6 @@ body:
       required: true
 
   - type: textarea
-    id: steps
-    attributes:
-      label: 重现步骤
-      description: 重现此 bug 的步骤
-      placeholder: |
-        1. 进入 '...'
-        2. 点击 '...'
-        3. 滚动到 '...'
-        4. 看到错误
-    validations:
-      required: true
-
-  - type: textarea
     id: expected
     attributes:
       label: 期望行为
@@ -54,14 +41,6 @@ body:
     validations:
       required: true
 
-  - type: textarea
-    id: actual
-    attributes:
-      label: 实际行为
-      description: 描述实际发生的情况
-      placeholder: "实际发生了什么..."
-    validations:
-      required: true
 
   - type: markdown
     attributes:
@@ -109,6 +88,4 @@ body:
       description: 请确认以下事项
       options:
         - label: 我已经搜索了现有的 issues，确认这是一个新问题
-          required: true
-        - label: 我已经提供了足够的信息来重现这个问题
           required: true
