@@ -642,129 +642,89 @@ class BaseParser(ABC):
         return ParseResult(text=text, chunks=chunks)
 
     def _split_into_units(self, text: str) -> List[str]:
-        """Split text into basic units, preserving Markdown structure
+        """
+        [FINAL VERSION] 将文本分割为基本单元，使用一个非常健壮的模式来保护
+        多行 Markdown 结构的完整性，特别是表格。
 
+        这个版本能够精确匹配从表头开始、到表体结束的完整表格，无论其周围
+        的文本格式如何，从而防止它在分块时被错误地拆分。
+        
         Args:
-            text: Text content
+            text: 文本内容
 
         Returns:
-            List of basic units
+            基本单元的列表
         """
-        logger.info(f"Splitting text into basic units, text length: {len(text)}")
-        # Match Markdown image syntax
-        image_pattern = r"!\[.*?\]\(.*?\)"
-        # Match Markdown link syntax
-        link_pattern = r"\[.*?\]\(.*?\)"
+        logger.info(f"Splitting text into basic units with robust structure protection, text length: {len(text)}")
+        
+        # 定义所有需要作为整体保护的结构模式 ---
+        table_pattern = r"(?m)(^\|.*\|[ \t]*\r?\n(?:[ \t]*\r?\n)?^\|\s*:?--+.*\r?\n(?:^\|.*\|\r?\n?)*)"
+        
+        # 其他需要保护的结构（代码块、公式块、行内元素）
+        code_block_pattern = r"```[\s\S]*?```"
+        math_block_pattern = r"\$\$[\s\S]*?\$\$"
+        inline_pattern = r"!\[.*?\]\(.*?\)|\[.*?\]\(.*?\)"
 
-        # First, find all structures that need to be kept intact
-        images = re.finditer(image_pattern, text)
-        links = re.finditer(link_pattern, text)
-
-        # Record the start and end positions of all structures that need to be kept intact
+        # 查找所有受保护结构的位置 ---
         protected_ranges = []
-        for match in images:
-            protected_ranges.append((match.start(), match.end()))
-        for match in links:
-            protected_ranges.append((match.start(), match.end()))
+        for pattern in [table_pattern, code_block_pattern, math_block_pattern, inline_pattern]:
+            for match in re.finditer(pattern, text):
+                # 确保匹配到的不是空字符串，避免无效范围
+                if match.group(0).strip():
+                    protected_ranges.append((match.start(), match.end()))
 
-        # Sort by start position
+        # 按起始位置排序
         protected_ranges.sort(key=lambda x: x[0])
-        logger.info(f"Found {len(protected_ranges)} protected ranges (images/links)")
+        logger.info(f"Found {len(protected_ranges)} protected structures (tables, code, formulas, images, links).")
+        
+        # 合并可能重叠的保护范围 ---
+        # 确保我们有一组不相交的、需要保护的文本块
+        if protected_ranges:
+            merged_ranges = []
+            current_start, current_end = protected_ranges[0]
 
-        # Remove ranges that are completely within other ranges, keep the largest range
-        for start, end in protected_ranges[:]:  # Create a copy to iterate over
-            is_inner = False
-            for start2, end2 in protected_ranges:
-                if (
-                    (start > start2 and end < end2)
-                    or (start > start2 and end <= end2)
-                    or (start >= start2 and end < end2)
-                ):
-                    is_inner = True
-                    break
-            if is_inner:
-                protected_ranges.remove((start, end))
-                logger.info(f"Removed inner protected range: ({start}, {end})")
+            for next_start, next_end in protected_ranges[1:]:
+                if next_start < current_end:
+                    # 如果下一个范围与当前范围重叠，则合并它们
+                    current_end = max(current_end, next_end)
+                else:
+                    # 如果不重叠，则完成当前范围并开始一个新的范围
+                    merged_ranges.append((current_start, current_end))
+                    current_start, current_end = next_start, next_end
+            
+            merged_ranges.append((current_start, current_end))
+            protected_ranges = merged_ranges
+            logger.info(f"After merging overlaps, {len(protected_ranges)} protected ranges remain.")
 
-        logger.info(f"After cleanup: {len(protected_ranges)} protected ranges remain")
-
-        # Split text, avoiding protected areas
+        # 根据保护范围和分隔符来分割文本 ---
         units = []
         last_end = 0
+        
+        # 定义分隔符的正则表达式，通过加括号来保留分隔符本身
+        separator_pattern = f"({'|'.join(re.escape(s) for s in self.separators)})"
 
         for start, end in protected_ranges:
-            # Add text before protected range
-            if start <= last_end:
-                continue
-            pre_text = text[last_end:start]
-            if not pre_text.strip():
-                continue
-            logger.info(
-                f"Processing text segment before protected range, length: {len(pre_text)}"
-            )
-            separator_pattern = (
-                f"({'|'.join(re.escape(s) for s in self.separators)})"
-            )
-            segments = re.split(separator_pattern, pre_text)
-            for unit in segments:
-                if len(unit) <= self.chunk_size:
-                    units.append(unit)
-                else:
-                    # Split further by English .
-                    logger.info(
-                        f"Unit exceeds chunk size ({len(unit)}>{self.chunk_size}), splitting further"
-                    )
-                    separators = ["."]
-                    sep_pattern = (
-                        f"({'|'.join(re.escape(s) for s in separators)})"
-                    )
-                    additional_units = re.split(sep_pattern, unit)
-                    units.extend(additional_units)
-                    logger.info(
-                        f"Split into {len(additional_units)} additional units"
-                    )
+            # a. 处理受保护范围之前的文本
+            if start > last_end:
+                pre_text = text[last_end:start]
+                # 对这部分非保护文本进行分割，并保留分隔符
+                segments = re.split(separator_pattern, pre_text)
+                units.extend([s for s in segments if s]) # 添加所有非空部分
 
-            # Add protected range
+            # b. 将整个受保护的块（例如，一个完整的表格）作为一个单独的、不可分割的单元添加
             protected_text = text[start:end]
-            logger.info(
-                f"Adding protected range: {protected_text[:30]}..."
-                if len(protected_text) > 30
-                else f"Adding protected range: {protected_text}"
-            )
             units.append(protected_text)
 
             last_end = end
 
-        # Add text after the last protected range
+        # c. 处理最后一个受保护范围之后的文本
         if last_end < len(text):
             post_text = text[last_end:]
-            if post_text.strip():
-                logger.info(
-                    f"Processing final text segment after all protected ranges, length: {len(post_text)}"
-                )
-                separator_pattern = (
-                    f"({'|'.join(re.escape(s) for s in self.separators)})"
-                )
-                segments = re.split(separator_pattern, post_text)
-                for unit in segments:
-                    if len(unit) <= self.chunk_size:
-                        units.append(unit)
-                    else:
-                        # Split further by English .
-                        logger.info(
-                            f"Final unit exceeds chunk size ({len(unit)}>{self.chunk_size}), splitting"
-                        )
-                        separators = ["."]
-                        sep_pattern = f"({'|'.join(re.escape(s) for s in separators)})"
-                        additional_units = re.split(sep_pattern, unit)
-                        units.extend(additional_units)
-                        logger.info(
-                            f"Split into {len(additional_units)} additional units"
-                        )
-
-        logger.info(f"Text splitting complete, created {len(units)} basic units")
+            segments = re.split(separator_pattern, post_text)
+            units.extend([s for s in segments if s]) # 添加所有非空部分
+       
+        logger.info(f"Text splitting complete, created {len(units)} final basic units.")
         return units
-
     def _find_complete_units(self, units: List[str], target_size: int) -> List[str]:
         """Find a list of complete units that do not exceed the target size
 
