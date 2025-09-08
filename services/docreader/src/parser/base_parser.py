@@ -643,12 +643,6 @@ class BaseParser(ABC):
 
     def _split_into_units(self, text: str) -> List[str]:
         """
-        [FINAL VERSION] 将文本分割为基本单元，使用一个非常健壮的模式来保护
-        多行 Markdown 结构的完整性，特别是表格。
-
-        这个版本能够精确匹配从表头开始、到表体结束的完整表格，无论其周围
-        的文本格式如何，从而防止它在分块时被错误地拆分。
-        
         Args:
             text: 文本内容
 
