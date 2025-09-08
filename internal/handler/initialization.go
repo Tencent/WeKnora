@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1338,20 +1339,37 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	model *types.Model,
 ) (bool, string) {
-	// 这里需要根据实际情况实现远程API的连接检查
-	// 可以发送一个简单的请求来验证连接和认证
+	// 使用 /chat/completions 端点进行连接检查
+	// 发送一个简单的测试请求来验证连接和认证
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 
-	// 根据不同的API类型构造测试请求
+	// 构造测试请求
 	testEndpoint := ""
 	if model.Parameters.BaseURL != "" {
-		testEndpoint = model.Parameters.BaseURL + "/models"
+		testEndpoint = model.Parameters.BaseURL + "/chat/completions"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", testEndpoint, nil)
+	// 构造测试请求体
+	testRequest := map[string]interface{}{
+		"model": model.Name,
+		"messages": []map[string]string{
+			{
+				"role":    "user",
+				"content": "test",
+			},
+		},
+		"max_tokens": 1,
+	}
+
+	jsonData, err := json.Marshal(testRequest)
+	if err != nil {
+		return false, fmt.Sprintf("构造请求体失败: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", testEndpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return false, fmt.Sprintf("创建请求失败: %v", err)
 	}
@@ -1370,8 +1388,8 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 
 	// 检查响应状态
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		// 连接成功，现在检查模型是否存在
-		return true, "连接正常，请自行确保模型存在"
+		// 连接成功，模型可用
+		return true, "连接正常，模型可用"
 	} else if resp.StatusCode == 401 {
 		return false, "认证失败，请检查API Key"
 	} else if resp.StatusCode == 403 {
