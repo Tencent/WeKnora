@@ -30,6 +30,7 @@ show_help() {
     echo "  -r, --restart  重新构建并重启指定容器"
     echo "  -l, --list     列出所有正在运行的容器"
     echo "  -p, --pull     拉取最新的Docker镜像"
+    echo "  --no-pull      启动时不拉取镜像（默认会拉取）"
     echo "  -v, --version  显示版本信息"
     exit 0
 }
@@ -333,8 +334,16 @@ start_docker() {
     
     # 启动基本服务
     log_info "启动核心服务容器..."
-	# 统一通过已检测到的 Compose 命令启动，添加 --pull always 确保使用最新镜像
-	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build --pull always -d
+	# 统一通过已检测到的 Compose 命令启动
+	if [ "$NO_PULL" = true ]; then
+		# 不拉取镜像，使用本地镜像
+		log_info "跳过镜像拉取，使用本地镜像..."
+		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build -d
+	else
+		# 拉取最新镜像
+		log_info "拉取最新镜像..."
+		PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build --pull always -d
+	fi
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
         return 1
@@ -564,6 +573,7 @@ CHECK_ENVIRONMENT=false
 LIST_CONTAINERS=false
 RESTART_CONTAINER=false
 PULL_IMAGES=false
+NO_PULL=false
 CONTAINER_NAME=""
 
 # 没有参数时默认启动所有服务
@@ -590,6 +600,10 @@ while [ "$1" != "" ]; do
         -l | --list )       LIST_CONTAINERS=true
                             ;;
         -p | --pull )       PULL_IMAGES=true
+                            ;;
+        --no-pull )         NO_PULL=true
+                            START_OLLAMA=true
+                            START_DOCKER=true
                             ;;
         -r | --restart )    RESTART_CONTAINER=true
                             CONTAINER_NAME="$2"

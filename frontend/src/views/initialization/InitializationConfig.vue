@@ -282,7 +282,7 @@
                                             name="refresh" 
                                             class="refresh-icon" 
                                             :class="{ spinning: modelStatus.embedding.checking }"
-                                            @click="checkRemoteModelStatus('embedding')" 
+                                            @click="checkEmbeddingModelStatus()" 
                                         />
                                     </t-tooltip>
                                     <t-icon 
@@ -1422,7 +1422,7 @@ const onModelNameInput = (type: 'llm' | 'embedding' | 'vlm') => {
             if (type === 'llm' && formData.llm.source === 'remote' && formData.llm.baseUrl) {
                 await checkRemoteModelStatus('llm');
             } else if (type === 'embedding' && formData.embedding.source === 'remote' && formData.embedding.baseUrl) {
-                await checkRemoteModelStatus('embedding');
+                await checkEmbeddingModelStatus();
             } else if (type === 'vlm' && !isVlmOllama.value) {
                 // VLM远程API校验可以在这里添加
             }
@@ -1465,7 +1465,11 @@ const onRemoteConfigChange = async (type: 'llm' | 'embedding') => {
     
     // 如果配置完整，检查模型
     if (formData[type].modelName && formData[type].baseUrl) {
-        await checkRemoteModelStatus(type);
+        if (type === 'llm') {
+            await checkRemoteModelStatus(type);
+        } else if (type === 'embedding') {
+            await checkEmbeddingModelStatus();
+        }
     }
 };
 
@@ -1492,13 +1496,17 @@ const onRemoteConfigInput = async (type: 'llm' | 'embedding') => {
             form.value?.validate([`${type}.modelName`, `${type}.baseUrl`]);
             
             // 自动检查远程API模型状态
-            await checkRemoteModelStatus(type);
+            if (type === 'llm') {
+                await checkRemoteModelStatus(type);
+            } else if (type === 'embedding') {
+                await checkEmbeddingModelStatus();
+            }
         }
     }, 500); // 500ms防抖延迟
 };
 
 // 检查远程模型
-const checkRemoteModelStatus = async (type: 'llm' | 'embedding') => {
+const checkRemoteModelStatus = async (type: 'llm') => {
     if (!formData[type].modelName || !formData[type].baseUrl) {
         return;
     }
@@ -1752,15 +1760,8 @@ onMounted(async () => {
     // 加载当前配置
     await loadCurrentConfig();
 
-    // 检查Ollama状态
-    const needOllamaCheck = 
-        formData.llm.source === 'local' || 
-        formData.embedding.source === 'local' || 
-        (formData.multimodal.enabled && formData.multimodal.vlm.interfaceType === 'ollama');
-    
-    if (needOllamaCheck) {
-        await refreshOllamaSummary();
-    }
+    // 总是检查Ollama状态，因为这是独立于具体配置的
+    await refreshOllamaSummary();
     
     // 检查已配置模型状态
     await checkAllConfiguredModels();
@@ -2220,7 +2221,7 @@ const checkAllConfiguredModels = async () => {
         if (formData.embedding.source === 'local' && formData.embedding.modelName && ollamaStatus.available) {
             await checkAllOllamaModels();
         } else if (formData.embedding.source === 'remote' && formData.embedding.modelName && formData.embedding.baseUrl) {
-            await checkRemoteModelStatus('embedding');
+            await checkEmbeddingModelStatus();
         }
     }
     
@@ -2241,6 +2242,51 @@ const checkAllConfiguredModels = async () => {
 
 const onDimensionInput = (event: any) => {
     formData.embedding.dimension = Number(event.target.value);
+};
+
+// 检查Embedding模型状态
+const checkEmbeddingModelStatus = async () => {
+    if (!formData.embedding.modelName) {
+        return;
+    }
+    
+    try {
+        modelStatus.embedding.checking = true;
+        modelStatus.embedding.checked = false;
+        modelStatus.embedding.available = false;
+        modelStatus.embedding.message = '';
+        
+        const result = await testEmbeddingModel({
+            source: formData.embedding.source as 'local' | 'remote',
+            modelName: formData.embedding.modelName,
+            baseUrl: formData.embedding.source === 'remote' ? formData.embedding.baseUrl : undefined,
+            apiKey: formData.embedding.apiKey || undefined,
+            dimension: formData.embedding.dimension || undefined,
+        });
+        
+        modelStatus.embedding.checked = true;
+        modelStatus.embedding.available = result.available || false;
+        modelStatus.embedding.message = result.message || '';
+        
+        // 如果检测到维度信息，自动更新
+        if (result.available && result.dimension && result.dimension > 0) {
+            formData.embedding.dimension = result.dimension;
+        }
+        
+        // 触发表单验证
+        setTimeout(() => {
+            form.value?.validate(['embedding.modelName']);
+        }, 100);
+        
+    } catch (error) {
+        console.error('检查Embedding模型失败:', error);
+        modelStatus.embedding.checked = true;
+        modelStatus.embedding.available = false;
+        const err = error as any;
+        modelStatus.embedding.message = (err && err.message) || '检查失败';
+    } finally {
+        modelStatus.embedding.checking = false;
+    }
 };
 
 // 检测并自动填写 Embedding 维度
