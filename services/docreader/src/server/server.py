@@ -18,6 +18,52 @@ from parser import Parser, OCREngine
 from parser.config import ChunkingConfig
 from utils.request import request_id_context, init_logging_request_id
 
+# --- Encoding utilities: sanitize strings to valid UTF-8 and (optionally) multi-encoding read ---
+import re
+from typing import Optional
+
+try:
+    # Optional dependency for charset detection; install via `pip install charset-normalizer`
+    from charset_normalizer import from_bytes as _cn_from_bytes  # type: ignore
+except Exception:  # pragma: no cover
+    _cn_from_bytes = None  # type: ignore
+
+# Surrogate range U+D800..U+DFFF are invalid Unicode scalar values and cannot be encoded to UTF-8
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+def to_valid_utf8_text(s: Optional[str]) -> str:
+    """Return a UTF-8 safe string for protobuf.
+
+    - Replace any surrogate code points with U+FFFD
+    - Re-encode with errors='replace' to ensure valid UTF-8
+    """
+    if not s:
+        return ""
+    s = _SURROGATE_RE.sub("\uFFFD", s)
+    return s.encode("utf-8", errors="replace").decode("utf-8")
+
+def read_text_with_fallback(file_path: str) -> str:
+    """Read text from file supporting multiple encodings with graceful fallback.
+
+    This server currently receives bytes over gRPC and delegates decoding to the parser.
+    This helper is provided for future local-file reads if needed.
+    """
+    with open(file_path, "rb") as f:
+        raw = f.read()
+    if _cn_from_bytes is not None:
+        try:
+            result = _cn_from_bytes(raw).best()
+            if result:
+                return str(result)
+        except Exception:
+            pass
+    for enc in ("utf-8", "gb18030", "latin-1"):
+        try:
+            return raw.decode(enc, errors="replace")
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
 # Ensure no existing handlers
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
@@ -233,25 +279,31 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 return ReadResponse(error=str(e))
                 
     def _convert_chunk_to_proto(self, chunk):
-        """Convert internal Chunk object to protobuf Chunk message"""
+        """Convert internal Chunk object to protobuf Chunk message
+        Ensures all string fields are valid UTF-8 for protobuf (no lone surrogates).
+        """
+        # Clean helper for strings
+        _c = to_valid_utf8_text
+
         proto_chunk = Chunk(
-            content=chunk.content,
-            seq=chunk.seq,
-            start=chunk.start,
-            end=chunk.end,
+            content=_c(getattr(chunk, "content", None)),
+            seq=getattr(chunk, "seq", 0),
+            start=getattr(chunk, "start", 0),
+            end=getattr(chunk, "end", 0),
         )
         
         # If chunk has images attribute and is not empty, add image info
         if hasattr(chunk, "images") and chunk.images:
-            logger.info(f"Adding {len(chunk.images)} images to chunk {chunk.seq}")
+            logger.info(f"Adding {len(chunk.images)} images to chunk {getattr(chunk, 'seq', 0)}")
             for img_info in chunk.images:
+                # img_info expected as dict
                 proto_image = Image(
-                    url=img_info.get("cos_url", ""),
-                    caption=img_info.get("caption", ""),
-                    ocr_text=img_info.get("ocr_text", ""),
-                    original_url=img_info.get("original_url", ""),
-                    start=img_info.get("start", 0),
-                    end=img_info.get("end", 0)
+                    url=_c(img_info.get("cos_url", "")),
+                    caption=_c(img_info.get("caption", "")),
+                    ocr_text=_c(img_info.get("ocr_text", "")),
+                    original_url=_c(img_info.get("original_url", "")),
+                    start=int(img_info.get("start", 0) or 0),
+                    end=int(img_info.get("end", 0) or 0),
                 )
                 proto_chunk.images.append(proto_image)
                 

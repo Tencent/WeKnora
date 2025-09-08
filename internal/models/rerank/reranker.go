@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-    
+
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -26,16 +26,16 @@ type RankResult struct {
 	Document       DocumentInfo `json:"document"`
 	RelevanceScore float64      `json:"relevance_score"`
 }
-//Handles the RelevanceScore field by checking if RelevanceScore exists first, otherwise falls back to Score field
+
+// Handles the RelevanceScore field by checking if RelevanceScore exists first, otherwise falls back to Score field
 func (r *RankResult) UnmarshalJSON(data []byte) error {
 
 	var temp struct {
-		Index          int           `json:"index"`
-		Document       DocumentInfo  `json:"document"`
-		RelevanceScore *float64      `json:"relevance_score"`
-		Score          *float64      `json:"score"`
+		Index          int          `json:"index"`
+		Document       DocumentInfo `json:"document"`
+		RelevanceScore *float64     `json:"relevance_score"`
+		Score          *float64     `json:"score"`
 	}
-
 
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return fmt.Errorf("failed to unmarshal rank result: %w", err)
@@ -50,12 +50,32 @@ func (r *RankResult) UnmarshalJSON(data []byte) error {
 		r.RelevanceScore = *temp.Score
 	}
 
-
 	return nil
 }
 
 type DocumentInfo struct {
 	Text string `json:"text"`
+}
+
+// UnmarshalJSON handles both string and object formats for DocumentInfo
+func (d *DocumentInfo) UnmarshalJSON(data []byte) error {
+	// First try to unmarshal as a string
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		d.Text = text
+		return nil
+	}
+
+	// If that fails, try to unmarshal as an object with text field
+	var temp struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return fmt.Errorf("failed to unmarshal DocumentInfo: %w", err)
+	}
+
+	d.Text = temp.Text
+	return nil
 }
 
 type RerankerConfig struct {
