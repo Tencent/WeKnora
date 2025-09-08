@@ -1,0 +1,108 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weknora-mcp-server"
+version = "1.0.0"
+description = "WeKnora MCP Server - Model Context Protocol server for WeKnora API"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "WeKnora Team", email = "support@weknora.com"}
+]
+maintainers = [
+    {name = "WeKnora Team", email = "support@weknora.com"}
+]
+keywords = ["mcp", "model-context-protocol", "weknora", "knowledge-management", "api-server"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "mcp>=1.0.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0",
+    "flake8>=6.0",
+    "mypy>=1.0",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP"
+Documentation = "https://docs.weknora.com"
+Repository = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP"
+"Bug Reports" = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP/issues"
+Changelog = "https://github.com/NannaOlympicBroadcast/WeKnoraMCP/blob/main/CHANGELOG.md"
+
+[project.scripts]
+weknora-mcp-server = "main:sync_main"
+weknora-server = "run_server:main"
+
+[tool.setuptools]
+py-modules = ["weknora_mcp_server", "main", "run_server", "run", "test_module"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"*" = ["*.md", "*.txt", "*.yml", "*.yaml"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --strict-config"
+testpaths = ["tests"]
+asyncio_mode = "auto"
