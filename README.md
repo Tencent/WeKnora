@@ -208,10 +208,6 @@ http://localhost
 </table>
 
 WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
-### 配套MCP服务器
-详见：
-https://github.com/NannaOlympicBroadcast/WeKnoraMCP
-<img width="950" height="2063" alt="118d078426f42f3d4983c13386085d7f" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />
 
 ## 📘 文档
 
