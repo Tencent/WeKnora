@@ -8,6 +8,13 @@ services:
       - data-files:/data/files
       - ./config/config.yaml:/app/config/config.yaml
     environment:
+      - COS_SECRET_ID=${COS_SECRET_ID}
+      - COS_SECRET_KEY=${COS_SECRET_KEY}
+      - COS_REGION=${COS_REGION}
+      - COS_BUCKET_NAME=${COS_BUCKET_NAME}
+      - COS_APP_ID=${COS_APP_ID}
+      - COS_PATH_PREFIX=${COS_PATH_PREFIX}
+      - COS_ENABLE_OLD_DOMAIN=${COS_ENABLE_OLD_DOMAIN}
       - GIN_MODE=${GIN_MODE}
       - DB_DRIVER=postgres
       - DB_HOST=postgres
