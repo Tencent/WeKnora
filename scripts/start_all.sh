@@ -29,6 +29,7 @@ show_help() {
     echo "  -c, --check    检查环境并诊断问题"
     echo "  -r, --restart  重新构建并重启指定容器"
     echo "  -l, --list     列出所有正在运行的容器"
+    echo "  -p, --pull     拉取最新的Docker镜像"
     echo "  -v, --version  显示版本信息"
     exit 0
 }
@@ -332,8 +333,8 @@ start_docker() {
     
     # 启动基本服务
     log_info "启动核心服务容器..."
-	# 统一通过已检测到的 Compose 命令启动
-	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build -d
+	# 统一通过已检测到的 Compose 命令启动，添加 --pull always 确保使用最新镜像
+	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD up --build --pull always -d
     if [ $? -ne 0 ]; then
         log_error "Docker容器启动失败"
         return 1
@@ -389,6 +390,45 @@ list_containers() {
     # 列出所有容器
     echo -e "${BLUE}当前正在运行的容器:${NC}"
 	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | sort
+    
+    return 0
+}
+
+# 拉取最新的Docker镜像
+pull_images() {
+    log_info "正在拉取最新的Docker镜像..."
+    
+    # 检查Docker环境
+    check_docker
+    if [ $? -ne 0 ]; then
+        return 1
+    fi
+    
+    # 检查.env文件
+    check_env_file
+    
+    # 读取.env文件
+    source "$PROJECT_ROOT/.env"
+    storage_type=${STORAGE_TYPE:-local}
+    
+    check_platform
+    
+    # 进入项目根目录再执行docker-compose命令
+    cd "$PROJECT_ROOT"
+    
+    # 拉取所有镜像
+    log_info "拉取所有服务的最新镜像..."
+	PLATFORM=$PLATFORM "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD pull
+    if [ $? -ne 0 ]; then
+        log_error "镜像拉取失败"
+        return 1
+    fi
+    
+    log_success "所有镜像已成功拉取到最新版本"
+    
+    # 显示拉取的镜像信息
+    log_info "已拉取的镜像:"
+    docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.CreatedAt}}\t{{.Size}}" | head -10
     
     return 0
 }
@@ -523,6 +563,7 @@ STOP_SERVICES=false
 CHECK_ENVIRONMENT=false
 LIST_CONTAINERS=false
 RESTART_CONTAINER=false
+PULL_IMAGES=false
 CONTAINER_NAME=""
 
 # 没有参数时默认启动所有服务
@@ -548,6 +589,8 @@ while [ "$1" != "" ]; do
                             ;;
         -l | --list )       LIST_CONTAINERS=true
                             ;;
+        -p | --pull )       PULL_IMAGES=true
+                            ;;
         -r | --restart )    RESTART_CONTAINER=true
                             CONTAINER_NAME="$2"
                             shift
@@ -570,6 +613,12 @@ fi
 # 列出所有容器
 if [ "$LIST_CONTAINERS" = true ]; then
     list_containers
+    exit $?
+fi
+
+# 拉取最新镜像
+if [ "$PULL_IMAGES" = true ]; then
+    pull_images
     exit $?
 fi
 
