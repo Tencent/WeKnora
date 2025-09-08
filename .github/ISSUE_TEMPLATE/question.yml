@@ -1,0 +1,108 @@
+name: ❓ 问题咨询
+description: 询问关于 WeKnora 的问题或寻求帮助
+title: "[Question]: "
+labels: ["question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提问！请提供足够的信息，这样我们就能更好地帮助您。
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: 问题类别
+      description: 选择您的问题类别
+      options:
+        - 安装和部署
+        - 配置问题
+        - 使用问题
+        - 性能问题
+        - 集成问题
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 问题描述
+      description: 请详细描述您的问题
+      placeholder: "您遇到了什么问题？需要什么帮助？"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景信息
+      description: 请提供相关的背景信息
+      placeholder: |
+        - 您正在尝试做什么？
+        - 您期望的结果是什么？
+        - 您已经尝试了什么？
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      description: 您当前使用的操作系统
+      placeholder: "例如: macOS 13.0, Ubuntu 20.04, Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 其他环境信息
+      description: 请提供其他相关的环境信息
+      placeholder: |
+        - WeKnora 版本: [例如: v1.0.0]
+        - 部署方式: [例如: Docker, 源码编译]
+        - 其他相关信息...
+
+  - type: markdown
+    attributes:
+      value: |
+        ## 📋 日志收集指南（如需要）
+        
+        如果问题涉及错误或需要调试，请收集相关日志：
+        
+        **应用模块日志：**
+        ```bash
+        docker exec -it WeKnora-app tail -f /var/log/WeKnora.log
+        ```
+        
+        **文档解析模块日志：**
+        ```bash
+        docker exec -it WeKnora-docreader tail -f /var/log/docreader.log
+        ```
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 如果有相关日志或错误信息，请粘贴在这里
+      placeholder: "粘贴相关日志或错误信息..."
+      render: shell
+
+  - type: textarea
+    id: research
+    attributes:
+      label: 已查找的资源
+      description: 请列出您已经查看过的文档、issues 或其他资源
+      placeholder: |
+        - 已查看的文档: [例如: README.md, API.md]
+        - 已查看的 issues: [例如: #123, #456]
+        - 其他资源: [例如: 官方文档, Stack Overflow]
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 确认事项
+      description: 请确认以下事项
+      options:
+        - label: 我已经搜索了现有的 issues 和文档
+          required: true
+        - label: 我已经提供了足够的信息来帮助理解问题
+          required: true

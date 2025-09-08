@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: WeKnora 文档
+    url: https://github.com/your-org/WeKnora/blob/main/README.md
+    about: 查看 WeKnora 的使用文档和说明
+  - name: 讨论区
+    url: https://github.com/your-org/WeKnora/discussions
+    about: 在讨论区提问或分享想法

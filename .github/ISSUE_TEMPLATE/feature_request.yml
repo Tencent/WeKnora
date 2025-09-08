@@ -1,0 +1,88 @@
+name: ✨ 功能请求
+description: 建议新功能或改进现有功能
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您提出功能请求！请详细描述您的建议，这将帮助我们更好地理解您的需求。
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: 相关组件
+      description: 选择功能请求相关的组件
+      options:
+        - 前端界面
+        - 后端服务及API
+        - 文档解析服务
+        - 向量数据库
+        - 模型服务
+        - 配置管理
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题描述
+      description: 请描述您遇到的问题或当前功能的不足
+      placeholder: "当前功能有什么问题或限制？"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 建议的解决方案
+      description: 请详细描述您希望看到的功能或改进
+      placeholder: "您希望如何解决这个问题？"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 描述您考虑过的其他解决方案
+      placeholder: "您是否考虑过其他解决方案？"
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 优先级
+      description: 您认为这个功能请求的优先级如何？
+      options:
+        - 低 - 可以稍后考虑
+        - 中 - 有一定价值
+        - 高 - 对工作流程很重要
+        - 紧急 - 阻塞了重要工作
+    validations:
+      required: true
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: 使用场景
+      description: 请描述这个功能的具体使用场景
+      placeholder: "在什么情况下您会使用这个功能？"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 补充信息
+      description: 任何其他相关信息、截图或链接
+      placeholder: "添加任何其他相关信息..."
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: 确认事项
+      description: 请确认以下事项
+      options:
+        - label: 我已经搜索了现有的 issues，确认这是一个新的功能请求
+          required: true
+        - label: 我理解这个功能请求可能需要讨论和评估
+          required: true
