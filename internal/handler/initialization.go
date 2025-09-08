@@ -1361,7 +1361,8 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 				"content": "test",
 			},
 		},
-		"max_tokens": 1,
+		"max_tokens":      1,
+		"enable_thinking": false, // for dashscope.aliyuncs qwen3-32b
 	}
 
 	jsonData, err := json.Marshal(testRequest)
@@ -1386,6 +1387,11 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err == nil {
+		logger.Infof(ctx, "Response body: %s", string(body))
+	}
+
 	// 检查响应状态
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// 连接成功，模型可用
@@ -1399,58 +1405,6 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	} else {
 		return false, fmt.Sprintf("API返回错误状态: %d", resp.StatusCode)
 	}
-}
-
-// checkModelExistence 检查指定模型是否在模型列表中存在
-func (h *InitializationHandler) checkModelExistence(ctx context.Context,
-	resp *http.Response, modelName string) (bool, string) {
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return true, "连接正常，但无法验证模型列表"
-	}
-
-	var modelsResp struct {
-		Data []struct {
-			ID     string `json:"id"`
-			Object string `json:"object"`
-		} `json:"data"`
-		Object string `json:"object"`
-	}
-
-	// 尝试解析模型列表响应
-	if err := json.Unmarshal(body, &modelsResp); err != nil {
-		// 如果无法解析，可能是非标准API，只要连接成功就认为可用
-		return true, "连接正常"
-	}
-
-	// 检查模型是否在列表中
-	for _, model := range modelsResp.Data {
-		if model.ID == modelName {
-			return true, "连接正常，模型存在"
-		}
-	}
-
-	// 模型不在列表中，返回可用的模型建议
-	if len(modelsResp.Data) > 0 {
-		availableModels := make([]string, 0, min(3, len(modelsResp.Data)))
-		for i, model := range modelsResp.Data {
-			if i >= 3 {
-				break
-			}
-			availableModels = append(availableModels, model.ID)
-		}
-		return false, fmt.Sprintf("模型 '%s' 不存在，可用模型: %s", modelName, strings.Join(availableModels, ", "))
-	}
-
-	return false, fmt.Sprintf("模型 '%s' 不存在", modelName)
-}
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // checkRerankModelConnection 检查Rerank模型连接和功能的内部方法
