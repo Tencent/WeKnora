@@ -42,6 +42,9 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
+      - name: Read VERSION file
+        run: echo "VERSION=$(cat VERSION)" >> $GITHUB_ENV
+      
       - name: Build ${{ matrix.service_name }} Image
         uses: docker/build-push-action@v3
         with:
@@ -49,4 +52,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           file: ${{ matrix.file }}
           context: ${{ matrix.context }}
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:latest
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:${{ env.VERSION }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:cache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:cache,mode=max
