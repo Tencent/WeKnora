@@ -33,6 +33,7 @@ type ModelSource string
 const (
 	ModelSourceLocal  ModelSource = "local"  // Local model
 	ModelSourceRemote ModelSource = "remote" // Remote model
+	ModelSourceAliyun ModelSource = "aliyun" // Aliyun DashScope model
 )
 
 type EmbeddingParameters struct {

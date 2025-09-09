@@ -91,6 +91,8 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	switch strings.ToLower(string(config.Source)) {
 	case string(types.ModelSourceRemote):
 		return NewOpenAIReranker(config)
+	case string(types.ModelSourceAliyun):
+		return NewAliyunReranker(config)
 	default:
 		return nil, fmt.Errorf("unsupported rerank model source: %s", config.Source)
 	}

@@ -16,6 +16,7 @@ export interface InitializationConfig {
         dimension?: number; // 添加embedding维度字段
     };
     rerank: {
+        source: string;
         modelName: string;
         baseUrl: string;
         apiKey?: string;
@@ -235,6 +236,7 @@ export function testEmbeddingModel(modelConfig: {
 
 
 export function checkRerankModel(modelConfig: {
+    source: string;
     modelName: string;
     baseUrl: string;
     apiKey?: string;

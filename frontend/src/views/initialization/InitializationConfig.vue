@@ -335,9 +335,19 @@
                 <!-- Rerank 详细配置 -->
                 <div v-if="formData.rerank.enabled" class="rerank-config">
                     <div class="form-row">
+                        <t-form-item label="模型来源" name="rerank.source">
+                            <t-radio-group v-model="formData.rerank.source" @change="onModelSourceChange('rerank')">
+                                <t-radio value="remote">Remote API (远程)</t-radio>
+                                <t-radio value="aliyun">Aliyun DashScope (阿里云)</t-radio>
+                            </t-radio-group>
+                        </t-form-item>
+                    </div>
+                    
+                    <div class="form-row">
                         <t-form-item label="模型名称" name="rerank.modelName">
                             <div class="model-input-with-status">
-                                <t-input v-model="formData.rerank.modelName" placeholder="例如: bge-reranker-v2-m3" 
+                                <t-input v-model="formData.rerank.modelName" 
+                                         :placeholder="formData.rerank.source === 'aliyun' ? '例如: text-rerank' : '例如: bge-reranker-v2-m3'" 
                                          @blur="onRerankConfigChange"
                                          @input="onRerankConfigInput" />
                                 <div class="model-status-icon">
@@ -361,7 +371,8 @@
                     <div class="form-row">
                         <t-form-item label="Base URL" name="rerank.baseUrl">
                             <div class="url-input-with-check">
-                                <t-input v-model="formData.rerank.baseUrl" placeholder="例如: http://localhost:11434, 去除末尾/rerank路径后的URL的前面部分" 
+                                <t-input v-model="formData.rerank.baseUrl" 
+                                         :placeholder="formData.rerank.source === 'aliyun' ? '例如: https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank' : '例如: http://localhost:11434, 去除末尾/rerank路径后的URL的前面部分'" 
                                          @blur="onRerankConfigChange"
                                          @input="onRerankConfigInput" />
                                 <div v-if="formData.rerank.modelName && formData.rerank.baseUrl" class="check-action">
@@ -868,6 +879,7 @@ const formData = reactive({
     },
     rerank: {
         enabled: false,
+        source: 'remote',
         modelName: '',
         baseUrl: '',
         apiKey: ''
@@ -1344,7 +1356,7 @@ onUnmounted(() => {
 });
 
 // 事件处理
-const onModelSourceChange = async (type: 'llm' | 'embedding') => {
+const onModelSourceChange = async (type: 'llm' | 'embedding' | 'rerank') => {
     // 重置模型状态
     modelStatus[type].checked = false;
     modelStatus[type].available = false;
@@ -1353,6 +1365,15 @@ const onModelSourceChange = async (type: 'llm' | 'embedding') => {
     // 如果切换到本地，检查Ollama状态
     if (formData[type].source === 'local' && !ollamaStatus.checked) {
         await checkOllama();
+    }
+    
+    // 对于rerank，根据source设置默认的baseUrl
+    if (type === 'rerank') {
+        if (formData.rerank.source === 'aliyun') {
+            formData.rerank.baseUrl = 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank';
+        } else if (formData.rerank.source === 'remote') {
+            formData.rerank.baseUrl = '';
+        }
     }
 };
 
@@ -1754,6 +1775,7 @@ const handleSubmit = async () => {
 // 监听表单变化
 watch(() => formData.llm.source, () => onModelSourceChange('llm'));
 watch(() => formData.embedding.source, () => onModelSourceChange('embedding'));
+watch(() => formData.rerank.source, () => onModelSourceChange('rerank'));
 
 // 组件挂载时检查Ollama状态
 onMounted(async () => {
@@ -1826,6 +1848,7 @@ const checkRerankModelStatus = async () => {
         modelStatus.rerank.message = '';
         
         const result = await checkRerankModel({
+            source: formData.rerank.source,
             modelName: formData.rerank.modelName,
             baseUrl: formData.rerank.baseUrl,
             apiKey: formData.rerank.apiKey
