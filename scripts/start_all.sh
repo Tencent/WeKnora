@@ -703,8 +703,8 @@ else
     if [ "$START_OLLAMA" = true ] && [ "$START_DOCKER" = true ]; then
         if [ $OLLAMA_RESULT -eq 0 ] && [ $DOCKER_RESULT -eq 0 ]; then
             log_success "所有服务启动完成，可通过以下地址访问:"
-            echo -e "${GREEN}  - 前端界面: http://localhost${NC}"
-            echo -e "${GREEN}  - API接口: http://localhost:8080${NC}"
+            echo -e "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
+            echo -e "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
             echo -e "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
         else
             log_error "部分服务启动失败，请检查日志并修复问题"
@@ -714,8 +714,8 @@ else
         echo -e "${GREEN}  - Ollama API: http://localhost:$OLLAMA_PORT${NC}"
     elif [ "$START_DOCKER" = true ] && [ $DOCKER_RESULT -eq 0 ]; then
         log_success "Docker容器启动完成，可通过以下地址访问:"
-        echo -e "${GREEN}  - 前端界面: http://localhost${NC}"
-        echo -e "${GREEN}  - API接口: http://localhost:8080${NC}"
+        echo -e "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
+        echo -e "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
         echo -e "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
     fi
 fi

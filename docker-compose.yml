@@ -3,7 +3,7 @@ services:
     image: wechatopenai/weknora-app:latest
     container_name: WeKnora-app
     ports:
-      - "8080:8080"
+      - "${APP_PORT:-8080}:8080"
     volumes:
       - data-files:/data/files
       - ./config/config.yaml:/app/config/config.yaml
@@ -98,7 +98,7 @@ services:
     image: wechatopenai/weknora-ui:latest
     container_name: WeKnora-frontend
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - app
     networks:
@@ -109,7 +109,7 @@ services:
     image: wechatopenai/weknora-docreader:latest
     container_name: WeKnora-docreader
     ports:
-      - "50051:50051"
+      - "${DOCREADER_PORT:-50051}:50051"
     environment:
       - COS_SECRET_ID=${COS_SECRET_ID}
       - COS_SECRET_KEY=${COS_SECRET_KEY}
