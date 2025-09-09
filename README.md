@@ -15,150 +15,153 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.1.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
 <p align="center">
-| <a href="./README_EN.md"><b>English</b></a> | <b>简体中文</b> | <a href="./README_JA.md"><b>日本語</b></a> |
+| <b>English</b> | <a href="./README_CN.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> |
 </p>
 
 <p align="center">
   <h4 align="center">
 
-  [项目介绍](#-项目介绍) • [架构设计](#-架构设计) • [核心特性](#-核心特性) • [快速开始](#-快速开始) • [文档](#-文档) • [开发指南](#-开发指南)
-
+  [Overview](#-overview) • [Architecture](#-architecture) • [Key Features](#-key-features) • [Getting Started](#-getting-started) • [API Reference](#-api-reference) • [Developer Guide](#-developer-guide)
+  
   </h4>
 </p>
 
-# 💡 WeKnora - 基于大模型的文档理解检索框架
+# 💡 WeKnora - LLM-Powered Document Understanding & Retrieval Framework
 
-## 📌 项目介绍
+## 📌 Overview
 
-[**WeKnora（维娜拉）**](https://weknora.weixin.qq.com) 是一款基于大语言模型（LLM）的文档理解与语义检索框架，专为结构复杂、内容异构的文档场景而打造。
+[**WeKnora**](https://weknora.weixin.qq.com) is an LLM-powered framework designed for deep document understanding and semantic retrieval, especially for handling complex, heterogeneous documents. 
 
-框架采用模块化架构，融合多模态预处理、语义向量索引、智能召回与大模型生成推理，构建起高效、可控的文档问答流程。核心检索流程基于 **RAG（Retrieval-Augmented Generation）** 机制，将上下文相关片段与语言模型结合，实现更高质量的语义回答。
+It adopts a modular architecture that combines multimodal preprocessing, semantic vector indexing, intelligent retrieval, and large language model inference. At its core, WeKnora follows the **RAG (Retrieval-Augmented Generation)** paradigm, enabling high-quality, context-aware answers by combining relevant document chunks with model reasoning.
 
-**官网：** https://weknora.weixin.qq.com
+**Website:** https://weknora.weixin.qq.com
 
-## 🏗️ 架构设计
+## 🏗️ Architecture
 
-![weknora-pipelone.png](./docs/images/pipeline.jpg)
+![weknora-pipeline.png](./docs/images/pipeline.jpg)
 
-WeKnora 采用现代化模块化设计，构建了一条完整的文档理解与检索流水线。系统主要包括文档解析、向量化处理、检索引擎和大模型推理等核心模块，每个组件均可灵活配置与扩展。
+WeKnora employs a modern modular design to build a complete document understanding and retrieval pipeline. The system primarily includes document parsing, vector processing, retrieval engine, and large model inference as core modules, with each component being flexibly configurable and extendable.
 
-## 🎯 核心特性
+## 🎯 Key Features
 
-- **🔍 精准理解**：支持 PDF、Word、图片等文档的结构化内容提取，统一构建语义视图
-- **🧠 智能推理**：借助大语言模型理解文档上下文与用户意图，支持精准问答与多轮对话
-- **🔧 灵活扩展**：从解析、嵌入、召回到生成全流程解耦，便于灵活集成与定制扩展
-- **⚡ 高效检索**：混合多种检索策略：关键词、向量、知识图谱
-- **🎯 简单易用**：直观的Web界面与标准API，零技术门槛快速上手
-- **🔒 安全可控**：支持本地化与私有云部署，数据完全自主可控
+- **🔍 Precise Understanding**: Structured content extraction from PDFs, Word documents, images and more into unified semantic views
+- **🧠 Intelligent Reasoning**: Leverages LLMs to understand document context and user intent for accurate Q&A and multi-turn conversations
+- **🔧 Flexible Extension**: All components from parsing and embedding to retrieval and generation are decoupled for easy customization
+- **⚡ Efficient Retrieval**: Hybrid retrieval strategies combining keywords, vectors, and knowledge graphs
+- **🎯 User-Friendly**: Intuitive web interface and standardized APIs for zero technical barriers
+- **🔒 Secure & Controlled**: Support for local deployment and private cloud, ensuring complete data sovereignty
 
-## 📊 适用场景
+## 📊 Application Scenarios
 
-| 应用场景 | 具体应用 | 核心价值 |
+| Scenario | Applications | Core Value |
 |---------|----------|----------|
-| **企业知识管理** | 内部文档检索、规章制度问答、操作手册查询 | 提升知识查找效率，降低培训成本 |
-| **科研文献分析** | 论文检索、研究报告分析、学术资料整理 | 加速文献调研，辅助研究决策 |
-| **产品技术支持** | 产品手册问答、技术文档检索、故障排查 | 提升客户服务质量，减少技术支持负担 |
-| **法律合规审查** | 合同条款检索、法规政策查询、案例分析 | 提高合规效率，降低法律风险 |
-| **医疗知识辅助** | 医学文献检索、诊疗指南查询、病例分析 | 辅助临床决策，提升诊疗质量 |
+| **Enterprise Knowledge Management** | Internal document retrieval, policy Q&A, operation manual search | Improve knowledge discovery efficiency, reduce training costs |
+| **Academic Research Analysis** | Paper retrieval, research report analysis, scholarly material organization | Accelerate literature review, assist research decisions |
+| **Product Technical Support** | Product manual Q&A, technical documentation search, troubleshooting | Enhance customer service quality, reduce support burden |
+| **Legal & Compliance Review** | Contract clause retrieval, regulatory policy search, case analysis | Improve compliance efficiency, reduce legal risks |
+| **Medical Knowledge Assistance** | Medical literature retrieval, treatment guideline search, case analysis | Support clinical decisions, improve diagnosis quality |
 
-## 🧩 功能模块能力
+## 🧩 Feature Matrix
 
-| 功能模块 | 支持情况 | 说明 |
+| Module | Support | Description |
 |---------|---------|------|
-| 文档格式支持 | ✅ PDF / Word / Txt / Markdown / 图片（含 OCR / Caption） | 支持多种结构化与非结构化文档内容解析，支持图文混排与图像文字提取 |
-| 嵌入模型支持 | ✅ 本地模型、BGE / GTE API 等 | 支持自定义 embedding 模型，兼容本地部署与云端向量生成接口 |
-| 向量数据库接入 | ✅ PostgreSQL（pgvector）、Elasticsearch | 支持主流向量索引后端，可灵活切换与扩展，适配不同检索场景 |
-| 检索机制 | ✅ BM25 / Dense Retrieve / GraphRAG | 支持稠密/稀疏召回、知识图谱增强检索等多种策略，可自由组合召回-重排-生成流程 |
-| 大模型集成 | ✅ 支持 Qwen、DeepSeek 等，思考/非思考模式切换 | 可接入本地大模型（如 Ollama 启动）或调用外部 API 服务，支持推理模式灵活配置 |
-| 问答能力 | ✅ 上下文感知、多轮对话、提示词模板 | 支持复杂语义建模、指令控制与链式问答，可配置提示词与上下文窗口 |
-| 端到端测试支持 | ✅ 检索+生成过程可视化与指标评估 | 提供一体化链路测试工具，支持评估召回命中率、回答覆盖度、BLEU / ROUGE 等主流指标 |
-| 部署模式 | ✅ 支持本地部署 / Docker 镜像 | 满足私有化、离线部署与灵活运维的需求 |
-| 用户界面 | ✅ Web UI + RESTful API | 提供交互式界面与标准 API 接口，适配开发者与业务用户使用习惯 |
+| Document Formats | ✅ PDF / Word / Txt / Markdown / Images (with OCR / Caption) | Support for structured and unstructured documents with text extraction from images |
+| Embedding Models | ✅ Local models, BGE / GTE APIs, etc. | Customizable embedding models, compatible with local deployment and cloud vector generation APIs |
+| Vector DB Integration | ✅ PostgreSQL (pgvector), Elasticsearch | Support for mainstream vector index backends, flexible switching for different retrieval scenarios |
+| Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG | Support for sparse/dense recall and knowledge graph-enhanced retrieval with customizable retrieve-rerank-generate pipelines |
+| LLM Integration | ✅ Support for Qwen, DeepSeek, etc., with thinking/non-thinking mode switching | Compatible with local models (e.g., via Ollama) or external API services with flexible inference configuration |
+| QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates | Support for complex semantic modeling, instruction control and chain-of-thought Q&A with configurable prompts and context windows |
+| E2E Testing | ✅ Retrieval+generation process visualization and metric evaluation | End-to-end testing tools for evaluating recall hit rates, answer coverage, BLEU/ROUGE and other metrics |
+| Deployment Modes | ✅ Support for local deployment / Docker images | Meets private, offline deployment and flexible operation requirements |
+| User Interfaces | ✅ Web UI + RESTful API | Interactive interface and standard API endpoints, suitable for both developers and business users |
 
-## 🚀 快速开始
+## 🚀 Getting Started
 
-### 🛠 环境要求
+### 🛠 Prerequisites
 
-确保本地已安装以下工具：
+Make sure the following tools are installed on your system:
 
 * [Docker](https://www.docker.com/)
 * [Docker Compose](https://docs.docker.com/compose/)
 * [Git](https://git-scm.com/)
 
-### 📦 安装步骤
+### 📦 Installation
 
-#### ① 克隆代码仓库
+#### ① Clone the repository
 
 ```bash
-# 克隆主仓库
+# Clone the main repository
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
 ```
 
-#### ② 配置环境变量
+#### ② Configure environment variables
 
 ```bash
-# 复制示例配置文件
+# Copy example env file
 cp .env.example .env
 
-# 编辑 .env，填入对应配置信息
-# 所有变量说明详见 .env.example 注释
+# Edit .env and set required values
+# All variables are documented in the .env.example comments
 ```
 
-#### ③ 启动服务
+#### ③ Start the services
 
 ```bash
-# 启动全部服务（含 Ollama 与后端容器）
+# Start all services (Ollama + backend containers)
 ./scripts/start_all.sh
-# 或
+# Or
 make start-all
 ```
 
-#### ③ 启动服务备选
+#### ③ Start the services (backup)
 
 ```bash
-# 启动 ollama 服务 (可选)
+# Start ollama services (Optional)
 ollama serve > /dev/null 2>&1 &
 
-# 启动服务
+# Start the service
 docker compose up -d
 ```
 
-#### ④ 停止服务
+#### ④ Stop the services
 
 ```bash
 ./scripts/start_all.sh --stop
-# 或
+# Or
 make stop-all
 ```
 
-### 🌐 服务访问地址
+### 🌐 Access Services
 
-启动成功后，可访问以下地址：
+Once started, services will be available at:
 
-* Web UI：`http://localhost`
-* 后端 API：`http://localhost:8080`
-* 链路追踪（Jaeger）：`http://localhost:16686`
+* Web UI: `http://localhost`
+* Backend API: `http://localhost:8080`
+* Jaeger Tracing: `http://localhost:16686`
 
-### 🔌 使用微信对话开放平台
+### 🔌 Using WeChat Dialog Open Platform
 
-WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心技术框架，提供更简便的使用方式：
+WeKnora serves as the core technology framework for the [WeChat Dialog Open Platform](https://chatbot.weixin.qq.com), providing a more convenient usage approach:
 
-- **零代码部署**：只需上传知识，即可在微信生态中快速部署智能问答服务，实现"即问即答"的体验
-- **高效问题管理**：支持高频问题的独立分类管理，提供丰富的数据工具，确保回答精准可靠且易于维护
-- **微信生态覆盖**：通过微信对话开放平台，WeKnora 的智能问答能力可无缝集成到公众号、小程序等微信场景中，提升用户交互体验
-### 🔗MCP服务器访问已经部署好的WEKnora
-#### 1️⃣克隆储存库
+- **Zero-code Deployment**: Simply upload knowledge to quickly deploy intelligent Q&A services within the WeChat ecosystem, achieving an "ask and answer" experience
+- **Efficient Question Management**: Support for categorized management of high-frequency questions, with rich data tools to ensure accurate, reliable, and easily maintainable answers
+- **WeChat Ecosystem Integration**: Through the WeChat Dialog Open Platform, WeKnora's intelligent Q&A capabilities can be seamlessly integrated into WeChat Official Accounts, Mini Programs, and other WeChat scenarios, enhancing user interaction experiences
+
+### 🔗 Access WeKnora via MCP Server
+
+#### 1️⃣ Clone the repository
 ```
 git clone https://github.com/Tencent/WeKnora
 ```
-#### 2️⃣配置MCP服务器
-mcp客户端配置服务器
+
+#### 2️⃣ Configure MCP Server
+Configure the MCP client to connect to the server:
 ```json
 {
   "mcpServers": {
@@ -168,150 +171,150 @@ mcp客户端配置服务器
       ],
       "command": "python",
       "env":{
-        "WEKNORA_API_KEY":"进入你的weknora实例，打开开发者工具，查看请求头x-api-key，以sk开头",
-        "WEKNORA_BASE_URL":"http(s)://你的weknora地址/api/v1"
+        "WEKNORA_API_KEY":"Enter your WeKnora instance, open developer tools, check the request header x-api-key starting with sk",
+        "WEKNORA_BASE_URL":"http(s)://your-weknora-address/api/v1"
       }
     }
   }
 }
 ```
-使用stdio命令直接运行
+
+Run directly using stdio command:
 ```
 pip install weknora-mcp-server
 python -m weknora-mcp-server
 ```
 
-## 🔧 初始化配置引导
+## 🔧 Initialization Configuration Guide
 
-为了方便用户快速配置各类模型，降低试错成本，我们改进了原来的配置文件初始化方式，增加了Web UI界面进行各种模型的配置。在使用之前，请确保代码更新到最新版本。具体使用步骤如下：
-如果是第一次使用本项目，可跳过①②步骤，直接进入③④步骤。
+To help users quickly configure various models and reduce trial-and-error costs, we've improved the original configuration file initialization method by adding a Web UI interface for model configuration. Before using, please ensure the code is updated to the latest version. The specific steps are as follows:
+If this is your first time using this project, you can skip steps ①② and go directly to steps ③④.
 
-### ① 关闭服务
+### ① Stop the services
 
 ```bash
 ./scripts/start_all.sh --stop
 ```
 
-### ② 清空原有数据表（建议在没有重要数据的情况下使用）
+### ② Clear existing data tables (recommended when no important data exists)
 
 ```bash
 make clean-db
 ```
 
-### ③ 编译并启动服务
+### ③ Compile and start services
 
 ```bash
 ./scripts/start_all.sh
 ```
 
-### ④ 访问Web UI
+### ④ Access Web UI
 
 http://localhost
 
-首次访问会自动跳转到初始化配置页面，配置完成后会自动跳转到知识库页面。请按照页面提示信息完成模型的配置。
+On first access, it will automatically redirect to the initialization configuration page. After configuration is complete, it will automatically redirect to the knowledge base page. Please follow the page instructions to complete model configuration.
 
-![配置页面](./docs/images/config.png)
+![Configuration Page](./docs/images/config.png)
 
+## 📱 Interface Showcase
 
-## 📱 功能展示
-
-### Web UI 界面
-
-<table>
-  <tr>
-    <td><b>知识上传</b><br/><img src="./docs/images/knowledges.png" alt="知识上传界面"></td>
-    <td><b>知识问答入口</b><br/><img src="./docs/images/qa.png" alt="知识问答入口"></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>图文结果回答</b><br/><img src="./docs/images/answer.png" alt="图文结果回答"></td>
-  </tr>
-</table>
-
-**知识库管理：** 支持拖拽上传各类文档，自动识别文档结构并提取核心知识，建立索引。系统清晰展示处理进度和文档状态，实现高效的知识库管理。
-
-### 文档知识图谱
+### Web UI Interface
 
 <table>
   <tr>
-    <td><img src="./docs/images/graph2.png" alt="知识图谱展示1"></td>
-    <td><img src="./docs/images/graph1.png" alt="知识图谱展示2"></td>
+    <td><b>Knowledge Upload</b><br/><img src="./docs/images/knowledges.png" alt="Knowledge Upload Interface"></td>
+    <td><b>Q&A Entry</b><br/><img src="./docs/images/qa.png" alt="Q&A Entry Interface"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Rich Text & Image Responses</b><br/><img src="./docs/images/answer.png" alt="Rich Answer Interface"></td>
   </tr>
 </table>
 
-WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
-### 配套MCP服务器调用效果
-<img width="950" height="2063" alt="118d078426f42f3d4983c13386085d7f" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />
+**Knowledge Base Management:** Support for dragging and dropping various documents, automatically identifying document structures and extracting core knowledge to establish indexes. The system clearly displays processing progress and document status, achieving efficient knowledge base management.
 
+### Document Knowledge Graph
 
-## 📘 文档
+<table>
+  <tr>
+    <td><img src="./docs/images/graph2.png" alt="Knowledge Graph View 1"></td>
+    <td><img src="./docs/images/graph1.png" alt="Knowledge Graph View 2"></td>
+  </tr>
+</table>
 
-常见问题排查：[常见问题排查](./docs/QA.md)
+WeKnora supports transforming documents into knowledge graphs, displaying the relationships between different sections of the documents. Once the knowledge graph feature is enabled, the system analyzes and constructs an internal semantic association network that not only helps users understand document content but also provides structured support for indexing and retrieval, enhancing the relevance and breadth of search results.
 
-详细接口说明请参考：[API 文档](./docs/API.md)
+### MCP Server Integration Effects
+<img width="950" height="2063" alt="MCP Server Integration Demo" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />
 
-## 🧭 开发指南
+## 📘 API Reference
 
-### 📁 项目目录结构
+Troubleshooting FAQ: [Troubleshooting FAQ](./docs/QA.md)
+
+Detailed API documentation is available at: [API Docs](./docs/API.md)
+
+## 🧭 Developer Guide
+
+### 📁 Directory Structure
 
 ```
 WeKnora/
-├── cmd/         # 应用入口
-├── internal/    # 核心业务逻辑
-├── config/      # 配置文件
-├── migrations/  # 数据库迁移脚本
-├── scripts/     # 启动与工具脚本
-├── services/    # 各子服务实现
-├── frontend/    # 前端项目
-└── docs/        # 项目文档
+├── cmd/         # Main entry point
+├── internal/    # Core business logic
+├── config/      # Configuration files
+├── migrations/  # DB migration scripts
+├── scripts/     # Shell scripts
+├── services/    # Microservice logic
+├── frontend/    # Frontend app
+└── docs/        # Project documentation
 ```
 
-### 🔧 常用命令
+### 🔧 Common Commands
 
 ```bash
-# 清空数据库（慎用！）
+# Wipe all data from DB (use with caution)
 make clean-db
 ```
 
-## 🤝 贡献指南
+## 🤝 Contributing
 
-我们欢迎社区用户参与贡献！如有建议、Bug 或新功能需求，请通过 [Issue](https://github.com/Tencent/WeKnora/issues) 提出，或直接提交 Pull Request。
+We welcome community contributions! For suggestions, bugs, or feature requests, please submit an [Issue](https://github.com/Tencent/WeKnora/issues) or directly create a Pull Request.
 
-### 🎯 贡献方式
+### 🎯 How to Contribute
 
-- 🐛 **Bug修复**: 发现并修复系统缺陷
-- ✨ **新功能**: 提出并实现新特性
-- 📚 **文档改进**: 完善项目文档
-- 🧪 **测试用例**: 编写单元测试和集成测试
-- 🎨 **UI/UX优化**: 改进用户界面和体验
+- 🐛 **Bug Fixes**: Discover and fix system defects
+- ✨ **New Features**: Propose and implement new capabilities
+- 📚 **Documentation**: Improve project documentation
+- 🧪 **Test Cases**: Write unit and integration tests
+- 🎨 **UI/UX Enhancements**: Improve user interface and experience
 
-### 📋 贡献流程
+### 📋 Contribution Process
 
-1. **Fork项目** 到你的GitHub账户
-2. **创建特性分支** `git checkout -b feature/amazing-feature`
-3. **提交更改** `git commit -m 'Add amazing feature'`
-4. **推送分支** `git push origin feature/amazing-feature`
-5. **创建Pull Request** 并详细描述变更内容
+1. **Fork the project** to your GitHub account
+2. **Create a feature branch** `git checkout -b feature/amazing-feature`
+3. **Commit changes** `git commit -m 'Add amazing feature'`
+4. **Push branch** `git push origin feature/amazing-feature`
+5. **Create a Pull Request** with detailed description of changes
 
-### 🎨 代码规范
+### 🎨 Code Standards
 
-- 遵循 [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
-- 使用 `gofmt` 格式化代码
-- 添加必要的单元测试
-- 更新相关文档
+- Follow [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
+- Format code using `gofmt`
+- Add necessary unit tests
+- Update relevant documentation
 
-### 📝 提交规范
+### 📝 Commit Guidelines
 
-使用 [Conventional Commits](https://www.conventionalcommits.org/) 规范：
+Use [Conventional Commits](https://www.conventionalcommits.org/) standard:
 
 ```
-feat: 添加文档批量上传功能
-fix: 修复向量检索精度问题  
-docs: 更新API文档
-test: 添加检索引擎测试用例
-refactor: 重构文档解析模块
+feat: Add document batch upload functionality
+fix: Resolve vector retrieval precision issue
+docs: Update API documentation
+test: Add retrieval engine test cases
+refactor: Restructure document parsing module
 ```
 
-## 📄 许可证
+## 📄 License
 
-本项目基于 [MIT](./LICENSE) 协议发布。
-你可以自由使用、修改和分发本项目代码，但需保留原始版权声明。
+This project is licensed under the [MIT License](./LICENSE).
+You are free to use, modify, and distribute the code with proper attribution.
