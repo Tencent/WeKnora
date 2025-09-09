@@ -33,30 +33,40 @@ class PaddleOCRBackend(OCRBackend):
         """Initialize PaddleOCR backend"""
         self.ocr = None
         try:
+            import os
+            import paddle
+            
+            # Set PaddlePaddle to use CPU and disable GPU
+            os.environ['CUDA_VISIBLE_DEVICES'] = ''
+            paddle.set_device('cpu')
+            
             from paddleocr import PaddleOCR
-            # Default OCR configuration
+            # Simplified OCR configuration
             ocr_config = {
-                "text_det_limit_type": "max",  # Change from 'min' to 'max'
-                "text_det_limit_side_len": 960,  # A standard and safe limit for the longest side
-                "use_doc_orientation_classify": False,  # Do not use document image orientation classification
-                "use_doc_unwarping": False,  # Do not use document unwarping
-                "use_textline_orientation": False,  # Do not use textline orientation classification
-                "text_recognition_model_name": "PP-OCRv5_server_rec",
-                "text_detection_model_name": "PP-OCRv5_server_det",
-                "text_recognition_model_dir": "/root/.paddlex/official_models/PP-OCRv5_server_rec_infer",
-                "text_detection_model_dir": "/root/.paddlex/official_models/PP-OCRv5_server_det_infer",
-                "text_det_thresh": 0.3,  # Text detection pixel threshold
-                "text_det_box_thresh": 0.6,  # Text detection box threshold
-                "text_det_unclip_ratio": 1.5,  # Text detection expansion ratio
-                "text_rec_score_thresh": 0.0,  # Text recognition confidence threshold
-                "ocr_version": "PP-OCRv5",  # Switch to PP-OCRv4 here to compare
+                "use_gpu": False,
+                "text_det_limit_type": "max",
+                "text_det_limit_side_len": 960,
+                "use_doc_orientation_classify": False,
+                "use_doc_unwarping": False,
+                "use_textline_orientation": False,
+                "text_recognition_model_name": "PP-OCRv4_server_rec",
+                "text_detection_model_name": "PP-OCRv4_server_det",
+                "text_det_thresh": 0.3,
+                "text_det_box_thresh": 0.6,
+                "text_det_unclip_ratio": 1.5,
+                "text_rec_score_thresh": 0.0,
+                "ocr_version": "PP-OCRv4",
                 "lang": "ch",
+                "show_log": False,
+                "use_dilation": True,  # improves accuracy
+                "det_db_score_mode": "slow",  # improves accuracy
             }
             
             self.ocr = PaddleOCR(**ocr_config)
             logger.info("PaddleOCR engine initialized successfully")
-        except ImportError:
-            logger.error("Failed to import paddleocr. Please install it with 'pip install paddleocr'")
+            
+        except ImportError as e:
+            logger.error(f"Failed to import paddleocr: {str(e)}. Please install it with 'pip install paddleocr'")
         except Exception as e:
             logger.error(f"Failed to initialize PaddleOCR: {str(e)}")
     
@@ -71,50 +81,39 @@ class PaddleOCRBackend(OCRBackend):
         """
         try:
             # Ensure image is in RGB format
+            if hasattr(image, "convert") and image.mode != "RGB":
+                image = image.convert("RGB")
+
+            # Convert to numpy array if needed
             if hasattr(image, "convert"):
-                if image.mode == "RGBA":
-                    img_for_ocr = image.convert("RGB") # 尝试转换为 RGB
-                    logger.info(f"Converted image from RGBA to RGB format for OCR.")
-                elif image.mode != "RGB": # 如果不是 RGBA 也不是 RGB，也尝试转 RGB
-                    img_for_ocr = image.convert("RGB")
-                    logger.info(f"Converted image from {image.mode} to RGB format for OCR.")
-                else:
-                    img_for_ocr = image
-                    logger.info(f"Image already in RGB format.")
+                image_array = np.array(image)
             else:
-                img_for_ocr = image
-                logger.info(f"Image is not a PIL.Image object, assuming it's already suitable for OCR.")
+                image_array = image
 
-            # Convert to numpy array if not already
-            if hasattr(img_for_ocr, "convert"):
-                image_array = np.array(img_for_ocr)
-            else:
-                image_array = img_for_ocr
-
-            ocr_result = self.ocr.predict(image_array)
+            # Perform OCR
+            ocr_result = self.ocr.ocr(image_array, cls=False)
    
             # Extract text
-            if ocr_result and any(ocr_result):
-                ocr_text = ""
-                for image_result in ocr_result:
-                    ocr_text = ocr_text + " ".join(image_result["rec_texts"])
-                text_length = len(ocr_text)
-                if text_length > 0:
-                    logger.info(f"OCR extracted {text_length} characters")
-                    logger.info(
-                        f"OCR text sample: {ocr_text[:100]}..."
-                        if text_length > 100
-                        else f"OCR text: {ocr_text}"
-                    )
-                    return ocr_text
-                else:
-                    logger.warning("OCR returned empty result")
+            ocr_text = ""
+            if ocr_result and ocr_result[0]:
+                for line in ocr_result[0]:
+                    if line and len(line) >= 2:
+                        text = line[1][0] if line[1] else ""
+                        if text:
+                            ocr_text += text + " "
+            
+            text_length = len(ocr_text.strip())
+            if text_length > 0:
+                logger.info(f"OCR extracted {text_length} characters")
+                return ocr_text.strip()
             else:
-                logger.warning("OCR did not return any result")
-            return ""
+                logger.warning("OCR returned empty result")
+                return ""
+                
         except Exception as e:
             logger.error(f"OCR recognition error: {str(e)}")
             return ""
+    
 class NanonetsOCRBackend(OCRBackend):
     """Nanonets OCR backend implementation using OpenAI API format"""
     

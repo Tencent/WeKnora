@@ -5,9 +5,7 @@ from concurrent import futures
 import traceback
 import grpc
 import uuid
-
-# Enable gRPC fork support to avoid multiprocessing issues
-os.environ.setdefault('GRPC_ENABLE_FORK_SUPPORT', '1')
+import atexit
 
 # Add parent directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -327,104 +325,47 @@ def init_ocr_engine(ocr_backend, ocr_config):
         logger.error(f"Error initializing OCR engine: {str(e)}")
         return False
 
+
 def serve():
+    
     init_ocr_engine(os.getenv("OCR_BACKEND", "paddle"), {
         "OCR_API_BASE_URL": os.getenv("OCR_API_BASE_URL", ""),
     })
-    # Set max number of worker threads and processes
+    
+    # Set max number of worker threads
     max_workers = int(os.environ.get("GRPC_MAX_WORKERS", "4"))
-    # Force single process mode to avoid gRPC multiprocessing issues
-    worker_processes = 1
-    logger.info(f"Starting DocReader service, max worker threads per process: {max_workers}, "
-                f"processes: {worker_processes} (forced single process mode)")
+    logger.info(f"Starting DocReader service with {max_workers} worker threads")
     
     # Get port number
     port = os.environ.get("GRPC_PORT", "50051")
     
-    # Multi-process mode (disabled due to gRPC fork issues)
-    if False and worker_processes > 1:
-        import multiprocessing
-        processes = []
-        
-        def run_server():
-            # Create server
-            server = grpc.server(
-                futures.ThreadPoolExecutor(max_workers=max_workers),
-                options=[
-                    ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-                    ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
-                    ('grpc.enable_fork_support', 1),
-                    ('grpc.so_reuseport', 1),
-                ],
-            )
-            
-            # Register service
-            docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
-            
-            # Set listen address
-            server.add_insecure_port(f"[::]:{port}")
-            
-            # Start service
-            server.start()
-            
-            logger.info(f"Worker process {os.getpid()} started on port {port}")
-            
-            try:
-                # Wait for service termination
-                server.wait_for_termination()
-            except KeyboardInterrupt:
-                logger.info(f"Worker process {os.getpid()} received termination signal")
-                server.stop(0)
-        
-        # Start specified number of worker processes
-        for i in range(worker_processes):
-            process = multiprocessing.Process(target=run_server)
-            processes.append(process)
-            process.start()
-            logger.info(f"Started worker process {process.pid} ({i+1}/{worker_processes})")
-        
-        # Wait for all processes to complete
-        try:
-            for process in processes:
-                process.join()
-        except KeyboardInterrupt:
-            logger.info("Master process received termination signal")
-            for process in processes:
-                if process.is_alive():
-                    logger.info(f"Terminating worker process {process.pid}")
-                    process.terminate()
+    # Create server
+    server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=max_workers),
+        options=[
+            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
+            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+        ],
+    )
     
-    # Single-process mode
-    else:
-        # Create server
-        server = grpc.server(
-            futures.ThreadPoolExecutor(max_workers=max_workers),
-            options=[
-                ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-                ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
-                ('grpc.enable_fork_support', 1),
-                ('grpc.so_reuseport', 1),
-            ],
-        )
-        
-        # Register service
-        docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
-        
-        # Set listen address
-        server.add_insecure_port(f"[::]:{port}")
-        
-        # Start service
-        server.start()
-        
-        logger.info(f"Server started on port {port} (single process mode)")
-        logger.info("Server is ready to accept connections")
-        
-        try:
-            # Wait for service termination
-            server.wait_for_termination()
-        except KeyboardInterrupt:
-            logger.info("Received termination signal, shutting down server")
-            server.stop(0)
+    # Register service
+    docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
+    
+    # Set listen address
+    server.add_insecure_port(f"[::]:{port}")
+    
+    # Start service
+    server.start()
+    
+    logger.info(f"Server started on port {port}")
+    logger.info("Server is ready to accept connections")
+    
+    try:
+        # Wait for service termination
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        logger.info("Received termination signal, shutting down server")
+        server.stop(0)
 
 if __name__ == "__main__":
     serve()
