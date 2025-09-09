@@ -54,6 +54,7 @@ class DocParser(BaseParser):
                         enable_multimodal=self.enable_multimodal,
                         chunk_size=self.chunk_size,
                         chunk_overlap=self.chunk_overlap,
+                        chunking_config=self.chunking_config,
                         separators=self.separators,
                     )
                     text = docx_parser.parse_into_text(docx_content)
