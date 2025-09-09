@@ -129,6 +129,9 @@ services:
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
       - MINIO_USE_SSL=${MINIO_USE_SSL}
       - WEB_PROXY=${WEB_PROXY}
+      - GRPC_ENABLE_FORK_SUPPORT=1
+      - GRPC_WORKER_PROCESSES=1
+      - GRPC_MAX_WORKERS=4
     networks:
       - WeKnora-network
     restart: unless-stopped

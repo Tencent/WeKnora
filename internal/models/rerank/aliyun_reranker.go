@@ -22,9 +22,21 @@ type AliyunReranker struct {
 
 // AliyunRerankRequest represents a request to rerank documents using Aliyun DashScope API
 type AliyunRerankRequest struct {
-	Model     string   `json:"model"`     // Model to use for reranking
+	Model      string                 `json:"model"`      // Model to use for reranking
+	Input      AliyunRerankInput      `json:"input"`      // Input containing query and documents
+	Parameters AliyunRerankParameters `json:"parameters"` // Parameters for the reranking
+}
+
+// AliyunRerankInput contains the query and documents for reranking
+type AliyunRerankInput struct {
 	Query     string   `json:"query"`     // Query text to compare documents against
 	Documents []string `json:"documents"` // List of document texts to rerank
+}
+
+// AliyunRerankParameters contains parameters for the reranking request
+type AliyunRerankParameters struct {
+	ReturnDocuments bool `json:"return_documents"` // Whether to return documents in response
+	TopN            int  `json:"top_n"`            // Number of top results to return
 }
 
 // AliyunRerankResponse represents the response from Aliyun DashScope reranking request
@@ -58,7 +70,7 @@ type AliyunUsage struct {
 // NewAliyunReranker creates a new instance of Aliyun reranker with the provided configuration
 func NewAliyunReranker(config *RerankerConfig) (*AliyunReranker, error) {
 	apiKey := config.APIKey
-	baseURL := "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank"
+	baseURL := "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 	if url := config.BaseURL; url != "" {
 		baseURL = url
 	}
@@ -76,9 +88,15 @@ func NewAliyunReranker(config *RerankerConfig) (*AliyunReranker, error) {
 func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body
 	requestBody := &AliyunRerankRequest{
-		Model:     r.modelName,
-		Query:     query,
-		Documents: documents,
+		Model: r.modelName,
+		Input: AliyunRerankInput{
+			Query:     query,
+			Documents: documents,
+		},
+		Parameters: AliyunRerankParameters{
+			ReturnDocuments: true,
+			TopN:            len(documents), // Return all documents
+		},
 	}
 
 	jsonData, err := json.Marshal(requestBody)

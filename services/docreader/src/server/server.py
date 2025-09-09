@@ -6,6 +6,9 @@ import traceback
 import grpc
 import uuid
 
+# Enable gRPC fork support to avoid multiprocessing issues
+os.environ.setdefault('GRPC_ENABLE_FORK_SUPPORT', '1')
+
 # Add parent directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -330,15 +333,16 @@ def serve():
     })
     # Set max number of worker threads and processes
     max_workers = int(os.environ.get("GRPC_MAX_WORKERS", "4"))
-    worker_processes = int(os.environ.get("GRPC_WORKER_PROCESSES", str(os.cpu_count() or 1)))
+    # Force single process mode to avoid gRPC multiprocessing issues
+    worker_processes = 1
     logger.info(f"Starting DocReader service, max worker threads per process: {max_workers}, "
-                f"processes: {worker_processes}")
+                f"processes: {worker_processes} (forced single process mode)")
     
     # Get port number
     port = os.environ.get("GRPC_PORT", "50051")
     
-    # Multi-process mode
-    if worker_processes > 1:
+    # Multi-process mode (disabled due to gRPC fork issues)
+    if False and worker_processes > 1:
         import multiprocessing
         processes = []
         
@@ -349,6 +353,8 @@ def serve():
                 options=[
                     ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
                     ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+                    ('grpc.enable_fork_support', 1),
+                    ('grpc.so_reuseport', 1),
                 ],
             )
             
@@ -396,6 +402,8 @@ def serve():
             options=[
                 ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
                 ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+                ('grpc.enable_fork_support', 1),
+                ('grpc.so_reuseport', 1),
             ],
         )
         

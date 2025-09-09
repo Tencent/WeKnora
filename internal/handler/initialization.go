@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1410,93 +1411,38 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 // checkRerankModelConnection 检查Rerank模型连接和功能的内部方法
 func (h *InitializationHandler) checkRerankModelConnection(ctx context.Context,
 	modelName, baseURL, apiKey string) (bool, string) {
-	client := &http.Client{
-		Timeout: 15 * time.Second,
+
+	// 创建Reranker配置
+	config := &rerank.RerankerConfig{
+		APIKey:    apiKey,
+		BaseURL:   baseURL,
+		ModelName: modelName,
+		Source:    types.ModelSourceRemote, // 默认值，实际会根据URL判断
 	}
 
-	// 构造重排API端点
-	rerankEndpoint := baseURL + "/rerank"
-
-	// Mock测试数据
-	testQuery := "什么是人工智能？"
-	testPassages := []string{
-		"机器学习是人工智能的一个子领域，专注于算法和统计模型，使计算机系统能够通过经验自动改进。",
-		"深度学习是机器学习的一个子集，使用人工神经网络来模拟人脑的工作方式。",
-	}
-
-	// 构造重排请求
-	rerankRequest := map[string]interface{}{
-		"model":                  modelName,
-		"query":                  testQuery,
-		"documents":              testPassages,
-		"truncate_prompt_tokens": 512,
-	}
-
-	jsonData, err := json.Marshal(rerankRequest)
+	// 创建Reranker实例
+	reranker, err := rerank.NewReranker(config)
 	if err != nil {
-		return false, fmt.Sprintf("构造请求失败: %v", err)
+		return false, fmt.Sprintf("创建Reranker失败: %v", err)
 	}
 
-	logger.Infof(ctx, "Rerank request: %s, modelName=%s, baseURL=%s, apiKey=%s",
-		string(jsonData), modelName, baseURL, apiKey)
+	// 简化的测试数据
+	testQuery := "ping"
+	testDocuments := []string{
+		"pong",
+	}
 
-	req, err := http.NewRequestWithContext(
-		ctx, "POST", rerankEndpoint, strings.NewReader(string(jsonData)),
-	)
+	// 使用Reranker进行测试
+	results, err := reranker.Rerank(ctx, testQuery, testDocuments)
 	if err != nil {
-		return false, fmt.Sprintf("创建请求失败: %v", err)
+		return false, fmt.Sprintf("重排测试失败: %v", err)
 	}
 
-	// 添加认证头
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, fmt.Sprintf("连接失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, fmt.Sprintf("读取响应失败: %v", err)
-	}
-
-	// 检查响应状态
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		// 尝试解析重排响应
-		var rerankResp struct {
-			Results []struct {
-				Index          int     `json:"index"`
-				Document       string  `json:"document"`
-				RelevanceScore float64 `json:"relevance_score"`
-			} `json:"results"`
-		}
-
-		if err := json.Unmarshal(body, &rerankResp); err != nil {
-			// 如果无法解析标准重排响应，检查是否有其他格式
-			return true, "连接正常，但响应格式非标准"
-		}
-
-		// 检查是否返回了重排结果
-		if len(rerankResp.Results) > 0 {
-			return true, fmt.Sprintf("重排功能正常，返回%d个结果", len(rerankResp.Results))
-		} else {
-			return false, "重排接口连接成功，但未返回重排结果"
-		}
-	} else if resp.StatusCode == 401 {
-		return false, "认证失败，请检查API Key"
-	} else if resp.StatusCode == 403 {
-		return false, "权限不足，请检查API Key权限"
-	} else if resp.StatusCode == 404 {
-		return false, "重排API端点不存在，请检查Base URL"
-	} else if resp.StatusCode == 422 {
-		return false, fmt.Sprintf("请求参数错误: %s", string(body))
+	// 检查结果
+	if len(results) > 0 {
+		return true, fmt.Sprintf("重排功能正常，返回%d个结果", len(results))
 	} else {
-		return false, fmt.Sprintf("API返回错误状态: %d, 响应: %s", resp.StatusCode, string(body))
+		return false, "重排接口连接成功，但未返回重排结果"
 	}
 }
 
