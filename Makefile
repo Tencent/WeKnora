@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images
+.PHONY: help build run test clean docker-build docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images
 
 # Show help
 help:
@@ -11,10 +11,13 @@ help:
 	@echo "  clean             清理构建文件"
 	@echo ""
 	@echo "Docker 命令:"
-	@echo "  docker-build      构建 Docker 镜像"
-	@echo "  docker-run        运行 Docker 容器"
-	@echo "  docker-stop       停止 Docker 容器"
-	@echo "  docker-restart    重启 Docker 容器"
+	@echo "  docker-build-app       构建应用 Docker 镜像 (wechatopenai/weknora-app)"
+	@echo "  docker-build-docreader 构建文档读取器镜像 (wechatopenai/weknora-docreader)"
+	@echo "  docker-build-frontend  构建前端镜像 (wechatopenai/weknora-ui)"
+	@echo "  docker-build-all       构建所有 Docker 镜像"
+	@echo "  docker-run            运行 Docker 容器"
+	@echo "  docker-stop           停止 Docker 容器"
+	@echo "  docker-restart        重启 Docker 容器"
 	@echo ""
 	@echo "服务管理:"
 	@echo "  start-all         启动所有服务"
@@ -37,13 +40,18 @@ help:
 	@echo "  lint              代码检查"
 	@echo "  deps              安装依赖"
 	@echo "  docs              生成 API 文档"
+	@echo ""
+	@echo "环境检查:"
+	@echo "  check-env         检查环境配置"
+	@echo "  list-containers   列出运行中的容器"
+	@echo "  pull-images       拉取最新镜像"
 
 # Go related variables
 BINARY_NAME=WeKnora
 MAIN_PATH=./cmd/server
 
 # Docker related variables
-DOCKER_IMAGE=WeKnora
+DOCKER_IMAGE=wechatopenai/weknora-app
 DOCKER_TAG=latest
 
 # Build the application
@@ -64,8 +72,19 @@ clean:
 	rm -f $(BINARY_NAME)
 
 # Build Docker image
-docker-build:
-	docker build -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+docker-build-app:
+	docker build -f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+
+# Build docreader Docker image
+docker-build-docreader:
+	docker build -f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
+
+# Build frontend Docker image
+docker-build-frontend:
+	docker build -f frontend/Dockerfile -t wechatopenai/weknora-ui:latest frontend/
+
+# Build all Docker images
+docker-build-all: docker-build-app docker-build-docreader docker-build-frontend
 
 # Run Docker container (传统方式)
 docker-run:
@@ -107,10 +126,10 @@ build-images-frontend:
 clean-images:
 	./scripts/build_images.sh --clean
 
-# Restart Docker container (stop, rebuild, start)
+# Restart Docker container (stop, start)
 docker-restart:
 	docker-compose stop -t 60
-	docker-compose up --build
+	docker-compose up
 
 # Database migrations
 migrate-up:
@@ -150,5 +169,17 @@ clean-db:
 	@if [ $$(docker volume ls -q -f name=weknora_redis_data) ]; then \
 		docker volume rm weknora_redis_data; \
 	fi
+
+# Environment check
+check-env:
+	./scripts/start_all.sh --check
+
+# List containers
+list-containers:
+	./scripts/start_all.sh --list
+
+# Pull latest images
+pull-images:
+	./scripts/start_all.sh --pull
 
 
