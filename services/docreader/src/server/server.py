@@ -6,6 +6,8 @@ import traceback
 import grpc
 import uuid
 import atexit
+from grpc_health.v1 import health_pb2_grpc
+from grpc_health.v1.health import HealthServicer
 
 # Add parent directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -348,8 +350,12 @@ def serve():
         ],
     )
     
-    # Register service
+    # Register services
     docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
+    
+    # Register health check service
+    health_servicer = HealthServicer()
+    health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
     
     # Set listen address
     server.add_insecure_port(f"[::]:{port}")

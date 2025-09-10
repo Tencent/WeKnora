@@ -114,7 +114,13 @@ RUN apt-get update && apt-get install -y \
     libglu1-mesa \
     libsm6 \
     libreoffice \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# 安装 grpc_health_probe
+RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
+    wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
+    chmod +x /bin/grpc_health_probe
     
 # 从构建阶段复制已安装的依赖和生成的代码
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages

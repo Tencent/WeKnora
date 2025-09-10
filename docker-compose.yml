@@ -68,6 +68,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      docreader:
+        condition: service_healthy
     networks:
       - WeKnora-network
     restart: unless-stopped
@@ -129,6 +131,12 @@ services:
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME}
       - MINIO_USE_SSL=${MINIO_USE_SSL}
       - WEB_PROXY=${WEB_PROXY}
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     networks:
       - WeKnora-network
     restart: unless-stopped

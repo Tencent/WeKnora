@@ -1,5 +1,6 @@
 grpcio
 grpcio-tools
+grpcio-health-checking
 protobuf
 python-docx
 PyPDF2
