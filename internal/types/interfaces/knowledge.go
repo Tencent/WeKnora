@@ -70,4 +70,5 @@ type KnowledgeRepository interface {
 	) (bool, *types.Knowledge, error)
 	// AminusB returns the difference set of A and B.
 	AminusB(ctx context.Context, Atenant uint, A string, Btenant uint, B string) ([]string, error)
+	UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error
 }

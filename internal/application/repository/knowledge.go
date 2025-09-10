@@ -197,3 +197,8 @@ func (r *knowledgeRepository) AminusB(
 	}
 	return knowledgeIDs, err
 }
+
+func (r *knowledgeRepository) UpdateKnowledgeColumn(ctx context.Context, id string, column string, value interface{}) error {
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Update(column, value).Error
+	return err
+}

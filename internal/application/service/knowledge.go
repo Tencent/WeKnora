@@ -166,9 +166,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if exists {
 		logger.Infof(ctx, "File already exists: %s", file.Filename)
 		// Update creation time for existing knowledge
-		existingKnowledge.CreatedAt = time.Now()
-		existingKnowledge.UpdatedAt = time.Now()
-		if err := s.repo.UpdateKnowledge(ctx, existingKnowledge); err != nil {
+		if err := s.repo.UpdateKnowledgeColumn(ctx, existingKnowledge.ID, "created_at", time.Now()); err != nil {
 			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
 			return nil, err
 		}
@@ -627,6 +625,8 @@ func (s *knowledgeService) processDocument(ctx context.Context,
 		attribute.String("embedding_model", knowledge.EmbeddingModelID),
 		attribute.Bool("enable_multimodal", enableMultimodel),
 	)
+	logger.GetLogger(ctx).Infof("processDocument trace id: %s", span.SpanContext().TraceID().String())
+
 	if !enableMultimodel && IsImageType(knowledge.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			WithField("error", ErrImageNotParse).Errorf("processDocument image without enable multimodel")
@@ -1137,6 +1137,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		span.RecordError(err)
 		return
 	}
+	logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
 
 	// Update knowledge status to completed
 	knowledge.ParseStatus = "completed"
@@ -1154,6 +1155,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, totalStorageSize); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update tenant storage used failed")
 	}
+	logger.GetLogger(ctx).Infof("processChunks successfully")
 }
 
 // GetSummary generates a summary for knowledge content using an AI model
