@@ -41,14 +41,14 @@ class PaddleOCRBackend(OCRBackend):
             paddle.set_device('cpu')
             
             from paddleocr import PaddleOCR
-            # Simplified OCR configuration
+            # OCR configuration with text orientation classification enabled
             ocr_config = {
                 "use_gpu": False,
                 "text_det_limit_type": "max",
                 "text_det_limit_side_len": 960,
-                "use_doc_orientation_classify": False,
+                "use_doc_orientation_classify": True,  # 启用文档方向分类
                 "use_doc_unwarping": False,
-                "use_textline_orientation": False,
+                "use_textline_orientation": True,  # 启用文本行方向检测
                 "text_recognition_model_name": "PP-OCRv4_server_rec",
                 "text_detection_model_name": "PP-OCRv4_server_det",
                 "text_det_thresh": 0.3,

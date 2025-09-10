@@ -50,22 +50,33 @@ COPY services/docreader/requirements.txt .
 # 安装依赖
 RUN pip cache purge && pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 预下载 PP-OCRv5 模型
-RUN mkdir -p /root/.paddlex/official_models && \
-    wget https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_det_infer.tar \
-        -O /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar && \
-    wget https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_server_rec_infer.tar \
-        -O /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar && \
-    tar -xf /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar -C /root/.paddlex/official_models/ && \
-    tar -xf /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar -C /root/.paddlex/official_models/ && \
-    rm -rf /root/.paddlex/official_models/PP-OCRv5_server_det_infer.tar /root/.paddlex/official_models/PP-OCRv5_server_rec_infer.tar
+# 预下载 PP-OCRv4 模型
+RUN mkdir -p /root/.paddleocr/whl/det/ch && \
+    mkdir -p /root/.paddleocr/whl/rec/ch && \
+    mkdir -p /root/.paddleocr/whl/cls/ch && \
+    # 下载检测模型
+    wget https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_det_infer.tar \
+        -O /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar && \
+    tar -xf /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar -C /root/.paddleocr/whl/det/ch/ && \
+    # 下载识别模型
+    wget https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_rec_infer.tar \
+        -O /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar && \
+    tar -xf /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar -C /root/.paddleocr/whl/rec/ch/ && \
+    # 下载文本方向分类模型（用于判断文本是否需要旋转）
+    wget https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar \
+        -O /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar && \
+    tar -xf /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar -C /root/.paddleocr/whl/cls/ && \
+    # 清理压缩包
+    rm -f /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar && \
+    rm -f /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar && \
+    rm -f /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar
 
 # 复制源代码和生成脚本
 COPY services/docreader/src/ /app/src/
 COPY services/docreader/scripts/ /app/scripts/
 
 # 确保模型目录存在
-RUN ls -la /root/.paddlex/official_models
+RUN ls -la /root/.paddleocr/whl/
 
 # 生成 protobuf 代码
 RUN chmod +x /app/scripts/generate_proto.sh && bash /app/scripts/generate_proto.sh
@@ -104,29 +115,11 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libreoffice \
     && rm -rf /var/lib/apt/lists/*
-
-# # 下载并安装 LibreOffice（区分架构）
-# RUN mkdir -p /tmp/libreoffice && cd /tmp/libreoffice && \
-#     if [ "$(uname -m)" = "x86_64" ]; then \
-#         wget https://mirrors.tuna.tsinghua.edu.cn/libreoffice/libreoffice/stable/25.2.5/deb/x86_64/LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
-#         tar -xzf LibreOffice_25.2.5_Linux_x86-64_deb.tar.gz && \
-#         cd LibreOffice_25.2.5.2_Linux_x86-64_deb/DEBS && dpkg -i *.deb; \
-#     elif [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then \
-#         wget https://mirrors.aliyun.com/libreoffice/testing/25.8.0/deb/aarch64/LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
-#         tar -xzf LibreOffice_25.8.0.3_Linux_aarch64_deb.tar.gz && \
-#         cd LibreOffice_25.8.0.3_Linux_aarch64_deb/DEBS && dpkg -i *.deb; \
-#     else \
-#         echo "Unsupported architecture: $(uname -m)" && exit 1; \
-#     fi && \
-#     cd / && rm -rf /tmp/libreoffice
-
-# 设置 LibreOffice 环境变量
-# RUN echo 'export LIBREOFFICE_PATH=/opt/libreoffice25.2/program/soffice' >> /etc/environment;
     
 # 从构建阶段复制已安装的依赖和生成的代码
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=builder /root/.paddlex/official_models /root/.paddlex/official_models
+COPY --from=builder /root/.paddleocr /root/.paddleocr
 COPY --from=builder /app/src /app/src
 
 # 安装 Playwright 浏览器

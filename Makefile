@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform
 
 # Show help
 help:
@@ -45,6 +45,7 @@ help:
 	@echo "  check-env         检查环境配置"
 	@echo "  list-containers   列出运行中的容器"
 	@echo "  pull-images       拉取最新镜像"
+	@echo "  show-platform     显示当前构建平台"
 
 # Go related variables
 BINARY_NAME=WeKnora
@@ -53,6 +54,17 @@ MAIN_PATH=./cmd/server
 # Docker related variables
 DOCKER_IMAGE=wechatopenai/weknora-app
 DOCKER_TAG=latest
+
+# Platform detection
+ifeq ($(shell uname -m),x86_64)
+    PLATFORM=linux/amd64
+else ifeq ($(shell uname -m),aarch64)
+    PLATFORM=linux/arm64
+else ifeq ($(shell uname -m),arm64)
+    PLATFORM=linux/arm64
+else
+    PLATFORM=linux/amd64
+endif
 
 # Build the application
 build:
@@ -73,15 +85,15 @@ clean:
 
 # Build Docker image
 docker-build-app:
-	docker build -f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
+	docker build --platform $(PLATFORM) -f docker/Dockerfile.app -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
 
 # Build docreader Docker image
 docker-build-docreader:
-	docker build -f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
+	docker build --platform $(PLATFORM) -f docker/Dockerfile.docreader -t wechatopenai/weknora-docreader:latest .
 
 # Build frontend Docker image
 docker-build-frontend:
-	docker build -f frontend/Dockerfile -t wechatopenai/weknora-ui:latest frontend/
+	docker build --platform $(PLATFORM) -f frontend/Dockerfile -t wechatopenai/weknora-ui:latest frontend/
 
 # Build all Docker images
 docker-build-all: docker-build-app docker-build-docreader docker-build-frontend
@@ -181,5 +193,10 @@ list-containers:
 # Pull latest images
 pull-images:
 	./scripts/start_all.sh --pull
+
+# Show current platform
+show-platform:
+	@echo "当前系统架构: $(shell uname -m)"
+	@echo "Docker构建平台: $(PLATFORM)"
 
 
