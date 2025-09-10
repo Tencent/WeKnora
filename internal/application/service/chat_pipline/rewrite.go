@@ -166,8 +166,10 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Update rewritten query
-	chatManage.RewriteQuery = response.Content
+	if response.Content != "" {
+		// Update rewritten query
+		chatManage.RewriteQuery = response.Content
+	}
 	logger.GetLogger(ctx).Infof("Rewritten query, session_id: %s, rewrite_query: %s",
 		chatManage.SessionID, chatManage.RewriteQuery)
 	return next()
