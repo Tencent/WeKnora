@@ -7,6 +7,12 @@ services:
     volumes:
       - data-files:/data/files
       - ./config/config.yaml:/app/config/config.yaml
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     environment:
       - COS_SECRET_ID=${COS_SECRET_ID}
       - COS_SECRET_KEY=${COS_SECRET_KEY}
@@ -102,7 +108,8 @@ services:
     ports:
       - "${FRONTEND_PORT:-80}:80"
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     networks:
       - WeKnora-network
     restart: unless-stopped

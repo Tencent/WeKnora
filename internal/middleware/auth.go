@@ -19,6 +19,7 @@ var noAuthAPI = map[string][]string{
 	"/api/v1/test-data":        {"GET"},
 	"/api/v1/tenants":          {"POST"},
 	"/api/v1/initialization/*": {"GET", "POST"},
+	"/health":                  {"GET"},
 }
 
 // 检查请求是否在无需认证的API列表中

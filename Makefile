@@ -168,7 +168,7 @@ deps:
 
 # Build for production
 build-prod:
-	GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o $(BINARY_NAME) $(MAIN_PATH)
+	GOOS=linux go build -installsuffix cgo -ldflags="-w -s" -o $(BINARY_NAME) $(MAIN_PATH)
 
 clean-db:
 	@echo "Cleaning database..."
