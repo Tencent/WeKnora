@@ -126,11 +126,12 @@ RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /root/.paddleocr /root/.paddleocr
-COPY --from=builder /app/src /app/src
 
 # 安装 Playwright 浏览器
 RUN python -m playwright install webkit
 RUN python -m playwright install-deps webkit
+
+COPY --from=builder /app/src /app/src
 
 # 设置 Python 路径
 ENV PYTHONPATH=/app/src

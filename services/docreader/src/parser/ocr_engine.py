@@ -40,6 +40,31 @@ class PaddleOCRBackend(OCRBackend):
             os.environ['CUDA_VISIBLE_DEVICES'] = ''
             paddle.set_device('cpu')
             
+            # 尝试检测CPU是否支持AVX指令集
+            try:
+                import subprocess
+                import platform
+                
+                # 检测CPU是否支持AVX
+                if platform.system() == "Linux":
+                    try:
+                        result = subprocess.run(['grep', '-o', 'avx', '/proc/cpuinfo'], 
+                                              capture_output=True, text=True, timeout=5)
+                        has_avx = 'avx' in result.stdout.lower()
+                        if not has_avx:
+                            logger.warning("CPU does not support AVX instructions, using compatibility mode")
+                            # 进一步限制指令集使用
+                            os.environ['FLAGS_use_avx2'] = '0'
+                            os.environ['FLAGS_use_avx'] = '1'
+                    except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
+                        logger.warning("Could not detect AVX support, using compatibility mode")
+                        os.environ['FLAGS_use_avx2'] = '0'
+                        os.environ['FLAGS_use_avx'] = '1'
+            except Exception as e:
+                logger.warning(f"Error detecting CPU capabilities: {e}, using compatibility mode")
+                os.environ['FLAGS_use_avx2'] = '0'
+                os.environ['FLAGS_use_avx'] = '1'
+            
             from paddleocr import PaddleOCR
             # OCR configuration with text orientation classification enabled
             ocr_config = {
@@ -67,6 +92,13 @@ class PaddleOCRBackend(OCRBackend):
             
         except ImportError as e:
             logger.error(f"Failed to import paddleocr: {str(e)}. Please install it with 'pip install paddleocr'")
+        except OSError as e:
+            if "Illegal instruction" in str(e) or "core dumped" in str(e):
+                logger.error(f"PaddlePaddle crashed due to CPU instruction set incompatibility: {str(e)}")
+                logger.error("This usually happens when the CPU doesn't support AVX instructions.")
+                logger.error("Please try installing a CPU-only version of PaddlePaddle or use a different OCR backend.")
+            else:
+                logger.error(f"Failed to initialize PaddleOCR due to OS error: {str(e)}")
         except Exception as e:
             logger.error(f"Failed to initialize PaddleOCR: {str(e)}")
     
