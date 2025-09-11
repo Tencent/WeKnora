@@ -49,15 +49,7 @@ body:
         
         请按照以下步骤收集相关日志：
         
-        **1. 应用模块日志：**
-        ```bash
-        docker exec -it WeKnora-app tail -f /var/log/WeKnora.log
-        ```
-        
-        **2. 文档解析模块日志：**
-        ```bash
-        docker exec -it WeKnora-docreader tail -f /var/log/docreader.log
-        ```
+        docker compose logs -f --tail=1000 app docreader postgres
         
         请重现问题并收集相关日志，然后粘贴到下面的日志字段中。
 
@@ -68,8 +60,7 @@ body:
       description: 请按照上面的指南收集并粘贴相关日志
       placeholder: |
         请粘贴从以下命令收集的日志：
-        - docker exec -it WeKnora-app tail -f /var/log/WeKnora.log
-        - docker exec -it WeKnora-docreader tail -f /var/log/docreader.log
+        docker compose logs -f --tail=1000 app docreader postgres
       render: shell
 
   - type: input

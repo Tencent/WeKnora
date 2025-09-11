@@ -102,7 +102,6 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     antiword \
-    supervisor \
     vim \
     tar \
     dpkg \
@@ -137,12 +136,8 @@ COPY --from=builder /app/src /app/src
 ENV PYTHONPATH=/app/src
 RUN cd /app/src && python -m download_deps
 
-# 创建supervisor配置
-RUN mkdir -p /etc/supervisor/conf.d
-COPY services/docreader/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
 # 暴露 gRPC 端口
 EXPOSE 50051
 
-# 使用supervisor启动服务
-CMD ["supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# 直接运行 Python 服务（日志输出到 stdout/stderr）
+CMD ["python", "/app/src/server/server.py"]

@@ -18,8 +18,8 @@ SCRIPT_NAME=$(basename "$0")
 
 # 显示帮助信息
 show_help() {
-    echo -e "${GREEN}WeKnora 启动脚本 v${VERSION}${NC}"
-    echo -e "${GREEN}用法:${NC} $0 [选项]"
+    printf "%b\n" "${GREEN}WeKnora 启动脚本 v${VERSION}${NC}"
+    printf "%b\n" "${GREEN}用法:${NC} $0 [选项]"
     echo "选项:"
     echo "  -h, --help     显示帮助信息"
     echo "  -o, --ollama   启动Ollama服务"
@@ -37,25 +37,25 @@ show_help() {
 
 # 显示版本信息
 show_version() {
-    echo -e "${GREEN}WeKnora 启动脚本 v${VERSION}${NC}"
+    printf "%b\n" "${GREEN}WeKnora 启动脚本 v${VERSION}${NC}"
     exit 0
 }
 
 # 日志函数
 log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+    printf "%b\n" "${BLUE}[INFO]${NC} $1"
 }
 
 log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    printf "%b\n" "${YELLOW}[WARNING]${NC} $1"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    printf "%b\n" "${RED}[ERROR]${NC} $1"
 }
 
 log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+    printf "%b\n" "${GREEN}[SUCCESS]${NC} $1"
 }
 
 # 选择可用的 Docker Compose 命令（优先 docker compose，其次 docker-compose）
@@ -397,7 +397,7 @@ list_containers() {
     cd "$PROJECT_ROOT"
     
     # 列出所有容器
-    echo -e "${BLUE}当前正在运行的容器:${NC}"
+    printf "%b\n" "${BLUE}当前正在运行的容器:${NC}"
 	"$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD ps --services | sort
     
     return 0
@@ -703,20 +703,26 @@ else
     if [ "$START_OLLAMA" = true ] && [ "$START_DOCKER" = true ]; then
         if [ $OLLAMA_RESULT -eq 0 ] && [ $DOCKER_RESULT -eq 0 ]; then
             log_success "所有服务启动完成，可通过以下地址访问:"
-            echo -e "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
-            echo -e "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
-            echo -e "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
+            printf "%b\n" "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
+            printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
+            printf "%b\n" "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
+            echo ""
+            log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
+            "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
         else
             log_error "部分服务启动失败，请检查日志并修复问题"
         fi
     elif [ "$START_OLLAMA" = true ] && [ $OLLAMA_RESULT -eq 0 ]; then
         log_success "Ollama服务启动完成，可通过以下地址访问:"
-        echo -e "${GREEN}  - Ollama API: http://localhost:$OLLAMA_PORT${NC}"
+        printf "%b\n" "${GREEN}  - Ollama API: http://localhost:$OLLAMA_PORT${NC}"
     elif [ "$START_DOCKER" = true ] && [ $DOCKER_RESULT -eq 0 ]; then
         log_success "Docker容器启动完成，可通过以下地址访问:"
-        echo -e "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
-        echo -e "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
-        echo -e "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
+        printf "%b\n" "${GREEN}  - 前端界面: http://localhost:${FRONTEND_PORT:-80}${NC}"
+        printf "%b\n" "${GREEN}  - API接口: http://localhost:${APP_PORT:-8080}${NC}"
+        printf "%b\n" "${GREEN}  - Jaeger链路追踪: http://localhost:16686${NC}"
+        echo ""
+        log_info "正在持续输出容器日志（按 Ctrl+C 退出日志，容器不会停止）..."
+        "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD logs app docreader postgres --since=10s -f
     fi
 fi
 

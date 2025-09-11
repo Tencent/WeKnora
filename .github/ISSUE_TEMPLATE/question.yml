@@ -68,14 +68,8 @@ body:
         
         如果问题涉及错误或需要调试，请收集相关日志：
         
-        **应用模块日志：**
         ```bash
-        docker exec -it WeKnora-app tail -f /var/log/WeKnora.log
-        ```
-        
-        **文档解析模块日志：**
-        ```bash
-        docker exec -it WeKnora-docreader tail -f /var/log/docreader.log
+        docker compose logs -f --tail=1000 app docreader postgres
         ```
 
   - type: textarea

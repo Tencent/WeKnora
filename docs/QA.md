@@ -2,11 +2,7 @@
 
 ## 1. 如何查看日志？
 ```bash
-# 查看 主服务 日志
-docker exec -it WeKnora-app tail -f /var/log/WeKnora.log
-
-# 查看 文档解析模块 日志
-docker exec -it WeKnora-docreader tail -f /var/log/docreader.log
+docker compose logs -f app docreader postgres
 ```
 
 ## 2. 如何启动和停止服务？

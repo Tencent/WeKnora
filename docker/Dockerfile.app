@@ -39,7 +39,7 @@ WORKDIR /app
 # Install runtime dependencies
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories && \
     apk update && apk upgrade && \
-    apk add --no-cache build-base postgresql-client mysql-client ca-certificates tzdata sed curl bash supervisor vim wget
+    apk add --no-cache build-base postgresql-client mysql-client ca-certificates tzdata sed curl bash vim wget
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/WeKnora .
@@ -55,10 +55,6 @@ COPY --from=builder /go/pkg/mod/github.com/yanyiwu /go/pkg/mod/github.com/yanyiw
 # Make scripts executable
 RUN chmod +x ./scripts/*.sh
 
-# Setup supervisor configuration
-RUN mkdir -p /etc/supervisor.d/
-COPY docker/config/supervisord.conf /etc/supervisor.d/supervisord.conf
-
 # Expose ports
 EXPOSE 8080
 
@@ -70,5 +66,7 @@ RUN mkdir -p /data/files && \
     adduser -D -g '' appuser && \
     chown -R appuser:appuser /app /data/files
 
-# Run supervisor instead of direct application start
-CMD ["supervisord", "-c", "/etc/supervisor.d/supervisord.conf"]
+# Switch to non-root user and run the application directly
+USER appuser
+
+CMD ["./WeKnora"]
