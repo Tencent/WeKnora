@@ -26,22 +26,31 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 检查是否存在本地protoc安装包，如果存在则离线安装，否则在线安装,其他安装包按需求添加
+ARG TARGETARCH
 COPY packages/ /app/packages/
 RUN echo "检查本地protoc安装包..." && \
-    if [ -f "/app/packages/protoc-3.19.4-linux-x86_64.zip" ]; then \
+    # 根据目标架构选择正确的protoc包名
+    case ${TARGETARCH} in \
+        "amd64") PROTOC_ARCH="x86_64" ;; \
+        "arm64") PROTOC_ARCH="aarch_64" ;; \
+        "arm") PROTOC_ARCH="arm" ;; \
+        *) echo "Unsupported architecture for protoc: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    PROTOC_PACKAGE="protoc-3.19.4-linux-${PROTOC_ARCH}.zip" && \
+    if [ -f "/app/packages/${PROTOC_PACKAGE}" ]; then \
         echo "发现本地protoc安装包，将进行离线安装"; \
         # 离线安装：使用本地包（精确路径避免歧义）
-        cp /app/packages/protoc-*.zip /app/ && \
-        unzip -o /app/protoc-*.zip -d /usr/local && \
+        cp /app/packages/${PROTOC_PACKAGE} /app/ && \
+        unzip -o /app/${PROTOC_PACKAGE} -d /usr/local && \
         chmod +x /usr/local/bin/protoc && \
-        rm -f /app/protoc-*.zip; \
+        rm -f /app/${PROTOC_PACKAGE}; \
     else \
         echo "未发现本地protoc安装包，将进行在线安装"; \
         # 在线安装：从网络下载
-        curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/protoc-3.19.4-linux-x86_64.zip && \
-        unzip -o protoc-3.19.4-linux-x86_64.zip -d /usr/local && \
+        curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/${PROTOC_PACKAGE} && \
+        unzip -o ${PROTOC_PACKAGE} -d /usr/local && \
         chmod +x /usr/local/bin/protoc && \
-        rm -f protoc-3.19.4-linux-x86_64.zip; \
+        rm -f ${PROTOC_PACKAGE}; \
     fi
 
 # 复制依赖文件
@@ -117,8 +126,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 grpc_health_probe
+ARG TARGETARCH
 RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
-    wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
+    # 根据目标架构选择正确的二进制文件
+    case ${TARGETARCH} in \
+        "amd64") ARCH="amd64" ;; \
+        "arm64") ARCH="arm64" ;; \
+        "arm") ARCH="arm" ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH} && \
     chmod +x /bin/grpc_health_probe
     
 # 从构建阶段复制已安装的依赖和生成的代码
