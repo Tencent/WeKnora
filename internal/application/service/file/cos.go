@@ -23,8 +23,8 @@ type cosFileService struct {
 }
 
 // NewCosFileService creates a new COS file service instance
-func NewCosFileService(appId, region, secretId, secretKey, cosPathPrefix string) (interfaces.FileService, error) {
-	bucketURL := fmt.Sprintf("https://%s.cos.%s.myqcloud.com", appId, region)
+func NewCosFileService(bucketName, region, secretId, secretKey, cosPathPrefix string) (interfaces.FileService, error) {
+	bucketURL := fmt.Sprintf("https://%s.cos.%s.myqcloud.com/", bucketName, region)
 	u, err := url.Parse(bucketURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse bucketURL: %w", err)
@@ -59,7 +59,7 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file to COS: %w", err)
 	}
-	return fmt.Sprintf("https://%s/%s", s.bucketURL, objectName), nil
+	return fmt.Sprintf("%s%s", s.bucketURL, objectName), nil
 }
 
 // GetFile retrieves a file from COS storage by its path URL
