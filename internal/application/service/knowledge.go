@@ -25,6 +25,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/services/docreader/src/client"
 	"github.com/Tencent/WeKnora/services/docreader/src/proto"
 	"github.com/google/uuid"
@@ -191,15 +192,22 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		metadataJSON = types.JSON(metadataBytes)
 	}
 
+	// 验证文件名安全性
+	safeFilename, isValid := secutils.ValidateInput(file.Filename)
+	if !isValid {
+		logger.Errorf(ctx, "Invalid filename: %s", file.Filename)
+		return nil, werrors.NewValidationError("文件名包含非法字符")
+	}
+
 	// Create knowledge record
 	logger.Info(ctx, "Creating knowledge record")
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		Type:             "file",
-		Title:            file.Filename,
-		FileName:         file.Filename,
-		FileType:         getFileType(file.Filename),
+		Title:            safeFilename,
+		FileName:         safeFilename,
+		FileType:         getFileType(safeFilename),
 		FileSize:         file.Size,
 		FileHash:         hash,
 		ParseStatus:      "pending",
@@ -258,10 +266,10 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, err
 	}
 
-	// Validate URL format
+	// Validate URL format and security
 	logger.Info(ctx, "Validating URL")
-	if !isValidURL(url) {
-		logger.Error(ctx, "Invalid URL format")
+	if !isValidURL(url) || !secutils.IsValidURL(url) {
+		logger.Error(ctx, "Invalid or unsafe URL format")
 		return nil, ErrInvalidURL
 	}
 
@@ -339,6 +347,17 @@ func (s *knowledgeService) CreateKnowledgeFromPassage(ctx context.Context,
 	logger.Info(ctx, "Start creating knowledge from passage")
 	logger.Infof(ctx, "Knowledge base ID: %s, passage count: %d", kbID, len(passage))
 
+	// 验证段落内容安全性
+	safePassages := make([]string, 0, len(passage))
+	for i, p := range passage {
+		safePassage, isValid := secutils.ValidateInput(p)
+		if !isValid {
+			logger.Errorf(ctx, "Invalid passage content at index %d", i)
+			return nil, werrors.NewValidationError(fmt.Sprintf("段落 %d 包含非法内容", i+1))
+		}
+		safePassages = append(safePassages, safePassage)
+	}
+
 	// Get knowledge base configuration
 	logger.Info(ctx, "Getting knowledge base configuration")
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
@@ -370,7 +389,7 @@ func (s *knowledgeService) CreateKnowledgeFromPassage(ctx context.Context,
 
 	// Process passages asynchronously
 	logger.Info(ctx, "Starting asynchronous passage processing")
-	go s.processDocumentFromPassage(ctx, kb, knowledge, passage)
+	go s.processDocumentFromPassage(ctx, kb, knowledge, safePassages)
 
 	logger.Infof(ctx, "Knowledge from passage created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil

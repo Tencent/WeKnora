@@ -15,7 +15,7 @@
                     trigger="click">
                     <template #content>
                         <div class="doc_content">
-                            <div v-html="item.content.replace(/\n/g, '<br/>')"></div>
+                            <div v-html="safeProcessContent(item.content)"></div>
                         </div>
                     </template>
                     <span class="doc">
@@ -28,6 +28,7 @@
 </template>
 <script setup>
 import { onMounted, defineProps, computed, ref, reactive } from "vue";
+import { sanitizeHTML } from '@/utils/security';
 const props = defineProps({
     // 必填项
     content: {
@@ -42,6 +43,14 @@ const props = defineProps({
 const showReferBox = ref(false);
 const referBoxSwitch = () => {
     showReferBox.value = !showReferBox.value;
+};
+
+// 安全地处理内容
+const safeProcessContent = (content) => {
+    if (!content) return '';
+    // 先进行安全清理，然后处理换行
+    const sanitized = sanitizeHTML(content);
+    return sanitized.replace(/\n/g, '<br/>');
 };
 
 </script>

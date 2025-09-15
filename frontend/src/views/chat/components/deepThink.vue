@@ -29,6 +29,7 @@
 </template>
 <script setup>
 import { onMounted, watch, computed, ref, reactive, defineProps } from 'vue';
+import { sanitizeHTML } from '@/utils/security';
 
 const isFold = ref(true)
 const props = defineProps({
@@ -51,7 +52,6 @@ const showHide = () => {
 }
 const handlePanelChange = (val) => {
     isFold.value = !val.length ? true : false;
-
 }
 </script>
 <style lang="less" scoped>

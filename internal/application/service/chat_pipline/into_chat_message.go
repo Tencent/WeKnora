@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // PluginIntoChatMessage handles the transformation of search results into chat messages
@@ -50,9 +51,16 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	weekdayName := []string{"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"}
 	var userContent bytes.Buffer
 
+	// 验证用户查询的安全性
+	safeQuery, isValid := secutils.ValidateInput(chatManage.Query)
+	if !isValid {
+		logger.Errorf(ctx, "Invalid user query: %s", chatManage.Query)
+		return ErrTemplateExecute.WithError(fmt.Errorf("用户查询包含非法内容"))
+	}
+
 	// Execute template with context data
 	err = tmpl.Execute(&userContent, map[string]interface{}{
-		"Query":       chatManage.Query,                         // User's original query
+		"Query":       safeQuery,                                // User's original query
 		"Contexts":    passages,                                 // Extracted passages from search results
 		"CurrentTime": time.Now().Format("2006-01-02 15:04:05"), // Formatted current time
 		"CurrentWeek": weekdayName[time.Now().Weekday()],        // Current weekday in Chinese

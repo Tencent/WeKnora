@@ -4,6 +4,8 @@ import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
 import { downKnowledgeDetails } from "@/api/knowledge-base/index";
 import { MessagePlugin } from "tdesign-vue-next";
 import picturePreview from '@/components/picture-preview.vue';
+import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+
 marked.use({
   mangle: false,
   headerIds: false,
@@ -37,10 +39,16 @@ const checkImage = (url) => {
   });
 };
 renderer.image = function (href, title, text) {
-  // 自定义HTML结构，图片展示带标题
+  // 安全地处理图片链接
+  if (!isValidImageURL(href)) {
+    return `<p>无效的图片链接</p>`;
+  }
+  
+  // 使用安全的图片创建函数
+  const safeImage = createSafeImage(href, text || '', title || '');
   return `<figure>
-                <img class="markdown-image" src="${href}" alt="${title}" title="${text}">
-                <figcaption style="text-align: left;">${text}</figcaption>
+                ${safeImage}
+                <figcaption style="text-align: left;">${text || ''}</figcaption>
             </figure>`;
 };
 const props = defineProps(["visible", "details"]);
@@ -66,14 +74,23 @@ watch(() => props.details.md, (newVal) => {
   deep: true
 })
 
-// 处理 Markdown 中的图片
+// 安全地处理 Markdown 内容
 const processMarkdown = (markdownText) => {
-  // 自定义渲染器处理图片
+  if (!markdownText || typeof markdownText !== 'string') {
+    return '';
+  }
+  
+  // 首先对 Markdown 内容进行安全处理
+  const safeMarkdown = safeMarkdownToHTML(markdownText);
+  
+  // 使用安全的渲染器
   marked.use({ renderer });
-  let html = marked.parse(markdownText);
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  return doc.body.innerHTML;
+  let html = marked.parse(safeMarkdown);
+  
+  // 使用 DOMPurify 进行最终的安全清理
+  const sanitizedHTML = sanitizeHTML(html);
+  
+  return sanitizedHTML;
 };
 const closePreImg = () => {
   reviewImg.value = false

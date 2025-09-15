@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -50,6 +51,13 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	// 对 chunk 内容进行安全清理
+	for _, chunk := range result.Data.([]*types.Chunk) {
+		if chunk.Content != "" {
+			chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
+		}
 	}
 
 	logger.Infof(

@@ -23,6 +23,8 @@ import { marked } from 'marked';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import picturePreview from '@/components/picture-preview.vue';
+import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+
 marked.use({
     mangle: false,
     headerIds: false,
@@ -89,36 +91,36 @@ const checkImage = (url) => {
         img.src = url;
     });
 };
-// 处理 Markdown 中的图片
+// 安全地处理 Markdown 内容
 const processMarkdown = (markdownText) => {
-    // 自定义渲染器处理图片
+    if (!markdownText || typeof markdownText !== 'string') {
+        return '';
+    }
+    
+    // 首先对 Markdown 内容进行安全处理
+    const safeMarkdown = safeMarkdownToHTML(markdownText);
+    
+    // 自定义安全的渲染器处理图片
     const renderer = {
         image(href, title, text) {
-            return `<img src="${href}" alt="${text}" title="${title || ''}"  class="markdown-image" style="max-width: 708px;height: 230px;">`;
+            // 验证图片 URL 是否安全
+            if (!isValidImageURL(href)) {
+                return `<p>无效的图片链接</p>`;
+            }
+            // 使用安全的图片创建函数
+            return createSafeImage(href, text || '', title || '');
         }
     };
 
     marked.use({ renderer });
 
-    // 第一次渲染
-    let html = marked.parse(markdownText);
+    // 安全地渲染 Markdown
+    let html = marked.parse(safeMarkdown);
 
-    // 创建虚拟 DOM 来操作
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-
-    // 检查所有图片
-    // const images = doc.querySelectorAll('img');
-    // images.forEach(async item => {
-    //     const isValid = await checkImage(item.src);
-    //     if (!isValid) {
-    //         item.remove();
-    //     }
-    // });
-    // if (props.isFirstEnter) { 
-    //     emit('scroll-bottom')
-    // }
-    return doc.body.innerHTML;
+    // 使用 DOMPurify 进行最终的安全清理
+    const sanitizedHTML = sanitizeHTML(html);
+    
+    return sanitizedHTML;
 };
 const handleImg = async (newVal) => {
     let index = newVal.lastIndexOf('![');
