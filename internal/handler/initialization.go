@@ -179,6 +179,10 @@ func (h *InitializationHandler) CheckStatus(c *gin.Context) {
 		})
 		return
 	}
+	// ignore api key in response for security
+	for _, model := range models {
+		model.Parameters.APIKey = ""
+	}
 
 	logger.Info(ctx, "System is already initialized")
 	c.JSON(http.StatusOK, gin.H{
