@@ -15,6 +15,7 @@ var (
 		regexp.MustCompile(`(?i)<iframe[^>]*>.*?</iframe>`),
 		regexp.MustCompile(`(?i)<object[^>]*>.*?</object>`),
 		regexp.MustCompile(`(?i)<embed[^>]*>.*?</embed>`),
+		regexp.MustCompile(`(?i)<embed[^>]*>`),
 		regexp.MustCompile(`(?i)<form[^>]*>.*?</form>`),
 		regexp.MustCompile(`(?i)<input[^>]*>`),
 		regexp.MustCompile(`(?i)<button[^>]*>.*?</button>`),
@@ -151,7 +152,7 @@ func CleanMarkdown(input string) string {
 		cleaned = pattern.ReplaceAllString(cleaned, "")
 	}
 
-	return strings.TrimSpace(cleaned)
+	return cleaned
 }
 
 // SanitizeForDisplay 为显示清理内容

@@ -19,7 +19,7 @@
                     </div>
                 </template>
                 <div class="content">
-                    <span v-html="deepSession.thinkContent.replace(/\n/g, '<br/>')"></span>
+                    <span v-html="safeProcessThinkContent(deepSession.thinkContent)"></span>
                 </div>
             </t-collapse-panel>
 
@@ -53,6 +53,19 @@ const showHide = () => {
 const handlePanelChange = (val) => {
     isFold.value = !val.length ? true : false;
 }
+
+// 安全地处理思考内容，防止XSS攻击
+const safeProcessThinkContent = (content) => {
+    if (!content || typeof content !== 'string') return '';
+    
+    // 先处理换行符
+    const contentWithBreaks = content.replace(/\n/g, '<br/>');
+    
+    // 使用DOMPurify进行安全清理，允许基本的文本格式化标签
+    const cleanContent = sanitizeHTML(contentWithBreaks);
+    
+    return cleanContent;
+};
 </script>
 <style lang="less" scoped>
 .deep-think {

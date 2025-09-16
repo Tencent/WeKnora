@@ -12,7 +12,7 @@ const DOMPurifyConfig = {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
     'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-    'div', 'span', 'figure', 'figcaption'
+    'div', 'span', 'figure', 'figcaption', 'think'
   ],
   // 允许的属性
   ALLOWED_ATTR: [
