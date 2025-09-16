@@ -3,50 +3,71 @@
         <div class="logo_box">
             <img class="logo" src="@/assets/img/weknora.png" alt="">
         </div>
-        <div class="menu_box" v-for="(item, index) in menuArr" :key="index">
-            <div @click="gotopage(item.path)"
-                @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
-                :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : item.path == currentpath ? 'menu_item_active' : '']">
-                <div class="menu_item-box">
-                    <div class="menu_icon">
-                        <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'setting' ? settingIcon : item.icon == 'logout' ? logoutIcon : prefixIcon)" alt="">
+        
+        <!-- 上半部分：知识库和对话 -->
+        <div class="menu_top">
+            <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
+                <div @click="gotopage(item.path)"
+                    @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
+                    :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : item.path == currentpath ? 'menu_item_active' : '']">
+                    <div class="menu_item-box">
+                        <div class="menu_icon">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'setting' ? settingIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'tenant' ? tenantIcon : prefixIcon)" alt="">
+                        </div>
+                        <span class="menu_title">{{ item.title }}</span>
                     </div>
-                    <span class="menu_title">{{ item.title }}</span>
+                    <t-popup overlayInnerClassName="upload-popup" class="placement top center" content="上传知识"
+                        placement="top" show-arrow destroy-on-close>
+                        <div class="upload-file-wrap" @click="uploadFile" variant="outline"
+                            v-if="item.path == 'knowledgeBase'">
+                            <img class="upload-file-icon" :class="[item.path == currentpath ? 'active-upload' : '']"
+                                :src="getImgSrc(fileAddIcon)" alt="">
+                        </div>
+                    </t-popup>
                 </div>
-                <t-popup overlayInnerClassName="upload-popup" class="placement top center" content="上传知识"
-                    placement="top" show-arrow destroy-on-close>
-                    <div class="upload-file-wrap" @click="uploadFile" variant="outline"
-                        v-if="item.path == 'knowledgeBase'">
-                        <img class="upload-file-icon" :class="[item.path == currentpath ? 'active-upload' : '']"
-                            :src="getImgSrc(fileAddIcon)" alt="">
-                    </div>
-                </t-popup>
-            </div>
-            <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children">
-                <div class="submenu_item_p" v-for="(subitem, subindex) in item.children" :key="subindex"
-                    @click="gotopage(subitem.path)">
-                    <div :class="['submenu_item', currentSecondpath == subitem.path ? 'submenu_item_active' : '']"
-                        @mouseenter="mouseenteBotDownr(subindex)" @mouseleave="mouseleaveBotDown">
-                        <i v-if="currentSecondpath == subitem.path" class="dot"></i>
-                        <span class="submenu_title"
-                            :style="currentSecondpath == subitem.path ? 'margin-left:14px;max-width:160px;' : 'margin-left:18px;max-width:173px;'">
-                            {{ subitem.title }}
-                        </span>
-                        <t-popup v-model:visible="subitem.isMore" @overlay-click="delCard(subindex, subitem)"
-                            @visible-change="onVisibleChange" overlayClassName="del-menu-popup" trigger="click"
-                            destroy-on-close placement="top-left">
-                            <div v-if="(activeSubmenu == subindex) || (currentSecondpath == subitem.path) || subitem.isMore"
-                                @click.stop="openMore(subindex)" variant="outline" class="menu-more-wrap">
-                                <t-icon name="ellipsis" class="menu-more" />
-                            </div>
-                            <template #content>
-                                <span class="del_submenu">删除记录</span>
-                            </template>
-                        </t-popup>
+                <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children">
+                    <div class="submenu_item_p" v-for="(subitem, subindex) in item.children" :key="subindex"
+                        @click="gotopage(subitem.path)">
+                        <div :class="['submenu_item', currentSecondpath == subitem.path ? 'submenu_item_active' : '']"
+                            @mouseenter="mouseenteBotDownr(subindex)" @mouseleave="mouseleaveBotDown">
+                            <i v-if="currentSecondpath == subitem.path" class="dot"></i>
+                            <span class="submenu_title"
+                                :style="currentSecondpath == subitem.path ? 'margin-left:14px;max-width:160px;' : 'margin-left:18px;max-width:173px;'">
+                                {{ subitem.title }}
+                            </span>
+                            <t-popup v-model:visible="subitem.isMore" @overlay-click="delCard(subindex, subitem)"
+                                @visible-change="onVisibleChange" overlayClassName="del-menu-popup" trigger="click"
+                                destroy-on-close placement="top-left">
+                                <div v-if="(activeSubmenu == subindex) || (currentSecondpath == subitem.path) || subitem.isMore"
+                                    @click.stop="openMore(subindex)" variant="outline" class="menu-more-wrap">
+                                    <t-icon name="ellipsis" class="menu-more" />
+                                </div>
+                                <template #content>
+                                    <span class="del_submenu">删除记录</span>
+                                </template>
+                            </t-popup>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+        
+        <!-- 下半部分：账户信息、系统设置、退出登录 -->
+        <div class="menu_bottom">
+            <div class="menu_box" v-for="(item, index) in bottomMenuItems" :key="'bottom-' + index">
+                <div @click="gotopage(item.path)"
+                    @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
+                    :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : item.path == currentpath ? 'menu_item_active' : '']">
+                    <div class="menu_item-box">
+                        <div class="menu_icon">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'setting' ? settingIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'tenant' ? tenantIcon : prefixIcon)" alt="">
+                        </div>
+                        <span class="menu_title">{{ item.title }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <input type="file" @change="upload" style="display: none" ref="uploadInput"
             accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png" />
     </div>
@@ -78,6 +99,19 @@ const totalPages = computed(() => Math.ceil(total.value / page_size.value));
 const hasMore = computed(() => currentPage.value < totalPages.value);
 const { menuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref(-1);
+
+// 分离上下两部分菜单
+const topMenuItems = computed(() => {
+    return menuArr.value.filter(item => 
+        item.path === 'knowledgeBase' || item.path === 'creatChat'
+    );
+});
+
+const bottomMenuItems = computed(() => {
+    return menuArr.value.filter(item => 
+        item.path !== 'knowledgeBase' && item.path !== 'creatChat'
+    );
+});
 const loading = ref(false)
 const uploadFile = () => {
     uploadInput.value.click()
@@ -167,12 +201,14 @@ let knowledgeIcon = ref('zhishiku-green.svg');
 let prefixIcon = ref('prefixIcon.svg');
 let settingIcon = ref('setting.svg');
 let logoutIcon = ref('logout.svg');
+let tenantIcon = ref('setting.svg'); // 暂时使用setting图标
 let pathPrefix = ref(route.name)
 const getIcon = (path) => {
     fileAddIcon.value = path == 'knowledgeBase' ? 'file-add-green.svg' : 'file-add.svg';
     knowledgeIcon.value = path == 'knowledgeBase' ? 'zhishiku-green.svg' : 'zhishiku.svg';
     prefixIcon.value = path == 'creatChat' ? 'prefixIcon-green.svg' : path == 'knowledgeBase' ? 'prefixIcon-grey.svg' : 'prefixIcon.svg';
     settingIcon.value = path == 'settings' ? 'setting-green.svg' : 'setting.svg';
+    tenantIcon.value = path == 'tenant' ? 'setting-green.svg' : 'setting.svg'; // 暂时使用setting图标
     logoutIcon.value = 'logout.svg';
 }
 getIcon(route.name)
@@ -221,6 +257,10 @@ const mouseleaveMenu = (path) => {
     padding: 8px;
     background: #fff;
     box-sizing: border-box;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 
     .logo_box {
         height: 80px;
@@ -250,9 +290,28 @@ const mouseleaveMenu = (path) => {
         line-height: 21.7px;
     }
 
+    .menu_top {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 0;
+    }
+
+    .menu_bottom {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
     .menu_box {
         display: flex;
         flex-direction: column;
+        
+        &.has-submenu {
+            flex: 1;
+            min-height: 0;
+        }
     }
 
 
@@ -358,12 +417,11 @@ const mouseleaveMenu = (path) => {
         font-family: "PingFang SC";
         font-size: 14px;
         font-style: normal;
-        font-family: "PingFang SC";
-        font-size: 14px;
-        font-style: normal;
-        overflow-y: scroll;
+        overflow-y: auto;
         scrollbar-width: none;
-        height: calc(98vh - 276px);
+        flex: 1;
+        min-height: 0;
+        margin-left: 4px;
     }
 
     .submenu_item_p {

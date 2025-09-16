@@ -36,6 +36,12 @@ const router = createRouter({
       meta: { requiresInit: true, requiresAuth: true },
       children: [
         {
+          path: "tenant",
+          name: "tenant",
+          component: () => import("../views/tenant/TenantInfo.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
           path: "knowledgeBase",
           name: "knowledgeBase",
           component: () => import("../views/knowledge/KnowledgeBase.vue"),

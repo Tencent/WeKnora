@@ -13,6 +13,7 @@ export const useMenuStore = defineStore('menuStore', {
                 childrenPath: 'chat',
                 children: reactive<object[]>([]),
             },
+            { title: '账户信息', icon: 'tenant', path: 'tenant' },
             { title: '系统设置', icon: 'setting', path: 'settings' },
             { title: '退出登录', icon: 'logout', path: 'logout' }
         ]),
@@ -31,7 +32,7 @@ export const useMenuStore = defineStore('menuStore', {
             this.menuArr[1].children?.unshift(item)
         },
         updatasessionTitle(session_id: string, title: string) {
-            this.menuArr[1].children?.forEach(item => {
+            this.menuArr[1].children?.forEach((item: any) => {
                 if (item.id == session_id) {
                     item.title = title;
                     item.isNoTitle = false;

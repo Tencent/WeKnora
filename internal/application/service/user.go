@@ -399,10 +399,10 @@ func (s *userService) RevokeToken(ctx context.Context, tokenString string) error
 
 // GetCurrentUser gets current user from context
 func (s *userService) GetCurrentUser(ctx context.Context) (*types.User, error) {
-	userID, ok := ctx.Value("user_id").(string)
+	user, ok := ctx.Value("user").(*types.User)
 	if !ok {
 		return nil, errors.New("user not found in context")
 	}
 
-	return s.userRepo.GetUserByID(ctx, userID)
+	return user, nil
 }

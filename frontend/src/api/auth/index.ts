@@ -74,8 +74,13 @@ export interface UserInfo {
 export interface TenantInfo {
   id: string
   name: string
+  description?: string
   api_key: string
+  status?: string
+  business?: string
   owner_id: string
+  storage_quota?: number
+  storage_used?: number
   created_at: string
   updated_at: string
   knowledge_bases?: KnowledgeBaseInfo[]
