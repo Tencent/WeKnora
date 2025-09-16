@@ -87,15 +87,19 @@ const downloadFile = () => {
   downKnowledgeDetails(props.details.id)
     .then((result) => {
       if (result) {
+        if (url.value) {
+          URL.revokeObjectURL(url.value);
+        }
         url.value = URL.createObjectURL(result);
-        down.value.click();
-        // const link = document.createElement("a");
-        // link.style.display = "none";
-        // link.setAttribute("href", url);
-        // link.setAttribute("download", props.details.title);
-        // link.click();
-        // document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
+        const link = document.createElement("a");
+        link.style.display = "none";
+        link.setAttribute("href", url.value);
+        link.setAttribute("download", props.details.title);
+        link.click();
+        nextTick(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url.value);
+        })
       }
     })
     .catch((err) => {
