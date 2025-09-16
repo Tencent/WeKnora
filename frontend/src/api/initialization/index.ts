@@ -316,9 +316,17 @@ export function testMultimodalFunction(testData: {
         formData.append('chunk_overlap', testData.chunk_overlap.toString());
         formData.append('separators', JSON.stringify(testData.separators));
 
+        // 获取鉴权Token
+        const token = localStorage.getItem('weknora_token');
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         // 使用原生fetch因为需要发送FormData
         fetch('/api/v1/initialization/multimodal/test', {
             method: 'POST',
+            headers,
             body: formData
         })
         .then(response => response.json())

@@ -19,6 +19,7 @@
     "marked": "^5.1.2",
     "pagefind": "^1.1.1",
     "pinia": "^3.0.1",
+    "tdesign-icons-vue-next": "^0.4.1",
     "tdesign-vue-next": "^1.11.5",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",
