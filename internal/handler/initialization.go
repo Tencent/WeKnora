@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -1095,72 +1095,55 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	model *types.Model,
 ) (bool, string) {
-	// 使用 /chat/completions 端点进行连接检查
-	// 发送一个简单的测试请求来验证连接和认证
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+	// 使用 models/chat 进行连接检查
+	// 创建聊天配置
+	chatConfig := &chat.ChatConfig{
+		Source:    types.ModelSourceRemote,
+		BaseURL:   model.Parameters.BaseURL,
+		ModelName: model.Name,
+		APIKey:    model.Parameters.APIKey,
+		ModelID:   model.Name,
 	}
 
-	// 构造测试请求
-	testEndpoint := ""
-	if model.Parameters.BaseURL != "" {
-		testEndpoint = model.Parameters.BaseURL + "/chat/completions"
+	// 创建聊天实例
+	chatInstance, err := chat.NewChat(chatConfig)
+	if err != nil {
+		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
 
-	// 构造测试请求体
-	testRequest := map[string]interface{}{
-		"model": model.Name,
-		"messages": []map[string]string{
-			{
-				"role":    "user",
-				"content": "test",
-			},
+	// 构造测试消息
+	testMessages := []chat.Message{
+		{
+			Role:    "user",
+			Content: "test",
 		},
-		"max_tokens":      1,
-		"enable_thinking": false, // for dashscope.aliyuncs qwen3-32b
 	}
 
-	jsonData, err := json.Marshal(testRequest)
+	// 构造测试选项
+	testOptions := &chat.ChatOptions{
+		MaxTokens: 1,
+		Thinking:  &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
+	}
+
+	// 使用聊天实例进行测试
+	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
-		return false, fmt.Sprintf("构造请求体失败: %v", err)
+		// 根据错误类型返回不同的错误信息
+		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "unauthorized") {
+			return false, "认证失败，请检查API Key"
+		} else if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "forbidden") {
+			return false, "权限不足，请检查API Key权限"
+		} else if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+			return false, "API端点不存在，请检查Base URL"
+		} else if strings.Contains(err.Error(), "timeout") {
+			return false, "连接超时，请检查网络连接"
+		} else {
+			return false, fmt.Sprintf("连接失败: %v", err)
+		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", testEndpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return false, fmt.Sprintf("创建请求失败: %v", err)
-	}
-
-	// 添加认证头
-	if model.Parameters.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+model.Parameters.APIKey)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return false, fmt.Sprintf("连接失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err == nil {
-		logger.Infof(ctx, "Response body: %s", string(body))
-	}
-
-	// 检查响应状态
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		// 连接成功，模型可用
-		return true, "连接正常，模型可用"
-	} else if resp.StatusCode == 401 {
-		return false, "认证失败，请检查API Key"
-	} else if resp.StatusCode == 403 {
-		return false, "权限不足，请检查API Key权限"
-	} else if resp.StatusCode == 404 {
-		return false, "API端点不存在，请检查Base URL"
-	} else {
-		return false, fmt.Sprintf("API返回错误状态: %d", resp.StatusCode)
-	}
+	// 连接成功，模型可用
+	return true, "连接正常，模型可用"
 }
 
 // checkRerankModelConnection 检查Rerank模型连接和功能的内部方法
