@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2025-09-17
+
+### 🚀 Major Features
+- **NEW**: Multi-knowledgebases operation support
+  - Added comprehensive multi-knowledgebase management functionality
+  - Implemented multi-data source search engine configuration and optimization logic
+  - Enhanced knowledge base switching and management in UI
+- **NEW**: Enhanced tenant information management
+  - Added dedicated tenant information page
+  - Improved user and tenant management capabilities
+
+### 🎨 UI/UX Improvements
+- **REDESIGNED**: Settings page with improved layout and functionality
+- **ENHANCED**: Menu component with multi-knowledgebase support
+- **IMPROVED**: Initialization configuration page structure
+- **OPTIMIZED**: Login page and authentication flow
+
+### 🔒 Security Fixes
+- **FIXED**: XSS attack vulnerabilities in thinking component
+- **FIXED**: Content Security Policy (CSP) errors
+- **ENHANCED**: Frontend security measures and input sanitization
+
+### 🐛 Bug Fixes
+- **FIXED**: Login direct page navigation issues
+- **FIXED**: App LLM model check logic
+- **FIXED**: Version script functionality
+- **FIXED**: File download content errors
+- **IMPROVED**: Document content component display
+
+### 🧹 Code Cleanup
+- **REMOVED**: Test data functionality and related APIs
+- **SIMPLIFIED**: Initialization configuration components
+- **CLEANED**: Redundant UI components and unused code
+
+### 📊 Technical Details
+- **39 files** modified
+- **1,717 lines** added
+- **4,838 lines** removed
+- Enhanced multi-knowledgebase API endpoints
+- Improved error handling and user feedback
+
 ## [0.1.3] - 2025-01-27
 
 ### 🔒 Security Features
