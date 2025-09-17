@@ -25,7 +25,7 @@ const router = createRouter({
     {
       path: "/platform",
       name: "Platform",
-      redirect: "/platform/knowledgeBase",
+      redirect: "/platform/knowledge-bases",
       component: () => import("../views/platform/index.vue"),
       meta: { requiresInit: true, requiresAuth: true },
       children: [
@@ -79,7 +79,7 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
     if (to.path === '/login' && authStore.isLoggedIn) {
-      next('/platform/knowledgeBase')
+      next('/platform/knowledge-bases')
       return
     }
     next()

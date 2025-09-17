@@ -1246,7 +1246,11 @@ const loadCurrentConfig = async () => {
         }
         
         // 根据是否为知识库设置模式选择不同的API
-        const config = await getCurrentConfigByKB(currentKbId.value);
+        if (props.isKbSettings && !currentKbId.value) {
+            console.error('知识库设置模式下缺少知识库ID');
+            return;
+        }
+        const config = await getCurrentConfigByKB(currentKbId.value!);
         
         // 设置hasFiles状态
         hasFiles.value = config.hasFiles || false;
@@ -1643,6 +1647,16 @@ onUnmounted(() => {
 watch(() => formData.llm.source, () => onModelSourceChange('llm'));
 watch(() => formData.embedding.source, () => onModelSourceChange('embedding'));
 
+// 监听路由参数变化，当知识库ID变化时重新加载配置
+watch(() => route.params.kbId, async (newKbId, oldKbId) => {
+    // 只有在知识库设置模式下且ID确实发生变化时才重新加载
+    if (props.isKbSettings && newKbId && newKbId !== oldKbId) {
+        console.log('知识库ID变化，重新加载配置:', { oldKbId, newKbId });
+        await loadCurrentConfig();
+        await checkAllConfiguredModels();
+    }
+}, { immediate: false });
+
 // 添加缺失的函数
 const onRerankChange = () => {
     console.log('Rerank enabled:', formData.rerank.enabled);
@@ -1963,7 +1977,12 @@ const handleSubmit = async () => {
         }
         
         // 根据是否为知识库设置模式选择不同的API
-        const result = await initializeSystemByKB(currentKbId.value, formData);
+        if (props.isKbSettings && !currentKbId.value) {
+            console.error('知识库设置模式下缺少知识库ID');
+            MessagePlugin.error('知识库ID缺失，无法保存配置');
+            return;
+        }
+        const result = await initializeSystemByKB(currentKbId.value!, formData);
         
         if (result.success) {
             MessagePlugin.success(props.isKbSettings ? '知识库设置更新成功' : (isUpdateMode.value ? '配置更新成功' : '系统初始化完成'));

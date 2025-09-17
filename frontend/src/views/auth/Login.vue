@@ -274,7 +274,7 @@ const handleLogin = async () => {
 
       // 等待状态更新完成后再跳转
       await nextTick()
-      router.replace('/platform/knowledgeBase')
+      router.replace('/platform/knowledge-bases')
     } else {
       MessagePlugin.error(response.message || '登录失败，请检查邮箱或密码')
     }

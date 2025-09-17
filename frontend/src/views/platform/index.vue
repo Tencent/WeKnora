@@ -38,7 +38,7 @@ const drop = (event) => {
         if (fileEntry) {
             fileEntry.file((file: file) => {
                 requestMethod(file, uploadInput)
-                router.push('/platform/knowledgeBase?upload=true')
+                router.push('/platform/knowledge-bases?upload=true')
             })
         }
     }

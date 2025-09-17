@@ -176,12 +176,12 @@ deps:
 
 # Build for production
 build-prod:
-	@VERSION=$${VERSION:-unknown}; \
+	VERSION=$${VERSION:-unknown}; \
 	COMMIT_ID=$${COMMIT_ID:-unknown}; \
 	BUILD_TIME=$${BUILD_TIME:-unknown}; \
 	GO_VERSION=$${GO_VERSION:-unknown}; \
 	LDFLAGS="-X 'github.com/Tencent/WeKnora/internal/handler.Version=$$VERSION' -X 'github.com/Tencent/WeKnora/internal/handler.CommitID=$$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/handler.BuildTime=$$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/handler.GoVersion=$$GO_VERSION'"; \
-	GOOS=linux go build -installsuffix cgo -ldflags="-w -s $$LDFLAGS" -o $(BINARY_NAME) $(MAIN_PATH)
+	GOOS=linux go build -v -installsuffix cgo -ldflags="-w -s $$LDFLAGS" -o $(BINARY_NAME) $(MAIN_PATH)
 
 clean-db:
 	@echo "Cleaning database..."

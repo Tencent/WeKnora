@@ -78,12 +78,30 @@
         <!-- 下半部分：账户信息、系统设置、退出登录 -->
         <div class="menu_bottom">
             <div class="menu_box" v-for="(item, index) in bottomMenuItems" :key="'bottom-' + index">
-                <div @click="handleMenuClick(item.path)"
+                <div v-if="item.path === 'logout'">
+                    <t-popconfirm 
+                        content="确定要退出登录吗？" 
+                        @confirm="handleLogout"
+                        placement="top"
+                        :show-arrow="true"
+                    >
+                        <div @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
+                            :class="['menu_item', 'logout-item']">
+                            <div class="menu_item-box">
+                                <div class="menu_icon">
+                                    <img class="icon" :src="getImgSrc(logoutIcon)" alt="">
+                                </div>
+                                <span class="menu_title">{{ item.title }}</span>
+                            </div>
+                        </div>
+                    </t-popconfirm>
+                </div>
+                <div v-else @click="handleMenuClick(item.path)"
                     @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
                     :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : (item.path == currentpath) ? 'menu_item_active' : '']">
                     <div class="menu_item-box">
                         <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon :  item.icon == 'logout' ? logoutIcon : item.icon == 'tenant' ? tenantIcon : prefixIcon)" alt="">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'tenant' ? tenantIcon : prefixIcon)" alt="">
                         </div>
                         <span class="menu_title">{{ item.path === 'knowledge-bases' && kbMenuItem ? kbMenuItem.title : item.title }}</span>
                     </div>
@@ -444,9 +462,14 @@ const handleMenuClick = async (path: string) => {
         } else {
             router.push('/platform/knowledge-bases')
         }
-      } else {
-          gotopage(path)
-      }
+    } else {
+        gotopage(path)
+    }
+}
+
+// 处理退出登录确认
+const handleLogout = () => {
+    gotopage('logout')
 }
 
 const getCurrentKbId = async (): Promise<string | null> => {
@@ -912,6 +935,50 @@ watch(() => route.params.kbId, () => {
         cursor: pointer;
         margin-top: 4px !important;
 
+    }
+}
+
+// 退出登录确认框样式
+:deep(.t-popconfirm) {
+    .t-popconfirm__content {
+        background: #fff;
+        border: 1px solid #e7e7e7;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        padding: 12px 16px;
+        font-size: 14px;
+        color: #333;
+        max-width: 200px;
+    }
+    
+    .t-popconfirm__arrow {
+        border-bottom-color: #e7e7e7;
+    }
+    
+    .t-popconfirm__arrow::after {
+        border-bottom-color: #fff;
+    }
+    
+    .t-popconfirm__buttons {
+        margin-top: 8px;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+    }
+    
+    .t-button--variant-outline {
+        border-color: #d9d9d9;
+        color: #666;
+    }
+    
+    .t-button--theme-danger {
+        background-color: #ff4d4f;
+        border-color: #ff4d4f;
+    }
+    
+    .t-button--theme-danger:hover {
+        background-color: #ff7875;
+        border-color: #ff7875;
     }
 }
 </style>
