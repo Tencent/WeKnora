@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-app:
+  build-images:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -42,12 +42,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Set up Go
-        if: matrix.service_name == 'app'
-        uses: actions/setup-go@v4
-        with:
-          go-version: '1.24'
-
       - name: Prepare version info
         id: version
         run: |
@@ -62,6 +56,20 @@ jobs:
           # 显示版本信息
           ./scripts/get_version.sh info
       
+      - name: Build Cache for Docker
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: go-build-cache
+          key: ${{ runner.os }}-go-build-cache-${{ hashFiles('**/go.sum') }}
+
+      - name: Inject go-build-cache
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          cache-source: go-build-cache
+          dockerfile: ${{ matrix.file }}
+          skip-extraction: ${{ steps.cache.outputs.cache-hit }}
+
       - name: Build ${{ matrix.service_name }} Image
         uses: docker/build-push-action@v3
         with:
@@ -79,3 +87,4 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:cache
           cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:cache,mode=max
+  

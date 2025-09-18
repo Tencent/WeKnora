@@ -21,10 +21,9 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/re
 RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Copy go mod and sum files
-COPY go.mod .
-COPY go.sum .
-RUN go mod download
-COPY . .
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Get version and commit info for build injection
 ARG VERSION_ARG
@@ -39,7 +38,8 @@ ENV BUILD_TIME=${BUILD_TIME_ARG}
 ENV GO_VERSION=${GO_VERSION_ARG}
 
 # Build the application with version info
-RUN make build-prod
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod make build-prod
 
 # Final stage
 FROM alpine:3.17
@@ -58,7 +58,7 @@ RUN mkdir -p /data/files && \
 
 # Copy migrate tool from builder stage
 COPY --from=builder /go/bin/migrate /usr/local/bin/
-COPY --from=builder /go/pkg/mod/github.com/yanyiwu /go/pkg/mod/github.com/yanyiwu/
+COPY --from=builder /app/yanyiwu/ /go/pkg/mod/github.com/yanyiwu/
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/config ./config
