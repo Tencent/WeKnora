@@ -23,7 +23,6 @@ RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate
 # Copy go mod and sum files
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
-RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 COPY . .
 
 # Get version and commit info for build injection
@@ -40,6 +39,7 @@ ENV GO_VERSION=${GO_VERSION_ARG}
 
 # Build the application with version info
 RUN --mount=type=cache,target=/go/pkg/mod make build-prod
+RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage
 FROM alpine:3.17

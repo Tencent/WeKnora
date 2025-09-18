@@ -1,6 +1,8 @@
 name: Build and Push Docker Image
 on:
   push:
+    tags:
+      - "v*"
     branches:
       - main
 
@@ -9,50 +11,128 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-images:
+  build-ui:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - service_name: ui
-            file: frontend/Dockerfile
-            context: ./frontend
-            platform: linux/amd64,linux/arm64
-          - service_name: app
-            file: docker/Dockerfile.app
-            context: .
-            platform: linux/amd64,linux/arm64
-          - service_name: docreader
-            file: docker/Dockerfile.docreader
-            context: .
-            platform: linux/amd64,linux/arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui
 
       - name: Prepare version info
         id: version
         run: |
           # 使用统一的版本管理脚本
           eval "$(./scripts/get_version.sh env)"
-          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build ui Image
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: frontend/Dockerfile
+          context: ./frontend
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui:cache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui:cache,mode=max
+
+  build-docreader:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-docreader
+
+      - name: Prepare version info
+        id: version
+        run: |
+          eval "$(./scripts/get_version.sh env)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Build docreader Image
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile.docreader
+          context: .
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-docreader:cache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-docreader:cache,mode=max
+
+  build-app:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runs: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runs: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        id: setup-buildx
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
+
+      - name: Prepare version info
+        id: version
+        run: |
+          # 使用统一的版本管理脚本
+          eval "$(./scripts/get_version.sh env)"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
           echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
           echo "go_version=$GO_VERSION" >> $GITHUB_OUTPUT
           
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
           # 显示版本信息
           ./scripts/get_version.sh info
       
@@ -60,34 +140,85 @@ jobs:
         uses: actions/cache@v4
         id: cache
         with:
-          path: go-build-cache
-          key: ${{ runner.os }}-go-build-cache-${{ hashFiles('**/go.sum') }}
+          path: go-pkg-mod
+          key: ${{ env.PLATFORM_PAIR }}-go-build-cache-${{ hashFiles('**/go.sum') }}
 
       - name: Inject go-build-cache
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
-          cache-source: go-build-cache
+          builder: ${{ steps.setup-buildx.outputs.name }}
           cache-map: |
             {
               "go-pkg-mod": "/go/pkg/mod"
             }
           skip-extraction: ${{ steps.cache.outputs.cache-hit }}
 
-      - name: Build ${{ matrix.service_name }} Image
+      - name: Build app Image
+        id: build
         uses: docker/build-push-action@v3
         with:
           push: true
           platforms: ${{ matrix.platform }}
-          file: ${{ matrix.file }}
-          context: ${{ matrix.context }}
+          file: docker/Dockerfile.app
+          context: .
           build-args: |
-            ${{ matrix.service_name == 'app' && format('VERSION_ARG={0}', steps.version.outputs.version) || '' }}
-            ${{ matrix.service_name == 'app' && format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) || '' }}
-            ${{ matrix.service_name == 'app' && format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) || '' }}
-            ${{ matrix.service_name == 'app' && format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) || '' }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:${{ steps.version.outputs.version }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:cache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-${{ matrix.service_name }}:cache,mode=max
-  
+            ${{ format('VERSION_ARG={0}', steps.version.outputs.version) }}
+            ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
+            ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
+            ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-app:cache-${{ env.PLATFORM_PAIR }}
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-app:cache-${{ env.PLATFORM_PAIR }},mode=max
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - build-app
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ secrets.DOCKERHUB_USERNAME }}/weknora-app@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app:${{ steps.meta.outputs.version }}
