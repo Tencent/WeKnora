@@ -67,7 +67,10 @@ jobs:
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
           cache-source: go-build-cache
-          dockerfile: ${{ matrix.file }}
+          cache-map: |
+            {
+              "go-pkg-mod": "/go/pkg/mod"
+            }
           skip-extraction: ${{ steps.cache.outputs.cache-hit }}
 
       - name: Build ${{ matrix.service_name }} Image
