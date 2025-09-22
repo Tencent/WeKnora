@@ -74,6 +74,9 @@ type UpdateImageInfoRequest struct {
 // ErrDuplicateFile is returned when attempting to create a knowledge entry with a file that already exists
 var ErrDuplicateFile = errors.New("file already exists")
 
+// ErrDuplicateURL is returned when attempting to create a knowledge entry with a URL that already exists
+var ErrDuplicateURL = errors.New("URL already exists")
+
 // CreateKnowledgeFromFile creates a knowledge entry from a local file path
 func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	knowledgeBaseID string, filePath string, metadata map[string]string, enableMultimodel *bool,
@@ -186,7 +189,12 @@ func (c *Client) CreateKnowledgeFromURL(ctx context.Context, knowledgeBaseID str
 	}
 
 	var response KnowledgeResponse
-	if err := parseResponse(resp, &response); err != nil {
+	if resp.StatusCode == http.StatusConflict {
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		return &response.Data, ErrDuplicateURL
+	} else if err := parseResponse(resp, &response); err != nil {
 		return nil, err
 	}
 
