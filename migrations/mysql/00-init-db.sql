@@ -51,6 +51,7 @@ CREATE TABLE knowledge_bases (
     vlm_model_id VARCHAR(64) NOT NULL,
     cos_config JSON NOT NULL,
     vlm_config JSON NOT NULL,
+    extract_config JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL

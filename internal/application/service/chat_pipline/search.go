@@ -77,6 +77,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		}
 		chatManage.SearchResult = append(chatManage.SearchResult, searchResults...)
 	}
+
 	// remove duplicate results
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 

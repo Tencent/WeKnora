@@ -83,7 +83,7 @@ type CreateSessionRequest struct {
 func (h *SessionHandler) CreateSession(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	logger.Infof(ctx, "Start creating session, config: %+v", h.config.Conversation)
+	// logger.Infof(ctx, "Start creating session, config: %+v", h.config.Conversation)
 
 	// Parse and validate the request body
 	var request CreateSessionRequest

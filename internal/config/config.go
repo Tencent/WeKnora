@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
@@ -18,10 +19,10 @@ type Config struct {
 	KnowledgeBase  *KnowledgeBaseConfig  `yaml:"knowledge_base" json:"knowledge_base"`
 	Tenant         *TenantConfig         `yaml:"tenant" json:"tenant"`
 	Models         []ModelConfig         `yaml:"models" json:"models"`
-	Asynq          *AsynqConfig          `yaml:"asynq" json:"asynq"`
 	VectorDatabase *VectorDatabaseConfig `yaml:"vector_database" json:"vector_database"`
 	DocReader      *DocReaderConfig      `yaml:"docreader" json:"docreader"`
 	StreamManager  *StreamManagerConfig  `yaml:"stream_manager" json:"stream_manager"`
+	ExtractManager *ExtractManagerConfig `yaml:"extract" json:"extract"`
 }
 
 type DocReaderConfig struct {
@@ -109,15 +110,6 @@ type ModelConfig struct {
 	Parameters map[string]interface{} `yaml:"parameters" json:"parameters"`
 }
 
-type AsynqConfig struct {
-	Addr         string        `yaml:"addr" json:"addr"`
-	Username     string        `yaml:"username" json:"username"`
-	Password     string        `yaml:"password" json:"password"`
-	ReadTimeout  time.Duration `yaml:"read_timeout" json:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
-	Concurrency  int           `yaml:"concurrency" json:"concurrency"`
-}
-
 // StreamManagerConfig 流管理器配置
 type StreamManagerConfig struct {
 	Type           string        `yaml:"type" json:"type"`                       // 类型: "memory" 或 "redis"
@@ -132,6 +124,18 @@ type RedisConfig struct {
 	DB       int           `yaml:"db" json:"db"`             // Redis数据库
 	Prefix   string        `yaml:"prefix" json:"prefix"`     // 键前缀
 	TTL      time.Duration `yaml:"ttl" json:"ttl"`           // 过期时间(小时)
+}
+
+// ExtractManagerConfig 抽取管理器配置
+type ExtractManagerConfig struct {
+	ExtractGraph  *types.PromptTemplateStructured `yaml:"extract_graph" json:"extract_graph"`
+	ExtractEntity *types.PromptTemplateStructured `yaml:"extract_entity" json:"extract_entity"`
+	FabriText     *FebriText                      `yaml:"fabri_text" json:"fabri_text"`
+}
+
+type FebriText struct {
+	WithTag   string `yaml:"with_tag" json:"with_tag"`
+	WithNoTag string `yaml:"with_no_tag" json:"with_no_tag"`
 }
 
 // LoadConfig 从配置文件加载配置

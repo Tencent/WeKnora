@@ -50,6 +50,13 @@ export interface InitializationConfig {
     };
     // Frontend-only hint for storage selection UI
     storageType?: 'cos' | 'minio';
+    nodeExtract: {
+        enabled: boolean,
+        text: string,
+        tags: string[],
+        nodes: Node[],
+        relations: Relation[]
+    }
 }
 
 // 下载任务状态类型
@@ -63,8 +70,6 @@ export interface DownloadTask {
     endTime?: string;
 }
 
-
-
 // 根据知识库ID执行配置更新
 export function initializeSystemByKB(kbId: string, config: InitializationConfig): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -76,7 +81,7 @@ export function initializeSystemByKB(kbId: string, config: InitializationConfig)
             })
             .catch((error: any) => {
                 console.error('知识库配置更新失败:', error);
-                reject(error);
+                reject(error.error || error);
             });
     });
 }
@@ -324,4 +329,93 @@ export function testMultimodalFunction(testData: {
             reject(error);
         });
     });
-} 
+}
+
+// 文本内容关系提取接口
+export interface TextRelationExtractionRequest {
+    text: string;
+    tags: string[];
+    llmConfig: LLMConfig;
+}
+
+export interface Node {
+    name: string;
+    attributes: string[];
+}
+
+export interface Relation {
+    node1: string;
+    node2: string;
+    type: string;
+}
+
+export interface LLMConfig {
+    source: 'local' | 'remote';
+    modelName: string;
+    baseUrl: string;
+    apiKey: string;
+}
+
+export interface TextRelationExtractionResponse {
+    nodes: Node[];
+    relations: Relation[];
+}
+
+// 文本内容关系提取
+export function extractTextRelations(request: TextRelationExtractionRequest): Promise<TextRelationExtractionResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/extract/text-relation', request)
+            .then((response: any) => {
+                resolve(response.data || { nodes: [], relations: [] });
+            })
+            .catch((error: any) => {
+                console.error('文本内容关系提取失败:', error);
+                reject(error);
+            });
+    });
+}
+
+export interface FabriTextRequest {
+    tags: string[];
+    llmConfig: LLMConfig;
+}
+
+export interface FabriTextResponse {
+    text: string;
+}
+
+// 文本内容生成
+export function fabriText(request: FabriTextRequest): Promise<FabriTextResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/extract/fabri-text', request)
+            .then((response: any) => {
+                resolve(response.data || { text: '' });
+            })
+            .catch((error: any) => {
+                console.error('文本内容生成失败:', error);
+                reject(error);
+            });
+    });
+}
+
+export interface FabriTagRequest {
+    llmConfig: LLMConfig; 
+}
+
+export interface FabriTagResponse {
+    tags: string[];
+}
+
+// 文本内容生成
+export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1/initialization/extract/fabri-tag', request)
+            .then((response: any) => {
+                resolve(response.data || { tags: [] as string[] });
+            })
+            .catch((error: any) => {
+                console.error('标签生成失败:', error);
+                reject(error);
+            });
+    });
+}

@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"strconv"
-
+	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -133,6 +134,21 @@ type InitializationRequest struct {
 		ChunkOverlap int      `json:"chunkOverlap" binding:"min=0"`
 		Separators   []string `json:"separators" binding:"required,min=1"`
 	} `json:"documentSplitting" binding:"required"`
+
+	NodeExtract struct {
+		Enabled bool     `json:"enabled"`
+		Text    string   `json:"text"`
+		Tags    []string `json:"tags"`
+		Nodes   []struct {
+			Name       string   `json:"name"`
+			Attributes []string `json:"attributes"`
+		} `json:"nodes"`
+		Relations []struct {
+			Node1 string `json:"node1"`
+			Node2 string `json:"node2"`
+			Type  string `json:"type"`
+		} `json:"relations"`
+	} `json:"nodeExtract"`
 }
 
 // InitializeByKB 根据知识库ID执行配置更新
@@ -203,6 +219,25 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 		if req.Rerank.ModelName == "" || req.Rerank.BaseURL == "" {
 			logger.Error(ctx, "Rerank configuration incomplete")
 			c.Error(errors.NewBadRequestError("Rerank配置不完整"))
+			return
+		}
+	}
+
+	// 验证Node Extractor配置（如果启用）
+	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" && req.NodeExtract.Enabled {
+		logger.Error(ctx, "Node Extractor configuration incomplete")
+		c.Error(errors.NewBadRequestError("请正确配置环境变量NEO4J_ENABLE"))
+		return
+	}
+	if req.NodeExtract.Enabled {
+		if req.NodeExtract.Text == "" || len(req.NodeExtract.Tags) == 0 {
+			logger.Error(ctx, "Node Extractor configuration incomplete")
+			c.Error(errors.NewBadRequestError("Node Extractor配置不完整"))
+			return
+		}
+		if len(req.NodeExtract.Nodes) == 0 || len(req.NodeExtract.Relations) == 0 {
+			logger.Error(ctx, "Node Extractor configuration incomplete")
+			c.Error(errors.NewBadRequestError("请先提取实体和关系"))
 			return
 		}
 	}
@@ -404,6 +439,29 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 		kb.VLMModelID = ""
 		kb.VLMConfig = types.VLMConfig{}
 		kb.StorageConfig = types.StorageConfig{}
+	}
+
+	if req.NodeExtract.Enabled {
+		kb.ExtractConfig = &types.ExtractConfig{
+			Text:      req.NodeExtract.Text,
+			Tags:      req.NodeExtract.Tags,
+			Nodes:     make([]*types.GraphNode, 0),
+			Relations: make([]*types.GraphRelation, 0),
+		}
+		for _, rnode := range req.NodeExtract.Nodes {
+			node := &types.GraphNode{
+				Name:       rnode.Name,
+				Attributes: rnode.Attributes,
+			}
+			kb.ExtractConfig.Nodes = append(kb.ExtractConfig.Nodes, node)
+		}
+		for _, relation := range req.NodeExtract.Relations {
+			kb.ExtractConfig.Relations = append(kb.ExtractConfig.Relations, &types.GraphRelation{
+				Node1: relation.Node1,
+				Node2: relation.Node2,
+				Type:  relation.Type,
+			})
+		}
 	}
 
 	err = h.kbRepository.UpdateKnowledgeBase(ctx, kb)
@@ -710,7 +768,6 @@ func (h *InitializationHandler) downloadModelAsync(ctx context.Context,
 	err := h.pullModelWithProgress(ctx, modelName, func(progress float64, message string) {
 		h.updateTaskStatus(taskID, "downloading", progress, message)
 	})
-
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_name": modelName,
@@ -777,7 +834,6 @@ func (h *InitializationHandler) pullModelWithProgress(ctx context.Context,
 		)
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to pull model: %w", err)
 	}
@@ -971,6 +1027,20 @@ func buildConfigResponse(models []*types.Model,
 		}
 	}
 
+	if kb.ExtractConfig != nil {
+		config["nodeExtract"] = map[string]interface{}{
+			"enabled":   true,
+			"text":      kb.ExtractConfig.Text,
+			"tags":      kb.ExtractConfig.Tags,
+			"nodes":     kb.ExtractConfig.Nodes,
+			"relations": kb.ExtractConfig.Relations,
+		}
+	} else {
+		config["nodeExtract"] = map[string]interface{}{
+			"enabled": false,
+		}
+	}
+
 	return config
 }
 
@@ -1148,8 +1218,8 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 
 // checkRerankModelConnection 检查Rerank模型连接和功能的内部方法
 func (h *InitializationHandler) checkRerankModelConnection(ctx context.Context,
-	modelName, baseURL, apiKey string) (bool, string) {
-
+	modelName, baseURL, apiKey string,
+) (bool, string) {
 	// 创建Reranker配置
 	config := &rerank.RerankerConfig{
 		APIKey:    apiKey,
@@ -1491,4 +1561,215 @@ func (h *InitializationHandler) testMultimodalWithDocReader(
 	result["ocr"] = strings.Join(allOCRTexts, "; ")
 
 	return result, nil
+}
+
+// TextRelationExtractionRequest 文本关系提取请求结构
+type TextRelationExtractionRequest struct {
+	Text      string    `json:"text" binding:"required"`
+	Tags      []string  `json:"tags" binding:"required"`
+	LLMConfig LLMConfig `json:"llmConfig"`
+}
+
+type LLMConfig struct {
+	Source    string `json:"source"`
+	ModelName string `json:"modelName"`
+	BaseUrl   string `json:"baseUrl"`
+	ApiKey    string `json:"apiKey"`
+}
+
+// TextRelationExtractionResponse 文本关系提取响应结构
+type TextRelationExtractionResponse struct {
+	Nodes     []*types.GraphNode     `json:"nodes"`
+	Relations []*types.GraphRelation `json:"relations"`
+}
+
+func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req TextRelationExtractionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "文本关系提取请求参数错误")
+		c.Error(errors.NewBadRequestError("文本关系提取请求参数错误"))
+		return
+	}
+
+	// 验证文本内容
+	if len(req.Text) == 0 {
+		c.Error(errors.NewBadRequestError("文本内容不能为空"))
+		return
+	}
+
+	if len(req.Text) > 5000 {
+		c.Error(errors.NewBadRequestError("文本内容长度不能超过5000字符"))
+		return
+	}
+
+	// 验证标签
+	if len(req.Tags) == 0 {
+		c.Error(errors.NewBadRequestError("至少需要选择一个关系标签"))
+		return
+	}
+
+	// 调用模型服务进行文本关系提取
+	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, req.LLMConfig)
+	if err != nil {
+		logger.Error(ctx, "文本关系提取失败", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"success": false,
+				"message": err.Error(),
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// extractRelationsFromText 从文本中提取关系
+func (h *InitializationHandler) extractRelationsFromText(ctx context.Context, text string, tags []string, llm LLMConfig) (*TextRelationExtractionResponse, error) {
+	chatModel, err := chat.NewChat(&chat.ChatConfig{
+		ModelID:   "initialization",
+		APIKey:    llm.ApiKey,
+		BaseURL:   llm.BaseUrl,
+		ModelName: llm.ModelName,
+		Source:    types.ModelSource(llm.Source),
+	})
+	if err != nil {
+		logger.Error(ctx, "初始化模型服务失败", err)
+		return nil, err
+	}
+
+	template := &types.PromptTemplateStructured{
+		Description: h.config.ExtractManager.ExtractGraph.Description,
+		Tags:        tags,
+		Examples:    h.config.ExtractManager.ExtractGraph.Examples,
+	}
+
+	extractor := chatpipline.NewExtractor(chatModel, template)
+	graph, err := extractor.Extract(ctx, text)
+	if err != nil {
+		logger.Error(ctx, "文本关系提取失败", err)
+		return nil, err
+	}
+	extractor.RemoveUnknownRelation(ctx, graph)
+
+	result := &TextRelationExtractionResponse{
+		Nodes:     graph.Node,
+		Relations: graph.Relation,
+	}
+
+	return result, nil
+}
+
+type FabriTextRequest struct {
+	Tags      []string  `json:"tags"`
+	LLMConfig LLMConfig `json:"llmConfig"`
+}
+
+type FabriTextResponse struct {
+	Text string `json:"text"`
+}
+
+func (h *InitializationHandler) FabriText(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req FabriTextRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "生成示例文本请求参数错误")
+		c.Error(errors.NewBadRequestError("生成示例文本请求参数错误"))
+		return
+	}
+
+	result, err := h.fabriText(ctx, req.Tags, req.LLMConfig)
+	if err != nil {
+		logger.Error(ctx, "生成示例文本失败", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"success": false,
+				"message": err.Error(),
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    FabriTextResponse{Text: result},
+	})
+}
+
+func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, llm LLMConfig) (string, error) {
+	chatModel, err := chat.NewChat(&chat.ChatConfig{
+		ModelID:   "initialization",
+		APIKey:    llm.ApiKey,
+		BaseURL:   llm.BaseUrl,
+		ModelName: llm.ModelName,
+		Source:    types.ModelSource(llm.Source),
+	})
+	if err != nil {
+		logger.Error(ctx, "初始化模型服务失败", err)
+		return "", err
+	}
+
+	content := h.config.ExtractManager.FabriText.WithNoTag
+	if len(tags) > 0 {
+		tagStr, _ := json.Marshal(tags)
+		content = fmt.Sprintf(h.config.ExtractManager.FabriText.WithTag, string(tagStr))
+	}
+
+	think := false
+	result, err := chatModel.Chat(ctx, []chat.Message{
+		{Role: "user", Content: content},
+	}, &chat.ChatOptions{
+		Temperature: 0.3,
+		MaxTokens:   4096,
+		Thinking:    &think,
+	})
+	if err != nil {
+		logger.Error(ctx, "生成示例文本失败", err)
+		return "", err
+	}
+	return result.Content, nil
+}
+
+type FabriTagRequest struct {
+	LLMConfig LLMConfig `json:"llmConfig"`
+}
+
+type FabriTagResponse struct {
+	Tags []string `json:"tags"`
+}
+
+var tagOptions = []string{
+	"内容", "文化", "人物", "事件", "时间", "地点", "作品", "作者", "关系", "属性",
+}
+
+func (h *InitializationHandler) FabriTag(c *gin.Context) {
+	tagRandom := RandomSelect(tagOptions, rand.Intn(len(tagOptions)-1)+1)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    FabriTagResponse{Tags: tagRandom},
+	})
+}
+
+func RandomSelect(strs []string, n int) []string {
+	if n <= 0 {
+		return []string{}
+	}
+	result := make([]string, len(strs))
+	copy(result, strs)
+	rand.Shuffle(len(result), func(i, j int) {
+		result[i], result[j] = result[j], result[i]
+	})
+
+	if n > len(strs) {
+		n = len(strs)
+	}
+	return result[:n]
 }

@@ -692,6 +692,285 @@
                 </div>
             </div>
 
+            <!-- 实体关系提取 -->
+            <div class="config-section">
+                <h3><t-icon name="transform" class="section-icon" />实体关系提取</h3>
+                
+                <div class="form-row">
+                    <t-form-item name="nodeExtract.enabled">
+                        <div class="switch-container">
+                            <t-switch v-model="formData.nodeExtract.enabled" @change="clearExtractExample" />
+                            <span class="switch-label">启用实体关系提取</span>
+                        </div>
+                    </t-form-item>
+                </div>
+
+                <div v-if="formData.nodeExtract.enabled" class="node-config">
+                    <h4>关系标签配置</h4>
+                    <!-- 关系标签配置区域 -->
+                    <div class="form-row">
+                        <t-form-item label="关系类型" name="tags">
+                            <div class="tags-grid">
+                                <div class="btn-tips-form">
+                                    <div class="tags-gen-btn">
+                                        <t-button 
+                                            theme="default" 
+                                            size="medium"
+                                            :disabled="!modelStatus.llm.available"
+                                            :loading="tagFabring"
+                                            @click="handleFabriTag" 
+                                            class="gen-tags-btn"
+                                        >
+                                            随机生成标签
+                                        </t-button>
+                                    </div>
+                                    <div v-if="!modelStatus.llm.available" class="btn-tips">
+                                        <t-icon name="info-circle" class="tip-icon" />
+                                        <span>请完善模型配置信息</span>
+                                    </div>
+                                </div>
+                                <div class="tags-config">
+                                    <t-select 
+                                        v-model="formData.nodeExtract.tags" 
+                                        v-model:input-value="tagInput"
+                                        multiple
+                                        placeholder="系统将根据选定的关系类型从文本中提取相应的实体关系"
+                                        :options="tagOptions"
+                                        clearable
+                                        @clear="clearTags"
+                                        creatable
+                                        @create="addTag"
+                                        filterable
+                                    />
+                                </div>
+                            </div>
+                        </t-form-item>
+                    </div>
+
+                    <h4>提取示例</h4>
+                    <!-- 文本内容输入区域 -->
+                    <div class="form-row">
+                        <t-form-item label="示例文本" name="text" :required="true">
+                            <div class="sample-text-form">
+                                <div class="btn-tips-form">
+                                    <div class="tags-gen-btn">
+                                        <t-button 
+                                            theme="default" 
+                                            size="medium"
+                                            :disabled="!modelStatus.llm.available"
+                                            :title="!modelStatus.llm.available ? 'LLM 模型不可用' : ''"
+                                            :loading="textFabring"
+                                            @click="handleFabriText" 
+                                            class="tags-gen-btn"
+                                        >
+                                            随机生成文本
+                                        </t-button>
+                                    </div>
+                                    <div v-if="!modelStatus.llm.available" class="btn-tips">
+                                        <t-icon name="info-circle" class="tip-icon" />
+                                        <span>请完善模型配置信息</span>
+                                    </div>
+                                </div>
+                                <div class="sample-text">
+                                    <t-textarea 
+                                        v-model="formData.nodeExtract.text" 
+                                        placeholder="请输入需要分析的文本内容，例如：《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一..." 
+                                        :autosize="{ minRows: 8, maxRows: 15 }"
+                                        show-word-limit
+                                        maxlength="5000"
+                                    />
+                                </div>
+                            </div>
+                        </t-form-item>
+                    </div>
+
+                    <!-- 提取实体 -->
+                    <div class="form-row">
+                        <!-- 实体列表 -->
+                        <t-form-item v-if="formData.nodeExtract.nodes.length > 0" label="实体列表" name="node-form">
+                            <div class="node-list">
+                                <div v-for="(node, nodeIndex) in formData.nodeExtract.nodes" :key="nodeIndex" class="node-item">
+                                    <div class="node-header">
+                                        <span class="node-icon"><t-icon name="user" class="node-icon-svg" /></span>
+                                        <!-- 节点名称输入 -->
+                                        <t-input 
+                                            type="text" 
+                                            v-model="node.name" 
+                                            class="node-name-input" 
+                                            placeholder="节点名称"
+                                        />
+                                        <!-- 删除节点按钮 -->
+                                        <t-button 
+                                            class="delete-node-btn" 
+                                            theme="default"
+                                            @click="removeNode(nodeIndex)"
+                                            :disabled="formData.nodeExtract.nodes.length === 0"
+                                            size="small"
+                                        >
+                                            <t-icon name="delete" />
+                                        </t-button>
+                                    </div>
+                                    
+                                    <div class="node-attributes">
+                                        <!-- 属性列表 -->
+                                        <div v-for="(attribute, attrIndex) in node.attributes" :key="attrIndex" class="attribute-item">
+                                            <t-input 
+                                                type="text" 
+                                                v-model="node.attributes[attrIndex]" 
+                                                class="attribute-input" 
+                                                placeholder="属性值"
+                                            />
+                                            <t-button 
+                                                class="delete-attr-btn" 
+                                                theme="default"
+                                                @click="removeAttribute(nodeIndex, attrIndex)"
+                                                :disabled="node.attributes.length === 0"
+                                                size="small"
+                                            >
+                                                <t-icon name="close" />
+                                            </t-button>
+                                        </div>
+                                        
+                                        <!-- 添加属性按钮 -->
+                                        <t-button class="add-attr-btn" @click="addAttribute(nodeIndex)" size="small">
+                                            添加属性
+                                        </t-button>
+                                    </div>
+                                </div>
+                            </div>
+                        </t-form-item>
+                        <!-- 添加实体按钮 -->
+                        <div class="btn-tips-form">
+                            <div class="tags-gen-btn">
+                                <t-button class="add-node-btn" @click="addNode">
+                                    添加实体
+                                </t-button>
+                            </div>
+                            <div v-if="!readyNode" class="btn-tips">
+                                <t-icon name="info-circle" class="tip-icon" />
+                                <span>请完善实体信息</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 提取关系 -->
+                    <div class="form-row">
+                        <t-form-item v-if="formData.nodeExtract.relations.length > 0" label="关系连接" name="node-relation">
+                            <div class="relation-list">
+                                <div v-for="(relation, index) in formData.nodeExtract.relations" :key="index" class="relation-item">
+                                    <div class="relation-line">
+                                        <t-select-input 
+                                            :value="formData.nodeExtract.relations[index].node1"
+                                            :popup-visible="popupVisibleNode1[index]"
+                                            placeholder="请选择实体"
+                                            clearable
+                                            @popup-visible-change="onPopupVisibleNode1Change(index, $event)"
+                                            @clear="relationOnClearNode1(index)"
+                                            @focus="onFocus"
+                                        >
+                                            <template #panel>
+                                            <ul class="select-input-node">
+                                                <li v-for="item in formData.nodeExtract.nodes" :key="item.name" @click="onRelationNode1OptionClick(index, item)">
+                                                    {{ item.name }}
+                                                </li>
+                                            </ul>
+                                            </template>
+                                            <template #suffixIcon>
+                                                <ChevronDownIcon />
+                                            </template>
+                                        </t-select-input>
+                                        <t-icon name="arrow-right" class="relation-arrow"/>
+                                        <t-select 
+                                            v-model="formData.nodeExtract.relations[index].type" 
+                                            placeholder="请选择关系类型"
+                                            :options="tagOptions"
+                                            clearable
+                                            creatable
+                                            filterable
+                                        />
+                                        <t-icon name="arrow-right" class="relation-arrow"/>
+                                        <t-select-input 
+                                            :value="formData.nodeExtract.relations[index].node2"
+                                            :popup-visible="popupVisibleNode2[index]"
+                                            placeholder="请选择实体"
+                                            clearable
+                                            @popup-visible-change="onPopupVisibleNode2Change(index, $event)"
+                                            @clear="relationOnClearNode2(index)"
+                                            @focus="onFocus"
+                                        >
+                                            <template #panel>
+                                            <ul class="select-input-node">
+                                                <li v-for="item in formData.nodeExtract.nodes" :key="item.name" @click="onRelationNode2OptionClick(index, item)">
+                                                    {{ item.name }}
+                                                </li>
+                                            </ul>
+                                            </template>
+                                            <template #suffixIcon>
+                                                <ChevronDownIcon />
+                                            </template>
+                                        </t-select-input>
+                                        <t-button 
+                                            class="delete-node-btn" 
+                                            theme="default"
+                                            @click="removeRelation(index)"
+                                            :disabled="formData.nodeExtract.relations.length === 0"
+                                            size="small"
+                                        >
+                                            <t-icon name="delete" />
+                                        </t-button>
+                                    </div>
+                                </div>
+                            </div>
+                        </t-form-item>
+
+                        <!-- 添加关系按钮 -->
+                        <div class="btn-tips-form">
+                            <div class="tags-gen-btn">
+                                <t-button class="add-node-btn" @click="addRelation">
+                                    添加关系
+                                </t-button>
+                            </div>
+                            <div v-if="!readyRelation" class="btn-tips">
+                                <t-icon name="info-circle" class="tip-icon" />
+                                <span>请完善关系信息</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 重置按钮区域 -->
+                    <div class="extract-button">
+                        <t-button 
+                            theme="primary" 
+                            size="medium" 
+                            :disabled="!modelStatus.llm.available"
+                            :title="!modelStatus.llm.available ? 'LLM 模型不可用' : ''"
+                            :loading="extracting" 
+                            @click="handleExtract"
+                        >
+                            {{ extracting ? '正在提取...' : '开始提取' }}
+                        </t-button>
+
+                        <t-button 
+                            theme="default" 
+                            size="medium" 
+                            @click="defaultExtractExample"
+                            class="default-extract-btn"
+                        >
+                            默认示例
+                        </t-button>
+
+                        <t-button 
+                            theme="default" 
+                            size="medium" 
+                            @click="clearExtractExample"
+                            class="clear-extract-btn"
+                        >
+                            清空示例
+                        </t-button>
+                    </div>
+                </div>
+            </div>
+
             <!-- 提交按钮区域 -->
             <div class="submit-section">
                 <t-button theme="primary" type="button" size="large" 
@@ -724,6 +1003,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { ChevronDownIcon } from 'tdesign-icons-vue-next';
 import { 
     initializeSystemByKB,
     checkOllamaStatus, 
@@ -736,7 +1016,15 @@ import {
     checkRerankModel,
     testMultimodalFunction,
     listOllamaModels,
-    testEmbeddingModel
+    testEmbeddingModel,
+    extractTextRelations,
+    fabriText,
+    fabriTag,
+    type TextRelationExtractionRequest,
+    type Node,
+    type Relation,
+    type FabriTagRequest,
+    type FabriTextRequest
 } from '@/api/initialization';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { useAuthStore } from '@/stores/auth';
@@ -762,6 +1050,25 @@ const form = ref<TFormRef>(null);
 const submitting = ref(false);
 const hasFiles = ref(false);
 const isUpdateMode = ref(false); // 是否为更新模式
+const tagOptionsDefault = [
+    { label: '内容', value: '内容' },
+    { label: '文化', value: '文化' },
+    { label: '人物', value: '人物' },
+    { label: '事件', value: '事件' },
+    { label: '时间', value: '时间' },
+    { label: '地点', value: '地点' },
+    { label: '作品', value: '作品' },
+    { label: '作者', value: '作者' },
+    { label: '关系', value: '关系' },
+    { label: '属性', value: '属性' }
+];
+const tagOptions = ref([] as {label: string, value: string}[]);
+const tagInput = ref('');
+const popupVisibleNode1 = ref<boolean[]>([]);
+const popupVisibleNode2 = ref<boolean[]>([]);
+const tagFabring = ref(false);
+const textFabring = ref(false);
+const extracting = ref(false);
 
 // 防抖机制：防止按钮快速重复点击
 const submitDebounceTimer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -874,6 +1181,13 @@ const formData = reactive({
         chunkSize: 512, 
         chunkOverlap: 100,
         separators: ['\n\n', '\n', '。', '！', '？', ';', '；']
+    },
+    nodeExtract: {
+        enabled: false,
+        text: '',
+        tags: [] as string[],
+        nodes: [] as Node[],
+        relations: [] as Relation[]
     }
 });
 
@@ -995,8 +1309,29 @@ const canSubmit = computed(() => {
             vlmOk = true;
         }
     }
+
+    let extractOk = true;
+    if (formData.nodeExtract.enabled) {
+        if (formData.nodeExtract.text === '') {
+            extractOk = false;
+        }
+        for (let i = 0; i < formData.nodeExtract.tags.length; i++) {
+            const tag = formData.nodeExtract.tags[i];
+            if (tag == '') {
+                extractOk = false;
+                break;
+            }
+        }
+
+        if (!readyNode.value){
+            extractOk = false;
+        }
+        if (!readyRelation.value){
+            extractOk = false;
+        }
+    }
     
-    return llmOk && embeddingOk && rerankOk && vlmOk;
+    return llmOk && embeddingOk && rerankOk && vlmOk && extractOk;
 });
 
 const imageUpload = ref(null);
@@ -1034,6 +1369,10 @@ const rules = {
     'embedding.dimension': [
         { required: true, message: '请输入Embedding维度', type: 'error' },
         { validator: validateEmbeddingDimension, message: '维度必须为有效整数值，常见取值为768, 1024, 1536, 3584等', type: 'error' }
+    ],
+    'nodeExtract.text': [
+        { required: true, message: '请输入文本内容', type: 'error' },
+        { min: 10, message: '文本内容至少需要10个字符', type: 'error' }
     ]
 };
 
@@ -1282,6 +1621,20 @@ const loadCurrentConfig = async () => {
         } else {
             // 如果没有文档分割配置，确保使用默认的precision模式
             selectedPreset.value = 'precision';
+        }
+        if (config.nodeExtract.enabled) {
+            formData.nodeExtract.enabled = true;
+            formData.nodeExtract.text = config.nodeExtract.text;
+            formData.nodeExtract.tags = config.nodeExtract.tags;
+            formData.nodeExtract.nodes = config.nodeExtract.nodes;
+            formData.nodeExtract.relations = config.nodeExtract.relations;
+            tagOptions.value = [];
+            for (const tag of config.nodeExtract.tags) {
+                if (tagOptions.value.find((item) => item.value === tag)) {
+                    continue;
+                }
+                tagOptions.value.push({ label: tag, value: tag });
+            }
         }
         
         // 在配置加载完成后，检查模型状态
@@ -2027,9 +2380,9 @@ const handleSubmit = async () => {
         } else {
             MessagePlugin.error(result.message || '操作失败');
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error('提交失败:', error);
-        MessagePlugin.error('操作失败，请检查网络连接');
+        MessagePlugin.error(error.message || '操作失败，请检查网络连接');
     } finally {
         submitting.value = false;
         
@@ -2049,6 +2402,288 @@ const formatFileSize = (bytes: number): string => {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
+
+const addTag = async (val: string) => {
+    val = val.trim();
+    if (val === '') {
+        MessagePlugin.error('请输入有效的标签');
+        return;
+    }
+    if (!tagOptions.value.find(item => item.value === val)){
+        tagOptions.value.push({ label: val, value: val });
+    }
+    if (!formData.nodeExtract.tags.includes(val)) {
+        formData.nodeExtract.tags.push(val);
+    }else {
+        MessagePlugin.error('该标签已存在');
+    }
+    tagInput.value = '';
+}
+
+const clearTags = async () => {
+    formData.nodeExtract.tags = [];
+}
+
+const defaultExtractExample = async () => {
+    formData.nodeExtract.tags = ['作者', '别名'];
+    formData.nodeExtract.text = `《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。`;
+    formData.nodeExtract.nodes = [
+        {name: '红楼梦', attributes: ['中国古典四大名著之一', '又名《石头记》', '被誉为中国封建社会的百科全书']},
+        {name: '石头记', attributes: ['《红楼梦》的别名']},
+        {name: '曹雪芹', attributes: ['清代作家', '《红楼梦》前 80 回的作者']},
+        {name: '高鹗', attributes: ['一般认为是《红楼梦》后 40 回的续写者']}
+    ];
+    formData.nodeExtract.relations = [
+        {node1: '红楼梦', node2: '石头记', type: '别名'},
+        {node1: '红楼梦', node2: '曹雪芹', type: '作者'},
+        {node1: '红楼梦', node2: '高鹗', type: '作者'}
+    ];
+    tagOptions.value = [];
+    tagOptions.value.push({ label: '作者', value: '作者' });
+    tagOptions.value.push({ label: '别名', value: '别名' });
+    popupVisibleNode1.value = Array(formData.nodeExtract.nodes.length).fill(false);
+    popupVisibleNode2.value = Array(formData.nodeExtract.nodes.length).fill(false);
+}
+
+const clearExtractExample = async () => {
+    formData.nodeExtract.tags = [];
+    formData.nodeExtract.text = '';
+    formData.nodeExtract.nodes = [];
+    formData.nodeExtract.relations = [];
+    tagOptions.value = [...tagOptionsDefault];
+    popupVisibleNode1.value = [];
+    popupVisibleNode2.value = [];
+}
+
+const addNode = async () =>{
+    formData.nodeExtract.nodes.push({
+        name: '',
+        attributes: []
+    });
+}
+        
+const removeNode = async (index: number) => {
+    formData.nodeExtract.nodes.splice(index, 1);
+}
+
+const addAttribute = async (nodeIndex: number) => {
+    formData.nodeExtract.nodes[nodeIndex].attributes.push('');
+}
+
+const removeAttribute = async(nodeIndex: number, attrIndex: number) => {
+    formData.nodeExtract.nodes[nodeIndex].attributes.splice(attrIndex, 1);
+}
+
+const onRelationNode1OptionClick = async (index: number, item: Node) => {
+    formData.nodeExtract.relations[index].node1 = item.name;
+    popupVisibleNode1.value[index] = false;
+}
+
+const onRelationNode2OptionClick = async (index: number, item: Node) => {
+    formData.nodeExtract.relations[index].node2 = item.name;
+    popupVisibleNode2.value[index] = false;
+}
+
+const relationOnClearNode1 = async (index: number) => {
+    formData.nodeExtract.relations[index].node1 = '';
+}
+
+const relationOnClearNode2 = async (index: number) => {
+    formData.nodeExtract.relations[index].node2 = '';
+}
+
+const onPopupVisibleNode1Change = async (index: number, val: boolean) => {
+    popupVisibleNode1.value[index] = val;
+};
+
+const onPopupVisibleNode2Change = async (index: number, val: boolean) => {
+    popupVisibleNode2.value[index] = val;
+};
+
+const addRelation = async () => {
+    formData.nodeExtract.relations.push({
+        node1: '',
+        node2: '',
+        type: ''
+    });
+    popupVisibleNode1.value.push(false);
+    popupVisibleNode2.value.push(false);
+}
+
+const removeRelation = async (index: number) => {
+    formData.nodeExtract.relations.splice(index, 1);
+}
+
+const onFocus = async () => {};
+
+const canExtract = async (): Promise<boolean> =>{
+    if (formData.nodeExtract.text === '') {
+        MessagePlugin.error('请输入示例文本');
+        return false;
+    }
+    if (formData.nodeExtract.tags.length === 0) {
+        MessagePlugin.error('请输入关系类型');
+        return false;
+    }
+    for (let i = 0; i < formData.nodeExtract.tags.length; i++) {
+        if (formData.nodeExtract.tags[i] === '') {
+            MessagePlugin.error('请输入关系类型');
+            return false;
+        }
+    }
+    if (!modelStatus.llm.available) {
+        MessagePlugin.error('请输入 LLM 大语言模型配置');
+        return false;
+    }
+    return true;
+}
+
+const readyNode = computed(() => {
+    for (let i = 0; i < formData.nodeExtract.nodes.length; i++) {
+        let node = formData.nodeExtract.nodes[i];
+        if (node.name === '') {
+            return false;
+        }
+        if (node.attributes){
+            for (let j = 0; j < node.attributes.length; j++) {
+                if (node.attributes[j] === '') {
+                    return false;
+                }
+            }
+        }
+    }
+    return formData.nodeExtract.nodes.length > 0;
+})
+
+const readyRelation = computed(() => {
+    for (let i = 0; i < formData.nodeExtract.relations.length; i++) {
+        let relation = formData.nodeExtract.relations[i];
+        if (relation.node1 == '' || relation.node2 == '' || relation.type == '' ) {
+            return false
+        }
+    }
+    return formData.nodeExtract.relations.length > 0;
+})
+
+// 处理提取
+const handleExtract = async () => {
+    if (extracting.value) return;
+
+    try {
+        // 表单验证
+        const isValid = await form.value?.validate();
+        if (!isValid) {
+            MessagePlugin.error('请检查表单填写是否正确');
+            return;
+        }
+        if (!canExtract()){
+            return;
+        }
+
+        extracting.value = true;
+
+        const request: TextRelationExtractionRequest = {
+            text: formData.nodeExtract.text.trim(),
+            tags: formData.nodeExtract.tags,
+            llmConfig: {
+                source: formData.llm.source as 'local' | 'remote',
+                modelName: formData.llm.modelName,
+                baseUrl: formData.llm.baseUrl,
+                apiKey: formData.llm.apiKey,
+            },
+        };
+
+        const result = await extractTextRelations(request);
+        if (result.nodes.length === 0 ) {
+            MessagePlugin.info('未提取有效节点');
+        } else {
+            formData.nodeExtract.nodes = result.nodes;
+        }
+        if ( result.relations.length === 0) {
+            MessagePlugin.info('未提取有效关系');
+        } else {
+            formData.nodeExtract.relations = result.relations;
+        }
+    } catch (error) {
+        console.error('文本内容关系提取失败:', error);
+        MessagePlugin.error('提取失败，请检查网络连接或文本内容格式');
+    } finally {
+        extracting.value = false;
+    }
+};
+
+// 处理标签
+const handleFabriTag = async () => {
+    if (tagFabring.value) return;
+
+    try {
+        // 表单验证
+        const isValid = await form.value?.validate();
+        if (!isValid) {
+            MessagePlugin.error('请检查表单填写是否正确');
+            return;
+        }
+
+        tagFabring.value = true;
+
+        const request: FabriTagRequest = {
+            llmConfig: {
+                source: formData.llm.source as 'local' | 'remote',
+                modelName: formData.llm.modelName,
+                baseUrl: formData.llm.baseUrl,
+                apiKey: formData.llm.apiKey,
+            },
+        };
+
+        const result = await fabriTag(request);
+        formData.nodeExtract.tags = result.tags;
+        tagOptions.value = [];
+        for (let i = 0; i < result.tags.length; i++) {
+            tagOptions.value.push({ label: result.tags[i], value: result.tags[i] });
+        }
+
+    } catch (error) {
+        console.error('随机生成标签:', error);
+        MessagePlugin.error('生成失败，请重试');
+    } finally {
+        tagFabring.value = false;
+    }
+};
+
+// 处理示例文本
+const handleFabriText = async () => {
+    if (textFabring.value) return;
+
+    try {
+        // 表单验证
+        const isValid = await form.value?.validate();
+        if (!isValid) {
+            MessagePlugin.error('请检查表单填写是否正确');
+            return;
+        }
+
+        textFabring.value = true;
+
+        const request: FabriTextRequest = {
+            tags: formData.nodeExtract.tags,
+            llmConfig: {
+                source: formData.llm.source as 'local' | 'remote',
+                modelName: formData.llm.modelName,
+                baseUrl: formData.llm.baseUrl,
+                apiKey: formData.llm.apiKey,
+            },
+        };
+
+        const result = await fabriText(request);
+        formData.nodeExtract.text = result.text;
+    } catch (error) {
+        console.error('生成示例文本失败:', error);
+        MessagePlugin.error('生成失败，请重试');
+    } finally {
+        textFabring.value = false;
+    }
+};
+
 
 // 组件挂载时检查Ollama状态
 onMounted(async () => {
@@ -2164,6 +2799,76 @@ onMounted(async () => {
             .section-icon {
                 color: #07c05f;
                 font-size: 20px;
+            }
+        }
+
+        .add-tag-container {
+            display: flex;
+            align-items: center; /* 垂直居中 */
+            justify-content: flex-start; /* 水平起始对齐 */
+            gap: 8px;
+        }
+        .extract-button {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            text-align: center;
+        }
+
+        .node-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .node-header {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .attribute-item {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            margin-bottom: 4px;
+        }
+
+        .relation-line {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 4px;
+        }
+
+        .relation-arrow {
+            font-size: 50px;
+        }
+
+        .sample-text-form {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+    }
+
+    .btn-tips-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+
+        .btn-tips {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fa8c16;
+            
+            .tip-icon {
+                margin-right: 6px;
             }
         }
     }
@@ -2385,7 +3090,7 @@ onMounted(async () => {
         }
     }
 
-    .rerank-config, .multimodal-config {
+    .rerank-config, .multimodal-config, .node-config {
         // margin-top: 20px;
         // padding: 20px;
         // background: #f9fcff;
@@ -2833,5 +3538,30 @@ onMounted(async () => {
             }
         }
     }
+}
+
+.select-input-node {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    gap: 2px;
+}
+
+.select-input-node > li {
+    display: block;
+    border-radius: 3px;
+    line-height: 22px;
+    cursor: pointer;
+    padding: 3px 8px;
+    color: var(--td-text-color-primary);
+    transition: background-color 0.2s linear;
+    white-space: nowrap;
+    word-wrap: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.select-input-node > li:hover {
+    background-color: var(--td-bg-color-container-hover);
 }
 </style>

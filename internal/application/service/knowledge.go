@@ -29,6 +29,7 @@ import (
 	"github.com/Tencent/WeKnora/services/docreader/src/client"
 	"github.com/Tencent/WeKnora/services/docreader/src/proto"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sync/errgroup"
 )
@@ -61,6 +62,8 @@ type knowledgeService struct {
 	chunkRepo       interfaces.ChunkRepository
 	fileSvc         interfaces.FileService
 	modelService    interfaces.ModelService
+	task            *asynq.Client
+	graphEngine     interfaces.RetrieveGraphRepository
 }
 
 // NewKnowledgeService creates a new knowledge service instance
@@ -74,6 +77,8 @@ func NewKnowledgeService(
 	chunkRepo interfaces.ChunkRepository,
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
+	task *asynq.Client,
+	graphEngine interfaces.RetrieveGraphRepository,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -85,6 +90,8 @@ func NewKnowledgeService(
 		chunkRepo:       chunkRepo,
 		fileSvc:         fileSvc,
 		modelService:    modelService,
+		task:            task,
+		graphEngine:     graphEngine,
 	}, nil
 }
 
@@ -488,6 +495,16 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		return nil
 	})
 
+	// Delete the knowledge graph
+	wg.Go(func() error {
+		namespace := types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID}
+		if err := s.graphEngine.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge graph failed")
+			return err
+		}
+		return nil
+	})
+
 	if err = wg.Wait(); err != nil {
 		return err
 	}
@@ -557,6 +574,19 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		tenantInfo.StorageUsed += storageAdjust
 		if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, storageAdjust); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge update tenant storage used failed")
+		}
+		return nil
+	})
+
+	// Delete the knowledge graph
+	wg.Go(func() error {
+		namespaces := []types.NameSpace{}
+		for _, knowledge := range knowledgeList {
+			namespaces = append(namespaces, types.NameSpace{KnowledgeBase: knowledge.KnowledgeBaseID, Knowledge: knowledge.ID})
+		}
+		if err := s.graphEngine.DelGraph(ctx, namespaces); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge graph failed")
+			return err
 		}
 		return nil
 	})
@@ -1157,6 +1187,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return
 	}
 	logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
+
+	logger.Infof(ctx, "processChunks create relationship rag task")
+	for _, chunk := range textChunks {
+		err := NewChunkExtractTask(ctx, s.task, chunk.TenantID, chunk.ID, kb.SummaryModelID)
+		if err != nil {
+			logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks create chunk extract task failed")
+			span.RecordError(err)
+		}
+	}
 
 	// Update knowledge status to completed
 	knowledge.ParseStatus = "completed"

@@ -14,6 +14,7 @@ import (
 
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/dig"
 	"gorm.io/driver/postgres"
@@ -22,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
+	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
@@ -68,6 +70,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// External service clients
 	must(container.Provide(initDocReaderClient))
 	must(container.Provide(initOllamaService))
+	must(container.Provide(initNeo4jClient))
 	must(container.Provide(stream.NewStreamManager))
 
 	// Data repositories layer
@@ -80,6 +83,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewModelRepository))
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
+	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 
 	// Business service layer
 	must(container.Provide(service.NewTenantService))
@@ -93,6 +97,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
+	must(container.Provide(service.NewChunkExtractService))
 
 	// Chat pipeline components for processing chat requests
 	must(container.Provide(chatpipline.NewEventManager))
@@ -107,6 +112,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipline.NewPluginFilterTopK))
 	must(container.Invoke(chatpipline.NewPluginPreprocess))
 	must(container.Invoke(chatpipline.NewPluginRewrite))
+	must(container.Invoke(chatpipline.NewPluginExtractEntity))
+	must(container.Invoke(chatpipline.NewPluginSearchEntity))
 
 	// HTTP handlers layer
 	must(container.Provide(handler.NewTenantHandler))
@@ -123,6 +130,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Router configuration
 	must(container.Provide(router.NewRouter))
+	must(container.Provide(router.NewAsyncqClient))
+	must(container.Provide(router.NewAsynqServer))
+	must(container.Invoke(router.RunAsynqServer))
 
 	return container
 }
@@ -184,6 +194,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	err = db.AutoMigrate(
 		&types.User{},
 		&types.AuthToken{},
+		&types.KnowledgeBase{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate database tables: %v", err)
@@ -384,4 +395,24 @@ func initDocReaderClient(cfg *config.Config) (*client.Client, error) {
 func initOllamaService() (*ollama.OllamaService, error) {
 	// Get Ollama service from existing factory function
 	return ollama.GetOllamaService()
+}
+
+func initNeo4jClient() (neo4j.Driver, error) {
+	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
+		logger.Debugf(context.Background(), "NOT SUPPORT RETRIEVE GRAPH")
+		return nil, nil
+	}
+	uri := os.Getenv("NEO4J_URI")
+	username := os.Getenv("NEO4J_USERNAME")
+	password := os.Getenv("NEO4J_PASSWORD")
+
+	driver, err := neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
+	if err != nil {
+		return nil, err
+	}
+	err = driver.VerifyAuthentication(context.Background(), nil)
+	if err != nil {
+		return nil, err
+	}
+	return driver, nil
 }
