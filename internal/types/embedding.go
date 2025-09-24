@@ -19,6 +19,7 @@ const (
 	MatchTypeHistory
 	MatchTypeParentChunk   // 父Chunk匹配类型
 	MatchTypeRelationChunk // 关系Chunk匹配类型
+	MatchTypeGraph
 )
 
 // IndexInfo contains information about indexed content
