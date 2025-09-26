@@ -24,6 +24,8 @@ const (
 	ChunkTypeEntity ChunkType = "entity"
 	// ChunkTypeRelationship 表示关系类型的 Chunk
 	ChunkTypeRelationship ChunkType = "relationship"
+	// ChunkTypeExtraction 表示抽取类型的 Chunk
+	ChunkTypeExtraction ChunkType = "extraction"
 )
 
 // ImageInfo 表示与 Chunk 关联的图片信息

@@ -28,6 +28,7 @@ type ChatManage struct {
 	SearchResult []*SearchResult       `json:"-"` // Results from search phase
 	RerankResult []*SearchResult       `json:"-"` // Results after reranking
 	MergeResult  []*SearchResult       `json:"-"` // Final merged results after all processing
+	GraphResult  *GraphData            `json:"-"` // Graph data from search phase
 	UserContent  string                `json:"-"` // Processed user content
 	ChatResponse *ChatResponse         `json:"-"` // Final response from chat model
 	ResponseChan <-chan StreamResponse `json:"-"` // Channel for streaming responses
