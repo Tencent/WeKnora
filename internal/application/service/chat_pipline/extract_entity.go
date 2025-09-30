@@ -346,6 +346,9 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	for _, node := range graph.Node {
 		if prenode, ok := nodeMap[node.Name]; ok {
 			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
+			if node.Attributes == nil {
+				node.Attributes = make(map[string]string)
+			}
 			for k, v := range prenode.Attributes {
 				node.Attributes[k] = v
 			}
