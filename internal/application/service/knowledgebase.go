@@ -2,11 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"time"
-
-	"encoding/json"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/common"
@@ -376,8 +375,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 // processSearchResults handles the processing of search results, optimizing database queries
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
-	chunks []*types.IndexWithScore) ([]*types.SearchResult, error) {
-
+	chunks []*types.IndexWithScore,
+) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
 	}
@@ -527,8 +526,8 @@ func (s *knowledgeBaseService) collectRelatedChunkIDs(chunk *types.Chunk, proces
 func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
-	matchType types.MatchType) *types.SearchResult {
-
+	matchType types.MatchType,
+) *types.SearchResult {
 	return &types.SearchResult{
 		ID:                chunk.ID,
 		Content:           chunk.Content,
