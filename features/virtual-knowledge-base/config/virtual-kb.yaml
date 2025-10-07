@@ -1,0 +1,17 @@
+virtual_kb:
+  enabled: true
+  limits:
+    max_tags_per_document: 50
+    max_virtual_kbs_per_user: 100
+    max_filters_per_virtual_kb: 20
+  search:
+    cache_enabled: true
+    cache_ttl_seconds: 3600
+    default_vector_threshold: 0.25
+    default_keyword_threshold: 0.2
+  ui:
+    base_path: "/virtual-kb"
+    theme:
+      primary_color: "#1f7aec"
+      accent_color: "#ff9f1c"
+      danger_color: "#ff595e"
