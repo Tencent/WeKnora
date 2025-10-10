@@ -305,6 +305,19 @@ async def handle_list_tools() -> list[types.Tool]:
         
         # Knowledge Management
         types.Tool(
+            name="create_knowledge_from_file",
+            description="Create knowledge from a local file on the server filesystem",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "kb_id": {"type": "string", "description": "Knowledge base ID"},
+                    "file_path": {"type": "string", "description": "Absolute path to the local file on the server"},
+                    "enable_multimodel": {"type": "boolean", "description": "Enable multimodal processing", "default": True}
+                },
+                "required": ["kb_id", "file_path"]
+            }
+        ),
+        types.Tool(
             name="create_knowledge_from_url",
             description="Create knowledge from URL",
             inputSchema={
@@ -537,6 +550,12 @@ async def handle_call_tool(
             result = client.hybrid_search(args["kb_id"], args["query"], config)
         
         # Knowledge Management
+        elif name == "create_knowledge_from_file":
+            result = client.create_knowledge_from_file(
+                args["kb_id"],
+                args["file_path"],
+                args.get("enable_multimodel", True)
+            )
         elif name == "create_knowledge_from_url":
             result = client.create_knowledge_from_url(
                 args["kb_id"],
