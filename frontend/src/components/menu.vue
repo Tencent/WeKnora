@@ -144,7 +144,10 @@ let activeSubmenu = ref<number>(-1);
 
 // 是否处于知识库详情页
 const isInKnowledgeBase = computed<boolean>(() => {
-    return route.name === 'knowledgeBaseDetail' || route.name === 'kbCreatChat' || route.name === 'chat' || route.name === 'knowledgeBaseSettings';
+    return route.name === 'knowledgeBaseDetail' || 
+           route.name === 'kbCreatChat' || 
+           route.name === 'chat' || 
+           route.name === 'knowledgeBaseSettings';
 });
 
 // 统一的菜单项激活状态判断

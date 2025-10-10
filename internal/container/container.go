@@ -194,6 +194,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	err = db.AutoMigrate(
 		&types.User{},
 		&types.AuthToken{},
+		&types.KnowledgeBase{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to auto-migrate database tables: %v", err)

@@ -267,6 +267,8 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 	r.POST("/initialization/embedding/test", handler.TestEmbeddingModel)
 	r.POST("/initialization/rerank/check", handler.CheckRerankModel)
 	r.POST("/initialization/multimodal/test", handler.TestMultimodalFunction)
+
+	r.POST("/initialization/extract/text-relation", handler.ExtractTextRelations)
 }
 
 // RegisterSystemRoutes registers system information routes
