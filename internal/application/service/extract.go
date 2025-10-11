@@ -50,7 +50,7 @@ func NewChunkExtractService(
 ) interfaces.Extracter {
 	generator := chatpipline.NewQAPromptGenerator(chatpipline.NewFormater(), config.ExtractGraph)
 	ctx := context.Background()
-	logger.Debugf(ctx, "chunk extract prompt: %s", generator.Render(ctx, "extract"))
+	logger.Debugf(ctx, "chunk extract prompt: %s", generator.Render(ctx, "extract", []string{"demo"}))
 	return &ChunkExtractService{
 		template:          config.ExtractGraph,
 		modelService:      modelService,
@@ -75,14 +75,35 @@ func (s *ChunkExtractService) Extract(ctx context.Context, t *asynq.Task) error 
 		logger.Errorf(ctx, "failed to get chunk: %v", err)
 		return err
 	}
+	kb, err := s.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
+		return err
+	}
+	if kb.ExtractConfig == nil {
+		logger.Warnf(ctx, "failed to get extract config")
+		return err
+	}
+
 	chatModel, err := s.modelService.GetChatModel(ctx, p.ModelID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
 		return err
 	}
 
-	extractor := chatpipline.NewExtractor(chatModel, s.template)
-	graph, err := extractor.Extract(ctx, chunk.Content)
+	template := &types.PromptTemplateStructured{
+		Description: s.template.Description,
+		Examples: []types.GraphData{
+			{
+				Text:     kb.ExtractConfig.Text,
+				Tags:     kb.ExtractConfig.Tags,
+				Node:     kb.ExtractConfig.Nodes,
+				Relation: kb.ExtractConfig.Relations,
+			},
+		},
+	}
+	extractor := chatpipline.NewExtractor(chatModel, template)
+	graph, err := extractor.Extract(ctx, chunk.Content, kb.ExtractConfig.Tags)
 	if err != nil {
 		return err
 	}

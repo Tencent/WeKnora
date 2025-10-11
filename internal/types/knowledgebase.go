@@ -171,23 +171,10 @@ func (c *VLMConfig) Scan(value interface{}) error {
 }
 
 type ExtractConfig struct {
-	Text      string     `yaml:"text" json:"text"`
-	Tags      []string   `yaml:"tags" json:"tags"`
-	Nodes     []Node     `yaml:"nodes" json:"nodes"`
-	Relations []Relation `yaml:"relations" json:"relations"`
-}
-
-// Node 节点结构
-type Node struct {
-	Name       string            `json:"name"`
-	Attributes map[string]string `json:"attributes"`
-}
-
-// Relation 关系结构
-type Relation struct {
-	Node1 string `json:"node_1"`
-	Node2 string `json:"node_2"`
-	Type  string `json:"type"`
+	Text      string           `yaml:"text" json:"text"`
+	Tags      []string         `yaml:"tags" json:"tags"`
+	Nodes     []*GraphNode     `yaml:"nodes" json:"nodes"`
+	Relations []*GraphRelation `yaml:"relations" json:"relations"`
 }
 
 // Value implements the driver.Valuer interface, used to convert ExtractConfig to database value

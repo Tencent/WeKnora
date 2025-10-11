@@ -2238,13 +2238,12 @@ const addTag = async () => {
 const onNodeExtractChange = async () => {
     if (formData.nodeExtract.enabled) {
         formData.nodeExtract.text = `《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。`;
-        formData.nodeExtract.tags = ['内容', '文化'];
     } else {
         formData.nodeExtract.text = '';
-        formData.nodeExtract.tags = [];
         formData.nodeExtract.nodes = [];
         formData.nodeExtract.relations = [];
     }
+    formData.nodeExtract.tags = [];
     newTag.value = '';
     tagOptions.value = [...tagOptionsDefault];
 };

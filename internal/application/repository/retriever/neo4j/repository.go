@@ -86,11 +86,10 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		relData := []map[string]interface{}{}
 		for _, rel := range graph.Relation {
 			relData = append(relData, map[string]interface{}{
-				"source":        rel.Source.Name,
-				"target":        rel.Target.Name,
+				"source":        rel.Node1.Name,
+				"target":        rel.Node2.Name,
 				"knowledge_id":  namespace.Knowledge,
 				"type":          rel.Type,
-				"attributes":    rel.Attributes,
 				"source_labels": n.Labels(namespace),
 				"target_labels": n.Labels(namespace),
 			})
@@ -201,16 +200,15 @@ func (n *Neo4jRepository) SearchNode(ctx context.Context, namespace types.NameSp
 			// Convert relationship to types.Relation
 			relData := rel.(neo4j.Relationship)
 			graphData.Relation = append(graphData.Relation, &types.GraphRelation{
-				Source: &types.GraphNode{
+				Node1: &types.GraphNode{
 					Name:       nodeData.Props["name"].(string),
 					Attributes: mapI2mapS(nodeData.Props),
 				},
-				Target: &types.GraphNode{
+				Node2: &types.GraphNode{
 					Name:       targetNodeData.Props["name"].(string),
 					Attributes: mapI2mapS(targetNodeData.Props),
 				},
-				Type:       relData.Type,
-				Attributes: mapI2mapS(relData.Props),
+				Type: relData.Type,
 			})
 		}
 		return graphData, nil

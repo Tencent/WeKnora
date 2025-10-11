@@ -22,14 +22,14 @@ type GraphNode struct {
 }
 
 type GraphRelation struct {
-	Source     *GraphNode        `json:"source,omitempty"`
-	Target     *GraphNode        `json:"target,omitempty"`
-	Type       string            `json:"type,omitempty"`
-	Attributes map[string]string `json:"attributes,omitempty"`
+	Node1 *GraphNode `json:"node1,omitempty"`
+	Node2 *GraphNode `json:"node2,omitempty"`
+	Type  string     `json:"type,omitempty"`
 }
 
 type GraphData struct {
 	Text     string           `json:"text,omitempty"`
+	Tags     []string         `json:"tags"`
 	Node     []*GraphNode     `json:"node,omitempty"`
 	Relation []*GraphRelation `json:"relation,omitempty"`
 }

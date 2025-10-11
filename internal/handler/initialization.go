@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -438,11 +439,11 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 		kb.ExtractConfig = &types.ExtractConfig{
 			Text:      req.NodeExtract.Text,
 			Tags:      req.NodeExtract.Tags,
-			Nodes:     make([]types.Node, 0),
-			Relations: make([]types.Relation, 0),
+			Nodes:     make([]*types.GraphNode, 0),
+			Relations: make([]*types.GraphRelation, 0),
 		}
 		for _, node := range req.NodeExtract.Nodes {
-			node := types.Node{
+			node := &types.GraphNode{
 				Name:       node.Name,
 				Attributes: make(map[string]string),
 			}
@@ -452,10 +453,14 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 			kb.ExtractConfig.Nodes = append(kb.ExtractConfig.Nodes, node)
 		}
 		for _, relation := range req.NodeExtract.Relations {
-			kb.ExtractConfig.Relations = append(kb.ExtractConfig.Relations, types.Relation{
-				Node1: relation.Node1,
-				Node2: relation.Node2,
-				Type:  relation.Type,
+			kb.ExtractConfig.Relations = append(kb.ExtractConfig.Relations, &types.GraphRelation{
+				Node1: &types.GraphNode{
+					Name: relation.Node1,
+				},
+				Node2: &types.GraphNode{
+					Name: relation.Node2,
+				},
+				Type: relation.Type,
 			})
 		}
 	}
@@ -1575,8 +1580,8 @@ type LLMConfig struct {
 
 // TextRelationExtractionResponse 文本关系提取响应结构
 type TextRelationExtractionResponse struct {
-	Nodes     []types.Node     `json:"nodes"`
-	Relations []types.Relation `json:"relations"`
+	Nodes     []*types.GraphNode     `json:"nodes"`
+	Relations []*types.GraphRelation `json:"relations"`
 }
 
 // ExtractTextRelations 提取文本关系
@@ -1639,34 +1644,28 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 
 // extractRelationsFromText 从文本中提取关系
 func (h *InitializationHandler) extractRelationsFromText(ctx context.Context, text string, tags []string, llm LLMConfig) (*TextRelationExtractionResponse, error) {
-	result := &TextRelationExtractionResponse{
-		Nodes:     []Node{},
-		Relations: []Relation{},
+	chatModel, err := chat.NewChat(&chat.ChatConfig{
+		ModelID:   "initialization",
+		APIKey:    llm.ApiKey,
+		BaseURL:   llm.BaseUrl,
+		ModelName: llm.ModelName,
+		Source:    types.ModelSource(llm.Source),
+	})
+	if err != nil {
+		logger.Error(ctx, "初始化模型服务失败", err)
+		return nil, err
 	}
 
-	// 如果没有任何提取结果，返回默认的示例数据
-	result.Nodes = []Node{
-		{
-			Name: "示例实体1",
-			Attributes: map[string]string{
-				"属性1": "值1",
-				"属性2": "值2",
-			},
-		},
-		{
-			Name: "示例实体2",
-			Attributes: map[string]string{
-				"属性1": "值1",
-				"属性2": "值2",
-			},
-		},
+	extractor := chatpipline.NewExtractor(chatModel, h.config.ExtractGraph)
+	graph, err := extractor.Extract(ctx, text, tags)
+	if err != nil {
+		logger.Error(ctx, "文本关系提取失败", err)
+		return nil, err
 	}
-	result.Relations = []Relation{
-		{
-			Node1: "示例实体1",
-			Node2: "示例实体2",
-			Type:  "示例关系",
-		},
+
+	result := &TextRelationExtractionResponse{
+		Nodes:     graph.Node,
+		Relations: graph.Relation,
 	}
 
 	return result, nil

@@ -18,8 +18,9 @@ import (
 // PluginExtractEntity is a plugin for extracting entities from user queries
 // It uses historical dialog context and large language models to identify key entities in the user's original query
 type PluginExtractEntity struct {
-	modelService interfaces.ModelService         // Model service for calling large language models
-	template     *types.PromptTemplateStructured // Template for generating prompts
+	modelService      interfaces.ModelService         // Model service for calling large language models
+	template          *types.PromptTemplateStructured // Template for generating prompts
+	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
 }
 
 // NewPluginRewrite creates a new query rewriting plugin instance
@@ -27,11 +28,13 @@ type PluginExtractEntity struct {
 func NewPluginExtractEntity(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
+	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
 	config *config.Config,
 ) *PluginExtractEntity {
 	res := &PluginExtractEntity{
-		modelService: modelService,
-		template:     config.ExtractEntity,
+		modelService:      modelService,
+		template:          config.ExtractEntity,
+		knowledgeBaseRepo: knowledgeBaseRepo,
 	}
 	eventManager.Register(res)
 	return res
@@ -56,8 +59,29 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	extractor := NewExtractor(model, p.template)
-	graph, err := extractor.Extract(ctx, query)
+	kb, err := p.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chatManage.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
+		return next()
+	}
+	if kb.ExtractConfig == nil {
+		logger.Warnf(ctx, "failed to get extract config")
+		return next()
+	}
+
+	template := &types.PromptTemplateStructured{
+		Description: p.template.Description,
+		Examples: []types.GraphData{
+			{
+				Text:     kb.ExtractConfig.Text,
+				Tags:     kb.ExtractConfig.Tags,
+				Node:     kb.ExtractConfig.Nodes,
+				Relation: kb.ExtractConfig.Relations,
+			},
+		},
+	}
+	extractor := NewExtractor(model, template)
+	graph, err := extractor.Extract(ctx, query, kb.ExtractConfig.Tags)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to extract entities, session_id: %s, error: %v", chatManage.SessionID, err)
 		return next()
@@ -95,13 +119,13 @@ func NewExtractor(
 	}
 }
 
-func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphData, error) {
+func (e *Extractor) Extract(ctx context.Context, content string, tags []string) (*types.GraphData, error) {
 	generator := NewQAPromptGenerator(e.formater, e.template)
-	logger.Debugf(ctx, "chat response: %s", generator.Render(ctx, content))
+	logger.Debugf(ctx, "chat response: %s", generator.Render(ctx, content, tags))
 	chatResponse, err := e.chat.Chat(ctx, []chat.Message{
 		{
 			Role:    "user",
-			Content: generator.Render(ctx, content),
+			Content: generator.Render(ctx, content, tags),
 		},
 	}, e.chatOpt)
 	if err != nil {
@@ -118,22 +142,24 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 }
 
 type QAPromptGenerator struct {
-	Formater        *Formater
-	Template        *types.PromptTemplateStructured
-	ExamplesHeading string
-	QuestionHeading string
-	QuestionPrefix  string
-	answerPrefix    string
+	Formater           *Formater
+	Template           *types.PromptTemplateStructured
+	ExamplesHeading    string
+	QuestionHeading    string
+	RelationTypePrefix string
+	QuestionPrefix     string
+	AnswerPrefix       string
 }
 
 func NewQAPromptGenerator(formater *Formater, template *types.PromptTemplateStructured) *QAPromptGenerator {
 	return &QAPromptGenerator{
-		Formater:        formater,
-		Template:        template,
-		ExamplesHeading: "# Examples",
-		QuestionHeading: "# Question",
-		QuestionPrefix:  "Q: ",
-		answerPrefix:    "A: ",
+		Formater:           formater,
+		Template:           template,
+		ExamplesHeading:    "# Examples",
+		QuestionHeading:    "# Question",
+		RelationTypePrefix: "指定关系类型:",
+		QuestionPrefix:     "Q: ",
+		AnswerPrefix:       "A: ",
 	}
 }
 
@@ -143,25 +169,38 @@ func (qa *QAPromptGenerator) formatExampleAsText(example types.GraphData) (strin
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s%s\n%s%s\n", qa.QuestionPrefix, question, qa.answerPrefix, answer), nil
+	return fmt.Sprintf("%s%s\n%s%s\n", qa.QuestionPrefix, question, qa.AnswerPrefix, answer), nil
 }
 
-func (qa *QAPromptGenerator) Render(ctx context.Context, question string) string {
-	promptLines := []string{fmt.Sprintf("%s\n", qa.Template.Description)}
+func (qa *QAPromptGenerator) Render(ctx context.Context, question string, tags []string) string {
+	promptLines := []string{fmt.Sprintf("%s", qa.Template.Description)}
+	// new line
+	promptLines = append(promptLines, "")
 
 	if len(qa.Template.Examples) > 0 {
 		promptLines = append(promptLines, qa.ExamplesHeading)
 		for _, example := range qa.Template.Examples {
-			formatted, err := qa.formatExampleAsText(example)
+			// Question
+			promptLines = append(promptLines, fmt.Sprintf("%s%s", qa.QuestionPrefix, example.Text))
+
+			// Tags
+			promptLines = append(promptLines, fmt.Sprintf("%s%s", qa.RelationTypePrefix, strings.Join(example.Tags, ",")))
+
+			// Answer
+			answer, err := qa.Formater.formatExtraction(example.Node, example.Relation)
 			if err != nil {
 				return ""
 			}
-			promptLines = append(promptLines, formatted)
+			promptLines = append(promptLines, fmt.Sprintf("%s%s", qa.AnswerPrefix, answer))
+
+			// new line
+			promptLines = append(promptLines, "")
 		}
 	}
 	promptLines = append(promptLines, qa.QuestionHeading)
 	promptLines = append(promptLines, fmt.Sprintf("%s%s", qa.QuestionPrefix, question))
-	promptLines = append(promptLines, qa.answerPrefix)
+	promptLines = append(promptLines, fmt.Sprintf("%s%s", qa.RelationTypePrefix, strings.Join(tags, ",")))
+	promptLines = append(promptLines, qa.AnswerPrefix)
 	return strings.Join(promptLines, "\n")
 }
 
@@ -220,12 +259,9 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 	}
 	for _, relation := range relations {
 		item := map[string]interface{}{
-			f.relationSource: relation.Source.Name,
-			f.relationTarget: relation.Target.Name,
+			f.relationSource: relation.Node1.Name,
+			f.relationTarget: relation.Node2.Name,
 			f.relationPrefix: relation.Type,
-		}
-		if len(relation.Attributes) > 0 {
-			item[fmt.Sprintf("%s%s", f.relationPrefix, f.attributeSuffix)] = relation.Attributes
 		}
 		items = append(items, item)
 	}
@@ -313,19 +349,10 @@ func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphDat
 				Attributes: attributes,
 			})
 		case group[f.relationSource] != nil && group[f.relationTarget] != nil:
-			var attributes map[string]string
-			attributesKey := f.relationPrefix + f.attributeSuffix
-			if attr, ok := group[attributesKey].(map[string]interface{}); ok {
-				attributes = make(map[string]string)
-				for k, v := range attr {
-					attributes[k] = fmt.Sprintf("%v", v)
-				}
-			}
 			relations = append(relations, &types.GraphRelation{
-				Source:     &types.GraphNode{Name: fmt.Sprintf("%v", group[f.relationSource])},
-				Target:     &types.GraphNode{Name: fmt.Sprintf("%v", group[f.relationTarget])},
-				Type:       fmt.Sprintf("%v", group[f.relationPrefix]),
-				Attributes: attributes,
+				Node1: &types.GraphNode{Name: fmt.Sprintf("%v", group[f.relationSource])},
+				Node2: &types.GraphNode{Name: fmt.Sprintf("%v", group[f.relationTarget])},
+				Type:  fmt.Sprintf("%v", group[f.relationPrefix]),
 			})
 		default:
 			logger.Warnf(ctx, "Unsupported graph group: %v", group)
@@ -357,32 +384,42 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 		nodeMap[node.Name] = node
 		nodes = append(nodes, node)
 	}
+
+	relationType := make(map[string]bool)
+	for _, relation := range graph.Relation {
+		if relation.Type != "" {
+			relationType[relation.Type] = true
+		}
+	}
+
 	relations := make([]*types.GraphRelation, 0, len(graph.Relation))
 	for _, relation := range graph.Relation {
-		if relation.Source.Name == relation.Target.Name {
+		if relation.Node1.Name == relation.Node2.Name {
 			logger.Infof(ctx, "Duplicate relation, ignore it")
 			continue
 		}
-		if _, ok := nodeMap[relation.Source.Name]; !ok {
-			node := &types.GraphNode{Name: relation.Source.Name}
-			nodes = append(nodes, node)
-			nodeMap[relation.Source.Name] = node
-			logger.Infof(ctx, "Add unknown source node ID: %s", relation.Source.Name)
+		if _, ok := relationType[relation.Type]; !ok {
+			logger.Infof(ctx, "Unknown relation type: %s, ignore it", relation.Type)
+			continue
 		}
-		source := nodeMap[relation.Source.Name]
-		if _, ok := nodeMap[relation.Target.Name]; !ok {
-			node := &types.GraphNode{Name: relation.Target.Name}
-			nodes = append(nodes, node)
-			nodeMap[relation.Target.Name] = node
-			logger.Infof(ctx, "Add unknown target node ID: %s", relation.Target.Name)
-		}
-		target := nodeMap[relation.Target.Name]
 
-		if relation.Type == "" {
-			relation.Type = f.relationPrefix
+		if _, ok := nodeMap[relation.Node1.Name]; !ok {
+			node := &types.GraphNode{Name: relation.Node1.Name}
+			nodes = append(nodes, node)
+			nodeMap[relation.Node1.Name] = node
+			logger.Infof(ctx, "Add unknown source node ID: %s", relation.Node1.Name)
 		}
-		relation.Source = source
-		relation.Target = target
+		node1 := nodeMap[relation.Node1.Name]
+		if _, ok := nodeMap[relation.Node2.Name]; !ok {
+			node := &types.GraphNode{Name: relation.Node2.Name}
+			nodes = append(nodes, node)
+			nodeMap[relation.Node2.Name] = node
+			logger.Infof(ctx, "Add unknown target node ID: %s", relation.Node2.Name)
+		}
+		node2 := nodeMap[relation.Node2.Name]
+
+		relation.Node1 = node1
+		relation.Node2 = node2
 		relations = append(relations, relation)
 	}
 	*graph = types.GraphData{
