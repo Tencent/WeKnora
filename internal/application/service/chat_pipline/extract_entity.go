@@ -157,19 +157,10 @@ func NewQAPromptGenerator(formater *Formater, template *types.PromptTemplateStru
 		Template:           template,
 		ExamplesHeading:    "# Examples",
 		QuestionHeading:    "# Question",
-		RelationTypePrefix: "指定关系类型:",
+		RelationTypePrefix: "relation list:",
 		QuestionPrefix:     "Q: ",
 		AnswerPrefix:       "A: ",
 	}
-}
-
-func (qa *QAPromptGenerator) formatExampleAsText(example types.GraphData) (string, error) {
-	question := example.Text
-	answer, err := qa.Formater.formatExtraction(example.Node, example.Relation)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%s%s\n%s%s\n", qa.QuestionPrefix, question, qa.AnswerPrefix, answer), nil
 }
 
 func (qa *QAPromptGenerator) Render(ctx context.Context, question string, tags []string) string {
