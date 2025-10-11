@@ -38,6 +38,8 @@ type KnowledgeBase struct {
 	VLMConfig VLMConfig `yaml:"vlm_config" json:"vlm_config" gorm:"type:json"`
 	// Storage config
 	StorageConfig StorageConfig `yaml:"cos_config" json:"cos_config" gorm:"column:cos_config;type:json"`
+	// Extract config
+	ExtractConfig *ExtractConfig `yaml:"extract_config" json:"extract_config" gorm:"column:extract_config;type:json"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 	// Last updated time of the knowledge base
@@ -166,4 +168,28 @@ func (c *VLMConfig) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, c)
+}
+
+type ExtractConfig struct {
+	Text      string           `yaml:"text" json:"text"`
+	Tags      []string         `yaml:"tags" json:"tags"`
+	Nodes     []*GraphNode     `yaml:"nodes" json:"nodes"`
+	Relations []*GraphRelation `yaml:"relations" json:"relations"`
+}
+
+// Value implements the driver.Valuer interface, used to convert ExtractConfig to database value
+func (e ExtractConfig) Value() (driver.Value, error) {
+	return json.Marshal(e)
+}
+
+// Scan implements the sql.Scanner interface, used to convert database value to ExtractConfig
+func (e *ExtractConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, e)
 }

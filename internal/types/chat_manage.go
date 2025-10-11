@@ -28,6 +28,8 @@ type ChatManage struct {
 	SearchResult []*SearchResult       `json:"-"` // Results from search phase
 	RerankResult []*SearchResult       `json:"-"` // Results after reranking
 	MergeResult  []*SearchResult       `json:"-"` // Final merged results after all processing
+	Entity       []string              `json:"-"` // List of identified entities
+	GraphResult  *GraphData            `json:"-"` // Graph data from search phase
 	UserContent  string                `json:"-"` // Processed user content
 	ChatResponse *ChatResponse         `json:"-"` // Final response from chat model
 	ResponseChan <-chan StreamResponse `json:"-"` // Channel for streaming responses
@@ -75,6 +77,7 @@ const (
 	PREPROCESS_QUERY       EventType = "preprocess_query"       // Query preprocessing stage
 	REWRITE_QUERY          EventType = "rewrite_query"          // Query rewriting for better retrieval
 	CHUNK_SEARCH           EventType = "chunk_search"           // Search for relevant chunks
+	ENTITY_SEARCH          EventType = "entity_search"          // Search for relevant entities
 	CHUNK_RERANK           EventType = "chunk_rerank"           // Rerank search results
 	CHUNK_MERGE            EventType = "chunk_merge"            // Merge similar chunks
 	INTO_CHAT_MESSAGE      EventType = "into_chat_message"      // Convert chunks into chat messages
@@ -104,6 +107,7 @@ var Pipline = map[string][]EventType{
 		REWRITE_QUERY,
 		PREPROCESS_QUERY,
 		CHUNK_SEARCH,
+		ENTITY_SEARCH,
 		CHUNK_RERANK,
 		CHUNK_MERGE,
 		FILTER_TOP_K,

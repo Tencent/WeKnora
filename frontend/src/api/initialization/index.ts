@@ -50,6 +50,13 @@ export interface InitializationConfig {
     };
     // Frontend-only hint for storage selection UI
     storageType?: 'cos' | 'minio';
+    nodeExtract: {
+        enabled: boolean,
+        text: string,
+        tags: string[],
+        nodes: Node[],
+        relations: Relation[]
+    }
 }
 
 // 下载任务状态类型
@@ -324,4 +331,48 @@ export function testMultimodalFunction(testData: {
             reject(error);
         });
     });
-} 
+}
+
+// 文本内容关系提取接口
+export interface TextRelationExtractionRequest {
+    text: string;
+    tags: string[];
+    llmConfig: LLMConfig;
+}
+
+export interface Node {
+    name: string;
+    attributes: Record<string, string>;
+}
+
+export interface Relation {
+    node_1: string;
+    node_2: string;
+    type: string;
+}
+
+export interface LLMConfig {
+    source: 'local' | 'remote';
+    modelName: string;
+    baseUrl: string;
+    apiKey: string;
+}
+
+export interface TextRelationExtractionResponse {
+    nodes: Node[];
+    relations: Relation[];
+}
+
+// 文本内容关系提取
+export function extractTextRelations(request: TextRelationExtractionRequest): Promise<TextRelationExtractionResponse> {
+    return new Promise((resolve, reject) => {
+        post('/api/v1//initialization/extract/text-relation', request)
+            .then((response: any) => {
+                resolve(response.data || { nodes: [], relations: [] });
+            })
+            .catch((error: any) => {
+                console.error('文本内容关系提取失败:', error);
+                reject(error);
+            });
+    });
+}

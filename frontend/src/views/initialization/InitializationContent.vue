@@ -692,6 +692,130 @@
                 </div>
             </div>
 
+            <!-- 实体关系提取 -->
+            <div class="config-section">
+                <h3><t-icon name="transform" class="section-icon" />实体关系提取</h3>
+                
+                <div class="form-row">
+                    <t-form-item name="nodeExtract.enabled">
+                        <div class="switch-container">
+                            <t-switch v-model="formData.nodeExtract.enabled" @change="onNodeExtractChange" />
+                            <span class="switch-label">启用实体关系提取</span>
+                        </div>
+                    </t-form-item>
+                </div>
+
+                <div v-if="formData.nodeExtract.enabled" class="rerank-config">
+                    <!-- 文本内容输入区域 -->
+                    <div class="form-row">
+                        <t-form-item label="示例文本" name="text" :required="true">
+                            <t-textarea 
+                                v-model="formData.nodeExtract.text" 
+                                placeholder="请输入需要分析的文本内容，例如：《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一..." 
+                                :autosize="{ minRows: 8, maxRows: 15 }"
+                                show-word-limit
+                                maxlength="5000"
+                            />
+                        </t-form-item>
+                    </div>
+
+                    <!-- 关系标签配置区域 -->
+                    <div class="form-row">
+                        <t-form-item label="关系类型" name="tags">
+                            <div class="tags-config">
+                                <t-select 
+                                    v-model="formData.nodeExtract.tags" 
+                                    multiple
+                                    placeholder="系统将根据选定的关系类型从文本中提取相应的实体关系"
+                                    :options="tagOptions"
+                                    clearable
+                                    creatable
+                                    filterable
+                                />
+                                <div class="add-tag-container">
+                                    <t-input
+                                        v-model="newTag"
+                                        placeholder="输入新标签"
+                                        class="add-tag-input"
+                                    />
+                                    <t-button @click="addTag" class="add-tag-button">添加关系</t-button>
+                                </div>
+                            </div>
+                        </t-form-item>
+                    </div>
+
+                    <!-- 提交按钮区域 -->
+                    <div class="extract-button">
+                        <t-button 
+                            theme="primary" 
+                            size="medium" 
+                            :loading="extracting" 
+                            :disabled="!canExtract"
+                            @click="handleExtract"
+                        >
+                            {{ extracting ? '正在提取...' : '开始提取' }}
+                        </t-button>
+
+                        <t-button 
+                            theme="default" 
+                            size="medium" 
+                            @click="onNodeExtractChange"
+                            class="reset-btn"
+                        >
+                            重置
+                        </t-button>
+
+                        <!-- 状态提示 -->
+                        <div v-if="!canExtract" class="submit-tips">
+                            <t-icon name="info-circle" class="tip-icon" />
+                            <span>请输入文本内容</span>
+                        </div>
+                    </div>
+
+                    <!-- 提取结果展示区域 -->
+                    <div v-if="formData.nodeExtract.nodes.length > 0 && formData.nodeExtract.relations.length > 0" class="config-section">
+                        <h3><t-icon name="tree-list" class="section-icon" />提取结果</h3>
+                        
+                        <!-- 节点展示 -->
+                        <div class="result-section">
+                            <h4>实体节点</h4>
+                            <div class="nodes-grid">
+                                <div v-for="(node, index) in formData.nodeExtract.nodes" :key="index" class="node-card">
+                                    <div class="node-header">
+                                        <span class="node-icon"><t-icon name="user" class="node-icon-svg" /></span>
+                                        <span class="node-name">{{ node.name }}</span>
+                                    </div>
+                                    <div class="node-attributes">
+                                        <span v-for="(value, key) in node.attributes" :key="key" class="attribute-item">
+                                        <span class="attribute-key">{{ key }}:</span>
+                                        <span class="attribute-value">{{ value }}</span>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 关系展示 -->
+                        <div class="result-section">
+                            <h4>关系连接</h4>
+                            <div class="relations-list">
+                                <div v-for="(relation, index) in formData.nodeExtract.relations" :key="index" class="relation-item">
+                                    <div class="relation-line">
+                                        <span class="node-from">{{ relation.node_1 }}</span>
+                                        <t-icon name="arrow-right" class="relation-arrow" />
+                                        <span class="relation-type">{{ relation.type }}</span>
+                                        <t-icon name="arrow-right" class="relation-arrow" />
+                                        <span class="node-to">{{ relation.node_2 }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+
+                </div>
+            </div>
+
             <!-- 提交按钮区域 -->
             <div class="submit-section">
                 <t-button theme="primary" type="button" size="large" 
@@ -736,7 +860,12 @@ import {
     checkRerankModel,
     testMultimodalFunction,
     listOllamaModels,
-    testEmbeddingModel
+    testEmbeddingModel,
+    extractTextRelations,
+    type TextRelationExtractionRequest,
+    type TextRelationExtractionResponse,
+    type Node,
+    type Relation,
 } from '@/api/initialization';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { useAuthStore } from '@/stores/auth';
@@ -762,6 +891,24 @@ const form = ref<TFormRef>(null);
 const submitting = ref(false);
 const hasFiles = ref(false);
 const isUpdateMode = ref(false); // 是否为更新模式
+const extracting = ref(false);
+const canExtract = computed(() => {
+    return formData.nodeExtract.text.trim().length > 0;
+});
+const newTag = ref('');
+const tagOptionsDefault = [
+    { label: '内容', value: '内容' },
+    { label: '文化', value: '文化' },
+    { label: '人物', value: '人物' },
+    { label: '事件', value: '事件' },
+    { label: '时间', value: '时间' },
+    { label: '地点', value: '地点' },
+    { label: '作品', value: '作品' },
+    { label: '作者', value: '作者' },
+    { label: '关系', value: '关系' },
+    { label: '属性', value: '属性' }
+];
+const tagOptions = ref([...tagOptionsDefault]);
 
 // 防抖机制：防止按钮快速重复点击
 const submitDebounceTimer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -874,6 +1021,13 @@ const formData = reactive({
         chunkSize: 512, 
         chunkOverlap: 100,
         separators: ['\n\n', '\n', '。', '！', '？', ';', '；']
+    },
+    nodeExtract: {
+        enabled: false,
+        text: '',
+        tags: [] as string[],
+        nodes: [] as Node[],
+        relations: [] as Relation[]
     }
 });
 
@@ -995,6 +1149,11 @@ const canSubmit = computed(() => {
             vlmOk = true;
         }
     }
+
+    let extractOk = true;
+    if (formData.nodeExtract.enabled) {
+        extractOk = formData.nodeExtract.nodes.length > 0 && formData.nodeExtract.relations.length > 0;
+    }
     
     return llmOk && embeddingOk && rerankOk && vlmOk;
 });
@@ -1034,6 +1193,10 @@ const rules = {
     'embedding.dimension': [
         { required: true, message: '请输入Embedding维度', type: 'error' },
         { validator: validateEmbeddingDimension, message: '维度必须为有效整数值，常见取值为768, 1024, 1536, 3584等', type: 'error' }
+    ],
+    'nodeExtract.text': [
+        { required: true, message: '请输入文本内容', type: 'error' },
+        { min: 10, message: '文本内容至少需要10个字符', type: 'error' }
     ]
 };
 
@@ -1282,6 +1445,13 @@ const loadCurrentConfig = async () => {
         } else {
             // 如果没有文档分割配置，确保使用默认的precision模式
             selectedPreset.value = 'precision';
+        }
+        if (config.nodeExtract.enabled) {
+            formData.nodeExtract.enabled = true;
+            formData.nodeExtract.text = config.nodeExtract.text;
+            formData.nodeExtract.tags = config.nodeExtract.tags;
+            formData.nodeExtract.nodes = config.nodeExtract.nodes;
+            formData.nodeExtract.relations = config.nodeExtract.relations;
         }
         
         // 在配置加载完成后，检查模型状态
@@ -2050,6 +2220,76 @@ const formatFileSize = (bytes: number): string => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
+const addTag = async () => {
+    if (newTag.value.trim() === '') {
+        alert('请输入有效的标签');
+        return;
+    }
+    newTag.value = newTag.value.trim();
+    if (!formData.nodeExtract.tags.includes(newTag.value)) {
+        formData.nodeExtract.tags.push(newTag.value);
+        tagOptions.value.push({ label: newTag.value, value: newTag.value });
+        newTag.value = ''; // 清空输入框
+    } else {
+        alert('该标签已存在');
+    }
+}
+
+const onNodeExtractChange = async () => {
+    if (formData.nodeExtract.enabled) {
+        formData.nodeExtract.text = `《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。`;
+    } else {
+        formData.nodeExtract.text = '';
+        formData.nodeExtract.nodes = [];
+        formData.nodeExtract.relations = [];
+    }
+    formData.nodeExtract.tags = [];
+    newTag.value = '';
+    tagOptions.value = [...tagOptionsDefault];
+};
+
+// 处理提取
+const handleExtract = async () => {
+    if (extracting.value) return;
+
+    try {
+        // 表单验证
+        const isValid = await form.value?.validate();
+        if (!isValid) {
+            MessagePlugin.error('请检查表单填写是否正确');
+            return;
+        }
+
+        extracting.value = true;
+
+        const request: TextRelationExtractionRequest = {
+            text: formData.nodeExtract.text.trim(),
+            tags: formData.nodeExtract.tags,
+            llmConfig: {
+                source: formData.llm.source as 'local' | 'remote',
+                modelName: formData.llm.modelName,
+                baseUrl: formData.llm.baseUrl,
+                apiKey: formData.llm.apiKey,
+            },
+        };
+
+        const result = await extractTextRelations(request);
+        if (result.nodes.length === 0 || result.relations.length === 0) {
+            MessagePlugin.error('文本内容关系提取失败');
+            return;
+        }
+        formData.nodeExtract.nodes = result.nodes;
+        formData.nodeExtract.relations = result.relations;
+        MessagePlugin.success('文本内容关系提取成功');
+
+    } catch (error) {
+        console.error('文本内容关系提取失败:', error);
+        MessagePlugin.error('提取失败，请检查网络连接或文本内容格式');
+    } finally {
+        extracting.value = false;
+    }
+};
+
 // 组件挂载时检查Ollama状态
 onMounted(async () => {
     // 加载当前配置
@@ -2165,6 +2405,26 @@ onMounted(async () => {
                 color: #07c05f;
                 font-size: 20px;
             }
+        }
+
+        .attribute-item {
+            margin-right: 15px;
+        }
+        .attribute-item:last-child {
+            margin-right: 0;
+        }
+        .add-tag-container {
+            display: flex;
+            align-items: center; /* 垂直居中 */
+            justify-content: flex-start; /* 水平起始对齐 */
+            gap: 8px;
+        }
+        .extract-button {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            text-align: center;
         }
     }
 

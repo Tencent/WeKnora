@@ -7,21 +7,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 )
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation   *ConversationConfig   `yaml:"conversation" json:"conversation"`
-	Server         *ServerConfig         `yaml:"server" json:"server"`
-	KnowledgeBase  *KnowledgeBaseConfig  `yaml:"knowledge_base" json:"knowledge_base"`
-	Tenant         *TenantConfig         `yaml:"tenant" json:"tenant"`
-	Models         []ModelConfig         `yaml:"models" json:"models"`
-	Asynq          *AsynqConfig          `yaml:"asynq" json:"asynq"`
-	VectorDatabase *VectorDatabaseConfig `yaml:"vector_database" json:"vector_database"`
-	DocReader      *DocReaderConfig      `yaml:"docreader" json:"docreader"`
-	StreamManager  *StreamManagerConfig  `yaml:"stream_manager" json:"stream_manager"`
+	Conversation   *ConversationConfig             `yaml:"conversation" json:"conversation"`
+	Server         *ServerConfig                   `yaml:"server" json:"server"`
+	KnowledgeBase  *KnowledgeBaseConfig            `yaml:"knowledge_base" json:"knowledge_base"`
+	Tenant         *TenantConfig                   `yaml:"tenant" json:"tenant"`
+	Models         []ModelConfig                   `yaml:"models" json:"models"`
+	VectorDatabase *VectorDatabaseConfig           `yaml:"vector_database" json:"vector_database"`
+	DocReader      *DocReaderConfig                `yaml:"docreader" json:"docreader"`
+	StreamManager  *StreamManagerConfig            `yaml:"stream_manager" json:"stream_manager"`
+	ExtractGraph   *types.PromptTemplateStructured `yaml:"extract_graph" json:"extract_graph"`
+	ExtractEntity  *types.PromptTemplateStructured `yaml:"extract_entity" json:"extract_entity"`
 }
 
 type DocReaderConfig struct {
@@ -107,15 +109,6 @@ type ModelConfig struct {
 	Source     string                 `yaml:"source" json:"source"`
 	ModelName  string                 `yaml:"model_name" json:"model_name"`
 	Parameters map[string]interface{} `yaml:"parameters" json:"parameters"`
-}
-
-type AsynqConfig struct {
-	Addr         string        `yaml:"addr" json:"addr"`
-	Username     string        `yaml:"username" json:"username"`
-	Password     string        `yaml:"password" json:"password"`
-	ReadTimeout  time.Duration `yaml:"read_timeout" json:"read_timeout"`
-	WriteTimeout time.Duration `yaml:"write_timeout" json:"write_timeout"`
-	Concurrency  int           `yaml:"concurrency" json:"concurrency"`
 }
 
 // StreamManagerConfig 流管理器配置
