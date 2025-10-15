@@ -172,7 +172,7 @@ services:
     restart: unless-stopped
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:latest
+    image: paradedb/paradedb:v0.18.9-pg17
     container_name: WeKnora-postgres
     ports:
       - "${DB_PORT}:5432"
