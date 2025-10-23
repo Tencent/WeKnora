@@ -23,7 +23,8 @@ textract
 antiword
 openai
 ollama
-pdfplumber
+pymupdf
+pymupdf4llm
 
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
 paddlepaddle>=3.0.0,<4.0.0
