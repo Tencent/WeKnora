@@ -170,6 +170,8 @@ git clone https://github.com/Tencent/WeKnora
 ```
 
 #### 2️⃣ Configure MCP Server
+> It is recommended to directly refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for configuration.
+
 Configure the MCP client to connect to the server:
 ```json
 {

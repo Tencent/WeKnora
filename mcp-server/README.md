@@ -4,6 +4,8 @@
 
 ## 快速开始
 
+> 推荐直接参考 [MCP配置说明](./MCP_CONFIG.md)，无需进行以下操作。
+
 ### 1. 安装依赖
 ```bash
 pip install -r requirements.txt
@@ -133,5 +135,5 @@ python test_module.py
 
 如果遇到导入错误，请确保：
 1. 已安装所有必需的依赖包
-2. Python 版本兼容（推荐 3.8+）
+2. Python 版本兼容（推荐 3.10+）
 3. 没有文件名冲突（避免使用 `mcp.py` 作为文件名）

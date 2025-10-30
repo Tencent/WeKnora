@@ -88,11 +88,11 @@ WeKnoraMCP/
 - 完整的测试覆盖
 
 ### 依赖
-- Python 3.8+
+- Python 3.10+
 - mcp >= 1.0.0
 - requests >= 2.31.0
 
 ### 兼容性
 - 支持 Windows、macOS、Linux
-- 支持 Python 3.8-3.12
+- 支持 Python 3.10-3.12
 - 兼容现代 Python 包管理工具

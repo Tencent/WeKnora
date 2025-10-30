@@ -168,6 +168,8 @@ WeKnoraは[WeChat対話オープンプラットフォーム](https://chatbot.wei
 git clone https://github.com/Tencent/WeKnora
 ```
 #### 2️⃣MCPサーバーの設定
+> 設定には直接 [MCP設定説明](./mcp-server/MCP_CONFIG.md) を参照することをお勧めします。
+
 MCPクライアントでサーバーを設定
 ```json
 {

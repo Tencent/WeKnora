@@ -103,7 +103,7 @@ python main.py --check-only
 ### 1. 导入错误
 如果遇到 `ImportError`，请确保：
 - 已安装所有依赖：`pip install -r requirements.txt`
-- Python 版本兼容（推荐 3.8+）
+- Python 版本兼容（推荐 3.10+）
 - 没有文件名冲突
 
 ### 2. 连接错误

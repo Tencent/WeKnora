@@ -167,6 +167,8 @@ WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心
 git clone https://github.com/Tencent/WeKnora
 ```
 #### 2️⃣配置MCP服务器
+> 推荐直接参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行配置。
+
 mcp客户端配置服务器
 ```json
 {
