@@ -2,7 +2,7 @@
     <div class="dialogue-wrap">
         <div class="dialogue-answers">
             <div class="dialogue-title">
-                <span>基于知识库内容问答</span>
+                <span>{{ t('chat.knowledgeBaseQandA') }}</span>
             </div>
             <InputField @send-msg="sendMsg"></InputField>
         </div>
@@ -21,6 +21,7 @@
 </template>
 <script setup lang="ts">
 import { ref, onUnmounted, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import InputField from '@/components/Input-field.vue';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
@@ -28,6 +29,8 @@ import { useMenuStore } from '@/stores/menu';
 import { useRoute, useRouter } from 'vue-router';
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { listKnowledgeBases } from '@/api/knowledge-base';
+
+const { t } = useI18n();
 
 let { cardList } = useKnowledgeBase()
 const router = useRouter();
