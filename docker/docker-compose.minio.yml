@@ -3,6 +3,9 @@ version: "3.8"
 services:
   minio:
     image: minio/minio:latest
+    read_only: true
+    tmpfs:
+      - /tmp
     container_name: WeKnora-minio
     ports:
       - "9000:9000"
