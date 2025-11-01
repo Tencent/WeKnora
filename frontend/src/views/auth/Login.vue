@@ -288,7 +288,7 @@ const handleLogin = async () => {
       MessagePlugin.error(response.message || t('auth.loginError'))
     }
   } catch (error: any) {
-    console.error('登录错误:', error)
+    console.error(t('auth.loginError') + ':', error)
     MessagePlugin.error(error.message || t('auth.loginErrorRetry'))
   } finally {
     loading.value = false
@@ -324,7 +324,7 @@ const handleRegister = async () => {
       MessagePlugin.error(response.message || t('auth.registerFailed'))
     }
   } catch (error: any) {
-    console.error('注册错误:', error)
+    console.error(t('auth.registerError') + ':', error)
     MessagePlugin.error(error.message || t('auth.registerError'))
   } finally {
     loading.value = false

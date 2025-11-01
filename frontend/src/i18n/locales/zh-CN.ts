@@ -104,7 +104,8 @@ export default {
     noDescription: '无描述',
     emptyKnowledgeDragDrop: '知识为空，拖放上传',
     pdfDocFormat: 'pdf、doc 格式文件，不超过10M',
-    textMarkdownFormat: 'text、markdown格式文件，不超过200K'
+    textMarkdownFormat: 'text、markdown格式文件，不超过200K',
+    dragFileNotText: '请拖拽文件而不是文本或链接'
   },
   chat: {
     title: '对话',
@@ -129,7 +130,10 @@ export default {
     sourcesCount: '{count} 个来源',
     pleaseEnterContent: '请输入内容！',
     pleaseUploadKnowledgeBase: '请先上传知识库！',
-    replyingPleaseWait: '正在回复，请稍后再试！'
+    replyingPleaseWait: '正在回复，请稍后再试！',
+    createSessionFailed: '创建会话失败',
+    createSessionError: '创建会话出错',
+    unableToGetKnowledgeBaseId: '无法获取知识库ID'
   },
   settings: {
     title: '设置',

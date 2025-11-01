@@ -1393,7 +1393,7 @@ const checkOllama = async () => {
             await checkAllOllamaModels();
         }
     } catch (error) {
-        console.error('检查Ollama状态失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ':', error);
         ollamaStatus.checked = true;
         ollamaStatus.available = false;
         ollamaStatus.error = t('initialization.checkFailed');
@@ -1455,7 +1455,7 @@ const checkAllOllamaModels = async () => {
             modelStatus.vlm.available = result.models[formData.multimodal.vlm.modelName] || false;
         }
     } catch (error) {
-        console.error('检查模型状态失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ':', error);
     }
 };
 
@@ -1497,10 +1497,10 @@ const downloadModel = async (type: 'llm' | 'embedding' | 'vlm', modelName: strin
         startProgressPolling(type, result.taskId, modelName);
         
     } catch (error) {
-        console.error(`启动模型 ${modelName} 下载失败:`, error);
-        MessagePlugin.error(`启动模型 ${modelName} 下载失败`);
+        console.error(`${t('initialization.startModelDownloadFailed')} ${modelName}:`, error);
+        MessagePlugin.error(`${t('initialization.startModelDownloadFailed')} ${modelName}`);
         modelStatus[type].downloading = false;
-        modelStatus[type].message = '下载启动失败';
+        modelStatus[type].message = t('initialization.downloadStartFailed');
     }
 };
 
@@ -1545,7 +1545,7 @@ const startProgressPolling = (type: 'llm' | 'embedding' | 'vlm', taskId: string,
             }
             
         } catch (error) {
-            console.error('查询下载进度失败:', error);
+            console.error(t('initialization.queryProgressFailed') + ':', error);
             // 如果查询失败，停止轮询
             clearInterval(progressTimers[taskId]);
             delete progressTimers[taskId];
@@ -1567,7 +1567,7 @@ const loadCurrentConfig = async () => {
                     formData.kbDescription = kbInfo.data.description || '';
                 }
             } catch (error) {
-                console.error('获取知识库信息失败:', error);
+                console.error(t('initialization.getKnowledgeBaseInfoFailed') + ':', error);
                 MessagePlugin.error(t('initialization.getKnowledgeBaseInfoFailed'));
             }
         }
@@ -1836,7 +1836,7 @@ const checkRemoteModelStatus = async (type: 'llm') => {
         }, 100);
         
     } catch (error) {
-        console.error(`检查远程${type}模型失败:`, error);
+        console.error(`${t('initialization.checkOllamaStatusFailed')} ${type}:`, error);
         modelStatus[type].checked = true;
         modelStatus[type].available = false;
         const err = error as any;
@@ -1912,7 +1912,7 @@ const checkEmbeddingModelStatus = async () => {
         }, 100);
         
     } catch (error) {
-        console.error('检查Embedding模型失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ' Embedding:', error);
         modelStatus.embedding.checked = true;
         modelStatus.embedding.available = false;
         const err = error as any;
@@ -2120,7 +2120,7 @@ const checkRerankModelStatus = async () => {
         }, 100);
         
     } catch (error) {
-        console.error('检查Rerank模型失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ' Rerank:', error);
         modelStatus.rerank.checked = true;
         modelStatus.rerank.available = false;
         const err = error as any;
@@ -2298,10 +2298,10 @@ const startMultimodalTest = async () => {
             MessagePlugin.error(`${t('initialization.multimodalTestFailed')}: ${result.message}`);
         }
     } catch (error) {
-        console.error('多模态测试失败:', error);
+        console.error(t('initialization.multimodalTestFailed') + ':', error);
         multimodalTest.result = {
             success: false,
-            message: (error as any)?.message || '测试过程中发生错误'
+            message: (error as any)?.message || t('initialization.multimodalTestFailed')
         };
         MessagePlugin.error(t('initialization.multimodalTestFailed'));
     } finally {
@@ -2345,7 +2345,7 @@ const handleSubmit = async () => {
                     config: {} // 空的config对象，因为这里只更新基本信息
                 });
             } catch (error) {
-                console.error('更新知识库基本信息失败:', error);
+                console.error(t('initialization.updateKnowledgeBaseInfoFailed') + ':', error);
                 MessagePlugin.error(t('initialization.updateKnowledgeBaseInfoFailed'));
                 return;
             }
@@ -2358,7 +2358,7 @@ const handleSubmit = async () => {
         
         // 根据是否为知识库设置模式选择不同的API
         if (props.isKbSettings && !currentKbId.value) {
-            console.error('知识库设置模式下缺少知识库ID');
+            console.error(t('initialization.knowledgeBaseSettingsModeMissingId'));
             MessagePlugin.error(t('initialization.knowledgeBaseIdMissing'));
             return;
         }
@@ -2383,7 +2383,7 @@ const handleSubmit = async () => {
             MessagePlugin.error(result.message || t('initialization.operationFailed'));
         }
     } catch (error: any) {
-        console.error('提交失败:', error);
+        console.error(t('initialization.operationFailed') + ':', error);
         MessagePlugin.error(error.message || t('initialization.operationFailedCheckNetwork'));
     } finally {
         submitting.value = false;
@@ -2607,7 +2607,7 @@ const handleExtract = async () => {
             formData.nodeExtract.relations = result.relations;
         }
     } catch (error) {
-        console.error('文本内容关系提取失败:', error);
+        console.error(t('initialization.textRelationExtractionFailed') + ':', error);
         MessagePlugin.error(t('initialization.extractionFailedCheckNetwork'));
     } finally {
         extracting.value = false;
@@ -2645,7 +2645,7 @@ const handleFabriTag = async () => {
         }
 
     } catch (error) {
-        console.error('随机生成标签:', error);
+        console.error(t('initialization.generateRandomTags') + ':', error);
         MessagePlugin.error(t('initialization.generationFailedRetry'));
     } finally {
         tagFabring.value = false;
@@ -2679,7 +2679,7 @@ const handleFabriText = async () => {
         const result = await fabriText(request);
         formData.nodeExtract.text = result.text;
     } catch (error) {
-        console.error('生成示例文本失败:', error);
+        console.error(t('initialization.generateRandomText') + ':', error);
         MessagePlugin.error(t('initialization.generationFailedRetry'));
     } finally {
         textFabring.value = false;

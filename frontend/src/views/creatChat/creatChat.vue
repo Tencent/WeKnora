@@ -78,10 +78,10 @@ async function createNewSession(value: string) {
             await getTitle(res.data.id, value)
         } else {
             // 错误处理
-            console.error("创建会话失败");
+            console.error(t('chat.createSessionFailed'));
         }
     }).catch(error => {
-        console.error("创建会话出错:", error);
+        console.error(t('chat.createSessionError') + ':', error);
     })
 }
 
@@ -95,15 +95,15 @@ const confirmSelect = async () => {
         if (res.data && res.data.id) {
             await getTitle(res.data.id, value, selectedKbId.value)
         } else {
-            console.error('创建会话失败')
+            console.error(t('chat.createSessionFailed'))
         }
-    }).catch((e:any) => console.error('创建会话出错:', e))
+    }).catch((e:any) => console.error(t('chat.createSessionError') + ':', e))
 }
 
 const getTitle = async (session_id: string, value: string, kbId?: string) => {
     const finalKbId = kbId || await ensureKbId();
     if (!finalKbId) {
-        console.error('无法获取知识库ID');
+        console.error(t('chat.unableToGetKnowledgeBaseId'));
         return;
     }
     

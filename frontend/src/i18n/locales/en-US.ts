@@ -106,7 +106,8 @@ export default {
     noDescription: 'No description',
     emptyKnowledgeDragDrop: 'Knowledge is empty, drag and drop to upload',
     pdfDocFormat: 'pdf, doc format files, max 10M',
-    textMarkdownFormat: 'text, markdown format files, max 200K'
+    textMarkdownFormat: 'text, markdown format files, max 200K',
+    dragFileNotText: 'Please drag files instead of text or links'
   },
   chat: {
     title: 'Chat',
@@ -132,7 +133,10 @@ export default {
     sourcesCount: '{count} sources',
     pleaseEnterContent: 'Please enter content!',
     pleaseUploadKnowledgeBase: 'Please upload knowledge base first!',
-    replyingPleaseWait: 'Replying, please try again later!'
+    replyingPleaseWait: 'Replying, please try again later!',
+    createSessionFailed: 'Failed to create session',
+    createSessionError: 'Session creation error',
+    unableToGetKnowledgeBaseId: 'Unable to get knowledge base ID'
   },
   settings: {
     title: 'Settings',

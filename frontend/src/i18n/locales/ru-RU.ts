@@ -106,7 +106,8 @@ export default {
     noDescription: 'Нет описания',
     emptyKnowledgeDragDrop: 'База знаний пуста, перетащите файлы для загрузки',
     pdfDocFormat: 'Файлы pdf, doc формата, не более 10 МБ',
-    textMarkdownFormat: 'Файлы text, markdown формата, не более 200 КБ'
+    textMarkdownFormat: 'Файлы text, markdown формата, не более 200 КБ',
+    dragFileNotText: 'Пожалуйста, перетащите файлы, а не текст или ссылки'
   },
   chat: {
     title: 'Диалог',
@@ -132,7 +133,10 @@ export default {
     sourcesCount: '{count} источников',
     pleaseEnterContent: 'Пожалуйста, введите содержимое!',
     pleaseUploadKnowledgeBase: 'Пожалуйста, сначала загрузите базу знаний!',
-    replyingPleaseWait: 'Идёт ответ, пожалуйста, попробуйте позже!'
+    replyingPleaseWait: 'Идёт ответ, пожалуйста, попробуйте позже!',
+    createSessionFailed: 'Не удалось создать сеанс',
+    createSessionError: 'Ошибка создания сеанса',
+    unableToGetKnowledgeBaseId: 'Невозможно получить ID базы знаний'
   },
   settings: {
     title: 'Настройки',
