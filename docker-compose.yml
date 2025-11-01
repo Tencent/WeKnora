@@ -109,7 +109,10 @@ services:
       - WeKnora-network
 
   frontend:
-    image: wechatopenai/weknora-ui:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: weknora-frontend-local:latest
     container_name: WeKnora-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"

@@ -386,7 +386,7 @@ export default {
     login: 'Вход',
     logout: 'Выход',
     username: 'Имя пользователя',
-    email: 'Электронная почта',
+    email: 'Почта Email',
     password: 'Пароль',
     confirmPassword: 'Подтвердите пароль',
     rememberMe: 'Запомнить меня',

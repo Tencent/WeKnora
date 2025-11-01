@@ -21,12 +21,12 @@ import { useI18n } from 'vue-i18n'
 const { locale } = useI18n()
 
 const languageOptions = [
-  { label: 'Русский', value: 'ru-RU' },
+  { label: '中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
-  { label: '中文', value: 'zh-CN' }
+  { label: 'Русский', value: 'ru-RU' }
 ]
 
-const selectedLanguage = ref(localStorage.getItem('locale') || 'ru-RU')
+const selectedLanguage = ref(localStorage.getItem('locale') || 'zh-CN')
 
 const handleLanguageChange = (value: string) => {
   console.log('Язык изменен на:', value)
