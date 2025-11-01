@@ -13,7 +13,7 @@
                 </div>
                 <div v-if="loading"
                     style="height: 41px;display: flex;align-items: center;background: #fff;width: 58px;">
-                    <img class="botanswer_laoding_gif" src="@/assets/img/botanswer_loading.gif" alt="正在等待答案……">
+                    <img class="botanswer_laoding_gif" src="@/assets/img/botanswer_loading.gif" :alt="$t('chat.waitingForAnswer')">
                 </div>
             </div>
         </div>
@@ -26,12 +26,14 @@
 import { storeToRefs } from 'pinia';
 import { ref, onMounted, onUnmounted, nextTick, watch, reactive, onBeforeUnmount } from 'vue';
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, generateSessionsTitle } from "@/api/chat/index";
 import { useStream } from '../../api/chat/streame'
 import { useMenuStore } from '@/stores/menu';
+const { t } = useI18n();
 const usemenuStore = useMenuStore();
 const { menuArr, isFirstSession, firstQuery } = storeToRefs(usemenuStore);
 const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream } = useStream();
@@ -124,7 +126,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
             }
         }
         if (item.is_completed && !item.content) {
-            item.content = "抱歉，我无法回答这个问题。";
+            item.content = t('chat.cannotAnswer');
         }
         messagesList.unshift(item);
         if (isFirstEnter.value) {

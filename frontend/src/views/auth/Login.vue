@@ -1,5 +1,10 @@
 <template>
   <div class="login-container">
+    <!-- Переключатель языка -->
+    <div class="language-switcher-wrapper">
+      <LanguageSwitcher />
+    </div>
+    
     <!-- 登录表单 -->
     <div class="login-card" v-if="!isRegisterMode">
       <!-- 系统Logo和标题 -->
@@ -7,7 +12,7 @@
         <div class="logo">
           <img src="@/assets/img/weknora.png" alt="WeKnora" class="logo-img" />
         </div>
-        <p class="login-subtitle">基于大模型的文档理解与语义检索框架</p>
+        <p class="login-subtitle">{{ t('auth.subtitle') }}</p>
       </div>
 
       <div class="login-form">
@@ -18,20 +23,20 @@
           @submit="handleLogin"
           layout="vertical"
         >
-          <t-form-item label="邮箱" name="email">
+          <t-form-item :label="t('auth.email')" name="email">
             <t-input
               v-model="formData.email"
-              placeholder="请输入邮箱地址"
+              :placeholder="t('auth.emailPlaceholder')"
               type="email"
               size="large"
               :disabled="loading"
             />
           </t-form-item>
 
-          <t-form-item label="密码" name="password">
+          <t-form-item :label="t('auth.password')" name="password">
             <t-input
               v-model="formData.password"
-              placeholder="请输入密码（8-32位，包含字母和数字）"
+              :placeholder="t('auth.passwordPlaceholder')"
               type="password"
               size="large"
               :disabled="loading"
@@ -47,15 +52,15 @@
             :loading="loading"
             class="login-button"
           >
-            {{ loading ? '登录中...' : '登录' }}
+            {{ loading ? t('auth.loggingIn') : t('auth.login') }}
           </t-button>
         </t-form>
 
         <!-- 注册链接 -->
         <div class="register-link">
-          <span>还没有账号？</span>
+          <span>{{ t('auth.noAccount') }} </span>
           <a href="#" @click.prevent="toggleMode" class="register-btn">
-            立即注册
+            {{ t('auth.registerNow') }}
           </a>
         </div>
       </div>
@@ -64,8 +69,8 @@
     <!-- 注册表单 -->
     <div class="register-card" v-if="isRegisterMode">
       <div class="login-header">
-        <h1 class="login-title">创建账号</h1>
-        <p class="login-subtitle">注册后系统将为您创建专属租户</p>
+        <h1 class="login-title">{{ t('auth.createAccount') }}</h1>
+        <p class="login-subtitle">{{ t('auth.registerSubtitle') }}</p>
       </div>
 
       <div class="login-form">
@@ -76,39 +81,39 @@
           @submit="handleRegister"
           layout="vertical"
         >
-          <t-form-item label="用户名" name="username">
+          <t-form-item :label="t('auth.username')" name="username">
             <t-input
               v-model="registerData.username"
-              placeholder="请输入用户名"
+              :placeholder="t('auth.usernamePlaceholder')"
               size="large"
               :disabled="loading"
             />
           </t-form-item>
 
-          <t-form-item label="邮箱" name="email">
+          <t-form-item :label="t('auth.email')" name="email">
             <t-input
               v-model="registerData.email"
-              placeholder="请输入邮箱地址"
+              :placeholder="t('auth.emailPlaceholder')"
               type="email"
               size="large"
               :disabled="loading"
             />
           </t-form-item>
 
-          <t-form-item label="密码" name="password">
+          <t-form-item :label="t('auth.password')" name="password">
             <t-input
               v-model="registerData.password"
-              placeholder="请输入密码（8-32位，包含字母和数字）"
+              :placeholder="t('auth.passwordPlaceholder')"
               type="password"
               size="large"
               :disabled="loading"
             />
           </t-form-item>
 
-          <t-form-item label="确认密码" name="confirmPassword">
+          <t-form-item :label="t('auth.confirmPassword')" name="confirmPassword">
             <t-input
               v-model="registerData.confirmPassword"
-              placeholder="请再次输入密码"
+              :placeholder="t('auth.confirmPasswordPlaceholder')"
               type="password"
               size="large"
               :disabled="loading"
@@ -124,15 +129,15 @@
             :loading="loading"
             class="login-button"
           >
-            {{ loading ? '注册中...' : '注册' }}
+            {{ loading ? t('auth.registering') : t('auth.register') }}
           </t-button>
         </t-form>
 
         <!-- 返回登录 -->
         <div class="register-link">
-          <span>已有账号？</span>
+          <span>{{ t('auth.haveAccount') }} </span>
           <a href="#" @click.prevent="toggleMode" class="register-btn">
-            返回登录
+            {{ t('auth.backToLogin') }}
           </a>
         </div>
       </div>
@@ -143,9 +148,13 @@
 <script setup lang="ts">
 import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { login, register } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
+
+const { t } = useI18n()
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -174,52 +183,52 @@ const registerData = reactive<{[key: string]: any}>({
 })
 
 // 登录表单验证规则
-const formRules = {
+const formRules = computed(() => ({
   email: [
-    { required: true, message: '请输入邮箱地址', type: 'error' },
-    { email: true, message: '请输入正确的邮箱格式', type: 'error' }
+    { required: true, message: t('auth.emailRequired'), type: 'error' },
+    { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
   password: [
-    { required: true, message: '请输入密码', type: 'error' },
-    { min: 8, message: '密码至少8位', type: 'error' },
-    { max: 32, message: '密码不能超过32位', type: 'error' },
-    { pattern: /[a-zA-Z]/, message: '密码必须包含字母', type: 'error' },
-    { pattern: /\d/, message: '密码必须包含数字', type: 'error' }
+    { required: true, message: t('auth.passwordRequired'), type: 'error' },
+    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
+    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
+    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
+    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
   ]
-}
+}))
 
 // 注册表单验证规则
-const registerRules = {
+const registerRules = computed(() => ({
   username: [
-    { required: true, message: '请输入用户名', type: 'error' },
-    { min: 2, message: '用户名至少2位', type: 'error' },
-    { max: 20, message: '用户名不能超过20位', type: 'error' },
-    { 
-      pattern: /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/, 
-      message: '用户名只能包含字母、数字、下划线和中文', 
-      type: 'error' 
+    { required: true, message: t('auth.usernameRequired'), type: 'error' },
+    { min: 2, message: t('auth.usernameMinLength'), type: 'error' },
+    { max: 20, message: t('auth.usernameMaxLength'), type: 'error' },
+    {
+      pattern: /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/,
+      message: t('auth.usernameInvalid'),
+      type: 'error'
     }
   ],
   email: [
-    { required: true, message: '请输入邮箱地址', type: 'error' },
-    { email: true, message: '请输入正确的邮箱格式', type: 'error' }
+    { required: true, message: t('auth.emailRequired'), type: 'error' },
+    { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
   password: [
-    { required: true, message: '请输入密码', type: 'error' },
-    { min: 8, message: '密码至少8位', type: 'error' },
-    { max: 32, message: '密码不能超过32位', type: 'error' },
-    { pattern: /[a-zA-Z]/, message: '密码必须包含字母', type: 'error' },
-    { pattern: /\d/, message: '密码必须包含数字', type: 'error' }
+    { required: true, message: t('auth.passwordRequired'), type: 'error' },
+    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
+    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
+    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
+    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
   ],
   confirmPassword: [
-    { required: true, message: '请确认密码', type: 'error' },
+    { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {
       validator: (val: string) => val === registerData.password,
-      message: '两次输入的密码不一致',
+      message: t('auth.passwordMismatch'),
       type: 'error'
     }
   ]
-}
+}))
 
 // 切换登录/注册模式
 const toggleMode = () => {
@@ -269,18 +278,18 @@ const handleLogin = async () => {
           })
         }
       
-      MessagePlugin.success('登录成功！')
+      MessagePlugin.success(t('auth.loginSuccess'))
 
 
       // 等待状态更新完成后再跳转
       await nextTick()
       router.replace('/platform/knowledge-bases')
     } else {
-      MessagePlugin.error(response.message || '登录失败，请检查邮箱或密码')
+      MessagePlugin.error(response.message || t('auth.loginError'))
     }
   } catch (error: any) {
-    console.error('登录错误:', error)
-    MessagePlugin.error(error.message || '登录失败，请稍后重试')
+    console.error(t('auth.loginError') + ':', error)
+    MessagePlugin.error(error.message || t('auth.loginErrorRetry'))
   } finally {
     loading.value = false
   }
@@ -301,7 +310,7 @@ const handleRegister = async () => {
     })
 
     if (response.success) {
-      MessagePlugin.success('注册成功！系统已为您创建专属租户，请登录使用')
+      MessagePlugin.success(t('auth.registerSuccess'))
       
       // 切换到登录模式并填入邮箱
       isRegisterMode.value = false
@@ -312,11 +321,11 @@ const handleRegister = async () => {
         (registerData as any)[key] = ''
       })
     } else {
-      MessagePlugin.error(response.message || '注册失败')
+      MessagePlugin.error(response.message || t('auth.registerFailed'))
     }
   } catch (error: any) {
-    console.error('注册错误:', error)
-    MessagePlugin.error(error.message || '注册失败，请稍后重试')
+    console.error(t('auth.registerError') + ':', error)
+    MessagePlugin.error(error.message || t('auth.registerError'))
   } finally {
     loading.value = false
   }
@@ -324,7 +333,7 @@ const handleRegister = async () => {
 
 // 处理忘记密码
 const handleForgotPassword = () => {
-  MessagePlugin.info('忘记密码功能暂未开放，请联系管理员')
+  MessagePlugin.info(t('auth.forgotPasswordNotAvailable'))
 }
 
 // 检查是否已登录
@@ -344,6 +353,34 @@ onMounted(() => {
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
   padding: 20px;
   box-sizing: border-box;
+  position: relative;
+}
+
+.language-switcher-wrapper {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  
+  :deep(.t-select) {
+    min-width: 140px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+  
+  :deep(.t-select__wrap) {
+    border-color: #e7e7e7;
+    
+    &:hover {
+      border-color: #07C05F;
+    }
+  }
+  
+  :deep(.t-is-focused .t-select__wrap) {
+    border-color: #07C05F;
+    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+  }
 }
 
 .login-card,
@@ -524,6 +561,15 @@ onMounted(() => {
 @media (max-width: 480px) {
   .login-container {
     padding: 16px;
+  }
+  
+  .language-switcher-wrapper {
+    top: 12px;
+    right: 12px;
+    
+    :deep(.t-select) {
+      min-width: 120px;
+    }
   }
 
   .login-card,

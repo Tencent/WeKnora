@@ -7,12 +7,12 @@
         <div ref="parentMd">
             <!-- 消息正在总结中则渲染加载gif  -->
             <img v-if="session.thinking" class="botanswer_laoding_gif" src="@/assets/img/botanswer_loading.gif"
-                alt="正在总结答案……">
+                :alt="$t('chat.summarizingAnswer')">
             <div v-for="(item, index) in processedMarkdown" :key="index">
                 <img class="ai-markdown-img" @click="preview(item)" v-if="isLink(item)" :src="item" alt="">
                 <div v-else class="ai-markdown-template" v-html="processMarkdown(item)"></div>
             </div>
-            <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>加载中...</span></div>
+            <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('chat.loading') }}</span></div>
         </div>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
     </div>

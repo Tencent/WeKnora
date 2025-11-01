@@ -1,28 +1,28 @@
 <template>
   <div class="tenant-info-container">
     <div class="tenant-header">
-      <h2>系统信息</h2>
-      <p class="tenant-subtitle">查看系统版本信息和用户账户配置</p>
+      <h2>{{ $t('tenant.systemInfo') }}</h2>
+      <p class="tenant-subtitle">{{ $t('tenant.viewSystemInfo') }}</p>
     </div>
 
     <div class="tenant-content" v-if="!loading && !error">
       <!-- 系统信息卡片 -->
       <t-card class="info-card" :bordered="false">
         <template #header>
-          <div class="card-title">系统信息</div>
+          <div class="card-title">{{ $t('tenant.systemInfo') }}</div>
         </template>
         <div class="info-content">
           <t-descriptions :column="1" layout="vertical">
-            <t-descriptions-item label="版本号">
-              {{ systemInfo?.version || '未知' }}
+            <t-descriptions-item :label="$t('tenant.version')">
+              {{ systemInfo?.version || $t('tenant.unknown') }}
               <span v-if="systemInfo?.commit_id" class="commit-info">
                 ({{ systemInfo.commit_id }})
               </span>
             </t-descriptions-item>
-            <t-descriptions-item label="构建时间" v-if="systemInfo?.build_time">
+            <t-descriptions-item :label="$t('tenant.buildTime')" v-if="systemInfo?.build_time">
               {{ systemInfo.build_time }}
             </t-descriptions-item>
-            <t-descriptions-item label="Go版本" v-if="systemInfo?.go_version">
+            <t-descriptions-item :label="$t('tenant.goVersion')" v-if="systemInfo?.go_version">
               {{ systemInfo.go_version }}
             </t-descriptions-item>
           </t-descriptions>
@@ -32,20 +32,20 @@
       <!-- 用户信息卡片 -->
       <t-card class="info-card" :bordered="false">
         <template #header>
-          <div class="card-title">用户信息</div>
+          <div class="card-title">{{ $t('tenant.userInfo') }}</div>
         </template>
         <div class="info-content">
           <t-descriptions :column="1" layout="vertical">
-            <t-descriptions-item label="用户 ID">
+            <t-descriptions-item :label="$t('tenant.userId')">
               {{ userInfo?.id }}
             </t-descriptions-item>
-            <t-descriptions-item label="用户名">
+            <t-descriptions-item :label="$t('tenant.username')">
               {{ userInfo?.username }}
             </t-descriptions-item>
-            <t-descriptions-item label="邮箱">
+            <t-descriptions-item :label="$t('tenant.email')">
               {{ userInfo?.email }}
             </t-descriptions-item>
-            <t-descriptions-item label="创建时间">
+            <t-descriptions-item :label="$t('tenant.createdAt')">
               {{ formatDate(userInfo?.created_at) }}
             </t-descriptions-item>
           </t-descriptions>
@@ -55,31 +55,31 @@
       <!-- 租户信息卡片 -->
       <t-card class="info-card" :bordered="false">
         <template #header>
-          <div class="card-title">租户信息</div>
+          <div class="card-title">{{ $t('tenant.tenantInfo') }}</div>
         </template>
         <div class="info-content">
           <t-descriptions :column="1" layout="vertical">
-            <t-descriptions-item label="租户 ID">
+            <t-descriptions-item :label="$t('tenant.tenantId')">
               {{ tenantInfo?.id }}
             </t-descriptions-item>
-            <t-descriptions-item label="租户名称">
+            <t-descriptions-item :label="$t('tenant.tenantName')">
               {{ tenantInfo?.name }}
             </t-descriptions-item>
-            <t-descriptions-item label="描述">
-              {{ tenantInfo?.description || '暂无描述' }}
+            <t-descriptions-item :label="$t('tenant.description')">
+              {{ tenantInfo?.description || $t('tenant.noDescription') }}
             </t-descriptions-item>
-            <t-descriptions-item label="业务">
-              {{ tenantInfo?.business || '暂无' }}
+            <t-descriptions-item :label="$t('tenant.business')">
+              {{ tenantInfo?.business || $t('tenant.noBusiness') }}
             </t-descriptions-item>
-            <t-descriptions-item label="状态">
-              <t-tag 
-                :theme="getStatusTheme(tenantInfo?.status)" 
+            <t-descriptions-item :label="$t('tenant.status')">
+              <t-tag
+                :theme="getStatusTheme(tenantInfo?.status)"
                 variant="light"
               >
                 {{ getStatusText(tenantInfo?.status) }}
               </t-tag>
             </t-descriptions-item>
-            <t-descriptions-item label="创建时间">
+            <t-descriptions-item :label="$t('tenant.createdAt')">
               {{ formatDate(tenantInfo?.created_at) }}
             </t-descriptions-item>
           </t-descriptions>
@@ -90,7 +90,7 @@
       <t-card class="info-card" :bordered="false">
         <template #header>
           <div class="card-header-with-actions">
-            <div class="card-title">API Key</div>
+            <div class="card-title">{{ $t('tenant.apiKey') }}</div>
           </div>
         </template>
         <div class="api-key-content">
@@ -104,7 +104,7 @@
             <template #icon>
               <t-icon name="error-circle" />
             </template>
-            请妥善保管您的 API Key，不要在公共场所或代码仓库中暴露
+            {{ $t('tenant.keepApiKeySafe') }}
           </t-alert>
         </div>
       </t-card>
@@ -116,17 +116,17 @@
         v-if="tenantInfo?.storage_quota !== undefined"
       >
         <template #header>
-          <div class="card-title">存储信息</div>
+          <div class="card-title">{{ $t('tenant.storageInfo') }}</div>
         </template>
         <div class="storage-content">
           <t-descriptions :column="1" layout="vertical">
-            <t-descriptions-item label="存储配额">
+            <t-descriptions-item :label="$t('tenant.storageQuota')">
               {{ formatBytes(tenantInfo.storage_quota) }}
             </t-descriptions-item>
-            <t-descriptions-item label="已使用">
+            <t-descriptions-item :label="$t('tenant.used')">
               {{ formatBytes(tenantInfo.storage_used || 0) }}
             </t-descriptions-item>
-            <t-descriptions-item label="使用率">
+            <t-descriptions-item :label="$t('tenant.usage')">
               <div class="usage-info">
                 <span class="usage-text">{{ getUsagePercentage() }}%</span>
                 <t-progress 
@@ -144,10 +144,10 @@
       <!-- API 开发文档卡片 -->
       <t-card class="info-card" :bordered="false">
         <template #header>
-          <div class="card-title">API 开发文档</div>
+          <div class="card-title">{{ $t('tenant.apiDevDocs') }}</div>
         </template>
         <div class="doc-content">
-          <p class="doc-description">使用您的 API Key 开始开发，查看完整的 API 文档和示例代码。</p>
+          <p class="doc-description">{{ $t('tenant.useApiKey') }}</p>
           <t-space class="doc-actions">
             <t-button 
               theme="primary" 
@@ -156,7 +156,7 @@
               <template #icon>
                 <t-icon name="link" />
               </template>
-              查看 API 文档
+              {{ $t('tenant.viewApiDoc') }}
             </t-button>
           </t-space>
           
@@ -167,14 +167,14 @@
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-container">
       <t-loading size="large" />
-      <p class="loading-text">正在加载账户信息...</p>
+      <p class="loading-text">{{ $t('tenant.loadingAccountInfo') }}</p>
     </div>
 
     <!-- 错误状态 -->
     <div v-if="error" class="error-container">
-      <t-result theme="error" title="加载失败" :description="error">
+      <t-result theme="error" :title="$t('tenant.loadFailed')" :description="error">
         <template #extra>
-          <t-button theme="primary" @click="loadTenantInfo">重试</t-button>
+          <t-button theme="primary" @click="loadTenantInfo">{{ $t('tenant.retry') }}</t-button>
         </template>
       </t-result>
     </div>
@@ -183,8 +183,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getCurrentUser, type TenantInfo, type UserInfo } from '@/api/auth'
 import { getSystemInfo, type SystemInfo } from '@/api/system'
+const { t } = useI18n()
 
 // 响应式数据
 const tenantInfo = ref<TenantInfo | null>(null)
@@ -262,7 +264,7 @@ const copyApiKey = async () => {
     document.execCommand('copy')
     document.body.removeChild(textArea)
     import('tdesign-vue-next').then(({ MessagePlugin }) => {
-      MessagePlugin.success('API Key 已复制到剪贴板')
+      MessagePlugin.success($t('tenant.apiKeyCopied'))
     })
   }
 }
@@ -274,13 +276,13 @@ const openApiDoc = () => {
 const getStatusText = (status: string | undefined) => {
   switch (status) {
     case 'active':
-      return '活跃'
+      return $t('tenant.statusActive')
     case 'inactive':
-      return '未激活'
+      return $t('tenant.statusInactive')
     case 'suspended':
-      return '已暂停'
+      return $t('tenant.statusSuspended')
     default:
-      return '未知'
+      return $t('tenant.statusUnknown')
   }
 }
 
@@ -298,11 +300,11 @@ const getStatusTheme = (status: string | undefined) => {
 }
 
 const formatDate = (dateStr: string | undefined) => {
-  if (!dateStr) return '未知'
-  
+  if (!dateStr) return $t('tenant.unknown')
+
   try {
     const date = new Date(dateStr)
-    return date.toLocaleString('zh-CN', {
+    return date.toLocaleString('ru-RU', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -311,7 +313,7 @@ const formatDate = (dateStr: string | undefined) => {
       second: '2-digit'
     })
   } catch {
-    return '格式错误'
+    return $t('tenant.formatError')
   }
 }
 

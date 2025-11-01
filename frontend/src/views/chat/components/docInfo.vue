@@ -3,7 +3,7 @@
         <div class="refer_header" @click="referBoxSwitch" v-if="session.knowledge_references && session.knowledge_references.length">
             <div class="refer_title">
                 <img src="@/assets/img/ziliao.svg" alt="" />
-                <span>参考了{{ session.knowledge_references && session.knowledge_references.length }}个相关内容</span>
+                <span>{{ $t('chat.referencedContent', { count: session.knowledge_references && session.knowledge_references.length }) }}</span>
             </div>
             <div class="refer_show_icon">
                 <t-icon :name="showReferBox ? 'chevron-up' : 'chevron-down'" />
@@ -28,7 +28,9 @@
 </template>
 <script setup>
 import { onMounted, defineProps, computed, ref, reactive } from "vue";
+import { useI18n } from 'vue-i18n';
 import { sanitizeHTML } from '@/utils/security';
+const { t } = useI18n();
 const props = defineProps({
     // 必填项
     content: {

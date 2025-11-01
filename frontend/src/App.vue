@@ -1,9 +1,31 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ConfigProvider } from 'tdesign-vue-next'
+import enUS from 'tdesign-vue-next/es/locale/en_US'
+import zhCN from 'tdesign-vue-next/es/locale/zh_CN'
+import ruRU from 'tdesign-vue-next/es/locale/ru_RU'
+
+const { locale } = useI18n()
+
+const tdesignLocale = computed(() => {
+  switch (locale.value) {
+    case 'en-US':
+      return enUS
+    case 'ru-RU':
+      return ruRU
+    case 'zh-CN':
+    default:
+      return zhCN
+  }
+})
 </script>
 <template>
-  <div id="app">
-    <RouterView />
-  </div>
+  <ConfigProvider :global-config="tdesignLocale">
+    <div id="app">
+      <RouterView />
+    </div>
+  </ConfigProvider>
 </template>
 <style>
 body,

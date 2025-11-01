@@ -14,7 +14,7 @@
                         <div class="menu_icon">
                             <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon :  item.icon == 'logout' ? logoutIcon : item.icon == 'tenant' ? tenantIcon : prefixIcon)" alt="">
                         </div>
-                        <span class="menu_title" :title="item.path === 'knowledge-bases' && kbMenuItem ? kbMenuItem.title : item.title">{{ item.path === 'knowledge-bases' && kbMenuItem ? kbMenuItem.title : item.title }}</span>
+                        <span class="menu_title" :title="item.path === 'knowledge-bases' && kbMenuItem?.title ? kbMenuItem.title : t(item.titleKey)">{{ item.path === 'knowledge-bases' && kbMenuItem?.title ? kbMenuItem.title : t(item.titleKey) }}</span>
                         <!-- 知识库切换下拉箭头 -->
                         <div v-if="item.path === 'knowledge-bases' && isInKnowledgeBase" 
                              class="kb-dropdown-icon" 
@@ -39,7 +39,7 @@
                             {{ kb.name }}
                         </div>
                     </div>
-                    <t-popup overlayInnerClassName="upload-popup" class="placement top center" content="上传知识"
+                    <t-popup overlayInnerClassName="upload-popup" class="placement top center" :content="t('menu.uploadKnowledge')"
                         placement="top" show-arrow destroy-on-close>
                         <div class="upload-file-wrap" @click.stop="uploadFile" variant="outline"
                              v-if="item.path === 'knowledge-bases' && $route.name === 'knowledgeBaseDetail'">
@@ -66,7 +66,7 @@
                                     <t-icon name="ellipsis" class="menu-more" />
                                 </div>
                                 <template #content>
-                                    <span class="del_submenu">删除记录</span>
+                                    <span class="del_submenu">{{ t('menu.deleteRecord') }}</span>
                                 </template>
                             </t-popup>
                         </div>
@@ -74,13 +74,13 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- 下半部分：账户信息、系统设置、退出登录 -->
         <div class="menu_bottom">
             <div class="menu_box" v-for="(item, index) in bottomMenuItems" :key="'bottom-' + index">
                 <div v-if="item.path === 'logout'">
-                    <t-popconfirm 
-                        content="确定要退出登录吗？" 
+                    <t-popconfirm
+                        :content="t('menu.confirmLogout')"
                         @confirm="handleLogout"
                         placement="top"
                         :show-arrow="true"
@@ -91,7 +91,7 @@
                                 <div class="menu_icon">
                                     <img class="icon" :src="getImgSrc(logoutIcon)" alt="">
                                 </div>
-                                <span class="menu_title">{{ item.title }}</span>
+                                <span class="menu_title">{{ t(item.titleKey) }}</span>
                             </div>
                         </div>
                     </t-popconfirm>
@@ -103,7 +103,7 @@
                         <div class="menu_icon">
                             <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'tenant' ? tenantIcon : prefixIcon)" alt="">
                         </div>
-                        <span class="menu_title">{{ item.path === 'knowledge-bases' && kbMenuItem ? kbMenuItem.title : item.title }}</span>
+                        <span class="menu_title">{{ item.path === 'knowledge-bases' && kbMenuItem?.title ? kbMenuItem.title : t(item.titleKey) }}</span>
                     </div>
                 </div>
             </div>
@@ -118,12 +118,14 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, watch, computed, ref, reactive, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { getSessionsList, delSession } from "@/api/chat/index";
 import { getKnowledgeBaseById, listKnowledgeBases, uploadKnowledgeFile } from '@/api/knowledge-base';
 import { kbFileTypeVerification } from '@/utils/index';
 import { useMenuStore } from '@/stores/menu';
 import { useAuthStore } from '@/stores/auth';
 import { MessagePlugin } from "tdesign-vue-next";
+const { t } = useI18n();
 let uploadInput = ref();
 const usemenuStore = useMenuStore();
 const authStore = useAuthStore();
@@ -234,14 +236,14 @@ const uploadFile = async () => {
             const kb = kbResponse.data;
             
             // 检查知识库是否已初始化（有 EmbeddingModelID 和 SummaryModelID）
-            if (!kb.embedding_model_id || kb.embedding_model_id === '' || 
+            if (!kb.embedding_model_id || kb.embedding_model_id === '' ||
                 !kb.summary_model_id || kb.summary_model_id === '') {
-                MessagePlugin.warning("该知识库尚未完成初始化配置，请先前往设置页面配置模型信息后再上传文件");
+                MessagePlugin.warning(t('knowledgeBase.notInitialized'));
                 return;
             }
         } catch (error) {
             console.error('获取知识库信息失败:', error);
-            MessagePlugin.error("获取知识库信息失败，无法上传文件");
+            MessagePlugin.error(t('knowledgeBase.getInfoFailed'));
             return;
         }
     }
@@ -260,7 +262,7 @@ const upload = async (e: any) => {
     // 获取当前知识库ID
     const currentKbId = (route.params as any)?.kbId as string;
     if (!currentKbId) {
-        MessagePlugin.error("缺少知识库ID");
+        MessagePlugin.error(t('knowledgeBase.missingId'));
         return;
     }
     
@@ -280,24 +282,24 @@ const upload = async (e: any) => {
         const isSuccess = responseData.success || responseData.code === 200 || responseData.status === 'success' || (!responseData.error && responseData);
         
         if (isSuccess) {
-            MessagePlugin.info("上传成功！");
+            MessagePlugin.info(t('file.uploadSuccess'));
         } else {
             // 改进错误信息提取逻辑
-            let errorMessage = "上传失败！";
+            let errorMessage = t('file.uploadFailed');
             if (responseData.error && responseData.error.message) {
                 errorMessage = responseData.error.message;
             } else if (responseData.message) {
                 errorMessage = responseData.message;
             }
             if (responseData.code === 'duplicate_file' || (responseData.error && responseData.error.code === 'duplicate_file')) {
-                errorMessage = "文件已存在";
+                errorMessage = t('file.fileExists');
             }
             MessagePlugin.error(errorMessage);
         }
     } catch (err: any) {
-        let errorMessage = "上传失败！";
+        let errorMessage = t('file.uploadFailed');
         if (err.code === 'duplicate_file') {
-            errorMessage = "文件已存在";
+            errorMessage = t('file.fileExists');
         } else if (err.error && err.error.message) {
             errorMessage = err.error.message;
         } else if (err.message) {
@@ -331,7 +333,7 @@ const delCard = (index: number, item: any) => {
                 }
             }
         } else {
-            MessagePlugin.error("删除失败，请稍后再试!");
+            MessagePlugin.error(t('knowledgeBase.deleteFailed'));
         }
     })
 }
@@ -392,7 +394,7 @@ const getMessageList = async () => {
             // 过滤出当前知识库的会话
             const filtered = res.data.filter((s: any) => s.knowledge_base_id === kbId)
             filtered.forEach((item: any) => {
-                let obj = { title: item.title ? item.title : "新会话", path: `chat/${kbId}/${item.id}`, id: item.id, isMore: false, isNoTitle: item.title ? false : true }
+                let obj = { title: item.title ? item.title : t('menu.newSession'), path: `chat/${kbId}/${item.id}`, id: item.id, isMore: false, isNoTitle: item.title ? false : true }
                 usemenuStore.updatemenuArr(obj)
             });
             loading.value = false;

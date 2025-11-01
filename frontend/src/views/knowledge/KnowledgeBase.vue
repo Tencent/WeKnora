@@ -8,6 +8,8 @@ import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
 import { useMenuStore } from '@/stores/menu';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { useI18n } from 'vue-i18n';
+const { t } = useI18n();
 const usemenuStore = useMenuStore();
 const router = useRouter();
 import {
@@ -34,14 +36,17 @@ const getPageSize = () => {
 }
 getPageSize()
 // 直接调用 API 获取知识库文件列表
+console.log(t('knowledgeBase.apiCallKnowledgeFiles'));
 const loadKnowledgeFiles = async (kbIdValue: string) => {
   if (!kbIdValue) return;
-  
+
   try {
     const result = await listKnowledgeFiles(kbIdValue, { page: 1, page_size: pageSize });
-    
+
     // 由于响应拦截器已经返回了 data，所以 result 就是响应的 data 部分
     // 按照 useKnowledgeBase hook 中的方式处理
+    console.log(t('knowledgeBase.responseInterceptorData'));
+    console.log(t('knowledgeBase.hookProcessing'));
     const { data, total: totalResult } = result as any;
     
     if (!data || !Array.isArray(data)) {
@@ -65,32 +70,34 @@ const loadKnowledgeFiles = async (kbIdValue: string) => {
     cardList.value = cardList_ as any[];
     total.value = totalResult;
   } catch (err) {
-    console.error('Failed to load knowledge files:', err);
+    console.error(t('knowledgeBase.errorHandling') + ':', err);
   }
 };
 
 // 监听路由参数变化，重新获取知识库内容
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId && newKbId !== oldKbId) {
+    console.log(t('knowledgeBase.routeParamChange'));
     loadKnowledgeFiles(newKbId);
   }
 }, { immediate: false });
 
 // 监听文件上传事件
 const handleFileUploaded = (event: CustomEvent) => {
-  const uploadedKbId = event.detail.kbId;
-  console.log('接收到文件上传事件，上传的知识库ID:', uploadedKbId, '当前知识库ID:', kbId.value);
-  if (uploadedKbId && uploadedKbId === kbId.value) {
-    console.log('匹配当前知识库，开始刷新文件列表');
-    // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
-    loadKnowledgeFiles(uploadedKbId);
-  }
+const uploadedKbId = event.detail.kbId;
+console.log(t('knowledgeBase.fileUploadEventReceived', { uploadedKbId, currentKbId: kbId.value }));
+if (uploadedKbId && uploadedKbId === kbId.value) {
+  console.log(t('knowledgeBase.matchingKnowledgeBase'));
+  // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
+  loadKnowledgeFiles(uploadedKbId);
+}
 };
 
 onMounted(() => {
   getKnowled({ page: 1, page_size: pageSize });
   
   // 监听文件上传事件
+  console.log(t('knowledgeBase.fileUploadEventListening'));
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
 });
 
@@ -176,7 +183,7 @@ const sendMsg = (value: string) => {
 };
 
 const getTitle = (session_id: string, value: string) => {
-  let obj = { title: '新会话', path: `chat/${kbId.value}/${session_id}`, id: session_id, isMore: false, isNoTitle: true };
+  let obj = { title: t('knowledgeBase.newSession'), path: `chat/${kbId.value}/${session_id}`, id: session_id, isMore: false, isNoTitle: true };
   usemenuStore.updataMenuChildren(obj);
   usemenuStore.changeIsFirstSession(true);
   usemenuStore.changeFirstQuery(value);
@@ -185,23 +192,25 @@ const getTitle = (session_id: string, value: string) => {
 
 async function createNewSession(value: string): Promise<void> {
   // 优先使用当前页面的知识库ID
+  console.log(t('knowledgeBase.priorityCurrentPageKbId'));
   let sessionKbId = kbId.value;
-  
+
   // 如果当前页面没有知识库ID，尝试从localStorage获取设置中的知识库ID
   if (!sessionKbId) {
+    console.log(t('knowledgeBase.fallbackLocalStorageKbId'));
     const settingsStr = localStorage.getItem("WeKnora_settings");
     if (settingsStr) {
       try {
         const settings = JSON.parse(settingsStr);
         sessionKbId = settings.knowledgeBaseId;
       } catch (e) {
-        console.error("解析设置失败:", e);
+        console.error(t('knowledgeBase.settingsParsingFailed') + ":", e);
       }
     }
   }
   
   if (!sessionKbId) {
-    MessagePlugin.warning("请先选择一个知识库");
+    MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBaseFirst'));
     return;
   }
   
@@ -210,10 +219,10 @@ async function createNewSession(value: string): Promise<void> {
       getTitle(res.data.id, value);
     } else {
       // 错误处理
-      console.error("创建会话失败");
+      console.error(t('knowledgeBase.sessionCreationFailed'));
     }
   }).catch(error => {
-    console.error("创建会话出错:", error);
+    console.error(t('knowledgeBase.sessionCreationError') + ":", error);
   });
 }
 </script>
@@ -233,7 +242,7 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <template #content>
                 <t-icon class="icon svg-icon del-card" name="delete" />
-                <span class="del-card" style="margin-left: 8px">删除文档</span>
+                <span class="del-card" style="margin-left: 8px">{{ t('knowledgeBase.deleteDocument') }}</span>
               </template>
             </t-popup>
           </div>
@@ -241,7 +250,7 @@ async function createNewSession(value: string): Promise<void> {
             <t-icon :name="item.parse_status == 'failed' ? 'close-circle' : 'loading'" class="card-analyze-loading"
               :class="[item.parse_status == 'failed' ? 'failure' : '']"></t-icon>
             <span class="card-analyze-txt" :class="[item.parse_status == 'failed' ? 'failure' : '']">{{
-              item.parse_status == "failed" ? "解析失败" : "解析中..."
+              item.parse_status == "failed" ? t('knowledgeBase.parsingFailed') : t('knowledgeBase.parsingInProgress')
             }}</span>
           </div>
           <div v-show="item.parse_status == 'completed'" class="card-content-txt">
@@ -260,14 +269,14 @@ async function createNewSession(value: string): Promise<void> {
         <div class="circle-wrap">
           <div class="header">
             <img class="circle-img" src="@/assets/img/circle.png" alt="">
-            <span class="circle-title">删除确认</span>
+            <span class="circle-title">{{ t('knowledgeBase.deleteConfirmation') }}</span>
           </div>
           <span class="del-circle-txt">
-            {{ `确认要删除技能"${knowledge.file_name}"，删除后不可恢复` }}
+            {{ t('knowledgeBase.confirmDeleteDocument', { fileName: knowledge.file_name }) }}
           </span>
           <div class="circle-btn">
-            <span class="circle-btn-txt" @click="delDialog = false">取消</span>
-            <span class="circle-btn-txt confirm" @click="delCardConfirm">确认删除</span>
+            <span class="circle-btn-txt" @click="delDialog = false">{{ t('knowledgeBase.cancel') }}</span>
+            <span class="circle-btn-txt confirm" @click="delCardConfirm">{{ t('knowledgeBase.confirmDelete') }}</span>
           </div>
         </div>
       </t-dialog>

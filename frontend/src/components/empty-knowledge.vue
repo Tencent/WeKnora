@@ -1,11 +1,14 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 </script>
 <template>
     <div class="empty">
         <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-        <span class="empty-txt">知识为空，拖放上传</span>
-        <span class="empty-type-txt">pdf、doc 格式文件，不超过10M</span>
-        <span class="empty-type-txt">text、markdown格式文件，不超过200K</span>
+        <span class="empty-txt">{{ t('knowledgeBase.emptyKnowledgeDragDrop') }}</span>
+        <span class="empty-type-txt">{{ t('knowledgeBase.pdfDocFormat') }}</span>
+        <span class="empty-type-txt">{{ t('knowledgeBase.textMarkdownFormat') }}</span>
     </div>
 </template>
 <style scoped lang="less">
