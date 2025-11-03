@@ -25,7 +25,7 @@ tmp/
 temp/
 
 # Docker compose файл (локальные настройки)
-docker-compose.yml
+# docker-compose.yml
 
 WeKnora
 /models/
