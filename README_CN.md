@@ -320,7 +320,23 @@ test: 添加检索引擎测试用例
 refactor: 重构文档解析模块
 ```
 
+## 👥 贡献者
+
+感谢以下优秀的贡献者们：
+
+[![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora)](https://github.com/Tencent/WeKnora/graphs/contributors)
+
 ## 📄 许可证
 
 本项目基于 [MIT](./LICENSE) 协议发布。
 你可以自由使用、修改和分发本项目代码，但需保留原始版权声明。
+
+## 📈 项目统计
+
+<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
+ </picture>
+</a>

@@ -322,7 +322,23 @@ test: 検索エンジンテストケースを追加
 refactor: 文書解析モジュールをリファクタリング
 ```
 
+## 👥 コントリビューター
+
+素晴らしいコントリビューターに感謝します：
+
+[![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora )](https://github.com/Tencent/WeKnora/graphs/contributors )
+
 ## 📄 ライセンス
 
 このプロジェクトは[MIT](./LICENSE)ライセンスの下で公開されています。
 このプロジェクトのコードを自由に使用、変更、配布できますが、元の著作権表示を保持する必要があります。
+
+## 📈 プロジェクト統計
+
+<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
+ </picture>
+</a>
