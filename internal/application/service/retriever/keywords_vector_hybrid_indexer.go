@@ -27,6 +27,10 @@ func NewKVHybridRetrieveEngine(indexRepository interfaces.RetrieveEngineReposito
 	return &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepository, engineType: engineType}
 }
 
+func (v *KeywordsVectorHybridRetrieveEngineService) Engine() interfaces.RetrieveEngineRepository {
+	return v.indexRepository
+}
+
 // EngineType returns the type of the retrieval engine
 func (v *KeywordsVectorHybridRetrieveEngineService) EngineType() types.RetrieverEngineType {
 	return v.engineType

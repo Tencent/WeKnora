@@ -71,6 +71,7 @@ services:
       - INIT_RERANK_MODEL_NAME=${INIT_RERANK_MODEL_NAME:-}
       - INIT_RERANK_MODEL_BASE_URL=${INIT_RERANK_MODEL_BASE_URL:-}
       - INIT_RERANK_MODEL_API_KEY=${INIT_RERANK_MODEL_API_KEY:-}
+      - MILVUS_ADDR=${MILVUS_ADDR:-milvus:19530}
     depends_on:
       redis:
         condition: service_started
@@ -82,6 +83,8 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_started
+      milvus:
+        condition: service_healthy
     networks:
       - WeKnora-network
     restart: unless-stopped
@@ -233,6 +236,59 @@ services:
     networks:
       - WeKnora-network
 
+  etcd:
+    container_name: WeKnora-etcd
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd-data:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      start_period: 10s
+      retries: 3
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+  milvus:
+    container_name: WeKnora-milvus-standalone
+    image: milvusdb/milvus:v2.6.4
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+    - seccomp:unconfined
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY_ID:-minioadmin}      
+      - MINIO_SECRET_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+      - MINIO_BUCKET_NAME=milvus-bucket
+      - MQ_TYPE=woodpecker
+    volumes:
+      - milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 20s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -244,3 +300,5 @@ volumes:
   redis_data:
   minio_data:
   neo4j-data:
+  etcd-data:
+  milvus-data:

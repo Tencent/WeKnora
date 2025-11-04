@@ -14,6 +14,7 @@ import (
 
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/dig"
@@ -23,6 +24,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
+	repomilvus "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -65,6 +67,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(registerPoolCleanup))
 
 	// Initialize retrieval engine registry for search capabilities
+	must(container.Provide(initMilvusClient))
 	must(container.Provide(initRetrieveEngineRegistry))
 
 	// External service clients
@@ -272,7 +275,7 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 // Returns:
 //   - Configured retrieval engine registry
 //   - Error if initialization fails
-func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.RetrieveEngineRegistry, error) {
+func initRetrieveEngineRegistry(db *gorm.DB, mdb *milvusclient.Client, cfg *config.Config) (interfaces.RetrieveEngineRegistry, error) {
 	registry := retriever.NewRetrieveEngineRegistry()
 	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
 	log := logger.GetLogger(context.Background())
@@ -330,6 +333,20 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			}
 		}
 	}
+	if slices.Contains(retrieveDriver, "milvus") {
+		milvusRepo, err := repomilvus.NewMilvusRepository(mdb)
+		if err != nil {
+			log.Errorf("Create milvus repository failed: %v", err)
+		}
+		if err := registry.Register(
+			retriever.NewKVHybridRetrieveEngine(milvusRepo, types.MilvusRetrieverEngineType),
+		); err != nil {
+			log.Errorf("Register milvus retrieve engine failed: %v", err)
+		} else {
+			log.Infof("Register milvus retrieve engine success")
+		}
+	}
+
 	return registry, nil
 }
 
@@ -415,4 +432,15 @@ func initNeo4jClient() (neo4j.Driver, error) {
 		return nil, err
 	}
 	return driver, nil
+}
+
+func initMilvusClient() (*milvusclient.Client, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	addr := os.Getenv("MILVUS_ADDR")
+
+	return milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: addr,
+	})
 }

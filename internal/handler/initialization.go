@@ -8,11 +8,13 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	repomilvus "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -21,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/services/docreader/src/client"
@@ -370,9 +373,11 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 
 	// 找到模型ID
 	var embeddingModelID, llmModelID, rerankModelID, vlmModelID string
+	var embeddingDim int
 	for _, model := range processedModels {
 		if model.Type == types.ModelTypeEmbedding {
 			embeddingModelID = model.ID
+			embeddingDim = model.Parameters.EmbeddingParameters.Dimension
 		}
 		if model.Type == types.ModelTypeKnowledgeQA {
 			llmModelID = model.ID
@@ -461,6 +466,31 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 				Node2: relation.Node2,
 				Type:  relation.Type,
 			})
+		}
+	}
+
+	retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
+	// 如果使用Milvus作为检索引擎，更新Collection配置
+	if embeddingModelID != "" && slices.Contains(retrieveDriver, "milvus") {
+		var registry interfaces.RetrieveEngineRegistry
+		runtime.GetContainer().Invoke(func(r interfaces.RetrieveEngineRegistry) {
+			registry = r
+		})
+		repo, err := registry.GetRetrieveEngineService(types.MilvusRetrieverEngineType)
+		if err != nil {
+			c.Error(errors.NewInternalServerError("获取mivlus repo失败: " + err.Error()))
+			return
+		}
+		if cfg, ok := repo.Engine().(repomilvus.MilvusCollectionConfigurator); ok {
+			err := cfg.SetCollectionName(ctx, embeddingDim)
+			if err != nil {
+				c.Error(errors.NewInternalServerError("更新mivlus配置失败: " + err.Error()))
+				return
+			}
+			logger.Info(ctx, "Update Collection dim: ", embeddingDim, "success")
+		} else {
+			c.Error(errors.NewInternalServerError("获取mivlus配置接口失败"))
+			return
 		}
 	}
 
