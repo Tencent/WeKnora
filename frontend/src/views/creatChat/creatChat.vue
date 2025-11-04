@@ -9,10 +9,10 @@
     </div>
     
 
-    <t-dialog v-model:visible="selectVisible" header="选择知识库" :confirmBtn="{ content: '开始对话', theme: 'primary' }" :onConfirm="confirmSelect" :onCancel="() => selectVisible = false">
+    <t-dialog v-model:visible="selectVisible" :header="t('knowledgeBase.title')" :confirmBtn="{ content: t('chat.newChat'), theme: 'primary' }" :onConfirm="confirmSelect" :onCancel="() => selectVisible = false">
         <t-form :data="{ kb: selectedKbId }">
-            <t-form-item label="知识库">
-                <t-select v-model="selectedKbId" :loading="kbLoading" placeholder="请选择知识库">
+            <t-form-item :label="t('knowledgeBase.title')">
+                <t-select v-model="selectedKbId" :loading="kbLoading" :placeholder="t('knowledgeBase.selectKnowledgeBaseFirst')">
                     <t-option v-for="kb in kbList" :key="kb.id" :value="kb.id" :label="kb.name" />
                 </t-select>
             </t-form-item>
@@ -107,7 +107,7 @@ const getTitle = async (session_id: string, value: string, kbId?: string) => {
         return;
     }
     
-    let obj = { title: '新会话', path: `chat/${finalKbId}/${session_id}`, id: session_id, isMore: false, isNoTitle: true }
+    let obj = { title: t('menu.newSession'), path: `chat/${finalKbId}/${session_id}`, id: session_id, isMore: false, isNoTitle: true }
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
     usemenuStore.changeFirstQuery(value);
