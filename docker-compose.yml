@@ -1,6 +1,9 @@
 services:
   app:
     image: wechatopenai/weknora-app:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"

@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/docreader/client"
+	"github.com/Tencent/WeKnora/docreader/proto"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -26,8 +28,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/Tencent/WeKnora/services/docreader/src/client"
-	"github.com/Tencent/WeKnora/services/docreader/src/proto"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"go.opentelemetry.io/otel/attribute"
