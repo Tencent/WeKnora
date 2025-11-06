@@ -2,17 +2,17 @@
     <div class="dialogue-wrap">
         <div class="dialogue-answers">
             <div class="dialogue-title">
-                <span>基于知识库内容问答</span>
+                <span>{{ t('chat.knowledgeBaseQandA') }}</span>
             </div>
             <InputField @send-msg="sendMsg"></InputField>
         </div>
     </div>
     
 
-    <t-dialog v-model:visible="selectVisible" header="选择知识库" :confirmBtn="{ content: '开始对话', theme: 'primary' }" :onConfirm="confirmSelect" :onCancel="() => selectVisible = false">
+    <t-dialog v-model:visible="selectVisible" :header="t('knowledgeBase.title')" :confirmBtn="{ content: t('chat.newChat'), theme: 'primary' }" :onConfirm="confirmSelect" :onCancel="() => selectVisible = false">
         <t-form :data="{ kb: selectedKbId }">
-            <t-form-item label="知识库">
-                <t-select v-model="selectedKbId" :loading="kbLoading" placeholder="请选择知识库">
+            <t-form-item :label="t('knowledgeBase.title')">
+                <t-select v-model="selectedKbId" :loading="kbLoading" :placeholder="t('knowledgeBase.selectKnowledgeBaseFirst')">
                     <t-option v-for="kb in kbList" :key="kb.id" :value="kb.id" :label="kb.name" />
                 </t-select>
             </t-form-item>
@@ -21,6 +21,7 @@
 </template>
 <script setup lang="ts">
 import { ref, onUnmounted, watch } from 'vue';
+import { useI18n } from 'vue-i18n';
 import InputField from '@/components/Input-field.vue';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
@@ -28,6 +29,8 @@ import { useMenuStore } from '@/stores/menu';
 import { useRoute, useRouter } from 'vue-router';
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { listKnowledgeBases } from '@/api/knowledge-base';
+
+const { t } = useI18n();
 
 let { cardList } = useKnowledgeBase()
 const router = useRouter();
@@ -75,10 +78,10 @@ async function createNewSession(value: string) {
             await getTitle(res.data.id, value)
         } else {
             // 错误处理
-            console.error("创建会话失败");
+            console.error(t('chat.createSessionFailed'));
         }
     }).catch(error => {
-        console.error("创建会话出错:", error);
+        console.error(t('chat.createSessionError') + ':', error);
     })
 }
 
@@ -92,19 +95,19 @@ const confirmSelect = async () => {
         if (res.data && res.data.id) {
             await getTitle(res.data.id, value, selectedKbId.value)
         } else {
-            console.error('创建会话失败')
+            console.error(t('chat.createSessionFailed'))
         }
-    }).catch((e:any) => console.error('创建会话出错:', e))
+    }).catch((e:any) => console.error(t('chat.createSessionError') + ':', e))
 }
 
 const getTitle = async (session_id: string, value: string, kbId?: string) => {
     const finalKbId = kbId || await ensureKbId();
     if (!finalKbId) {
-        console.error('无法获取知识库ID');
+        console.error(t('chat.unableToGetKnowledgeBaseId'));
         return;
     }
     
-    let obj = { title: '新会话', path: `chat/${finalKbId}/${session_id}`, id: session_id, isMore: false, isNoTitle: true }
+    let obj = { title: t('menu.newSession'), path: `chat/${finalKbId}/${session_id}`, id: session_id, isMore: false, isNoTitle: true }
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
     usemenuStore.changeFirstQuery(value);

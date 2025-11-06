@@ -1,11 +1,13 @@
 <template>
     <div>
-        <t-textarea resize="none" :autosize="false" v-model="value" placeholder="请输入描述文案" name="description" @change="onChange" />
+        <t-textarea resize="none" :autosize="false" v-model="value" :placeholder="$t('chat.enterDescription')" name="description" @change="onChange" />
     </div>
 </template>
 <script setup>
 import { onMounted, watch, computed, ref, reactive } from 'vue';
+import { useI18n } from 'vue-i18n';
 
+const { t } = useI18n();
 const value = ref('');
 const onChange = (value,e) => {
     console.log(value)

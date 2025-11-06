@@ -22,6 +22,7 @@
     "tdesign-icons-vue-next": "^0.4.1",
     "tdesign-vue-next": "^1.11.5",
     "vue": "^3.5.13",
+    "vue-i18n": "^9.9.0",
     "vue-router": "^4.5.0",
     "webpack": "^5.94.0"
   },

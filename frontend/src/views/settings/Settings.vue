@@ -1,23 +1,23 @@
 <template>
     <div class="settings-container">
         <div class="settings-header">
-            <h2>系统配置</h2>
+            <h2>{{ t('settings.systemConfig') }}</h2>
         </div>
         <div class="settings-form">
             <t-form ref="form" :data="formData" :rules="rules" @submit="onSubmit">
-                <t-form-item label="API 服务端点" name="endpoint">
-                    <t-input v-model="formData.endpoint" placeholder="请输入API服务端点，例如：http://localhost" />
+                <t-form-item :label="t('settings.apiEndpoint')" name="endpoint">
+                    <t-input v-model="formData.endpoint" :placeholder="t('settings.enterApiEndpoint')" />
                 </t-form-item>
-                <t-form-item label="API Key" name="apiKey">
-                    <t-input v-model="formData.apiKey" placeholder="请输入API Key" />
+                <t-form-item :label="t('settings.apiKey')" name="apiKey">
+                    <t-input v-model="formData.apiKey" :placeholder="t('settings.enterApiKey')" />
                 </t-form-item>
-                <t-form-item label="知识库ID" name="knowledgeBaseId">
-                    <t-input v-model="formData.knowledgeBaseId" placeholder="请输入知识库ID" />
+                <t-form-item :label="t('settings.knowledgeBaseId')" name="knowledgeBaseId">
+                    <t-input v-model="formData.knowledgeBaseId" :placeholder="t('settings.enterKnowledgeBaseId')" />
                 </t-form-item>
                 <t-form-item>
                     <t-space>
-                        <t-button theme="primary" type="submit">保存配置</t-button>
-                        <t-button theme="default" @click="resetForm">重置</t-button>
+                        <t-button theme="primary" type="submit">{{ t('settings.saveConfig') }}</t-button>
+                        <t-button theme="default" @click="resetForm">{{ t('settings.reset') }}</t-button>
                     </t-space>
                 </t-form-item>
             </t-form>
@@ -26,9 +26,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, onMounted, computed } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { useI18n } from 'vue-i18n';
 import { useSettingsStore } from '@/stores/settings';
+
+const { t } = useI18n();
 
 const settingsStore = useSettingsStore();
 const form = ref(null);
@@ -39,11 +42,11 @@ const formData = reactive({
     knowledgeBaseId: ''
 });
 
-const rules = {
-    endpoint: [{ required: true, message: '请输入API服务端点', trigger: 'blur' }],
-    apiKey: [{ required: true, message: '请输入API Key', trigger: 'blur' }],
-    knowledgeBaseId: [{ required: true, message: '请输入知识库ID', trigger: 'blur' }]
-};
+const rules = computed(() => ({
+    endpoint: [{ required: true, message: t('settings.enterApiEndpointRequired'), trigger: 'blur' }],
+    apiKey: [{ required: true, message: t('settings.enterApiKeyRequired'), trigger: 'blur' }],
+    knowledgeBaseId: [{ required: true, message: t('settings.enterKnowledgeBaseIdRequired'), trigger: 'blur' }]
+}));
 
 onMounted(() => {
     // 初始化表单数据
@@ -60,7 +63,7 @@ const onSubmit = ({ validateResult }) => {
             apiKey: formData.apiKey,
             knowledgeBaseId: formData.knowledgeBaseId
         });
-        MessagePlugin.success('配置保存成功');
+        MessagePlugin.success(t('settings.configSaved'));
     }
 };
 

@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/docreader/client"
+	"github.com/Tencent/WeKnora/docreader/proto"
 	repomilvus "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -26,8 +28,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/services/docreader/src/client"
-	"github.com/Tencent/WeKnora/services/docreader/src/proto"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/ollama/ollama/api"

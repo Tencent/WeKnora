@@ -1,6 +1,9 @@
 services:
   app:
     image: wechatopenai/weknora-app:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -125,6 +128,9 @@ services:
 
   docreader:
     image: wechatopenai/weknora-docreader:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.docreader
     container_name: WeKnora-docreader
     ports:
       - "${DOCREADER_PORT:-50051}:50051"

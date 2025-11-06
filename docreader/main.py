@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover
 # Surrogate range U+D800..U+DFFF are invalid Unicode scalar values and cannot be encoded to UTF-8
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
 
+
 def to_valid_utf8_text(s: Optional[str]) -> str:
     """Return a UTF-8 safe string for protobuf.
 
@@ -42,8 +43,9 @@ def to_valid_utf8_text(s: Optional[str]) -> str:
     """
     if not s:
         return ""
-    s = _SURROGATE_RE.sub("\uFFFD", s)
+    s = _SURROGATE_RE.sub("\ufffd", s)
     return s.encode("utf-8", errors="replace").decode("utf-8")
+
 
 def read_text_with_fallback(file_path: str) -> str:
     """Read text from file supporting multiple encodings with graceful fallback.
@@ -67,6 +69,7 @@ def read_text_with_fallback(file_path: str) -> str:
             continue
     return raw.decode("utf-8", errors="replace")
 
+
 # Ensure no existing handlers
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
@@ -87,6 +90,7 @@ MAX_MESSAGE_LENGTH = 50 * 1024 * 1024
 
 
 parser = Parser()
+
 
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
     def __init__(self):
@@ -127,29 +131,34 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 # Get Storage and VLM config from request
                 storage_config = None
                 vlm_config = None
-                
+
                 sc = request.read_config.storage_config
                 # Keep parser-side key name as cos_config for backward compatibility
                 storage_config = {
-                    'provider': 'minio' if sc.provider == 2 else 'cos',
-                    'region': sc.region,
-                    'bucket_name': sc.bucket_name,
-                    'access_key_id': sc.access_key_id,
-                    'secret_access_key': sc.secret_access_key,
-                    'app_id': sc.app_id,
-                    'path_prefix': sc.path_prefix,
+                    "provider": "minio" if sc.provider == 2 else "cos",
+                    "region": sc.region,
+                    "bucket_name": sc.bucket_name,
+                    "access_key_id": sc.access_key_id,
+                    "secret_access_key": sc.secret_access_key,
+                    "app_id": sc.app_id,
+                    "path_prefix": sc.path_prefix,
                 }
-                logger.info(f"Using Storage config: provider={storage_config.get('provider')}, bucket={storage_config['bucket_name']}")
-                
+                logger.info(
+                    f"Using Storage config: provider={storage_config.get('provider')}, bucket={storage_config['bucket_name']}"
+                )
+
                 vlm_config = {
-                    'model_name': request.read_config.vlm_config.model_name,
-                    'base_url': request.read_config.vlm_config.base_url,
-                    'api_key': request.read_config.vlm_config.api_key or '',
-                    'interface_type': request.read_config.vlm_config.interface_type or 'openai',
+                    "model_name": request.read_config.vlm_config.model_name,
+                    "base_url": request.read_config.vlm_config.base_url,
+                    "api_key": request.read_config.vlm_config.api_key or "",
+                    "interface_type": request.read_config.vlm_config.interface_type
+                    or "openai",
                 }
-                logger.info(f"Using VLM config: model={vlm_config['model_name']}, "
-                                f"base_url={vlm_config['base_url']}, "
-                                f"interface_type={vlm_config['interface_type']}")
+                logger.info(
+                    f"Using VLM config: model={vlm_config['model_name']}, "
+                    f"base_url={vlm_config['base_url']}, "
+                    f"interface_type={vlm_config['interface_type']}"
+                )
 
                 chunking_config = ChunkingConfig(
                     chunk_size=chunk_size,
@@ -177,10 +186,12 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 logger.info(
                     f"Successfully parsed file {request.file_name}, returning {len(result.chunks)} chunks"
                 )
-                
+
                 # Build response, including image info
                 response = ReadResponse(
-                    chunks=[self._convert_chunk_to_proto(chunk) for chunk in result.chunks]
+                    chunks=[
+                        self._convert_chunk_to_proto(chunk) for chunk in result.chunks
+                    ]
                 )
                 logger.info(f"Response size: {response.ByteSize()} bytes")
                 return response
@@ -220,29 +231,34 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 # Get Storage and VLM config from request
                 storage_config = None
                 vlm_config = None
-                
+
                 sc = request.read_config.storage_config
                 storage_config = {
-                    'provider': 'minio' if sc.provider == 2 else 'cos',
-                    'region': sc.region,
-                    'bucket_name': sc.bucket_name,
-                    'access_key_id': sc.access_key_id,
-                    'secret_access_key': sc.secret_access_key,
-                    'app_id': sc.app_id,
-                    'path_prefix': sc.path_prefix,
+                    "provider": "minio" if sc.provider == 2 else "cos",
+                    "region": sc.region,
+                    "bucket_name": sc.bucket_name,
+                    "access_key_id": sc.access_key_id,
+                    "secret_access_key": sc.secret_access_key,
+                    "app_id": sc.app_id,
+                    "path_prefix": sc.path_prefix,
                 }
-                logger.info(f"Using Storage config: provider={storage_config.get('provider')}, bucket={storage_config['bucket_name']}") 
+                logger.info(
+                    f"Using Storage config: provider={storage_config.get('provider')}, bucket={storage_config['bucket_name']}"
+                )
 
                 vlm_config = {
-                    'model_name': request.read_config.vlm_config.model_name,
-                    'base_url': request.read_config.vlm_config.base_url,
-                    'api_key': request.read_config.vlm_config.api_key or '',
-                    'interface_type': request.read_config.vlm_config.interface_type or 'openai',
+                    "model_name": request.read_config.vlm_config.model_name,
+                    "base_url": request.read_config.vlm_config.base_url,
+                    "api_key": request.read_config.vlm_config.api_key or "",
+                    "interface_type": request.read_config.vlm_config.interface_type
+                    or "openai",
                 }
-                logger.info(f"Using VLM config: model={vlm_config['model_name']}, "
-                                f"base_url={vlm_config['base_url']}, "
-                                f"interface_type={vlm_config['interface_type']}")
-                    
+                logger.info(
+                    f"Using VLM config: model={vlm_config['model_name']}, "
+                    f"base_url={vlm_config['base_url']}, "
+                    f"interface_type={vlm_config['interface_type']}"
+                )
+
                 chunking_config = ChunkingConfig(
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap,
@@ -254,7 +270,9 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
 
                 # Parse URL
                 logger.info(f"Starting URL parsing process")
-                result = self.parser.parse_url(request.url, request.title, chunking_config)
+                result = self.parser.parse_url(
+                    request.url, request.title, chunking_config
+                )
                 if not result:
                     error_msg = "Failed to parse URL"
                     logger.error(error_msg)
@@ -266,9 +284,11 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 logger.info(
                     f"Successfully parsed URL {request.url}, returning {len(result.chunks)} chunks"
                 )
-                
+
                 response = ReadResponse(
-                    chunks=[self._convert_chunk_to_proto(chunk) for chunk in result.chunks]
+                    chunks=[
+                        self._convert_chunk_to_proto(chunk) for chunk in result.chunks
+                    ]
                 )
                 logger.info(f"Response size: {response.ByteSize()} bytes")
                 return response
@@ -280,7 +300,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 context.set_code(grpc.StatusCode.INTERNAL)
                 context.set_details(str(e))
                 return ReadResponse(error=str(e))
-                
+
     def _convert_chunk_to_proto(self, chunk):
         """Convert internal Chunk object to protobuf Chunk message
         Ensures all string fields are valid UTF-8 for protobuf (no lone surrogates).
@@ -294,10 +314,12 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
             start=getattr(chunk, "start", 0),
             end=getattr(chunk, "end", 0),
         )
-        
+
         # If chunk has images attribute and is not empty, add image info
         if hasattr(chunk, "images") and chunk.images:
-            logger.info(f"Adding {len(chunk.images)} images to chunk {getattr(chunk, 'seq', 0)}")
+            logger.info(
+                f"Adding {len(chunk.images)} images to chunk {getattr(chunk, 'seq', 0)}"
+            )
             for img_info in chunk.images:
                 # img_info expected as dict
                 proto_image = Image(
@@ -309,8 +331,9 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     end=int(img_info.get("end", 0) or 0),
                 )
                 proto_chunk.images.append(proto_image)
-                
+
         return proto_chunk
+
 
 def init_ocr_engine(ocr_backend, ocr_config):
     """Initialize OCR engine"""
@@ -328,44 +351,46 @@ def init_ocr_engine(ocr_backend, ocr_config):
         return False
 
 
-def serve():
-    
-    init_ocr_engine(os.getenv("OCR_BACKEND", "paddle"), {
-        "OCR_API_BASE_URL": os.getenv("OCR_API_BASE_URL", ""),
-    })
-    
+def main():
+    init_ocr_engine(
+        os.getenv("OCR_BACKEND", "paddle"),
+        {
+            "OCR_API_BASE_URL": os.getenv("OCR_API_BASE_URL", ""),
+        },
+    )
+
     # Set max number of worker threads
     max_workers = int(os.environ.get("GRPC_MAX_WORKERS", "4"))
     logger.info(f"Starting DocReader service with {max_workers} worker threads")
-    
+
     # Get port number
     port = os.environ.get("GRPC_PORT", "50051")
-    
+
     # Create server
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=max_workers),
         options=[
-            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+            ("grpc.max_send_message_length", MAX_MESSAGE_LENGTH),
+            ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
         ],
     )
-    
+
     # Register services
     docreader_pb2_grpc.add_DocReaderServicer_to_server(DocReaderServicer(), server)
-    
+
     # Register health check service
     health_servicer = HealthServicer()
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
-    
+
     # Set listen address
     server.add_insecure_port(f"[::]:{port}")
-    
+
     # Start service
     server.start()
-    
+
     logger.info(f"Server started on port {port}")
     logger.info("Server is ready to accept connections")
-    
+
     try:
         # Wait for service termination
         server.wait_for_termination()
@@ -373,5 +398,6 @@ def serve():
         logger.info("Received termination signal, shutting down server")
         server.stop(0)
 
+
 if __name__ == "__main__":
-    serve()
+    main()

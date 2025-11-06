@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Tencent/WeKnora/services/docreader/src/proto"
+	"github.com/Tencent/WeKnora/docreader/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/resolver"
@@ -16,10 +16,8 @@ const (
 	maxMessageSize = 50 * 1024 * 1024 // 50MB
 )
 
-var (
-	// Logger is the default logger used by the client
-	Logger = log.New(os.Stdout, "[DocReader] ", log.LstdFlags|log.Lmicroseconds)
-)
+// Logger is the default logger used by the client
+var Logger = log.New(os.Stdout, "[DocReader] ", log.LstdFlags|log.Lmicroseconds)
 
 // ImageInfo 表示一个图片的信息
 type ImageInfo struct {

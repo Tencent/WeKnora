@@ -1,27 +1,27 @@
 <template>
   <div class="kb-list-container">
     <div class="header">
-      <h2>知识库</h2>
-      <t-button theme="primary" @click="openCreate">新建知识库</t-button>
+      <h2>{{ t('knowledgeBase.title') }}</h2>
+      <t-button theme="primary" @click="openCreate">{{ t('knowledgeBase.createNewKnowledgeBase') }}</t-button>
     </div>
-    
+
     <!-- 未初始化知识库提示 -->
     <div v-if="hasUninitializedKbs" class="warning-banner">
       <t-icon name="info-circle" size="16px" />
-      <span>部分知识库尚未初始化，需要先在设置中配置模型信息才能添加知识文档</span>
+      <span>{{ t('knowledgeBase.uninitializedWarning') }}</span>
     </div>
     <t-table :data="kbs" :columns="columns" row-key="id" size="medium" hover>
       <template #status="{ row }">
         <div class="status-cell">
-          <t-tag 
+          <t-tag
             :theme="isInitialized(row) ? 'success' : 'warning'"
             size="small"
           >
-            {{ isInitialized(row) ? '已初始化' : '未初始化' }}
+            {{ isInitialized(row) ? t('knowledgeBase.initializedStatus') : t('knowledgeBase.notInitializedStatus') }}
           </t-tag>
-          <t-tooltip 
-            v-if="!isInitialized(row)" 
-            content="需要先在设置中配置模型信息才能添加知识"
+          <t-tooltip
+            v-if="!isInitialized(row)"
+            :content="t('knowledgeBase.needSettingsFirst')"
             placement="top"
           >
             <span class="warning-icon">⚠</span>
@@ -29,7 +29,7 @@
         </div>
       </template>
       <template #description="{ row }">
-        <div class="description-text">{{ row.description || '暂无描述' }}</div>
+        <div class="description-text">{{ row.description || t('knowledgeBase.noDescription') }}</div>
       </template>
       <template #op="{ row }">
         <t-space size="small">
@@ -39,30 +39,30 @@
             :disabled="!isInitialized(row)"
             :theme="isInitialized(row) ? 'primary' : 'default'"
             :variant="isInitialized(row) ? 'base' : 'outline'"
-            :title="!isInitialized(row) ? '请先在设置中配置模型信息' : ''"
+            :title="!isInitialized(row) ? t('knowledgeBase.configureModelsFirst') : ''"
           >
-            文档
+            {{ t('knowledgeBase.documents') }}
           </t-button>
-          <t-button size="small" variant="outline" @click="goSettings(row.id)">设置</t-button>
-          <t-popconfirm content="确认删除该知识库？" @confirm="remove(row.id)">
-            <t-button size="small" theme="danger" variant="text">删除</t-button>
+          <t-button size="small" variant="outline" @click="goSettings(row.id)">{{ t('knowledgeBase.settings') }}</t-button>
+          <t-popconfirm :content="t('knowledgeBase.confirmDeleteKnowledgeBase')" @confirm="remove(row.id)">
+            <t-button size="small" theme="danger" variant="text">{{ t('knowledgeBase.delete') }}</t-button>
           </t-popconfirm>
         </t-space>
       </template>
     </t-table>
 
-    <t-dialog v-model:visible="createVisible" header="新建知识库" :footer="false">
+    <t-dialog v-model:visible="createVisible" :header="t('knowledgeBase.createKnowledgeBaseDialog')" :footer="false">
       <t-form :data="createForm" @submit="create">
-        <t-form-item label="名称" name="name" :rules="[{ required: true, message: '请输入名称' }]">
+        <t-form-item :label="t('knowledgeBase.name')" name="name" :rules="[{ required: true, message: t('knowledgeBase.enterNameKb') }]">
           <t-input v-model="createForm.name" />
         </t-form-item>
-        <t-form-item label="描述" name="description">
+        <t-form-item :label="t('knowledgeBase.description')" name="description">
           <t-textarea v-model="createForm.description" />
         </t-form-item>
         <t-form-item>
           <t-space>
-            <t-button theme="primary" type="submit" :loading="creating">创建</t-button>
-            <t-button variant="outline" @click="createVisible = false">取消</t-button>
+            <t-button theme="primary" type="submit" :loading="creating">{{ t('knowledgeBase.createKb') }}</t-button>
+            <t-button variant="outline" @click="createVisible = false">{{ t('common.cancel') }}</t-button>
           </t-space>
         </t-form-item>
       </t-form>
@@ -76,6 +76,8 @@ import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { listKnowledgeBases, createKnowledgeBase, deleteKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 
 const router = useRouter()
 
@@ -91,11 +93,11 @@ const kbs = ref<KB[]>([])
 const loading = ref(false)
 
 const columns = [
-  { colKey: 'name', title: '名称' },
-  { colKey: 'description', title: '描述', cell: 'description', width: 300 },
-  { colKey: 'status', title: '状态', cell: 'status', width: 100 },
-  { colKey: 'updated_at', title: '更新时间' },
-  { colKey: 'op', title: '操作', cell: 'op', width: 220 },
+  { colKey: 'name', title: t('knowledgeBase.name') },
+  { colKey: 'description', title: t('knowledgeBase.description'), cell: 'description', width: 300 },
+  { colKey: 'status', title: t('knowledgeBase.status'), cell: 'status', width: 100 },
+  { colKey: 'updated_at', title: t('knowledgeBase.uploadTime') },
+  { colKey: 'op', title: t('knowledgeBase.actions'), cell: 'op', width: 220 },
 ]
 
 const fetchList = () => {
@@ -131,26 +133,26 @@ const create = () => {
   }
   createKnowledgeBase({ name: createForm.name, description: createForm.description, chunking_config }).then((res: any) => {
     if (res.success) {
-      MessagePlugin.success('创建成功')
+      MessagePlugin.success(t('knowledgeBase.createSuccess'))
       createVisible.value = false
       fetchList()
     } else {
-      MessagePlugin.error(res.message || '创建失败')
+      MessagePlugin.error(res.message || t('knowledgeBase.createFailed'))
     }
   }).catch((e: any) => {
-    MessagePlugin.error(e?.message || '创建失败')
+    MessagePlugin.error(e?.message || t('knowledgeBase.createFailed'))
   }).finally(() => creating.value = false)
 }
 
 const remove = (id: string) => {
   deleteKnowledgeBase(id).then((res: any) => {
     if (res.success) {
-      MessagePlugin.success('已删除')
+      MessagePlugin.success(t('knowledgeBase.deleted'))
       fetchList()
     } else {
-      MessagePlugin.error(res.message || '删除失败')
+      MessagePlugin.error(res.message || t('knowledgeBase.deleteFailedKb'))
     }
-  }).catch((e: any) => MessagePlugin.error(e?.message || '删除失败'))
+  }).catch((e: any) => MessagePlugin.error(e?.message || t('knowledgeBase.deleteFailedKb')))
 }
 
 const isInitialized = (kb: KB) => {

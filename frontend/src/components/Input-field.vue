@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { ref, defineEmits, onMounted, defineProps, defineExpose } from "vue";
+import { useI18n } from 'vue-i18n';
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
+
+const { t } = useI18n();
 let { cardList, total, getKnowled } = useKnowledgeBase()
 let query = ref("");
 const props = defineProps({
@@ -17,15 +20,15 @@ onMounted(() => {
 const emit = defineEmits(['send-msg']);
 const createSession = (val: string) => {
   if (!val.trim()) {
-    MessagePlugin.info("请先输入内容!");
+    MessagePlugin.info(t('chat.pleaseEnterContent'));
     return
   }
   if (!query.value && cardList.value.length == 0) {
-    MessagePlugin.info("请先上传知识库!");
+    MessagePlugin.info(t('chat.pleaseUploadKnowledgeBase'));
     return;
   }
   if (props.isReplying) {
-    return MessagePlugin.error("正在回复中，请稍后再试!");
+    return MessagePlugin.error(t('chat.replyingPleaseWait'));
   }
   emit('send-msg', val);
   clearvalue();
@@ -50,9 +53,9 @@ onBeforeRouteUpdate((to, from, next) => {
 </script>
 <template>
   <div class="answers-input">
-    <t-textarea v-model="query" placeholder="基于知识库提问" name="description" :autosize="true" @keydown="onKeydown" />
+    <t-textarea v-model="query" :placeholder="t('chat.askKnowledgeBase')" name="description" :autosize="true" @keydown="onKeydown" />
     <div class="answers-input-source">
-      <span>{{ total }}个来源</span>
+      <span>{{ t('chat.sourcesCount', { count: total }) }}</span>
     </div>
     <div @click="createSession(query)" class="answers-input-send"
       :class="[query.length && total ? '' : 'grey-out']">

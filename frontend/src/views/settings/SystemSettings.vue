@@ -2,8 +2,8 @@
     <div class="system-settings-container">
         <!-- 页面标题区域 -->
         <div class="settings-header">
-            <h2>{{ isKbSettings ? '知识库设置' : '系统设置' }}</h2>
-            <p class="settings-subtitle">{{ isKbSettings ? '配置该知识库的模型与文档切分参数' : '管理和更新系统模型与服务配置' }}</p>
+            <h2>{{ isKbSettings ? t('settings.knowledgeBaseSettings') : t('settings.system') }}</h2>
+            <p class="settings-subtitle">{{ isKbSettings ? t('settings.configureKbModels') : t('settings.manageSystemModels') }}</p>
         </div>
         
         <!-- 配置内容 -->
@@ -14,31 +14,31 @@
             <div v-else>
                 <t-form :data="kbForm" @submit="saveKb">
                     <div class="config-section">
-                        <h3><span class="section-icon">⚙️</span>基础信息</h3>
-                        <t-form-item label="名称" name="name" :rules="[{ required: true, message: '请输入名称' }]">
+                        <h3><span class="section-icon">⚙️</span>{{ t('settings.basicInfo') }}</h3>
+                        <t-form-item :label="t('settings.name')" name="name" :rules="[{ required: true, message: t('settings.enterNameRequired') }]">
                             <t-input v-model="kbForm.name" />
                         </t-form-item>
-                        <t-form-item label="描述" name="description">
+                        <t-form-item :label="t('settings.description')" name="description">
                             <t-textarea v-model="kbForm.description" />
                         </t-form-item>
                     </div>
                     <div class="config-section">
-                        <h3><span class="section-icon">📄</span>文档切分</h3>
+                        <h3><span class="section-icon">📄</span>{{ t('settings.documentSplitting') }}</h3>
                         <t-row :gutter="16">
                             <t-col :span="6">
-                                <t-form-item label="Chunk Size" name="chunkSize">
+                                <t-form-item :label="t('settings.chunkSize')" name="chunkSize">
                                     <t-input-number v-model="kbForm.config.chunking_config.chunk_size" :min="1" />
                                 </t-form-item>
                             </t-col>
                             <t-col :span="6">
-                                <t-form-item label="Chunk Overlap" name="chunkOverlap">
+                                <t-form-item :label="t('settings.chunkOverlap')" name="chunkOverlap">
                                     <t-input-number v-model="kbForm.config.chunking_config.chunk_overlap" :min="0" />
                                 </t-form-item>
                             </t-col>
                         </t-row>
                     </div>
                     <div class="submit-section">
-                        <t-button theme="primary" type="submit" :loading="saving">保存</t-button>
+                        <t-button theme="primary" type="submit" :loading="saving">{{ t('settings.save') }}</t-button>
                     </div>
                 </t-form>
             </div>
@@ -47,10 +47,13 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import { defineAsyncComponent, onMounted, reactive, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useI18n } from 'vue-i18n'
 import { getKnowledgeBaseById, updateKnowledgeBase } from '@/api/knowledge-base'
+
+const { t } = useI18n()
 
 // 异步加载初始化配置组件
 const InitializationContent = defineAsyncComponent(() => import('../initialization/InitializationContent.vue'))
@@ -97,12 +100,12 @@ const saveKb = () => {
     updateKnowledgeBase(kbId, { name: kbForm.name, description: kbForm.description, config: { chunking_config: { chunk_size: kbForm.config.chunking_config.chunk_size, chunk_overlap: kbForm.config.chunking_config.chunk_overlap, separators: [], enable_multimodal: false }, image_processing_config: { model_id: '' } } })
     .then((res: any) => {
         if (res.success) {
-            MessagePlugin.success('保存成功')
+            MessagePlugin.success(t('settings.saveSuccess'))
         } else {
-            MessagePlugin.error(res.message || '保存失败')
+            MessagePlugin.error(res.message || t('settings.saveFailed'))
         }
     })
-    .catch((e: any) => MessagePlugin.error(e?.message || '保存失败'))
+    .catch((e: any) => MessagePlugin.error(e?.message || t('settings.saveFailed')))
     .finally(() => saving.value = false)
 }
 </script>

@@ -4,26 +4,26 @@
         <!-- 顶部Ollama服务状态 -->
         <div class="ollama-summary-card">
             <div class="summary-header">
-                <span class="title"><t-icon name="server" />Ollama 服务状态</span>
+                <span class="title"><t-icon name="server" />{{ t('initialization.ollamaServiceStatus') }}</span>
                 <t-tag :theme="ollamaStatus.available ? 'success' : 'danger'" size="small" class="state">
-                    {{ ollamaStatus.available ? `正常 (${ollamaStatus.version||'v?'} )` : (ollamaStatus.error || '未运行') }}
+                    {{ ollamaStatus.available ? `${t('initialization.normal')} (${ollamaStatus.version||'v?'} )` : (ollamaStatus.error || t('initialization.notRunning')) }}
                 </t-tag>
-                <t-tooltip content="刷新状态">
+                <t-tooltip :content="t('initialization.refreshStatus')">
                     <t-icon name="refresh" class="refresh-icon" :class="{ spinning: summaryRefreshing }" @click="refreshOllamaSummary" />
                 </t-tooltip>
             </div>
             <div class="summary-body">
                 <div class="models">
-                    <span class="label">Ollama 服务地址</span>
+                    <span class="label">{{ t('initialization.ollamaServiceAddress') }}</span>
                     <div class="model-list">
-                        <t-tag size="small" theme="default" class="model-pill">{{ ollamaStatus.baseUrl || '未配置' }}</t-tag>
+                        <t-tag size="small" theme="default" class="model-pill">{{ ollamaStatus.baseUrl || t('initialization.notConfigured') }}</t-tag>
                     </div>
                 </div>
                 <div class="models">
-                    <span class="label">已安装模型</span>
+                    <span class="label">{{ t('initialization.installedModels') }}</span>
                     <div class="model-list">
                         <t-tag v-for="m in installedModels" :key="m" size="small" theme="default" class="model-pill">{{ m }}</t-tag>
-                        <span v-if="installedModels.length===0" class="empty">暂无</span>
+                        <span v-if="installedModels.length===0" class="empty">{{ t('initialization.none') }}</span>
                     </div>
                 </div>
             </div>
@@ -33,36 +33,36 @@
         <t-form ref="form" :data="formData" :rules="rules" @submit.prevent layout="vertical">
             <!-- 知识库基本信息配置区域 (仅在知识库设置模式下显示) -->
             <div v-if="props.isKbSettings" class="config-section">
-                <h3><t-icon name="folder" class="section-icon" />知识库基本信息</h3>
+                <h3><t-icon name="folder" class="section-icon" />{{ t('initialization.knowledgeBaseInfo') }}</h3>
                 <div class="form-row">
-                    <t-form-item label="知识库名称" name="kbName" :required="true">
-                        <t-input v-model="formData.kbName" placeholder="请输入知识库名称" maxlength="50" show-word-limit />
+                    <t-form-item :label="t('initialization.knowledgeBaseName')" name="kbName" :required="true">
+                        <t-input v-model="formData.kbName" :placeholder="t('initialization.knowledgeBaseNamePlaceholder')" maxlength="50" show-word-limit />
                     </t-form-item>
                 </div>
                 <div class="form-row">
-                    <t-form-item label="知识库描述" name="kbDescription">
-                        <t-textarea v-model="formData.kbDescription" placeholder="请输入知识库描述" maxlength="200" show-word-limit :autosize="{ minRows: 3, maxRows: 6 }" />
+                    <t-form-item :label="t('initialization.knowledgeBaseDescription')" name="kbDescription">
+                        <t-textarea v-model="formData.kbDescription" :placeholder="t('initialization.knowledgeBaseDescriptionPlaceholder')" maxlength="200" show-word-limit :autosize="{ minRows: 3, maxRows: 6 }" />
                     </t-form-item>
                 </div>
             </div>
 
             <!-- LLM 大语言模型配置区域 -->
             <div class="config-section">
-                <h3><t-icon name="chat" class="section-icon" />LLM 大语言模型配置</h3>
+                <h3><t-icon name="chat" class="section-icon" />{{ t('initialization.llmModelConfig') }}</h3>
                 <div class="form-row">
-                    <t-form-item label="模型来源" name="llm.source">
+                    <t-form-item :label="t('initialization.modelSource')" name="llm.source">
                         <t-radio-group v-model="formData.llm.source" @change="onModelSourceChange('llm')">
-                            <t-radio value="local">Ollama (本地)</t-radio>
-                            <t-radio value="remote">Remote API (远程)</t-radio>
+                            <t-radio value="local">{{ t('initialization.local') }}</t-radio>
+                            <t-radio value="remote">{{ t('initialization.remote') }}</t-radio>
                         </t-radio-group>
                     </t-form-item>
                 </div>
                 
                 <div class="form-row">
-                    <t-form-item label="模型名称" name="llm.modelName">
+                    <t-form-item :label="t('initialization.modelName')" name="llm.modelName">
                         <div class="model-input-with-status">
-                            <t-input v-model="formData.llm.modelName" placeholder="例如: qwen3:0.6b" 
-                                     @blur="onModelNameChange('llm')" 
+                            <t-input v-model="formData.llm.modelName" :placeholder="t('initialization.modelNamePlaceholder')"
+                                     @blur="onModelNameChange('llm')"
                                      @input="onModelNameInput('llm')"
                                      @keyup.enter="onModelNameChange('llm')"
                                      :clearable="!modelStatus.llm.downloading" />
@@ -76,18 +76,18 @@
                                     v-else-if="formData.llm.source === 'local' && formData.llm.modelName && modelStatus.llm.checked" 
                                     :name="modelStatus.llm.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                     :class="['status-icon', modelStatus.llm.available ? 'installed' : 'not-installed']" 
-                                    :title="modelStatus.llm.available ? '已安装' : '未安装'"
+                                    :title="modelStatus.llm.available ? t('initialization.installed') : t('initialization.notInstalled')"
                                 />
                                 <t-icon 
                                     v-else-if="formData.llm.source === 'local' && formData.llm.modelName && !modelStatus.llm.checked" 
                                     name="help-circle" 
                                     class="status-icon unknown" 
-                                    title="未检查"
+                                    :title="t('initialization.notChecked')"
                                 />
                             </div>
                             <!-- 下载按钮：未安装时显示 -->
                             <div v-if="formData.llm.source === 'local' && formData.llm.modelName && modelStatus.llm.checked && !modelStatus.llm.available && !modelStatus.llm.downloading" class="download-action">
-                                <t-tooltip content="下载模型">
+                                <t-tooltip :content="t('initialization.downloadModel')">
                                     <t-button 
                                         size="small" 
                                         theme="primary" 
@@ -107,13 +107,13 @@
                 <!-- 远程 API 配置区域 -->
                 <div v-if="formData.llm.source === 'remote'" class="remote-config">
                     <div class="form-row">
-                        <t-form-item label="Base URL" name="llm.baseUrl">
+                        <t-form-item :label="t('initialization.baseUrl')" name="llm.baseUrl">
                             <div class="url-input-with-check">
-                                <t-input v-model="formData.llm.baseUrl" placeholder="例如: https://api.openai.com/v1, 去除末尾/chat/completions路径后的URL的前面部分" 
+                                <t-input v-model="formData.llm.baseUrl" :placeholder="t('initialization.baseUrlPlaceholder')"
                                          @blur="onRemoteConfigChange('llm')"
                                          @input="onRemoteConfigInput('llm')" />
                                 <div v-if="formData.llm.modelName && formData.llm.baseUrl" class="check-action">
-                                    <t-tooltip v-if="!modelStatus.llm.available && modelStatus.llm.checked" content="重新检查连接">
+                                    <t-tooltip v-if="!modelStatus.llm.available && modelStatus.llm.checked" :content="t('initialization.checkConnection')">
                                         <t-icon 
                                             name="refresh" 
                                             class="refresh-icon" 
@@ -125,21 +125,21 @@
                                         v-else-if="modelStatus.llm.checked" 
                                         :name="modelStatus.llm.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                         :class="['status-icon', modelStatus.llm.available ? 'installed' : 'not-installed']" 
-                                        :title="modelStatus.llm.available ? '连接正常' : '连接失败'"
+                                        :title="modelStatus.llm.available ? t('initialization.connectionNormal') : t('initialization.connectionFailed')"
                                     />
                                     <t-icon 
                                         v-else 
                                         name="loading" 
                                         class="status-icon checking spinning" 
-                                        title="检查连接中"
+                                        :title="t('initialization.checkingConnection')"
                                     />
                                 </div>
                             </div>
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="API Key (可选)" name="llm.apiKey">
-                            <t-input v-model="formData.llm.apiKey" type="password" placeholder="请输入API Key (可选)" 
+                        <t-form-item :label="t('initialization.apiKey')" name="llm.apiKey">
+                            <t-input v-model="formData.llm.apiKey" type="password" :placeholder="t('initialization.apiKeyPlaceholder')"
                                      @blur="onRemoteConfigChange('llm')"
                                      @input="onRemoteConfigInput('llm')" />
                         </t-form-item>
@@ -155,26 +155,26 @@
 
             <!-- Embedding 嵌入模型配置区域 -->
             <div class="config-section">
-                <h3><t-icon name="layers" class="section-icon" />Embedding 嵌入模型配置</h3>
+                <h3><t-icon name="layers" class="section-icon" />{{ t('initialization.embeddingModelConfig') }}</h3>
                 
                 <!-- 已有文件时的禁用提示 -->
                 <div v-if="hasFiles" class="embedding-warning">
-                    <t-alert theme="warning" message="知识库中已有文件，无法修改Embedding模型配置" />
+                    <t-alert theme="warning" :message="t('initialization.embeddingWarning')" />
                 </div>
                 
                 <div class="form-row">
-                    <t-form-item label="模型来源" name="embedding.source">
+                    <t-form-item :label="t('initialization.modelSource')" name="embedding.source">
                         <t-radio-group v-model="formData.embedding.source" @change="onModelSourceChange('embedding')" :disabled="hasFiles">
-                            <t-radio value="local">Ollama (本地)</t-radio>
-                            <t-radio value="remote">Remote API (远程)</t-radio>
+                            <t-radio value="local">{{ t('initialization.local') }}</t-radio>
+                            <t-radio value="remote">{{ t('initialization.remote') }}</t-radio>
                         </t-radio-group>
                     </t-form-item>
                 </div>
                 
                 <div class="form-row">
-                    <t-form-item label="模型名称" name="embedding.modelName">
+                    <t-form-item :label="t('initialization.modelName')" name="embedding.modelName">
                         <div class="model-input-with-status">
-                            <t-input v-model="formData.embedding.modelName" placeholder="例如: nomic-embed-text:latest" 
+                            <t-input v-model="formData.embedding.modelName" :placeholder="t('initialization.modelNamePlaceholder')"
                                      @blur="onModelNameChange('embedding')" 
                                      @input="onModelNameInput('embedding')"
                                      @keyup.enter="onModelNameChange('embedding')"
@@ -190,18 +190,18 @@
                                     v-else-if="formData.embedding.source === 'local' && formData.embedding.modelName && modelStatus.embedding.checked" 
                                     :name="modelStatus.embedding.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                     :class="['status-icon', modelStatus.embedding.available ? 'installed' : 'not-installed']" 
-                                    :title="modelStatus.embedding.available ? '已安装' : '未安装'"
+                                    :title="modelStatus.embedding.available ? t('initialization.installed') : t('initialization.notInstalled')"
                                 />
                                 <t-icon 
                                     v-else-if="formData.embedding.source === 'local' && formData.embedding.modelName && !modelStatus.embedding.checked" 
                                     name="help-circle" 
                                     class="status-icon unknown" 
-                                    title="未检查"
+                                    :title="t('initialization.notChecked')"
                                 />
                             </div>
                             <!-- 下载按钮：未安装时显示 -->
                             <div v-if="formData.embedding.source === 'local' && formData.embedding.modelName && modelStatus.embedding.checked && !modelStatus.embedding.available && !modelStatus.embedding.downloading" class="download-action">
-                                <t-tooltip content="下载模型">
+                                <t-tooltip :content="t('initialization.downloadModel')">
                                     <t-button 
                                         size="small" 
                                         theme="primary" 
@@ -219,22 +219,22 @@
                 
                 <!-- 向量维度设置 -->
                 <div class="form-row">
-                    <t-form-item label="维度" name="embedding.dimension">
+                    <t-form-item :label="t('initialization.dimension')" name="embedding.dimension">
                         <div class="dimension-input-with-action">
-                            <t-input v-model="formData.embedding.dimension" 
-                                     :disabled="hasFiles" 
-                                     placeholder="请输入向量维度" 
+                            <t-input v-model="formData.embedding.dimension"
+                                     :disabled="hasFiles"
+                                     :placeholder="t('initialization.dimensionPlaceholder')"
                                      style="width: 100px;"
                                      @input="onDimensionInput" />
-                            <t-button 
-                                size="small" 
-                                variant="outline" 
+                            <t-button
+                                size="small"
+                                variant="outline"
                                 class="detect-dim-btn"
                                 :loading="embeddingDimDetecting"
                                 :disabled="hasFiles"
                                 @click="detectEmbeddingDimension"
                             >
-                                检测维度
+                                {{ t('initialization.detectDimension') }}
                             </t-button>
                         </div>
                     </t-form-item>
@@ -244,13 +244,13 @@
                 <!-- 远程 Embedding API 配置 -->
                 <div v-if="formData.embedding.source === 'remote'" class="remote-config">
                     <div class="form-row">
-                        <t-form-item label="Base URL" name="embedding.baseUrl">
+                        <t-form-item :label="t('initialization.baseUrl')" name="embedding.baseUrl">
                             <div class="url-input-with-check">
-                                <t-input v-model="formData.embedding.baseUrl" placeholder="例如: https://api.openai.com/v1, 去除末尾/embeddings路径后的URL的前面部分" 
+                                <t-input v-model="formData.embedding.baseUrl" :placeholder="t('initialization.baseUrlPlaceholder')"
                                          :disabled="hasFiles" @blur="onRemoteConfigChange('embedding')"
                                          @input="onRemoteConfigInput('embedding')" />
                                 <div v-if="formData.embedding.modelName && formData.embedding.baseUrl && !hasFiles" class="check-action">
-                                    <t-tooltip v-if="!modelStatus.embedding.available && modelStatus.embedding.checked" content="重新检查连接">
+                                    <t-tooltip v-if="!modelStatus.embedding.available && modelStatus.embedding.checked" :content="t('initialization.checkConnection')">
                                         <t-icon 
                                             name="refresh" 
                                             class="refresh-icon" 
@@ -262,21 +262,21 @@
                                         v-else-if="modelStatus.embedding.checked" 
                                         :name="modelStatus.embedding.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                         :class="['status-icon', modelStatus.embedding.available ? 'installed' : 'not-installed']" 
-                                        :title="modelStatus.embedding.available ? '连接正常' : '连接失败'"
+                                        :title="modelStatus.embedding.available ? t('initialization.connectionNormal') : t('initialization.connectionFailed')"
                                     />
                                     <t-icon 
                                         v-else 
                                         name="loading" 
                                         class="input-icon checking spinning" 
-                                        title="检查连接中"
+                                        :title="t('initialization.checkingConnection')"
                                     />
                                 </div>
                             </div>
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="API Key (可选)" name="embedding.apiKey">
-                            <t-input v-model="formData.embedding.apiKey" type="password" placeholder="请输入API Key (可选)" 
+                        <t-form-item :label="t('initialization.apiKey')" name="embedding.apiKey">
+                            <t-input v-model="formData.embedding.apiKey" type="password" :placeholder="t('initialization.apiKeyPlaceholder')"
                                      :disabled="hasFiles" @blur="onRemoteConfigChange('embedding')"
                                      @input="onRemoteConfigInput('embedding')" />
                         </t-form-item>
@@ -292,13 +292,13 @@
 
             <!-- Rerank 重排模型配置区域 -->
             <div class="config-section">
-                <h3><t-icon name="swap" class="section-icon" />Rerank 重排模型配置</h3>
+                <h3><t-icon name="swap" class="section-icon" />{{ t('initialization.rerankModelConfig') }}</h3>
                 
                 <div class="form-row">
                     <t-form-item name="rerank.enabled">
                         <div class="switch-container">
                             <t-switch v-model="formData.rerank.enabled" @change="onRerankChange" />
-                            <span class="switch-label">启用Rerank重排模型</span>
+                            <span class="switch-label">{{ t('initialization.enableRerank') }}</span>
                         </div>
                     </t-form-item>
                 </div>
@@ -306,9 +306,9 @@
                 <!-- Rerank 详细配置 -->
                 <div v-if="formData.rerank.enabled" class="rerank-config">
                     <div class="form-row">
-                        <t-form-item label="模型名称" name="rerank.modelName">
+                        <t-form-item :label="t('initialization.modelName')" name="rerank.modelName">
                             <div class="model-input-with-status">
-                                <t-input v-model="formData.rerank.modelName" placeholder="例如: bge-reranker-v2-m3" 
+                                <t-input v-model="formData.rerank.modelName" :placeholder="t('initialization.modelNamePlaceholder')"
                                          @blur="onRerankConfigChange"
                                          @input="onRerankConfigInput" />
                                 <div class="model-status-icon">
@@ -316,13 +316,13 @@
                                         v-if="formData.rerank.modelName && modelStatus.rerank.checked" 
                                         :name="modelStatus.rerank.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                         :class="['status-icon', modelStatus.rerank.available ? 'installed' : 'not-installed']" 
-                                        :title="modelStatus.rerank.available ? '连接正常' : '连接失败'"
+                                        :title="modelStatus.rerank.available ? t('initialization.connectionNormal') : t('initialization.connectionFailed')"
                                     />
                                     <t-icon 
                                         v-else-if="formData.rerank.modelName && !modelStatus.rerank.checked" 
                                         name="help-circle" 
                                         class="status-icon unknown" 
-                                        title="未检查"
+                                        :title="t('initialization.notChecked')"
                                     />
                                 </div>
                             </div>
@@ -330,13 +330,13 @@
                     </div>
                     
                     <div class="form-row">
-                        <t-form-item label="Base URL" name="rerank.baseUrl">
+                        <t-form-item :label="t('initialization.baseUrl')" name="rerank.baseUrl">
                             <div class="url-input-with-check">
-                                <t-input v-model="formData.rerank.baseUrl" placeholder="例如: http://localhost:11434, 去除末尾/rerank路径后的URL的前面部分" 
+                                <t-input v-model="formData.rerank.baseUrl" :placeholder="t('initialization.baseUrlPlaceholder')"
                                          @blur="onRerankConfigChange"
                                          @input="onRerankConfigInput" />
                                 <div v-if="formData.rerank.modelName && formData.rerank.baseUrl" class="check-action">
-                                    <t-tooltip v-if="!modelStatus.rerank.available && modelStatus.rerank.checked" content="重新检查连接">
+                                    <t-tooltip v-if="!modelStatus.rerank.available && modelStatus.rerank.checked" :content="t('initialization.checkConnection')">
                                         <t-icon 
                                             name="refresh" 
                                             class="refresh-icon" 
@@ -348,13 +348,13 @@
                                         v-else-if="modelStatus.rerank.checked" 
                                         :name="modelStatus.rerank.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                         :class="['status-icon', modelStatus.rerank.available ? 'installed' : 'not-installed']" 
-                                        :title="modelStatus.rerank.available ? '连接正常' : '连接失败'"
+                                        :title="modelStatus.rerank.available ? t('initialization.connectionNormal') : t('initialization.connectionFailed')"
                                     />
                                     <t-icon 
                                         v-else 
                                         name="loading" 
                                         class="input-icon checking spinning" 
-                                        title="检查连接中"
+                                        :title="t('initialization.checkingConnection')"
                                     />
                                 </div>
                             </div>
@@ -362,8 +362,8 @@
                     </div>
                     
                     <div class="form-row">
-                        <t-form-item label="API Key" name="rerank.apiKey">
-                            <t-input v-model="formData.rerank.apiKey" type="password" placeholder="请输入API Key (可选)" 
+                        <t-form-item :label="t('initialization.apiKey')" name="rerank.apiKey">
+                            <t-input v-model="formData.rerank.apiKey" type="password" :placeholder="t('initialization.apiKeyPlaceholder')"
                                      @blur="onRerankConfigChange"
                                      @input="onRerankConfigInput" />
                         </t-form-item>
@@ -379,12 +379,12 @@
 
             <!-- 多模态配置区域 -->
             <div class="config-section">
-                <h3><t-icon name="image" class="section-icon" />多模态配置</h3>
+                <h3><t-icon name="image" class="section-icon" />{{ t('initialization.multimodalConfig') }}</h3>
                 <div class="form-row">
                     <t-form-item name="multimodal.enabled">
                         <div class="switch-container">
                             <t-switch v-model="formData.multimodal.enabled" @change="onMultimodalChange" />
-                            <span class="switch-label">启用多模态图片信息提取</span>
+                            <span class="switch-label">{{ t('initialization.enableMultimodal') }}</span>
                         </div>
                     </t-form-item>
                 </div>
@@ -392,11 +392,11 @@
                 <!-- 多模态详细配置 -->
                 <div v-if="formData.multimodal.enabled" class="multimodal-config">
                     <!-- VLM 视觉语言模型配置 -->
-                    <h4>视觉语言模型配置</h4>
+                    <h4>{{ t('initialization.visualLanguageModelConfig') }}</h4>
                     <div class="form-row">
-                        <t-form-item label="模型名称" name="multimodal.vlm.modelName">
+                        <t-form-item :label="t('initialization.modelName')" name="multimodal.vlm.modelName">
                             <div class="model-input-with-status">
-                                <t-input v-model="formData.multimodal.vlm.modelName" placeholder="例如: qwen2.5vl:3b" 
+                                <t-input v-model="formData.multimodal.vlm.modelName" :placeholder="t('initialization.modelNamePlaceholder')"
                                          @blur="onModelNameChange('vlm')" 
                                          @input="onModelNameInput('vlm')"
                                          @keyup.enter="onModelNameChange('vlm')"
@@ -411,18 +411,18 @@
                                         v-else-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && modelStatus.vlm.checked" 
                                         :name="modelStatus.vlm.available ? 'check-circle-filled' : 'close-circle-filled'" 
                                         :class="['status-icon', modelStatus.vlm.available ? 'installed' : 'not-installed']" 
-                                        :title="modelStatus.vlm.available ? '已安装' : '未安装'"
+                                        :title="modelStatus.vlm.available ? t('initialization.installed') : t('initialization.notInstalled')"
                                     />
                                     <t-icon 
                                         v-else-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && !modelStatus.vlm.checked" 
                                         name="help-circle" 
                                         class="status-icon unknown" 
-                                        title="未检查"
+                                        :title="t('initialization.notChecked')"
                                     />
                                 </div>
                                 <!-- 下载按钮：未安装时显示 -->
                                 <div v-if="formData.multimodal.vlm.interfaceType === 'ollama' && formData.multimodal.vlm.modelName && modelStatus.vlm.checked && !modelStatus.vlm.available && !modelStatus.vlm.downloading" class="download-action">
-                                    <t-tooltip content="下载模型">
+                                    <t-tooltip :content="t('initialization.downloadModel')">
                                         <t-button 
                                             size="small" 
                                             theme="primary" 
@@ -438,31 +438,31 @@
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item label="接口类型" name="multimodal.vlm.interfaceType">
+                        <t-form-item :label="t('initialization.interfaceType')" name="multimodal.vlm.interfaceType">
                             <t-radio-group v-model="formData.multimodal.vlm.interfaceType" @change="onVlmInterfaceTypeChange">
-                                <t-radio value="ollama">Ollama (本地)</t-radio>
-                                <t-radio value="openai">OpenAI 兼容接口</t-radio>
+                                <t-radio value="ollama">{{ t('initialization.local') }}</t-radio>
+                                <t-radio value="openai">{{ t('initialization.openaiCompatible') }}</t-radio>
                             </t-radio-group>
                         </t-form-item>
                     </div>
                     <div class="form-row" v-if="formData.multimodal.vlm.interfaceType === 'openai'">
-                        <t-form-item label="Base URL" name="multimodal.vlm.baseUrl">
-                            <t-input v-model="formData.multimodal.vlm.baseUrl" placeholder="例如: http://localhost:11434/v1，去除末尾/chat/completions路径后的URL的前面部分"
+                        <t-form-item :label="t('initialization.baseUrl')" name="multimodal.vlm.baseUrl">
+                            <t-input v-model="formData.multimodal.vlm.baseUrl" :placeholder="t('initialization.baseUrlPlaceholder')"
                                      @blur="onVlmBaseUrlChange"
                                      @input="onVlmBaseUrlInput" />
                         </t-form-item>
                     </div>
                     <div class="form-row" v-if="formData.multimodal.vlm.interfaceType === 'openai'">
-                        <t-form-item label="API Key" name="multimodal.vlm.apiKey">
-                            <t-input v-model="formData.multimodal.vlm.apiKey" type="password" placeholder="请输入API Key (可选)"
+                        <t-form-item :label="t('initialization.apiKey')" name="multimodal.vlm.apiKey">
+                            <t-input v-model="formData.multimodal.vlm.apiKey" type="password" :placeholder="t('initialization.apiKeyPlaceholder')"
                                      @blur="onVlmApiKeyChange" />
                         </t-form-item>
                     </div>
                     
                     <!-- 对象存储服务配置 -->
-                    <h4>对象存储服务配置</h4>
+                    <h4>{{ t('initialization.storageServiceConfig') }}</h4>
                     <div class="form-row">
-                        <t-form-item label="存储类型">
+                        <t-form-item :label="t('initialization.storageType')">
                             <t-radio-group v-model="formData.multimodal.storageType" @change="onStorageTypeChange">
                                 <t-radio value="cos">COS</t-radio>
                                 <t-radio value="minio">MinIO</t-radio>
@@ -473,60 +473,60 @@
                     <!-- MinIO 配置区域 -->
                     <div v-if="formData.multimodal.storageType === 'minio'">
                         <div class="form-row">
-                            <t-form-item label="Bucket Name" name="multimodal.minio.bucketName">
-                                <t-input v-model="formData.multimodal.minio.bucketName" placeholder="请输入Bucket名称" />
+                            <t-form-item :label="t('initialization.bucketName')" name="multimodal.minio.bucketName">
+                                <t-input v-model="formData.multimodal.minio.bucketName" :placeholder="t('initialization.bucketNamePlaceholder')" />
                             </t-form-item>
                         </div>
 
                         <div class="form-row">
-                            <t-form-item label="Path Prefix" name="multimodal.minio.pathPrefix">
-                                <t-input v-model="formData.multimodal.minio.pathPrefix" placeholder="例如: images" />
+                            <t-form-item :label="t('initialization.pathPrefix')" name="multimodal.minio.pathPrefix">
+                                <t-input v-model="formData.multimodal.minio.pathPrefix" :placeholder="t('initialization.pathPrefixPlaceholder')" />
                             </t-form-item>
                         </div>
                     </div>
                     
                     <!-- COS 配置区域 -->
                     <div class="form-row">
-                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" label="Secret ID" name="multimodal.cos.secretId">
-                            <t-input v-model="formData.multimodal.cos.secretId" placeholder="请输入COS Secret ID"
+                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" :label="t('initialization.secretId')" name="multimodal.cos.secretId">
+                            <t-input v-model="formData.multimodal.cos.secretId" :placeholder="t('initialization.secretIdPlaceholder')"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" label="Secret Key" name="multimodal.cos.secretKey">
-                            <t-input v-model="formData.multimodal.cos.secretKey" type="password" placeholder="请输入COS Secret Key"
+                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" :label="t('initialization.secretKey')" name="multimodal.cos.secretKey">
+                            <t-input v-model="formData.multimodal.cos.secretKey" type="password" :placeholder="t('initialization.secretKeyPlaceholder')"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" label="Region" name="multimodal.cos.region">
-                            <t-input v-model="formData.multimodal.cos.region" placeholder="例如: ap-beijing"
+                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" :label="t('initialization.region')" name="multimodal.cos.region">
+                            <t-input v-model="formData.multimodal.cos.region" :placeholder="t('initialization.regionPlaceholder')"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" label="Bucket Name" name="multimodal.cos.bucketName">
-                            <t-input v-model="formData.multimodal.cos.bucketName" placeholder="请输入Bucket名称"
+                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" :label="t('initialization.bucketName')" name="multimodal.cos.bucketName">
+                            <t-input v-model="formData.multimodal.cos.bucketName" :placeholder="t('initialization.bucketNamePlaceholder')"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" label="App ID" name="multimodal.cos.appId">
-                            <t-input v-model="formData.multimodal.cos.appId" placeholder="请输入App ID"
+                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" :label="t('initialization.appId')" name="multimodal.cos.appId">
+                            <t-input v-model="formData.multimodal.cos.appId" :placeholder="t('initialization.appIdPlaceholder')"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     <div class="form-row">
-                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" label="Path Prefix" name="multimodal.cos.pathPrefix">
-                            <t-input v-model="formData.multimodal.cos.pathPrefix" placeholder="例如: images"
+                        <t-form-item v-if="formData.multimodal.storageType === 'cos'" :label="t('initialization.pathPrefix')" name="multimodal.cos.pathPrefix">
+                            <t-input v-model="formData.multimodal.cos.pathPrefix" :placeholder="t('initialization.pathPrefixPlaceholder')"
                                      @blur="onCosConfigChange" />
                         </t-form-item>
                     </div>
                     
                     <!-- 多模态功能测试区域 -->
                     <div v-if="canTestMultimodal" class="multimodal-test">
-                        <h5>功能测试</h5>
-                        <p class="test-desc">上传图片测试VLM模型的图片描述和文字识别功能</p>
+                        <h5>{{ t('initialization.functionTest') }}</h5>
+                        <p class="test-desc">{{ t('initialization.testDescription') }}</p>
                         
                         <div class="test-area">
                             <!-- 上传区域 -->
@@ -543,7 +543,7 @@
                                     >
                                         <t-button theme="default" variant="outline" size="small">
                                             <t-icon name="upload" />
-                                            选择图片
+                                            {{ t('initialization.selectImage') }}
                                         </t-button>
                                     </t-upload>
                                 </div>
@@ -559,41 +559,41 @@
                             </div>
                             
                             <div class="test-button-wrapper">
-                                <t-button 
+                                <t-button
                                     v-if="multimodalTest.selectedFile"
-                                    theme="primary" 
-                                    size="small" 
+                                    theme="primary"
+                                    size="small"
                                     :loading="multimodalTest.testing"
                                     @click="startMultimodalTest"
                                 >
-                                    开始测试
+                                    {{ t('initialization.startTest') }}
                                 </t-button>
                             </div>
                             <!-- 测试结果 -->
                             <div v-if="multimodalTest.result" class="test-result">
                                 <div v-if="multimodalTest.result.success" class="result-success">
-                                    <h6>测试结果</h6>
+                                    <h6>{{ t('initialization.testResult') }}</h6>
                                     
                                     <div v-if="multimodalTest.result.caption" class="result-item">
-                                        <label>图片描述:</label>
+                                        <label>{{ t('initialization.imageDescription') }}</label>
                                         <div class="result-text">{{ multimodalTest.result.caption }}</div>
                                     </div>
                                     
                                     <div v-if="multimodalTest.result.ocr" class="result-item">
-                                        <label>文字识别:</label>
+                                        <label>{{ t('initialization.textRecognition') }}</label>
                                         <div class="result-text">{{ multimodalTest.result.ocr }}</div>
                                     </div>
                                     
                                     <div v-if="multimodalTest.result.processing_time" class="result-time">
-                                        处理时间: {{ multimodalTest.result.processing_time }}ms
+                                        {{ t('initialization.processingTime') }}: {{ multimodalTest.result.processing_time }}ms
                                     </div>
                                 </div>
                                 
                                 <div v-else class="result-error">
-                                    <h6>测试失败</h6>
+                                    <h6>{{ t('initialization.testFailed') }}</h6>
                                     <div class="error-msg">
                                         <t-icon name="error-circle" />
-                                        {{ multimodalTest.result.message || '多模态处理失败' }}
+                                        {{ multimodalTest.result.message || t('initialization.multimodalProcessingFailed') }}
                                     </div>
                                 </div>
                             </div>
@@ -604,34 +604,34 @@
 
             <!-- 文档分割配置区域 -->
             <div class="config-section">
-                <h3><t-icon name="cut" class="section-icon" />文档分割配置</h3>
+                <h3><t-icon name="cut" class="section-icon" />{{ t('initialization.documentSplittingConfig') }}</h3>
                 
                 <!-- 预设配置选择 -->
                 <div class="form-row preset-row">
-                    <t-form-item label="分割策略">
+                    <t-form-item :label="t('initialization.splittingStrategy')">
                         <t-radio-group v-model="selectedPreset" @change="onPresetChange" class="preset-radio-group">
                             <t-radio value="balanced" class="preset-radio">
                                 <div class="preset-content">
-                                    <div class="preset-title">均衡模式</div>
-                                    <div class="preset-desc">块大小: 1000 / 重叠: 200</div>
+                                    <div class="preset-title">{{ t('initialization.balancedMode') }}</div>
+                                    <div class="preset-desc">{{ t('initialization.balancedModeDesc') }}</div>
                                 </div>
                             </t-radio>
                             <t-radio value="precision" class="preset-radio">
                                 <div class="preset-content">
-                                    <div class="preset-title">精准模式</div>
-                                    <div class="preset-desc">块大小: 512 / 重叠: 100</div>
+                                    <div class="preset-title">{{ t('initialization.precisionMode') }}</div>
+                                    <div class="preset-desc">{{ t('initialization.precisionModeDesc') }}</div>
                                 </div>
                             </t-radio>
                             <t-radio value="context" class="preset-radio">
                                 <div class="preset-content">
-                                    <div class="preset-title">上下文模式</div>
-                                    <div class="preset-desc">块大小: 2048 / 重叠: 400</div>
+                                    <div class="preset-title">{{ t('initialization.contextMode') }}</div>
+                                    <div class="preset-desc">{{ t('initialization.contextModeDesc') }}</div>
                                 </div>
                             </t-radio>
                             <t-radio value="custom" class="preset-radio">
                                 <div class="preset-content">
-                                    <div class="preset-title">自定义</div>
-                                    <div class="preset-desc">手动配置参数</div>
+                                    <div class="preset-title">{{ t('initialization.custom') }}</div>
+                                    <div class="preset-desc">{{ t('initialization.customDesc') }}</div>
                                 </div>
                             </t-radio>
                         </t-radio-group>
@@ -641,47 +641,47 @@
                 <!-- 参数配置网格 -->
                 <div class="parameters-grid" :class="{ 'disabled-grid': selectedPreset !== 'custom' }">
                     <div class="parameter-group">
-                        <div class="parameter-label">分块大小</div>
+                        <div class="parameter-label">{{ t('initialization.chunkSize') }}</div>
                         <div class="parameter-control">
-                            <t-slider 
-                                v-model="formData.documentSplitting.chunkSize" 
-                                :min="100" 
-                                :max="4000" 
+                            <t-slider
+                                v-model="formData.documentSplitting.chunkSize"
+                                :min="100"
+                                :max="4000"
                                 :step="1"
                                 :disabled="selectedPreset !== 'custom'"
                                 :marks="{ 100: '100', 1000: '1000', 2000: '2000', 4000: '4000' }"
                                 class="parameter-slider"
                             />
-                            <div class="parameter-value">{{ formData.documentSplitting.chunkSize }} 字符</div>
+                            <div class="parameter-value">{{ formData.documentSplitting.chunkSize }} {{ t('initialization.characters') }}</div>
                         </div>
-                        <div class="parameter-desc">控制每个文档分块的大小，影响检索精度</div>
+                        <div class="parameter-desc">{{ t('initialization.chunkSizeDesc') }}</div>
                     </div>
                     
                     <div class="parameter-group">
-                        <div class="parameter-label">分块重叠</div>
+                        <div class="parameter-label">{{ t('initialization.chunkOverlap') }}</div>
                         <div class="parameter-control">
-                            <t-slider 
-                                v-model="formData.documentSplitting.chunkOverlap" 
-                                :min="0" 
-                                :max="1000" 
+                            <t-slider
+                                v-model="formData.documentSplitting.chunkOverlap"
+                                :min="0"
+                                :max="1000"
                                 :step="1"
                                 :disabled="selectedPreset !== 'custom'"
                                 :marks="{ 0: '0', 200: '200', 500: '500', 1000: '1000' }"
                                 class="parameter-slider"
                             />
-                            <div class="parameter-value">{{ formData.documentSplitting.chunkOverlap }} 字符</div>
+                            <div class="parameter-value">{{ formData.documentSplitting.chunkOverlap }} {{ t('initialization.characters') }}</div>
                         </div>
-                        <div class="parameter-desc">分块间重叠的字符数，保持上下文连贯性</div>
+                        <div class="parameter-desc">{{ t('initialization.chunkOverlapDesc') }}</div>
                     </div>
                     
                     <div class="parameter-group">
-                        <div class="parameter-label">分隔符设置</div>
+                        <div class="parameter-label">{{ t('initialization.separatorSettings') }}</div>
                         <div class="parameter-control">
-                            <t-select 
-                                v-model="formData.documentSplitting.separators" 
+                            <t-select
+                                v-model="formData.documentSplitting.separators"
                                 multiple
                                 :disabled="selectedPreset !== 'custom'"
-                                placeholder="选择或自定义分隔符"
+                                :placeholder="t('initialization.selectOrCustomSeparators')"
                                 class="parameter-select"
                                 clearable
                                 creatable
@@ -694,47 +694,47 @@
 
             <!-- 实体关系提取 -->
             <div class="config-section">
-                <h3><t-icon name="transform" class="section-icon" />实体关系提取</h3>
+                <h3><t-icon name="transform" class="section-icon" />{{ t('initialization.entityRelationExtraction') }}</h3>
                 
                 <div class="form-row">
                     <t-form-item name="nodeExtract.enabled">
                         <div class="switch-container">
                             <t-switch v-model="formData.nodeExtract.enabled" @change="clearExtractExample" />
-                            <span class="switch-label">启用实体关系提取</span>
+                            <span class="switch-label">{{ t('initialization.enableEntityRelationExtraction') }}</span>
                         </div>
                     </t-form-item>
                 </div>
 
                 <div v-if="formData.nodeExtract.enabled" class="node-config">
-                    <h4>关系标签配置</h4>
+                    <h4>{{ t('initialization.relationTypeConfig') }}</h4>
                     <!-- 关系标签配置区域 -->
                     <div class="form-row">
-                        <t-form-item label="关系类型" name="tags">
+                        <t-form-item :label="t('initialization.relationType')" name="tags">
                             <div class="tags-grid">
                                 <div class="btn-tips-form">
                                     <div class="tags-gen-btn">
-                                        <t-button 
-                                            theme="default" 
+                                        <t-button
+                                            theme="default"
                                             size="medium"
                                             :disabled="!modelStatus.llm.available"
                                             :loading="tagFabring"
-                                            @click="handleFabriTag" 
+                                            @click="handleFabriTag"
                                             class="gen-tags-btn"
                                         >
-                                            随机生成标签
+                                            {{ t('initialization.generateRandomTags') }}
                                         </t-button>
                                     </div>
                                     <div v-if="!modelStatus.llm.available" class="btn-tips">
                                         <t-icon name="info-circle" class="tip-icon" />
-                                        <span>请完善模型配置信息</span>
+                                        <span>{{ t('initialization.completeModelConfig') }}</span>
                                     </div>
                                 </div>
                                 <div class="tags-config">
-                                    <t-select 
-                                        v-model="formData.nodeExtract.tags" 
+                                    <t-select
+                                        v-model="formData.nodeExtract.tags"
                                         v-model:input-value="tagInput"
                                         multiple
-                                        placeholder="系统将根据选定的关系类型从文本中提取相应的实体关系"
+                                        :placeholder="t('initialization.systemWillExtract')"
                                         :options="tagOptions"
                                         clearable
                                         @clear="clearTags"
@@ -747,34 +747,34 @@
                         </t-form-item>
                     </div>
 
-                    <h4>提取示例</h4>
+                    <h4>{{ t('initialization.extractionExample') }}</h4>
                     <!-- 文本内容输入区域 -->
                     <div class="form-row">
-                        <t-form-item label="示例文本" name="text" :required="true">
+                        <t-form-item :label="t('initialization.sampleText')" name="text" :required="true">
                             <div class="sample-text-form">
                                 <div class="btn-tips-form">
                                     <div class="tags-gen-btn">
-                                        <t-button 
-                                            theme="default" 
+                                        <t-button
+                                            theme="default"
                                             size="medium"
                                             :disabled="!modelStatus.llm.available"
-                                            :title="!modelStatus.llm.available ? 'LLM 模型不可用' : ''"
+                                            :title="!modelStatus.llm.available ? t('initialization.llmModelUnavailable') : ''"
                                             :loading="textFabring"
-                                            @click="handleFabriText" 
+                                            @click="handleFabriText"
                                             class="tags-gen-btn"
                                         >
-                                            随机生成文本
+                                            {{ t('initialization.generateRandomText') }}
                                         </t-button>
                                     </div>
                                     <div v-if="!modelStatus.llm.available" class="btn-tips">
                                         <t-icon name="info-circle" class="tip-icon" />
-                                        <span>请完善模型配置信息</span>
+                                        <span>{{ t('initialization.completeModelConfig') }}</span>
                                     </div>
                                 </div>
                                 <div class="sample-text">
-                                    <t-textarea 
-                                        v-model="formData.nodeExtract.text" 
-                                        placeholder="请输入需要分析的文本内容，例如：《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一..." 
+                                    <t-textarea
+                                        v-model="formData.nodeExtract.text"
+                                        :placeholder="t('initialization.sampleTextPlaceholder')"
                                         :autosize="{ minRows: 8, maxRows: 15 }"
                                         show-word-limit
                                         maxlength="5000"
@@ -787,21 +787,21 @@
                     <!-- 提取实体 -->
                     <div class="form-row">
                         <!-- 实体列表 -->
-                        <t-form-item v-if="formData.nodeExtract.nodes.length > 0" label="实体列表" name="node-form">
+                        <t-form-item v-if="formData.nodeExtract.nodes.length > 0" :label="t('initialization.entityList')" name="node-form">
                             <div class="node-list">
                                 <div v-for="(node, nodeIndex) in formData.nodeExtract.nodes" :key="nodeIndex" class="node-item">
                                     <div class="node-header">
                                         <span class="node-icon"><t-icon name="user" class="node-icon-svg" /></span>
                                         <!-- 节点名称输入 -->
-                                        <t-input 
-                                            type="text" 
-                                            v-model="node.name" 
-                                            class="node-name-input" 
-                                            placeholder="节点名称"
+                                        <t-input
+                                            type="text"
+                                            v-model="node.name"
+                                            class="node-name-input"
+                                            :placeholder="t('initialization.nodeNamePlaceholder')"
                                         />
                                         <!-- 删除节点按钮 -->
-                                        <t-button 
-                                            class="delete-node-btn" 
+                                        <t-button
+                                            class="delete-node-btn"
                                             theme="default"
                                             @click="removeNode(nodeIndex)"
                                             :disabled="formData.nodeExtract.nodes.length === 0"
@@ -814,14 +814,14 @@
                                     <div class="node-attributes">
                                         <!-- 属性列表 -->
                                         <div v-for="(attribute, attrIndex) in node.attributes" :key="attrIndex" class="attribute-item">
-                                            <t-input 
-                                                type="text" 
-                                                v-model="node.attributes[attrIndex]" 
-                                                class="attribute-input" 
-                                                placeholder="属性值"
+                                            <t-input
+                                                type="text"
+                                                v-model="node.attributes[attrIndex]"
+                                                class="attribute-input"
+                                                :placeholder="t('initialization.attributeValuePlaceholder')"
                                             />
-                                            <t-button 
-                                                class="delete-attr-btn" 
+                                            <t-button
+                                                class="delete-attr-btn"
                                                 theme="default"
                                                 @click="removeAttribute(nodeIndex, attrIndex)"
                                                 :disabled="node.attributes.length === 0"
@@ -833,7 +833,7 @@
                                         
                                         <!-- 添加属性按钮 -->
                                         <t-button class="add-attr-btn" @click="addAttribute(nodeIndex)" size="small">
-                                            添加属性
+                                            {{ t('initialization.addAttribute') }}
                                         </t-button>
                                     </div>
                                 </div>
@@ -843,26 +843,26 @@
                         <div class="btn-tips-form">
                             <div class="tags-gen-btn">
                                 <t-button class="add-node-btn" @click="addNode">
-                                    添加实体
+                                    {{ t('initialization.addEntity') }}
                                 </t-button>
                             </div>
                             <div v-if="!readyNode" class="btn-tips">
                                 <t-icon name="info-circle" class="tip-icon" />
-                                <span>请完善实体信息</span>
+                                <span>{{ t('initialization.completeEntityInfo') }}</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- 提取关系 -->
                     <div class="form-row">
-                        <t-form-item v-if="formData.nodeExtract.relations.length > 0" label="关系连接" name="node-relation">
+                        <t-form-item v-if="formData.nodeExtract.relations.length > 0" :label="t('initialization.relationConnection')" name="node-relation">
                             <div class="relation-list">
                                 <div v-for="(relation, index) in formData.nodeExtract.relations" :key="index" class="relation-item">
                                     <div class="relation-line">
-                                        <t-select-input 
+                                        <t-select-input
                                             :value="formData.nodeExtract.relations[index].node1"
                                             :popup-visible="popupVisibleNode1[index]"
-                                            placeholder="请选择实体"
+                                            :placeholder="t('initialization.selectEntity')"
                                             clearable
                                             @popup-visible-change="onPopupVisibleNode1Change(index, $event)"
                                             @clear="relationOnClearNode1(index)"
@@ -880,19 +880,19 @@
                                             </template>
                                         </t-select-input>
                                         <t-icon name="arrow-right" class="relation-arrow"/>
-                                        <t-select 
-                                            v-model="formData.nodeExtract.relations[index].type" 
-                                            placeholder="请选择关系类型"
+                                        <t-select
+                                            v-model="formData.nodeExtract.relations[index].type"
+                                            :placeholder="t('initialization.selectRelationType')"
                                             :options="tagOptions"
                                             clearable
                                             creatable
                                             filterable
                                         />
                                         <t-icon name="arrow-right" class="relation-arrow"/>
-                                        <t-select-input 
+                                        <t-select-input
                                             :value="formData.nodeExtract.relations[index].node2"
                                             :popup-visible="popupVisibleNode2[index]"
-                                            placeholder="请选择实体"
+                                            :placeholder="t('initialization.selectEntity')"
                                             clearable
                                             @popup-visible-change="onPopupVisibleNode2Change(index, $event)"
                                             @clear="relationOnClearNode2(index)"
@@ -909,8 +909,8 @@
                                                 <ChevronDownIcon />
                                             </template>
                                         </t-select-input>
-                                        <t-button 
-                                            class="delete-node-btn" 
+                                        <t-button
+                                            class="delete-node-btn"
                                             theme="default"
                                             @click="removeRelation(index)"
                                             :disabled="formData.nodeExtract.relations.length === 0"
@@ -927,45 +927,45 @@
                         <div class="btn-tips-form">
                             <div class="tags-gen-btn">
                                 <t-button class="add-node-btn" @click="addRelation">
-                                    添加关系
+                                    {{ t('initialization.addRelation') }}
                                 </t-button>
                             </div>
                             <div v-if="!readyRelation" class="btn-tips">
                                 <t-icon name="info-circle" class="tip-icon" />
-                                <span>请完善关系信息</span>
+                                <span>{{ t('initialization.completeRelationInfo') }}</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- 重置按钮区域 -->
                     <div class="extract-button">
-                        <t-button 
-                            theme="primary" 
-                            size="medium" 
+                        <t-button
+                            theme="primary"
+                            size="medium"
                             :disabled="!modelStatus.llm.available"
-                            :title="!modelStatus.llm.available ? 'LLM 模型不可用' : ''"
-                            :loading="extracting" 
+                            :title="!modelStatus.llm.available ? t('initialization.llmModelUnavailable') : ''"
+                            :loading="extracting"
                             @click="handleExtract"
                         >
-                            {{ extracting ? '正在提取...' : '开始提取' }}
+                            {{ extracting ? t('initialization.extracting') : t('initialization.startExtraction') }}
                         </t-button>
 
-                        <t-button 
-                            theme="default" 
-                            size="medium" 
+                        <t-button
+                            theme="default"
+                            size="medium"
                             @click="defaultExtractExample"
                             class="default-extract-btn"
                         >
-                            默认示例
+                            {{ t('initialization.defaultExample') }}
                         </t-button>
 
-                        <t-button 
-                            theme="default" 
-                            size="medium" 
+                        <t-button
+                            theme="default"
+                            size="medium"
                             @click="clearExtractExample"
                             class="clear-extract-btn"
                         >
-                            清空示例
+                            {{ t('initialization.clearExample') }}
                         </t-button>
                     </div>
                 </div>
@@ -973,22 +973,22 @@
 
             <!-- 提交按钮区域 -->
             <div class="submit-section">
-                <t-button theme="primary" type="button" size="large" 
+                <t-button theme="primary" type="button" size="large"
                           :loading="submitting" :disabled="!canSubmit || isSubmitDebounced"
                           @click="handleSubmit">
-                    {{ props.isKbSettings ? '更新知识库设置' : (isUpdateMode ? '更新配置信息' : '完成配置') }}
+                    {{ props.isKbSettings ? t('initialization.updateKnowledgeBaseSettings') : (isUpdateMode ? t('initialization.updateConfigInfo') : t('initialization.completeConfig')) }}
                 </t-button>
                 
                 <!-- 提交状态提示 -->
                 <div v-if="!canSubmit && hasOllamaModels" class="submit-tips">
                     <t-icon name="info-circle" class="tip-icon" />
-                    <span>请等待所有Ollama模型下载完成后再进行配置更新</span>
+                    <span>{{ t('initialization.waitForDownloads') }}</span>
                 </div>
                 
                 <!-- 远程API配置提示 -->
                 <div v-if="!canSubmit && !hasOllamaModels" class="submit-tips">
                     <t-icon name="info-circle" class="tip-icon" />
-                    <span>请完善模型配置信息</span>
+                    <span>{{ t('initialization.completeModelConfigInfo') }}</span>
                 </div>
             </div>
         </t-form>
@@ -1002,6 +1002,7 @@
  */
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { ChevronDownIcon } from 'tdesign-icons-vue-next';
 import { 
@@ -1032,6 +1033,7 @@ import { useAuthStore } from '@/stores/auth';
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
+const { t } = useI18n();
 
 // 接收props，判断是否为知识库设置模式
 const props = defineProps<{
@@ -1201,17 +1203,17 @@ const embeddingDimDetecting = ref(false);
 const selectedPreset = ref('precision');
 
 // 分隔符选项
-const separatorOptions = [
-    { label: '段落分隔符 (\\n\\n)', value: '\n\n' },
-    { label: '换行符 (\\n)', value: '\n' },
-    { label: '句号 (。)', value: '。' },
-    { label: '感叹号 (！)', value: '！' },
-    { label: '问号 (？)', value: '？' },
-    { label: '分号 (;)', value: ';' },
-    { label: '中文分号 (；)', value: '；' },
-    { label: '逗号 (,)', value: ',' },
-    { label: '中文逗号 (，)', value: '，' }
-];
+const separatorOptions = computed(() => [
+    { label: t('initialization.separatorParagraph'), value: '\n\n' },
+    { label: t('initialization.separatorNewline'), value: '\n' },
+    { label: t('initialization.separatorPeriod'), value: '。' },
+    { label: t('initialization.separatorExclamation'), value: '！' },
+    { label: t('initialization.separatorQuestion'), value: '？' },
+    { label: t('initialization.separatorSemicolon'), value: ';' },
+    { label: t('initialization.separatorChineseSemicolon'), value: '；' },
+    { label: t('initialization.separatorComma'), value: ',' },
+    { label: t('initialization.separatorChineseComma'), value: '，' }
+]);
 
 // 多模态测试状态
 const multimodalTest = reactive({
@@ -1349,32 +1351,32 @@ const validateEmbeddingDimension = (val: any) => {
 };
 
 // 表单验证规则
-const rules = {
+const rules = computed(() => ({
     // 知识库基本信息验证 (仅在知识库设置模式下使用)
     'kbName': [
-        { required: (t: any) => props.isKbSettings, message: '请输入知识库名称', type: 'error' },
-        { min: 1, max: 50, message: '知识库名称长度应在1-50个字符之间', type: 'error' }
+        { required: props.isKbSettings, message: t('initialization.pleaseEnterKnowledgeBaseName'), type: 'error' },
+        { min: 1, max: 50, message: t('initialization.knowledgeBaseNameLength'), type: 'error' }
     ],
     'kbDescription': [
-        { max: 200, message: '知识库描述长度不能超过200个字符', type: 'error' }
+        { max: 200, message: t('initialization.knowledgeBaseDescriptionLength'), type: 'error' }
     ],
-    'llm.modelName': [{ required: true, message: '请输入LLM模型名称', type: 'error' }],
+    'llm.modelName': [{ required: true, message: t('initialization.pleaseEnterLLMModelName'), type: 'error' }],
     'llm.baseUrl': [
-        { required: (t: any) => formData.llm.source === 'remote', message: '请输入BaseURL', type: 'error' }
+        { required: formData.llm.source === 'remote', message: t('initialization.pleaseEnterBaseURL'), type: 'error' }
     ],
-    'embedding.modelName': [{ required: true, message: '请输入Embedding模型名称', type: 'error' }],
+    'embedding.modelName': [{ required: true, message: t('initialization.pleaseEnterEmbeddingModelName'), type: 'error' }],
     'embedding.baseUrl': [
-        { required: (t: any) => formData.embedding.source === 'remote', message: '请输入BaseURL', type: 'error' }
+        { required: formData.embedding.source === 'remote', message: t('initialization.pleaseEnterBaseURL'), type: 'error' }
     ],
     'embedding.dimension': [
-        { required: true, message: '请输入Embedding维度', type: 'error' },
-        { validator: validateEmbeddingDimension, message: '维度必须为有效整数值，常见取值为768, 1024, 1536, 3584等', type: 'error' }
+        { required: true, message: t('initialization.pleaseEnterEmbeddingDimension'), type: 'error' },
+        { validator: validateEmbeddingDimension, message: t('initialization.dimensionMustBeInteger'), type: 'error' }
     ],
     'nodeExtract.text': [
-        { required: true, message: '请输入文本内容', type: 'error' },
-        { min: 10, message: '文本内容至少需要10个字符', type: 'error' }
+        { required: formData.nodeExtract.enabled, message: t('initialization.pleaseEnterTextContent'), type: 'error' },
+        { min: 10, message: t('initialization.textContentMinLength'), type: 'error' }
     ]
-};
+}));
 
 // 检查Ollama服务状态
 const checkOllama = async () => {
@@ -1391,10 +1393,10 @@ const checkOllama = async () => {
             await checkAllOllamaModels();
         }
     } catch (error) {
-        console.error('检查Ollama状态失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ':', error);
         ollamaStatus.checked = true;
         ollamaStatus.available = false;
-        ollamaStatus.error = '检查失败';
+        ollamaStatus.error = t('initialization.checkFailed');
     }
 };
 
@@ -1453,7 +1455,7 @@ const checkAllOllamaModels = async () => {
             modelStatus.vlm.available = result.models[formData.multimodal.vlm.modelName] || false;
         }
     } catch (error) {
-        console.error('检查模型状态失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ':', error);
     }
 };
 
@@ -1471,7 +1473,7 @@ const downloadModel = async (type: 'llm' | 'embedding' | 'vlm', modelName: strin
         // 立即更新状态，防止重复点击
         modelStatus[type].downloading = true;
         modelStatus[type].progress = 0;
-        modelStatus[type].message = '正在启动下载...';
+        modelStatus[type].message = t('initialization.startingDownload');
         
         // 启动下载任务
         const result = await downloadOllamaModel(modelName);
@@ -1479,15 +1481,15 @@ const downloadModel = async (type: 'llm' | 'embedding' | 'vlm', modelName: strin
         // 更新任务ID和初始进度
         modelStatus[type].taskId = result.taskId;
         modelStatus[type].progress = result.progress || 0;
-        modelStatus[type].message = '下载已开始';
+        modelStatus[type].message = t('initialization.downloadStarted');
         
         // 如果已经完成，直接更新状态
         if (result.status === 'completed') {
             modelStatus[type].available = true;
             modelStatus[type].downloading = false;
             modelStatus[type].progress = 100;
-            modelStatus[type].message = '下载完成';
-            MessagePlugin.success(`模型 ${modelName} 下载成功`);
+            modelStatus[type].message = t('initialization.downloadCompleted');
+            MessagePlugin.success(`${t('initialization.model')} ${modelName} ${t('initialization.downloadSuccess')}`);
             return;
         }
         
@@ -1495,10 +1497,10 @@ const downloadModel = async (type: 'llm' | 'embedding' | 'vlm', modelName: strin
         startProgressPolling(type, result.taskId, modelName);
         
     } catch (error) {
-        console.error(`启动模型 ${modelName} 下载失败:`, error);
-        MessagePlugin.error(`启动模型 ${modelName} 下载失败`);
+        console.error(`${t('initialization.startModelDownloadFailed')} ${modelName}:`, error);
+        MessagePlugin.error(`${t('initialization.startModelDownloadFailed')} ${modelName}`);
         modelStatus[type].downloading = false;
-        modelStatus[type].message = '下载启动失败';
+        modelStatus[type].message = t('initialization.downloadStartFailed');
     }
 };
 
@@ -1523,32 +1525,32 @@ const startProgressPolling = (type: 'llm' | 'embedding' | 'vlm', taskId: string,
                 modelStatus[type].available = true;
                 modelStatus[type].downloading = false;
                 modelStatus[type].progress = 100;
-                modelStatus[type].message = '下载完成';
+                modelStatus[type].message = t('initialization.downloadCompleted');
                 
                 // 清除定时器
                 clearInterval(progressTimers[taskId]);
                 delete progressTimers[taskId];
                 
-                MessagePlugin.success(`模型 ${modelName} 下载成功`);
+                MessagePlugin.success(`${t('initialization.model')} ${modelName} ${t('initialization.downloadSuccess')}`);
                 
             } else if (task.status === 'failed') {
                 modelStatus[type].downloading = false;
-                modelStatus[type].message = task.message || '下载失败';
+                modelStatus[type].message = task.message || t('initialization.downloadFailed');
                 
                 // 清除定时器
                 clearInterval(progressTimers[taskId]);
                 delete progressTimers[taskId];
                 
-                MessagePlugin.error(`模型 ${modelName} 下载失败: ${task.message}`);
+                MessagePlugin.error(`${t('initialization.model')} ${modelName} ${t('initialization.downloadFailed')}: ${task.message}`);
             }
             
         } catch (error) {
-            console.error('查询下载进度失败:', error);
+            console.error(t('initialization.queryProgressFailed') + ':', error);
             // 如果查询失败，停止轮询
             clearInterval(progressTimers[taskId]);
             delete progressTimers[taskId];
             modelStatus[type].downloading = false;
-            modelStatus[type].message = '查询进度失败';
+            modelStatus[type].message = t('initialization.progressQueryFailed');
         }
     }, 2000);
 };
@@ -1565,14 +1567,14 @@ const loadCurrentConfig = async () => {
                     formData.kbDescription = kbInfo.data.description || '';
                 }
             } catch (error) {
-                console.error('获取知识库信息失败:', error);
-                MessagePlugin.error('获取知识库信息失败');
+                console.error(t('initialization.getKnowledgeBaseInfoFailed') + ':', error);
+                MessagePlugin.error(t('initialization.getKnowledgeBaseInfoFailed'));
             }
         }
         
         // 根据是否为知识库设置模式选择不同的API
         if (props.isKbSettings && !currentKbId.value) {
-            console.error('知识库设置模式下缺少知识库ID');
+            console.error(t('initialization.knowledgeBaseSettingsModeMissingId'));
             return;
         }
         const config = await getCurrentConfigByKB(currentKbId.value!);
@@ -1834,7 +1836,7 @@ const checkRemoteModelStatus = async (type: 'llm') => {
         }, 100);
         
     } catch (error) {
-        console.error(`检查远程${type}模型失败:`, error);
+        console.error(`${t('initialization.checkOllamaStatusFailed')} ${type}:`, error);
         modelStatus[type].checked = true;
         modelStatus[type].available = false;
         const err = error as any;
@@ -1910,7 +1912,7 @@ const checkEmbeddingModelStatus = async () => {
         }, 100);
         
     } catch (error) {
-        console.error('检查Embedding模型失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ' Embedding:', error);
         modelStatus.embedding.checked = true;
         modelStatus.embedding.available = false;
         const err = error as any;
@@ -1933,7 +1935,7 @@ const detectEmbeddingDimension = async () => {
         const fields: string[] = ['embedding.source', 'embedding.modelName'];
         if (source === 'remote') fields.push('embedding.baseUrl');
         try { await form.value?.validate(fields); } catch {}
-        MessagePlugin.warning('请先完整填写Embedding配置');
+        MessagePlugin.warning(t('initialization.completeEmbeddingConfig'));
         return;
     }
 
@@ -1951,9 +1953,9 @@ const detectEmbeddingDimension = async () => {
         const dim = Number(res.dimension || 0);
         if (available && dim > 0) {
             formData.embedding.dimension = dim;
-            MessagePlugin.success(`检测成功，维度已自动填写为 ${dim}`);
+            MessagePlugin.success(`${t('initialization.detectionSuccess')} ${t('initialization.dimensionAutoFilled')} ${dim}`);
         } else {
-            MessagePlugin.error(message || '检测失败');
+            MessagePlugin.error(message || t('initialization.detectionFailed'));
         }
     } catch (e: any) {
         const msg = e?.message || '检测失败，请检查配置';
@@ -2118,7 +2120,7 @@ const checkRerankModelStatus = async () => {
         }, 100);
         
     } catch (error) {
-        console.error('检查Rerank模型失败:', error);
+        console.error(t('initialization.checkOllamaStatusFailed') + ' Rerank:', error);
         modelStatus.rerank.checked = true;
         modelStatus.rerank.available = false;
         const err = error as any;
@@ -2199,7 +2201,7 @@ const onImageChange = (files: any) => {
         
         if (missingConfigs.length > 0) {
             const missingList = missingConfigs.join('、');
-            MessagePlugin.error(`多模态配置不完整，请先完成多模态配置后再上传图片`);
+            MessagePlugin.error(t('initialization.multimodalConfigIncomplete'));
             return;
         }
         
@@ -2215,13 +2217,13 @@ const onImageChange = (files: any) => {
         // 清除之前的测试结果
         multimodalTest.result = null;
         
-        MessagePlugin.success('图片上传成功，可以开始测试');
+        MessagePlugin.success(t('initialization.imageUploadSuccess'));
     }
 };
 
 const startMultimodalTest = async () => {
     if (!multimodalTest.selectedFile) {
-        MessagePlugin.warning('请先选择一张图片');
+        MessagePlugin.warning(t('initialization.pleaseSelectImage'));
         return;
     }
     
@@ -2291,17 +2293,17 @@ const startMultimodalTest = async () => {
         multimodalTest.result = result;
         
         if (result.success) {
-            MessagePlugin.success('多模态测试成功');
+            MessagePlugin.success(t('initialization.multimodalTestSuccess'));
         } else {
-            MessagePlugin.error(`多模态测试失败: ${result.message}`);
+            MessagePlugin.error(`${t('initialization.multimodalTestFailed')}: ${result.message}`);
         }
     } catch (error) {
-        console.error('多模态测试失败:', error);
+        console.error(t('initialization.multimodalTestFailed') + ':', error);
         multimodalTest.result = {
             success: false,
-            message: (error as any)?.message || '测试过程中发生错误'
+            message: (error as any)?.message || t('initialization.multimodalTestFailed')
         };
-        MessagePlugin.error('多模态测试失败');
+        MessagePlugin.error(t('initialization.multimodalTestFailed'));
     } finally {
         multimodalTest.testing = false;
     }
@@ -2327,7 +2329,7 @@ const handleSubmit = async () => {
         // 表单验证
         const isValid = await form.value?.validate();
         if (!isValid) {
-            MessagePlugin.error('请检查表单填写是否正确');
+            MessagePlugin.error(t('initialization.checkFormCorrectness'));
             return;
         }
 
@@ -2343,8 +2345,8 @@ const handleSubmit = async () => {
                     config: {} // 空的config对象，因为这里只更新基本信息
                 });
             } catch (error) {
-                console.error('更新知识库基本信息失败:', error);
-                MessagePlugin.error('更新知识库基本信息失败');
+                console.error(t('initialization.updateKnowledgeBaseInfoFailed') + ':', error);
+                MessagePlugin.error(t('initialization.updateKnowledgeBaseInfoFailed'));
                 return;
             }
         }
@@ -2356,14 +2358,14 @@ const handleSubmit = async () => {
         
         // 根据是否为知识库设置模式选择不同的API
         if (props.isKbSettings && !currentKbId.value) {
-            console.error('知识库设置模式下缺少知识库ID');
-            MessagePlugin.error('知识库ID缺失，无法保存配置');
+            console.error(t('initialization.knowledgeBaseSettingsModeMissingId'));
+            MessagePlugin.error(t('initialization.knowledgeBaseIdMissing'));
             return;
         }
         const result = await initializeSystemByKB(currentKbId.value!, formData);
         
         if (result.success) {
-            MessagePlugin.success(props.isKbSettings ? '知识库设置更新成功' : (isUpdateMode.value ? '配置更新成功' : '系统初始化完成'));
+            MessagePlugin.success(props.isKbSettings ? t('initialization.knowledgeBaseSettingsUpdateSuccess') : (isUpdateMode.value ? t('initialization.configUpdateSuccess') : t('initialization.systemInitializationCompleted')));
             
             // 根据不同模式进行跳转
             if (props.isKbSettings && currentKbId.value) {
@@ -2378,11 +2380,11 @@ const handleSubmit = async () => {
                 }, 1500);
             }
         } else {
-            MessagePlugin.error(result.message || '操作失败');
+            MessagePlugin.error(result.message || t('initialization.operationFailed'));
         }
     } catch (error: any) {
-        console.error('提交失败:', error);
-        MessagePlugin.error(error.message || '操作失败，请检查网络连接');
+        console.error(t('initialization.operationFailed') + ':', error);
+        MessagePlugin.error(error.message || t('initialization.operationFailedCheckNetwork'));
     } finally {
         submitting.value = false;
         
@@ -2406,7 +2408,7 @@ const formatFileSize = (bytes: number): string => {
 const addTag = async (val: string) => {
     val = val.trim();
     if (val === '') {
-        MessagePlugin.error('请输入有效的标签');
+        MessagePlugin.error(t('initialization.pleaseEnterValidTag'));
         return;
     }
     if (!tagOptions.value.find(item => item.value === val)){
@@ -2415,7 +2417,7 @@ const addTag = async (val: string) => {
     if (!formData.nodeExtract.tags.includes(val)) {
         formData.nodeExtract.tags.push(val);
     }else {
-        MessagePlugin.error('该标签已存在');
+        MessagePlugin.error(t('initialization.tagAlreadyExists'));
     }
     tagInput.value = '';
 }
@@ -2518,21 +2520,21 @@ const onFocus = async () => {};
 
 const canExtract = async (): Promise<boolean> =>{
     if (formData.nodeExtract.text === '') {
-        MessagePlugin.error('请输入示例文本');
+        MessagePlugin.error(t('initialization.pleaseEnterSampleText'));
         return false;
     }
     if (formData.nodeExtract.tags.length === 0) {
-        MessagePlugin.error('请输入关系类型');
+        MessagePlugin.error(t('initialization.pleaseEnterRelationType'));
         return false;
     }
     for (let i = 0; i < formData.nodeExtract.tags.length; i++) {
         if (formData.nodeExtract.tags[i] === '') {
-            MessagePlugin.error('请输入关系类型');
+            MessagePlugin.error(t('initialization.pleaseEnterRelationType'));
             return false;
         }
     }
     if (!modelStatus.llm.available) {
-        MessagePlugin.error('请输入 LLM 大语言模型配置');
+        MessagePlugin.error(t('initialization.pleaseEnterLLMModelConfig'));
         return false;
     }
     return true;
@@ -2573,7 +2575,7 @@ const handleExtract = async () => {
         // 表单验证
         const isValid = await form.value?.validate();
         if (!isValid) {
-            MessagePlugin.error('请检查表单填写是否正确');
+            MessagePlugin.error(t('initialization.checkFormCorrectness'));
             return;
         }
         if (!canExtract()){
@@ -2595,18 +2597,18 @@ const handleExtract = async () => {
 
         const result = await extractTextRelations(request);
         if (result.nodes.length === 0 ) {
-            MessagePlugin.info('未提取有效节点');
+            MessagePlugin.info(t('initialization.noValidNodesExtracted'));
         } else {
             formData.nodeExtract.nodes = result.nodes;
         }
         if ( result.relations.length === 0) {
-            MessagePlugin.info('未提取有效关系');
+            MessagePlugin.info(t('initialization.noValidRelationsExtracted'));
         } else {
             formData.nodeExtract.relations = result.relations;
         }
     } catch (error) {
-        console.error('文本内容关系提取失败:', error);
-        MessagePlugin.error('提取失败，请检查网络连接或文本内容格式');
+        console.error(t('initialization.textRelationExtractionFailed') + ':', error);
+        MessagePlugin.error(t('initialization.extractionFailedCheckNetwork'));
     } finally {
         extracting.value = false;
     }
@@ -2620,7 +2622,7 @@ const handleFabriTag = async () => {
         // 表单验证
         const isValid = await form.value?.validate();
         if (!isValid) {
-            MessagePlugin.error('请检查表单填写是否正确');
+            MessagePlugin.error(t('initialization.checkFormCorrectness'));
             return;
         }
 
@@ -2643,8 +2645,8 @@ const handleFabriTag = async () => {
         }
 
     } catch (error) {
-        console.error('随机生成标签:', error);
-        MessagePlugin.error('生成失败，请重试');
+        console.error(t('initialization.generateRandomTags') + ':', error);
+        MessagePlugin.error(t('initialization.generationFailedRetry'));
     } finally {
         tagFabring.value = false;
     }
@@ -2658,7 +2660,7 @@ const handleFabriText = async () => {
         // 表单验证
         const isValid = await form.value?.validate();
         if (!isValid) {
-            MessagePlugin.error('请检查表单填写是否正确');
+            MessagePlugin.error(t('initialization.checkFormCorrectness'));
             return;
         }
 
@@ -2677,8 +2679,8 @@ const handleFabriText = async () => {
         const result = await fabriText(request);
         formData.nodeExtract.text = result.text;
     } catch (error) {
-        console.error('生成示例文本失败:', error);
-        MessagePlugin.error('生成失败，请重试');
+        console.error(t('initialization.generateRandomText') + ':', error);
+        MessagePlugin.error(t('initialization.generationFailedRetry'));
     } finally {
         textFabring.value = false;
     }
