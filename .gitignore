@@ -29,7 +29,7 @@ temp/
 
 WeKnora
 /models/
-services/docreader/src/proto/__pycache__
+**/__pycache__
 test/data/mswag.txt
 data/files/
 
