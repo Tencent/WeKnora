@@ -107,9 +107,14 @@ func (s *OllamaService) IsModelAvailable(ctx context.Context, modelName string) 
 		return false, fmt.Errorf("failed to get model list: %w", err)
 	}
 
+	// If no version is specified for the model, add ":latest" by default
+	checkModelName := modelName
+	if !strings.Contains(modelName, ":") {
+		checkModelName = modelName + ":latest"
+	}
 	// Check if model is in the list
 	for _, model := range listResp.Models {
-		if model.Name == modelName {
+		if model.Name == checkModelName {
 			return true, nil
 		}
 	}

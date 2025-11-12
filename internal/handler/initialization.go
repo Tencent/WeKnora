@@ -556,11 +556,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 
 	// 检查每个模型是否存在
 	for _, modelName := range req.Models {
-		checkModelName := modelName
-		if !strings.Contains(modelName, ":") {
-			checkModelName = modelName + ":latest"
-		}
-		available, err := h.ollamaService.IsModelAvailable(ctx, checkModelName)
+		available, err := h.ollamaService.IsModelAvailable(ctx, modelName)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"model_name": modelName,
