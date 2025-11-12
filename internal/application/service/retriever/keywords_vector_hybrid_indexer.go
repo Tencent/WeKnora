@@ -51,7 +51,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		embeddingMap[indexInfo.ChunkID] = embedding
+		embeddingMap[indexInfo.SourceID] = embedding
 	}
 	params["embedding"] = embeddingMap
 	return v.indexRepository.Save(ctx, indexInfo, params)
