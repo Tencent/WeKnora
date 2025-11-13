@@ -538,7 +538,7 @@ check_environment() {
     # 检查内存
     log_info "检查内存使用情况..."
     if [ "$OS" = "Darwin" ]; then
-        vm_stat | perl -ne '/page size of (\d+)/ and $size=$1; /Pages free: (\d+)/ and print "Free Memory: ", $1 * $size / 1048576, " MB\n"'
+        vm_stat | perl -ne '/page size of (\d+)/ and $size=$1; /Pages free:\s*(\d+)/ and print "Free Memory: ", $1 * $size / 1048576, " MB\n"'
     else
         free -h | grep -E "(total|Mem:)"
     fi
