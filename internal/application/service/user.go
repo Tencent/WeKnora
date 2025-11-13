@@ -63,6 +63,16 @@ var engine = map[string][]types.RetrieverEngineParams{
 			RetrieverEngineType: types.ElasticsearchRetrieverEngineType,
 		},
 	},
+	"milvus": {
+		{
+			RetrieverType:       types.KeywordsRetrieverType,
+			RetrieverEngineType: types.MilvusRetrieverEngineType,
+		},
+		{
+			RetrieverType:       types.VectorRetrieverType,
+			RetrieverEngineType: types.MilvusRetrieverEngineType,
+		},
+	},
 }
 
 // Register creates a new user account

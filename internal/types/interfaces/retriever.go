@@ -65,6 +65,7 @@ type RetrieveEngineRegistry interface {
 
 // RetrieveEngineService defines the retrieve engine service interface
 type RetrieveEngineService interface {
+	Engine() RetrieveEngineRepository
 	// Index indexes the index info
 	Index(ctx context.Context,
 		embedder embedding.Embedder,

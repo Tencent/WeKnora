@@ -81,7 +81,7 @@ WeKnora employs a modern modular design to build a complete document understandi
 |---------|---------|------|
 | Document Formats | ✅ PDF / Word / Txt / Markdown / Images (with OCR / Caption) | Support for structured and unstructured documents with text extraction from images |
 | Embedding Models | ✅ Local models, BGE / GTE APIs, etc. | Customizable embedding models, compatible with local deployment and cloud vector generation APIs |
-| Vector DB Integration | ✅ PostgreSQL (pgvector), Elasticsearch | Support for mainstream vector index backends, flexible switching for different retrieval scenarios |
+| Vector DB Integration | ✅ PostgreSQL (pgvector), Elasticsearch, milvus | Support for mainstream vector index backends, flexible switching for different retrieval scenarios |
 | Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG | Support for sparse/dense recall and knowledge graph-enhanced retrieval with customizable retrieve-rerank-generate pipelines |
 | LLM Integration | ✅ Support for Qwen, DeepSeek, etc., with thinking/non-thinking mode switching | Compatible with local models (e.g., via Ollama) or external API services with flexible inference configuration |
 | QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates | Support for complex semantic modeling, instruction control and chain-of-thought Q&A with configurable prompts and context windows |
