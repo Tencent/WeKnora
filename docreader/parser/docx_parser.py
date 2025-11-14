@@ -1,37 +1,36 @@
 import logging
-import tempfile
 import os
-import sys
-import time
-from io import BytesIO
-from typing import Optional, Dict, Any, Tuple, List, Union
-from dataclasses import dataclass, field
-from PIL import Image
-from docx import Document
-from docx.image.exceptions import (
-    UnrecognizedImageError,
-    UnexpectedEndOfFileError,
-    InvalidImageStreamError,
-)
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+import re
 import tempfile
 import threading
+import time
 import traceback
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from io import BytesIO
 from multiprocessing import Manager
-import re
+from typing import Any, Dict, List, Optional, Tuple
 
-from .base_parser import BaseParser
+from docx import Document
+from docx.image.exceptions import (
+    InvalidImageStreamError,
+    UnexpectedEndOfFileError,
+    UnrecognizedImageError,
+)
+from PIL import Image
+
+from docreader.models.document import Document as DocumentModel
+from docreader.parser.base_parser import BaseParser
+from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-# Add thread local storage to track the processing status of each thread
-thread_local = threading.local()
 
 
 class ImageData:
     """Represents a processed image of document content"""
+
     local_path: str = ""
-    object: Image.Image = None
+    object: Optional[Image.Image] = None
     url: str = ""
 
 
@@ -40,7 +39,9 @@ class LineData:
     """Represents a processed line of document content with associated images"""
 
     text: str = ""  # Extracted text content
-    images: List[ImageData] = field(default_factory=list)  # List of images or image paths
+    images: List[ImageData] = field(
+        default_factory=list
+    )  # List of images or image paths
     extra_info: str = ""  # Placeholder for additional info (currently unused)
     page_num: int = 0  # Page number
     content_sequence: List[Tuple[str, Any]] = field(
@@ -53,18 +54,8 @@ class DocxParser(BaseParser):
 
     def __init__(
         self,
-        file_name: str = "",
-        file_type: str = None,
-        enable_multimodal: bool = True,
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
-        separators: list = ["\n\n", "\n", "。"],
-        ocr_backend: str = "paddle",
-        ocr_config: dict = None,
-        max_image_size: int = 1920,
-        max_concurrent_tasks: int = 5,
-        max_pages: int = 100,  # Maximum number of pages to process, default to 50 pages
-        chunking_config=None,
+        max_pages: int = 100,  # Maximum number of pages to process
+        **kwargs,
     ):
         """Initialize DOCX document parser
 
@@ -79,37 +70,16 @@ class DocxParser(BaseParser):
             ocr_config: OCR engine configuration
             max_image_size: Maximum image size limit
             max_concurrent_tasks: Maximum number of concurrent tasks
-            max_pages: Maximum number of pages to process, if more than this, only process the first max_pages pages
+            max_pages: Maximum number of pages to process
         """
-        super().__init__(
-            file_name=file_name,
-            file_type=file_type,
-            enable_multimodal=enable_multimodal,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=separators,
-            ocr_backend=ocr_backend,
-            ocr_config=ocr_config,
-            max_image_size=max_image_size,
-            max_concurrent_tasks=max_concurrent_tasks,
-            chunking_config=chunking_config,
-        )
+        super().__init__(**kwargs)
         self.max_pages = max_pages
         logger.info(f"DocxParser initialized with max_pages={max_pages}")
 
-    def parse_into_text(self, content: bytes) ->  Union[str, Tuple[str, Dict[str, Any]]]:
-        """Parse DOCX document, extract text content and image Markdown links
-
-        Args:
-            content: DOCX document content
-
-        Returns:
-            Tuple of (parsed_text, image_map) where image_map maps image URLs to Image objects
-            All LineData objects are used internally but not returned directly through this interface
-        """
+    def parse_into_text(self, content: bytes) -> DocumentModel:
+        """Parse DOCX document, extract text content and image Markdown links"""
         logger.info(f"Parsing DOCX document, content size: {len(content)} bytes")
         logger.info(f"Max pages limit set to: {self.max_pages}")
-        logger.info("Converting DOCX content to sections and tables")
 
         start_time = time.time()
         # Use concurrent processing to handle the document
@@ -123,7 +93,7 @@ class DocxParser(BaseParser):
             docx_processor = Docx(
                 max_image_size=self.max_image_size,
                 enable_multimodal=self.enable_multimodal,
-                upload_file=self.upload_file,
+                upload_file=self.storage.upload_file,
             )
             all_lines, tables = docx_processor(
                 binary=content,
@@ -140,7 +110,7 @@ class DocxParser(BaseParser):
             section_start_time = time.time()
 
             text_parts = []
-            image_parts = {}
+            image_parts: Dict[str, str] = {}
 
             for sec_idx, line in enumerate(all_lines):
                 try:
@@ -148,16 +118,19 @@ class DocxParser(BaseParser):
                         text_parts.append(line.text)
                         if sec_idx < 3 or sec_idx % 50 == 0:
                             logger.info(
-                                f"Added section {sec_idx+1} text: {line.text[:50]}..."
+                                f"Added section {sec_idx + 1} text: {line.text[:50]}..."
                                 if len(line.text) > 50
-                                else f"Added section {sec_idx+1} text: {line.text}"
+                                else f"Added section {sec_idx + 1} text: {line.text}"
                             )
                     if line.images:
                         for image_data in line.images:
-                            if image_data.url:
-                                image_parts[image_data.url] = image_data.object
+                            if image_data.url and image_data.object:
+                                image_parts[image_data.url] = endecode.decode_image(
+                                    image_data.object
+                                )
+                                image_data.object.close()
                 except Exception as e:
-                    logger.error(f"Error processing section {sec_idx+1}: {str(e)}")
+                    logger.error(f"Error processing section {sec_idx + 1}: {str(e)}")
                     logger.error(f"Detailed stack trace: {traceback.format_exc()}")
                     continue
 
@@ -176,17 +149,17 @@ class DocxParser(BaseParser):
 
             total_processing_time = time.time() - start_time
             logger.info(
-                f"Parsing complete in {total_processing_time:.2f}s, generated {len(text)} characters of text "
+                f"Parsing complete in {total_processing_time:.2f}s, "
+                f"generated {len(text)} characters of text"
             )
 
-            return text, image_parts
+            return DocumentModel(content=text, images=image_parts)
         except Exception as e:
             logger.error(f"Error parsing DOCX document: {str(e)}")
             logger.error(f"Detailed stack trace: {traceback.format_exc()}")
-            fallback_text = self._parse_using_simple_method(content)
-            return fallback_text, {}
+            return self._parse_using_simple_method(content)
 
-    def _parse_using_simple_method(self, content: bytes) -> str:
+    def _parse_using_simple_method(self, content: bytes) -> DocumentModel:
         """Parse document using a simplified method, as a fallback
 
         Args:
@@ -201,7 +174,8 @@ class DocxParser(BaseParser):
             doc = Document(BytesIO(content))
             logger.info(
                 f"Successfully loaded document in simplified method, "
-                f"contains {len(doc.paragraphs)} paragraphs and {len(doc.tables)} tables"
+                f"contains {len(doc.paragraphs)} paragraphs "
+                f"and {len(doc.tables)} tables"
             )
             text_parts = []
 
@@ -211,7 +185,7 @@ class DocxParser(BaseParser):
             para_with_text = 0
             for i, para in enumerate(doc.paragraphs):
                 if i % 100 == 0:
-                    logger.info(f"Processing paragraph {i+1}/{para_count}")
+                    logger.info(f"Processing paragraph {i + 1}/{para_count}")
                 if para.text.strip():
                     text_parts.append(para.text.strip())
                     para_with_text += 1
@@ -225,7 +199,7 @@ class DocxParser(BaseParser):
             rows_processed = 0
             for i, table in enumerate(doc.tables):
                 if i % 10 == 0:
-                    logger.info(f"Processing table {i+1}/{table_count}")
+                    logger.info(f"Processing table {i + 1}/{table_count}")
 
                 table_has_content = False
                 for row in table.rows:
@@ -256,25 +230,24 @@ class DocxParser(BaseParser):
             # If the result is still empty, return an error message
             if not result_text:
                 logger.warning("No text extracted using simplified method")
-                return "", {}
+                return DocumentModel()
 
-            return result_text, {}
+            return DocumentModel(content=result_text)
         except Exception as backup_error:
             processing_time = time.time() - start_time
             logger.error(
-                f"Simplified parsing failed after {processing_time:.2f}s: {str(backup_error)}"
+                f"Simplified parsing failed {processing_time:.2f}s: {backup_error}"
             )
             logger.error(f"Detailed traceback: {traceback.format_exc()}")
-            return "", {}
+            return DocumentModel()
 
 
 class Docx:
     def __init__(self, max_image_size=1920, enable_multimodal=False, upload_file=None):
         logger.info("Initializing DOCX processor")
         self.max_image_size = max_image_size  # Maximum image size limit
-        self.picture_cache = (
-            {}
-        )  # Image cache to avoid processing the same image repeatedly
+        # Image cache to avoid processing the same image repeatedly
+        self.picture_cache = {}
         self.enable_multimodal = enable_multimodal
         self.upload_file = upload_file
 
@@ -454,7 +427,6 @@ class Docx:
 
         return page_to_paragraphs
 
-
     def __call__(
         self,
         binary: Optional[bytes] = None,
@@ -610,7 +582,6 @@ class Docx:
                 )
 
         return pages_to_process
-
 
     def _process_document(
         self,
@@ -806,7 +777,9 @@ class Docx:
                 # Collect temporary image paths for later cleanup
                 for line in page_lines:
                     for image_data in line.images:
-                        if image_data.local_path and image_data.local_path.startswith("/tmp/docx_img_"):
+                        if image_data.local_path and image_data.local_path.startswith(
+                            "/tmp/docx_img_"
+                        ):
                             temp_img_paths.add(image_data.local_path)
 
                 results.extend(page_lines)
@@ -876,7 +849,11 @@ class Docx:
 
                 # Process all image data objects
                 for image_data in image_paths:
-                    if image_data.local_path and os.path.exists(image_data.local_path) and image_data.local_path not in image_url_map:
+                    if (
+                        image_data.local_path
+                        and os.path.exists(image_data.local_path)
+                        and image_data.local_path not in image_url_map
+                    ):
                         try:
                             # Upload the image if it doesn't have a URL yet
                             if not image_data.url:
@@ -886,12 +863,16 @@ class Docx:
                                     image_data.url = image_url
                                     # Add image URL as Markdown format
                                     markdown_image = f"![]({image_url})"
-                                    image_url_map[image_data.local_path] = markdown_image
+                                    image_url_map[image_data.local_path] = (
+                                        markdown_image
+                                    )
                                     logger.info(
                                         f"Added image URL for {image_data.local_path}: {image_url}"
                                     )
                                 else:
-                                    logger.warning(f"Failed to upload image: {image_data.local_path}")
+                                    logger.warning(
+                                        f"Failed to upload image: {image_data.local_path}"
+                                    )
                             else:
                                 # Already has a URL, use it
                                 markdown_image = f"![]({image_data.url})"
@@ -925,12 +906,19 @@ class Docx:
                         # For ImageData objects, use the URL
                         if isinstance(content, str) and content in image_url_map:
                             combined_parts.append(image_url_map[content])
-                        elif hasattr(content, 'local_path') and content.local_path in image_url_map:
+                        elif (
+                            hasattr(content, "local_path")
+                            and content.local_path in image_url_map
+                        ):
                             combined_parts.append(image_url_map[content.local_path])
 
                 # Create the final text with proper ordering
                 final_text = "\n\n".join(part for part in combined_parts if part)
-                processed_lines.append(LineData(text=final_text, page_num=page_num, images=line_data.images))
+                processed_lines.append(
+                    LineData(
+                        text=final_text, page_num=page_num, images=line_data.images
+                    )
+                )
         else:
             processed_lines = lines
 
@@ -1003,11 +991,11 @@ class Docx:
             logger.info(f"Processing {table_count} tables")
             for tb_idx, tb in enumerate(self.doc.tables):
                 if tb_idx % 10 == 0:  # Log only every 10 tables to reduce log volume
-                    logger.info(f"Processing table {tb_idx+1}/{table_count}")
+                    logger.info(f"Processing table {tb_idx + 1}/{table_count}")
 
                 # Optimize: Check if table is empty
                 if len(tb.rows) == 0 or all(len(r.cells) == 0 for r in tb.rows):
-                    logger.info(f"Skipping empty table {tb_idx+1}")
+                    logger.info(f"Skipping empty table {tb_idx + 1}")
                     continue
 
                 table_html = self._convert_table_to_html(tb)
@@ -1111,8 +1099,8 @@ def _save_image_to_temp(logger, image, page_num, img_idx):
     if not image:
         return None
 
-    import tempfile
     import os
+    import tempfile
 
     try:
         # Create a temporary file
@@ -1187,8 +1175,15 @@ def process_page_multiprocess(
             return []
 
         # Extract page content
-        combined_text, image_objects, content_sequence = _extract_page_content_in_process(
-            process_logger, doc, page_num, paragraphs, enable_multimodal, max_image_size
+        combined_text, image_objects, content_sequence = (
+            _extract_page_content_in_process(
+                process_logger,
+                doc,
+                page_num,
+                paragraphs,
+                enable_multimodal,
+                max_image_size,
+            )
         )
 
         # Process content sequence to maintain order between processes
@@ -1199,7 +1194,9 @@ def process_page_multiprocess(
         if enable_multimodal:
             # First pass: save all images to temporary files
             for i, image_object in enumerate(image_objects):
-                img_path = _save_image_to_temp(process_logger, image_object, page_num, i)
+                img_path = _save_image_to_temp(
+                    process_logger, image_object, page_num, i
+                )
                 if img_path:
                     # Create ImageData object
                     image_data = ImageData()

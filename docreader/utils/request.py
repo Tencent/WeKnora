@@ -1,10 +1,10 @@
-from contextvars import ContextVar
-import logging
-import uuid
 import contextlib
+import logging
 import time
-from typing import Optional
+import uuid
+from contextvars import ContextVar
 from logging import LogRecord
+from typing import Optional
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -26,21 +26,21 @@ def get_request_id() -> Optional[str]:
 
 class MillisecondFormatter(logging.Formatter):
     """自定义日志格式化器，只显示毫秒级时间戳(3位数字)而不是微秒(6位)"""
-    
+
     def formatTime(self, record, datefmt=None):
         """重写formatTime方法，将微秒格式化为毫秒"""
         # 先获取标准的格式化时间
         result = super().formatTime(record, datefmt)
-        
+
         # 如果使用了包含.%f的格式，则将微秒(6位)截断为毫秒(3位)
         if datefmt and ".%f" in datefmt:
             # 格式化的时间字符串应该在最后有6位微秒数
-            parts = result.split('.')
+            parts = result.split(".")
             if len(parts) > 1 and len(parts[1]) >= 6:
                 # 只保留前3位作为毫秒
                 millis = parts[1][:3]
                 result = f"{parts[0]}.{millis}"
-                
+
         return result
 
 

@@ -1,64 +1,68 @@
 # -*- coding: utf-8 -*-
-import os
-import uuid
-import logging
 import io
+import logging
+import os
 import traceback
+import uuid
 from abc import ABC, abstractmethod
-from typing import Tuple, Optional
+from typing import Dict
 
-from qcloud_cos import CosConfig, CosS3Client
 from minio import Minio
+from qcloud_cos import CosConfig, CosS3Client
+
+from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 class Storage(ABC):
     """Abstract base class for object storage operations"""
-    
+
     @abstractmethod
     def upload_file(self, file_path: str) -> str:
         """Upload file to object storage
-        
+
         Args:
             file_path: File path
-            
-        Returns:
-            File URL
-        """
-        pass
-    
-    @abstractmethod
-    def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
-        """Upload bytes to object storage
-        
-        Args:
-            content: Byte content to upload
-            file_ext: File extension
-            
+
         Returns:
             File URL
         """
         pass
 
-        
+    @abstractmethod
+    def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
+        """Upload bytes to object storage
+
+        Args:
+            content: Byte content to upload
+            file_ext: File extension
+
+        Returns:
+            File URL
+        """
+        pass
+
+
 class CosStorage(Storage):
     """Tencent Cloud COS storage implementation"""
-    
+
     def __init__(self, storage_config=None):
         """Initialize COS storage
-        
+
         Args:
             storage_config: Storage configuration
         """
         self.storage_config = storage_config
-        self.client, self.bucket_name, self.region, self.prefix = self._init_cos_client()
-        
+        self.client, self.bucket_name, self.region, self.prefix = (
+            self._init_cos_client()
+        )
+
     def _init_cos_client(self):
         """Initialize Tencent Cloud COS client"""
         try:
-            # Use provided COS config if available, otherwise fall back to environment variables
+            # Use provided COS config if available,
+            # otherwise fall back to environment variables
             if self.storage_config and self.storage_config.get("access_key_id") != "":
                 cos_config = self.storage_config
                 secret_id = cos_config.get("access_key_id")
@@ -75,15 +79,16 @@ class CosStorage(Storage):
                 bucket_name = os.getenv("COS_BUCKET_NAME")
                 appid = os.getenv("COS_APP_ID")
                 prefix = os.getenv("COS_PATH_PREFIX")
-                
+
             enable_old_domain = (
                 os.getenv("COS_ENABLE_OLD_DOMAIN", "true").lower() == "true"
             )
 
             if not all([secret_id, secret_key, region, bucket_name, appid]):
                 logger.error(
-                    "Incomplete COS configuration, missing required environment variables"
-                    f"secret_id: {secret_id}, secret_key: {secret_key}, region: {region}, bucket_name: {bucket_name}, appid: {appid}"
+                    "Incomplete COS configuration, missing environment variables"
+                    f"secret_id: {secret_id}, secret_key: {secret_key}, "
+                    f"region: {region}, bucket_name: {bucket_name}, appid: {appid}"
                 )
                 return None, None, None, None
 
@@ -105,27 +110,26 @@ class CosStorage(Storage):
         except Exception as e:
             logger.error(f"Failed to initialize COS client: {str(e)}")
             return None, None, None, None
-            
+
     def _get_download_url(self, bucket_name, region, object_key):
         """Generate COS object URL
-        
+
         Args:
             bucket_name: Bucket name
             region: Region
             object_key: Object key
-            
+
         Returns:
             File URL
         """
         return f"https://{bucket_name}.cos.{region}.myqcloud.com/{object_key}"
-    
-        
+
     def upload_file(self, file_path: str) -> str:
         """Upload file to Tencent Cloud COS
-        
+
         Args:
             file_path: File path
-            
+
         Returns:
             File URL
         """
@@ -135,16 +139,16 @@ class CosStorage(Storage):
                 return ""
 
             # Generate object key, use UUID to avoid conflicts
-            file_name = os.path.basename(file_path)
-            object_key = (
-                f"{self.prefix}/images/{uuid.uuid4().hex}{os.path.splitext(file_name)[1]}"
-            )
+            file_ext = os.path.splitext(file_path)[1]
+            object_key = f"{self.prefix}/images/{uuid.uuid4().hex}{file_ext}"
             logger.info(f"Generated object key: {object_key}")
 
             # Upload file
             logger.info("Attempting to upload file to COS")
-            response = self.client.upload_file(
-                Bucket=self.bucket_name, LocalFilePath=file_path, Key=object_key
+            self.client.upload_file(
+                Bucket=self.bucket_name,
+                LocalFilePath=file_path,
+                Key=object_key,
             )
 
             # Get file URL
@@ -156,14 +160,14 @@ class CosStorage(Storage):
         except Exception as e:
             logger.error(f"Failed to upload file to COS: {str(e)}")
             return ""
-            
+
     def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
         """Upload bytes to Tencent Cloud COS
-        
+
         Args:
             content: Byte content to upload
             file_ext: File extension
-            
+
         Returns:
             File URL
         """
@@ -171,10 +175,16 @@ class CosStorage(Storage):
             logger.info(f"Uploading bytes content to COS, size: {len(content)} bytes")
             if not self.client:
                 return ""
-                
-            object_key = f"{self.prefix}/images/{uuid.uuid4().hex}{file_ext}" if self.prefix else f"images/{uuid.uuid4().hex}{file_ext}"
+
+            object_key = (
+                f"{self.prefix}/images/{uuid.uuid4().hex}{file_ext}"
+                if self.prefix
+                else f"images/{uuid.uuid4().hex}{file_ext}"
+            )
             logger.info(f"Generated object key: {object_key}")
-            self.client.put_object(Bucket=self.bucket_name, Body=content, Key=object_key)
+            self.client.put_object(
+                Bucket=self.bucket_name, Body=content, Key=object_key
+            )
             file_url = self._get_download_url(self.bucket_name, self.region, object_key)
             logger.info(f"Successfully uploaded bytes to COS: {file_url}")
             return file_url
@@ -186,16 +196,18 @@ class CosStorage(Storage):
 
 class MinioStorage(Storage):
     """MinIO storage implementation"""
-    
+
     def __init__(self, storage_config=None):
         """Initialize MinIO storage
-        
+
         Args:
             storage_config: Storage configuration
         """
         self.storage_config = storage_config
-        self.client, self.bucket_name, self.use_ssl, self.endpoint, self.path_prefix = self._init_minio_client()
-        
+        self.client, self.bucket_name, self.use_ssl, self.endpoint, self.path_prefix = (
+            self._init_minio_client()
+        )
+
     def _init_minio_client(self):
         """Initialize MinIO client from environment variables or injected config.
 
@@ -203,58 +215,69 @@ class MinioStorage(Storage):
         prefer those values to override envs.
         """
         try:
-            endpoint = os.getenv("MINIO_ENDPOINT")
+            endpoint = os.getenv("MINIO_ENDPOINT", "")
             use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
             if self.storage_config and self.storage_config.get("bucket_name"):
                 storage_config = self.storage_config
-                bucket_name = storage_config.get("bucket_name")
+                bucket_name = storage_config.get("bucket_name", "")
                 path_prefix = storage_config.get("path_prefix").strip().strip("/")
                 access_key = storage_config.get("access_key_id")
                 secret_key = storage_config.get("secret_access_key")
             else:
                 access_key = os.getenv("MINIO_ACCESS_KEY_ID")
                 secret_key = os.getenv("MINIO_SECRET_ACCESS_KEY")
-                bucket_name = os.getenv("MINIO_BUCKET_NAME")
+                bucket_name = os.getenv("MINIO_BUCKET_NAME", "")
                 path_prefix = os.getenv("MINIO_PATH_PREFIX", "").strip().strip("/")
 
             if not all([endpoint, access_key, secret_key, bucket_name]):
-                logger.error("Incomplete MinIO configuration, missing required environment variables")
+                logger.error(
+                    "Incomplete MinIO configuration, missing environment variables"
+                )
                 return None, None, None, None, None
 
             # Initialize client
-            client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=use_ssl)
+            client = Minio(
+                endpoint, access_key=access_key, secret_key=secret_key, secure=use_ssl
+            )
 
             # Ensure bucket exists
             found = client.bucket_exists(bucket_name)
             if not found:
                 client.make_bucket(bucket_name)
-                policy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}' % (bucket_name, bucket_name)
+                policy = (
+                    '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}'
+                    % (bucket_name, bucket_name)
+                )
                 client.set_bucket_policy(bucket_name, policy)
 
             return client, bucket_name, use_ssl, endpoint, path_prefix
         except Exception as e:
             logger.error(f"Failed to initialize MinIO client: {str(e)}")
             return None, None, None, None, None
-            
-    def _get_download_url(self, bucket_name: str, object_key: str, use_ssl: bool, endpoint: str, public_endpoint: str = None):
+
+    def _get_download_url(self, object_key: str):
         """Construct a public URL for MinIO object.
 
         If MINIO_PUBLIC_ENDPOINT is provided, use it; otherwise fallback to endpoint.
         """
-        if public_endpoint:
-            base = public_endpoint
-        else:
-            scheme = "https" if use_ssl else "http"
-            base = f"{scheme}://{endpoint}"
-        # Path-style URL for MinIO
-        return f"{base}/{bucket_name}/{object_key}"
-        
+        # 1. Use public endpoint if provided
+        endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT")
+        if endpoint:
+            return f"{endpoint}/{self.bucket_name}/{object_key}"
+
+        # 2. Use SSL if enabled
+        if self.use_ssl:
+            return f"https://{self.endpoint}/{self.bucket_name}/{object_key}"
+
+        # 3. Use HTTP default
+        return f"http://{self.endpoint}/{self.bucket_name}/{object_key}"
+
     def upload_file(self, file_path: str) -> str:
         """Upload file to MinIO
-        
+
         Args:
             file_path: File path
-            
+
         Returns:
             File URL
         """
@@ -265,29 +288,27 @@ class MinioStorage(Storage):
 
             # Generate object key, use UUID to avoid conflicts
             file_name = os.path.basename(file_path)
-            object_key = f"{self.path_prefix}/images/{uuid.uuid4().hex}{os.path.splitext(file_name)[1]}" if self.path_prefix else f"images/{uuid.uuid4().hex}{os.path.splitext(file_name)[1]}"
+            object_key = (
+                f"{self.path_prefix}/images/{uuid.uuid4().hex}{os.path.splitext(file_name)[1]}"
+                if self.path_prefix
+                else f"images/{uuid.uuid4().hex}{os.path.splitext(file_name)[1]}"
+            )
             logger.info(f"Generated MinIO object key: {object_key}")
 
             # Upload file
             logger.info("Attempting to upload file to MinIO")
-            with open(file_path, 'rb') as file_data:
+            with open(file_path, "rb") as file_data:
                 file_size = os.path.getsize(file_path)
                 self.client.put_object(
-                    bucket_name=self.bucket_name,
+                    bucket_name=self.bucket_name or "",
                     object_name=object_key,
                     data=file_data,
                     length=file_size,
-                    content_type='application/octet-stream'
+                    content_type="application/octet-stream",
                 )
 
             # Get file URL
-            file_url = self._get_download_url(
-                self.bucket_name, 
-                object_key, 
-                self.use_ssl, 
-                self.endpoint,
-                os.getenv("MINIO_PUBLIC_ENDPOINT", None)
-            )
+            file_url = self._get_download_url(object_key)
 
             logger.info(f"Successfully uploaded file to MinIO: {file_url}")
             return file_url
@@ -295,14 +316,14 @@ class MinioStorage(Storage):
         except Exception as e:
             logger.error(f"Failed to upload file to MinIO: {str(e)}")
             return ""
-            
+
     def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
         """Upload bytes to MinIO
-        
+
         Args:
             content: Byte content to upload
             file_ext: File extension
-            
+
         Returns:
             File URL
         """
@@ -310,23 +331,21 @@ class MinioStorage(Storage):
             logger.info(f"Uploading bytes content to MinIO, size: {len(content)} bytes")
             if not self.client:
                 return ""
-                
-            object_key = f"{self.path_prefix}/images/{uuid.uuid4().hex}{file_ext}" if self.path_prefix else f"images/{uuid.uuid4().hex}{file_ext}"
+
+            object_key = (
+                f"{self.path_prefix}/images/{uuid.uuid4().hex}{file_ext}"
+                if self.path_prefix
+                else f"images/{uuid.uuid4().hex}{file_ext}"
+            )
             logger.info(f"Generated MinIO object key: {object_key}")
             self.client.put_object(
-                self.bucket_name, 
-                object_key, 
-                data=io.BytesIO(content), 
-                length=len(content), 
-                content_type="application/octet-stream"
+                self.bucket_name or "",
+                object_key,
+                data=io.BytesIO(content),
+                length=len(content),
+                content_type="application/octet-stream",
             )
-            file_url = self._get_download_url(
-                self.bucket_name, 
-                object_key, 
-                self.use_ssl, 
-                self.endpoint,
-                os.getenv("MINIO_PUBLIC_ENDPOINT", None)
-            )
+            file_url = self._get_download_url(object_key)
             logger.info(f"Successfully uploaded bytes to MinIO: {file_url}")
             return file_url
         except Exception as e:
@@ -335,26 +354,61 @@ class MinioStorage(Storage):
             return ""
 
 
-def create_storage(storage_config=None) -> Storage:
+class LocalStorage(Storage):
+    """Local file system storage implementation"""
+
+    def __init__(self, storage_config: Dict[str, str] = {}):
+        self.storage_config = storage_config
+        base_dir = storage_config.get(
+            "base_dir", os.getenv("LOCAL_STORAGE_BASE_DIR", "")
+        )
+        self.image_dir = os.path.join(base_dir, "images")
+        os.makedirs(self.image_dir, exist_ok=True)
+
+    def upload_file(self, file_path: str) -> str:
+        logger.info(f"Uploading file to local storage: {file_path}")
+        return file_path
+
+    def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
+        logger.info(f"Uploading file to local storage: {len(content)} bytes")
+        fname = os.path.join(self.image_dir, f"{uuid.uuid4()}{file_ext}")
+        with open(fname, "wb") as f:
+            f.write(content)
+        return fname
+
+
+class Base64Storage(Storage):
+    def upload_file(self, file_path: str) -> str:
+        logger.info(f"Uploading file to base64 storage: {file_path}")
+        return file_path
+
+    def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
+        logger.info(f"Uploading file to base64 storage: {len(content)} bytes")
+        file_ext = file_ext.lstrip(".")
+        return f"data:image/{file_ext};base64,{endecode.decode_image(content)}"
+
+
+def create_storage(storage_config: Dict[str, str] | None = None) -> Storage:
     """Create a storage instance based on configuration or environment variables
-    
+
     Args:
         storage_config: Storage configuration dictionary
-        
+
     Returns:
         Storage instance
     """
     storage_type = os.getenv("STORAGE_TYPE", "cos").lower()
-    
     if storage_config:
         storage_type = str(storage_config.get("provider", storage_type)).lower()
-        
     logger.info(f"Creating {storage_type} storage instance")
-    
+
     if storage_type == "minio":
         return MinioStorage(storage_config)
     elif storage_type == "cos":
-        # Default to COS
         return CosStorage(storage_config)
-    else:
-        return None
+    elif storage_type == "local":
+        return LocalStorage(storage_config or {})
+    elif storage_type == "base64":
+        return Base64Storage()
+
+    raise ValueError(f"Invalid storage type: {storage_type}")

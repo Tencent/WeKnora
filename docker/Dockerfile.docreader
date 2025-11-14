@@ -80,10 +80,11 @@ RUN pip install uv --break-system-packages && \
     python -m uv sync --locked --no-dev
 
 # 复制源代码和生成脚本
-COPY docreader .
+COPY docreader docreader
 
 # 生成 protobuf 代码
-RUN chmod +x scripts/generate_proto.sh && bash scripts/generate_proto.sh
+RUN chmod +x docreader/scripts/generate_proto.sh && \
+    bash docreader/scripts/generate_proto.sh
 
 # 确保模型目录存在
 RUN ls -la /root/.paddleocr/whl/
@@ -150,10 +151,11 @@ RUN python -m playwright install-deps webkit
 # COPY docreader/scripts/download_deps.py download_deps.py
 # RUN python -m download_deps
 
-COPY --from=builder /app/ ./
+COPY docreader/pyproject.toml docreader/uv.lock ./
+COPY --from=builder /app/docreader docreader
 
 # 暴露 gRPC 端口
 EXPOSE 50051
 
 # 直接运行 Python 服务（日志输出到 stdout/stderr）
-CMD ["uv", "run", "main.py"]
+CMD ["uv", "run", "-m", "docreader.main"]

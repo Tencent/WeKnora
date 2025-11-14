@@ -150,6 +150,7 @@ services:
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
       - MINIO_USE_SSL=${MINIO_USE_SSL:-}
       - WEB_PROXY=${WEB_PROXY:-}
+      - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
       interval: 30s

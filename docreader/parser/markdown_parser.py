@@ -1,33 +1,53 @@
-import asyncio
-import re
+import base64
 import logging
-import numpy as np
-import os  # Import os module to get environment variables
-from typing import Dict, List, Optional, Tuple, Union, Any
-from .base_parser import BaseParser
+import os
+from typing import Dict
+
+from docreader.models.document import Document
+from docreader.parser.base_parser import BaseParser
+from docreader.parser.chain_parser import PipelineParser
+from docreader.parser.markdown_image_util import MarkdownImageUtil
+from docreader.utils import endecode
 
 # Get logger object
 logger = logging.getLogger(__name__)
 
 
-class MarkdownParser(BaseParser):
-    """Markdown document parser"""
+class MarkdownImageBase64(BaseParser):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.image_helper = MarkdownImageUtil()
 
-    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
-        """Parse Markdown document, only extract text content, do not process images
-
-        Args:
-            content: Markdown document content
-
-        Returns:
-            Parsed text result
-        """
-        logger.info(f"Parsing Markdown document, content size: {len(content)} bytes")
-
+    def parse_into_text(self, content: bytes) -> Document:
         # Convert byte content to string using universal decoding method
-        text = self.decode_bytes(content)
-        logger.info(f"Decoded Markdown content, text length: {len(text)} characters")
+        text = endecode.decode_bytes(content)
+        text, img_b64 = self.image_helper.extract_base64(text, path_prefix="images")
 
-        logger.info(f"Markdown parsing complete, extracted {len(text)} characters of text")
-        return text
+        images: Dict[str, str] = {}
+        image_replace: Dict[str, str] = {}
 
+        logger.debug(f"Uploading {len(img_b64)} images from markdown")
+        for ipath, b64_bytes in img_b64.items():
+            ext = os.path.splitext(ipath)[1].lower()
+            image_url = self.storage.upload_bytes(b64_bytes, ext)
+
+            image_replace[ipath] = image_url
+            images[image_url] = base64.b64encode(b64_bytes).decode()
+
+        text = self.image_helper.replace_path(text, image_replace)
+        return Document(content=text, images=images)
+
+
+class MarkdownParser(PipelineParser):
+    _parser_cls = (MarkdownImageBase64,)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+
+    your_content = "test![](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgA)test"
+    parser = MarkdownParser()
+
+    document = parser.parse_into_text(your_content.encode())
+    logger.info(document.content)
+    logger.info(f"Images: {len(document.images)}, name: {document.images.keys()}")

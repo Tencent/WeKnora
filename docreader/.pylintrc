@@ -1,0 +1,5 @@
+[LOGGING]
+logging-format-style=fstr
+
+[MESSAGES CONTROL]
+; disable=W1203

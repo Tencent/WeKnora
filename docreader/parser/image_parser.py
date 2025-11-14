@@ -1,15 +1,13 @@
+import base64
 import logging
 import os
-import asyncio
-from PIL import Image
-import io
-from typing import Dict, Any, Tuple, Union
-from .base_parser import BaseParser, ParseResult
-import numpy as np
+
+from docreader.models.document import Document
+from docreader.parser.base_parser import BaseParser
 
 # Set up logger for this module
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+
 
 class ImageParser(BaseParser):
     """
@@ -23,46 +21,24 @@ class ImageParser(BaseParser):
     4. Returning a combined result with both text and image reference
     """
 
-    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
+    def parse_into_text(self, content: bytes) -> Document:
         """
-        Parse image content, upload the image and return Markdown reference along with image map.
-
-        Args:
-            content: Raw image data (bytes)
-
-        Returns:
-            Tuple of (markdown_text, image_map) where image_map maps image URLs to PIL Image objects
+        Parse image content into markdown text
+        :param content: bytes content of the image
+        :return: Document object
         """
         logger.info(f"Parsing image content, size: {len(content)} bytes")
-        image_map = {}
-        
-        try:
-            # Upload image to storage service
-            logger.info("Uploading image to storage")
-            _, ext = os.path.splitext(self.file_name)
-            image_url = self.upload_bytes(content, file_ext=ext)
-            if not image_url:
-                logger.error("Failed to upload image to storage")
-                return "", {}
-            logger.info(
-                f"Successfully uploaded image, URL: {image_url[:50]}..."
-                if len(image_url) > 50
-                else f"Successfully uploaded image, URL: {image_url}"
-            )
 
-            # Create image object and add to map
-            try:
-                from PIL import Image
-                import io
-                image = Image.open(io.BytesIO(content))
-                image_map[image_url] = image
-                logger.info(f"Added image to image_map for URL: {image_url}")
-            except Exception as img_err:
-                logger.error(f"Error creating image object: {str(img_err)}")
+        # Get file extension
+        ext = os.path.splitext(self.file_name)[1].lower()
 
-            markdown_text = f"![{self.file_name}]({image_url})"
-            return markdown_text, image_map
+        # Upload image to storage
+        image_url = self.storage.upload_bytes(content, file_ext=ext)
+        logger.info(f"Successfully uploaded image, URL: {image_url[:50]}...")
 
-        except Exception as e:
-            logger.error(f"Error parsing image: {str(e)}")
-            return "", {}
+        # Generate markdown text
+        text = f"![{self.file_name}]({image_url})"
+        images = {image_url: base64.b64encode(content).decode()}
+
+        # Create image object and add to map
+        return Document(content=text, images=images)

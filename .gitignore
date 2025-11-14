@@ -24,17 +24,14 @@ node_modules/
 tmp/
 temp/
 
-# Docker compose файл (локальные настройки)
-# docker-compose.yml
-
 WeKnora
 /models/
-**/__pycache__
 test/data/mswag.txt
 data/files/
 
-.python-version
 .venv/
+**/__pycache__
+.python-version
 
 ### macOS
 # General

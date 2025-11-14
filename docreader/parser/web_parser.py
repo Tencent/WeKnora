@@ -1,11 +1,14 @@
-from typing import Any, Optional, Tuple, Dict, Union
-import os
-
-from playwright.async_api import async_playwright
-from bs4 import BeautifulSoup
-from .base_parser import BaseParser, ParseResult
-import logging
 import asyncio
+import logging
+import os
+from typing import Any
+
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+
+from docreader.models.document import Document
+from docreader.parser.base_parser import BaseParser
+from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +62,7 @@ class WebParser(BaseParser):
             # Return empty BeautifulSoup object on error
             return BeautifulSoup("", "html.parser")
 
-    def parse_into_text(self, content: bytes) -> Union[str, Tuple[str, Dict[str, Any]]]:
+    def parse_into_text(self, content: bytes) -> Document:
         """Parse web page
 
         Args:
@@ -78,10 +81,10 @@ class WebParser(BaseParser):
             # Run async method
             # Handle content possibly being a string
             if isinstance(content, bytes):
-                url = self.decode_bytes(content)
+                url = endecode.decode_bytes(content)
                 logger.info(f"Decoded URL from bytes: {url}")
             else:
-                url = content
+                url = str(content)
                 logger.info(f"Using content as URL directly: {url}")
 
             logger.info(f"Scraping web page: {url}")
@@ -118,11 +121,11 @@ class WebParser(BaseParser):
             logger.info(
                 f"Web page parsing complete, total content: {len(result)} characters"
             )
-            return result
+            return Document(content=result)
 
         except Exception as e:
             logger.error(f"Error parsing web page: {str(e)}")
-            return f"Error parsing web page: {str(e)}"
+            return Document(content=f"Error parsing web page: {str(e)}")
 
         finally:
             # Close event loop
