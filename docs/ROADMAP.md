@@ -1,44 +1,44 @@
 # Weknora Roadmap
-📌 This roadmap defines the core direction of the project, and its content will be dynamically updated based on requirements and contributions.
+📌 本路线图用于明确项目核心方向，内容会随需求和贡献动态更新。
 
 ## Vision
-Independently deploy a personal knowledge base that supports documents, data, and images, expanding more LLM application scenarios based on the traditional RAG framework.
+独立部署个人知识库，支持文档、数据、图片，基于传统RAG框架拓展更多LLM应用场景。
 
 ## Next Phase
-- Configurable upload file size
-- Agent mode: The model automatically determines whether to call functions such as document retrieval and web retrieval
-- Configuration management: Configure models, prompts, and enable storage/retrieval modules via the web interface
-- Support for more document types (csv, xls, xlsx, html, etc.)
-- Vector database support (Milvus, etc.)
-- Optimize document parsing speed and accuracy, and improve chunking strategies
+- 上传文件大小可配置
+- Agent模式：模型自动判断是否调用文档检索、网页检索等功能
+- 配置管理：Web端可配置模型、提示词，启用存储检索模块
+- 支持更多文档类型（csv、xls、xlsx、html等）
+- 向量数据库支持（milvus等）
+- 优化文档解析速度与精度，优化分块策略
 
 ## Future
-- Expand more calling tools for Agent mode
-- Data Agent: Support data statistical analysis
-- Batch knowledge management: Import, export, and migration
-- Configurable startup modules: Customize optional components to reduce dependencies
-- Simplified configuration: Unified management via the web interface, reducing configuration files
-- Permission management: Deconstruct permissions for users, tenants, knowledge bases, etc., supporting administrators, user groups, etc.
-- Richer chunking modes (semantic chunking, keyword chunking, etc.)
-- Expanded parsing tools (minerU, pp-structure, etc.)
-- Expanded vector databases (Milvus, etc.)
-- Diversified OCR models
+- Agent模式扩展更多调用工具
+- 数据Agent：支持数据统计分析
+- 批量知识管理：导入、导出、迁移
+- 启动模块可配置：自定义可选组件，减少依赖
+- 简化配置：Web端统一管理，减少配置文件
+- 权限管理：解构用户、租户、知识库等权限，支持管理员、用户组等
+- 丰富分块模式（语义分块、关键词分块等）
+- 扩展解析工具（minerU、pp-structure等）
+- 扩展向量数据库（milvus等）
+- 丰富OCR模型
 
 ## Done
-- Multilingual support (Chinese, English, Russian)
-- Support for Neo4j graph database
-- XSS injection protection
-- User login function
-- MCP server implementation
-- Official Docker image provided, supporting Windows, Linux, and macOS
-- Support for Alibaba Cloud model integration
+- 多语言支持（中、英、俄）
+- 支持Neo4j图数据库
+- XSS注入防护
+- 用户登录功能
+- MCP服务端实现
+- 提供官方Docker镜像，支持Windows、Linux、macOS
+- 支持阿里云模型接入
 
-## How to Participate
-1. Have ideas for any features? Initiate discussions in Issues (label: `roadmap-discuss`);
-2. When submitting a PR, associate it with the corresponding Roadmap phase;
-3. Discover a requirement gap? Submit an Issue with the `feature-request` label, and we will include it in the Roadmap after evaluation.
+## How to participate
+1. 对任何功能有想法？可在 Issues 中发起讨论（标签：`roadmap-discuss`）；
+2. 提交 PR 时，关联对应的 Roadmap 阶段；
+3. 发现需求缺口？提交 Issue 并添加 `feature-request` 标签，我们会评估后纳入 Roadmap。
 
 ## Change Notice
-- This Roadmap will be updated irregularly to sync the latest progress and requirement adjustments;
-- Major direction changes will be announced in Issues;
-- Priorities will be dynamically adjusted based on user feedback and contributor resources.
+- 本 Roadmap 将不定期更新，同步最新进度和需求调整；
+- 若有重大方向变更，会在 Issues 发布公告；
+- 优先级会根据用户反馈和贡献者资源动态调整。
