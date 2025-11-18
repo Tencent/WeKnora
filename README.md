@@ -119,23 +119,56 @@ cp .env.example .env
 # All variables are documented in the .env.example comments
 ```
 
-#### ③ Start the services
+#### ③ Start the services (include Ollama)
+
+Check the images that need to be started in the .env file.
 
 ```bash
-# Start all services (Ollama + backend containers)
 ./scripts/start_all.sh
-# Or
+```
+
+or
+
+```bash
 make start-all
 ```
 
-#### ③ Start the services (backup)
+#### ③.0 Start ollama services (Optional)
 
 ```bash
-# Start ollama services (Optional)
 ollama serve > /dev/null 2>&1 &
+```
 
-# Start the service
+#### ③.1 Activate different combinations of features
+
+- Minimum core services
+```bash
 docker compose up -d
+```
+
+- All features enabled
+```bash
+docker-compose --profile full up -d
+```
+
+- Tracing logs required
+```bash
+docker-compose --profile jaeger up -d
+```
+
+- Neo4j knowledge graph required
+```bash
+docker-compose --profile neo4j up -d
+```
+
+- Minio file storage service required
+```bash
+docker-compose --profile minio up -d
+```
+
+- Multiple options combination
+```bash
+docker-compose --profile neo4j --profile minio up -d
 ```
 
 #### ④ Stop the services

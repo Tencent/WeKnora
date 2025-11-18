@@ -119,23 +119,56 @@ cp .env.example .env
 # すべての変数の説明は.env.exampleのコメントを参照
 ```
 
-#### ③ サービスの起動
+#### ③ サービスを起動します（Ollama を含む）
+
+.env ファイルで、起動する必要があるイメージを確認します。
 
 ```bash
-# すべてのサービスを起動（Ollamaとバックエンドコンテナを含む）
 ./scripts/start_all.sh
-# または
+```
+
+または
+
+```bash
 make start-all
 ```
 
-#### ③ サービス起動の代替方法
+#### ③.0 ollama サービスを起動する (オプション)
 
 ```bash
-# ollamaサービスを起動（オプション）
 ollama serve > /dev/null 2>&1 &
+```
 
-# サービスを起動
+#### ③.1 さまざまな機能の組み合わせを有効にする
+
+- 最小限のコアサービス
+```bash
 docker compose up -d
+```
+
+- すべての機能を有効にする
+```bash
+docker-compose --profile full up -d
+```
+
+- トレースログが必要
+```bash
+docker-compose --profile jaeger up -d
+```
+
+- Neo4j ナレッジグラフが必要
+```bash
+docker-compose --profile neo4j up -d
+```
+
+- Minio ファイルストレージサービスが必要
+```bash
+docker-compose --profile minio up -d
+```
+
+- 複数のオプションの組み合わせ
+```bash
+docker-compose --profile neo4j --profile minio up -d
 ```
 
 #### ④ サービスの停止

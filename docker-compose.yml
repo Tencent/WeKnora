@@ -1,4 +1,17 @@
 services:
+  frontend:
+    image: wechatopenai/weknora-ui:latest
+    build: ./frontend
+    container_name: WeKnora-frontend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+
   app:
     image: wechatopenai/weknora-app:latest
     build:
@@ -79,49 +92,13 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_started
       docreader:
         condition: service_healthy
-      neo4j:
-        condition: service_started
     networks:
       - WeKnora-network
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
-  minio:
-    image: minio/minio:latest
-    container_name: WeKnora-minio
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    environment:
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY_ID:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
-    command: server --console-address ":9001" /data
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - WeKnora-network
-
-  frontend:
-    image: wechatopenai/weknora-ui:latest
-    container_name: WeKnora-frontend
-    ports:
-      - "${FRONTEND_PORT:-80}:80"
-    depends_on:
-      app:
-        condition: service_healthy
-    networks:
-      - WeKnora-network
-    restart: unless-stopped
 
   docreader:
     image: wechatopenai/weknora-docreader:latest
@@ -162,35 +139,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      - "6831:6831/udp" # Jaeger Thrift接收器
-      - "6832:6832/udp" # Jaeger Thrift接收器(Compact)
-      - "5778:5778" # 配置端口
-      - "16686:16686" # Web UI
-      - "4317:4317" # OTLP gRPC接收器
-      - "4318:4318" # OTLP HTTP接收器
-      - "14250:14250" # 接收模型端口
-      - "14268:14268" # Jaeger HTTP接收器
-      - "9411:9411" # Zipkin兼容性端口
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
-    volumes:
-      - jaeger_data:/var/lib/jaeger # 持久化 Jaeger 数据
-    networks:
-      - WeKnora-network
-    restart: unless-stopped
   # 修改的PostgreSQL配置
   postgres:
     image: paradedb/paradedb:v0.18.9-pg17
     container_name: WeKnora-postgres
-    ports:
-      - "${DB_PORT}:5432"
     environment:
       - POSTGRES_USER=${DB_USER}
-      # NOCC:hardcode-password(工具误报)
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=${DB_NAME}
     volumes:
@@ -212,14 +166,57 @@ services:
   redis:
     image: redis:7.0-alpine
     container_name: WeKnora-redis
-    ports:
-      - "${REDIS_PORT}:6379"
-    volumes:
-      - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     restart: always
     networks:
       - WeKnora-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: WeKnora-minio
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY_ID:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+    command: server --console-address ":9001" /data
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - WeKnora-network
+    profiles:
+      - minio
+      - full
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "6831:6831/udp" # Jaeger Thrift接收器
+      - "6832:6832/udp" # Jaeger Thrift接收器(Compact)
+      - "5778:5778" # 配置端口
+      - "16686:16686" # Web UI
+      - "4317:4317" # OTLP gRPC接收器
+      - "4318:4318" # OTLP HTTP接收器
+      - "14250:14250" # 接收模型端口
+      - "14268:14268" # Jaeger HTTP接收器
+      - "9411:9411" # Zipkin兼容性端口
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    volumes:
+      - jaeger_data:/var/lib/jaeger # 持久化 Jaeger 数据
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - jaeger
+      - full
 
   neo4j:
     image: neo4j:latest
@@ -238,6 +235,9 @@ services:
     restart: always
     networks:
       - WeKnora-network
+    profiles:
+      - neo4j
+      - full
 
 networks:
   WeKnora-network:
@@ -247,6 +247,5 @@ volumes:
   postgres-data:
   data-files:
   jaeger_data:
-  redis_data:
   minio_data:
   neo4j-data:

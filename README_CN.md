@@ -119,23 +119,56 @@ cp .env.example .env
 # 所有变量说明详见 .env.example 注释
 ```
 
-#### ③ 启动服务
+#### ③ 启动服务 (含 Ollama)
+
+检查 .env 文件中需要启动的镜像。
 
 ```bash
-# 启动全部服务（含 Ollama 与后端容器）
 ./scripts/start_all.sh
-# 或
+```
+
+或者
+
+```bash
 make start-all
 ```
 
-#### ③ 启动服务备选
+#### ③.0 启动Ollama (可选)
 
 ```bash
-# 启动 ollama 服务 (可选)
 ollama serve > /dev/null 2>&1 &
+```
 
-# 启动服务
+#### ③.1 激活不同组合的功能
+
+- 启动最小功能
+```bash
 docker compose up -d
+```
+
+- 启动全部功能
+```bash
+docker-compose --profile full up -d
+```
+
+- 需要 tracing 日志
+```bash
+docker-compose --profile jaeger up -d
+```
+
+- 需要 neo4j 知识图谱
+```bash
+docker-compose --profile neo4j up -d
+```
+
+- 需要 minio 文件存储服务
+```bash
+docker-compose --profile minio up -d
+```
+
+- 多选项组合
+```bash
+docker-compose --profile neo4j --profile minio up -d
 ```
 
 #### ④ 停止服务
