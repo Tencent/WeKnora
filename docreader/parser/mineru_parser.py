@@ -8,13 +8,14 @@ import requests
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
-from docreader.parser.markdown_parser import MarkdownImageUtil
+from docreader.parser.chain_parser import PipelineParser
+from docreader.parser.markdown_parser import MarkdownImageUtil, MarkdownTableFormatter
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
 
 
-class MinerUParser(BaseParser):
+class StdMinerUParser(BaseParser):
     def __init__(
         self,
         enable_markdownify: bool = True,
@@ -110,6 +111,10 @@ class MinerUParser(BaseParser):
             f"Successfully parsed PDF, text: {len(text)}, images: {len(images)}"
         )
         return Document(content=text, images=images)
+
+
+class MinerUParser(PipelineParser):
+    _parser_cls = (StdMinerUParser, MarkdownTableFormatter)
 
 
 if __name__ == "__main__":

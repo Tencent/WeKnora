@@ -1,5 +1,5 @@
 import logging
-from typing import List, Tuple, Type
+from typing import Dict, List, Tuple, Type
 
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
@@ -50,10 +50,13 @@ class PipelineParser(BaseParser):
                 logger.error(f"Failed to create parser {parser_cls.__name__}: {e}")
 
     def parse_into_text(self, content: bytes) -> Document:
+        images: Dict[str, str] = {}
         document = Document()
         for p in self._parsers:
             document = p.parse_into_text(content)
             content = endecode.encode_bytes(document.content)
+            images.update(document.images)
+        document.images.update(images)
         return document
 
     @classmethod
