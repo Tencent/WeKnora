@@ -137,3 +137,7 @@ python test_module.py
 1. 已安装所有必需的依赖包
 2. Python 版本兼容（推荐 3.10+）
 3. 没有文件名冲突（避免使用 `mcp.py` 作为文件名）
+
+## 调用效果
+
+<img width="950" height="2063" alt="118d078426f42f3d4983c13386085d7f" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />

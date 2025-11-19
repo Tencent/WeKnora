@@ -256,9 +256,7 @@ make clean-db
 
 http://localhost
 
-On first access, it will automatically redirect to the initialization configuration page. After configuration is complete, it will automatically redirect to the knowledge base page. Please follow the page instructions to complete model configuration.
-
-![Configuration Page](./docs/images/config.png)
+On your first visit, you will be automatically redirected to the registration/login page. After completing registration, please create a new knowledge base and finish the relevant settings on its configuration page.
 
 ## 📱 Interface Showcase
 
@@ -278,17 +276,13 @@ On first access, it will automatically redirect to the initialization configurat
 
 ### Document Knowledge Graph
 
-<table>
-  <tr>
-    <td><img src="./docs/images/graph2.png" alt="Knowledge Graph View 1"></td>
-    <td><img src="./docs/images/graph1.png" alt="Knowledge Graph View 2"></td>
-  </tr>
-</table>
-
 WeKnora supports transforming documents into knowledge graphs, displaying the relationships between different sections of the documents. Once the knowledge graph feature is enabled, the system analyzes and constructs an internal semantic association network that not only helps users understand document content but also provides structured support for indexing and retrieval, enhancing the relevance and breadth of search results.
 
-### MCP Server Integration Effects
-<img width="950" height="2063" alt="MCP Server Integration Demo" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />
+For detailed configuration, please refer to the [Knowledge Graph Configuration Guide](./docs/KnowledgeGraph.md).
+
+### MCP Server
+
+Please refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for the necessary setup.
 
 ## 📘 API Reference
 
@@ -302,21 +296,17 @@ Detailed API documentation is available at: [API Docs](./docs/API.md)
 
 ```
 WeKnora/
+├── client/      # go client
 ├── cmd/         # Main entry point
-├── internal/    # Core business logic
 ├── config/      # Configuration files
-├── migrations/  # DB migration scripts
-├── scripts/     # Shell scripts
-├── services/    # Microservice logic
+├── docker/      # docker images files
+├── docreader/   # Document parsing app
+├── docs/        # Project documentation
 ├── frontend/    # Frontend app
-└── docs/        # Project documentation
-```
-
-### 🔧 Common Commands
-
-```bash
-# Wipe all data from DB (use with caution)
-make clean-db
+├── internal/    # Core business logic
+├── mcp-server/  # MCP server
+├── migrations/  # DB migration scripts
+└── scripts/     # Shell scripts
 ```
 
 ## 🤝 Contributing
