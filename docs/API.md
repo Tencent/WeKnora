@@ -44,9 +44,7 @@ X-Request-ID: unique_request_id
 
 ### 获取 API Key
 
-获取 API Key 有以下方式：
-
-**创建租户时获取**：通过 `POST /api/v1/tenants` 接口创建新租户时，响应中会自动返回生成的 API Key。
+在 web 页面完成账户注册后，请前往账户信息页面获取您的 API Key。
 
 请妥善保管您的 API Key，避免泄露。API Key 代表您的账户身份，拥有完整的 API 访问权限。
 
