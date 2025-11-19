@@ -339,6 +339,9 @@ class BaseParser(ABC):
         logger.info(
             f"Extracted {len(document.content)} characters from {self.file_name}"
         )
+        if document.chunks:
+            return document
+
         splitter = TextSplitter(
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap,

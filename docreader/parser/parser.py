@@ -4,8 +4,10 @@ from typing import Dict, Type
 from docreader.models.document import Document
 from docreader.models.read_config import ChunkingConfig
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.csv_parser import CSVParser
 from docreader.parser.doc_parser import DocParser
 from docreader.parser.docx2_parser import Docx2Parser
+from docreader.parser.excel_parser import ExcelParser
 from docreader.parser.image_parser import ImageParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.pdf_parser import PDFParser
@@ -37,6 +39,9 @@ class Parser:
             "tiff": ImageParser,
             "webp": ImageParser,
             "markdown": MarkdownParser,
+            "csv": CSVParser,
+            "xlsx": ExcelParser,
+            "xls": ExcelParser,
         }
         logger.info(
             "Parser initialized with %d parsers: %s",

@@ -23,7 +23,7 @@ export function formatStringDate(date: any) {
   );
 }
 export function kbFileTypeVerification(file: any) {
-  let validTypes = ["pdf", "txt", "md", "docx", "doc", "jpg", "jpeg", "png"];
+  let validTypes = ["pdf", "txt", "md", "docx", "doc", "jpg", "jpeg", "png", "csv", "xlsx", "xls"];
   let type = file.name.substring(file.name.lastIndexOf(".") + 1);
   if (!validTypes.includes(type)) {
     MessagePlugin.error("文件类型错误！");
