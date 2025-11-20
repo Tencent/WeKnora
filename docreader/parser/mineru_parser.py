@@ -28,7 +28,6 @@ class StdMinerUParser(BaseParser):
         self.image_helper = MarkdownImageUtil()
         self.base64_pattern = re.compile(r"data:image/(\w+);base64,(.*)")
         self.enable = self.ping()
-        assert self.ping(), "MinerU API is not reachable"
 
     def ping(self, timeout: int = 5) -> bool:
         try:
@@ -41,6 +40,10 @@ class StdMinerUParser(BaseParser):
             return False
 
     def parse_into_text(self, content: bytes) -> Document:
+        if not self.enable:
+            logger.debug("MinerU API is not enabled")
+            return Document()
+
         logger.info(f"Parsing scanned PDF via MinerU API (size: {len(content)} bytes)")
         md_content: str = ""
         images_b64: Dict[str, str] = {}

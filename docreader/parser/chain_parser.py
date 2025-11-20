@@ -6,6 +6,7 @@ from docreader.parser.base_parser import BaseParser
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class FirstParser(BaseParser):
@@ -16,16 +17,15 @@ class FirstParser(BaseParser):
 
         self._parsers: List[BaseParser] = []
         for parser_cls in self._parser_cls:
-            try:
-                parser = parser_cls(*args, **kwargs)
-                self._parsers.append(parser)
-            except Exception as e:
-                logger.error(f"Failed to create parser {parser_cls.__name__}: {e}")
+            parser = parser_cls(*args, **kwargs)
+            self._parsers.append(parser)
 
     def parse_into_text(self, content: bytes) -> Document:
         for p in self._parsers:
+            logger.info(f"FirstParser: using parser {p.__class__.__name__}")
             document = p.parse_into_text(content)
             if document.is_valid():
+                logger.info(f"FirstParser: parser {p.__class__.__name__} succeeded")
                 return document
         return Document()
 
@@ -43,16 +43,14 @@ class PipelineParser(BaseParser):
 
         self._parsers: List[BaseParser] = []
         for parser_cls in self._parser_cls:
-            try:
-                parser = parser_cls(*args, **kwargs)
-                self._parsers.append(parser)
-            except Exception as e:
-                logger.error(f"Failed to create parser {parser_cls.__name__}: {e}")
+            parser = parser_cls(*args, **kwargs)
+            self._parsers.append(parser)
 
     def parse_into_text(self, content: bytes) -> Document:
         images: Dict[str, str] = {}
         document = Document()
         for p in self._parsers:
+            logger.info(f"PipelineParser: using parser {p.__class__.__name__}")
             document = p.parse_into_text(content)
             content = endecode.encode_bytes(document.content)
             images.update(document.images)
