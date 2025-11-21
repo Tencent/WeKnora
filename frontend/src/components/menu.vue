@@ -110,7 +110,7 @@
         </div>
         
         <input type="file" @change="upload" style="display: none" ref="uploadInput"
-            accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png" />
+            accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
     </div>
 </template>
 
