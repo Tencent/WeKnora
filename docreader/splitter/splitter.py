@@ -198,8 +198,6 @@ class TextSplitter(BaseModel, Generic[T]):
 
         # handle the last chunk
         assert cur_chunk
-        if cur_headers and cur_len < self.chunk_size:
-            cur_chunk.insert(0, (cur_chunk[0][0], cur_chunk[0][1], cur_headers))
         chunks.append(
             (
                 cur_chunk[0][0],
