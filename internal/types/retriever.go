@@ -9,6 +9,7 @@ const (
 	ElasticsearchRetrieverEngineType RetrieverEngineType = "elasticsearch"
 	InfinityRetrieverEngineType      RetrieverEngineType = "infinity"
 	ElasticFaissRetrieverEngineType  RetrieverEngineType = "elasticfaiss"
+	QdrantRetrieverEngineType        RetrieverEngineType = "qdrant"
 )
 
 // RetrieverType represents the type of retriever
