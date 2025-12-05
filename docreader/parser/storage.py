@@ -211,23 +211,36 @@ class MinioStorage(Storage):
     def _init_minio_client(self):
         """Initialize MinIO client from environment variables or injected config.
 
-        If storage_config.path_prefix contains JSON from server (for minio case),
-        prefer those values to override envs.
+        If storage_config contains valid configuration, prefer those values
+        to override environment variables.
         """
         try:
+            # Get configuration from storage_config with environment variables as fallback
+            # Each field can independently fall back to environment variables
+            access_key = (
+                self.storage_config.get("access_key_id")
+                if self.storage_config and self.storage_config.get("access_key_id")
+                else os.getenv("MINIO_ACCESS_KEY_ID")
+            )
+            secret_key = (
+                self.storage_config.get("secret_access_key")
+                if self.storage_config and self.storage_config.get("secret_access_key")
+                else os.getenv("MINIO_SECRET_ACCESS_KEY")
+            )
+            bucket_name = (
+                self.storage_config.get("bucket_name")
+                if self.storage_config and self.storage_config.get("bucket_name")
+                else os.getenv("MINIO_BUCKET_NAME", "")
+            )
+            path_prefix_raw = (
+                self.storage_config.get("path_prefix")
+                if self.storage_config and self.storage_config.get("path_prefix")
+                else os.getenv("MINIO_PATH_PREFIX", "")
+            )
+            path_prefix = path_prefix_raw.strip().strip("/") if path_prefix_raw else ""
+
             endpoint = os.getenv("MINIO_ENDPOINT", "")
             use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
-            if self.storage_config and self.storage_config.get("bucket_name"):
-                storage_config = self.storage_config
-                bucket_name = storage_config.get("bucket_name", "")
-                path_prefix = storage_config.get("path_prefix").strip().strip("/")
-                access_key = storage_config.get("access_key_id")
-                secret_key = storage_config.get("secret_access_key")
-            else:
-                access_key = os.getenv("MINIO_ACCESS_KEY_ID")
-                secret_key = os.getenv("MINIO_SECRET_ACCESS_KEY")
-                bucket_name = os.getenv("MINIO_BUCKET_NAME", "")
-                path_prefix = os.getenv("MINIO_PATH_PREFIX", "").strip().strip("/")
 
             if not all([endpoint, access_key, secret_key, bucket_name]):
                 logger.error(
@@ -246,7 +259,7 @@ class MinioStorage(Storage):
                 client.make_bucket(bucket_name)
                 # Set public read policy for the bucket
                 policy = (
-                    '{'
+                    "{"
                     '"Version":"2012-10-17",'
                     '"Statement":['
                     '{"Effect":"Allow","Principal":{"AWS":["*"]},'
@@ -255,8 +268,7 @@ class MinioStorage(Storage):
                     '{"Effect":"Allow","Principal":{"AWS":["*"]},'
                     '"Action":["s3:GetObject"],'
                     '"Resource":["arn:aws:s3:::%s/*"]}'
-                    ']}'
-                    % (bucket_name, bucket_name)
+                    "]}" % (bucket_name, bucket_name)
                 )
                 client.set_bucket_policy(bucket_name, policy)
 
