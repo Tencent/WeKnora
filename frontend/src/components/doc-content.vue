@@ -1,5 +1,8 @@
+// @ts-nocheck
 <script setup lang="ts">
 import { marked } from "marked";
+import hljs from "highlight.js";
+import "highlight.js/styles/github.css";
 import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
 import { downKnowledgeDetails, deleteGeneratedQuestion } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
@@ -18,17 +21,37 @@ let doc = null;
 let down = ref()
 let mdContentWrap = ref()
 let url = ref('')
+// 视图模式：chunks / original
+const viewMode = ref<'chunks' | 'original'>('chunks');
+const originalContent = ref<string>('');
+const loadingOriginal = ref(false);
 onMounted(() => {
   nextTick(() => {
     doc = document.getElementsByClassName('t-drawer__body')[0]
     doc.addEventListener('scroll', handleDetailsScroll);
   })
+  // 提供全局复制方法，供代码块按钮使用
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  window.copyCodeBlock = (codeId: string) => {
+    const el = document.getElementById(codeId);
+    if (!el) return;
+    const text = el.innerText || '';
+    navigator.clipboard?.writeText(text).then(() => {
+      MessagePlugin.success(t('common.copySuccess') || '复制成功');
+    }).catch(() => {
+      MessagePlugin.error(t('common.copyFailed') || '复制失败');
+    });
+  };
 })
 onUpdated(() => {
   page = 1
 })
 onUnmounted(() => {
   doc.removeEventListener('scroll', handleDetailsScroll);
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  delete window.copyCodeBlock;
 })
 const checkImage = (url) => {
   return new Promise((resolve) => {
@@ -51,8 +74,79 @@ renderer.image = function (href, title, text) {
                 <figcaption style="text-align: left;">${text || ''}</figcaption>
             </figure>`;
 };
+
+// 自定义代码块渲染器，添加语言标签与复制按钮
+renderer.code = function (code, infostring) {
+  const lang = (infostring || '').trim();
+  let detectedLang = lang;
+  let highlighted = '';
+  if (lang && hljs.getLanguage(lang)) {
+    try {
+      highlighted = hljs.highlight(code, { language: lang }).value;
+    } catch (e) {
+      highlighted = hljs.highlightAuto(code).value;
+      detectedLang = hljs.highlightAuto(code).language || lang;
+    }
+  } else {
+    const auto = hljs.highlightAuto(code);
+    highlighted = auto.value;
+    detectedLang = auto.language || lang;
+  }
+  const displayLang = detectedLang || 'Code';
+  const codeId = `code-block-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return `
+    <div class="code-block-wrapper" data-code-id="${codeId}">
+      <div class="code-block-header">
+        <span class="code-block-lang">${displayLang}</span>
+        <button class="code-block-copy-btn" onclick="window.copyCodeBlock && window.copyCodeBlock('${codeId}')" title="${t('common.copy') || '复制'}">
+          ${t('common.copy') || '复制'}
+        </button>
+      </div>
+      <pre class="code-block-pre"><code class="hljs language-${detectedLang || ''}" id="${codeId}">${highlighted}</code></pre>
+    </div>
+  `;
+};
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+const isTextFile = (fileType?: string): boolean => {
+  if (!fileType) return false;
+  const textTypes = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts', 'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml', 'ini', 'conf', 'log'];
+  return textTypes.includes(fileType.toLowerCase());
+};
+const isMarkdownFile = (fileType?: string): boolean => {
+  if (!fileType) return false;
+  const markdownTypes = ['md', 'markdown'];
+  return markdownTypes.includes(fileType.toLowerCase());
+};
+const loadOriginalContent = async () => {
+  if (!props.details.id || !props.details.type || props.details.type !== 'file') return;
+  const fileType = props.details.file_type?.toLowerCase();
+  if (!isTextFile(fileType)) {
+    MessagePlugin.warning(t('knowledgeBase.originalFileNotSupported') || '该文件类型不支持原文件展示，请下载查看');
+    return;
+  }
+  loadingOriginal.value = true;
+  try {
+    const blob = await downKnowledgeDetails(props.details.id);
+    const text = await blob.text();
+    originalContent.value = text;
+  } catch (error: any) {
+    console.error('Failed to load original content:', error);
+    MessagePlugin.error(error?.message || t('knowledgeBase.loadOriginalFailed') || '加载原文件内容失败');
+  } finally {
+    loadingOriginal.value = false;
+  }
+};
+const toggleViewMode = () => {
+  if (viewMode.value === 'chunks') {
+    viewMode.value = 'original';
+    if (!originalContent.value && props.details.type === 'file') {
+      loadOriginalContent();
+    }
+  } else {
+    viewMode.value = 'chunks';
+  }
+};
 watch(() => props.details.md, (newVal) => {
   nextTick(async () => {
     const images = mdContentWrap.value.querySelectorAll('img.markdown-image');
@@ -65,40 +159,35 @@ watch(() => props.details.md, (newVal) => {
       })
     }
   })
-}, {
-  immediate: true,
-  deep: true
-})
+}, { immediate: true, deep: true })
 
-// 安全地处理 Markdown 内容
+// 安全地处理 Markdown 内容（使用 marked）
 const processMarkdown = (markdownText) => {
-  if (!markdownText || typeof markdownText !== 'string') {
-    return '';
-  }
-  
-  // 先将文本中的 <br> 标签（作为纯文本）转换为换行符
-  // 这样 marked.parse 会将其正确解析为段落分隔或换行
-  let processedText = markdownText.replace(/<br\s*\/?>/gi, '\n');
-  
-  // 首先对 Markdown 内容进行安全处理
+  if (!markdownText || typeof markdownText !== 'string') return '';
+
+  // 处理被 <p> 包裹的表格行，转换为正常的表格行，并在前后补空行
+  let processedText = markdownText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
+
+  // 保留表格单元格中的 <br>，不转成换行，避免打散表格；其他区域原样交给 marked 处理
+
+  // 安全预处理
   const safeMarkdown = safeMarkdownToHTML(processedText);
-  
-  // 使用安全的渲染器
+
+  // 使用标记渲染
   marked.use({ renderer });
   let html = marked.parse(safeMarkdown);
-  
-  // 如果 marked.parse 转义了 <br> 标签，将其还原为实际的 <br> 标签
-  // 这样可以确保原本的 <br> 标签被正确渲染为换行
+
+  // 还原被转义的 <br>
   html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
-  
-  // 使用 DOMPurify 进行最终的安全清理（br 标签在允许列表中）
-  const sanitizedHTML = sanitizeHTML(html);
-  
-  return sanitizedHTML;
+
+  // 最终安全清理
+  return sanitizeHTML(html);
 };
 const handleClose = () => {
   emit("closeDoc", false);
   doc.scrollTop = 0;
+  viewMode.value = 'chunks';
+  originalContent.value = '';
 };
 
 // 获取显示标题
@@ -363,59 +452,90 @@ const handleDetailsScroll = () => {
       </div>
       
       <div class="content_header">
-        <span class="label">{{ getContentLabel() }}</span>
-        <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
+        <div class="header-left">
+          <div class="title-row">
+            <span class="label">{{ getContentLabel() }}</span>
+            <span v-if="viewMode === 'chunks' && details.total > 0" class="chunk-count">
+              {{ $t('knowledgeBase.chunkCount', { count: details.total }) || `共 ${details.total} 个片段` }}
+            </span>
+          </div>
+          <div class="meta-row">
+            <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
+            <t-button 
+              v-if="details.type === 'file'" 
+              size="small" 
+              variant="outline" 
+              theme="primary"
+              @click="toggleViewMode"
+              :loading="loadingOriginal && viewMode === 'original'"
+              class="view-mode-toggle"
+            >
+              {{ viewMode === 'chunks' 
+                ? (t('knowledgeBase.viewOriginal') || '查看原文件') 
+                : (t('knowledgeBase.viewChunks') || '查看分块') }}
+            </t-button>
+          </div>
+        </div>
       </div>
       
-      <div v-if="details.md.length == 0" class="no_content">{{ $t('common.noData') }}</div>
-      <div v-else class="chunk-list">
-        <div class="chunk-item" 
-          v-for="(item, index) in details.md" 
-          :key="index"
-          :class="getChunkClass(index)"
-        >
-          <div class="chunk-header">
-            <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ index + 1 }}</span>
-            <div class="chunk-header-right">
-              <t-tag 
-                v-if="getGeneratedQuestions(item).length > 0" 
-                size="small" 
-                theme="success" 
-                variant="light"
-              >
-                {{ $t('knowledgeBase.questions') || '问题' }} {{ getGeneratedQuestions(item).length }}
-              </t-tag>
-              <span class="chunk-meta">{{ getChunkMeta(item) }}</span>
-            </div>
-          </div>
-          <div class="md-content" v-html="processMarkdown(item.content)"></div>
-          
-          <!-- 生成的问题展示 -->
-          <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
-            <div class="questions-toggle" @click="toggleQuestions(index)">
-              <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-              <span>{{ $t('knowledgeBase.generatedQuestions') || '生成的问题' }} ({{ getGeneratedQuestions(item).length }})</span>
-            </div>
-            <div v-show="isExpanded(index)" class="questions-list">
-              <div 
-                v-for="question in getGeneratedQuestions(item)" 
-                :key="question.id" 
-                class="question-item"
-              >
-                <t-icon name="help-circle" size="14px" class="question-icon" />
-                <span class="question-text">{{ question.question }}</span>
-                <t-button 
-                  theme="default" 
-                  variant="text" 
-                  size="small"
-                  class="delete-question-btn"
-                  :loading="isDeleting(index, question.id)"
-                  @click.stop="handleDeleteQuestion(item, index, question)"
+      <!-- 原文件视图 -->
+      <div v-if="viewMode === 'original'">
+        <div v-if="isMarkdownFile(details.file_type)" class="md-content original-md" v-html="processMarkdown(originalContent || '')"></div>
+        <pre v-else class="original-text">{{ originalContent }}</pre>
+      </div>
+
+      <!-- 分块视图 -->
+      <div v-else>
+        <div v-if="details.md.length == 0" class="no_content">{{ $t('common.noData') }}</div>
+        <div v-else class="chunk-list">
+          <div class="chunk-item" 
+            v-for="(item, index) in details.md" 
+            :key="index"
+            :class="getChunkClass(index)"
+          >
+            <div class="chunk-header">
+              <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ index + 1 }}</span>
+              <div class="chunk-header-right">
+                <t-tag 
+                  v-if="getGeneratedQuestions(item).length > 0" 
+                  size="small" 
+                  theme="success" 
+                  variant="light"
                 >
-                  <template #icon>
-                    <t-icon name="delete" size="14px" />
-                  </template>
-                </t-button>
+                  {{ $t('knowledgeBase.questions') || '问题' }} {{ getGeneratedQuestions(item).length }}
+                </t-tag>
+                <span class="chunk-meta">{{ getChunkMeta(item) }}</span>
+              </div>
+            </div>
+            <div class="md-content" v-html="processMarkdown(item.content)"></div>
+            
+            <!-- 生成的问题展示 -->
+            <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
+              <div class="questions-toggle" @click="toggleQuestions(index)">
+                <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <span>{{ $t('knowledgeBase.generatedQuestions') || '生成的问题' }} ({{ getGeneratedQuestions(item).length }})</span>
+              </div>
+              <div v-show="isExpanded(index)" class="questions-list">
+                <div 
+                  v-for="question in getGeneratedQuestions(item)" 
+                  :key="question.id" 
+                  class="question-item"
+                >
+                  <t-icon name="help-circle" size="14px" class="question-icon" />
+                  <span class="question-text">{{ question.question }}</span>
+                  <t-button 
+                    theme="default" 
+                    variant="text" 
+                    size="small"
+                    class="delete-question-btn"
+                    :loading="isDeleting(index, question.id)"
+                    @click.stop="handleDeleteQuestion(item, index, question)"
+                  >
+                    <template #icon>
+                      <t-icon name="delete" size="14px" />
+                    </template>
+                  </t-button>
+                </div>
               </div>
             </div>
           </div>
@@ -434,6 +554,58 @@ const handleDetailsScroll = () => {
 
 :deep(.t-drawer .t-drawer__content-wrapper) {
   width: 654px !important;
+}
+
+// 代码块样式（带语言头与复制）
+:deep(.code-block-wrapper) {
+  margin: 12px 0;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+
+  .code-block-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #f3f4f6;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 12px;
+    font-weight: 600;
+    color: #1f2937;
+  }
+
+  .code-block-copy-btn {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 12px;
+    &:hover { background: #e5e7eb; color: #374151; }
+    &:active { background: #d1d5db; }
+  }
+
+  .code-block-pre {
+    margin: 0;
+    padding: 12px;
+    background: #f6f8fa;
+    overflow: auto;
+    font-size: 13px;
+    line-height: 1.5;
+    code {
+      background: transparent;
+      padding: 0;
+      border: none;
+      white-space: pre;
+      word-wrap: normal;
+      display: block;
+    }
+  }
 }
 
 :deep(.t-drawer__header) {
@@ -566,8 +738,40 @@ const handleDetailsScroll = () => {
   margin-top: 22px;
   margin-bottom: 16px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
+
+  .header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .chunk-count {
+    color: #07c05f;
+    font-size: 12px;
+    background: #07c05f14;
+    padding: 4px 8px;
+    border-radius: 12px;
+  }
+
+  .view-mode-toggle {
+    height: 28px;
+  }
 }
 
 .time {
