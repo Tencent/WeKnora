@@ -56,6 +56,11 @@ services:
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
       - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD:-}
       - ELASTICSEARCH_INDEX=${ELASTICSEARCH_INDEX:-}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=${QDRANT_PORT:-6334}
+      - QDRANT_COLLECTION=${QDRANT_COLLECTION:-weknora_embeddings}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT_USE_TLS=${QDRANT_USE_TLS:-false}
       - DOCREADER_ADDR=docreader:50051
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
@@ -240,6 +245,21 @@ services:
       - neo4j
       - full
 
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    container_name: WeKnora-qdrant
+    ports:
+      - "${QDRANT_REST_PORT:-6333}:6333"
+      - "${QDRANT_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - qdrant
+      - full
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -250,3 +270,4 @@ volumes:
   jaeger_data:
   minio_data:
   neo4j-data:
+  qdrant_data:

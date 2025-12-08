@@ -3,10 +3,51 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"os"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// retrieverEngineMapping maps RETRIEVE_DRIVER values to retriever engine configurations
+var retrieverEngineMapping = map[string][]RetrieverEngineParams{
+	"postgres": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: PostgresRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: PostgresRetrieverEngineType},
+	},
+	"elasticsearch_v7": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+	},
+	"elasticsearch_v8": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: ElasticsearchRetrieverEngineType},
+	},
+	"qdrant": {
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: QdrantRetrieverEngineType},
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: QdrantRetrieverEngineType},
+	},
+}
+
+// GetDefaultRetrieverEngines returns the default retriever engines based on RETRIEVE_DRIVER env
+func GetDefaultRetrieverEngines() []RetrieverEngineParams {
+	result := []RetrieverEngineParams{}
+	seen := make(map[string]bool)
+
+	for _, driver := range strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",") {
+		driver = strings.TrimSpace(driver)
+		if params, ok := retrieverEngineMapping[driver]; ok {
+			for _, p := range params {
+				key := string(p.RetrieverType) + ":" + string(p.RetrieverEngineType)
+				if !seen[key] {
+					seen[key] = true
+					result = append(result, p)
+				}
+			}
+		}
+	}
+	return result
+}
 
 // Tenant represents the tenant
 type Tenant struct {
@@ -47,6 +88,14 @@ type Tenant struct {
 // RetrieverEngines represents the retriever engines for a tenant
 type RetrieverEngines struct {
 	Engines []RetrieverEngineParams `yaml:"engines" json:"engines" gorm:"type:json"`
+}
+
+// GetEffectiveEngines returns the tenant's engines if configured, otherwise returns system defaults
+func (t *Tenant) GetEffectiveEngines() []RetrieverEngineParams {
+	if len(t.RetrieverEngines.Engines) > 0 {
+		return t.RetrieverEngines.Engines
+	}
+	return GetDefaultRetrieverEngines()
 }
 
 // BeforeCreate is a hook function that is called before creating a tenant

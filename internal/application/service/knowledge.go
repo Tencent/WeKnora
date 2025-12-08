@@ -737,7 +737,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.RetrieverEngines.Engines,
+			tenantInfo.GetEffectiveEngines(),
 		)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -826,7 +826,7 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.RetrieverEngines.Engines,
+			tenantInfo.GetEffectiveEngines(),
 		)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -1047,7 +1047,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// 删除旧的索引数据
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err == nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions()); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
@@ -1663,7 +1663,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		}
 		ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 
-		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 		if err != nil {
 			logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
 			return fmt.Errorf("failed to init retrieve engine: %w", err)
@@ -1772,7 +1772,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
 		return fmt.Errorf("failed to init retrieve engine: %w", err)
@@ -2268,7 +2268,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	}
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		return err
 	}
@@ -2539,7 +2539,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	}
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		return err
 	}
@@ -3257,7 +3257,7 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.RetrieverEngines.Engines,
+			tenantInfo.GetEffectiveEngines(),
 		)
 		if err != nil {
 			return err
@@ -3306,7 +3306,7 @@ func (s *knowledgeService) UpdateFAQEntryStatus(ctx context.Context,
 	// Sync update to retriever engines
 	chunkStatusMap := map[string]bool{chunk.ID: isEnabled}
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		return err
 	}
@@ -3366,7 +3366,7 @@ func (s *knowledgeService) UpdateFAQEntryStatusBatch(ctx context.Context,
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.RetrieverEngines.Engines,
+			tenantInfo.GetEffectiveEngines(),
 		)
 		if err != nil {
 			return err
@@ -4105,7 +4105,7 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	logger.Debugf(ctx, "indexFAQChunks: starting to index %d chunks", len(chunks))
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		return err
 	}
@@ -4212,7 +4212,7 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 		return err
 	}
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		return err
 	}
@@ -4358,7 +4358,7 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	if knowledge.EmbeddingModelID != "" {
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.RetrieverEngines.Engines,
+			tenantInfo.GetEffectiveEngines(),
 		)
 		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Error("Failed to init retrieve engine during cleanup")
@@ -4749,7 +4749,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		if err == nil {
 			retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 				s.retrieveEngine,
-				tenantInfo.RetrieverEngines.Engines,
+				tenantInfo.GetEffectiveEngines(),
 			)
 			if err == nil {
 				chunkIDs := make([]string, 0, len(chunksDeleted))

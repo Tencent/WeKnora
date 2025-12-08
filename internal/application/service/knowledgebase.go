@@ -249,7 +249,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.RetrieverEngines.Engines,
+			tenantInfo.GetEffectiveEngines(),
 		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
@@ -438,7 +438,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 
 	// Create a composite retrieval engine with tenant's configured retrievers
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create retrieval engine: %v", err)
 		return nil, err

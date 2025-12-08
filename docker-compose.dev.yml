@@ -54,6 +54,24 @@ services:
       retries: 3
     networks:
       - WeKnora-network-dev
+    profiles:
+      - minio
+      - full
+
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    container_name: WeKnora-qdrant-dev
+    ports:
+      - "${QDRANT_REST_PORT:-6333}:6333"
+      - "${QDRANT_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data_dev:/qdrant/storage
+    networks:
+      - WeKnora-network-dev
+    restart: unless-stopped
+    profiles:
+      - qdrant
+      - full
 
   neo4j:
     image: neo4j:latest
@@ -72,6 +90,9 @@ services:
     restart: always
     networks:
       - WeKnora-network-dev
+    profiles:
+      - neo4j
+      - full
 
   docreader:
     image: wechatopenai/weknora-docreader:main
@@ -130,6 +151,9 @@ services:
     networks:
       - WeKnora-network-dev
     restart: unless-stopped
+    profiles:
+      - jaeger
+      - full
 
 networks:
   WeKnora-network-dev:
@@ -141,4 +165,5 @@ volumes:
   minio_data_dev:
   neo4j-data-dev:
   jaeger_data_dev:
+  qdrant_data_dev:
 

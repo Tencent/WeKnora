@@ -52,10 +52,10 @@ detect_compose_cmd() {
 # 显示帮助信息
 show_help() {
     printf "%b\n" "${GREEN}WeKnora 开发环境脚本${NC}"
-    echo "用法: $0 [命令]"
+    echo "用法: $0 [命令] [选项]"
     echo ""
     echo "命令:"
-    echo "  start      启动基础设施服务（postgres, redis, minio, neo4j, docreader, jaeger）"
+    echo "  start      启动基础设施服务（postgres, redis, docreader）"
     echo "  stop       停止所有服务"
     echo "  restart    重启所有服务"
     echo "  logs       查看服务日志"
@@ -64,10 +64,20 @@ show_help() {
     echo "  frontend   启动前端开发服务器（本地运行）"
     echo "  help       显示此帮助信息"
     echo ""
+    echo "可选 Profile（用于 start 命令）:"
+    echo "  --minio    启动 MinIO 对象存储"
+    echo "  --qdrant   启动 Qdrant 向量数据库"
+    echo "  --neo4j    启动 Neo4j 图数据库"
+    echo "  --jaeger   启动 Jaeger 链路追踪"
+    echo "  --full     启动所有可选服务"
+    echo ""
     echo "示例："
-    echo "  $0 start              # 启动所有基础设施"
-    echo "  $0 app                # 在另一个终端启动后端"
-    echo "  $0 frontend           # 在另一个终端启动前端"
+    echo "  $0 start                    # 启动基础服务"
+    echo "  $0 start --qdrant           # 启动基础服务 + Qdrant"
+    echo "  $0 start --qdrant --jaeger  # 启动基础服务 + Qdrant + Jaeger"
+    echo "  $0 start --full             # 启动所有服务"
+    echo "  $0 app                      # 在另一个终端启动后端"
+    echo "  $0 frontend                 # 在另一个终端启动前端"
 }
 
 # 检查 Docker
@@ -107,8 +117,43 @@ start_services() {
         return 1
     fi
     
+    # 解析 profile 参数
+    shift  # 移除 "start" 命令本身
+    PROFILES="--profile full"
+    ENABLED_SERVICES=""
+    
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --minio)
+                PROFILES="$PROFILES --profile minio"
+                ENABLED_SERVICES="$ENABLED_SERVICES minio"
+                ;;
+            --qdrant)
+                PROFILES="$PROFILES --profile qdrant"
+                ENABLED_SERVICES="$ENABLED_SERVICES qdrant"
+                ;;
+            --neo4j)
+                PROFILES="$PROFILES --profile neo4j"
+                ENABLED_SERVICES="$ENABLED_SERVICES neo4j"
+                ;;
+            --jaeger)
+                PROFILES="$PROFILES --profile jaeger"
+                ENABLED_SERVICES="$ENABLED_SERVICES jaeger"
+                ;;
+            --full)
+                PROFILES="--profile full"
+                ENABLED_SERVICES="minio qdrant neo4j jaeger"
+                break
+                ;;
+            *)
+                log_warning "未知参数: $1"
+                ;;
+        esac
+        shift
+    done
+    
     # 启动服务
-    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml up -d
+    "$DOCKER_COMPOSE_BIN" $DOCKER_COMPOSE_SUBCMD -f docker-compose.dev.yml $PROFILES up -d
     
     if [ $? -eq 0 ]; then
         log_success "基础设施服务已启动"
@@ -116,10 +161,22 @@ start_services() {
         log_info "服务访问地址:"
         echo "  - PostgreSQL:    localhost:5432"
         echo "  - Redis:         localhost:6379"
-        echo "  - MinIO:         localhost:9000 (Console: localhost:9001)"
-        echo "  - Neo4j:         localhost:7474 (Bolt: localhost:7687)"
         echo "  - DocReader:     localhost:50051"
-        echo "  - Jaeger:        localhost:16686"
+        
+        # 根据启用的 profile 显示额外服务
+        if [[ "$ENABLED_SERVICES" == *"minio"* ]]; then
+            echo "  - MinIO:         localhost:9000 (Console: localhost:9001)"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"qdrant"* ]]; then
+            echo "  - Qdrant:        localhost:6333 (gRPC: localhost:6334)"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"neo4j"* ]]; then
+            echo "  - Neo4j:         localhost:7474 (Bolt: localhost:7687)"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"jaeger"* ]]; then
+            echo "  - Jaeger:        localhost:16686"
+        fi
+        
         echo ""
         log_info "接下来的步骤:"
         printf "%b\n" "${YELLOW}1. 在新终端运行后端:${NC} make dev-app"
@@ -201,6 +258,7 @@ start_app() {
     export REDIS_ADDR=localhost:6379
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
     export NEO4J_URI=bolt://localhost:7687
+    export QDRANT_HOST=localhost
     
     # 确保必要的环境变量已设置
     if [ -z "$DB_DRIVER" ]; then
@@ -251,9 +309,10 @@ start_frontend() {
 }
 
 # 解析命令
-case "${1:-help}" in
+CMD="${1:-help}"
+case "$CMD" in
     start)
-        start_services
+        start_services "$@"
         ;;
     stop)
         stop_services
@@ -277,7 +336,7 @@ case "${1:-help}" in
         show_help
         ;;
     *)
-        log_error "未知命令: $1"
+        log_error "未知命令: $CMD"
         show_help
         exit 1
         ;;

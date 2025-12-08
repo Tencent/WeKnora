@@ -389,7 +389,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 	sourceID := fmt.Sprintf("%s-%s", chunkID, questionID)
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.RetrieverEngines.Engines)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"chunk_id": chunkID,

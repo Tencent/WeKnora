@@ -64,35 +64,6 @@ func NewUserService(
 	}
 }
 
-var engine = map[string][]types.RetrieverEngineParams{
-	"postgres": {
-		{
-			RetrieverType:       types.KeywordsRetrieverType,
-			RetrieverEngineType: types.PostgresRetrieverEngineType,
-		},
-		{
-			RetrieverType:       types.VectorRetrieverType,
-			RetrieverEngineType: types.PostgresRetrieverEngineType,
-		},
-	},
-	"elasticsearch_v7": {
-		{
-			RetrieverType:       types.KeywordsRetrieverType,
-			RetrieverEngineType: types.ElasticsearchRetrieverEngineType,
-		},
-	},
-	"elasticsearch_v8": {
-		{
-			RetrieverType:       types.KeywordsRetrieverType,
-			RetrieverEngineType: types.ElasticsearchRetrieverEngineType,
-		},
-		{
-			RetrieverType:       types.VectorRetrieverType,
-			RetrieverEngineType: types.ElasticsearchRetrieverEngineType,
-		},
-	},
-}
-
 // Register creates a new user account
 func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error) {
 	logger.Info(ctx, "Start user registration")
@@ -120,21 +91,12 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 		return nil, errors.New("failed to process password")
 	}
 
-	egs := []types.RetrieverEngineParams{}
-	for _, driver := range strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",") {
-		if val, ok := engine[driver]; ok {
-			egs = append(egs, val...)
-		}
-	}
-	egs = uniqueRetrieverEngine(egs)
-	logger.Debug(ctx, "user register retriever engines")
-
 	// Create default tenant for the user
+	// Note: RetrieverEngines is left empty - system will use defaults from RETRIEVE_DRIVER env
 	tenant := &types.Tenant{
-		Name:             fmt.Sprintf("%s's Workspace", secutils.SanitizeForLog(req.Username)),
-		Description:      "Default workspace",
-		Status:           "active",
-		RetrieverEngines: types.RetrieverEngines{Engines: egs},
+		Name:        fmt.Sprintf("%s's Workspace", secutils.SanitizeForLog(req.Username)),
+		Description: "Default workspace",
+		Status:      "active",
 	}
 
 	createdTenant, err := s.tenantService.CreateTenant(ctx, tenant)
@@ -463,16 +425,4 @@ func (s *userService) GetCurrentUser(ctx context.Context) (*types.User, error) {
 	}
 
 	return user, nil
-}
-
-func uniqueRetrieverEngine(engine []types.RetrieverEngineParams) []types.RetrieverEngineParams {
-	seen := make(map[types.RetrieverEngineParams]bool)
-	var result []types.RetrieverEngineParams
-	for _, v := range engine {
-		if !seen[v] {
-			seen[v] = true
-			result = append(result, v)
-		}
-	}
-	return result
 }

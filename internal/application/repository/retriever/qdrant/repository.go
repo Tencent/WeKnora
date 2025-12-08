@@ -6,10 +6,11 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	typesLocal "github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
@@ -33,32 +34,121 @@ func NewQdrantRetrieveEngineRepository(client *qdrant.Client) interfaces.Retriev
 	log := logger.GetLogger(context.Background())
 	log.Info("[Qdrant] Initializing Qdrant retriever engine repository")
 
-	collectionName := os.Getenv(envQdrantCollection)
-	if collectionName == "" {
+	collectionBaseName := os.Getenv(envQdrantCollection)
+	if collectionBaseName == "" {
 		log.Warn("[Qdrant] QDRANT_COLLECTION environment variable not set, using default collection name")
-		collectionName = defaultCollectionName
+		collectionBaseName = defaultCollectionName
 	}
 
 	res := &qdrantRepository{
-		client:         client,
-		collectionName: collectionName,
+		client:             client,
+		collectionBaseName: collectionBaseName,
 	}
 
 	log.Info("[Qdrant] Successfully initialized repository")
 	return res
 }
 
-func (q *qdrantRepository) EngineType() typesLocal.RetrieverEngineType {
-	return typesLocal.QdrantRetrieverEngineType
+// getCollectionName returns the collection name for a specific dimension
+func (q *qdrantRepository) getCollectionName(dimension int) string {
+	return fmt.Sprintf("%s_%d", q.collectionBaseName, dimension)
 }
 
-func (q *qdrantRepository) Support() []typesLocal.RetrieverType {
-	return []typesLocal.RetrieverType{typesLocal.KeywordsRetrieverType, typesLocal.VectorRetrieverType}
+// ensureCollection ensures the collection exists for the given dimension
+func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) error {
+	collectionName := q.getCollectionName(dimension)
+
+	// Check cache first
+	if _, ok := q.initializedCollections.Load(dimension); ok {
+		return nil
+	}
+
+	log := logger.GetLogger(ctx)
+
+	// Check if collection exists
+	exists, err := q.client.CollectionExists(ctx, collectionName)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return fmt.Errorf("failed to check collection existence: %w", err)
+	}
+
+	if !exists {
+		log.Infof("[Qdrant] Creating collection %s with dimension %d", collectionName, dimension)
+
+		err = q.client.CreateCollection(ctx, &qdrant.CreateCollection{
+			CollectionName: collectionName,
+			VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
+				Size:     uint64(dimension),
+				Distance: qdrant.Distance_Cosine,
+			}),
+		})
+		if err != nil {
+			log.Errorf("[Qdrant] Failed to create collection: %v", err)
+			return fmt.Errorf("failed to create collection: %w", err)
+		}
+
+		// Create payload indexes for filtering
+		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID}
+		for _, field := range indexFields {
+			_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+				CollectionName: collectionName,
+				FieldName:      field,
+				FieldType:      qdrant.FieldType_FieldTypeKeyword.Enum(),
+			})
+			if err != nil {
+				log.Warnf("[Qdrant] Failed to create index for field %s: %v", field, err)
+			}
+		}
+
+		// Create bool index for is_enabled
+		_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+			CollectionName: collectionName,
+			FieldName:      fieldIsEnabled,
+			FieldType:      qdrant.FieldType_FieldTypeBool.Enum(),
+		})
+		if err != nil {
+			log.Warnf("[Qdrant] Failed to create index for field %s: %v", fieldIsEnabled, err)
+		}
+
+		// Create text index for content (for keyword search) with multilingual tokenizer
+		// This supports Chinese, Japanese, Korean and other languages
+		lowercase := true
+		_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
+			CollectionName: collectionName,
+			FieldName:      fieldContent,
+			FieldType:      qdrant.FieldType_FieldTypeText.Enum(),
+			FieldIndexParams: &qdrant.PayloadIndexParams{
+				IndexParams: &qdrant.PayloadIndexParams_TextIndexParams{
+					TextIndexParams: &qdrant.TextIndexParams{
+						Tokenizer: qdrant.TokenizerType_Multilingual,
+						Lowercase: &lowercase,
+					},
+				},
+			},
+		})
+		if err != nil {
+			log.Warnf("[Qdrant] Failed to create text index for content: %v", err)
+		}
+
+		log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+	}
+
+	// Mark as initialized
+	q.initializedCollections.Store(dimension, true)
+	return nil
+}
+
+func (q *qdrantRepository) EngineType() types.RetrieverEngineType {
+	return types.QdrantRetrieverEngineType
+}
+
+func (q *qdrantRepository) Support() []types.RetrieverType {
+	return []types.RetrieverType{types.KeywordsRetrieverType, types.VectorRetrieverType}
 }
 
 // EstimateStorageSize calculates the estimated storage size for a list of indices
 func (q *qdrantRepository) EstimateStorageSize(ctx context.Context,
-	indexInfoList []*typesLocal.IndexInfo, params map[string]any,
+	indexInfoList []*types.IndexInfo, params map[string]any,
 ) int64 {
 	var totalStorageSize int64
 	for _, embedding := range indexInfoList {
@@ -73,7 +163,7 @@ func (q *qdrantRepository) EstimateStorageSize(ctx context.Context,
 
 // Save stores a single point in Qdrant
 func (q *qdrantRepository) Save(ctx context.Context,
-	embedding *typesLocal.IndexInfo,
+	embedding *types.IndexInfo,
 	additionalParams map[string]any,
 ) error {
 	log := logger.GetLogger(ctx)
@@ -86,6 +176,12 @@ func (q *qdrantRepository) Save(ctx context.Context,
 		return err
 	}
 
+	dimension := len(embeddingDB.Embedding)
+	if err := q.ensureCollection(ctx, dimension); err != nil {
+		return err
+	}
+
+	collectionName := q.getCollectionName(dimension)
 	pointID := uuid.New().String()
 	point := &qdrant.PointStruct{
 		Id:      qdrant.NewID(pointID),
@@ -94,7 +190,7 @@ func (q *qdrantRepository) Save(ctx context.Context,
 	}
 
 	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
-		CollectionName: q.collectionName,
+		CollectionName: collectionName,
 		Points:         []*qdrant.PointStruct{point},
 	})
 	if err != nil {
@@ -108,7 +204,7 @@ func (q *qdrantRepository) Save(ctx context.Context,
 
 // BatchSave stores multiple points in Qdrant using batch upsert
 func (q *qdrantRepository) BatchSave(ctx context.Context,
-	embeddingList []*typesLocal.IndexInfo, additionalParams map[string]any,
+	embeddingList []*types.IndexInfo, additionalParams map[string]any,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(embeddingList) == 0 {
@@ -118,7 +214,9 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 
 	log.Infof("[Qdrant] Batch saving %d indices", len(embeddingList))
 
-	points := make([]*qdrant.PointStruct, 0, len(embeddingList))
+	// Group points by dimension
+	pointsByDimension := make(map[int][]*qdrant.PointStruct)
+
 	for _, embedding := range embeddingList {
 		embeddingDB := toQdrantVectorEmbedding(embedding, additionalParams)
 		if len(embeddingDB.Embedding) == 0 {
@@ -126,30 +224,42 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 			continue
 		}
 
+		dimension := len(embeddingDB.Embedding)
 		point := &qdrant.PointStruct{
 			Id:      qdrant.NewID(uuid.New().String()),
 			Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
 			Payload: createPayload(embeddingDB),
 		}
-		points = append(points, point)
-		log.Debugf("[Qdrant] Added chunk ID %s to batch request", embedding.ChunkID)
+		pointsByDimension[dimension] = append(pointsByDimension[dimension], point)
+		log.Debugf("[Qdrant] Added chunk ID %s to batch request (dimension: %d)", embedding.ChunkID, dimension)
 	}
 
-	if len(points) == 0 {
+	if len(pointsByDimension) == 0 {
 		log.Warn("[Qdrant] No valid points to save after filtering")
 		return nil
 	}
 
-	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
-		CollectionName: q.collectionName,
-		Points:         points,
-	})
-	if err != nil {
-		log.Errorf("[Qdrant] Failed to execute batch operation: %v", err)
-		return fmt.Errorf("failed to batch save: %w", err)
+	// Save points to each dimension-specific collection
+	totalSaved := 0
+	for dimension, points := range pointsByDimension {
+		if err := q.ensureCollection(ctx, dimension); err != nil {
+			return err
+		}
+
+		collectionName := q.getCollectionName(dimension)
+		_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
+			CollectionName: collectionName,
+			Points:         points,
+		})
+		if err != nil {
+			log.Errorf("[Qdrant] Failed to execute batch operation for dimension %d: %v", dimension, err)
+			return fmt.Errorf("failed to batch save (dimension %d): %w", dimension, err)
+		}
+		totalSaved += len(points)
+		log.Infof("[Qdrant] Saved %d points to collection %s", len(points), collectionName)
 	}
 
-	log.Infof("[Qdrant] Successfully batch saved %d indices", len(points))
+	log.Infof("[Qdrant] Successfully batch saved %d indices", totalSaved)
 	return nil
 }
 
@@ -161,10 +271,11 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 		return nil
 	}
 
-	log.Infof("[Qdrant] Deleting indices by chunk IDs, count: %d", len(chunkIDList))
+	collectionName := q.getCollectionName(dimension)
+	log.Infof("[Qdrant] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: q.collectionName,
+		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
 				qdrant.NewMatchKeywords(fieldChunkID, chunkIDList...),
@@ -190,10 +301,11 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		return nil
 	}
 
-	log.Infof("[Qdrant] Deleting indices by knowledge IDs, count: %d", len(knowledgeIDList))
+	collectionName := q.getCollectionName(dimension)
+	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: q.collectionName,
+		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
 				qdrant.NewMatchKeywords(fieldKnowledgeID, knowledgeIDList...),
@@ -219,10 +331,11 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 		return nil
 	}
 
-	log.Infof("[Qdrant] Deleting indices by source IDs, count: %d", len(sourceIDList))
+	collectionName := q.getCollectionName(dimension)
+	log.Infof("[Qdrant] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: q.collectionName,
+		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
 				qdrant.NewMatchKeywords(fieldSourceID, sourceIDList...),
@@ -239,6 +352,7 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 }
 
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
+// This method operates on all collections since dimension is not provided
 func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error {
 	log := logger.GetLogger(ctx)
 	if len(chunkStatusMap) == 0 {
@@ -247,6 +361,13 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 	}
 
 	log.Infof("[Qdrant] Batch updating chunk enabled status, count: %d", len(chunkStatusMap))
+
+	// Get all collections that match our base name pattern
+	collections, err := q.client.ListCollections(ctx)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to list collections: %v", err)
+		return fmt.Errorf("failed to list collections: %w", err)
+	}
 
 	// Group chunks by enabled status for batch updates
 	enabledChunkIDs := make([]string, 0)
@@ -260,47 +381,52 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		}
 	}
 
-	// Update enabled chunks
-	if len(enabledChunkIDs) > 0 {
-		_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
-			CollectionName: q.collectionName,
-			Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: true}),
-			PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-				Must: []*qdrant.Condition{
-					qdrant.NewMatchKeywords(fieldChunkID, enabledChunkIDs...),
-				},
-			}),
-		})
-		if err != nil {
-			log.Errorf("[Qdrant] Failed to update enabled chunks: %v", err)
-			return fmt.Errorf("failed to update enabled chunks: %w", err)
+	// Update in all matching collections
+	for _, collectionName := range collections {
+		// Only process collections that start with our base name
+		if len(collectionName) <= len(q.collectionBaseName) ||
+			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+			continue
 		}
-		log.Infof("[Qdrant] Successfully enabled %d chunks", len(enabledChunkIDs))
-	}
 
-	// Update disabled chunks
-	if len(disabledChunkIDs) > 0 {
-		_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
-			CollectionName: q.collectionName,
-			Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: false}),
-			PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-				Must: []*qdrant.Condition{
-					qdrant.NewMatchKeywords(fieldChunkID, disabledChunkIDs...),
-				},
-			}),
-		})
-		if err != nil {
-			log.Errorf("[Qdrant] Failed to update disabled chunks: %v", err)
-			return fmt.Errorf("failed to update disabled chunks: %w", err)
+		// Update enabled chunks
+		if len(enabledChunkIDs) > 0 {
+			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
+				CollectionName: collectionName,
+				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: true}),
+				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+					Must: []*qdrant.Condition{
+						qdrant.NewMatchKeywords(fieldChunkID, enabledChunkIDs...),
+					},
+				}),
+			})
+			if err != nil {
+				log.Warnf("[Qdrant] Failed to update enabled chunks in %s: %v", collectionName, err)
+			}
 		}
-		log.Infof("[Qdrant] Successfully disabled %d chunks", len(disabledChunkIDs))
+
+		// Update disabled chunks
+		if len(disabledChunkIDs) > 0 {
+			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
+				CollectionName: collectionName,
+				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: false}),
+				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+					Must: []*qdrant.Condition{
+						qdrant.NewMatchKeywords(fieldChunkID, disabledChunkIDs...),
+					},
+				}),
+			})
+			if err != nil {
+				log.Warnf("[Qdrant] Failed to update disabled chunks in %s: %v", collectionName, err)
+			}
+		}
 	}
 
 	log.Infof("[Qdrant] Batch update chunk enabled status completed")
 	return nil
 }
 
-func (q *qdrantRepository) getBaseFilter(params typesLocal.RetrieveParams) *qdrant.Filter {
+func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Filter {
 	must := make([]*qdrant.Condition, 0)
 	mustNot := make([]*qdrant.Condition, 0)
 
@@ -327,15 +453,15 @@ func (q *qdrantRepository) getBaseFilter(params typesLocal.RetrieveParams) *qdra
 
 // Retrieve dispatches the retrieval operation to the appropriate method based on retriever type
 func (q *qdrantRepository) Retrieve(ctx context.Context,
-	params typesLocal.RetrieveParams,
-) ([]*typesLocal.RetrieveResult, error) {
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
 	log.Debugf("[Qdrant] Processing retrieval request of type: %s", params.RetrieverType)
 
 	switch params.RetrieverType {
-	case typesLocal.VectorRetrieverType:
+	case types.VectorRetrieverType:
 		return q.VectorRetrieve(ctx, params)
-	case typesLocal.KeywordsRetrieverType:
+	case types.KeywordsRetrieverType:
 		return q.KeywordsRetrieve(ctx, params)
 	}
 
@@ -346,11 +472,26 @@ func (q *qdrantRepository) Retrieve(ctx context.Context,
 
 // VectorRetrieve performs vector similarity search
 func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
-	params typesLocal.RetrieveParams,
-) ([]*typesLocal.RetrieveResult, error) {
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
+	dimension := len(params.Embedding)
 	log.Infof("[Qdrant] Vector retrieval: dim=%d, topK=%d, threshold=%.4f",
-		len(params.Embedding), params.TopK, params.Threshold)
+		dimension, params.TopK, params.Threshold)
+
+	// Get collection name based on embedding dimension
+	collectionName := q.getCollectionName(dimension)
+
+	// Check if collection exists
+	exists, err := q.client.CollectionExists(ctx, collectionName)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return nil, fmt.Errorf("failed to check collection: %w", err)
+	}
+	if !exists {
+		log.Warnf("[Qdrant] Collection %s does not exist, returning empty results", collectionName)
+		return buildRetrieveResult(nil, types.VectorRetrieverType), nil
+	}
 
 	filter := q.getBaseFilter(params)
 
@@ -358,7 +499,7 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 	scoreThreshold := float32(params.Threshold)
 
 	searchResult, err := q.client.Query(ctx, &qdrant.QueryPoints{
-		CollectionName: q.collectionName,
+		CollectionName: collectionName,
 		Query:          qdrant.NewQuery(params.Embedding...),
 		Filter:         filter,
 		Limit:          &limit,
@@ -367,10 +508,10 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 	})
 	if err != nil {
 		log.Errorf("[Qdrant] Vector search failed: %v", err)
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", collectionName, err)
 	}
 
-	var results []*typesLocal.IndexWithScore
+	var results []*types.IndexWithScore
 	for _, point := range searchResult {
 		payload := point.Payload
 		embedding := &QdrantVectorEmbeddingWithScore{
@@ -386,7 +527,7 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 		}
 
 		pointID := point.Id.GetUuid()
-		results = append(results, fromQdrantVectorEmbedding(pointID, embedding, typesLocal.MatchTypeEmbedding))
+		results = append(results, fromQdrantVectorEmbedding(pointID, embedding, types.MatchTypeEmbedding))
 	}
 
 	if len(results) == 0 {
@@ -396,58 +537,104 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 		log.Debugf("[Qdrant] Top result score: %.4f", results[0].Score)
 	}
 
-	return buildRetrieveResult(results, typesLocal.VectorRetrieverType), nil
+	return buildRetrieveResult(results, types.VectorRetrieverType), nil
 }
 
 // KeywordsRetrieve performs keyword-based search in document content
+// This searches across all collections since keyword search doesn't depend on dimension
 func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
-	params typesLocal.RetrieveParams,
-) ([]*typesLocal.RetrieveResult, error) {
+	params types.RetrieveParams,
+) ([]*types.RetrieveResult, error) {
 	log := logger.GetLogger(ctx)
 	log.Infof("[Qdrant] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
 
-	filter := q.getBaseFilter(params)
-
-	filter.Must = append(filter.Must, qdrant.NewMatchText(fieldContent, params.Query))
-
-	limit := uint32(params.TopK)
-	scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
-		CollectionName: q.collectionName,
-		Filter:         filter,
-		Limit:          &limit,
-		WithPayload:    qdrant.NewWithPayload(true),
-	})
+	// Get all collections that match our base name pattern
+	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
-		log.Errorf("[Qdrant] Keywords search failed: %v", err)
-		return nil, err
+		log.Errorf("[Qdrant] Failed to list collections: %v", err)
+		return nil, fmt.Errorf("failed to list collections: %w", err)
 	}
 
-	var results []*typesLocal.IndexWithScore
-	for _, point := range scrollResult {
-		payload := point.Payload
-		embedding := &QdrantVectorEmbeddingWithScore{
-			QdrantVectorEmbedding: QdrantVectorEmbedding{
-				Content:         payload[fieldContent].GetStringValue(),
-				SourceID:        payload[fieldSourceID].GetStringValue(),
-				SourceType:      int(payload[fieldSourceType].GetIntegerValue()),
-				ChunkID:         payload[fieldChunkID].GetStringValue(),
-				KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
-				KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
-			},
-			Score: 1.0,
+	var allResults []*types.IndexWithScore
+	limit := uint32(params.TopK)
+
+	log.Debugf("[Qdrant] Found %d collections, base name: %s", len(collections), q.collectionBaseName)
+
+	// Tokenize query for OR-based search (better for Chinese and multi-word queries)
+	queryTokens := tokenizeQuery(params.Query)
+	log.Debugf("[Qdrant] Tokenized query into %d tokens: %v", len(queryTokens), queryTokens)
+
+	// Search in all matching collections
+	for _, collectionName := range collections {
+		log.Debugf("[Qdrant] Checking collection: %s", collectionName)
+		// Only process collections that start with our base name
+		if len(collectionName) <= len(q.collectionBaseName) ||
+			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+			log.Debugf("[Qdrant] Skipping collection %s (doesn't match base name %s)", collectionName, q.collectionBaseName)
+			continue
 		}
 
-		pointID := point.Id.GetUuid()
-		results = append(results, fromQdrantVectorEmbedding(pointID, embedding, typesLocal.MatchTypeKeywords))
+		filter := q.getBaseFilter(params)
+
+		// Build should conditions for each token (OR logic)
+		// This allows matching documents that contain any of the query tokens
+		if len(queryTokens) > 0 {
+			shouldConditions := make([]*qdrant.Condition, 0, len(queryTokens))
+			for _, token := range queryTokens {
+				shouldConditions = append(shouldConditions, qdrant.NewMatchText(fieldContent, token))
+			}
+			filter.Should = shouldConditions
+		} else {
+			// Fallback to original query if tokenization fails
+			filter.Must = append(filter.Must, qdrant.NewMatchText(fieldContent, params.Query))
+		}
+
+		log.Debugf("[Qdrant] Searching in collection %s with %d should conditions", collectionName, len(filter.Should))
+
+		scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
+			CollectionName: collectionName,
+			Filter:         filter,
+			Limit:          &limit,
+			WithPayload:    qdrant.NewWithPayload(true),
+		})
+		if err != nil {
+			log.Warnf("[Qdrant] Keywords search failed in %s: %v", collectionName, err)
+			continue
+		}
+
+		log.Debugf("[Qdrant] Found %d results in collection %s", len(scrollResult), collectionName)
+
+		for _, point := range scrollResult {
+			payload := point.Payload
+			embedding := &QdrantVectorEmbeddingWithScore{
+				QdrantVectorEmbedding: QdrantVectorEmbedding{
+					Content:         payload[fieldContent].GetStringValue(),
+					SourceID:        payload[fieldSourceID].GetStringValue(),
+					SourceType:      int(payload[fieldSourceType].GetIntegerValue()),
+					ChunkID:         payload[fieldChunkID].GetStringValue(),
+					KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
+					KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
+				},
+				Score: 1.0,
+			}
+
+			pointID := point.Id.GetUuid()
+			allResults = append(allResults, fromQdrantVectorEmbedding(pointID, embedding, types.MatchTypeKeywords))
+		}
 	}
 
-	if len(results) == 0 {
+	// Limit results to topK
+	if len(allResults) > params.TopK {
+		allResults = allResults[:params.TopK]
+	}
+
+	if len(allResults) == 0 {
 		log.Warnf("[Qdrant] No keyword matches found for query: %s", params.Query)
 	} else {
-		log.Infof("[Qdrant] Keywords retrieval found %d results", len(results))
+		log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
 	}
 
-	return buildRetrieveResult(results, typesLocal.KeywordsRetrieverType), nil
+	return buildRetrieveResult(allResults, types.KeywordsRetrieverType), nil
 }
 
 // CopyIndices copies index data from source knowledge base to target knowledge base
@@ -460,13 +647,20 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 ) error {
 	log := logger.GetLogger(ctx)
 	log.Infof(
-		"[Qdrant] Copying indices from source knowledge base %s to target knowledge base %s, count: %d",
-		sourceKnowledgeBaseID, targetKnowledgeBaseID, len(sourceToTargetChunkIDMap),
+		"[Qdrant] Copying indices from source knowledge base %s to target knowledge base %s, count: %d, dimension: %d",
+		sourceKnowledgeBaseID, targetKnowledgeBaseID, len(sourceToTargetChunkIDMap), dimension,
 	)
 
 	if len(sourceToTargetChunkIDMap) == 0 {
 		log.Warn("[Qdrant] Empty mapping, skipping copy")
 		return nil
+	}
+
+	collectionName := q.getCollectionName(dimension)
+
+	// Ensure target collection exists
+	if err := q.ensureCollection(ctx, dimension); err != nil {
+		return err
 	}
 
 	batchSize := uint32(64)
@@ -475,7 +669,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 
 	for {
 		scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
-			CollectionName: q.collectionName,
+			CollectionName: collectionName,
 			Filter: &qdrant.Filter{
 				Must: []*qdrant.Condition{
 					qdrant.NewMatch(fieldKnowledgeBaseID, sourceKnowledgeBaseID),
@@ -524,6 +718,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				fieldChunkID:         targetChunkID,
 				fieldKnowledgeID:     targetKnowledgeID,
 				fieldKnowledgeBaseID: targetKnowledgeBaseID,
+				fieldIsEnabled:       true,
 			})
 
 			var vectors *qdrant.Vectors
@@ -549,7 +744,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 
 		if len(targetPoints) > 0 {
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
-				CollectionName: q.collectionName,
+				CollectionName: collectionName,
 				Points:         targetPoints,
 			})
 			if err != nil {
@@ -588,11 +783,11 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 	return qdrant.NewValueMap(payload)
 }
 
-func buildRetrieveResult(results []*typesLocal.IndexWithScore, retrieverType typesLocal.RetrieverType) []*typesLocal.RetrieveResult {
-	return []*typesLocal.RetrieveResult{
+func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.RetrieverType) []*types.RetrieveResult {
+	return []*types.RetrieveResult{
 		{
 			Results:             results,
-			RetrieverEngineType: typesLocal.QdrantRetrieverEngineType,
+			RetrieverEngineType: types.QdrantRetrieverEngineType,
 			RetrieverType:       retrieverType,
 			Error:               nil,
 		},
@@ -666,4 +861,31 @@ func fromQdrantVectorEmbedding(id string,
 		Score:           embedding.Score,
 		MatchType:       matchType,
 	}
+}
+
+// tokenizeQuery splits a query string into tokens for OR-based full-text search.
+// It uses jieba for professional Chinese word segmentation.
+func tokenizeQuery(query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+
+	// Use jieba for segmentation (search mode for better recall)
+	words := types.Jieba.CutForSearch(query, true)
+
+	// Filter and deduplicate
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(words))
+	for _, word := range words {
+		word = strings.TrimSpace(strings.ToLower(word))
+		// Skip empty, single-char, and already seen words
+		if utf8.RuneCountInString(word) < 2 || seen[word] {
+			continue
+		}
+		seen[word] = true
+		result = append(result, word)
+	}
+
+	return result
 }

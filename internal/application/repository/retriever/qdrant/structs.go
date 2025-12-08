@@ -1,10 +1,16 @@
 package qdrant
 
-import "github.com/qdrant/go-client/qdrant"
+import (
+	"sync"
+
+	"github.com/qdrant/go-client/qdrant"
+)
 
 type qdrantRepository struct {
-	client         *qdrant.Client
-	collectionName string
+	client             *qdrant.Client
+	collectionBaseName string
+	// Cache for initialized collections (dimension -> true)
+	initializedCollections sync.Map
 }
 
 type QdrantVectorEmbedding struct {
