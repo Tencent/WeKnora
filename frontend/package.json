@@ -17,6 +17,7 @@
     "@types/papaparse": "^5.5.0",
     "axios": "^1.8.4",
     "dompurify": "^3.2.6",
+    "highlight.js": "^11.11.1",
     "marked": "^5.1.2",
     "pagefind": "^1.1.1",
     "papaparse": "^5.5.3",
