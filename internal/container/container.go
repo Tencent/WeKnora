@@ -279,9 +279,13 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 
 	// Run database migrations automatically (optional, can be disabled via env var)
 	// To disable auto-migration, set AUTO_MIGRATE=false
+	// To enable auto-recovery from dirty state, set AUTO_RECOVER_DIRTY=true
 	if os.Getenv("AUTO_MIGRATE") != "false" {
 		logger.Infof(context.Background(), "Running database migrations...")
-		if err := database.RunMigrations(migrateDSN); err != nil {
+		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") == "true"
+		if err := database.RunMigrationsWithOptions(migrateDSN, database.MigrationOptions{
+			AutoRecoverDirty: autoRecover,
+		}); err != nil {
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
@@ -539,21 +543,42 @@ func initOllamaService() (*ollama.OllamaService, error) {
 }
 
 func initNeo4jClient() (neo4j.Driver, error) {
+	ctx := context.Background()
 	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
-		logger.Debugf(context.Background(), "NOT SUPPORT RETRIEVE GRAPH")
+		logger.Debugf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil, nil
 	}
 	uri := os.Getenv("NEO4J_URI")
 	username := os.Getenv("NEO4J_USERNAME")
 	password := os.Getenv("NEO4J_PASSWORD")
 
-	driver, err := neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
-	if err != nil {
-		return nil, err
+	// Retry configuration
+	maxRetries := 30                 // Max retry attempts
+	retryInterval := 2 * time.Second // Wait between retries
+
+	var driver neo4j.Driver
+	var err error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		driver, err = neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
+		if err != nil {
+			logger.Warnf(ctx, "Failed to create Neo4j driver (attempt %d/%d): %v", attempt, maxRetries, err)
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		err = driver.VerifyAuthentication(ctx, nil)
+		if err == nil {
+			if attempt > 1 {
+				logger.Infof(ctx, "Successfully connected to Neo4j after %d attempts", attempt)
+			}
+			return driver, nil
+		}
+
+		logger.Warnf(ctx, "Failed to verify Neo4j authentication (attempt %d/%d): %v", attempt, maxRetries, err)
+		driver.Close(ctx)
+		time.Sleep(retryInterval)
 	}
-	err = driver.VerifyAuthentication(context.Background(), nil)
-	if err != nil {
-		return nil, err
-	}
-	return driver, nil
+
+	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
 }

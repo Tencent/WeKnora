@@ -96,10 +96,13 @@ case "$1" in
         if [ -z "$2" ]; then
             echo "Error: Version number is required"
             echo "Usage: $0 force <version>"
+            echo "Note: Use -1 to reset to no version (allows re-running all migrations)"
             exit 1
         fi
-        echo "Forcing migration version to $2..."
-        migrate -path ${MIGRATIONS_DIR} -database ${DB_URL} force $2
+        VERSION="$2"
+        echo "Forcing migration version to $VERSION..."
+        # Use env to pass the command, avoiding shell flag parsing issues with negative numbers
+        env migrate -path "${MIGRATIONS_DIR}" -database "${DB_URL}" force -- "$VERSION"
         ;;
     goto)
         if [ -z "$2" ]; then

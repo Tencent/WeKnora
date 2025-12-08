@@ -59,6 +59,7 @@ services:
       - DOCREADER_ADDR=docreader:50051
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
+      - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
       - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
@@ -151,8 +152,6 @@ services:
       - POSTGRES_DB=${DB_NAME}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./migrations/paradedb/00-init-db.sql:/docker-entrypoint-initdb.d/00-init-db.sql
-      - ./migrations/paradedb/01-migrate-to-paradedb.sql:/docker-entrypoint-initdb.d/01-migrate-to-paradedb.sql
     networks:
       - WeKnora-network
     healthcheck:

@@ -12,8 +12,6 @@ services:
       - POSTGRES_DB=${DB_NAME}
     volumes:
       - postgres-data-dev:/var/lib/postgresql/data
-      - ./migrations/paradedb/00-init-db.sql:/docker-entrypoint-initdb.d/00-init-db.sql
-      - ./migrations/paradedb/01-migrate-to-paradedb.sql:/docker-entrypoint-initdb.d/01-migrate-to-paradedb.sql
     networks:
       - WeKnora-network-dev
     healthcheck:
