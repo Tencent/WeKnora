@@ -28,15 +28,6 @@ ALTER TABLE chunks
 ALTER TABLE chunks
     DROP COLUMN IF EXISTS status;
 
-DROP INDEX IF EXISTS idx_embeddings_knowledge_base_id;
-
--- Drop index
-DROP INDEX IF EXISTS idx_embeddings_is_enabled;
-
--- Remove is_enabled column
-ALTER TABLE embeddings
-    DROP COLUMN IF EXISTS is_enabled;
-
 -- Drop indexes and columns referencing tags
 DROP INDEX IF EXISTS idx_chunks_tag;
 ALTER TABLE chunks DROP COLUMN IF EXISTS tag_id;

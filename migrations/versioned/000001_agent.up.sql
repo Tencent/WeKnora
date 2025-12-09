@@ -223,23 +223,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 -- Section 8: Embeddings Enhancements
 -- ============================================================================
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000001] Adding embeddings enhancements...'; END $$;
-
--- Add is_enabled column
-ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT TRUE;
-CREATE INDEX IF NOT EXISTS idx_embeddings_is_enabled ON embeddings(is_enabled);
-
--- Add index for knowledge_base_id
-CREATE INDEX IF NOT EXISTS idx_embeddings_knowledge_base_id ON embeddings(knowledge_base_id);
-
--- Reindex BM25 search index (idempotent - will rebuild if exists)
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_search_idx') THEN
-        REINDEX INDEX embeddings_search_idx;
-        RAISE NOTICE '[Migration 000001] Reindexed embeddings_search_idx';
-    END IF;
-END $$;
+-- move embeddings to 000002 migrations
 
 -- ============================================================================
 -- Section 9: Models Enhancements

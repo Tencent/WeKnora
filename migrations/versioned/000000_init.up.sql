@@ -5,9 +5,6 @@ DO $$ BEGIN RAISE NOTICE '[Migration 000000] Starting initial database setup...'
 -- Create extensions
 DO $$ BEGIN RAISE NOTICE '[Migration 000000] Creating extensions...'; END $$;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS pg_search;
 
 -- Create tenant table
 DO $$ BEGIN RAISE NOTICE '[Migration 000000] Creating table: tenants'; END $$;
@@ -210,72 +207,5 @@ CREATE TABLE IF NOT EXISTS chunks (
 CREATE INDEX IF NOT EXISTS idx_chunks_tenant_kg ON chunks(tenant_id, knowledge_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_parent_id ON chunks(parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
-
--- Create embeddings table
-DO $$ BEGIN RAISE NOTICE '[Migration 000000] Creating table: embeddings'; END $$;
-CREATE TABLE IF NOT EXISTS embeddings (
-    id SERIAL PRIMARY KEY,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-
-    source_id VARCHAR(64) NOT NULL,
-    source_type INTEGER NOT NULL,
-    chunk_id VARCHAR(64),
-    knowledge_id VARCHAR(64),
-    knowledge_base_id VARCHAR(64),
-    content TEXT,
-    dimension INTEGER NOT NULL,
-    embedding halfvec
-);
-
-DO $$ BEGIN RAISE NOTICE '[Migration 000000] Creating indexes for embeddings (this may take a while)...'; END $$;
-CREATE UNIQUE INDEX IF NOT EXISTS embeddings_unique_source ON embeddings(source_id, source_type);
-
--- Create BM25 search index (check if exists first)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_search_idx') THEN
-        CREATE INDEX embeddings_search_idx ON embeddings
-        USING bm25 (id, knowledge_base_id, content, knowledge_id, chunk_id)
-        WITH (
-            key_field = 'id',
-            text_fields = '{
-                "content": {
-                  "tokenizer": {"type": "chinese_lindera"}
-                }
-            }'
-        );
-        RAISE NOTICE '[Migration 000000] Created BM25 index embeddings_search_idx';
-    ELSE
-        RAISE NOTICE '[Migration 000000] BM25 index embeddings_search_idx already exists';
-    END IF;
-END $$;
-
--- Create HNSW indexes for vector search (check if exists first)
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_embedding_idx' OR indexname LIKE 'embeddings_embedding%3584%') THEN
-        CREATE INDEX embeddings_embedding_idx_3584 ON embeddings 
-        USING hnsw ((embedding::halfvec(3584)) halfvec_cosine_ops) 
-        WITH (m = 16, ef_construction = 64) 
-        WHERE (dimension = 3584);
-        RAISE NOTICE '[Migration 000000] Created HNSW index for dimension 3584';
-    ELSE
-        RAISE NOTICE '[Migration 000000] HNSW index for dimension 3584 already exists';
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'embeddings_embedding_idx_798' OR indexname LIKE 'embeddings_embedding%798%') THEN
-        CREATE INDEX embeddings_embedding_idx_798 ON embeddings 
-        USING hnsw ((embedding::halfvec(798)) halfvec_cosine_ops) 
-        WITH (m = 16, ef_construction = 64) 
-        WHERE (dimension = 798);
-        RAISE NOTICE '[Migration 000000] Created HNSW index for dimension 798';
-    ELSE
-        RAISE NOTICE '[Migration 000000] HNSW index for dimension 798 already exists';
-    END IF;
-END $$;
 
 DO $$ BEGIN RAISE NOTICE '[Migration 000000] Initial database setup completed successfully!'; END $$;

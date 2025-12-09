@@ -253,13 +253,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		dbPassword := os.Getenv("DB_PASSWORD")
 		encodedPassword := url.QueryEscape(dbPassword)
 
+		// Check if postgres is in RETRIEVE_DRIVER to determine skip_embedding
+		retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
+		skipEmbedding := "true"
+		if slices.Contains(retrieveDriver, "postgres") {
+			skipEmbedding = "false"
+		}
+		logger.Infof(context.Background(), "Skip embedding: %s", skipEmbedding)
+
 		migrateDSN = fmt.Sprintf(
-			"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+			"postgres://%s:%s@%s:%s/%s?sslmode=disable&options=-c%%20app.skip_embedding=%s",
 			os.Getenv("DB_USER"),
 			encodedPassword, // Use encoded password
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
+			skipEmbedding,
 		)
 
 		// Debug log (don't log password)
@@ -282,10 +291,15 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	// To enable auto-recovery from dirty state, set AUTO_RECOVER_DIRTY=true
 	if os.Getenv("AUTO_MIGRATE") != "false" {
 		logger.Infof(context.Background(), "Running database migrations...")
+
 		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") == "true"
-		if err := database.RunMigrationsWithOptions(migrateDSN, database.MigrationOptions{
+		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
-		}); err != nil {
+		}
+
+		// Run base migrations (all versioned migrations including embeddings)
+		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
+		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(

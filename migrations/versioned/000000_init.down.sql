@@ -1,10 +1,3 @@
--- Drop indexes for embeddings
-DROP INDEX IF EXISTS embeddings_unique_source;
-DROP INDEX IF EXISTS embeddings_search_idx;
-
--- Drop embeddings table
-DROP TABLE IF EXISTS embeddings;
-
 -- Drop indexes for chunks
 DROP INDEX IF EXISTS idx_chunks_tenant_kg;
 DROP INDEX IF EXISTS idx_chunks_parent_id;
