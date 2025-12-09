@@ -333,7 +333,7 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("MINIO_ACCESS_KEY_ID"),
 			os.Getenv("MINIO_SECRET_ACCESS_KEY"),
 			os.Getenv("MINIO_BUCKET_NAME"),
-			false,
+			strings.EqualFold(os.Getenv("MINIO_USE_SSL"), "true"),
 		)
 	case "cos":
 		if os.Getenv("COS_BUCKET_NAME") == "" ||
