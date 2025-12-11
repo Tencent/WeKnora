@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/go/pkg/mod make build-prod
 RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
 
 # Final stage
-FROM alpine:3.17
+FROM alpine:3.23
 
 WORKDIR /app
 
