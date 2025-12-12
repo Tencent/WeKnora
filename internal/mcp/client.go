@@ -75,18 +75,29 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		headers[key] = value
 	}
 
-	// Add auth headers
-	if config.Service.AuthConfig != nil {
-		if config.Service.AuthConfig.APIKey != "" {
-			headers["X-API-Key"] = config.Service.AuthConfig.APIKey
-		}
-		if config.Service.AuthConfig.Token != "" {
-			headers["Authorization"] = "Bearer " + config.Service.AuthConfig.Token
-		}
-		if config.Service.AuthConfig.CustomHeaders != nil {
-			for key, value := range config.Service.AuthConfig.CustomHeaders {
-				headers[key] = value
-			}
+	// Add auth headers - authentication must be explicitly provided
+	if config.Service.AuthConfig == nil {
+		return nil, fmt.Errorf("authentication configuration is required for MCP client")
+	}
+	
+	// Ensure at least one form of authentication is provided
+	hasAuth := config.Service.AuthConfig.APIKey != "" ||
+		config.Service.AuthConfig.Token != "" ||
+		(config.Service.AuthConfig.CustomHeaders != nil && len(config.Service.AuthConfig.CustomHeaders) > 0)
+	
+	if !hasAuth {
+		return nil, fmt.Errorf("at least one authentication credential must be provided (APIKey, Token, or CustomHeaders)")
+	}
+	
+	if config.Service.AuthConfig.APIKey != "" {
+		headers["X-API-Key"] = config.Service.AuthConfig.APIKey
+	}
+	if config.Service.AuthConfig.Token != "" {
+		headers["Authorization"] = "Bearer " + config.Service.AuthConfig.Token
+	}
+	if config.Service.AuthConfig.CustomHeaders != nil {
+		for key, value := range config.Service.AuthConfig.CustomHeaders {
+			headers[key] = value
 		}
 	}
 
