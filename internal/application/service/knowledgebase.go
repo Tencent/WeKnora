@@ -544,81 +544,108 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		logger.Info(ctx, "No search results found")
 		return nil, nil
 	}
-	logger.Infof(ctx, "Result count before RRF fusion: vector=%d, keyword=%d", len(vectorResults), len(keywordResults))
+	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d", len(vectorResults), len(keywordResults))
 
-	// Use RRF (Reciprocal Rank Fusion) to merge results
-	// RRF score = sum(1 / (k + rank)) for each retriever where the chunk appears
-	// k=60 is a common choice that works well in practice
-	const rrfK = 60
+	var deduplicatedChunks []*types.IndexWithScore
 
-	// Build rank maps for each retriever (already sorted by score from retriever)
-	vectorRanks := make(map[string]int)
-	for i, r := range vectorResults {
-		if _, exists := vectorRanks[r.ChunkID]; !exists {
-			vectorRanks[r.ChunkID] = i + 1 // 1-indexed rank
+	// If only vector results (no keyword results), keep original embedding scores
+	// This is important for FAQ search which only uses vector retrieval
+	if len(keywordResults) == 0 {
+		logger.Info(ctx, "Only vector results, keeping original embedding scores")
+		chunkInfoMap := make(map[string]*types.IndexWithScore)
+		for _, r := range vectorResults {
+			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
+				chunkInfoMap[r.ChunkID] = r
+			}
 		}
-	}
-	keywordRanks := make(map[string]int)
-	for i, r := range keywordResults {
-		if _, exists := keywordRanks[r.ChunkID]; !exists {
-			keywordRanks[r.ChunkID] = i + 1 // 1-indexed rank
+		deduplicatedChunks = make([]*types.IndexWithScore, 0, len(chunkInfoMap))
+		for _, info := range chunkInfoMap {
+			deduplicatedChunks = append(deduplicatedChunks, info)
 		}
-	}
+		slices.SortFunc(deduplicatedChunks, func(a, b *types.IndexWithScore) int {
+			if a.Score > b.Score {
+				return -1
+			} else if a.Score < b.Score {
+				return 1
+			}
+			return 0
+		})
+		logger.Infof(ctx, "Result count after deduplication: %d", len(deduplicatedChunks))
+	} else {
+		// Use RRF (Reciprocal Rank Fusion) to merge results from multiple retrievers
+		// RRF score = sum(1 / (k + rank)) for each retriever where the chunk appears
+		// k=60 is a common choice that works well in practice
+		const rrfK = 60
 
-	// Collect all unique chunks and compute RRF scores
-	chunkInfoMap := make(map[string]*types.IndexWithScore)
-	rrfScores := make(map[string]float64)
-
-	// Process vector results
-	for _, r := range vectorResults {
-		if _, exists := chunkInfoMap[r.ChunkID]; !exists {
-			chunkInfoMap[r.ChunkID] = r
+		// Build rank maps for each retriever (already sorted by score from retriever)
+		vectorRanks := make(map[string]int)
+		for i, r := range vectorResults {
+			if _, exists := vectorRanks[r.ChunkID]; !exists {
+				vectorRanks[r.ChunkID] = i + 1 // 1-indexed rank
+			}
 		}
-	}
-	// Process keyword results
-	for _, r := range keywordResults {
-		if _, exists := chunkInfoMap[r.ChunkID]; !exists {
-			chunkInfoMap[r.ChunkID] = r
+		keywordRanks := make(map[string]int)
+		for i, r := range keywordResults {
+			if _, exists := keywordRanks[r.ChunkID]; !exists {
+				keywordRanks[r.ChunkID] = i + 1 // 1-indexed rank
+			}
 		}
-	}
 
-	// Compute RRF scores
-	for chunkID := range chunkInfoMap {
-		rrfScore := 0.0
-		if rank, ok := vectorRanks[chunkID]; ok {
-			rrfScore += 1.0 / float64(rrfK+rank)
+		// Collect all unique chunks and compute RRF scores
+		chunkInfoMap := make(map[string]*types.IndexWithScore)
+		rrfScores := make(map[string]float64)
+
+		// Process vector results
+		for _, r := range vectorResults {
+			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
+				chunkInfoMap[r.ChunkID] = r
+			}
 		}
-		if rank, ok := keywordRanks[chunkID]; ok {
-			rrfScore += 1.0 / float64(rrfK+rank)
+		// Process keyword results
+		for _, r := range keywordResults {
+			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
+				chunkInfoMap[r.ChunkID] = r
+			}
 		}
-		rrfScores[chunkID] = rrfScore
-	}
 
-	// Convert to slice and sort by RRF score
-	deduplicatedChunks := make([]*types.IndexWithScore, 0, len(chunkInfoMap))
-	for chunkID, info := range chunkInfoMap {
-		// Store RRF score in the Score field for downstream processing
-		info.Score = rrfScores[chunkID]
-		deduplicatedChunks = append(deduplicatedChunks, info)
-	}
-	slices.SortFunc(deduplicatedChunks, func(a, b *types.IndexWithScore) int {
-		if a.Score > b.Score {
-			return -1
-		} else if a.Score < b.Score {
-			return 1
+		// Compute RRF scores
+		for chunkID := range chunkInfoMap {
+			rrfScore := 0.0
+			if rank, ok := vectorRanks[chunkID]; ok {
+				rrfScore += 1.0 / float64(rrfK+rank)
+			}
+			if rank, ok := keywordRanks[chunkID]; ok {
+				rrfScore += 1.0 / float64(rrfK+rank)
+			}
+			rrfScores[chunkID] = rrfScore
 		}
-		return 0
-	})
 
-	logger.Infof(ctx, "Result count after RRF fusion: %d", len(deduplicatedChunks))
+		// Convert to slice and sort by RRF score
+		deduplicatedChunks = make([]*types.IndexWithScore, 0, len(chunkInfoMap))
+		for chunkID, info := range chunkInfoMap {
+			// Store RRF score in the Score field for downstream processing
+			info.Score = rrfScores[chunkID]
+			deduplicatedChunks = append(deduplicatedChunks, info)
+		}
+		slices.SortFunc(deduplicatedChunks, func(a, b *types.IndexWithScore) int {
+			if a.Score > b.Score {
+				return -1
+			} else if a.Score < b.Score {
+				return 1
+			}
+			return 0
+		})
 
-	// Log top results after RRF fusion for debugging
-	for i, chunk := range deduplicatedChunks {
-		if i < 15 {
-			vRank, vOk := vectorRanks[chunk.ChunkID]
-			kRank, kOk := keywordRanks[chunk.ChunkID]
-			logger.Debugf(ctx, "RRF rank %d: chunk_id=%s, rrf_score=%.6f, vector_rank=%v(%v), keyword_rank=%v(%v)",
-				i, chunk.ChunkID, chunk.Score, vRank, vOk, kRank, kOk)
+		logger.Infof(ctx, "Result count after RRF fusion: %d", len(deduplicatedChunks))
+
+		// Log top results after RRF fusion for debugging
+		for i, chunk := range deduplicatedChunks {
+			if i < 15 {
+				vRank, vOk := vectorRanks[chunk.ChunkID]
+				kRank, kOk := keywordRanks[chunk.ChunkID]
+				logger.Debugf(ctx, "RRF rank %d: chunk_id=%s, rrf_score=%.6f, vector_rank=%v(%v), keyword_rank=%v(%v)",
+					i, chunk.ChunkID, chunk.Score, vRank, vOk, kRank, kOk)
+			}
 		}
 	}
 
