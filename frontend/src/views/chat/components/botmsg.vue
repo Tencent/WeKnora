@@ -34,7 +34,7 @@
     </div>
 </template>
 <script setup>
-import { onMounted, watch, computed, ref, reactive, defineProps, nextTick } from 'vue';
+import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick } from 'vue';
 import { marked } from 'marked';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
@@ -282,9 +282,35 @@ const handleAddToKnowledge = () => {
     MessagePlugin.info(t('chat.editorOpened') || '已打开编辑器，请选择知识库后保存');
 };
 
+// 处理 markdown-content 中图片的点击事件
+const handleMarkdownImageClick = (e) => {
+    const target = e.target;
+    if (target && target.tagName === 'IMG') {
+        const src = target.getAttribute('src');
+        if (src) {
+            e.preventDefault();
+            e.stopPropagation();
+            preview(src);
+        }
+    }
+};
+
 onMounted(async () => {
     processedMarkdown.value = splitMarkdownByImages(props.content);
-    removeImg()
+    removeImg();
+    
+    // 为 markdown-content 中的图片添加点击事件
+    nextTick(() => {
+        if (parentMd.value) {
+            parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
+        }
+    });
+});
+
+onBeforeUnmount(() => {
+    if (parentMd.value) {
+        parentMd.value.removeEventListener('click', handleMarkdownImageClick, true);
+    }
 });
 </script>
 <style lang="less" scoped>
@@ -396,18 +422,42 @@ onMounted(async () => {
             background: #fafafa;
         }
     }
+
+    :deep(img) {
+        max-width: 80%;
+        max-height: 300px;
+        width: auto;
+        height: auto;
+        border-radius: 8px;
+        display: block;
+        margin: 8px 0;
+        border: 0.5px solid #e5e7eb;
+        object-fit: contain;
+        cursor: pointer;
+        transition: transform 0.2s ease;
+
+        &:hover {
+            transform: scale(1.02);
+        }
+    }
 }
 
 .ai-markdown-img {
+    max-width: 80%;
+    max-height: 300px;
+    width: auto;
+    height: auto;
     border-radius: 8px;
     display: block;
     cursor: pointer;
-    object-fit: scale-down;
-    contain: content;
-    margin-left: 16px;
+    object-fit: contain;
+    margin: 8px 0 8px 16px;
     border: 0.5px solid #E7E7E7;
-    max-width: 708px;
-    height: 230px;
+    transition: transform 0.2s ease;
+
+    &:hover {
+        transform: scale(1.02);
+    }
 }
 
 .bot_msg {

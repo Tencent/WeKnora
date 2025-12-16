@@ -95,7 +95,7 @@ services:
       - full
 
   docreader:
-    image: wechatopenai/weknora-docreader:main
+    image: wechatopenai/weknora-docreader:latest
     container_name: WeKnora-docreader-dev
     ports:
       - "${DOCREADER_PORT:-50051}:50051"

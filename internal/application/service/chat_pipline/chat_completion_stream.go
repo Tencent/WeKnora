@@ -59,8 +59,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "messages_ready", map[string]interface{}{
 		"message_count": len(chatMessages),
 		"system_prompt": chatMessages[0].Content,
-		"user_content":  chatMessages[len(chatMessages)-1].Content,
 	})
+	logger.Infof(ctx, "user message: %s", chatMessages[len(chatMessages)-1].Content)
 	// EventBus is required for event-driven streaming
 	if chatManage.EventBus == nil {
 		pipelineError(ctx, "Stream", "eventbus_missing", map[string]interface{}{

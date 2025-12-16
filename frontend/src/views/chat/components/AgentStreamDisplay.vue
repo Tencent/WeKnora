@@ -208,6 +208,9 @@
       </div>
     </div>
   </Teleport>
+  
+  <!-- Image Preview -->
+  <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
 </template>
 
 <script setup lang="ts">
@@ -216,6 +219,7 @@ import { useRouter } from 'vue-router';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
+import picturePreview from '@/components/picture-preview.vue';
 import { getChunkByIdOnly } from '@/api/knowledge-base';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -247,6 +251,19 @@ const getLocalizedToolName = (toolName?: string | null): string => {
 
 // 根元素引用
 const rootElement = ref<HTMLElement | null>(null);
+
+// 图片预览状态
+const imagePreviewVisible = ref(false);
+const imagePreviewUrl = ref('');
+
+const openImagePreview = (url: string) => {
+  imagePreviewUrl.value = url;
+  imagePreviewVisible.value = true;
+};
+
+const closeImagePreview = () => {
+  imagePreviewVisible.value = false;
+};
 
 // 浮层状态（Web/KB 共用）
 const KB_SNIPPET_LIMIT = 600;
@@ -923,6 +940,18 @@ const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
   
+  // Handle image clicks -> open preview
+  if (target.tagName === 'IMG') {
+    const imgEl = target as HTMLImageElement;
+    const src = imgEl.getAttribute('src');
+    if (src) {
+      e.preventDefault();
+      e.stopPropagation();
+      openImagePreview(src);
+      return;
+    }
+  }
+  
   // Handle web citation clicks
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl && webEl.getAttribute('data-url')) {
@@ -1130,8 +1159,8 @@ const renderMarkdown = (content: any): string => {
     if (!html) return '';
     
     return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'span', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
-      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id', 'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex']
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'span', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'figure', 'figcaption'],
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id', 'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt', 'width', 'height', 'style']
     });
   } catch (e) {
     console.error('Markdown rendering error:', e, 'Content:', contentStr.substring(0, 100));
@@ -1891,6 +1920,24 @@ const handleAddToKnowledge = (answerEvent: any) => {
           font-weight: 600;
         }
       }
+      
+      :deep(img) {
+        max-width: 80%;
+        max-height: 300px;
+        width: auto;
+        height: auto;
+        border-radius: 8px;
+        display: block;
+        margin: 8px 0;
+        border: 0.5px solid #e5e7eb;
+        object-fit: contain;
+        cursor: pointer;
+        transition: transform 0.2s ease;
+        
+        &:hover {
+          transform: scale(1.02);
+        }
+      }
     }
   }
 }
@@ -2003,6 +2050,24 @@ const handleAddToKnowledge = (answerEvent: any) => {
         th {
           background: #f9fafb;
           font-weight: 600;
+        }
+      }
+      
+      :deep(img) {
+        max-width: 80%;
+        max-height: 300px;
+        width: auto;
+        height: auto;
+        border-radius: 8px;
+        display: block;
+        margin: 8px 0;
+        border: 0.5px solid #e5e7eb;
+        object-fit: contain;
+        cursor: pointer;
+        transition: transform 0.2s ease;
+        
+        &:hover {
+          transform: scale(1.02);
         }
       }
     }
