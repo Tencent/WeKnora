@@ -30,9 +30,19 @@ func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler
 	}
 }
 
-// LoadMessages handles requests to load message history
-// It supports both loading recent messages and loading messages before a specific timestamp
-// This endpoint is used for scrolling through conversation history
+// LoadMessages godoc
+// @Summary      加载消息历史
+// @Description  加载会话的消息历史，支持分页和时间筛选
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        session_id   path      string  true   "会话ID"
+// @Param        limit        query     int     false  "返回数量"  default(20)
+// @Param        before_time  query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
+// @Success      200          {object}  map[string]interface{}  "消息列表"
+// @Failure      400          {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /messages/{session_id}/load [get]
 func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -108,8 +118,18 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	})
 }
 
-// DeleteMessage handles requests to delete a message from a session
-// It requires both session ID and message ID to identify the specific message to delete
+// DeleteMessage godoc
+// @Summary      删除消息
+// @Description  从会话中删除指定消息
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        session_id  path      string  true  "会话ID"
+// @Param        id          path      string  true  "消息ID"
+// @Success      200         {object}  map[string]interface{}  "删除成功"
+// @Failure      500         {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Router       /messages/{session_id}/{id} [delete]
 func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 	ctx := c.Request.Context()
 

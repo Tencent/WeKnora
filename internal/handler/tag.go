@@ -22,7 +22,20 @@ func NewTagHandler(tagService interfaces.KnowledgeTagService) *TagHandler {
 	return &TagHandler{tagService: tagService}
 }
 
-// ListTags returns all tags under a knowledge base with statistics.
+// ListTags godoc
+// @Summary      获取标签列表
+// @Description  获取知识库下的所有标签及统计信息
+// @Tags         标签管理
+// @Accept       json
+// @Produce      json
+// @Param        id         path      string  true   "知识库ID"
+// @Param        page       query     int     false  "页码"
+// @Param        page_size  query     int     false  "每页数量"
+// @Param        keyword    query     string  false  "关键词搜索"
+// @Success      200        {object}  map[string]interface{}  "标签列表"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/tags [get]
 func (h *TagHandler) ListTags(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
@@ -55,7 +68,18 @@ type createTagRequest struct {
 	SortOrder int    `json:"sort_order"`
 }
 
-// CreateTag creates a new tag.
+// CreateTag godoc
+// @Summary      创建标签
+// @Description  在知识库下创建新标签
+// @Tags         标签管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object{name=string,color=string,sort_order=int}  true  "标签信息"
+// @Success      200      {object}  map[string]interface{}  "创建的标签"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/tags [post]
 func (h *TagHandler) CreateTag(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))
@@ -89,7 +113,19 @@ type updateTagRequest struct {
 	SortOrder *int    `json:"sort_order"`
 }
 
-// UpdateTag updates an existing tag.
+// UpdateTag godoc
+// @Summary      更新标签
+// @Description  更新标签信息
+// @Tags         标签管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        tag_id   path      string  true  "标签ID"
+// @Param        request  body      object  true  "标签更新信息"
+// @Success      200      {object}  map[string]interface{}  "更新后的标签"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/tags/{tag_id} [put]
 func (h *TagHandler) UpdateTag(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -116,7 +152,19 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 	})
 }
 
-// DeleteTag deletes a tag. Use query param force=true to force delete even if referenced.
+// DeleteTag godoc
+// @Summary      删除标签
+// @Description  删除标签，可使用force=true强制删除被引用的标签
+// @Tags         标签管理
+// @Accept       json
+// @Produce      json
+// @Param        id      path      string  true   "知识库ID"
+// @Param        tag_id  path      string  true   "标签ID"
+// @Param        force   query     bool    false  "强制删除"
+// @Success      200     {object}  map[string]interface{}  "删除成功"
+// @Failure      400     {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/tags/{tag_id} [delete]
 func (h *TagHandler) DeleteTag(c *gin.Context) {
 	ctx := c.Request.Context()
 	tagID := secutils.SanitizeForLog(c.Param("tag_id"))

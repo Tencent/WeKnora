@@ -5,6 +5,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -12,6 +14,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+
+	_ "github.com/Tencent/WeKnora/docs" // swagger docs
 )
 
 // RouterParams 路由参数
@@ -59,20 +63,30 @@ func NewRouter(params RouterParams) *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// 其他中间件
+	// 基础中间件（不需要认证）
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
+
+	// 健康检查（不需要认证）
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
+	// Swagger API 文档（不需要认证）
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler,
+		ginSwagger.DefaultModelsExpandDepth(-1), // 默认折叠 Models
+		ginSwagger.DocExpansion("list"),         // 展开模式: "list"(展开标签), "full"(全部展开), "none"(全部折叠)
+		ginSwagger.DeepLinking(true),            // 启用深度链接
+		ginSwagger.PersistAuthorization(true),   // 持久化认证信息
+	))
+
+	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
 
 	// 添加OpenTelemetry追踪中间件
 	r.Use(middleware.TracingMiddleware())
-
-	// 健康检查
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
-	})
 
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")

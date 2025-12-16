@@ -22,7 +22,21 @@ func NewFAQHandler(knowledgeService interfaces.KnowledgeService) *FAQHandler {
 	return &FAQHandler{knowledgeService: knowledgeService}
 }
 
-// ListEntries lists FAQ entries under a knowledge base.
+// ListEntries godoc
+// @Summary      获取FAQ条目列表
+// @Description  获取知识库下的FAQ条目列表，支持分页和筛选
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id         path      string  true   "知识库ID"
+// @Param        page       query     int     false  "页码"
+// @Param        page_size  query     int     false  "每页数量"
+// @Param        tag_id     query     string  false  "标签ID筛选"
+// @Param        keyword    query     string  false  "关键词搜索"
+// @Success      200        {object}  map[string]interface{}  "FAQ列表"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries [get]
 func (h *FAQHandler) ListEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	var page types.Pagination
@@ -48,7 +62,18 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	})
 }
 
-// UpsertEntries appends or replaces FAQ entries in batch asynchronously.
+// UpsertEntries godoc
+// @Summary      批量更新/插入FAQ条目
+// @Description  异步批量更新或插入FAQ条目
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                    true  "知识库ID"
+// @Param        request  body      types.FAQBatchUpsertPayload  true  "批量操作请求"
+// @Success      200      {object}  map[string]interface{}    "任务ID"
+// @Failure      400      {object}  errors.AppError           "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries [post]
 func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req types.FAQBatchUpsertPayload
@@ -73,7 +98,18 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	})
 }
 
-// CreateEntry creates a single FAQ entry synchronously.
+// CreateEntry godoc
+// @Summary      创建单个FAQ条目
+// @Description  同步创建单个FAQ条目
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                true  "知识库ID"
+// @Param        request  body      types.FAQEntryPayload true  "FAQ条目"
+// @Success      200      {object}  map[string]interface{}  "创建的FAQ条目"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entry [post]
 func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req types.FAQEntryPayload
@@ -96,7 +132,19 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	})
 }
 
-// UpdateEntry updates a single FAQ entry.
+// UpdateEntry godoc
+// @Summary      更新FAQ条目
+// @Description  更新指定的FAQ条目
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string                true  "知识库ID"
+// @Param        entry_id  path      string                true  "FAQ条目ID"
+// @Param        request   body      types.FAQEntryPayload true  "FAQ条目"
+// @Success      200       {object}  map[string]interface{}  "更新成功"
+// @Failure      400       {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [put]
 func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req types.FAQEntryPayload
@@ -118,7 +166,18 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	})
 }
 
-// UpdateEntryTagBatch updates tags for FAQ entries in batch.
+// UpdateEntryTagBatch godoc
+// @Summary      批量更新FAQ标签
+// @Description  批量更新FAQ条目的标签
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object  true  "标签更新请求"
+// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries/tags [put]
 func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req faqEntryTagBatchRequest
@@ -138,9 +197,18 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	})
 }
 
-// UpdateEntryFieldsBatch updates multiple fields for FAQ entries in batch.
-// This is the unified API for batch updating FAQ entry fields.
-// Supports updating is_enabled, is_recommended, tag_id in a single call.
+// UpdateEntryFieldsBatch godoc
+// @Summary      批量更新FAQ字段
+// @Description  批量更新FAQ条目的多个字段（is_enabled, is_recommended, tag_id）
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                        true  "知识库ID"
+// @Param        request  body      types.FAQEntryFieldsBatchUpdate  true  "字段更新请求"
+// @Success      200      {object}  map[string]interface{}        "更新成功"
+// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries/fields [put]
 func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req types.FAQEntryFieldsBatchUpdate
@@ -170,7 +238,18 @@ type faqEntryTagBatchRequest struct {
 	Updates map[string]*string `json:"updates" binding:"required,min=1"`
 }
 
-// DeleteEntries deletes FAQ entries in batch.
+// DeleteEntries godoc
+// @Summary      批量删除FAQ条目
+// @Description  批量删除指定的FAQ条目
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object{ids=[]string}  true  "要删除的FAQ ID列表"
+// @Success      200      {object}  map[string]interface{}  "删除成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries [delete]
 func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req faqDeleteRequest
@@ -193,7 +272,18 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	})
 }
 
-// SearchFAQ searches FAQ entries using hybrid search.
+// SearchFAQ godoc
+// @Summary      搜索FAQ
+// @Description  使用混合搜索在FAQ中搜索
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                true  "知识库ID"
+// @Param        request  body      types.FAQSearchRequest  true  "搜索请求"
+// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/search [post]
 func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req types.FAQSearchRequest
@@ -222,7 +312,17 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	})
 }
 
-// ExportEntries exports all FAQ entries as a CSV file.
+// ExportEntries godoc
+// @Summary      导出FAQ条目
+// @Description  将所有FAQ条目导出为CSV文件
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      text/csv
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {file}    file    "CSV文件"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/faq/entries/export [get]
 func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	ctx := c.Request.Context()
 	kbID := secutils.SanitizeForLog(c.Param("id"))

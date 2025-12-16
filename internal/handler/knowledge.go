@@ -82,7 +82,22 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	return false
 }
 
-// CreateKnowledgeFromFile handles requests to create knowledge from an uploaded file
+// CreateKnowledgeFromFile godoc
+// @Summary      从文件创建知识
+// @Description  上传文件并创建知识条目
+// @Tags         知识管理
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        id                path      string  true   "知识库ID"
+// @Param        file              formData  file    true   "上传的文件"
+// @Param        fileName          formData  string  false  "自定义文件名"
+// @Param        metadata          formData  string  false  "元数据JSON"
+// @Param        enable_multimodel formData  bool    false  "启用多模态处理"
+// @Success      200               {object}  map[string]interface{}  "创建的知识"
+// @Failure      400               {object}  errors.AppError         "请求参数错误"
+// @Failure      409               {object}  map[string]interface{}  "文件重复"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/knowledge/file [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating knowledge from file")
@@ -167,7 +182,19 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	})
 }
 
-// CreateKnowledgeFromURL handles requests to create knowledge from a URL
+// CreateKnowledgeFromURL godoc
+// @Summary      从URL创建知识
+// @Description  从指定URL抓取内容并创建知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "知识库ID"
+// @Param        request  body      object{url=string,enable_multimodel=bool,title=string}  true  "URL请求"
+// @Success      201      {object}  map[string]interface{}  "创建的知识"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      409      {object}  map[string]interface{}  "URL重复"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/knowledge/url [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating knowledge from URL")
@@ -223,7 +250,18 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	})
 }
 
-// CreateManualKnowledge handles manual Markdown knowledge creation
+// CreateManualKnowledge godoc
+// @Summary      手工创建知识
+// @Description  手工录入Markdown格式的知识内容
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                       true  "知识库ID"
+// @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
+// @Success      200      {object}  map[string]interface{}       "创建的知识"
+// @Failure      400      {object}  errors.AppError              "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/knowledge/manual [post]
 func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating manual knowledge")
@@ -262,7 +300,18 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	})
 }
 
-// GetKnowledge retrieves a knowledge entry by its ID
+// GetKnowledge godoc
+// @Summary      获取知识详情
+// @Description  根据ID获取知识条目详情
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}  "知识详情"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "知识不存在"
+// @Security     Bearer
+// @Router       /knowledge/{id} [get]
 func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -296,7 +345,22 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	})
 }
 
-// ListKnowledge retrieves a paginated list of knowledge entries from a knowledge base
+// ListKnowledge godoc
+// @Summary      获取知识列表
+// @Description  获取知识库下的知识列表，支持分页和筛选
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id         path      string  true   "知识库ID"
+// @Param        page       query     int     false  "页码"
+// @Param        page_size  query     int     false  "每页数量"
+// @Param        tag_id     query     string  false  "标签ID筛选"
+// @Param        keyword    query     string  false  "关键词搜索"
+// @Param        file_type  query     string  false  "文件类型筛选"
+// @Success      200        {object}  map[string]interface{}  "知识列表"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/knowledge [get]
 func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -356,7 +420,17 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	})
 }
 
-// DeleteKnowledge handles requests to delete a knowledge entry by its ID
+// DeleteKnowledge godoc
+// @Summary      删除知识
+// @Description  根据ID删除知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/{id} [delete]
 func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -385,7 +459,17 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	})
 }
 
-// DownloadKnowledgeFile handles requests to download a file associated with a knowledge entry
+// DownloadKnowledgeFile godoc
+// @Summary      下载知识文件
+// @Description  下载知识条目关联的原始文件
+// @Tags         知识管理
+// @Accept       json
+// @Produce      application/octet-stream
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {file}    file    "文件内容"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/{id}/download [get]
 func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -442,7 +526,17 @@ type GetKnowledgeBatchRequest struct {
 	IDs []string `form:"ids" binding:"required"` // List of knowledge IDs
 }
 
-// GetKnowledgeBatch handles requests to retrieve multiple knowledge entries in a batch
+// GetKnowledgeBatch godoc
+// @Summary      批量获取知识
+// @Description  根据ID列表批量获取知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        ids  query     []string  true  "知识ID列表"
+// @Success      200  {object}  map[string]interface{}  "知识列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/batch [get]
 func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -489,6 +583,18 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	})
 }
 
+// UpdateKnowledge godoc
+// @Summary      更新知识
+// @Description  更新知识条目信息
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string          true  "知识ID"
+// @Param        request  body      types.Knowledge true  "知识信息"
+// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/{id} [put]
 func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 	// Get knowledge ID from URL path parameter
@@ -519,7 +625,18 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	})
 }
 
-// UpdateManualKnowledge handles manual Markdown knowledge updates
+// UpdateManualKnowledge godoc
+// @Summary      更新手工知识
+// @Description  更新手工录入的Markdown知识内容
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                       true  "知识ID"
+// @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
+// @Success      200      {object}  map[string]interface{}       "更新后的知识"
+// @Failure      400      {object}  errors.AppError              "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/manual/{id} [put]
 func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating manual knowledge")
@@ -562,7 +679,17 @@ type knowledgeTagBatchRequest struct {
 	Updates map[string]*string `json:"updates" binding:"required,min=1"`
 }
 
-// UpdateKnowledgeTagBatch updates tags for knowledge items in batch.
+// UpdateKnowledgeTagBatch godoc
+// @Summary      批量更新知识标签
+// @Description  批量更新知识条目的标签
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object  true  "标签更新请求"
+// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req knowledgeTagBatchRequest
@@ -581,7 +708,19 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	})
 }
 
-// UpdateImageInfo updates a chunk's properties
+// UpdateImageInfo godoc
+// @Summary      更新图像信息
+// @Description  更新知识分块的图像信息
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string  true  "知识ID"
+// @Param        chunk_id  path      string  true  "分块ID"
+// @Param        request   body      object{image_info=string}  true  "图像信息"
+// @Success      200       {object}  map[string]interface{}     "更新成功"
+// @Failure      400       {object}  errors.AppError            "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge/image/{id}/{chunk_id} [put]
 func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating image info")

@@ -38,11 +38,16 @@ func NewAuthHandler(configInfo *config.Config,
 	}
 }
 
-// Register handles the HTTP request for user registration
-// It deserializes the request body into a registration request object, validates it,
-// calls the service to create the user, and returns the result
-// Parameters:
-//   - c: Gin context for the HTTP request
+// Register godoc
+// @Summary      用户注册
+// @Description  注册新用户账号
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.RegisterRequest  true  "注册请求参数"
+// @Success      201      {object}  types.RegisterResponse
+// @Failure      400      {object}  errors.AppError  "请求参数错误"
+// @Router       /auth/register [post]
 func (h *AuthHandler) Register(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -88,11 +93,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, response)
 }
 
-// Login handles the HTTP request for user login
-// It deserializes the request body into a login request object, validates it,
-// calls the service to authenticate the user, and returns tokens
-// Parameters:
-//   - c: Gin context for the HTTP request
+// Login godoc
+// @Summary      用户登录
+// @Description  用户登录并获取访问令牌
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.LoginRequest  true  "登录请求参数"
+// @Success      200      {object}  types.LoginResponse
+// @Failure      401      {object}  errors.AppError  "认证失败"
+// @Router       /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -137,10 +147,16 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// Logout handles the HTTP request for user logout
-// It extracts the token from the Authorization header and revokes it
-// Parameters:
-//   - c: Gin context for the HTTP request
+// Logout godoc
+// @Summary      用户登出
+// @Description  撤销当前访问令牌并登出
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "登出成功"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -182,10 +198,16 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	})
 }
 
-// RefreshToken handles the HTTP request for refreshing access tokens
-// It extracts the refresh token from the request body and generates new tokens
-// Parameters:
-//   - c: Gin context for the HTTP request
+// RefreshToken godoc
+// @Summary      刷新令牌
+// @Description  使用刷新令牌获取新的访问令牌
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object{refreshToken=string}  true  "刷新令牌"
+// @Success      200      {object}  map[string]interface{}       "新令牌"
+// @Failure      401      {object}  errors.AppError              "令牌无效"
+// @Router       /auth/refresh [post]
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -220,10 +242,16 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	})
 }
 
-// GetCurrentUser handles the HTTP request for getting current user information
-// It extracts the user from the context (set by auth middleware) and returns user info
-// Parameters:
-//   - c: Gin context for the HTTP request
+// GetCurrentUser godoc
+// @Summary      获取当前用户信息
+// @Description  获取当前登录用户的详细信息
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "用户信息"
+// @Failure      401  {object}  errors.AppError         "未授权"
+// @Security     Bearer
+// @Router       /auth/me [get]
 func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -256,10 +284,17 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	})
 }
 
-// ChangePassword handles the HTTP request for changing user password
-// It extracts the current user and validates the old password before setting new one
-// Parameters:
-//   - c: Gin context for the HTTP request
+// ChangePassword godoc
+// @Summary      修改密码
+// @Description  修改当前用户的登录密码
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object{old_password=string,new_password=string}  true  "密码修改请求"
+// @Success      200      {object}  map[string]interface{}                           "修改成功"
+// @Failure      400      {object}  errors.AppError                                  "请求参数错误"
+// @Security     Bearer
+// @Router       /auth/change-password [post]
 func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -302,10 +337,16 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	})
 }
 
-// ValidateToken handles the HTTP request for validating access tokens
-// It extracts the token from the Authorization header and validates it
-// Parameters:
-//   - c: Gin context for the HTTP request
+// ValidateToken godoc
+// @Summary      验证令牌
+// @Description  验证访问令牌是否有效
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "令牌有效"
+// @Failure      401  {object}  errors.AppError         "令牌无效"
+// @Security     Bearer
+// @Router       /auth/validate [get]
 func (h *AuthHandler) ValidateToken(c *gin.Context) {
 	ctx := c.Request.Context()
 

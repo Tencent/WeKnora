@@ -23,8 +23,17 @@ func NewMCPServiceHandler(mcpServiceService interfaces.MCPServiceService) *MCPSe
 	}
 }
 
-// CreateMCPService creates a new MCP service
-// POST /api/mcp-services
+// CreateMCPService godoc
+// @Summary      创建MCP服务
+// @Description  创建新的MCP服务配置
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.MCPService  true  "MCP服务配置"
+// @Success      200      {object}  map[string]interface{}  "创建的MCP服务"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /mcp-services [post]
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -55,8 +64,16 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	})
 }
 
-// ListMCPServices lists all MCP services for a tenant
-// GET /api/mcp-services
+// ListMCPServices godoc
+// @Summary      获取MCP服务列表
+// @Description  获取当前租户的所有MCP服务
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "MCP服务列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /mcp-services [get]
 func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -80,8 +97,17 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	})
 }
 
-// GetMCPService retrieves a single MCP service
-// GET /api/mcp-services/:id
+// GetMCPService godoc
+// @Summary      获取MCP服务详情
+// @Description  根据ID获取MCP服务详情
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "MCP服务ID"
+// @Success      200  {object}  map[string]interface{}  "MCP服务详情"
+// @Failure      404  {object}  errors.AppError         "服务不存在"
+// @Security     Bearer
+// @Router       /mcp-services/{id} [get]
 func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -106,8 +132,18 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	})
 }
 
-// UpdateMCPService updates an MCP service
-// PUT /api/mcp-services/:id
+// UpdateMCPService godoc
+// @Summary      更新MCP服务
+// @Description  更新MCP服务配置
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string  true  "MCP服务ID"
+// @Param        request  body      object  true  "更新字段"
+// @Success      200      {object}  map[string]interface{}  "更新后的MCP服务"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /mcp-services/{id} [put]
 func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -227,8 +263,17 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	})
 }
 
-// DeleteMCPService deletes an MCP service
-// DELETE /api/mcp-services/:id
+// DeleteMCPService godoc
+// @Summary      删除MCP服务
+// @Description  删除指定的MCP服务
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "MCP服务ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Router       /mcp-services/{id} [delete]
 func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -253,8 +298,17 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 	})
 }
 
-// TestMCPService tests connection to an MCP service
-// POST /api/mcp-services/:id/test
+// TestMCPService godoc
+// @Summary      测试MCP服务连接
+// @Description  测试MCP服务是否可以正常连接
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "MCP服务ID"
+// @Success      200  {object}  map[string]interface{}  "测试结果"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /mcp-services/{id}/test [post]
 func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -288,8 +342,17 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 	})
 }
 
-// GetMCPServiceTools retrieves tools from an MCP service
-// GET /api/mcp-services/:id/tools
+// GetMCPServiceTools godoc
+// @Summary      获取MCP服务工具列表
+// @Description  获取MCP服务提供的工具列表
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "MCP服务ID"
+// @Success      200  {object}  map[string]interface{}  "工具列表"
+// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Router       /mcp-services/{id}/tools [get]
 func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))
@@ -314,8 +377,17 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	})
 }
 
-// GetMCPServiceResources retrieves resources from an MCP service
-// GET /api/mcp-services/:id/resources
+// GetMCPServiceResources godoc
+// @Summary      获取MCP服务资源列表
+// @Description  获取MCP服务提供的资源列表
+// @Tags         MCP服务
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "MCP服务ID"
+// @Success      200  {object}  map[string]interface{}  "资源列表"
+// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Router       /mcp-services/{id}/resources [get]
 func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	ctx := c.Request.Context()
 	serviceID := secutils.SanitizeForLog(c.Param("id"))

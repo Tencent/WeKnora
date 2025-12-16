@@ -39,7 +39,17 @@ func NewHandler(
 	}
 }
 
-// CreateSession handles the creation of a new conversation session
+// CreateSession godoc
+// @Summary      创建会话
+// @Description  创建新的对话会话
+// @Tags         会话
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateSessionRequest  true  "会话创建请求"
+// @Success      201      {object}  map[string]interface{}  "创建的会话"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /sessions [post]
 func (h *Handler) CreateSession(c *gin.Context) {
 	ctx := c.Request.Context()
 	// Parse and validate the request body
@@ -187,7 +197,17 @@ func (h *Handler) applyConversationDefaults(ctx context.Context, session *types.
 	session.SummaryParameters = h.createDefaultSummaryConfig(ctx)
 }
 
-// GetSession retrieves a session by its ID
+// GetSession godoc
+// @Summary      获取会话详情
+// @Description  根据ID获取会话详情
+// @Tags         会话
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "会话ID"
+// @Success      200  {object}  map[string]interface{}  "会话详情"
+// @Failure      404  {object}  errors.AppError         "会话不存在"
+// @Security     Bearer
+// @Router       /sessions/{id} [get]
 func (h *Handler) GetSession(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -223,7 +243,18 @@ func (h *Handler) GetSession(c *gin.Context) {
 	})
 }
 
-// GetSessionsByTenant retrieves all sessions for the current tenant with pagination
+// GetSessionsByTenant godoc
+// @Summary      获取会话列表
+// @Description  获取当前租户的会话列表，支持分页
+// @Tags         会话
+// @Accept       json
+// @Produce      json
+// @Param        page       query     int  false  "页码"
+// @Param        page_size  query     int  false  "每页数量"
+// @Success      200        {object}  map[string]interface{}  "会话列表"
+// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /sessions [get]
 func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -253,7 +284,18 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	})
 }
 
-// UpdateSession updates an existing session's properties
+// UpdateSession godoc
+// @Summary      更新会话
+// @Description  更新会话属性
+// @Tags         会话
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string         true  "会话ID"
+// @Param        request  body      types.Session  true  "会话信息"
+// @Success      200      {object}  map[string]interface{}  "更新后的会话"
+// @Failure      404      {object}  errors.AppError         "会话不存在"
+// @Security     Bearer
+// @Router       /sessions/{id} [put]
 func (h *Handler) UpdateSession(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -304,7 +346,17 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 	})
 }
 
-// DeleteSession deletes a session by its ID
+// DeleteSession godoc
+// @Summary      删除会话
+// @Description  删除指定的会话
+// @Tags         会话
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "会话ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      404  {object}  errors.AppError         "会话不存在"
+// @Security     Bearer
+// @Router       /sessions/{id} [delete]
 func (h *Handler) DeleteSession(c *gin.Context) {
 	ctx := c.Request.Context()
 

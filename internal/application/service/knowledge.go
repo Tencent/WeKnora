@@ -3990,8 +3990,8 @@ func (s *knowledgeService) buildFAQCSV(chunks []*types.Chunk, tagMap map[string]
 			escapeCSVField(strings.Join(meta.NegativeQuestions, "##")),
 			escapeCSVField(strings.Join(meta.Answers, "##")),
 			boolToCSV(meta.AnswerStrategy == types.AnswerStrategyAll),
-			boolToCSV(!chunk.IsEnabled),                                    // 是否停用：取反
-			boolToCSV(!chunk.Flags.HasFlag(types.ChunkFlagRecommended)),    // 是否禁止被推荐：取反
+			boolToCSV(!chunk.IsEnabled),                                 // 是否停用：取反
+			boolToCSV(!chunk.Flags.HasFlag(types.ChunkFlagRecommended)), // 是否禁止被推荐：取反
 		}
 		buf.WriteString(strings.Join(row, ","))
 		buf.WriteString("\n")
@@ -4619,11 +4619,6 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		if cfg == nil {
 			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 				Error("triggerManualProcessing enable multimodal but VLM config missing")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "VLM 配置缺失"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return
 		}
 		vlmConfig = cfg
 	}

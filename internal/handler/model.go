@@ -68,11 +68,17 @@ type CreateModelRequest struct {
 	Parameters  types.ModelParameters `json:"parameters"  binding:"required"`
 }
 
-// CreateModel handles the HTTP request to create a new model
-// It validates the request, processes it using the model service,
-// and returns the created model to the client
-// Parameters:
-//   - c: Gin context for the HTTP request
+// CreateModel godoc
+// @Summary      创建模型
+// @Description  创建新的模型配置
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CreateModelRequest  true  "模型信息"
+// @Success      201      {object}  map[string]interface{}  "创建的模型"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /models [post]
 func (h *ModelHandler) CreateModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -125,11 +131,17 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	})
 }
 
-// GetModel handles the HTTP request to retrieve a model by its ID
-// It fetches the model from the service and returns it to the client,
-// or returns appropriate error messages if the model cannot be found
-// Parameters:
-//   - c: Gin context for the HTTP request
+// GetModel godoc
+// @Summary      获取模型详情
+// @Description  根据ID获取模型详情
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "模型ID"
+// @Success      200  {object}  map[string]interface{}  "模型详情"
+// @Failure      404  {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Router       /models/{id} [get]
 func (h *ModelHandler) GetModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -169,10 +181,16 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 	})
 }
 
-// ListModels handles the HTTP request to retrieve all models for a tenant
-// It validates the tenant ID, fetches models from the service, and returns them to the client
-// Parameters:
-//   - c: Gin context for the HTTP request
+// ListModels godoc
+// @Summary      获取模型列表
+// @Description  获取当前租户的所有模型
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "模型列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /models [get]
 func (h *ModelHandler) ListModels(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -219,11 +237,18 @@ type UpdateModelRequest struct {
 	Type        types.ModelType       `json:"type"`
 }
 
-// UpdateModel handles the HTTP request to update an existing model
-// It validates the request, retrieves the current model, applies changes,
-// and updates the model in the service
-// Parameters:
-//   - c: Gin context for the HTTP request
+// UpdateModel godoc
+// @Summary      更新模型
+// @Description  更新模型配置信息
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string              true  "模型ID"
+// @Param        request  body      UpdateModelRequest  true  "更新信息"
+// @Success      200      {object}  map[string]interface{}  "更新后的模型"
+// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Router       /models/{id} [put]
 func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -285,11 +310,17 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	})
 }
 
-// DeleteModel handles the HTTP request to delete a model by its ID
-// It validates the model ID, attempts to delete the model through the service,
-// and returns appropriate status and messages
-// Parameters:
-//   - c: Gin context for the HTTP request
+// DeleteModel godoc
+// @Summary      删除模型
+// @Description  删除指定的模型
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "模型ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      404  {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Router       /models/{id} [delete]
 func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	ctx := c.Request.Context()
 

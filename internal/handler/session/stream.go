@@ -15,7 +15,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ContinueStream handles continued streaming of an active response stream
+// ContinueStream godoc
+// @Summary      继续流式响应
+// @Description  继续获取正在进行的流式响应
+// @Tags         问答
+// @Accept       json
+// @Produce      text/event-stream
+// @Param        session_id  path      string  true  "会话ID"
+// @Param        message_id  query     string  true  "消息ID"
+// @Success      200         {object}  map[string]interface{}  "流式响应"
+// @Failure      404         {object}  errors.AppError         "会话或消息不存在"
+// @Security     Bearer
+// @Router       /sessions/{session_id}/continue [get]
 func (h *Handler) ContinueStream(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -163,7 +174,18 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	}
 }
 
-// StopSession handles the stop generation request
+// StopSession godoc
+// @Summary      停止生成
+// @Description  停止当前正在进行的生成任务
+// @Tags         问答
+// @Accept       json
+// @Produce      json
+// @Param        session_id  path      string              true  "会话ID"
+// @Param        request     body      StopSessionRequest  true  "停止请求"
+// @Success      200         {object}  map[string]interface{}  "停止成功"
+// @Failure      404         {object}  errors.AppError         "会话或消息不存在"
+// @Security     Bearer
+// @Router       /sessions/{session_id}/stop [post]
 func (h *Handler) StopSession(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))

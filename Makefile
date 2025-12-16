@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger
 
 # Show help
 help:
@@ -39,7 +39,8 @@ help:
 	@echo "  fmt               格式化代码"
 	@echo "  lint              代码检查"
 	@echo "  deps              安装依赖"
-	@echo "  docs              生成 API 文档"
+	@echo "  docs              生成 Swagger API 文档"
+	@echo "  install-swagger   安装 swag 工具"
 	@echo ""
 	@echo "环境检查:"
 	@echo "  check-env         检查环境配置"
@@ -194,9 +195,16 @@ migrate-goto:
 	fi
 	./scripts/migrate.sh goto $(version)
 
-# Generate API documentation
+# Generate API documentation (Swagger)
 docs:
-	swag init -g $(MAIN_PATH)/main.go -o ./docs
+	@echo "生成 Swagger API 文档..."
+	swag init -g $(MAIN_PATH)/main.go -o ./docs --parseDependency --parseInternal
+	@echo "文档已生成到 ./docs 目录"
+	@echo "启动服务后访问 http://localhost:8080/swagger/index.html 查看文档"
+
+# Install swagger tool
+install-swagger:
+	go install github.com/swaggo/swag/cmd/swag@latest
 
 # Format code
 fmt:

@@ -44,7 +44,14 @@ var (
 	GoVersion = "unknown"
 )
 
-// GetSystemInfo gets system information including version and commit ID
+// GetSystemInfo godoc
+// @Summary      获取系统信息
+// @Description  获取系统版本、构建信息和引擎配置
+// @Tags         系统
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  GetSystemInfoResponse  "系统信息"
+// @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 

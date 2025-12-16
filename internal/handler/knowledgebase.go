@@ -27,7 +27,18 @@ func NewKnowledgeBaseHandler(
 	return &KnowledgeBaseHandler{service: service, knowledgeService: knowledgeService}
 }
 
-// HybridSearch handles requests to perform hybrid vector and keyword search on a knowledge base
+// HybridSearch godoc
+// @Summary      混合搜索
+// @Description  在知识库中执行向量和关键词混合搜索
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string             true  "知识库ID"
+// @Param        request  body      types.SearchParams true  "搜索参数"
+// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -68,7 +79,17 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	})
 }
 
-// CreateKnowledgeBase handles requests to create a new knowledge base
+// CreateKnowledgeBase godoc
+// @Summary      创建知识库
+// @Description  创建新的知识库
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.KnowledgeBase  true  "知识库信息"
+// @Success      201      {object}  map[string]interface{}  "创建的知识库"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases [post]
 func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -144,7 +165,18 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 	return kb, id, nil
 }
 
-// GetKnowledgeBase handles requests to retrieve a knowledge base by ID
+// GetKnowledgeBase godoc
+// @Summary      获取知识库详情
+// @Description  根据ID获取知识库详情
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "知识库详情"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "知识库不存在"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id} [get]
 func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	// Validate and get the knowledge base
 	kb, _, err := h.validateAndGetKnowledgeBase(c)
@@ -158,7 +190,16 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// ListKnowledgeBases handles requests to list all knowledge bases for a tenant
+// ListKnowledgeBases godoc
+// @Summary      获取知识库列表
+// @Description  获取当前租户的所有知识库
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "知识库列表"
+// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Router       /knowledge-bases [get]
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -183,7 +224,18 @@ type UpdateKnowledgeBaseRequest struct {
 	Config      *types.KnowledgeBaseConfig `json:"config"      binding:"required"`
 }
 
-// UpdateKnowledgeBase handles requests to update an existing knowledge base
+// UpdateKnowledgeBase godoc
+// @Summary      更新知识库
+// @Description  更新知识库的名称、描述和配置
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                     true  "知识库ID"
+// @Param        request  body      UpdateKnowledgeBaseRequest true  "更新请求"
+// @Success      200      {object}  map[string]interface{}     "更新后的知识库"
+// @Failure      400      {object}  errors.AppError            "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id} [put]
 func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating knowledge base")
@@ -222,7 +274,17 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// DeleteKnowledgeBase handles requests to delete a knowledge base
+// DeleteKnowledgeBase godoc
+// @Summary      删除知识库
+// @Description  删除指定的知识库及其所有内容
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/{id} [delete]
 func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start deleting knowledge base")
@@ -257,6 +319,17 @@ type CopyKnowledgeBaseRequest struct {
 	TargetID string `json:"target_id"`
 }
 
+// CopyKnowledgeBase godoc
+// @Summary      复制知识库
+// @Description  将一个知识库的内容复制到另一个知识库
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        request  body      CopyKnowledgeBaseRequest  true  "复制请求"
+// @Success      200      {object}  map[string]interface{}    "复制成功"
+// @Failure      400      {object}  errors.AppError           "请求参数错误"
+// @Security     Bearer
+// @Router       /knowledge-bases/copy [post]
 func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req CopyKnowledgeBaseRequest

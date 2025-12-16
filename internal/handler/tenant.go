@@ -40,11 +40,17 @@ func NewTenantHandler(service interfaces.TenantService, userService interfaces.U
 	}
 }
 
-// CreateTenant handles the HTTP request for creating a new tenant
-// It deserializes the request body into a tenant object, validates it,
-// calls the service to create the tenant, and returns the result
-// Parameters:
-//   - c: Gin context for the HTTP request
+// CreateTenant godoc
+// @Summary      创建租户
+// @Description  创建新的租户
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.Tenant  true  "租户信息"
+// @Success      201      {object}  map[string]interface{}  "创建的租户"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants [post]
 func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -85,11 +91,18 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 	})
 }
 
-// GetTenant handles the HTTP request for retrieving a tenant by ID
-// It extracts and validates the tenant ID from the URL parameter,
-// retrieves the tenant from the service, and returns it in the response
-// Parameters:
-//   - c: Gin context for the HTTP request
+// GetTenant godoc
+// @Summary      获取租户详情
+// @Description  根据ID获取租户详情
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "租户ID"
+// @Success      200  {object}  map[string]interface{}  "租户详情"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      404  {object}  errors.AppError         "租户不存在"
+// @Security     Bearer
+// @Router       /tenants/{id} [get]
 func (h *TenantHandler) GetTenant(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -119,11 +132,18 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 	})
 }
 
-// UpdateTenant handles the HTTP request for updating an existing tenant
-// It extracts the tenant ID from the URL parameter, deserializes the request body,
-// validates the data, updates the tenant through the service, and returns the result
-// Parameters:
-//   - c: Gin context for the HTTP request
+// UpdateTenant godoc
+// @Summary      更新租户
+// @Description  更新租户信息
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      int           true  "租户ID"
+// @Param        request  body      types.Tenant  true  "租户信息"
+// @Success      200      {object}  map[string]interface{}  "更新后的租户"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants/{id} [put]
 func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -171,11 +191,17 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	})
 }
 
-// DeleteTenant handles the HTTP request for deleting a tenant
-// It extracts and validates the tenant ID from the URL parameter,
-// calls the service to delete the tenant, and returns the result
-// Parameters:
-//   - c: Gin context for the HTTP request
+// DeleteTenant godoc
+// @Summary      删除租户
+// @Description  删除指定的租户
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "租户ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants/{id} [delete]
 func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -209,10 +235,16 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 	})
 }
 
-// ListTenants handles the HTTP request for retrieving a list of all tenants
-// It calls the service to fetch the tenant list and returns it in the response
-// Parameters:
-//   - c: Gin context for the HTTP request
+// ListTenants godoc
+// @Summary      获取租户列表
+// @Description  获取当前用户可访问的租户列表
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "租户列表"
+// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Security     Bearer
+// @Router       /tenants [get]
 func (h *TenantHandler) ListTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -237,10 +269,16 @@ func (h *TenantHandler) ListTenants(c *gin.Context) {
 	})
 }
 
-// ListAllTenants handles the HTTP request for retrieving a list of all tenants
-// This endpoint requires cross-tenant access permission
-// Parameters:
-//   - c: Gin context for the HTTP request
+// ListAllTenants godoc
+// @Summary      获取所有租户列表
+// @Description  获取系统中所有租户（需要跨租户访问权限）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "所有租户列表"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Router       /tenants/all [get]
 func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -287,13 +325,20 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 	})
 }
 
-// SearchTenants handles the HTTP request for searching tenants with pagination
-// This endpoint requires cross-tenant access permission
-// Query parameters:
-//   - keyword: search keyword (optional)
-//   - tenant_id: filter by tenant ID (optional)
-//   - page: page number (default: 1)
-//   - page_size: page size (default: 20)
+// SearchTenants godoc
+// @Summary      搜索租户
+// @Description  分页搜索租户（需要跨租户访问权限）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        keyword    query     string  false  "搜索关键词"
+// @Param        tenant_id  query     int     false  "租户ID筛选"
+// @Param        page       query     int     false  "页码"  default(1)
+// @Param        page_size  query     int     false  "每页数量"  default(20)
+// @Success      200        {object}  map[string]interface{}  "搜索结果"
+// @Failure      403        {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Router       /tenants/search [get]
 func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -381,8 +426,16 @@ type AgentConfigRequest struct {
 	UseCustomPrompt         *bool    `json:"use_custom_system_prompt"`
 }
 
-// GetTenantAgentConfig retrieves the agent configuration for a tenant
-// This is the global agent configuration that applies to all sessions by default
+// GetTenantAgentConfig godoc
+// @Summary      获取租户Agent配置
+// @Description  获取租户的全局Agent配置（默认应用于所有会话）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "Agent配置"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants/kv/agent-config [get]
 func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
@@ -528,10 +581,17 @@ func (h *TenantHandler) updateTenantAgentConfigInternal(c *gin.Context) {
 	})
 }
 
-// GetTenantKV provides a generic KV-style getter for tenant-level configurations
-// Supported keys:
-// - "agent-config": returns tenant.AgentConfig with additional available_* fields
-// - "web-search-config": returns masked tenant.WebSearchConfig (API key masked)
+// GetTenantKV godoc
+// @Summary      获取租户KV配置
+// @Description  获取租户级别的KV配置（支持agent-config、web-search-config、conversation-config）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        key  path      string  true  "配置键名"
+// @Success      200  {object}  map[string]interface{}  "配置值"
+// @Failure      400  {object}  errors.AppError         "不支持的键"
+// @Security     Bearer
+// @Router       /tenants/kv/{key} [get]
 func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
 	key := secutils.SanitizeForLog(c.Param("key"))
@@ -553,8 +613,18 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	}
 }
 
-// UpdateTenantKV provides a generic KV-style updater for tenant-level configurations
-// Body is the JSON value to set for the key.
+// UpdateTenantKV godoc
+// @Summary      更新租户KV配置
+// @Description  更新租户级别的KV配置（支持agent-config、web-search-config、conversation-config）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        key      path      string  true  "配置键名"
+// @Param        request  body      object  true  "配置值"
+// @Success      200      {object}  map[string]interface{}  "更新成功"
+// @Failure      400      {object}  errors.AppError         "不支持的键"
+// @Security     Bearer
+// @Router       /tenants/kv/{key} [put]
 func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
 	key := secutils.SanitizeForLog(c.Param("key"))
@@ -620,7 +690,16 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	})
 }
 
-// GetTenantWebSearchConfig returns the web search configuration for a tenant
+// GetTenantWebSearchConfig godoc
+// @Summary      获取租户网络搜索配置
+// @Description  获取租户的网络搜索配置
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "网络搜索配置"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants/kv/web-search-config [get]
 func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start getting tenant web search config")
@@ -696,8 +775,16 @@ func validateConversationConfig(req *types.ConversationConfig) error {
 	return nil
 }
 
-// GetTenantConversationConfig retrieves the conversation configuration for a tenant
-// This is the global conversation configuration that applies to normal mode sessions by default
+// GetTenantConversationConfig godoc
+// @Summary      获取租户对话配置
+// @Description  获取租户的全局对话配置（默认应用于普通模式会话）
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "对话配置"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /tenants/kv/conversation-config [get]
 func (h *TenantHandler) GetTenantConversationConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)

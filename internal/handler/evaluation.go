@@ -29,7 +29,17 @@ type EvaluationRequest struct {
 	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
 }
 
-// Evaluation handles evaluation request
+// Evaluation godoc
+// @Summary      执行评估
+// @Description  对知识库进行评估测试
+// @Tags         评估
+// @Accept       json
+// @Produce      json
+// @Param        request  body      EvaluationRequest  true  "评估请求参数"
+// @Success      200      {object}  map[string]interface{}  "评估任务"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /evaluation/ [post]
 func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -81,7 +91,17 @@ type GetEvaluationRequest struct {
 	TaskID string `form:"task_id" binding:"required"` // ID of evaluation task
 }
 
-// GetEvaluationResult retrieves evaluation result by task ID
+// GetEvaluationResult godoc
+// @Summary      获取评估结果
+// @Description  根据任务ID获取评估结果
+// @Tags         评估
+// @Accept       json
+// @Produce      json
+// @Param        task_id  query     string  true  "评估任务ID"
+// @Success      200      {object}  map[string]interface{}  "评估结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Router       /evaluation/ [get]
 func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 	ctx := c.Request.Context()
 
