@@ -6,6 +6,7 @@ const (
 	TypeFAQImport           = "faq:import"           // FAQ导入任务
 	TypeQuestionGeneration  = "question:generation"  // 问题生成任务
 	TypeSummaryGeneration   = "summary:generation"   // 摘要生成任务
+	TypeKBClone             = "kb:clone"             // 知识库复制任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -54,6 +55,39 @@ type SummaryGenerationPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
+}
+
+// KBClonePayload represents the knowledge base clone task payload
+type KBClonePayload struct {
+	TenantID uint64 `json:"tenant_id"`
+	TaskID   string `json:"task_id"`
+	SourceID string `json:"source_id"`
+	TargetID string `json:"target_id"`
+}
+
+// KBCloneTaskStatus represents the status of a knowledge base clone task
+type KBCloneTaskStatus string
+
+const (
+	KBCloneStatusPending    KBCloneTaskStatus = "pending"
+	KBCloneStatusProcessing KBCloneTaskStatus = "processing"
+	KBCloneStatusCompleted  KBCloneTaskStatus = "completed"
+	KBCloneStatusFailed     KBCloneTaskStatus = "failed"
+)
+
+// KBCloneProgress represents the progress of a knowledge base clone task
+type KBCloneProgress struct {
+	TaskID    string            `json:"task_id"`
+	SourceID  string            `json:"source_id"`
+	TargetID  string            `json:"target_id"`
+	Status    KBCloneTaskStatus `json:"status"`
+	Progress  int               `json:"progress"`   // 0-100
+	Total     int               `json:"total"`      // 总知识数
+	Processed int               `json:"processed"`  // 已处理数
+	Message   string            `json:"message"`    // 状态消息
+	Error     string            `json:"error"`      // 错误信息
+	CreatedAt int64             `json:"created_at"` // 任务创建时间
+	UpdatedAt int64             `json:"updated_at"` // 最后更新时间
 }
 
 // ChunkContext represents chunk content with surrounding context

@@ -586,3 +586,43 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 
 	return affectedIDs, nil
 }
+
+// FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
+// Returns: chunksToAdd (IDs of chunks in src whose content_hash is not in dst),
+//
+//	chunksToDelete (IDs of chunks in dst whose content_hash is not in src)
+func (r *chunkRepository) FAQChunkDiff(
+	ctx context.Context,
+	srcTenantID uint64, srcKBID string,
+	dstTenantID uint64, dstKBID string,
+) (chunksToAdd []string, chunksToDelete []string, err error) {
+	// Get content_hash set from destination KB
+	dstHashSubQuery := r.db.Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
+		Select("content_hash")
+
+	// Find chunks in source that don't exist in destination (by content_hash)
+	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
+		Where("content_hash NOT IN (?)", dstHashSubQuery).
+		Pluck("id", &chunksToAdd).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("failed to get chunks to add: %w", err)
+	}
+
+	// Get content_hash set from source KB
+	srcHashSubQuery := r.db.Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", srcTenantID, srcKBID, types.ChunkTypeFAQ).
+		Select("content_hash")
+
+	// Find chunks in destination that don't exist in source (by content_hash)
+	err = r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", dstTenantID, dstKBID, types.ChunkTypeFAQ).
+		Where("content_hash NOT IN (?)", srcHashSubQuery).
+		Pluck("id", &chunksToDelete).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("failed to get chunks to delete: %w", err)
+	}
+
+	return chunksToAdd, chunksToDelete, nil
+}

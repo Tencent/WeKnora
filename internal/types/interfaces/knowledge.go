@@ -111,6 +111,12 @@ type KnowledgeService interface {
 	ProcessQuestionGeneration(ctx context.Context, t *asynq.Task) error
 	// ProcessSummaryGeneration handles Asynq summary generation tasks
 	ProcessSummaryGeneration(ctx context.Context, t *asynq.Task) error
+	// ProcessKBClone handles Asynq knowledge base clone tasks
+	ProcessKBClone(ctx context.Context, t *asynq.Task) error
+	// GetKBCloneProgress retrieves the progress of a knowledge base clone task
+	GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error)
+	// SaveKBCloneProgress saves the progress of a knowledge base clone task
+	SaveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.

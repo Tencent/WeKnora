@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -11,20 +13,28 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 )
 
 // KnowledgeBaseHandler defines the HTTP handler for knowledge base operations
 type KnowledgeBaseHandler struct {
 	service          interfaces.KnowledgeBaseService
 	knowledgeService interfaces.KnowledgeService
+	asynqClient      *asynq.Client
 }
 
 // NewKnowledgeBaseHandler creates a new knowledge base handler instance
 func NewKnowledgeBaseHandler(
 	service interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	asynqClient *asynq.Client,
 ) *KnowledgeBaseHandler {
-	return &KnowledgeBaseHandler{service: service, knowledgeService: knowledgeService}
+	return &KnowledgeBaseHandler{
+		service:          service,
+		knowledgeService: knowledgeService,
+		asynqClient:      asynqClient,
+	}
 }
 
 // HybridSearch godoc
@@ -319,15 +329,23 @@ type CopyKnowledgeBaseRequest struct {
 	TargetID string `json:"target_id"`
 }
 
+// CopyKnowledgeBaseResponse defines the response for copy knowledge base
+type CopyKnowledgeBaseResponse struct {
+	TaskID   string `json:"task_id"`
+	SourceID string `json:"source_id"`
+	TargetID string `json:"target_id"`
+	Message  string `json:"message"`
+}
+
 // CopyKnowledgeBase godoc
 // @Summary      复制知识库
-// @Description  将一个知识库的内容复制到另一个知识库
+// @Description  将一个知识库的内容复制到另一个知识库（异步任务）
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        request  body      CopyKnowledgeBaseRequest  true  "复制请求"
-// @Success      200      {object}  map[string]interface{}    "复制成功"
-// @Failure      400      {object}  errors.AppError           "请求参数错误"
+// @Param        request  body      CopyKnowledgeBaseRequest   true  "复制请求"
+// @Success      200      {object}  map[string]interface{}     "任务ID"
+// @Failure      400      {object}  errors.AppError            "请求参数错误"
 // @Security     Bearer
 // @Router       /knowledge-bases/copy [post]
 func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
@@ -339,20 +357,102 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	go func(ctx context.Context) {
-		err := h.knowledgeService.CloneKnowledgeBase(ctx, req.SourceID, req.TargetID)
-		if err != nil {
-			logger.Errorf(ctx, "Failed to copy knowledge base, ID: %s to ID: %s",
-				secutils.SanitizeForLog(req.SourceID), secutils.SanitizeForLog(req.TargetID))
-			return
-		}
-		logger.Infof(ctx, "Knowledge base copy from ID: %s to ID: %s successfully",
-			secutils.SanitizeForLog(req.SourceID), secutils.SanitizeForLog(req.TargetID))
-	}(logger.CloneContext(ctx))
+	// Get tenant ID from context
+	tenantID, exists := c.Get(types.TenantIDContextKey.String())
+	if !exists {
+		logger.Error(ctx, "Failed to get tenant ID")
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	// Generate task ID
+	taskID := uuid.New().String()
+
+	// Create KB clone payload
+	payload := types.KBClonePayload{
+		TenantID: tenantID.(uint64),
+		TaskID:   taskID,
+		SourceID: req.SourceID,
+		TargetID: req.TargetID,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal KB clone payload: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to create task"))
+		return
+	}
+
+	// Enqueue KB clone task to Asynq
+	task := asynq.NewTask(types.TypeKBClone, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue KB clone task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue task"))
+		return
+	}
+
+	logger.Infof(ctx, "KB clone task enqueued: %s, asynq task ID: %s, source: %s, target: %s",
+		taskID, info.ID, secutils.SanitizeForLog(req.SourceID), secutils.SanitizeForLog(req.TargetID))
+
+	// Save initial progress to Redis so frontend can query immediately
+	initialProgress := &types.KBCloneProgress{
+		TaskID:    taskID,
+		SourceID:  req.SourceID,
+		TargetID:  req.TargetID,
+		Status:    types.KBCloneStatusPending,
+		Progress:  0,
+		Message:   "Task queued, waiting to start...",
+		CreatedAt: time.Now().Unix(),
+		UpdatedAt: time.Now().Unix(),
+	}
+	if err := h.knowledgeService.SaveKBCloneProgress(ctx, initialProgress); err != nil {
+		logger.Warnf(ctx, "Failed to save initial KB clone progress: %v", err)
+		// Don't fail the request, task is already enqueued
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Knowledge base copy successfully",
+		"data": CopyKnowledgeBaseResponse{
+			TaskID:   taskID,
+			SourceID: req.SourceID,
+			TargetID: req.TargetID,
+			Message:  "Knowledge base copy task started",
+		},
+	})
+}
+
+// GetKBCloneProgress godoc
+// @Summary      获取知识库复制进度
+// @Description  获取知识库复制任务的进度
+// @Tags         知识库
+// @Accept       json
+// @Produce      json
+// @Param        task_id  path      string  true  "任务ID"
+// @Success      200      {object}  map[string]interface{}  "进度信息"
+// @Failure      404      {object}  errors.AppError         "任务不存在"
+// @Security     Bearer
+// @Router       /knowledge-bases/copy/progress/{task_id} [get]
+func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		logger.Error(ctx, "Task ID is empty")
+		c.Error(errors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+
+	progress, err := h.knowledgeService.GetKBCloneProgress(ctx, taskID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    progress,
 	})
 }
 

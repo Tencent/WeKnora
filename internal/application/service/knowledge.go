@@ -30,6 +30,7 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/sync/errgroup"
 )
@@ -67,6 +68,7 @@ type knowledgeService struct {
 	modelService    interfaces.ModelService
 	task            *asynq.Client
 	graphEngine     interfaces.RetrieveGraphRepository
+	redisClient     *redis.Client
 }
 
 const (
@@ -91,6 +93,7 @@ func NewKnowledgeService(
 	task *asynq.Client,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
+	redisClient *redis.Client,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -107,6 +110,7 @@ func NewKnowledgeService(
 		task:            task,
 		graphEngine:     graphEngine,
 		retrieveEngine:  retrieveEngine,
+		redisClient:     redisClient,
 	}, nil
 }
 
@@ -5173,4 +5177,431 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 
 	return nil
+}
+
+const (
+	kbCloneProgressKeyPrefix = "kb_clone_progress:"
+	kbCloneProgressTTL       = 24 * time.Hour
+)
+
+// getKBCloneProgressKey returns the Redis key for storing KB clone progress
+func getKBCloneProgressKey(taskID string) string {
+	return kbCloneProgressKeyPrefix + taskID
+}
+
+// ProcessKBClone handles Asynq knowledge base clone tasks
+func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) error {
+	var payload types.KBClonePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		return fmt.Errorf("failed to unmarshal KB clone payload: %w", err)
+	}
+
+	// Add tenant ID to context
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+
+	// Check if this is the last retry
+	retryCount, _ := asynq.GetRetryCount(ctx)
+	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	isLastRetry := retryCount >= maxRetry
+
+	logger.Infof(ctx, "Processing KB clone task: %s, source: %s, target: %s, retry: %d/%d",
+		payload.TaskID, payload.SourceID, payload.TargetID, retryCount, maxRetry)
+
+	// Helper function to handle errors - only mark as failed on last retry
+	handleError := func(progress *types.KBCloneProgress, err error, message string) {
+		if isLastRetry {
+			progress.Status = types.KBCloneStatusFailed
+			progress.Error = err.Error()
+			progress.Message = message
+			progress.UpdatedAt = time.Now().Unix()
+			_ = s.saveKBCloneProgress(ctx, progress)
+		}
+	}
+
+	// Update progress to processing
+	progress := &types.KBCloneProgress{
+		TaskID:    payload.TaskID,
+		SourceID:  payload.SourceID,
+		TargetID:  payload.TargetID,
+		Status:    types.KBCloneStatusProcessing,
+		Progress:  0,
+		Message:   "Starting knowledge base clone...",
+		UpdatedAt: time.Now().Unix(),
+	}
+	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
+		logger.Errorf(ctx, "Failed to update KB clone progress: %v", err)
+	}
+
+	// Get source and target knowledge bases
+	srcKB, dstKB, err := s.kbService.CopyKnowledgeBase(ctx, payload.SourceID, payload.TargetID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to copy knowledge base: %v", err)
+		handleError(progress, err, "Failed to copy knowledge base configuration")
+		return err
+	}
+
+	// Use different sync strategies based on knowledge base type
+	if srcKB.Type == types.KnowledgeBaseTypeFAQ {
+		return s.cloneFAQKnowledgeBase(ctx, srcKB, dstKB, progress, handleError)
+	}
+
+	// Document type: use Knowledge-level diff based on file_hash
+	addKnowledge, err := s.repo.AminusB(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge to add: %v", err)
+		handleError(progress, err, "Failed to calculate knowledge difference")
+		return err
+	}
+
+	delKnowledge, err := s.repo.AminusB(ctx, dstKB.TenantID, dstKB.ID, srcKB.TenantID, srcKB.ID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge to delete: %v", err)
+		handleError(progress, err, "Failed to calculate knowledge difference")
+		return err
+	}
+
+	totalOperations := len(addKnowledge) + len(delKnowledge)
+	progress.Total = totalOperations
+	progress.Message = fmt.Sprintf("Found %d knowledge to add, %d to delete", len(addKnowledge), len(delKnowledge))
+	progress.UpdatedAt = time.Now().Unix()
+	_ = s.saveKBCloneProgress(ctx, progress)
+
+	logger.Infof(ctx, "Knowledge after update to add: %d, delete: %d", len(addKnowledge), len(delKnowledge))
+
+	processedCount := 0
+	batch := 10
+
+	// Delete knowledge in target that doesn't exist in source
+	g, gctx := errgroup.WithContext(ctx)
+	for ids := range slices.Chunk(delKnowledge, batch) {
+		g.Go(func() error {
+			err := s.DeleteKnowledgeList(gctx, ids)
+			if err != nil {
+				logger.Errorf(gctx, "delete partial knowledge %v: %v", ids, err)
+				return err
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		logger.Errorf(ctx, "delete total knowledge %d: %v", len(delKnowledge), err)
+		handleError(progress, err, "Failed to delete knowledge")
+		return err
+	}
+
+	processedCount += len(delKnowledge)
+	if totalOperations > 0 {
+		progress.Progress = processedCount * 100 / totalOperations
+	}
+	progress.Processed = processedCount
+	progress.Message = fmt.Sprintf("Deleted %d knowledge, cloning %d...", len(delKnowledge), len(addKnowledge))
+	progress.UpdatedAt = time.Now().Unix()
+	_ = s.saveKBCloneProgress(ctx, progress)
+
+	// Clone knowledge from source to target
+	g, gctx = errgroup.WithContext(ctx)
+	g.SetLimit(batch)
+	for _, knowledge := range addKnowledge {
+		g.Go(func() error {
+			srcKn, err := s.repo.GetKnowledgeByID(gctx, srcKB.TenantID, knowledge)
+			if err != nil {
+				logger.Errorf(gctx, "get knowledge %s: %v", knowledge, err)
+				return err
+			}
+			err = s.cloneKnowledge(gctx, srcKn, dstKB)
+			if err != nil {
+				logger.Errorf(gctx, "clone knowledge %s: %v", knowledge, err)
+				return err
+			}
+
+			// Update progress
+			processedCount++
+			if totalOperations > 0 {
+				progress.Progress = processedCount * 100 / totalOperations
+			}
+			progress.Processed = processedCount
+			progress.Message = fmt.Sprintf("Cloned %d/%d knowledge", processedCount-len(delKnowledge), len(addKnowledge))
+			progress.UpdatedAt = time.Now().Unix()
+			_ = s.saveKBCloneProgress(ctx, progress)
+
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		logger.Errorf(ctx, "add total knowledge %d: %v", len(addKnowledge), err)
+		handleError(progress, err, "Failed to clone knowledge")
+		return err
+	}
+
+	// Mark as completed
+	progress.Status = types.KBCloneStatusCompleted
+	progress.Progress = 100
+	progress.Processed = totalOperations
+	progress.Message = "Knowledge base clone completed successfully"
+	progress.UpdatedAt = time.Now().Unix()
+	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
+		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
+	}
+
+	logger.Infof(ctx, "KB clone task completed: %s", payload.TaskID)
+	return nil
+}
+
+// cloneFAQKnowledgeBase handles FAQ knowledge base cloning with chunk-level incremental sync
+func (s *knowledgeService) cloneFAQKnowledgeBase(
+	ctx context.Context,
+	srcKB, dstKB *types.KnowledgeBase,
+	progress *types.KBCloneProgress,
+	handleError func(*types.KBCloneProgress, error, string),
+) error {
+	// Get source FAQ knowledge first (FAQ KB has exactly one Knowledge entry)
+	srcKnowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, srcKB.TenantID, srcKB.ID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get source FAQ knowledge: %v", err)
+		handleError(progress, err, "Failed to get source FAQ knowledge")
+		return err
+	}
+	if len(srcKnowledgeList) == 0 {
+		// Source has no FAQ knowledge, nothing to clone
+		progress.Status = types.KBCloneStatusCompleted
+		progress.Progress = 100
+		progress.Message = "Source FAQ knowledge base is empty"
+		progress.UpdatedAt = time.Now().Unix()
+		_ = s.saveKBCloneProgress(ctx, progress)
+		return nil
+	}
+	srcKnowledge := srcKnowledgeList[0]
+
+	// Get chunk-level differences based on content_hash
+	chunksToAdd, chunksToDelete, err := s.chunkRepo.FAQChunkDiff(ctx, srcKB.TenantID, srcKB.ID, dstKB.TenantID, dstKB.ID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to calculate FAQ chunk difference: %v", err)
+		handleError(progress, err, "Failed to calculate FAQ chunk difference")
+		return err
+	}
+
+	totalOperations := len(chunksToAdd) + len(chunksToDelete)
+	progress.Total = totalOperations
+	progress.Message = fmt.Sprintf("Found %d FAQ entries to add, %d to delete", len(chunksToAdd), len(chunksToDelete))
+	progress.UpdatedAt = time.Now().Unix()
+	_ = s.saveKBCloneProgress(ctx, progress)
+
+	logger.Infof(ctx, "FAQ chunks to add: %d, delete: %d", len(chunksToAdd), len(chunksToDelete))
+
+	// If nothing to do, mark as completed
+	if totalOperations == 0 {
+		progress.Status = types.KBCloneStatusCompleted
+		progress.Progress = 100
+		progress.Message = "FAQ knowledge base is already in sync"
+		progress.UpdatedAt = time.Now().Unix()
+		_ = s.saveKBCloneProgress(ctx, progress)
+		return nil
+	}
+
+	// Get tenant info and initialize retrieve engine
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
+	if err != nil {
+		logger.Errorf(ctx, "Failed to init retrieve engine: %v", err)
+		handleError(progress, err, "Failed to initialize retrieve engine")
+		return err
+	}
+
+	// Get embedding model
+	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, dstKB.EmbeddingModelID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
+		handleError(progress, err, "Failed to get embedding model")
+		return err
+	}
+
+	processedCount := 0
+
+	// Delete FAQ chunks that don't exist in source
+	if len(chunksToDelete) > 0 {
+		// Delete from vector store
+		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunksToDelete, embeddingModel.GetDimensions()); err != nil {
+			logger.Errorf(ctx, "Failed to delete FAQ chunks from vector store: %v", err)
+			handleError(progress, err, "Failed to delete FAQ entries from vector store")
+			return err
+		}
+		// Delete from database
+		if err := s.chunkRepo.DeleteChunks(ctx, dstKB.TenantID, chunksToDelete); err != nil {
+			logger.Errorf(ctx, "Failed to delete FAQ chunks from database: %v", err)
+			handleError(progress, err, "Failed to delete FAQ entries from database")
+			return err
+		}
+		processedCount += len(chunksToDelete)
+		if totalOperations > 0 {
+			progress.Progress = processedCount * 100 / totalOperations
+		}
+		progress.Processed = processedCount
+		progress.Message = fmt.Sprintf("Deleted %d FAQ entries, adding %d...", len(chunksToDelete), len(chunksToAdd))
+		progress.UpdatedAt = time.Now().Unix()
+		_ = s.saveKBCloneProgress(ctx, progress)
+	}
+
+	// Get or create the FAQ knowledge entry in destination
+	dstKnowledge, err := s.getOrCreateFAQKnowledge(ctx, dstKB, srcKnowledge)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get or create FAQ knowledge: %v", err)
+		handleError(progress, err, "Failed to prepare FAQ knowledge entry")
+		return err
+	}
+
+	// Clone FAQ chunks from source to destination
+	batch := 50
+	for i := 0; i < len(chunksToAdd); i += batch {
+		end := i + batch
+		if end > len(chunksToAdd) {
+			end = len(chunksToAdd)
+		}
+		batchIDs := chunksToAdd[i:end]
+
+		// Get source chunks
+		srcChunks, err := s.chunkRepo.ListChunksByID(ctx, srcKB.TenantID, batchIDs)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to get source FAQ chunks: %v", err)
+			handleError(progress, err, "Failed to get source FAQ entries")
+			return err
+		}
+
+		// Create new chunks for destination
+		newChunks := make([]*types.Chunk, 0, len(srcChunks))
+		for _, srcChunk := range srcChunks {
+			newChunk := &types.Chunk{
+				ID:              uuid.New().String(),
+				TenantID:        dstKB.TenantID,
+				KnowledgeID:     dstKnowledge.ID,
+				KnowledgeBaseID: dstKB.ID,
+				TagID:           srcChunk.TagID,
+				Content:         srcChunk.Content,
+				ChunkIndex:      srcChunk.ChunkIndex,
+				IsEnabled:       srcChunk.IsEnabled,
+				Flags:           srcChunk.Flags,
+				ChunkType:       types.ChunkTypeFAQ,
+				Metadata:        srcChunk.Metadata,
+				ContentHash:     srcChunk.ContentHash,
+				Status:          int(types.ChunkStatusStored), // Initially stored, will be indexed
+			}
+			newChunks = append(newChunks, newChunk)
+		}
+
+		// Save to database
+		if err := s.chunkRepo.CreateChunks(ctx, newChunks); err != nil {
+			logger.Errorf(ctx, "Failed to create FAQ chunks: %v", err)
+			handleError(progress, err, "Failed to create FAQ entries")
+			return err
+		}
+
+		// Index in vector store using existing method
+		// This will index standard question + similar questions based on FAQConfig
+		if err := s.indexFAQChunks(ctx, dstKB, dstKnowledge, newChunks, embeddingModel, false, false); err != nil {
+			logger.Errorf(ctx, "Failed to index FAQ chunks: %v", err)
+			handleError(progress, err, "Failed to index FAQ entries")
+			return err
+		}
+
+		// Update chunk status to indexed
+		for _, chunk := range newChunks {
+			chunk.Status = int(types.ChunkStatusIndexed)
+		}
+		if err := s.chunkService.UpdateChunks(ctx, newChunks); err != nil {
+			logger.Warnf(ctx, "Failed to update FAQ chunks status: %v", err)
+			// Don't fail the whole operation for status update failure
+		}
+
+		processedCount += len(batchIDs)
+		if totalOperations > 0 {
+			progress.Progress = processedCount * 100 / totalOperations
+		}
+		progress.Processed = processedCount
+		progress.Message = fmt.Sprintf("Added %d/%d FAQ entries", processedCount-len(chunksToDelete), len(chunksToAdd))
+		progress.UpdatedAt = time.Now().Unix()
+		_ = s.saveKBCloneProgress(ctx, progress)
+	}
+
+	// Mark as completed
+	progress.Status = types.KBCloneStatusCompleted
+	progress.Progress = 100
+	progress.Processed = totalOperations
+	progress.Message = "FAQ knowledge base clone completed successfully"
+	progress.UpdatedAt = time.Now().Unix()
+	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
+		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
+	}
+
+	return nil
+}
+
+// getOrCreateFAQKnowledge gets or creates the FAQ knowledge entry for a knowledge base
+// If srcKnowledge is provided, it will copy relevant fields from source when creating new knowledge
+func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *types.KnowledgeBase, srcKnowledge *types.Knowledge) (*types.Knowledge, error) {
+	// FAQ knowledge base should have exactly one Knowledge entry
+	knowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, kb.TenantID, kb.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(knowledgeList) > 0 {
+		return knowledgeList[0], nil
+	}
+
+	// Create a new FAQ knowledge entry, copying from source if available
+	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
+		TenantID:         kb.TenantID,
+		KnowledgeBaseID:  kb.ID,
+		Type:             types.KnowledgeTypeFAQ,
+		Title:            "FAQ",
+		ParseStatus:      "completed",
+		EnableStatus:     "enabled",
+		EmbeddingModelID: kb.EmbeddingModelID,
+	}
+
+	// Copy additional fields from source knowledge if available
+	if srcKnowledge != nil {
+		knowledge.Title = srcKnowledge.Title
+		knowledge.Description = srcKnowledge.Description
+		knowledge.Source = srcKnowledge.Source
+		knowledge.Metadata = srcKnowledge.Metadata
+	}
+
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		return nil, err
+	}
+	return knowledge, nil
+}
+
+// saveKBCloneProgress saves the KB clone progress to Redis
+func (s *knowledgeService) saveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error {
+	key := getKBCloneProgressKey(progress.TaskID)
+	data, err := json.Marshal(progress)
+	if err != nil {
+		return fmt.Errorf("failed to marshal progress: %w", err)
+	}
+	return s.redisClient.Set(ctx, key, data, kbCloneProgressTTL).Err()
+}
+
+// SaveKBCloneProgress saves the KB clone progress to Redis (public method for handler use)
+func (s *knowledgeService) SaveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error {
+	return s.saveKBCloneProgress(ctx, progress)
+}
+
+// GetKBCloneProgress retrieves the progress of a knowledge base clone task
+func (s *knowledgeService) GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error) {
+	key := getKBCloneProgressKey(taskID)
+	data, err := s.redisClient.Get(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, werrors.NewNotFoundError("KB clone task not found")
+		}
+		return nil, fmt.Errorf("failed to get progress from Redis: %w", err)
+	}
+
+	var progress types.KBCloneProgress
+	if err := json.Unmarshal(data, &progress); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal progress: %w", err)
+	}
+	return &progress, nil
 }

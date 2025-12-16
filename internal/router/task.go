@@ -73,6 +73,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register summary generation handler
 	mux.HandleFunc(types.TypeSummaryGeneration, params.KnowledgeService.ProcessSummaryGeneration)
 
+	// Register KB clone handler
+	mux.HandleFunc(types.TypeKBClone, params.KnowledgeService.ProcessKBClone)
+
 	go func() {
 		// Start the server
 		if err := params.Server.Run(mux); err != nil {

@@ -140,6 +140,29 @@ type CopyKnowledgeBaseRequest struct {
 	TargetID string `json:"target_id"`
 }
 
+// CopyKnowledgeBaseResponse represents the response from copy knowledge base API
+type CopyKnowledgeBaseResponse struct {
+	TaskID   string `json:"task_id"`
+	SourceID string `json:"source_id"`
+	TargetID string `json:"target_id"`
+	Message  string `json:"message"`
+}
+
+// KBCloneProgress represents the progress of a knowledge base clone task
+type KBCloneProgress struct {
+	TaskID    string `json:"task_id"`
+	SourceID  string `json:"source_id"`
+	TargetID  string `json:"target_id"`
+	Status    string `json:"status"`    // pending, processing, completed, failed
+	Progress  int    `json:"progress"`  // 0-100
+	Total     int    `json:"total"`     // Total operations count
+	Processed int    `json:"processed"` // Processed operations count
+	Message   string `json:"message"`
+	Error     string `json:"error,omitempty"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
 // CreateKnowledgeBase creates a knowledge base
 func (c *Client) CreateKnowledgeBase(ctx context.Context, knowledgeBase *KnowledgeBase) (*KnowledgeBase, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/knowledge-bases", knowledgeBase, nil)
@@ -257,18 +280,44 @@ func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, param
 	return response.Data, nil
 }
 
-func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBaseRequest) error {
+// CopyKnowledgeBase copies a knowledge base asynchronously and returns task info
+func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBaseRequest) (*CopyKnowledgeBaseResponse, error) {
 	path := "/api/v1/knowledge-bases/copy"
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var response struct {
-		Success bool   `json:"success"`
-		Message string `json:"message,omitempty"`
+		Success bool                      `json:"success"`
+		Data    CopyKnowledgeBaseResponse `json:"data"`
 	}
 
-	return parseResponse(resp, &response)
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// GetKBCloneProgress gets the progress of a knowledge base clone task
+func (c *Client) GetKBCloneProgress(ctx context.Context, taskID string) (*KBCloneProgress, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/copy/progress/%s", taskID)
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool            `json:"success"`
+		Data    KBCloneProgress `json:"data"`
+	}
+
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
 }
