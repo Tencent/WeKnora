@@ -292,7 +292,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	if os.Getenv("AUTO_MIGRATE") != "false" {
 		logger.Infof(context.Background(), "Running database migrations...")
 
-		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") == "true"
+		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 		}
