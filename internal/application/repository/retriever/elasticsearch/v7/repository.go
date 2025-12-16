@@ -287,18 +287,18 @@ func (e *elasticsearchRepository) countBulkErrors(ctx context.Context,
 }
 
 // DeleteByChunkIDList Delete indices by chunk ID list
-func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int) error {
+func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
 	return e.deleteByFieldList(ctx, "chunk_id.keyword", chunkIDList)
 }
 
 // DeleteBySourceIDList Delete indices by source ID list
-func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int) error {
+func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error {
 	return e.deleteByFieldList(ctx, "source_id.keyword", sourceIDList)
 }
 
 // DeleteByKnowledgeIDList Delete indices by knowledge ID list
 func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
-	knowledgeIDList []string, dimension int,
+	knowledgeIDList []string, dimension int, knowledgeType string,
 ) error {
 	return e.deleteByFieldList(ctx, "knowledge_id.keyword", knowledgeIDList)
 }
@@ -816,6 +816,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
+	knowledgeType string,
 ) error {
 	log := logger.GetLogger(ctx)
 	log.Infof(

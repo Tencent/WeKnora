@@ -38,6 +38,8 @@ type RetrieveParams struct {
 	TopK int
 	// Similarity threshold
 	Threshold float64
+	// Knowledge type (e.g., "faq", "manual") - determines which index to use
+	KnowledgeType string
 	// Additional parameters, different retrievers may require different parameters
 	AdditionalParams map[string]interface{}
 	// Retriever type
@@ -72,6 +74,8 @@ type IndexWithScore struct {
 	Score float64
 	// Match type
 	MatchType MatchType
+	// IsEnabled
+	IsEnabled bool
 }
 
 // GetScore returns the score for ScoreComparable interface

@@ -107,7 +107,7 @@ func (g *pgRepository) BatchSave(
 }
 
 // DeleteByChunkIDList deletes indices by chunk IDs
-func (g *pgRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int) error {
+func (g *pgRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
 	logger.GetLogger(ctx).Infof("[Postgres] Deleting indices by chunk IDs, count: %d", len(chunkIDList))
 	result := g.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Delete(&pgVector{})
 	if result.Error != nil {
@@ -119,7 +119,7 @@ func (g *pgRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []st
 }
 
 // DeleteBySourceIDList deletes indices by source IDs
-func (g *pgRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int) error {
+func (g *pgRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error {
 	if len(sourceIDList) == 0 {
 		return nil
 	}
@@ -134,7 +134,7 @@ func (g *pgRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []
 }
 
 // DeleteByKnowledgeIDList deletes indices by knowledge IDs
-func (g *pgRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int) error {
+func (g *pgRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int, knowledgeType string) error {
 	logger.GetLogger(ctx).Infof("[Postgres] Deleting indices by knowledge IDs, count: %d", len(knowledgeIDList))
 	result := g.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Delete(&pgVector{})
 	if result.Error != nil {
@@ -357,6 +357,7 @@ func (g *pgRepository) CopyIndices(ctx context.Context,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
+	knowledgeType string,
 ) error {
 	logger.GetLogger(ctx).Infof(
 		"[Postgres] Copying indices, source knowledge base: %s, target knowledge base: %s, mapping count: %d",

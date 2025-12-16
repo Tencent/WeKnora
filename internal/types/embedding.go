@@ -32,4 +32,6 @@ type IndexInfo struct {
 	ChunkID         string     // ID of the text chunk
 	KnowledgeID     string     // ID of the knowledge
 	KnowledgeBaseID string     // ID of the knowledge base
+	KnowledgeType   string     // Type of the knowledge (e.g., "faq", "manual")
+	IsEnabled       bool       // Whether the chunk is enabled for retrieval
 }

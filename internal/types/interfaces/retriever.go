@@ -31,9 +31,9 @@ type RetrieveEngineRepository interface {
 	EstimateStorageSize(ctx context.Context, indexInfoList []*types.IndexInfo, params map[string]any) int64
 
 	// DeleteByChunkIDList deletes the index info by chunk id list
-	DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int) error
+	DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int, knowledgeType string) error
 	// DeleteBySourceIDList deletes the index info by source id list
-	DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int) error
+	DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error
 	// 复制索引数据
 	// sourceKnowledgeBaseID: 源知识库ID
 	// sourceToTargetChunkIDMap: 源分块ID到目标分块ID的映射关系
@@ -46,10 +46,11 @@ type RetrieveEngineRepository interface {
 		sourceToTargetChunkIDMap map[string]string,
 		targetKnowledgeBaseID string,
 		dimension int,
+		knowledgeType string,
 	) error
 
 	// DeleteByKnowledgeIDList deletes the index info by knowledge id list
-	DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int) error
+	DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int, knowledgeType string) error
 
 	// BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
 	// chunkStatusMap: map of chunk ID to enabled status (true = enabled, false = disabled)
@@ -102,16 +103,17 @@ type RetrieveEngineService interface {
 		sourceToTargetChunkIDMap map[string]string,
 		targetKnowledgeBaseID string,
 		dimension int,
+		knowledgeType string,
 	) error
 
 	// DeleteByChunkIDList deletes the index info by chunk id list
-	DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int) error
+	DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int, knowledgeType string) error
 
 	// DeleteBySourceIDList deletes the index info by source id list
-	DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int) error
+	DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error
 
 	// DeleteByKnowledgeIDList deletes the index info by knowledge id list
-	DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int) error
+	DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int, knowledgeType string) error
 
 	// BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
 	// chunkStatusMap: map of chunk ID to enabled status (true = enabled, false = disabled)

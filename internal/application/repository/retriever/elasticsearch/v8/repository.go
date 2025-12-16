@@ -163,7 +163,7 @@ func (e *elasticsearchRepository) BatchSave(ctx context.Context,
 
 // DeleteByChunkIDList removes documents from the index based on chunk IDs
 // Returns an error if the delete operation fails
-func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int) error {
+func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
 	log := logger.GetLogger(ctx)
 	if len(chunkIDList) == 0 {
 		log.Warn("[Elasticsearch] Empty chunk ID list provided for deletion, skipping")
@@ -186,7 +186,7 @@ func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunk
 
 // DeleteBySourceIDList removes documents from the index based on source IDs
 // Returns an error if the delete operation fails
-func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int) error {
+func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error {
 	log := logger.GetLogger(ctx)
 	if len(sourceIDList) == 0 {
 		log.Warn("[Elasticsearch] Empty source ID list provided for deletion, skipping")
@@ -210,7 +210,7 @@ func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sour
 // DeleteByKnowledgeIDList removes documents from the index based on knowledge IDs
 // Returns an error if the delete operation fails
 func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
-	knowledgeIDList []string, dimension int,
+	knowledgeIDList []string, dimension int, knowledgeType string,
 ) error {
 	log := logger.GetLogger(ctx)
 	if len(knowledgeIDList) == 0 {
@@ -447,6 +447,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
+	knowledgeType string,
 ) error {
 	log := logger.GetLogger(ctx)
 	log.Infof(

@@ -254,20 +254,25 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
 		} else {
-			// Group knowledge by embedding model
-			embeddingGroups := make(map[string][]string)
+			// Group knowledge by embedding model and type
+			type groupKey struct {
+				EmbeddingModelID string
+				Type             string
+			}
+			embeddingGroups := make(map[groupKey][]string)
 			for _, knowledge := range knowledgeList {
-				embeddingGroups[knowledge.EmbeddingModelID] = append(embeddingGroups[knowledge.EmbeddingModelID], knowledge.ID)
+				key := groupKey{EmbeddingModelID: knowledge.EmbeddingModelID, Type: knowledge.Type}
+				embeddingGroups[key] = append(embeddingGroups[key], knowledge.ID)
 			}
 
-			for embeddingModelID, knowledgeGroup := range embeddingGroups {
-				embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, embeddingModelID)
+			for key, knowledgeGroup := range embeddingGroups {
+				embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
 				if err != nil {
-					logger.Warnf(ctx, "Failed to get embedding model %s: %v", embeddingModelID, err)
+					logger.Warnf(ctx, "Failed to get embedding model %s: %v", key.EmbeddingModelID, err)
 					continue
 				}
-				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeGroup, embeddingModel.GetDimensions()); err != nil {
-					logger.Warnf(ctx, "Failed to delete embeddings for model %s: %v", embeddingModelID, err)
+				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeGroup, embeddingModel.GetDimensions(), key.Type); err != nil {
+					logger.Warnf(ctx, "Failed to delete embeddings for model %s: %v", key.EmbeddingModelID, err)
 				}
 			}
 		}
@@ -479,14 +484,21 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		}
 		logger.Infof(ctx, "Query embedding generated successfully, embedding vector length: %d", len(queryEmbedding))
 
-		retrieveParams = append(retrieveParams, types.RetrieveParams{
+		vectorParams := types.RetrieveParams{
 			Query:            params.QueryText,
 			Embedding:        queryEmbedding,
 			KnowledgeBaseIDs: []string{id},
 			TopK:             matchCount,
 			Threshold:        params.VectorThreshold,
 			RetrieverType:    types.VectorRetrieverType,
-		})
+		}
+
+		// For FAQ knowledge base, use FAQ index
+		if kb.Type == types.KnowledgeBaseTypeFAQ {
+			vectorParams.KnowledgeType = types.KnowledgeTypeFAQ
+		}
+
+		retrieveParams = append(retrieveParams, vectorParams)
 		logger.Info(ctx, "Vector retrieval parameters setup completed")
 	}
 

@@ -755,7 +755,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 			return err
 		}
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions()); err != nil {
+		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 			return err
 		}
@@ -839,17 +839,23 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 			logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete knowledge embedding failed")
 			return err
 		}
-		group := map[string][]string{}
-		for _, knowledge := range knowledgeList {
-			group[knowledge.EmbeddingModelID] = append(group[knowledge.EmbeddingModelID], knowledge.ID)
+		// Group by EmbeddingModelID and Type
+		type groupKey struct {
+			EmbeddingModelID string
+			Type             string
 		}
-		for embeddingModelID, knowledgeList := range group {
-			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, embeddingModelID)
+		group := map[groupKey][]string{}
+		for _, knowledge := range knowledgeList {
+			key := groupKey{EmbeddingModelID: knowledge.EmbeddingModelID, Type: knowledge.Type}
+			group[key] = append(group[key], knowledge.ID)
+		}
+		for key, knowledgeIDs := range group {
+			embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, key.EmbeddingModelID)
 			if err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge get embedding model failed")
 				return err
 			}
-			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeList, embeddingModel.GetDimensions()); err != nil {
+			if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, knowledgeIDs, embeddingModel.GetDimensions(), key.Type); err != nil {
 				logger.GetLogger(ctx).
 					WithField("error", err).
 					Errorf("DeleteKnowledge delete knowledge embedding failed")
@@ -1056,7 +1062,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err == nil {
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions()); err != nil {
+		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
 			// 不返回错误，继续处理（可能没有旧数据）
 		} else {
@@ -1348,7 +1354,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// delete index
 		if err := retrieveEngine.DeleteByKnowledgeIDList(
-			ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(),
+			ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
 		); err != nil {
 			logger.Errorf(ctx, "Delete index failed: %v", err)
 		}
@@ -1375,7 +1381,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 		}
-		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions()); err != nil {
+		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup index after deletion detected: %v", err)
 		}
 		span.AddEvent("aborted: knowledge was deleted during processing")
@@ -2330,7 +2336,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	}
 
 	// Delete old vector representation of the chunk
-	err = retrieveEngine.DeleteByChunkIDList(ctx, ids, embeddingModel.GetDimensions())
+	err = retrieveEngine.DeleteByChunkIDList(ctx, ids, embeddingModel.GetDimensions(), sourceKB.Type)
 	if err != nil {
 		return err
 	}
@@ -2607,6 +2613,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		map[string]string{src.ID: dst.ID},
 		srcTodst,
 		embeddingModel.GetDimensions(),
+		dst.Type,
 	); err != nil {
 		return err
 	}
@@ -4372,6 +4379,8 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 				ChunkID:         chunk.ID,
 				KnowledgeID:     chunk.KnowledgeID,
 				KnowledgeBaseID: chunk.KnowledgeBaseID,
+				KnowledgeType:   types.KnowledgeTypeFAQ,
+				IsEnabled:       chunk.IsEnabled,
 			},
 		}, nil
 	}
@@ -4397,6 +4406,8 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 		ChunkID:         chunk.ID,
 		KnowledgeID:     chunk.KnowledgeID,
 		KnowledgeBaseID: chunk.KnowledgeBaseID,
+		KnowledgeType:   types.KnowledgeTypeFAQ,
+		IsEnabled:       chunk.IsEnabled,
 	})
 
 	// 每个相似问创建一个索引项
@@ -4419,6 +4430,8 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			KnowledgeType:   types.KnowledgeTypeFAQ,
+			IsEnabled:       chunk.IsEnabled,
 		})
 	}
 
@@ -4478,7 +4491,7 @@ func (s *knowledgeService) indexFAQChunks(ctx context.Context,
 	var deleteDuration time.Duration
 	if needDelete {
 		deleteStartTime := time.Now()
-		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions()); err != nil {
+		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
 			logger.Warnf(ctx, "Delete FAQ vectors failed: %v", err)
 		}
 		deleteDuration = time.Since(deleteStartTime)
@@ -4561,7 +4574,7 @@ func (s *knowledgeService) deleteFAQChunkVectors(ctx context.Context,
 	}
 
 	size := retrieveEngine.EstimateStorageSize(ctx, embeddingModel, indexInfo)
-	if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions()); err != nil {
+	if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
 		return err
 	}
 	if size > 0 {
@@ -4696,7 +4709,7 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 				logger.GetLogger(ctx).WithField("error", modelErr).Error("Failed to get embedding model during cleanup")
 				cleanupErr = errors.Join(cleanupErr, modelErr)
 			} else {
-				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions()); err != nil {
+				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 					logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge index")
 					cleanupErr = errors.Join(cleanupErr, err)
 				}
@@ -5119,7 +5132,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 				for _, chunk := range chunksDeleted {
 					chunkIDs = append(chunkIDs, chunk.ID)
 				}
-				if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions()); err != nil {
+				if err := retrieveEngine.DeleteByChunkIDList(ctx, chunkIDs, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
 					logger.Warnf(ctx, "Failed to delete index data for chunks (may not exist): %v", err)
 				} else {
 					logger.Infof(ctx, "Successfully deleted index data for %d chunks", len(chunksDeleted))
@@ -5420,7 +5433,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 	// Delete FAQ chunks that don't exist in source
 	if len(chunksToDelete) > 0 {
 		// Delete from vector store
-		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunksToDelete, embeddingModel.GetDimensions()); err != nil {
+		if err := retrieveEngine.DeleteByChunkIDList(ctx, chunksToDelete, embeddingModel.GetDimensions(), types.KnowledgeTypeFAQ); err != nil {
 			logger.Errorf(ctx, "Failed to delete FAQ chunks from vector store: %v", err)
 			handleError(progress, err, "Failed to delete FAQ entries from vector store")
 			return err

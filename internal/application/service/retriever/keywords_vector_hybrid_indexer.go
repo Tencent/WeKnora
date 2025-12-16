@@ -65,7 +65,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	if len(indexInfoList) == 0 {
 		return nil
 	}
-	params := make(map[string]any)
+
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
 		var contentList []string
 		for _, indexInfo := range indexInfoList {
@@ -87,6 +87,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		}
 		batchSize := 40
 		for i, indexChunk := range utils.ChunkSlice(indexInfoList, batchSize) {
+			params := make(map[string]any)
 			embeddingMap := make(map[string][]float32)
 			for j, indexInfo := range indexChunk {
 				embeddingMap[indexInfo.SourceID] = embeddings[i*batchSize+j]
@@ -101,6 +102,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 	var err error
 	for _, indexChunk := range utils.ChunkSlice(indexInfoList, 10) {
+		params := make(map[string]any)
 		err = v.indexRepository.BatchSave(ctx, indexChunk, params)
 		if err != nil {
 			return err
@@ -111,23 +113,23 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 
 // DeleteByChunkIDList deletes vectors by their chunk IDs
 func (v *KeywordsVectorHybridRetrieveEngineService) DeleteByChunkIDList(ctx context.Context,
-	indexIDList []string, dimension int,
+	indexIDList []string, dimension int, knowledgeType string,
 ) error {
-	return v.indexRepository.DeleteByChunkIDList(ctx, indexIDList, dimension)
+	return v.indexRepository.DeleteByChunkIDList(ctx, indexIDList, dimension, knowledgeType)
 }
 
 // DeleteBySourceIDList deletes vectors by their source IDs
 func (v *KeywordsVectorHybridRetrieveEngineService) DeleteBySourceIDList(ctx context.Context,
-	sourceIDList []string, dimension int,
+	sourceIDList []string, dimension int, knowledgeType string,
 ) error {
-	return v.indexRepository.DeleteBySourceIDList(ctx, sourceIDList, dimension)
+	return v.indexRepository.DeleteBySourceIDList(ctx, sourceIDList, dimension, knowledgeType)
 }
 
 // DeleteByKnowledgeIDList deletes vectors by their knowledge IDs
 func (v *KeywordsVectorHybridRetrieveEngineService) DeleteByKnowledgeIDList(ctx context.Context,
-	knowledgeIDList []string, dimension int,
+	knowledgeIDList []string, dimension int, knowledgeType string,
 ) error {
-	return v.indexRepository.DeleteByKnowledgeIDList(ctx, knowledgeIDList, dimension)
+	return v.indexRepository.DeleteByKnowledgeIDList(ctx, knowledgeIDList, dimension, knowledgeType)
 }
 
 // Support returns the retriever types supported by this engine
@@ -162,12 +164,13 @@ func (v *KeywordsVectorHybridRetrieveEngineService) CopyIndices(
 	sourceToTargetChunkIDMap map[string]string,
 	targetKnowledgeBaseID string,
 	dimension int,
+	knowledgeType string,
 ) error {
 	logger.Infof(ctx, "Copy indices from knowledge base %s to %s, mapping relation count: %d",
 		sourceKnowledgeBaseID, targetKnowledgeBaseID, len(sourceToTargetChunkIDMap),
 	)
 	return v.indexRepository.CopyIndices(
-		ctx, sourceKnowledgeBaseID, sourceToTargetKBIDMap, sourceToTargetChunkIDMap, targetKnowledgeBaseID, dimension,
+		ctx, sourceKnowledgeBaseID, sourceToTargetKBIDMap, sourceToTargetChunkIDMap, targetKnowledgeBaseID, dimension, knowledgeType,
 	)
 }
 

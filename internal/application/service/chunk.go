@@ -406,7 +406,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 	}
 
 	// Delete the vector index by source ID
-	if err := retrieveEngine.DeleteBySourceIDList(ctx, []string{sourceID}, embeddingModel.GetDimensions()); err != nil {
+	if err := retrieveEngine.DeleteBySourceIDList(ctx, []string{sourceID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
 		logger.Warnf(ctx, "Failed to delete vector index for question (may not exist): %v", err)
 		// Continue even if vector deletion fails - the question might not have been indexed
 	}
