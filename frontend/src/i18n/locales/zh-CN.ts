@@ -1320,6 +1320,11 @@ export default {
       downloadExampleCSV: "下载 CSV 示例",
       downloadExampleExcel: "下载 Excel 示例",
     },
+    faqExport: {
+      exportButton: "导出 CSV",
+      exportSuccess: "导出成功",
+      exportFailed: "导出失败",
+    },
     models: {
       title: "模型配置",
       description: "为知识库选择合适的 AI 模型",

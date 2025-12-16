@@ -142,14 +142,18 @@
             <div ref="tagListRef" class="faq-tag-list" @scroll="handleTagListScroll">
               <div
                 class="faq-tag-item"
-                :class="{ active: selectedTagId === '' }"
+                :class="{ active: selectedTagId === UNTAGGED_FILTER }"
                 @click="handleUntaggedClick"
               >
                 <div class="faq-tag-left">
                   <t-icon name="folder" size="18px" />
                   <span>{{ $t('knowledgeBase.untagged') }}</span>
                 </div>
-                <span class="faq-tag-count">{{ untaggedFAQCount }}</span>
+                <div class="faq-tag-right">
+                  <span class="faq-tag-count">{{ untaggedFAQCount }}</span>
+                  <!-- Placeholder for alignment with other tags that have more menu -->
+                  <div class="tag-more-placeholder"></div>
+                </div>
               </div>
 
               <div v-if="creatingTag" class="faq-tag-item tag-editing" @click.stop>
@@ -1111,6 +1115,7 @@ import {
   updateFAQEntryFieldsBatch,
   deleteFAQEntries,
   searchFAQEntries,
+  exportFAQEntries,
   listKnowledgeTags,
   updateFAQEntryTagBatch,
   createKnowledgeBaseTag,
@@ -1184,7 +1189,9 @@ type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () 
 const tagList = ref<any[]>([])
 const tagLoading = ref(false)
 const tagListRef = ref<HTMLElement | null>(null)
-const selectedTagId = ref<string>('')
+// Special value to represent "untagged" filter - must match backend constant
+const UNTAGGED_FILTER = '__untagged__'
+const selectedTagId = ref<string>(UNTAGGED_FILTER)
 const overallFAQTotal = ref(0)
 const tagSearchQuery = ref('')
 const TAG_PAGE_SIZE = 20
@@ -1328,87 +1335,6 @@ const searchForm = reactive({
   matchCount: 10,
 })
 
-// Toolbar actions dropdown
-const toolbarActionOptions = computed(() => {
-  const options = [
-    { 
-      content: t('knowledgeEditor.faqImport.importButton'), 
-      value: 'import', 
-      icon: 'upload',
-      disabled: importState.taskStatus?.status === 'running' // 导入过程中禁用导入按钮
-    },
-    { content: t('knowledgeEditor.faq.searchTest'), value: 'search', icon: 'search' },
-  ]
-  
-  // 如果有选中的条目，添加批量操作选项
-  if (selectedRowKeys.value.length > 0) {
-    options.push(
-      {
-        content: `${t('knowledgeEditor.faq.batchUpdateTag')} (${selectedRowKeys.value.length})`,
-        value: 'batchTag',
-        icon: 'folder',
-      },
-      {
-        content: `${t('knowledgeEditor.faq.batchEnable')} (${selectedRowKeys.value.length})`,
-        value: 'batchEnable',
-        icon: 'check-circle',
-      },
-      {
-        content: `${t('knowledgeEditor.faq.batchDisable')} (${selectedRowKeys.value.length})`,
-        value: 'batchDisable',
-        icon: 'close-circle',
-      },
-      /* 暂时隐藏推荐批量操作
-      {
-        content: `${t('knowledgeEditor.faq.batchEnableRecommended')} (${selectedRowKeys.value.length})`,
-        value: 'batchEnableRecommended',
-        icon: 'thumb-up',
-      },
-      {
-        content: `${t('knowledgeEditor.faq.batchDisableRecommended')} (${selectedRowKeys.value.length})`,
-        value: 'batchDisableRecommended',
-        icon: 'thumb-down',
-      },
-      */
-      {
-        content: `${t('knowledgeEditor.faqImport.deleteSelected')} (${selectedRowKeys.value.length})`,
-        value: 'delete',
-        icon: 'delete',
-      }
-    )
-  }
-  
-  return options
-})
-
-const handleToolbarAction = (data: { value: string }) => {
-  switch (data.value) {
-    case 'import':
-      openImportDialog()
-      break
-    case 'search':
-      searchDrawerVisible.value = true
-      break
-    case 'batchTag':
-      openBatchTagDialog()
-      break
-    case 'batchEnable':
-      handleBatchStatusChange(true)
-      break
-    case 'batchDisable':
-      handleBatchStatusChange(false)
-      break
-    case 'batchEnableRecommended':
-      handleBatchRecommendedChange(true)
-      break
-    case 'batchDisableRecommended':
-      handleBatchRecommendedChange(false)
-      break
-    case 'delete':
-      handleBatchDelete()
-      break
-  }
-}
 
 // 标签列表滚动加载更多
 const handleTagListScroll = () => {
@@ -1507,8 +1433,8 @@ const handleUntaggedClick = () => {
   if (editingTagId.value) {
     cancelEditTag()
   }
-  if (selectedTagId.value === '') return
-  handleTagFilterChange('')
+  if (selectedTagId.value === UNTAGGED_FILTER) return
+  handleTagFilterChange(UNTAGGED_FILTER)
 }
 
 const startCreateTag = () => {
@@ -1618,7 +1544,7 @@ const confirmDeleteTag = (tag: any) => {
         await deleteKnowledgeBaseTag(props.kbId, tag.id, { force: true })
         MessagePlugin.success(t('knowledgeBase.tagDeleteSuccess'))
         if (selectedTagId.value === tag.id) {
-          handleTagFilterChange('')
+          handleTagFilterChange(UNTAGGED_FILTER)
         }
         await loadTags()
         await loadEntries()
@@ -1682,6 +1608,8 @@ const handleFaqMenuAction = (event: Event) => {
     openImportDialog()
   } else if (detail.action === 'search') {
     searchDrawerVisible.value = true
+  } else if (detail.action === 'export') {
+    handleExportCSV()
   } else if (detail.action === 'batch') {
     // 批量操作通过左侧菜单的下拉菜单处理
     if (selectedRowKeys.value.length === 0) {
@@ -1788,6 +1716,16 @@ const loadEntries = async (append = false) => {
   }
 
   try {
+    // If overallFAQTotal is not initialized, fetch it first (without tag_id filter)
+    if (overallFAQTotal.value === 0 && !append) {
+      const totalRes = await listFAQEntries(props.kbId, {
+        page: 1,
+        page_size: 1,
+      })
+      const totalData = (totalRes.data || {}) as { total: number }
+      overallFAQTotal.value = totalData.total || 0
+    }
+
     const res = await listFAQEntries(props.kbId, {
       page: currentPage,
       page_size: pageSize,
@@ -1812,9 +1750,6 @@ const loadEntries = async (append = false) => {
       entries.value = [...entries.value, ...newEntries]
     } else {
       entries.value = newEntries
-    }
-    if (selectedTagId.value === '') {
-      overallFAQTotal.value = pageData.total || 0
     }
     // 判断是否还有更多数据
     hasMore.value = entries.value.length < (pageData.total || 0)
@@ -2328,8 +2263,9 @@ const startPolling = (taskId: string) => {
           if (status === 'success') {
             MessagePlugin.success(t('knowledgeEditor.faqImport.importSuccess'))
             // 清除筛选条件，确保用户能看到所有新导入的数据
-            selectedTagId.value = ''
+            selectedTagId.value = UNTAGGED_FILTER
             entrySearchKeyword.value = ''
+            overallFAQTotal.value = 0  // Reset to trigger re-fetch
             await loadEntries()
             await loadTags()
             // 任务完成后，3秒后自动关闭进度条
@@ -2653,12 +2589,41 @@ const downloadExcelExample = () => {
   XLSX.writeFile(workbook, 'faq_example.xlsx')
 }
 
+// 导出 FAQ 数据为 CSV
+const exportLoading = ref(false)
+const handleExportCSV = async () => {
+  if (!props.kbId) {
+    MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBase') || '请先选择知识库')
+    return
+  }
+  
+  exportLoading.value = true
+  try {
+    const blob = await exportFAQEntries(props.kbId)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `faq_export_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+    MessagePlugin.success(t('knowledgeEditor.faqExport.exportSuccess') || '导出成功')
+  } catch (error: any) {
+    console.error('Export failed:', error)
+    MessagePlugin.error(t('knowledgeEditor.faqExport.exportFailed') || '导出失败')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
 watch(
   () => props.kbId,
   async (newKbId) => {
     currentPage = 1
     hasMore.value = true
-    selectedTagId.value = ''
+    selectedTagId.value = UNTAGGED_FILTER
+    overallFAQTotal.value = 0  // Reset to trigger re-fetch
     cancelCreateTag()
     cancelEditTag()
     tagSearchQuery.value = ''
@@ -3374,6 +3339,12 @@ watch(() => entries.value.map(e => ({
       .tag-more {
         display: flex;
         align-items: center;
+      }
+
+      .tag-more-placeholder {
+        width: 24px;  // Same width as tag-more-btn
+        height: 24px;
+        flex-shrink: 0;
       }
     }
 

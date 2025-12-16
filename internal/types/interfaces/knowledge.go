@@ -95,6 +95,8 @@ type KnowledgeService interface {
 	DeleteFAQEntries(ctx context.Context, kbID string, entryIDs []string) error
 	// SearchFAQEntries searches FAQ entries using hybrid search.
 	SearchFAQEntries(ctx context.Context, kbID string, req *types.FAQSearchRequest) ([]*types.FAQEntry, error)
+	// ExportFAQEntries exports all FAQ entries for a knowledge base as CSV data.
+	ExportFAQEntries(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
 	UpdateKnowledgeTagBatch(ctx context.Context, updates map[string]*string) error
 	// UpdateFAQEntryTagBatch updates tag for FAQ entries in batch.

@@ -1926,6 +1926,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         max-height: 300px;
         width: auto;
         height: auto;
+        min-height: 100px; /* 防止流式输出时图片高度塌陷导致抖动 */
         border-radius: 8px;
         display: block;
         margin: 8px 0;
@@ -1933,6 +1934,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         object-fit: contain;
         cursor: pointer;
         transition: transform 0.2s ease;
+        background-color: #f9fafb; /* 加载时的占位背景色 */
         
         &:hover {
           transform: scale(1.02);
@@ -2058,6 +2060,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         max-height: 300px;
         width: auto;
         height: auto;
+        min-height: 100px; /* 防止流式输出时图片高度塌陷导致抖动 */
         border-radius: 8px;
         display: block;
         margin: 8px 0;
@@ -2065,6 +2068,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         object-fit: contain;
         cursor: pointer;
         transition: transform 0.2s ease;
+        background-color: #f9fafb; /* 加载时的占位背景色 */
         
         &:hover {
           transform: scale(1.02);

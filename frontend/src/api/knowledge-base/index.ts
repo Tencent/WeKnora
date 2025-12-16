@@ -206,3 +206,9 @@ export function searchFAQEntries(
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/faq/search`, data);
 }
+
+// Export FAQ entries as CSV file
+export async function exportFAQEntries(kbId: string): Promise<Blob> {
+  const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export`);
+  return response as unknown as Blob;
+}

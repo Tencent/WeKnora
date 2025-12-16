@@ -221,3 +221,23 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 		"data":    entries,
 	})
 }
+
+// ExportEntries exports all FAQ entries as a CSV file.
+func (h *FAQHandler) ExportEntries(c *gin.Context) {
+	ctx := c.Request.Context()
+	kbID := secutils.SanitizeForLog(c.Param("id"))
+
+	csvData, err := h.knowledgeService.ExportFAQEntries(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+
+	// Set response headers for CSV download
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", "attachment; filename=faq_export.csv")
+	// Add BOM for Excel compatibility with UTF-8
+	bom := []byte{0xEF, 0xBB, 0xBF}
+	c.Data(http.StatusOK, "text/csv; charset=utf-8", append(bom, csvData...))
+}

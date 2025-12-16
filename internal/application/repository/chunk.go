@@ -86,7 +86,10 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 	baseFilter := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
-		if tagID != "" {
+		if tagID == "__untagged__" {
+			// Special value to filter entries without a tag
+			db = db.Where("tag_id = ''")
+		} else if tagID != "" {
 			db = db.Where("tag_id = ?", tagID)
 		}
 		if keyword != "" {
@@ -365,6 +368,48 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 			Select("id, metadata").
 			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ?",
 				tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed).
+			Offset(offset).
+			Limit(batchSize).
+			Find(&batchChunks).Error; err != nil {
+			return nil, err
+		}
+
+		// 如果没有查询到数据，说明已经查询完毕
+		if len(batchChunks) == 0 {
+			break
+		}
+
+		allChunks = append(allChunks, batchChunks...)
+
+		// 如果返回的数据少于批次大小，说明已经是最后一批
+		if len(batchChunks) < batchSize {
+			break
+		}
+
+		offset += batchSize
+	}
+
+	return allChunks, nil
+}
+
+// ListAllFAQChunksForExport lists all FAQ chunks for export with full metadata, tag_id, is_enabled, and flags.
+// Uses batch query to handle large datasets.
+func (r *chunkRepository) ListAllFAQChunksForExport(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+) ([]*types.Chunk, error) {
+	const batchSize = 1000 // 每批查询1000条
+	var allChunks []*types.Chunk
+	offset := 0
+
+	for {
+		var batchChunks []*types.Chunk
+		if err := r.db.WithContext(ctx).
+			Select("id, metadata, tag_id, is_enabled, flags").
+			Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ? AND status = ?",
+				tenantID, knowledgeID, types.ChunkTypeFAQ, types.ChunkStatusIndexed).
+			Order("created_at ASC").
 			Offset(offset).
 			Limit(batchSize).
 			Find(&batchChunks).Error; err != nil {

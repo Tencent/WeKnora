@@ -1081,6 +1081,11 @@ export default {
       downloadExampleCSV: 'Скачать пример CSV',
       downloadExampleExcel: 'Скачать пример Excel',
     },
+    faqExport: {
+      exportButton: 'Экспорт CSV',
+      exportSuccess: 'Экспорт успешен',
+      exportFailed: 'Ошибка экспорта',
+    },
     models: {
       title: 'Конфигурация моделей',
       description: 'Выберите подходящие AI-модели для базы знаний',

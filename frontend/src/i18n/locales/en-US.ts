@@ -984,6 +984,11 @@ export default {
       downloadExampleCSV: 'Download CSV Example',
       downloadExampleExcel: 'Download Excel Example',
     },
+    faqExport: {
+      exportButton: 'Export CSV',
+      exportSuccess: 'Export successful',
+      exportFailed: 'Export failed',
+    },
     models: {
       title: 'Model Configuration',
       description: 'Select appropriate AI models for the knowledge base',

@@ -52,6 +52,8 @@ type ChunkRepository interface {
 	// ListAllFAQChunksWithMetadataByKnowledgeBaseID lists all FAQ chunks for a knowledge base ID
 	// returns ID and Metadata fields for duplicate question checking
 	ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Chunk, error)
+	// ListAllFAQChunksForExport lists all FAQ chunks for export with full metadata, tag_id, is_enabled, and flags
+	ListAllFAQChunksForExport(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
 	// UpdateChunkFlagsBatch updates flags for multiple chunks in batch using a single SQL statement.
 	// setFlags: map of chunk ID to flags to set (OR operation)
 	// clearFlags: map of chunk ID to flags to clear (AND NOT operation)

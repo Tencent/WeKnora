@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -171,6 +172,28 @@ func (c *Client) ListFAQEntries(ctx context.Context,
 	return response.Data, nil
 }
 
+// ExportFAQEntries exports all FAQ entries from a knowledge base as CSV data.
+// The CSV format matches the import example format with 8 columns:
+// 分类(必填), 问题(必填), 相似问题(选填-多个用##分隔), 反例问题(选填-多个用##分隔),
+// 机器人回答(必填-多个用##分隔), 是否全部回复(选填-默认FALSE), 是否停用(选填-默认FALSE),
+// 是否禁止被推荐(选填-默认False 可被推荐)
+func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) ([]byte, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/export", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the raw CSV data from response body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read export response: %w", err)
+	}
+
+	return data, nil
+}
+
 // UpsertFAQEntries imports or appends FAQ entries asynchronously and returns the task ID.
 func (c *Client) UpsertFAQEntries(ctx context.Context,
 	knowledgeBaseID string, payload *FAQBatchUpsertPayload,
@@ -206,6 +229,28 @@ func (c *Client) CreateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 	return response.Data, nil
+}
+
+// ExportFAQEntries exports all FAQ entries from a knowledge base as CSV data.
+// The CSV format matches the import example format with 8 columns:
+// 分类(必填), 问题(必填), 相似问题(选填-多个用##分隔), 反例问题(选填-多个用##分隔),
+// 机器人回答(必填-多个用##分隔), 是否全部回复(选填-默认FALSE), 是否停用(选填-默认FALSE),
+// 是否禁止被推荐(选填-默认False 可被推荐)
+func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) ([]byte, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/export", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the raw CSV data from response body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read export response: %w", err)
+	}
+
+	return data, nil
 }
 
 // UpdateFAQEntry updates a single FAQ entry.
@@ -284,4 +329,26 @@ func (c *Client) SearchFAQEntries(ctx context.Context,
 	}
 
 	return response.Data, nil
+}
+
+// ExportFAQEntries exports all FAQ entries from a knowledge base as CSV data.
+// The CSV format matches the import example format with 8 columns:
+// 分类(必填), 问题(必填), 相似问题(选填-多个用##分隔), 反例问题(选填-多个用##分隔),
+// 机器人回答(必填-多个用##分隔), 是否全部回复(选填-默认FALSE), 是否停用(选填-默认FALSE),
+// 是否禁止被推荐(选填-默认False 可被推荐)
+func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) ([]byte, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/export", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read the raw CSV data from response body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read export response: %w", err)
+	}
+
+	return data, nil
 }

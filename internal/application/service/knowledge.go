@@ -3895,6 +3895,128 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 	return nil
 }
 
+// ExportFAQEntries exports all FAQ entries for a knowledge base as CSV data.
+// The CSV format matches the import example format with 8 columns:
+// 分类(必填), 问题(必填), 相似问题(选填-多个用##分隔), 反例问题(选填-多个用##分隔),
+// 机器人回答(必填-多个用##分隔), 是否全部回复(选填-默认FALSE), 是否停用(选填-默认FALSE),
+// 是否禁止被推荐(选填-默认False 可被推荐)
+func (s *knowledgeService) ExportFAQEntries(ctx context.Context, kbID string) ([]byte, error) {
+	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	faqKnowledge, err := s.findFAQKnowledge(ctx, tenantID, kb.ID)
+	if err != nil {
+		return nil, err
+	}
+	if faqKnowledge == nil {
+		// Return empty CSV with headers only
+		return s.buildFAQCSV(nil, nil), nil
+	}
+
+	// Get all FAQ chunks
+	chunks, err := s.chunkRepo.ListAllFAQChunksForExport(ctx, tenantID, faqKnowledge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list FAQ chunks: %w", err)
+	}
+
+	// Build tag map for tag_id -> tag_name conversion
+	tagMap, err := s.buildTagMap(ctx, tenantID, kbID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build tag map: %w", err)
+	}
+
+	return s.buildFAQCSV(chunks, tagMap), nil
+}
+
+// buildTagMap builds a map from tag_id to tag_name for the given knowledge base.
+func (s *knowledgeService) buildTagMap(ctx context.Context, tenantID uint64, kbID string) (map[string]string, error) {
+	// Get all tags for this knowledge base (no pagination limit)
+	page := &types.Pagination{Page: 1, PageSize: 10000}
+	tags, _, err := s.tagRepo.ListByKB(ctx, tenantID, kbID, page, "")
+	if err != nil {
+		return nil, err
+	}
+
+	tagMap := make(map[string]string, len(tags))
+	for _, tag := range tags {
+		if tag != nil {
+			tagMap[tag.ID] = tag.Name
+		}
+	}
+	return tagMap, nil
+}
+
+// buildFAQCSV builds CSV content from FAQ chunks.
+func (s *knowledgeService) buildFAQCSV(chunks []*types.Chunk, tagMap map[string]string) []byte {
+	var buf strings.Builder
+
+	// Write CSV header (matching import example format)
+	headers := []string{
+		"分类(必填)",
+		"问题(必填)",
+		"相似问题(选填-多个用##分隔)",
+		"反例问题(选填-多个用##分隔)",
+		"机器人回答(必填-多个用##分隔)",
+		"是否全部回复(选填-默认FALSE)",
+		"是否停用(选填-默认FALSE)",
+		"是否禁止被推荐(选填-默认False 可被推荐)",
+	}
+	buf.WriteString(strings.Join(headers, ","))
+	buf.WriteString("\n")
+
+	// Write data rows
+	for _, chunk := range chunks {
+		meta, err := chunk.FAQMetadata()
+		if err != nil || meta == nil {
+			continue
+		}
+
+		// Get tag name
+		tagName := ""
+		if chunk.TagID != "" && tagMap != nil {
+			if name, ok := tagMap[chunk.TagID]; ok {
+				tagName = name
+			}
+		}
+
+		// Build row
+		row := []string{
+			escapeCSVField(tagName),
+			escapeCSVField(meta.StandardQuestion),
+			escapeCSVField(strings.Join(meta.SimilarQuestions, "##")),
+			escapeCSVField(strings.Join(meta.NegativeQuestions, "##")),
+			escapeCSVField(strings.Join(meta.Answers, "##")),
+			boolToCSV(meta.AnswerStrategy == types.AnswerStrategyAll),
+			boolToCSV(!chunk.IsEnabled),                                    // 是否停用：取反
+			boolToCSV(!chunk.Flags.HasFlag(types.ChunkFlagRecommended)),    // 是否禁止被推荐：取反
+		}
+		buf.WriteString(strings.Join(row, ","))
+		buf.WriteString("\n")
+	}
+
+	return []byte(buf.String())
+}
+
+// escapeCSVField escapes a field for CSV format.
+func escapeCSVField(field string) string {
+	// If field contains comma, newline, or quote, wrap in quotes and escape internal quotes
+	if strings.ContainsAny(field, ",\"\n\r") {
+		return "\"" + strings.ReplaceAll(field, "\"", "\"\"") + "\""
+	}
+	return field
+}
+
+// boolToCSV converts a boolean to CSV TRUE/FALSE string.
+func boolToCSV(b bool) string {
+	if b {
+		return "TRUE"
+	}
+	return "FALSE"
+}
+
 func (s *knowledgeService) validateFAQKnowledgeBase(ctx context.Context, kbID string) (*types.KnowledgeBase, error) {
 	if kbID == "" {
 		return nil, werrors.NewBadRequestError("知识库 ID 不能为空")
