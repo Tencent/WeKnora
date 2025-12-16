@@ -439,11 +439,16 @@ const handleSubmit = async () => {
         command: formData.value.stdio_config.command,
         args
       }
-      // Filter out empty env vars
+      // Build env vars using envVarKeys to get the correct key names
+      // This fixes the issue where user-entered keys weren't being saved
       const envVars: Record<string, string> = {}
-      for (const [key, value] of Object.entries(formData.value.env_vars)) {
-        if (key && key.trim() !== '' && value && value.trim() !== '') {
-          envVars[key] = value
+      const formEnvVarsEntries = Object.entries(formData.value.env_vars)
+      for (let i = 0; i < formEnvVarsEntries.length; i++) {
+        const [, value] = formEnvVarsEntries[i]
+        // Use the key from envVarKeys (which reflects user input) instead of formData key
+        const actualKey = envVarKeys.value[i]
+        if (actualKey && actualKey.trim() !== '' && value && value.trim() !== '') {
+          envVars[actualKey.trim()] = value.trim()
         }
       }
       data.env_vars = Object.keys(envVars).length > 0 ? envVars : undefined
