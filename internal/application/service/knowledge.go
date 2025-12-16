@@ -1069,6 +1069,55 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	logger.Infof(ctx, "Cleanup completed, starting to process new chunks")
 
+	// ========== DocReader 解析结果日志 ==========
+	logger.Infof(ctx, "[DocReader] ========== 解析结果概览 ==========")
+	logger.Infof(ctx, "[DocReader] 知识ID: %s, 知识库ID: %s", knowledge.ID, knowledge.KnowledgeBaseID)
+	logger.Infof(ctx, "[DocReader] 总Chunk数量: %d", len(chunks))
+
+	// 统计图片信息
+	totalImages := 0
+	chunksWithImages := 0
+	for _, chunkData := range chunks {
+		if len(chunkData.Images) > 0 {
+			chunksWithImages++
+			totalImages += len(chunkData.Images)
+		}
+	}
+	logger.Infof(ctx, "[DocReader] 包含图片的Chunk数: %d, 总图片数: %d", chunksWithImages, totalImages)
+
+	// 打印每个Chunk的详细信息
+	for idx, chunkData := range chunks {
+		contentPreview := chunkData.Content
+		if len(contentPreview) > 200 {
+			contentPreview = contentPreview[:200] + "..."
+		}
+		logger.Infof(ctx, "[DocReader] Chunk #%d (seq=%d): 内容长度=%d, 图片数=%d, 范围=[%d-%d]",
+			idx, chunkData.Seq, len(chunkData.Content), len(chunkData.Images), chunkData.Start, chunkData.End)
+		logger.Debugf(ctx, "[DocReader] Chunk #%d 内容预览: %s", idx, contentPreview)
+
+		// 打印图片详细信息
+		for imgIdx, img := range chunkData.Images {
+			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.Url)
+			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalUrl)
+			if img.Caption != "" {
+				captionPreview := img.Caption
+				if len(captionPreview) > 100 {
+					captionPreview = captionPreview[:100] + "..."
+				}
+				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
+			}
+			if img.OcrText != "" {
+				ocrPreview := img.OcrText
+				if len(ocrPreview) > 100 {
+					ocrPreview = ocrPreview[:100] + "..."
+				}
+				logger.Infof(ctx, "[DocReader]   图片 #%d: OCRText=%s", imgIdx, ocrPreview)
+			}
+			logger.Infof(ctx, "[DocReader]   图片 #%d: 位置=[%d-%d]", imgIdx, img.Start, img.End)
+		}
+	}
+	logger.Infof(ctx, "[DocReader] ========== 解析结果概览结束 ==========")
+
 	// Create chunk objects from proto chunks
 	maxSeq := 0
 

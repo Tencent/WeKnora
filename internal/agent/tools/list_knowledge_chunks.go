@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -139,7 +140,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args map[string]i
 
 	formattedChunks := make([]map[string]interface{}, 0, len(chunks))
 	for idx, c := range chunks {
-		formattedChunks = append(formattedChunks, map[string]interface{}{
+		chunkData := map[string]interface{}{
 			"seq":             idx + 1,
 			"chunk_id":        c.ID,
 			"chunk_index":     c.ChunkIndex,
@@ -150,7 +151,35 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args map[string]i
 			"start_at":        c.StartAt,
 			"end_at":          c.EndAt,
 			"parent_chunk_id": c.ParentChunkID,
-		})
+		}
+
+		// 添加图片信息
+		if c.ImageInfo != "" {
+			var imageInfos []types.ImageInfo
+			if err := json.Unmarshal([]byte(c.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
+				imageList := make([]map[string]string, 0, len(imageInfos))
+				for _, img := range imageInfos {
+					imgData := make(map[string]string)
+					if img.URL != "" {
+						imgData["url"] = img.URL
+					}
+					if img.Caption != "" {
+						imgData["caption"] = img.Caption
+					}
+					if img.OCRText != "" {
+						imgData["ocr_text"] = img.OCRText
+					}
+					if len(imgData) > 0 {
+						imageList = append(imageList, imgData)
+					}
+				}
+				if len(imageList) > 0 {
+					chunkData["images"] = imageList
+				}
+			}
+		}
+
+		formattedChunks = append(formattedChunks, chunkData)
 	}
 
 	return &types.ToolResult{
@@ -218,7 +247,28 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 		fmt.Fprintf(builder, "Chunk #%d (Index %d)\n", idx+1, c.ChunkIndex+1)
 		fmt.Fprintf(builder, "  chunk_id: %s\n", c.ID)
 		fmt.Fprintf(builder, "  类型: %s\n", c.ChunkType)
-		fmt.Fprintf(builder, "  内容: %s\n\n", summarizeContent(c.Content))
+		fmt.Fprintf(builder, "  内容: %s\n", summarizeContent(c.Content))
+
+		// 输出关联的图片信息
+		if c.ImageInfo != "" {
+			var imageInfos []types.ImageInfo
+			if err := json.Unmarshal([]byte(c.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
+				fmt.Fprintf(builder, "  关联图片 (%d):\n", len(imageInfos))
+				for imgIdx, img := range imageInfos {
+					fmt.Fprintf(builder, "    图片 %d:\n", imgIdx+1)
+					if img.URL != "" {
+						fmt.Fprintf(builder, "      URL: %s\n", img.URL)
+					}
+					if img.Caption != "" {
+						fmt.Fprintf(builder, "      描述: %s\n", img.Caption)
+					}
+					if img.OCRText != "" {
+						fmt.Fprintf(builder, "      OCR文本: %s\n", img.OCRText)
+					}
+				}
+			}
+		}
+		builder.WriteString("\n")
 	}
 
 	if int64(fetched) < total {

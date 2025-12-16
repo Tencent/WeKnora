@@ -1050,6 +1050,26 @@ func (t *KnowledgeSearchTool) formatOutput(
 			result.Content,
 		)
 
+		// 解析并输出关联的图片信息
+		if result.ImageInfo != "" {
+			var imageInfos []types.ImageInfo
+			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
+				output += fmt.Sprintf("  Related Images (%d):\n", len(imageInfos))
+				for imgIdx, img := range imageInfos {
+					output += fmt.Sprintf("    Image %d:\n", imgIdx+1)
+					if img.URL != "" {
+						output += fmt.Sprintf("      URL: %s\n", img.URL)
+					}
+					if img.Caption != "" {
+						output += fmt.Sprintf("      Caption: %s\n", img.Caption)
+					}
+					if img.OCRText != "" {
+						output += fmt.Sprintf("      OCR Text: %s\n", img.OCRText)
+					}
+				}
+			}
+		}
+
 		if faqMeta != nil {
 			if faqMeta.StandardQuestion != "" {
 				output += fmt.Sprintf("  FAQ Standard Question: %s\n", faqMeta.StandardQuestion)
@@ -1080,6 +1100,34 @@ func (t *KnowledgeSearchTool) formatOutput(
 		})
 
 		last := formattedResults[len(formattedResults)-1]
+
+		// 添加图片信息到结构化数据
+		if result.ImageInfo != "" {
+			var imageInfos []types.ImageInfo
+			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
+				// 构建简化的图片信息列表
+				imageList := make([]map[string]string, 0, len(imageInfos))
+				for _, img := range imageInfos {
+					imgData := make(map[string]string)
+					if img.URL != "" {
+						imgData["url"] = img.URL
+					}
+					if img.Caption != "" {
+						imgData["caption"] = img.Caption
+					}
+					if img.OCRText != "" {
+						imgData["ocr_text"] = img.OCRText
+					}
+					if len(imgData) > 0 {
+						imageList = append(imageList, imgData)
+					}
+				}
+				if len(imageList) > 0 {
+					last["images"] = imageList
+				}
+			}
+		}
+
 		if faqMeta != nil {
 			if faqMeta.StandardQuestion != "" {
 				last["faq_standard_question"] = faqMeta.StandardQuestion
