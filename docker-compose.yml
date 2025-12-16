@@ -178,7 +178,7 @@ services:
       - WeKnora-network
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: WeKnora-minio
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -201,7 +201,8 @@ services:
       - full
 
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: WeKnora-jaeger
     ports:
       - "6831:6831/udp" # Jaeger Thrift接收器
       - "6832:6832/udp" # Jaeger Thrift接收器(Compact)
@@ -225,7 +226,7 @@ services:
       - full
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:2025.10.1
     container_name: WeKnora-neo4j
     volumes:
       - neo4j-data:/data
