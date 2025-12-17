@@ -21,29 +21,29 @@ import (
 
 // Knowledge represents knowledge information
 type Knowledge struct {
-	ID               string            `json:"id"`
-	TenantID         uint64            `json:"tenant_id"`
-	KnowledgeBaseID  string            `json:"knowledge_base_id"`
-	TagID            string            `json:"tag_id"`
-	Type             string            `json:"type"`
-	Title            string            `json:"title"`
-	Description      string            `json:"description"`
-	Source           string            `json:"source"`
-	ParseStatus      string            `json:"parse_status"`
-	SummaryStatus    string            `json:"summary_status"`
-	EnableStatus     string            `json:"enable_status"`
-	EmbeddingModelID string            `json:"embedding_model_id"`
-	FileName         string            `json:"file_name"`
-	FileType         string            `json:"file_type"`
-	FileSize         int64             `json:"file_size"`
-	FileHash         string            `json:"file_hash"`
-	FilePath         string            `json:"file_path"`
-	StorageSize      int64             `json:"storage_size"`
-	Metadata         map[string]string `json:"metadata"` // Extensible metadata for storing machine information, paths, etc.
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	ProcessedAt      *time.Time        `json:"processed_at"`
-	ErrorMessage     string            `json:"error_message"`
+	ID               string     `json:"id"`
+	TenantID         uint64     `json:"tenant_id"`
+	KnowledgeBaseID  string     `json:"knowledge_base_id"`
+	TagID            string     `json:"tag_id"`
+	Type             string     `json:"type"`
+	Title            string     `json:"title"`
+	Description      string     `json:"description"`
+	Source           string     `json:"source"`
+	ParseStatus      string     `json:"parse_status"`
+	SummaryStatus    string     `json:"summary_status"`
+	EnableStatus     string     `json:"enable_status"`
+	EmbeddingModelID string     `json:"embedding_model_id"`
+	FileName         string     `json:"file_name"`
+	FileType         string     `json:"file_type"`
+	FileSize         int64      `json:"file_size"`
+	FileHash         string     `json:"file_hash"`
+	FilePath         string     `json:"file_path"`
+	StorageSize      int64      `json:"storage_size"`
+	Metadata         string     `json:"metadata"` // Extensible metadata for storing machine information, paths, etc.
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	ProcessedAt      *time.Time `json:"processed_at"`
+	ErrorMessage     string     `json:"error_message"`
 }
 
 // KnowledgeResponse represents the API response containing a single knowledge entry
