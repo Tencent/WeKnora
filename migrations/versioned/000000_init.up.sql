@@ -24,8 +24,6 @@ CREATE TABLE IF NOT EXISTS tenants (
     deleted_at TIMESTAMP WITH TIME ZONE
 );
 
-COMMENT ON COLUMN tenants.agent_config IS 'Tenant-level agent configuration in JSON format';
-
 -- Set the starting value for tenants id sequence (only if current value is less than 10000)
 DO $$
 DECLARE
@@ -152,9 +150,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     deleted_at TIMESTAMP WITH TIME ZONE
 );
 
-COMMENT ON COLUMN sessions.agent_config IS 'Session-level agent configuration in JSON format';
-COMMENT ON COLUMN sessions.context_config IS 'LLM context management configuration (separate from message storage)';
-
 -- Create Index for sessions
 CREATE INDEX IF NOT EXISTS idx_sessions_tenant_id ON sessions(tenant_id);
 
@@ -174,8 +169,6 @@ CREATE TABLE IF NOT EXISTS messages (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
 );
-
-COMMENT ON COLUMN messages.agent_steps IS 'Agent execution steps (reasoning process and tool calls)';
 
 -- Create Index for messages
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id); 
