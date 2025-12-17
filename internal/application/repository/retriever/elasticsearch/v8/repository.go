@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	elasticsearchRetriever "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/typedapi/core/search"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/scriptlanguage"
+	"github.com/google/uuid"
 )
 
 // elasticsearchRepository implements the RetrieveEngineRepository interface for Elasticsearch v8
@@ -527,10 +529,26 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				embeddingMap[targetChunkID] = sourceDoc.Embedding
 			}
 
+			// Handle SourceID transformation for generated questions
+			// Generated questions have SourceID format: {chunkID}-{questionID}
+			// Regular chunks have SourceID == ChunkID
+			var targetSourceID string
+			if sourceDoc.SourceID == sourceDoc.ChunkID {
+				// Regular chunk, use targetChunkID as SourceID
+				targetSourceID = targetChunkID
+			} else if strings.HasPrefix(sourceDoc.SourceID, sourceDoc.ChunkID+"-") {
+				// This is a generated question, preserve the questionID part
+				questionID := strings.TrimPrefix(sourceDoc.SourceID, sourceDoc.ChunkID+"-")
+				targetSourceID = fmt.Sprintf("%s-%s", targetChunkID, questionID)
+			} else {
+				// For other complex scenarios, generate new unique SourceID
+				targetSourceID = uuid.New().String()
+			}
+
 			// Create new index information
 			indexInfo := &typesLocal.IndexInfo{
 				Content:         sourceDoc.Content,
-				SourceID:        targetChunkID,
+				SourceID:        targetSourceID,
 				SourceType:      typesLocal.SourceType(sourceDoc.SourceType),
 				ChunkID:         targetChunkID,
 				KnowledgeID:     targetKnowledgeID,

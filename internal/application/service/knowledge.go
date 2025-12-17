@@ -2531,6 +2531,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	chunkPage := 1
 	chunkPageSize := 100
 	srcTodst := map[string]string{}
+	tagIDMapping := map[string]string{} // srcTagID -> dstTagID
 	targetChunks := make([]*types.Chunk, 0, 10)
 	chunkType := []types.ChunkType{
 		types.ChunkTypeText, types.ChunkTypeSummary,
@@ -2555,22 +2556,41 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		if len(sourceChunks) == 0 {
 			break
 		}
+		now := time.Now()
 		for _, sourceChunk := range sourceChunks {
+			// Map TagID to target knowledge base
+			targetTagID := ""
+			if sourceChunk.TagID != "" {
+				if mappedTagID, ok := tagIDMapping[sourceChunk.TagID]; ok {
+					targetTagID = mappedTagID
+				} else {
+					// Try to find or create the tag in target knowledge base
+					targetTagID = s.getOrCreateTagInTarget(ctx, src, dst, sourceChunk.TagID, tagIDMapping)
+				}
+			}
+
 			targetChunk := &types.Chunk{
 				ID:              uuid.New().String(),
 				TenantID:        dst.TenantID,
 				KnowledgeID:     dst.ID,
 				KnowledgeBaseID: dst.KnowledgeBaseID,
+				TagID:           targetTagID,
 				Content:         sourceChunk.Content,
 				ChunkIndex:      sourceChunk.ChunkIndex,
 				IsEnabled:       sourceChunk.IsEnabled,
+				Flags:           sourceChunk.Flags,
+				Status:          sourceChunk.Status,
 				StartAt:         sourceChunk.StartAt,
 				EndAt:           sourceChunk.EndAt,
 				PreChunkID:      sourceChunk.PreChunkID,
 				NextChunkID:     sourceChunk.NextChunkID,
 				ChunkType:       sourceChunk.ChunkType,
 				ParentChunkID:   sourceChunk.ParentChunkID,
+				Metadata:        sourceChunk.Metadata,
+				ContentHash:     sourceChunk.ContentHash,
 				ImageInfo:       sourceChunk.ImageInfo,
+				CreatedAt:       now,
+				UpdatedAt:       now,
 			}
 			targetChunks = append(targetChunks, targetChunk)
 			srcTodst[sourceChunk.ID] = targetChunk.ID
@@ -5617,4 +5637,51 @@ func (s *knowledgeService) GetKBCloneProgress(ctx context.Context, taskID string
 		return nil, fmt.Errorf("failed to unmarshal progress: %w", err)
 	}
 	return &progress, nil
+}
+
+// getOrCreateTagInTarget finds or creates a tag in the target knowledge base based on the source tag.
+// It looks up the source tag by ID, then tries to find a tag with the same name in the target KB.
+// If not found, it creates a new tag with the same properties.
+// The mapping is cached in tagIDMapping for subsequent lookups.
+func (s *knowledgeService) getOrCreateTagInTarget(
+	ctx context.Context,
+	src, dst *types.Knowledge,
+	srcTagID string,
+	tagIDMapping map[string]string,
+) string {
+	// Get source tag
+	srcTag, err := s.tagRepo.GetByID(ctx, src.TenantID, srcTagID)
+	if err != nil || srcTag == nil {
+		logger.Warnf(ctx, "Failed to get source tag %s: %v", srcTagID, err)
+		tagIDMapping[srcTagID] = "" // Cache empty result to avoid repeated lookups
+		return ""
+	}
+
+	// Try to find existing tag with same name in target KB
+	dstTag, err := s.tagRepo.GetByName(ctx, dst.TenantID, dst.KnowledgeBaseID, srcTag.Name)
+	if err == nil && dstTag != nil {
+		tagIDMapping[srcTagID] = dstTag.ID
+		return dstTag.ID
+	}
+
+	// Create new tag in target KB
+	newTag := &types.KnowledgeTag{
+		ID:              uuid.New().String(),
+		TenantID:        dst.TenantID,
+		KnowledgeBaseID: dst.KnowledgeBaseID,
+		Name:            srcTag.Name,
+		Color:           srcTag.Color,
+		SortOrder:       srcTag.SortOrder,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	if err := s.tagRepo.Create(ctx, newTag); err != nil {
+		logger.Warnf(ctx, "Failed to create tag %s in target KB: %v", srcTag.Name, err)
+		tagIDMapping[srcTagID] = "" // Cache empty result
+		return ""
+	}
+
+	tagIDMapping[srcTagID] = newTag.ID
+	logger.Infof(ctx, "Created tag %s (ID: %s) in target KB %s", newTag.Name, newTag.ID, dst.KnowledgeBaseID)
+	return newTag.ID
 }

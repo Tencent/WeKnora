@@ -699,6 +699,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 
 			sourceChunkID := payload[fieldChunkID].GetStringValue()
 			sourceKnowledgeID := payload[fieldKnowledgeID].GetStringValue()
+			originalSourceID := payload[fieldSourceID].GetStringValue()
 
 			targetChunkID, ok := sourceToTargetChunkIDMap[sourceChunkID]
 			if !ok {
@@ -712,9 +713,25 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
+			// Handle SourceID transformation for generated questions
+			// Generated questions have SourceID format: {chunkID}-{questionID}
+			// Regular chunks have SourceID == ChunkID
+			var targetSourceID string
+			if originalSourceID == sourceChunkID {
+				// Regular chunk, use targetChunkID as SourceID
+				targetSourceID = targetChunkID
+			} else if strings.HasPrefix(originalSourceID, sourceChunkID+"-") {
+				// This is a generated question, preserve the questionID part
+				questionID := strings.TrimPrefix(originalSourceID, sourceChunkID+"-")
+				targetSourceID = fmt.Sprintf("%s-%s", targetChunkID, questionID)
+			} else {
+				// For other complex scenarios, generate new unique SourceID
+				targetSourceID = uuid.New().String()
+			}
+
 			newPayload := qdrant.NewValueMap(map[string]any{
 				fieldContent:         payload[fieldContent].GetStringValue(),
-				fieldSourceID:        targetChunkID,
+				fieldSourceID:        targetSourceID,
 				fieldSourceType:      payload[fieldSourceType].GetIntegerValue(),
 				fieldChunkID:         targetChunkID,
 				fieldKnowledgeID:     targetKnowledgeID,

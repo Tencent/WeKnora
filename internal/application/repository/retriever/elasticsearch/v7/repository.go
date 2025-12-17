@@ -1036,9 +1036,26 @@ func (e *elasticsearchRepository) processSingleHit(ctx context.Context,
 
 	// Extract basic content
 	content, _ := sourceObj["content"].(string)
+	originalSourceID, _ := sourceObj["source_id"].(string)
 	sourceType := 0
 	if st, ok := sourceObj["source_type"].(float64); ok {
 		sourceType = int(st)
+	}
+
+	// Handle SourceID transformation for generated questions
+	// Generated questions have SourceID format: {chunkID}-{questionID}
+	// Regular chunks have SourceID == ChunkID
+	var targetSourceID string
+	if originalSourceID == sourceChunkID {
+		// Regular chunk, use targetChunkID as SourceID
+		targetSourceID = targetChunkID
+	} else if strings.HasPrefix(originalSourceID, sourceChunkID+"-") {
+		// This is a generated question, preserve the questionID part
+		questionID := strings.TrimPrefix(originalSourceID, sourceChunkID+"-")
+		targetSourceID = fmt.Sprintf("%s-%s", targetChunkID, questionID)
+	} else {
+		// For other complex scenarios, generate new unique SourceID
+		targetSourceID = uuid.New().String()
 	}
 
 	// Extract embedding vector (if exists)
@@ -1057,7 +1074,7 @@ func (e *elasticsearchRepository) processSingleHit(ctx context.Context,
 	// Create IndexInfo object
 	indexInfo := &typesLocal.IndexInfo{
 		ChunkID:         targetChunkID,
-		SourceID:        targetChunkID,
+		SourceID:        targetSourceID,
 		KnowledgeID:     targetKnowledgeID,
 		KnowledgeBaseID: targetKnowledgeBaseID,
 		Content:         content,
