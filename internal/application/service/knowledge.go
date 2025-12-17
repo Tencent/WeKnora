@@ -2565,7 +2565,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 					targetTagID = mappedTagID
 				} else {
 					// Try to find or create the tag in target knowledge base
-					targetTagID = s.getOrCreateTagInTarget(ctx, src, dst, sourceChunk.TagID, tagIDMapping)
+					targetTagID = s.getOrCreateTagInTarget(ctx, src.TenantID, dst.TenantID, dst.KnowledgeBaseID, sourceChunk.TagID, tagIDMapping)
 				}
 			}
 
@@ -2725,8 +2725,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		return "", fmt.Errorf("failed to initialize task: %w", err)
 	}
 
-	logger.Infof(ctx, "Allocated ChunkIndex range [%d, %d] for FAQ import task %s, next ChunkIndex will be %d",
-		taskID)
+	logger.Infof(ctx, "FAQ import task initialized: %s, total entries: %d", taskID, len(payload.Entries))
 
 	// Enqueue FAQ import task to Asynq
 	logger.Info(ctx, "Enqueuing FAQ import task to Asynq")
@@ -5492,6 +5491,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 
 	// Clone FAQ chunks from source to destination
 	batch := 50
+	tagIDMapping := map[string]string{} // srcTagID -> dstTagID
 	for i := 0; i < len(chunksToAdd); i += batch {
 		end := i + batch
 		if end > len(chunksToAdd) {
@@ -5510,12 +5510,23 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 		// Create new chunks for destination
 		newChunks := make([]*types.Chunk, 0, len(srcChunks))
 		for _, srcChunk := range srcChunks {
+			// Map TagID to target knowledge base
+			targetTagID := ""
+			if srcChunk.TagID != "" {
+				if mappedTagID, ok := tagIDMapping[srcChunk.TagID]; ok {
+					targetTagID = mappedTagID
+				} else {
+					// Try to find or create the tag in target knowledge base
+					targetTagID = s.getOrCreateTagInTarget(ctx, srcKB.TenantID, dstKB.TenantID, dstKB.ID, srcChunk.TagID, tagIDMapping)
+				}
+			}
+
 			newChunk := &types.Chunk{
 				ID:              uuid.New().String(),
 				TenantID:        dstKB.TenantID,
 				KnowledgeID:     dstKnowledge.ID,
 				KnowledgeBaseID: dstKB.ID,
-				TagID:           srcChunk.TagID,
+				TagID:           targetTagID,
 				Content:         srcChunk.Content,
 				ChunkIndex:      srcChunk.ChunkIndex,
 				IsEnabled:       srcChunk.IsEnabled,
@@ -5523,7 +5534,10 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 				ChunkType:       types.ChunkTypeFAQ,
 				Metadata:        srcChunk.Metadata,
 				ContentHash:     srcChunk.ContentHash,
+				ImageInfo:       srcChunk.ImageInfo,
 				Status:          int(types.ChunkStatusStored), // Initially stored, will be indexed
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
 			}
 			newChunks = append(newChunks, newChunk)
 		}
@@ -5653,12 +5667,13 @@ func (s *knowledgeService) GetKBCloneProgress(ctx context.Context, taskID string
 // The mapping is cached in tagIDMapping for subsequent lookups.
 func (s *knowledgeService) getOrCreateTagInTarget(
 	ctx context.Context,
-	src, dst *types.Knowledge,
+	srcTenantID, dstTenantID uint64,
+	dstKnowledgeBaseID string,
 	srcTagID string,
 	tagIDMapping map[string]string,
 ) string {
 	// Get source tag
-	srcTag, err := s.tagRepo.GetByID(ctx, src.TenantID, srcTagID)
+	srcTag, err := s.tagRepo.GetByID(ctx, srcTenantID, srcTagID)
 	if err != nil || srcTag == nil {
 		logger.Warnf(ctx, "Failed to get source tag %s: %v", srcTagID, err)
 		tagIDMapping[srcTagID] = "" // Cache empty result to avoid repeated lookups
@@ -5666,7 +5681,7 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	}
 
 	// Try to find existing tag with same name in target KB
-	dstTag, err := s.tagRepo.GetByName(ctx, dst.TenantID, dst.KnowledgeBaseID, srcTag.Name)
+	dstTag, err := s.tagRepo.GetByName(ctx, dstTenantID, dstKnowledgeBaseID, srcTag.Name)
 	if err == nil && dstTag != nil {
 		tagIDMapping[srcTagID] = dstTag.ID
 		return dstTag.ID
@@ -5675,8 +5690,8 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	// Create new tag in target KB
 	newTag := &types.KnowledgeTag{
 		ID:              uuid.New().String(),
-		TenantID:        dst.TenantID,
-		KnowledgeBaseID: dst.KnowledgeBaseID,
+		TenantID:        dstTenantID,
+		KnowledgeBaseID: dstKnowledgeBaseID,
 		Name:            srcTag.Name,
 		Color:           srcTag.Color,
 		SortOrder:       srcTag.SortOrder,
@@ -5690,6 +5705,6 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	}
 
 	tagIDMapping[srcTagID] = newTag.ID
-	logger.Infof(ctx, "Created tag %s (ID: %s) in target KB %s", newTag.Name, newTag.ID, dst.KnowledgeBaseID)
+	logger.Infof(ctx, "Created tag %s (ID: %s) in target KB %s", newTag.Name, newTag.ID, dstKnowledgeBaseID)
 	return newTag.ID
 }
