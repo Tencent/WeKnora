@@ -969,6 +969,7 @@ export default {
       downloadFailed: "{name} 下载失败",
       downloadStartFailed: "启动下载失败",
       ollamaUnavailable: "Ollama服务不可用，无法选择本地模型",
+      ollamaNotSupportRerank: "Ollama 不支持 ReRank 模型，请使用远程接口配置",
       goToOllamaSettings: "查看设置",
       validation: {
         modelNameRequired: "请输入模型名称",

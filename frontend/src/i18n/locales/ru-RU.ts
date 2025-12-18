@@ -877,6 +877,7 @@ export default {
       downloadFailed: 'Не удалось загрузить {name}',
       downloadStartFailed: 'Не удалось запустить загрузку',
       ollamaUnavailable: 'Сервис Ollama недоступен, локальные модели недоступны для выбора',
+      ollamaNotSupportRerank: 'Ollama не поддерживает модели ReRank, используйте удалённый API',
       goToOllamaSettings: 'Открыть настройки',
       validation: {
         modelNameRequired: 'Введите название модели',

@@ -25,15 +25,21 @@
           <t-radio-group v-model="formData.source">
             <t-radio
               value="local"
-              :disabled="ollamaServiceStatus === false"
+              :disabled="ollamaServiceStatus === false || modelType === 'rerank'"
             >
               {{ $t('model.editor.sourceLocal') }}
             </t-radio>
             <t-radio value="remote">{{ $t('model.editor.sourceRemote') }}</t-radio>
           </t-radio-group>
 
+          <!-- ReRank模型不支持Ollama的提示信息 -->
+          <div v-if="modelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+            <t-icon name="info-circle-filled" class="tip-icon info" />
+            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
+          </div>
+
           <!-- Ollama不可用时的提示信息 -->
-          <div v-if="ollamaServiceStatus === false" class="ollama-unavailable-tip">
+          <div v-else-if="ollamaServiceStatus === false" class="ollama-unavailable-tip">
             <t-icon name="error-circle-filled" class="tip-icon" />
             <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
             <t-button
@@ -414,6 +420,11 @@ watch(() => props.visible, (val) => {
       formData.value = { ...props.modelData }
     } else {
       resetForm()
+    }
+
+    // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
+    if (props.modelType === 'rerank') {
+      formData.value.source = 'remote'
     }
   } else {
     // 恢复背景滚动
@@ -1314,12 +1325,27 @@ const handleCancel = () => {
     font-size: 16px;
     flex-shrink: 0;
     margin-right: 2px;
+
+    &.info {
+      color: #07C05F;
+    }
   }
 
   .tip-text {
     color: #dc2626;
     flex: 1;
     line-height: 1.5;
+  }
+
+  // ReRank提示使用主题绿色风格，与主页面保持一致
+  &.rerank-tip {
+    background: #f0fdf6;
+    border: 1px solid #d1fae5;
+    border-left: 3px solid #07C05F;
+
+    .tip-text {
+      color: #166534;
+    }
   }
 
   :deep(.tip-link) {
