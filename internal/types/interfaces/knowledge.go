@@ -117,6 +117,8 @@ type KnowledgeService interface {
 	GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error)
 	// SaveKBCloneProgress saves the progress of a knowledge base clone task
 	SaveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error
+	// GetFAQImportProgress retrieves the progress of an FAQ import task
+	GetFAQImportProgress(ctx context.Context, taskID string) (*types.FAQImportProgress, error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.

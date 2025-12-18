@@ -341,3 +341,31 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	c.Data(http.StatusOK, "text/csv; charset=utf-8", append(bom, csvData...))
 }
+
+// GetImportProgress godoc
+// @Summary      获取FAQ导入进度
+// @Description  获取FAQ导入任务的进度
+// @Tags         FAQ管理
+// @Accept       json
+// @Produce      json
+// @Param        task_id  path      string  true  "任务ID"
+// @Success      200      {object}  map[string]interface{}  "导入进度"
+// @Failure      404      {object}  errors.AppError         "任务不存在"
+// @Security     Bearer
+// @Router       /faq/import/progress/{task_id} [get]
+func (h *FAQHandler) GetImportProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+	taskID := secutils.SanitizeForLog(c.Param("task_id"))
+
+	progress, err := h.knowledgeService.GetFAQImportProgress(ctx, taskID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    progress,
+	})
+}

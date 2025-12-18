@@ -2680,7 +2680,7 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 }
 
 // UpsertFAQEntries imports or appends FAQ entries asynchronously.
-// Returns task ID for tracking import progress.
+// Returns task ID (UUID) for tracking import progress.
 func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	kbID string, payload *types.FAQBatchUpsertPayload,
 ) (string, error) {
@@ -2702,14 +2702,14 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-	// 检查是否有正在进行的导入任务
-	runningKnowledge, err := s.getRunningFAQImportTask(ctx, kbID, tenantID)
+	// 检查是否有正在进行的导入任务（通过Redis）
+	runningTaskID, err := s.getRunningFAQImportTaskID(ctx, kbID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check running import task: %v", err)
 		// 检查失败不影响导入，继续执行
-	} else if runningKnowledge != nil {
-		logger.Warnf(ctx, "Import task already running for KB %s: %s (status: %s)", kbID, runningKnowledge.ID, runningKnowledge.ParseStatus)
-		return "", werrors.NewBadRequestError(fmt.Sprintf("该知识库已有导入任务正在进行中（任务ID: %s），请等待完成后再试", runningKnowledge.ID))
+	} else if runningTaskID != "" {
+		logger.Warnf(ctx, "Import task already running for KB %s: %s", kbID, runningTaskID)
+		return "", werrors.NewBadRequestError(fmt.Sprintf("该知识库已有导入任务正在进行中（任务ID: %s），请等待完成后再试", runningTaskID))
 	}
 
 	faqKnowledge, err := s.ensureFAQKnowledge(ctx, tenantID, kb)
@@ -2717,15 +2717,34 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		return "", fmt.Errorf("failed to ensure FAQ knowledge: %w", err)
 	}
 
-	// 初始化导入任务状态到Knowledge表
-	taskID := faqKnowledge.ID // 使用Knowledge ID作为taskID
-	if err := s.updateFAQImportStatusWithRanges(ctx, taskID, types.FAQImportStatusPending,
-		0, len(payload.Entries), 0, ""); err != nil {
+	// 生成UUID作为任务ID
+	taskID := uuid.New().String()
+
+	// 初始化导入任务状态到Redis
+	progress := &types.FAQImportProgress{
+		TaskID:      taskID,
+		KBID:        kbID,
+		KnowledgeID: faqKnowledge.ID,
+		Status:      types.FAQImportStatusPending,
+		Progress:    0,
+		Total:       len(payload.Entries),
+		Processed:   0,
+		Message:     "任务已创建，等待处理",
+		CreatedAt:   time.Now().Unix(),
+		UpdatedAt:   time.Now().Unix(),
+	}
+	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
 		logger.Errorf(ctx, "Failed to initialize FAQ import task status: %v", err)
 		return "", fmt.Errorf("failed to initialize task: %w", err)
 	}
 
-	logger.Infof(ctx, "FAQ import task initialized: %s, total entries: %d", taskID, len(payload.Entries))
+	// 设置 KB 的运行中任务 ID
+	if err := s.setRunningFAQImportTaskID(ctx, kbID, taskID); err != nil {
+		logger.Errorf(ctx, "Failed to set running FAQ import task ID: %v", err)
+		// 不影响任务执行，继续
+	}
+
+	logger.Infof(ctx, "FAQ import task initialized: %s, kb_id: %s, total entries: %d", taskID, kbID, len(payload.Entries))
 
 	// Enqueue FAQ import task to Asynq
 	logger.Info(ctx, "Enqueuing FAQ import task to Asynq")
@@ -3158,7 +3177,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		actualProcessed += len(batch)
 		// 更新任务进度
 		progress := int(float64(actualProcessed) / float64(totalEntries) * 100)
-		if err := s.updateFAQImportStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, ""); err != nil {
+		if err := s.updateFAQImportProgressStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil {
 			logger.Errorf(ctx, "Failed to update task progress: %v", err)
 		}
 
@@ -4110,77 +4129,73 @@ func (s *knowledgeService) ensureFAQKnowledge(
 	return knowledge, nil
 }
 
-func (s *knowledgeService) updateFAQImportStatus(
+// updateFAQImportProgressStatus updates the FAQ import progress in Redis
+func (s *knowledgeService) updateFAQImportProgressStatus(
 	ctx context.Context,
-	knowledgeID string,
+	taskID string,
 	status types.FAQImportTaskStatus,
 	progress, total, processed int,
-	errorMsg string,
+	message, errorMsg string,
 ) error {
-	return s.updateFAQImportStatusWithRanges(ctx, knowledgeID, status, progress, total, processed, errorMsg)
-}
-
-// updateFAQImportStatusWithRanges 更新FAQ Knowledge的导入任务状态，包含NextChunkIndex
-func (s *knowledgeService) updateFAQImportStatusWithRanges(
-	ctx context.Context,
-	knowledgeID string,
-	status types.FAQImportTaskStatus,
-	progress, total, processed int,
-	errorMsg string,
-) error {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	// Get existing progress from Redis
+	existingProgress, err := s.GetFAQImportProgress(ctx, taskID)
 	if err != nil {
-		return err
+		// If not found, create a new progress entry
+		existingProgress = &types.FAQImportProgress{
+			TaskID:    taskID,
+			CreatedAt: time.Now().Unix(),
+		}
 	}
 
-	// 更新ParseStatus：将FAQImportTaskStatus映射到ParseStatus
-
-	knowledge.ParseStatus = string(status)
-	knowledge.UpdatedAt = time.Now()
-
-	meta, err := types.ParseFAQImportMetadata(knowledge)
-	if err != nil || meta == nil {
-		meta = &types.FAQImportMetadata{}
+	// Update progress fields
+	existingProgress.Status = status
+	existingProgress.Progress = progress
+	existingProgress.Total = total
+	existingProgress.Processed = processed
+	if message != "" {
+		existingProgress.Message = message
 	}
-
-	// 更新ErrorMessage
-	knowledge.ErrorMessage = errorMsg
+	existingProgress.Error = errorMsg
 	if status == types.FAQImportStatusCompleted {
-		knowledge.ErrorMessage = ""
+		existingProgress.Error = ""
 	}
 
-	// 更新Metadata中的导入进度信息，保留已有的ChunkIndexRanges和NextChunkIndex
-	meta.ImportProgress = progress
-	meta.ImportTotal = total
-	meta.ImportProcessed = processed
-	metaJSON, err := meta.ToJSON()
-	if err != nil {
-		return fmt.Errorf("failed to marshal import metadata: %w", err)
+	// 任务完成或失败时，清除 running key
+	if status == types.FAQImportStatusCompleted || status == types.FAQImportStatusFailed {
+		if existingProgress.KBID != "" {
+			if clearErr := s.clearRunningFAQImportTaskID(ctx, existingProgress.KBID); clearErr != nil {
+				logger.Errorf(ctx, "Failed to clear running FAQ import task ID: %v", clearErr)
+			}
+		}
 	}
-	knowledge.Metadata = metaJSON
 
-	return s.repo.UpdateKnowledge(ctx, knowledge)
+	return s.saveFAQImportProgress(ctx, existingProgress)
 }
 
-// getRunningFAQImportTask 获取指定知识库的进行中导入任务
-func (s *knowledgeService) getRunningFAQImportTask(
-	ctx context.Context,
-	kbID string,
-	tenantID uint64,
-) (*types.Knowledge, error) {
-	faqKnowledge, err := s.findFAQKnowledge(ctx, tenantID, kbID)
+// getRunningFAQImportTaskID checks if there's a running FAQ import task for the given KB
+// Returns the task ID if found, empty string otherwise
+func (s *knowledgeService) getRunningFAQImportTaskID(ctx context.Context, kbID string) (string, error) {
+	key := getFAQImportRunningKey(kbID)
+	taskID, err := s.redisClient.Get(ctx, key).Result()
 	if err != nil {
-		return nil, err
+		if errors.Is(err, redis.Nil) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get running FAQ import task: %w", err)
 	}
-	if faqKnowledge == nil {
-		return nil, errors.New("FAQ knowledge not found")
-	}
-	// 检查ParseStatus是否为pending或processing（进行中状态）
-	if faqKnowledge.ParseStatus == "pending" || faqKnowledge.ParseStatus == "processing" {
-		return faqKnowledge, nil
-	}
-	return nil, nil
+	return taskID, nil
+}
+
+// setRunningFAQImportTaskID sets the running task ID for a KB
+func (s *knowledgeService) setRunningFAQImportTaskID(ctx context.Context, kbID, taskID string) error {
+	key := getFAQImportRunningKey(kbID)
+	return s.redisClient.Set(ctx, key, taskID, faqImportProgressTTL).Err()
+}
+
+// clearRunningFAQImportTaskID clears the running task ID for a KB
+func (s *knowledgeService) clearRunningFAQImportTaskID(ctx context.Context, kbID string) error {
+	key := getFAQImportRunningKey(kbID)
+	return s.redisClient.Del(ctx, key).Err()
 }
 
 func (s *knowledgeService) chunkToFAQEntry(chunk *types.Chunk, kb *types.KnowledgeBase) (*types.FAQEntry, error) {
@@ -5099,24 +5114,22 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
-			if updateErr := s.updateFAQImportStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, len(payload.Entries), 0, err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, len(payload.Entries), 0, "获取知识库失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
 		return fmt.Errorf("failed to get knowledge base: %w", err)
 	}
 
-	// 检查任务状态 - 幂等性处理
-	if knowledge.ParseStatus == "completed" {
-		logger.Infof(ctx, "FAQ import already completed, skipping: %s", payload.TaskID)
-		return nil // 幂等：已完成的任务直接返回
-	}
-
-	// 检查已处理进度
-	importMeta, _ := types.ParseFAQImportMetadata(knowledge)
+	// 检查任务状态 - 幂等性处理（先检查Redis中的进度）
+	existingProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
 	var processedCount int
-	if importMeta != nil {
-		processedCount = importMeta.ImportProcessed
+	if existingProgress != nil {
+		if existingProgress.Status == types.FAQImportStatusCompleted {
+			logger.Infof(ctx, "FAQ import already completed, skipping: %s", payload.TaskID)
+			return nil // 幂等：已完成的任务直接返回
+		}
+		processedCount = existingProgress.Processed
 		logger.Infof(ctx, "Resuming FAQ import from progress: %d/%d", processedCount, len(payload.Entries))
 	}
 
@@ -5131,7 +5144,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 			logger.Errorf(ctx, "Failed to delete unindexed chunks: %v", err)
 			// 如果是最后一次重试，更新状态为失败
 			if isLastRetry {
-				if updateErr := s.updateFAQImportStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, processedCount, err.Error()); updateErr != nil {
+				if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, processedCount, "清理未索引数据失败", err.Error()); updateErr != nil {
 					logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 				}
 			}
@@ -5173,8 +5186,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 
 	// 更新任务状态为运行中
-	if err := s.updateFAQImportStatusWithRanges(ctx, payload.TaskID, types.FAQImportStatusProcessing, 0,
-		originalTotalEntries, processedCount, ""); err != nil {
+	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusProcessing, 0,
+		originalTotalEntries, processedCount, "开始处理导入任务", ""); err != nil {
 		logger.Errorf(ctx, "Failed to update task status to running: %v", err)
 	}
 
@@ -5190,12 +5203,12 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		// 如果是最后一次重试，更新状态为失败
 		if isLastRetry {
 			// 获取当前已处理的进度
-			currentMeta, _ := types.ParseFAQImportMetadata(knowledge)
+			currentProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
 			currentProcessed := 0
-			if currentMeta != nil {
-				currentProcessed = currentMeta.ImportProcessed
+			if currentProgress != nil {
+				currentProcessed = currentProgress.Processed
 			}
-			if updateErr := s.updateFAQImportStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, currentProcessed, err.Error()); updateErr != nil {
+			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusFailed, 0, originalTotalEntries, currentProcessed, "导入失败", err.Error()); updateErr != nil {
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
@@ -5204,7 +5217,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 任务成功完成
 	logger.Infof(ctx, "FAQ import task completed: %s", payload.TaskID)
-	if err := s.updateFAQImportStatus(ctx, payload.TaskID, types.FAQImportStatusCompleted, 100, originalTotalEntries, originalTotalEntries, ""); err != nil {
+	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusCompleted, 100, originalTotalEntries, originalTotalEntries, "导入完成", ""); err != nil {
 		logger.Errorf(ctx, "Failed to update task status to success: %v", err)
 	}
 
@@ -5219,6 +5232,51 @@ const (
 // getKBCloneProgressKey returns the Redis key for storing KB clone progress
 func getKBCloneProgressKey(taskID string) string {
 	return kbCloneProgressKeyPrefix + taskID
+}
+
+const (
+	faqImportProgressKeyPrefix = "faq_import_progress:"
+	faqImportRunningKeyPrefix  = "faq_import_running:"
+	faqImportProgressTTL       = 3 * time.Hour
+)
+
+// getFAQImportProgressKey returns the Redis key for storing FAQ import progress
+func getFAQImportProgressKey(taskID string) string {
+	return faqImportProgressKeyPrefix + taskID
+}
+
+// getFAQImportRunningKey returns the Redis key for storing running task ID by KB ID
+func getFAQImportRunningKey(kbID string) string {
+	return faqImportRunningKeyPrefix + kbID
+}
+
+// saveFAQImportProgress saves the FAQ import progress to Redis
+func (s *knowledgeService) saveFAQImportProgress(ctx context.Context, progress *types.FAQImportProgress) error {
+	key := getFAQImportProgressKey(progress.TaskID)
+	progress.UpdatedAt = time.Now().Unix()
+	data, err := json.Marshal(progress)
+	if err != nil {
+		return fmt.Errorf("failed to marshal FAQ import progress: %w", err)
+	}
+	return s.redisClient.Set(ctx, key, data, faqImportProgressTTL).Err()
+}
+
+// GetFAQImportProgress retrieves the progress of an FAQ import task
+func (s *knowledgeService) GetFAQImportProgress(ctx context.Context, taskID string) (*types.FAQImportProgress, error) {
+	key := getFAQImportProgressKey(taskID)
+	data, err := s.redisClient.Get(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, werrors.NewNotFoundError("FAQ import task not found")
+		}
+		return nil, fmt.Errorf("failed to get FAQ import progress from Redis: %w", err)
+	}
+
+	var progress types.FAQImportProgress
+	if err := json.Unmarshal(data, &progress); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal FAQ import progress: %w", err)
+	}
+	return &progress, nil
 }
 
 // ProcessKBClone handles Asynq knowledge base clone tasks

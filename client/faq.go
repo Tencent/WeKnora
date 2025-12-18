@@ -308,3 +308,41 @@ func (c *Client) ExportFAQEntries(ctx context.Context, knowledgeBaseID string) (
 
 	return data, nil
 }
+
+// FAQImportProgress represents the progress of an async FAQ import task.
+type FAQImportProgress struct {
+	TaskID      string `json:"task_id"`
+	KBID        string `json:"kb_id"`
+	KnowledgeID string `json:"knowledge_id"`
+	Status      string `json:"status"`
+	Progress    int    `json:"progress"`
+	Total       int    `json:"total"`
+	Processed   int    `json:"processed"`
+	Message     string `json:"message"`
+	Error       string `json:"error,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
+	UpdatedAt   int64  `json:"updated_at"`
+}
+
+// FAQImportProgressResponse wraps the FAQ import progress response.
+type FAQImportProgressResponse struct {
+	Success bool               `json:"success"`
+	Data    *FAQImportProgress `json:"data"`
+	Message string             `json:"message,omitempty"`
+	Code    string             `json:"code,omitempty"`
+}
+
+// GetFAQImportProgress retrieves the progress of an async FAQ import task.
+func (c *Client) GetFAQImportProgress(ctx context.Context, taskID string) (*FAQImportProgress, error) {
+	path := fmt.Sprintf("/api/v1/faq/import/progress/%s", taskID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response FAQImportProgressResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+	return response.Data, nil
+}

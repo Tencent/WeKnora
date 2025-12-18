@@ -1123,7 +1123,7 @@ import {
   deleteKnowledgeBaseTag,
   getKnowledgeBaseById,
   listKnowledgeBases,
-  getKnowledgeDetails,
+  getFAQImportProgress,
 } from '@/api/knowledge-base'
 import * as XLSX from 'xlsx'
 import Papa from 'papaparse'
@@ -2223,24 +2223,22 @@ const startPolling = (taskId: string) => {
   
   importState.pollingInterval = setInterval(async () => {
     try {
-      const res: any = await getKnowledgeDetails(taskId)
-      const knowledge = res?.data
-      if (knowledge) {
-        // 从Knowledge对象中提取导入任务状态
-        // ParseStatus: "pending" -> "pending", "processing" -> "running", "completed" -> "success", "failed" -> "failed"
-        let status = knowledge.parse_status
+      const res: any = await getFAQImportProgress(taskId)
+      const progressData = res?.data
+      if (progressData) {
+        // 从Redis进度数据中提取状态
+        // status: "pending" -> "pending", "processing" -> "running", "completed" -> "success", "failed" -> "failed"
+        let status = progressData.status
         if (status === 'processing') {
           status = 'running'
         } else if (status === 'completed') {
           status = 'success'
         }
         
-        // 从Metadata中提取导入进度信息
-        const metadata = knowledge.metadata || {}
-        const progress = metadata.import_progress || 0
-        const total = metadata.import_total || 0
-        const processed = metadata.import_processed || 0
-        const error = knowledge.error_message || ''
+        const progress = progressData.progress || 0
+        const total = progressData.total || 0
+        const processed = progressData.processed || 0
+        const error = progressData.error || ''
         
         importState.taskStatus = {
           status: status,
@@ -2350,25 +2348,23 @@ const restoreImportTask = async () => {
   if (!savedTaskId) return
 
   try {
-    // 查询Knowledge状态
-    const res: any = await getKnowledgeDetails(savedTaskId)
-    const knowledge = res?.data
+    // 查询Redis中的进度状态
+    const res: any = await getFAQImportProgress(savedTaskId)
+    const progressData = res?.data
     
-    if (knowledge) {
-      // 从Knowledge对象中提取导入任务状态
-      let status = knowledge.parse_status
+    if (progressData) {
+      // 从Redis进度数据中提取状态
+      let status = progressData.status
       if (status === 'processing') {
         status = 'running'
       } else if (status === 'completed') {
         status = 'success'
       }
       
-      // 从Metadata中提取导入进度信息
-      const metadata = knowledge.metadata || {}
-      const progress = metadata.import_progress || 0
-      const total = metadata.import_total || 0
-      const processed = metadata.import_processed || 0
-      const error = knowledge.error_message || ''
+      const progress = progressData.progress || 0
+      const total = progressData.total || 0
+      const processed = progressData.processed || 0
+      const error = progressData.error || ''
       
       importState.taskId = savedTaskId
       importState.taskStatus = {

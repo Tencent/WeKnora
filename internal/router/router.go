@@ -187,6 +187,11 @@ func RegisterFAQRoutes(r *gin.RouterGroup, handler *handler.FAQHandler) {
 		faq.DELETE("/entries", handler.DeleteEntries)
 		faq.POST("/search", handler.SearchFAQ)
 	}
+	// FAQ import progress route (outside of knowledge-base scope)
+	faqImport := r.Group("/faq/import")
+	{
+		faqImport.GET("/progress/:task_id", handler.GetImportProgress)
+	}
 }
 
 // RegisterKnowledgeBaseRoutes 注册知识库相关的路由

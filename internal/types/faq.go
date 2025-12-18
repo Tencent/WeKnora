@@ -260,7 +260,23 @@ const (
 	FAQImportStatusFailed FAQImportTaskStatus = "failed"
 )
 
+// FAQImportProgress represents the progress of an FAQ import task stored in Redis
+type FAQImportProgress struct {
+	TaskID      string              `json:"task_id"`       // UUID for the import task
+	KBID        string              `json:"kb_id"`         // Knowledge Base ID
+	KnowledgeID string              `json:"knowledge_id"`  // FAQ Knowledge ID
+	Status      FAQImportTaskStatus `json:"status"`        // Task status
+	Progress    int                 `json:"progress"`      // 0-100 percentage
+	Total       int                 `json:"total"`         // Total entries to import
+	Processed   int                 `json:"processed"`     // Entries processed so far
+	Message     string              `json:"message"`       // Status message
+	Error       string              `json:"error"`         // Error message if failed
+	CreatedAt   int64               `json:"created_at"`    // Task creation timestamp
+	UpdatedAt   int64               `json:"updated_at"`    // Last update timestamp
+}
+
 // FAQImportMetadata 存储在Knowledge.Metadata中的FAQ导入任务信息
+// Deprecated: Use FAQImportProgress with Redis storage instead
 type FAQImportMetadata struct {
 	ImportProgress  int `json:"import_progress"` // 0-100
 	ImportTotal     int `json:"import_total"`

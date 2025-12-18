@@ -212,3 +212,22 @@ export async function exportFAQEntries(kbId: string): Promise<Blob> {
   const response = await getDown(`/api/v1/knowledge-bases/${kbId}/faq/entries/export`);
   return response as unknown as Blob;
 }
+
+// FAQ Import Progress API
+export interface FAQImportProgress {
+  task_id: string
+  kb_id: string
+  knowledge_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  progress: number
+  total: number
+  processed: number
+  message: string
+  error: string
+  created_at: number
+  updated_at: number
+}
+
+export function getFAQImportProgress(taskId: string) {
+  return get(`/api/v1/faq/import/progress/${taskId}`);
+}
