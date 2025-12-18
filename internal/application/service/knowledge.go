@@ -5099,7 +5099,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		payload.TaskID, payload.KBID, len(payload.Entries), retryCount, maxRetry)
 
 	// 幂等性检查：获取knowledge记录（FAQ任务使用knowledge ID作为taskID）
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.TaskID)
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get FAQ knowledge: %v", err)
 		return nil
