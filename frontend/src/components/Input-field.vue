@@ -104,7 +104,11 @@ const removeSelectedItem = (item: { id: string; type: 'kb' | 'file' }) => {
 
 // 模型相关状态
 const availableModels = ref<ModelConfig[]>([]);
-const selectedModelId = ref<string>('');
+// 使用 computed 从 store 读取，并通过 setter 同步回 store
+const selectedModelId = computed({
+  get: () => settingsStore.conversationModels.selectedChatModelId || '',
+  set: (val: string) => settingsStore.updateConversationModels({ selectedChatModelId: val })
+});
 const conversationConfig = ref<ConversationConfig | null>(null);
 const modelsLoading = ref(false);
 const showModelSelector = ref(false);

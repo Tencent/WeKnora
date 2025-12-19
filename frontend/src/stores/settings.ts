@@ -28,6 +28,7 @@ interface AgentConfig {
 interface ConversationModels {
   summaryModelId: string;
   rerankModelId: string;
+  selectedChatModelId: string;  // 用户当前选择的对话模型ID
 }
 
 // 单个模型项接口
@@ -87,6 +88,7 @@ const defaultSettings: Settings = {
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
+    selectedChatModelId: "",  // 用户当前选择的对话模型ID
   }
 };
 
