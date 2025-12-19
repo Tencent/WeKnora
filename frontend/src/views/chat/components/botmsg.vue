@@ -17,7 +17,9 @@
             </div>
             <!-- 直接渲染完整内容，避免切分导致的问题，样式与 thinking 一致 -->
             <div class="content-wrapper">
-                <div class="ai-markdown-template markdown-content" v-html="processMarkdown(content || session.content)"></div>
+                <div class="ai-markdown-template markdown-content">
+                    <div v-for="(token, index) in markdownTokens" :key="index" v-html="renderToken(token)"></div>
+                </div>
             </div>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="session.is_completed && (content || session.content)" class="answer-toolbar">
@@ -78,131 +80,65 @@ const props = defineProps({
         required: false
     }
 });
-const processedMarkdown = ref([]);
+
 const preview = (url) => {
     nextTick(() => {
         reviewUrl.value = url;
         reviewImg.value = true
     })
 }
-const removeImg = () => {
-    nextTick(() => {
-        if (!parentMd.value) return;
-        const images = parentMd.value.querySelectorAll('img.ai-markdown-img');
-        if (images) {
-            images.forEach(async item => {
-                const isValid = await checkImage(item.src);
-                if (!isValid) {
-                    item.remove();
-                }
-            })
-        }
-    })
-}
+
 const closePreImg = () => {
     reviewImg.value = false
     reviewUrl.value = '';
 }
-const debounce = (fn, delay) => {
-    let timer
-    return (...args) => {
-        clearTimeout(timer)
-        timer = setTimeout(() => fn(...args), delay)
+
+// 创建自定义渲染器实例
+const customRenderer = new marked.Renderer();
+// 覆盖图片渲染方法
+customRenderer.image = function(href, title, text) {
+    // 验证图片 URL 是否安全
+    if (!isValidImageURL(href)) {
+        return `<p>${t('error.invalidImageLink')}</p>`;
     }
-}
-const checkImage = (url) => {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-            resolve(true);
-        }
-        img.onerror = () => resolve(false);
-        img.src = url;
-    });
+    // 使用安全的图片创建函数
+    return createSafeImage(href, text || '', title || '');
 };
-// 安全地处理 Markdown 内容
-const processMarkdown = (markdownText) => {
-    if (!markdownText || typeof markdownText !== 'string') {
-        return '';
+
+// 计算属性：将 Markdown 文本转换为 tokens
+const markdownTokens = computed(() => {
+    const text = props.content || props.session?.content || '';
+    if (!text || typeof text !== 'string') {
+        return [];
     }
     
     // 首先对 Markdown 内容进行安全处理
-    const safeMarkdown = safeMarkdownToHTML(markdownText);
+    const safeMarkdown = safeMarkdownToHTML(text);
     
-    // 创建自定义渲染器实例，继承默认渲染器
-    const customRenderer = new marked.Renderer();
-    // 覆盖图片渲染方法
-    customRenderer.image = function(href, title, text) {
-        // 验证图片 URL 是否安全
-        if (!isValidImageURL(href)) {
-            return `<p>${t('error.invalidImageLink')}</p>`;
-        }
-        // 使用安全的图片创建函数
-        return createSafeImage(href, text || '', title || '');
-    };
+    // 使用 marked.lexer 分词
+    return marked.lexer(safeMarkdown);
+});
 
-    // 创建临时的 marked 配置，包含 renderer 和 breaks 选项
-    // breaks: true 会将单个换行渲染为 <br>，而不是忽略
-    const markedOptions = {
-        renderer: customRenderer,
-        breaks: true  // 启用单个换行支持
-    };
-
-    // 安全地渲染 Markdown，直接传递选项
-    let html = marked.parse(safeMarkdown, markedOptions);
-
-    // 使用 DOMPurify 进行最终的安全清理
-    const sanitizedHTML = sanitizeHTML(html);
-    
-    return sanitizedHTML;
+// 渲染单个 token 为 HTML
+const renderToken = (token) => {
+    try {
+        // 创建临时的 marked 配置
+        const markedOptions = {
+            renderer: customRenderer,
+            breaks: true
+        };
+        
+        // 解析单个 token
+        // marked.parser 接受 token 数组
+        let html = marked.parser([token], markedOptions);
+        
+        // 使用 DOMPurify 进行最终的安全清理
+        return sanitizeHTML(html);
+    } catch (e) {
+        console.error('Token rendering error:', e);
+        return '';
+    }
 };
-const handleImg = async (newVal) => {
-    let index = newVal.lastIndexOf('![');
-    if (index != -1) {
-        isImgLoading.value = true;
-        let str = newVal.slice(index)
-        if (str.includes('](') && str.includes(')')) {
-            processedMarkdown.value = splitMarkdownByImages(newVal)
-            isImgLoading.value = false;
-        } else {
-            processedMarkdown.value = splitMarkdownByImages(newVal.slice(0, index))
-        }
-    } else {
-        processedMarkdown.value = splitMarkdownByImages(newVal)
-    }
-    removeImg()
-}
-function splitMarkdownByImages(markdown) {
-    const imageRegex = /!\[.*?\]\(\s*(?:<([^>]*)>|([^)\s]*))\s*(?:["'].*?["'])?\s*\)/g;
-    const result = [];
-    let lastIndex = 0;
-    let match;
-
-    while ((match = imageRegex.exec(markdown)) !== null) {
-        const textBefore = markdown.slice(lastIndex, match.index);
-        if (textBefore) result.push(textBefore);
-        const url = match[1] || match[2];
-        result.push(url);
-        lastIndex = imageRegex.lastIndex;
-    }
-
-    const remainingText = markdown.slice(lastIndex);
-    if (remainingText) result.push(remainingText);
-
-    return result;
-}
-function isLink(str) {
-    const trimmedStr = str.trim();
-    // 正则表达式匹配常见链接格式
-    const urlPattern = /^(https?:\/\/|ftp:\/\/|www\.)(?:(?:[\w-]+(?:\.[\w-]+)*)|(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|(?:\[[a-fA-F0-9:]+\]))(?::\d{1,5})?(?:[\/\w.,@?^=%&:~+#-]*[\w@?^=%&\/~+#-])?/i;
-    return urlPattern.test(trimmedStr);
-}
-
-watch(() => props.content, (newVal) => {
-    debounce(handleImg(newVal), 800)
-}, {
-    immediate: true
-})
 
 const myMarkdown = (res) => {
     return marked.parse(res, { renderer })
@@ -296,9 +232,6 @@ const handleMarkdownImageClick = (e) => {
 };
 
 onMounted(async () => {
-    processedMarkdown.value = splitMarkdownByImages(props.content);
-    removeImg();
-    
     // 为 markdown-content 中的图片添加点击事件
     nextTick(() => {
         if (parentMd.value) {
