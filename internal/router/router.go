@@ -166,6 +166,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/image/:id/:chunk_id", handler.UpdateImageInfo)
 		// 批量更新知识标签
 		k.PUT("/tags", handler.UpdateKnowledgeTagBatch)
+		// 搜索知识
+		k.GET("/search", handler.SearchKnowledge)
 	}
 }
 

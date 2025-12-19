@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, defineEmits, onMounted, onUnmounted, defineProps, computed, watch, nextTick, h } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch, nextTick, h } from "vue";
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
-import { listKnowledgeBases } from '@/api/knowledge-base';
+import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge } from '@/api/knowledge-base';
 import { stopSession } from '@/api/chat';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
+import MentionSelector from './MentionSelector.vue';
+import { getCaretCoordinates } from '@/utils/caret';
 import { listModels, type ModelConfig } from '@/api/model';
 import { getTenantWebSearchConfig } from '@/api/web-search';
 import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
@@ -23,6 +25,21 @@ const atButtonRef = ref<HTMLElement>();
 const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
+
+// Mention related state
+const showMention = ref(false);
+const mentionQuery = ref("");
+const mentionItems = ref<Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string }>>([]);
+const mentionActiveIndex = ref(0);
+const mentionStyle = ref<Record<string, string>>({});
+const textareaRef = ref<any>(null); // Ref to t-textarea component
+const mentionStartPos = ref(0);
+const isComposing = ref(false);
+const isMentionTriggeredByButton = ref(false);
+const mentionHasMore = ref(false);
+const mentionLoading = ref(false);
+const mentionOffset = ref(0);
+const MENTION_PAGE_SIZE = 20;
 
 const props = defineProps({
   isReplying: {
@@ -42,13 +59,48 @@ const props = defineProps({
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
+const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const isWebSearchConfigured = ref(false);
 
 // 获取已选择的知识库信息
-const knowledgeBases = ref<Array<{ id: string; name: string }>>([]);
+const knowledgeBases = ref<Array<{ id: string; name: string; type?: 'document' | 'faq'; knowledge_count?: number; chunk_count?: number }>>([]);
+const fileList = ref<Array<{ id: string; name: string }>>([]);
+
 const selectedKbs = computed(() => {
   return knowledgeBases.value.filter(kb => selectedKbIds.value.includes(kb.id));
 });
+
+const selectedFiles = computed(() => {
+  // If we have file details in fileList, use them.
+  // Otherwise we might show ID or Loading...
+  return selectedFileIds.value.map((id: string) => {
+    const found = fileList.value.find(f => f.id === id);
+    return found || { id, name: 'Loading...' };
+  });
+});
+
+  // 合并所有选中项（用于输入框内显示）
+  const allSelectedItems = computed(() => {
+    const kbs = selectedKbs.value.map(kb => ({ 
+      ...kb, 
+      type: 'kb' as const,
+      kbType: kb.type // 保留原始类型用于显示区分
+    }));
+    const files = selectedFiles.value.map((f: { id: string; name: string }) => ({ 
+      ...f, 
+      type: 'file' as const 
+    }));
+    return [...kbs, ...files];
+  });
+
+// 移除选中项
+const removeSelectedItem = (item: { id: string; type: 'kb' | 'file' }) => {
+  if (item.type === 'kb') {
+    settingsStore.removeKnowledgeBase(item.id);
+  } else {
+    settingsStore.removeFile(item.id);
+  }
+};
 
 // 模型相关状态
 const availableModels = ref<ModelConfig[]>([]);
@@ -90,6 +142,31 @@ const loadKnowledgeBases = async () => {
     console.error('Failed to load knowledge bases:', error);
   }
 };
+
+const loadFiles = async () => {
+  const ids = selectedFileIds.value;
+  if (ids.length === 0) return;
+  
+  // Filter out files we already have info for
+  const missingIds = ids.filter((id: string) => !fileList.value.find(f => f.id === id));
+  if (missingIds.length === 0) return;
+
+  try {
+    const query = new URLSearchParams();
+    missingIds.forEach((id: string) => query.append('ids', id));
+    const res: any = await batchQueryKnowledge(query.toString());
+    if (res.data) {
+      const newFiles = res.data.map((f: any) => ({ id: f.id, name: f.title || f.file_name }));
+      fileList.value = [...fileList.value, ...newFiles];
+    }
+  } catch (e) {
+    console.error("Failed to load files", e);
+  }
+};
+
+watch(selectedFileIds, () => {
+  loadFiles();
+}, { immediate: true });
 
 const loadWebSearchConfig = async () => {
   try {
@@ -322,8 +399,299 @@ const updateModelDropdownPosition = () => {
   console.log('[Model Dropdown] Applied style:', modelDropdownStyle.value);
 };
 
+// Mention Logic
+let lastMentionQuery = '';
+const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
+  console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
+  
+  if (!append) {
+    mentionOffset.value = 0;
+  }
+  
+  // Fetch KBs (always show, filter by query) - only on first load
+  let kbItems: any[] = [];
+  if (!append) {
+    const kbs = knowledgeBases.value.filter(kb => 
+      !q || kb.name.toLowerCase().includes(q.toLowerCase())
+    );
+    kbItems = kbs.map(kb => ({ 
+      id: kb.id, 
+      name: kb.name, 
+      type: 'kb' as const, 
+      kbType: kb.type || 'document',
+      count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0)
+    }));
+  }
+  
+  // Fetch Files from API
+  let fileItems: any[] = [];
+  mentionLoading.value = true;
+  try {
+    const res: any = await searchKnowledge(q || '', mentionOffset.value, MENTION_PAGE_SIZE);
+    console.log('[Mention] searchKnowledge response:', res);
+    if (res.data && Array.isArray(res.data)) {
+      fileItems = res.data.map((f: any) => ({ 
+        id: f.id, 
+        name: f.title || f.file_name, 
+        type: 'file' as const,
+        kbName: f.knowledge_base_name || ''
+      }));
+    }
+    mentionHasMore.value = res.has_more || false;
+    mentionOffset.value += fileItems.length;
+  } catch (e) {
+    console.error('[Mention] searchKnowledge error:', e);
+    mentionHasMore.value = false;
+  } finally {
+    mentionLoading.value = false;
+  }
+  
+  if (append) {
+    // Append file items to existing list
+    mentionItems.value = [...mentionItems.value, ...fileItems];
+  } else {
+    mentionItems.value = [...kbItems, ...fileItems];
+  }
+  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length });
+  
+  // Only reset index if query changed or explicitly requested
+  if (resetIndex || q !== lastMentionQuery) {
+    mentionActiveIndex.value = 0;
+  }
+  // Ensure index is within bounds
+  if (mentionActiveIndex.value >= mentionItems.value.length) {
+    mentionActiveIndex.value = Math.max(0, mentionItems.value.length - 1);
+  }
+  lastMentionQuery = q;
+};
+
+const loadMoreMentionItems = () => {
+  if (mentionHasMore.value && !mentionLoading.value) {
+    loadMentionItems(lastMentionQuery, false, true);
+  }
+};
+
+const getTextareaEl = () => {
+  if (!textareaRef.value) return null;
+  // If it's a native element
+  if (textareaRef.value instanceof HTMLTextAreaElement) return textareaRef.value;
+  // If it's a component wrapper
+  const el = textareaRef.value.$el || textareaRef.value;
+  if (!el) return null;
+  if (el.tagName === 'TEXTAREA') return el as HTMLTextAreaElement;
+  return el.querySelector('textarea');
+};
+
+const onInput = (val: string | InputEvent) => {
+  // 如果正在输入法组合中，不处理搜索逻辑，等待 compositionend
+  if (isComposing.value) return;
+
+  // TDesign t-textarea passes the value directly, not an event
+  const inputVal = typeof val === 'string' ? val : query.value;
+  
+  const textarea = getTextareaEl();
+  if (!textarea) {
+    console.warn('[Mention] Could not get textarea element');
+    return;
+  }
+  
+  const cursor = textarea.selectionStart;
+  const textBeforeCursor = inputVal.slice(0, cursor);
+  
+  console.log('[Mention] onInput called', { inputVal, cursor, textBeforeCursor, showMention: showMention.value });
+  
+  if (showMention.value) {
+    // 如果不是按钮触发的，检查 @ 符号
+    if (!isMentionTriggeredByButton.value) {
+      if (!inputVal || inputVal.length <= mentionStartPos.value || inputVal.charAt(mentionStartPos.value) !== '@') {
+        showMention.value = false;
+        return;
+      }
+    }
+
+    // 如果是按钮触发的，mentionStartPos 指向的是光标位置（即虚拟的 @ 位置前），所以实际上不应该往左删
+    // 但如果用户删除了前面的内容导致长度变短，也需要处理
+    if (cursor < mentionStartPos.value) {
+      showMention.value = false;
+      return;
+    }
+    
+    // Get query
+    // 如果是按钮触发，mentionStartPos 是起始位置，不需要 +1 跳过 @
+    const start = isMentionTriggeredByButton.value ? mentionStartPos.value : mentionStartPos.value + 1;
+    const q = inputVal.slice(start, cursor);
+    
+    if (q.includes(' ')) {
+      showMention.value = false;
+      return;
+    }
+    // Only reload if query changed
+    if (q !== mentionQuery.value) {
+      mentionQuery.value = q;
+      loadMentionItems(q, true); // Reset index when query changes
+    }
+  } else {
+    if (textBeforeCursor.endsWith('@')) {
+      console.log('[Mention] @ detected, opening menu');
+      isMentionTriggeredByButton.value = false;
+      mentionStartPos.value = cursor - 1;
+      showMention.value = true;
+      mentionQuery.value = "";
+      
+      const coords = getCaretCoordinates(textarea, cursor);
+      const rect = textarea.getBoundingClientRect();
+      const scrollTop = textarea.scrollTop;
+      const menuHeight = 320; // 预估最大高度
+      
+      let left = rect.left + coords.left;
+      // Prevent menu from going off-screen horizontally
+      if (left + 300 > window.innerWidth) {
+        left = window.innerWidth - 300 - 10;
+      }
+      
+      // 光标相对于视口的实际 top 位置
+      const cursorAbsoluteTop = rect.top + coords.top - scrollTop;
+      const lineHeight = coords.height; // 光标高度
+
+      // Check vertical space below cursor
+      const spaceBelow = window.innerHeight - (cursorAbsoluteTop + lineHeight);
+      
+      if (spaceBelow < menuHeight && cursorAbsoluteTop > menuHeight) {
+         // Show above cursor (using bottom positioning)
+         // bottom distance = viewport height - cursor top position
+         const bottom = window.innerHeight - cursorAbsoluteTop;
+         mentionStyle.value = {
+           left: `${left}px`,
+           bottom: `${bottom}px`,
+           top: 'auto'
+         };
+      } else {
+         // Show below cursor (using top positioning)
+         const top = cursorAbsoluteTop + lineHeight;
+         mentionStyle.value = {
+           left: `${left}px`,
+           top: `${top}px`,
+           bottom: 'auto'
+         };
+      }
+      
+      loadMentionItems("");
+    }
+  }
+};
+
+const onCompositionStart = () => {
+  isComposing.value = true;
+};
+
+const onCompositionEnd = (e: CompositionEvent) => {
+  isComposing.value = false;
+  // 手动触发 onInput 逻辑
+  // 注意：在 compositionend 时，v-model 可能还没更新，或者已经更新但我们需要用最新值
+  // TDesign textarea 可能需要 nextTick
+  nextTick(() => {
+    onInput(query.value);
+  });
+};
+
+const triggerMention = () => {
+  const textarea = getTextareaEl();
+  if (!textarea) return;
+  
+  // 关闭其他选择器
+  showAgentModeSelector.value = false;
+  showModelSelector.value = false;
+
+  textarea.focus();
+  
+  // 直接显示菜单，不插入 @
+  showMention.value = true;
+  isMentionTriggeredByButton.value = true;
+  mentionQuery.value = "";
+  mentionStartPos.value = textarea.selectionStart;
+  
+  const rect = textarea.getBoundingClientRect();
+  const menuHeight = 320;
+  
+  // 判断输入框上方空间
+  const spaceAbove = rect.top;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  
+  // 优先显示在上方，除非上方空间不足且下方空间充足
+  if (spaceAbove > menuHeight || spaceAbove > spaceBelow) {
+    // Show above textarea
+    mentionStyle.value = {
+      left: `${rect.left}px`,
+      bottom: `${window.innerHeight - rect.top + 8}px`, // 8px padding
+      top: 'auto'
+    };
+  } else {
+    // Show below textarea
+    mentionStyle.value = {
+      left: `${rect.left}px`,
+      top: `${rect.bottom + 8}px`,
+      bottom: 'auto'
+    };
+  }
+  
+  loadMentionItems("");
+};
+
+const onMentionSelect = (item: any) => {
+  if (item.type === 'kb') {
+      settingsStore.addKnowledgeBase(item.id);
+  } else if (item.type === 'file') {
+      settingsStore.addFile(item.id);
+      // Add to local cache immediately
+      if (!fileList.value.find(f => f.id === item.id)) {
+        fileList.value.push(item);
+      }
+  }
+  
+  const textarea = getTextareaEl();
+  if (textarea) {
+    // 如果是通过输入 @ 触发的，需要删除 @ 和后面的查询文字
+    if (!isMentionTriggeredByButton.value) {
+      const cursor = textarea.selectionStart;
+      const textBeforeAt = query.value.slice(0, mentionStartPos.value);
+      const textAfterCursor = query.value.slice(cursor);
+      query.value = textBeforeAt + textAfterCursor;
+      
+      nextTick(() => {
+        textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+        textarea.focus();
+      });
+    } else {
+      // 通过按钮触发的，如果用户输入了查询词，需要删除查询词
+      const cursor = textarea.selectionStart;
+      if (cursor > mentionStartPos.value) {
+         const textBeforeStart = query.value.slice(0, mentionStartPos.value);
+         const textAfterCursor = query.value.slice(cursor);
+         query.value = textBeforeStart + textAfterCursor;
+         
+         nextTick(() => {
+           textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+           textarea.focus();
+         });
+      } else {
+         // 直接聚焦
+         textarea.focus();
+      }
+    }
+  }
+  
+  showMention.value = false;
+};
+
+const removeFile = (id: string) => {
+  settingsStore.removeFile(id);
+};
+
 const toggleModelSelector = () => {
-  if (selectedKbIds.value.length === 0) return;
+  // 互斥：关闭其他
+  showMention.value = false;
+  showAgentModeSelector.value = false;
+
   showModelSelector.value = !showModelSelector.value;
   if (showModelSelector.value) {
     if (!availableModels.value.length) {
@@ -351,6 +719,15 @@ const closeAgentModeSelector = () => {
   showAgentModeSelector.value = false;
 };
 
+const closeMentionSelector = (e: MouseEvent) => {
+  const target = e.target as HTMLElement;
+  // 如果点击的是输入框区域，不关闭 Mention 列表（由光标逻辑控制）
+  if (target.closest('.rich-input-container')) {
+    return;
+  }
+  showMention.value = false;
+};
+
 // 窗口事件处理器
 let resizeHandler: (() => void) | null = null;
 let scrollHandler: (() => void) | null = null;
@@ -370,6 +747,7 @@ onMounted(() => {
   // 监听点击外部关闭下拉菜单
   document.addEventListener('click', closeAgentModeSelector);
   document.addEventListener('click', closeModelSelector);
+  document.addEventListener('click', closeMentionSelector);
   
   // 监听窗口大小变化和滚动，重新计算位置
   resizeHandler = () => {
@@ -396,6 +774,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
+  document.removeEventListener('click', closeMentionSelector);
   if (resizeHandler) {
     window.removeEventListener('resize', resizeHandler);
   }
@@ -417,8 +796,8 @@ watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
   }
 });
 
-watch(selectedKbIds, (ids) => {
-  if (!ids.length) {
+watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
+  if (!kbIds.length && !fileIds.length) {
     closeModelSelector();
   }
 }, { deep: true });
@@ -428,10 +807,6 @@ const emit = defineEmits(['send-msg', 'stop-generation']);
 const createSession = (val: string) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
-    return;
-  }
-  if (selectedKbIds.value.length === 0) {
-    MessagePlugin.warning(t('input.messages.selectKnowledge'));
     return;
   }
   if (props.isReplying) {
@@ -531,6 +906,10 @@ const toggleAgentModeSelector = () => {
     return;
   }
   
+  // 互斥
+  showMention.value = false;
+  showModelSelector.value = false;
+
   showAgentModeSelector.value = !showAgentModeSelector.value;
   if (showAgentModeSelector.value) {
     // 多次更新位置确保准确
@@ -566,6 +945,44 @@ const clearvalue = () => {
 }
 
 const onKeydown = (val: string, event: { e: { preventDefault(): unknown; keyCode: number; shiftKey: any; ctrlKey: any; }; }) => {
+  if (showMention.value) {
+    if (event.e.keyCode === 38) { // Up
+      event.e.preventDefault();
+      mentionActiveIndex.value = Math.max(0, mentionActiveIndex.value - 1);
+      return;
+    }
+    if (event.e.keyCode === 40) { // Down
+      event.e.preventDefault();
+      mentionActiveIndex.value = Math.min(mentionItems.value.length - 1, mentionActiveIndex.value + 1);
+      return;
+    }
+    if (event.e.keyCode === 13) { // Enter
+      event.e.preventDefault();
+      if (mentionItems.value[mentionActiveIndex.value]) {
+        onMentionSelect(mentionItems.value[mentionActiveIndex.value]);
+      }
+      return;
+    }
+    if (event.e.keyCode === 27) { // Esc
+        showMention.value = false;
+        return;
+    }
+  }
+
+  // 退格键：当输入框为空且有选中项时，删除最后一个选中项
+  if (event.e.keyCode === 8) { // Backspace
+    const textarea = getTextareaEl();
+    if (textarea && textarea.selectionStart === 0 && textarea.selectionEnd === 0 && query.value === '') {
+      const items = allSelectedItems.value;
+      if (items.length > 0) {
+        event.e.preventDefault();
+        const lastItem = items[items.length - 1];
+        removeSelectedItem(lastItem);
+        return;
+      }
+    }
+  }
+
   if ((event.e.keyCode == 13 && event.e.shiftKey) || (event.e.keyCode == 13 && event.e.ctrlKey)) {
     return;
   }
@@ -654,6 +1071,11 @@ const toggleAgentMode = () => {
 }
 
 const toggleWebSearch = () => {
+  // 互斥：虽然不是弹出层，但操作时关闭其他弹出层体验更好
+  showMention.value = false;
+  showModelSelector.value = false;
+  showAgentModeSelector.value = false;
+
   if (!isWebSearchConfigured.value) {
     const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 6px; max-width: 280px;' }, [
       h('span', { style: 'color: #333; line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
@@ -727,7 +1149,54 @@ onBeforeRouteUpdate((to, from, next) => {
 </script>
 <template>
   <div class="answers-input">
-    <t-textarea v-model="query" :placeholder="$t('input.placeholder')" name="description" :autosize="true" @keydown="onKeydown" />
+    <!-- 富文本输入框容器 -->
+    <div class="rich-input-container">
+      <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
+      <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
+        <span 
+          v-for="item in allSelectedItems" 
+          :key="item.id" 
+          class="inline-tag"
+          :class="[
+            item.type === 'kb' ? (item.kbType === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
+          ]"
+        >
+          <span class="tag-icon">
+            <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+            <t-icon v-else name="file" />
+          </span>
+          <span class="tag-name">{{ item.name }}</span>
+          <span class="tag-remove" @click="removeSelectedItem(item)">×</span>
+        </span>
+      </div>
+      
+      <!-- 实际输入框 -->
+      <t-textarea 
+        ref="textareaRef"
+        v-model="query" 
+        :placeholder="allSelectedItems.length > 0 ? $t('input.placeholderWithContext') : $t('input.placeholder')" 
+        name="description" 
+        :autosize="true" 
+        @keydown="onKeydown" 
+        @input="onInput"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
+      />
+    </div>
+    
+    <!-- Mention Selector -->
+    <Teleport to="body">
+      <MentionSelector
+        :visible="showMention"
+        :style="mentionStyle"
+        :items="mentionItems"
+        :hasMore="mentionHasMore"
+        :loading="mentionLoading"
+        v-model:activeIndex="mentionActiveIndex"
+        @select="onMentionSelect"
+        @loadMore="loadMoreMentionItems"
+      />
+    </Teleport>
     
     <!-- 控制栏 -->
     <div class="control-bar">
@@ -879,50 +1348,25 @@ onBeforeRouteUpdate((to, from, next) => {
           </div>
         </t-tooltip>
 
-        <!-- @ 知识库选择按钮 -->
-        <div 
-          ref="atButtonRef"
-          class="control-btn kb-btn"
-          :class="{ 'active': selectedKbIds.length > 0 }"
-          @click="toggleKbSelector"
-        >
-          <img :src="getImgSrc('at-icon.svg')" alt="@" class="control-icon" />
-          <span class="kb-btn-text">
-            {{ selectedKbIds.length > 0 ? $t('input.knowledgeBaseWithCount', { count: selectedKbIds.length }) : $t('input.knowledgeBase') }}
-          </span>
-          <svg 
-            width="12" 
-            height="12" 
-            viewBox="0 0 12 12" 
-            fill="currentColor"
-            class="dropdown-arrow"
-            :class="{ 'rotate': showKbSelector }"
-          >
-            <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z"/>
-          </svg>
-        </div>
-
-        <!-- 已选择的知识库标签 -->
-        <div v-if="displayedKbs.length > 0" class="kb-tags">
+        <!-- @ 知识库/文件选择按钮 -->
+        <t-tooltip :content="allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', { count: allSelectedItems.length }) : $t('input.knowledgeBase')">
           <div 
-            v-for="kb in displayedKbs" 
-            :key="kb.id" 
-            class="kb-tag"
+            ref="atButtonRef"
+            class="control-btn kb-btn"
+            :class="{ 'active': allSelectedItems.length > 0 }"
+            @click.stop
+            @mousedown.prevent="triggerMention"
           >
-            <span class="kb-tag-text">{{ kb.name }}</span>
-            <span class="kb-tag-remove" @click.stop="removeKb(kb.id)">×</span>
+            <img :src="getImgSrc('at-icon.svg')" alt="@" class="control-icon" />
+            <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
           </div>
-          <div v-if="remainingCount > 0" class="kb-tag more-tag">
-            +{{ remainingCount }}
-          </div>
-        </div>
+        </t-tooltip>
 
         <!-- 模型显示 -->
         <div class="model-display">
           <div
             ref="modelButtonRef"
             class="model-selector-trigger"
-            :class="{ disabled: selectedKbIds.length === 0 }"
             @click.stop="toggleModelSelector"
           >
             <span class="model-selector-name">
@@ -1002,7 +1446,7 @@ onBeforeRouteUpdate((to, from, next) => {
           v-if="!isReplying"
         @click="createSession(query)" 
         class="control-btn send-btn"
-        :class="{ 'disabled': !query.length || selectedKbIds.length === 0 }"
+        :class="{ 'disabled': !query.length }"
       >
         <img src="../assets/img/sending-aircraft.svg" :alt="$t('input.send')" />
         </div>
@@ -1033,35 +1477,144 @@ const getImgSrc = (url: string) => {
   transform: translateX(-400px);
 }
 
+/* 富文本输入框容器 */
+.rich-input-container {
+  position: relative;
+  width: 800px;
+  background: var(--td-bg-color-container, #FFF);
+  border-radius: 12px;
+  border: 1px solid var(--td-component-border, #E7E7E7);
+  box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
+  
+  &:focus-within {
+    border-color: var(--td-brand-color, #07C05F);
+  }
+}
+
+/* 选中的标签（输入框内顶部） */
+.selected-tags-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid var(--td-component-border, #f0f0f0);
+}
+
+.inline-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: default;
+  transition: all 0.15s;
+  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  border: 1px solid transparent;
+  color: var(--td-text-color-primary, #333);
+  
+  /* KB - Document (Greenish tint) */
+  &.kb-tag {
+    background: rgba(16, 185, 129, 0.08);
+    color: #059669;
+    
+    .tag-icon {
+      color: #10b981;
+    }
+  }
+
+  /* KB - FAQ (Blueish tint) */
+  &.faq-tag {
+    background: rgba(0, 82, 217, 0.08);
+    color: #0052d9;
+    
+    .tag-icon {
+      color: #0052d9;
+    }
+  }
+  
+  /* File (Orange tint) */
+  &.file-tag {
+    background: rgba(237, 123, 47, 0.08);
+    color: #e65100;
+    
+    .tag-icon {
+      color: #ed7b2f;
+    }
+  }
+  
+  .tag-icon {
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+  }
+  
+  .tag-name {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: currentColor;
+  }
+  
+  .tag-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 2px;
+    border-radius: 50%;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.15s, background 0.15s;
+    color: currentColor;
+    
+    &:hover {
+      opacity: 1;
+      background: rgba(0, 0, 0, 0.1);
+    }
+  }
+}
+
 :deep(.t-textarea__inner) {
   width: 100%;
-  width: 800px;
-  max-height: 250px !important;
-  min-height: 112px !important;
+  max-height: 200px !important;
+  min-height: 120px !important;
   resize: none;
-  color: #000000e6;
+  color: var(--td-text-color-primary, #000000e6);
   font-size: 16px;
   font-weight: 400;
   line-height: 24px;
-  font-family: "PingFang SC";
-  padding: 16px 12px 72px 16px;  /* 增加底部padding为控制栏腾出更多空间（原52px -> 72px） */
-  border-radius: 12px;
-  border: 1px solid #E7E7E7;
+  font-family: var(--td-font-family, "PingFang SC");
+  padding: 12px 16px 56px 16px;
+  border-radius: 0 0 12px 12px;
+  border: none;
   box-sizing: border-box;
-  background: #FFF;
-  box-shadow: 0 6px 6px 0 #0000000a, 0 12px 12px -1px #00000014;
+  background: transparent;
+  box-shadow: none;
 
   &:focus {
-    border: 1px solid #07C05F;
+    border: none;
+    box-shadow: none;
   }
 
   &::placeholder {
-    color: #00000066;
-    font-family: "PingFang SC";
+    color: var(--td-text-color-placeholder, #00000066);
+    font-family: var(--td-font-family, "PingFang SC");
     font-size: 16px;
     font-weight: 400;
     line-height: 24px;
   }
+}
+
+/* 当没有选中标签时，textarea 样式 */
+.rich-input-container:not(:has(.selected-tags-inline)) :deep(.t-textarea__inner) {
+  border-radius: 12px;
+  padding-top: 16px;
 }
 
 /* 控制栏 */
@@ -1074,12 +1627,12 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  flex-wrap: wrap;  /* 允许换行，避免内容过多时挤压 */
-  max-height: 56px;  /* 限制最大高度为两行 */
-  z-index: 10;  /* 提高z-index，确保在textarea滚动内容之上 */
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0.95) 40%, rgba(255, 255, 255, 1) 60%);  /* 更强的渐变背景，从半透明逐渐变为完全不透明 */
-  pointer-events: auto;  /* 确保可以点击 */
-  padding-top: 8px;  /* 增加上边距，给渐变更多空间 */
+  flex-wrap: wrap;
+  max-height: 56px;
+  z-index: 10;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, var(--td-bg-color-container, #fff) 40%, var(--td-bg-color-container, #fff) 100%);
+  pointer-events: auto;
+  padding-top: 8px;
 }
 
 .control-left {
@@ -1087,9 +1640,8 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 8px;
   flex: 1;
-  overflow: hidden;
-  flex-wrap: wrap;  /* 允许内部元素换行 */
-  min-width: 0;  /* 允许缩小 */
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .control-btn {
@@ -1099,14 +1651,14 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 6px 10px;
   border-radius: 6px;
-  background: #f5f5f5;
+  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
   cursor: pointer;
   transition: background 0.12s;
   user-select: none;
   flex-shrink: 0;
 
   &:hover {
-    background: #e6e6e6;
+    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
   }
 
   &.disabled {
@@ -1114,7 +1666,7 @@ const getImgSrc = (url: string) => {
     cursor: not-allowed;
     
     &:hover {
-      background: #f5f5f5;
+      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
     }
   }
 }
@@ -1154,20 +1706,20 @@ const getImgSrc = (url: string) => {
   }
   
   &:not(.agent-active) {
-    background: rgba(255, 255, 255, 0.8);
-    border-color: #e0e0e0;
+    background: var(--td-bg-color-container, #fff);
+    border-color: var(--td-component-border, #e0e0e0);
     
     .agent-mode-text {
-      color: #666;
+      color: var(--td-text-color-secondary, #666);
     }
     
     .normal-mode-icon {
-      color: #666;
+      color: var(--td-text-color-secondary, #666);
     }
     
     &:hover {
-      background: rgba(255, 255, 255, 1);
-      border-color: #b0b0b0;
+      background: var(--td-bg-color-container-hover, #fff);
+      border-color: var(--td-component-stroke, #b0b0b0);
     }
   }
 }
@@ -1180,7 +1732,7 @@ const getImgSrc = (url: string) => {
 
 .agent-mode-text {
   font-size: 13px;
-  color: #666;
+  color: var(--td-text-color-secondary, #666);
   font-weight: 500;
   white-space: nowrap;
   margin: 0 4px;
@@ -1195,6 +1747,7 @@ const getImgSrc = (url: string) => {
   height: 28px;
   padding: 0 10px;
   min-width: auto;
+  position: relative;
   
   &.active {
     background: rgba(16, 185, 129, 0.1);
@@ -1206,9 +1759,26 @@ const getImgSrc = (url: string) => {
   }
 }
 
+.kb-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #07C05F;
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .kb-btn-text {
   font-size: 13px;
-  color: #666;
+  color: var(--td-text-color-secondary, #666);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1240,14 +1810,14 @@ const getImgSrc = (url: string) => {
   
   &:not(.active) {
     .websearch-icon {
-      color: #666;
+      color: var(--td-text-color-secondary, #666);
     }
     
     &:hover {
-      background: #f0f0f0;
+      background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
       
       .websearch-icon {
-        color: #333;
+        color: var(--td-text-color-primary, #333);
       }
     }
   }
@@ -1259,7 +1829,7 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   max-width: 220px;
   font-size: 12px;
-  color: #666;
+  color: var(--td-text-color-secondary, #666);
 }
 
 :global(.websearch-tooltip-disabled a) {
@@ -1285,65 +1855,6 @@ const getImgSrc = (url: string) => {
   
   &.rotate {
     transform: rotate(180deg);
-  }
-}
-
-.kb-tags {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  overflow-x: auto;
-  scrollbar-width: none;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-.kb-tag {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  border-radius: 4px;
-  font-size: 12px;
-  color: #10b981;
-  white-space: nowrap;
-  transition: background 0.12s;
-  
-  &:hover {
-    background: rgba(16, 185, 129, 0.15);
-  }
-}
-
-.kb-tag-text {
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.kb-tag-remove {
-  cursor: pointer;
-  font-weight: bold;
-  font-size: 16px;
-  line-height: 1;
-  opacity: 0.7;
-  
-  &:hover {
-    opacity: 1;
-  }
-}
-
-.more-tag {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.1);
-  color: #666;
-  
-  &:hover {
-    background: rgba(0, 0, 0, 0.08);
   }
 }
 
@@ -1412,7 +1923,7 @@ const getImgSrc = (url: string) => {
 .model-display {
   display: flex;
   align-items: center;
-  margin-left: auto;  /* 推到最右边，但仍在 control-left 内 */
+  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -1482,10 +1993,10 @@ const getImgSrc = (url: string) => {
 .model-selector-dropdown {
   position: fixed !important;
   z-index: 9999;
-  background: #fff;
+  background: var(--td-bg-color-container, #fff);
   border-radius: 10px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
-  border: 1px solid #e7e9eb;
+  box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
+  border: 1px solid var(--td-component-border, #e7e9eb);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1499,11 +2010,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 10px;
-  border-bottom: 1px solid #f2f4f5;
-  background: #fafcfc;
+  border-bottom: 1px solid var(--td-component-border, #f2f4f5);
+  background: var(--td-bg-color-secondarycontainer, #fafcfc);
   font-size: 12px;
   font-weight: 600;
-  color: #222;
+  color: var(--td-text-color-primary, #222);
 }
 
 .model-selector-content {
@@ -1521,9 +2032,9 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 3px 8px;
   border-radius: 6px;
-  border: 1px solid #e1e5e6;
-  background: #fff;
-  color: #52575a;
+  border: 1px solid var(--td-component-border, #e1e5e6);
+  background: var(--td-bg-color-container, #fff);
+  color: var(--td-text-color-secondary, #52575a);
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
@@ -1553,11 +2064,11 @@ const getImgSrc = (url: string) => {
   }
   
   &:hover {
-    background: #f6f8f7;
+    background: var(--td-bg-color-container-hover, #f6f8f7);
   }
   
   &.selected {
-    background: #eefdf5;
+    background: var(--td-brand-color-light, #eefdf5);
     
     .model-option-name {
       color: #10b981;
@@ -1566,7 +2077,7 @@ const getImgSrc = (url: string) => {
   }
   
   &.empty {
-    color: #9aa0a6;
+    color: var(--td-text-color-disabled, #9aa0a6);
     cursor: default;
     text-align: center;
     padding: 20px 8px;
@@ -1586,7 +2097,7 @@ const getImgSrc = (url: string) => {
 
 .model-option-name {
   font-size: 12px;
-  color: #222;
+  color: var(--td-text-color-primary, #222);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1596,7 +2107,7 @@ const getImgSrc = (url: string) => {
 
 .model-option-desc {
   font-size: 11px;
-  color: #8b9196;
+  color: var(--td-text-color-secondary, #8b9196);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1635,10 +2146,10 @@ const getImgSrc = (url: string) => {
 .agent-mode-selector-dropdown {
   position: fixed !important;
   z-index: 9999;
-  background: #fff;
+  background: var(--td-bg-color-container, #fff);
   border-radius: 10px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
-  border: 1px solid #e7e9eb;
+  box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
+  border: 1px solid var(--td-component-border, #e7e9eb);
   overflow: hidden;
   padding: 6px 8px;
   min-width: 200px;
@@ -1661,7 +2172,7 @@ const getImgSrc = (url: string) => {
   margin: 4px 6px;
   
   &:hover:not(.disabled) {
-    background: #f6f8f7;
+    background: var(--td-bg-color-container-hover, #f6f8f7);
   }
   
   &.disabled {
@@ -1674,7 +2185,7 @@ const getImgSrc = (url: string) => {
   }
   
   &.selected {
-    background: #eefdf5;
+    background: var(--td-brand-color-light, #eefdf5);
     
     .agent-mode-option-name {
       color: #10b981;
@@ -1694,14 +2205,14 @@ const getImgSrc = (url: string) => {
 .agent-mode-option-name {
   font-size: 12px;
   font-weight: 600;
-  color: #222;
+  color: var(--td-text-color-primary, #222);
   line-height: 1.4;
   transition: color 0.12s;
 }
 
 .agent-mode-option-desc {
   font-size: 11px;
-  color: #8b9196;
+  color: var(--td-text-color-secondary, #8b9196);
   line-height: 1.3;
 }
 
@@ -1726,9 +2237,9 @@ const getImgSrc = (url: string) => {
 
 .agent-mode-footer {
   padding: 6px 10px;
-  border-top: 1px solid #f2f4f5;
+  border-top: 1px solid var(--td-component-border, #f2f4f5);
   margin-top: 2px;
-  background: #fafcfc;
+  background: var(--td-bg-color-secondarycontainer, #fafcfc);
 }
 
 .agent-mode-link {

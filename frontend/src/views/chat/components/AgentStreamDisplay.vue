@@ -1074,9 +1074,28 @@ const renderMarkdown = (content: any): string => {
   if (!content) return '';
   
   // Ensure content is a string
-  const contentStr = typeof content === 'string' ? content : String(content || '');
+  let contentStr = typeof content === 'string' ? content : String(content || '');
   if (!contentStr.trim()) return '';
   
+  // Handle streaming image syntax to prevent flickering
+  // Check if the content ends with an incomplete image markdown syntax like `![...` or `![...](...`
+  // This prevents the text from being rendered as plain text first and then jumping to an image
+  const lastImgStart = contentStr.lastIndexOf('![');
+  if (lastImgStart !== -1) {
+    // Only check the last occurrence to see if it's incomplete
+    // We check if the tail (from the last ![) contains a matching closing parenthesis )
+    // This is a heuristic: if the last ![ doesn't have a corresponding ), it's likely incomplete
+    const potentialImgTag = contentStr.slice(lastImgStart);
+    const hasClosingParen = potentialImgTag.includes(')');
+    const hasClosingBracket = potentialImgTag.includes(']');
+    
+    // If we have ![ but missing ] or ), it's incomplete
+    // Note: This is a simple check. It might false positive on `![text] (note)` but that's rare in this context
+    if (!hasClosingBracket || !hasClosingParen) {
+       contentStr = contentStr.slice(0, lastImgStart);
+    }
+  }
+
   try {
     // Preprocess custom citation tags into safe HTML the sanitizer will allow
     // Supported formats:

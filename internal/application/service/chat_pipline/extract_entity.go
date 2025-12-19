@@ -22,6 +22,7 @@ type PluginExtractEntity struct {
 	modelService      interfaces.ModelService         // Model service for calling large language models
 	template          *types.PromptTemplateStructured // Template for generating prompts
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
+	knowledgeRepo     interfaces.KnowledgeRepository
 }
 
 // NewPluginRewrite creates a new query rewriting plugin instance
@@ -30,12 +31,14 @@ func NewPluginExtractEntity(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
+	knowledgeRepo interfaces.KnowledgeRepository,
 	config *config.Config,
 ) *PluginExtractEntity {
 	res := &PluginExtractEntity{
 		modelService:      modelService,
 		template:          config.ExtractManager.ExtractEntity,
 		knowledgeBaseRepo: knowledgeBaseRepo,
+		knowledgeRepo:     knowledgeRepo,
 	}
 	eventManager.Register(res)
 	return res
@@ -65,15 +68,67 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	kb, err := p.knowledgeBaseRepo.GetKnowledgeBaseByID(ctx, chatManage.KnowledgeBaseID)
+	// Collect all knowledge base IDs to query
+	kbIDSet := make(map[string]struct{})
+	for _, id := range chatManage.KnowledgeBaseIDs {
+		kbIDSet[id] = struct{}{}
+	}
+
+	// If KnowledgeIDs is specified, retrieve them and collect their knowledge base IDs
+	// Also build a mapping from KnowledgeID to KnowledgeBaseID
+	knowledgeToKBMap := make(map[string]string)
+	if len(chatManage.KnowledgeIDs) > 0 {
+		knowledges, err := p.knowledgeRepo.GetKnowledgeBatch(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
+		if err != nil {
+			logger.Errorf(ctx, "failed to get knowledges: %v", err)
+			return next()
+		}
+		for _, k := range knowledges {
+			kbIDSet[k.KnowledgeBaseID] = struct{}{}
+			knowledgeToKBMap[k.ID] = k.KnowledgeBaseID
+		}
+	}
+
+	// Convert set to slice
+	allKBIDs := make([]string, 0, len(kbIDSet))
+	for id := range kbIDSet {
+		allKBIDs = append(allKBIDs, id)
+	}
+
+	// Batch retrieve all knowledge bases
+	kbs, err := p.knowledgeBaseRepo.GetKnowledgeBaseByIDs(ctx, allKBIDs)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge base: %v", err)
+		logger.Errorf(ctx, "failed to get knowledge bases: %v", err)
 		return next()
 	}
-	if kb.ExtractConfig == nil {
-		logger.Warnf(ctx, "failed to get extract config")
+
+	// Check if any knowledge base has ExtractConfig enabled and collect their IDs
+	enabledKBSet := make(map[string]struct{})
+	for _, kb := range kbs {
+		if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled {
+			enabledKBSet[kb.ID] = struct{}{}
+		}
+	}
+	if len(enabledKBSet) == 0 {
+		logger.Debugf(ctx, "no knowledge base has extract config enabled")
 		return next()
 	}
+
+	// Save enabled knowledge base IDs for later use in search_entity
+	enabledKBIDs := make([]string, 0, len(enabledKBSet))
+	for id := range enabledKBSet {
+		enabledKBIDs = append(enabledKBIDs, id)
+	}
+	chatManage.EntityKBIDs = enabledKBIDs
+
+	// Filter knowledgeToKBMap to only include files from enabled knowledge bases
+	entityKnowledge := make(map[string]string)
+	for knowledgeID, kbID := range knowledgeToKBMap {
+		if _, ok := enabledKBSet[kbID]; ok {
+			entityKnowledge[knowledgeID] = kbID
+		}
+	}
+	chatManage.EntityKnowledge = entityKnowledge
 
 	template := &types.PromptTemplateStructured{
 		Description: p.template.Description,

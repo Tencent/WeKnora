@@ -47,50 +47,81 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Get knowledge base IDs list
-	knowledgeBaseIDs := chatManage.KnowledgeBaseIDs
-	if len(knowledgeBaseIDs) == 0 && chatManage.KnowledgeBaseID != "" {
-		knowledgeBaseIDs = []string{chatManage.KnowledgeBaseID}
-		logger.Infof(ctx, "No KnowledgeBaseIDs provided, falling back to single KB: %s", chatManage.KnowledgeBaseID)
-	}
+	// Use EntityKBIDs (knowledge bases with ExtractConfig enabled)
+	knowledgeBaseIDs := chatManage.EntityKBIDs
+	// Use EntityKnowledge (KnowledgeID -> KnowledgeBaseID mapping for graph-enabled files)
+	entityKnowledge := chatManage.EntityKnowledge
 
-	if len(knowledgeBaseIDs) == 0 {
-		logger.Warnf(ctx, "No knowledge base IDs available for entity search")
+	if len(knowledgeBaseIDs) == 0 && len(entityKnowledge) == 0 {
+		logger.Warnf(ctx, "No knowledge base IDs or knowledge IDs with ExtractConfig enabled for entity search")
 		return next()
 	}
 
-	logger.Infof(ctx, "Searching entities across %d knowledge base(s): %v", len(knowledgeBaseIDs), knowledgeBaseIDs)
-
-	// Parallel search across multiple knowledge bases
+	// Parallel search across multiple knowledge bases and individual files
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var allNodes []*types.GraphNode
 	var allRelations []*types.GraphRelation
 
-	for _, kbID := range knowledgeBaseIDs {
-		wg.Add(1)
-		go func(knowledgeBaseID string) {
-			defer wg.Done()
+	// If specific KnowledgeIDs are provided, search by individual files
+	if len(entityKnowledge) > 0 {
+		logger.Infof(ctx, "Searching entities across %d knowledge file(s)", len(entityKnowledge))
+		for knowledgeID, kbID := range entityKnowledge {
+			wg.Add(1)
+			go func(knowledgeBaseID, knowledgeID string) {
+				defer wg.Done()
 
-			graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: knowledgeBaseID}, entity)
-			if err != nil {
-				logger.Errorf(ctx, "Failed to search entity in KB %s: %v", knowledgeBaseID, err)
-				return
-			}
+				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{
+					KnowledgeBase: knowledgeBaseID,
+					Knowledge:     knowledgeID,
+				}, entity)
+				if err != nil {
+					logger.Errorf(ctx, "Failed to search entity in Knowledge %s: %v", knowledgeID, err)
+					return
+				}
 
-			logger.Infof(
-				ctx,
-				"KB %s entity search result count: %d nodes, %d relations",
-				knowledgeBaseID,
-				len(graph.Node),
-				len(graph.Relation),
-			)
+				logger.Infof(
+					ctx,
+					"Knowledge %s entity search result count: %d nodes, %d relations",
+					knowledgeID,
+					len(graph.Node),
+					len(graph.Relation),
+				)
 
-			mu.Lock()
-			allNodes = append(allNodes, graph.Node...)
-			allRelations = append(allRelations, graph.Relation...)
-			mu.Unlock()
-		}(kbID)
+				mu.Lock()
+				allNodes = append(allNodes, graph.Node...)
+				allRelations = append(allRelations, graph.Relation...)
+				mu.Unlock()
+			}(kbID, knowledgeID)
+		}
+	} else {
+		// Otherwise, search by knowledge base
+		logger.Infof(ctx, "Searching entities across %d knowledge base(s): %v", len(knowledgeBaseIDs), knowledgeBaseIDs)
+		for _, kbID := range knowledgeBaseIDs {
+			wg.Add(1)
+			go func(knowledgeBaseID string) {
+				defer wg.Done()
+
+				graph, err := p.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: knowledgeBaseID}, entity)
+				if err != nil {
+					logger.Errorf(ctx, "Failed to search entity in KB %s: %v", knowledgeBaseID, err)
+					return
+				}
+
+				logger.Infof(
+					ctx,
+					"KB %s entity search result count: %d nodes, %d relations",
+					knowledgeBaseID,
+					len(graph.Node),
+					len(graph.Relation),
+				)
+
+				mu.Lock()
+				allNodes = append(allNodes, graph.Node...)
+				allRelations = append(allRelations, graph.Relation...)
+				mu.Unlock()
+			}(kbID)
+		}
 	}
 
 	wg.Wait()

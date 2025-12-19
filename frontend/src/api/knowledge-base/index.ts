@@ -231,3 +231,7 @@ export interface FAQImportProgress {
 export function getFAQImportProgress(taskId: string) {
   return get(`/api/v1/faq/import/progress/${taskId}`);
 }
+
+export function searchKnowledge(keyword: string, offset = 0, limit = 20) {
+  return get(`/api/v1/knowledge/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}&limit=${limit}`);
+}

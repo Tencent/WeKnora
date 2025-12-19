@@ -166,12 +166,23 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 ) ([]*types.RetrieveResult, error) {
 	logger.GetLogger(ctx).Infof("[Postgres] Keywords retrieval: query=%s, topK=%d", params.Query, params.TopK)
 	conds := make([]clause.Expression, 0)
+
+	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
+	// - If only KnowledgeBaseIDs: search entire knowledge bases
+	// - If only KnowledgeIDs: search specific documents
+	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by knowledge base IDs: %v", params.KnowledgeBaseIDs)
-		// Use standard SQL IN clause instead of @@@ operator for better performance with B-tree index
 		conds = append(conds, clause.IN{
 			Column: "knowledge_base_id",
 			Values: common.ToInterfaceSlice(params.KnowledgeBaseIDs),
+		})
+	}
+	if len(params.KnowledgeIDs) > 0 {
+		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by knowledge IDs: %v", params.KnowledgeIDs)
+		conds = append(conds, clause.IN{
+			Column: "knowledge_id",
+			Values: common.ToInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
 	conds = append(conds, clause.Expr{
@@ -250,13 +261,15 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	whereParts = append(whereParts, fmt.Sprintf("dimension = $%d", len(allVars)+1))
 	allVars = append(allVars, dimension)
 
-	// Knowledge base filter
+	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
+	// - If only KnowledgeBaseIDs: search entire knowledge bases
+	// - If only KnowledgeIDs: search specific documents
+	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		logger.GetLogger(ctx).Debugf(
 			"[Postgres] Filtering vector search by knowledge base IDs: %v",
 			params.KnowledgeBaseIDs,
 		)
-		// Build IN clause with proper placeholders
 		placeholders := make([]string, len(params.KnowledgeBaseIDs))
 		paramStart := len(allVars) + 1
 		for i := range params.KnowledgeBaseIDs {
@@ -264,6 +277,20 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 			allVars = append(allVars, params.KnowledgeBaseIDs[i])
 		}
 		whereParts = append(whereParts, fmt.Sprintf("knowledge_base_id IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
+	if len(params.KnowledgeIDs) > 0 {
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering vector search by knowledge IDs: %v",
+			params.KnowledgeIDs,
+		)
+		placeholders := make([]string, len(params.KnowledgeIDs))
+		paramStart := len(allVars) + 1
+		for i := range params.KnowledgeIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, params.KnowledgeIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)",
 			strings.Join(placeholders, ", ")))
 	}
 

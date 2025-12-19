@@ -8,6 +8,7 @@ interface Settings {
   isAgentEnabled: boolean;
   agentConfig: AgentConfig;
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
+  selectedFiles: string[]; // 当前选中的文件ID列表
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
@@ -71,6 +72,7 @@ const defaultSettings: Settings = {
     use_custom_system_prompt: false
   },
   selectedKnowledgeBases: [],  // 默认为空数组
+  selectedFiles: [], // 默认为空数组
   modelConfig: {
     chatModels: [],
     embeddingModels: [],
@@ -273,5 +275,30 @@ export const useSettingsStore = defineStore("settings", {
       this.settings.webSearchEnabled = enabled;
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
+
+    // File selection actions
+    addFile(fileId: string) {
+      if (!this.settings.selectedFiles) this.settings.selectedFiles = [];
+      if (!this.settings.selectedFiles.includes(fileId)) {
+        this.settings.selectedFiles.push(fileId);
+        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+      }
+    },
+
+    removeFile(fileId: string) {
+      if (!this.settings.selectedFiles) return;
+      this.settings.selectedFiles = this.settings.selectedFiles.filter((id: string) => id !== fileId);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    clearFiles() {
+      this.settings.selectedFiles = [];
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+    
+    getSelectedFiles(): string[] {
+      return this.settings.selectedFiles || [];
+    },
   },
-}); 
+});
+ 

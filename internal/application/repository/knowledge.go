@@ -292,3 +292,58 @@ func (r *knowledgeRepository) CountKnowledgeByStatus(
 
 	return count, nil
 }
+
+// SearchKnowledge searches knowledge items by keyword across the tenant
+// If keyword is empty, returns recent files
+// Only returns documents from document-type knowledge bases (excludes FAQ)
+// Returns (results, hasMore, error)
+func (r *knowledgeRepository) SearchKnowledge(
+	ctx context.Context,
+	tenantID uint64,
+	keyword string,
+	offset, limit int,
+) ([]*types.Knowledge, bool, error) {
+	// Use raw query to properly map knowledge_base_name
+	type KnowledgeWithKBName struct {
+		types.Knowledge
+		KnowledgeBaseName string `gorm:"column:knowledge_base_name"`
+	}
+
+	var results []KnowledgeWithKBName
+	query := r.db.WithContext(ctx).
+		Table("knowledges").
+		Select("knowledges.*, knowledge_bases.name as knowledge_base_name").
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id").
+		Where("knowledges.tenant_id = ?", tenantID).
+		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
+		Where("knowledges.deleted_at IS NULL")
+
+	// If keyword is provided, filter by file_name or title
+	if keyword != "" {
+		query = query.Where("knowledges.file_name LIKE ? ", "%"+keyword+"%")
+	}
+
+	// Fetch limit+1 to check if there are more results
+	err := query.Order("knowledges.created_at DESC").
+		Offset(offset).
+		Limit(limit + 1).
+		Scan(&results).Error
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Check if there are more results
+	hasMore := len(results) > limit
+	if hasMore {
+		results = results[:limit]
+	}
+
+	// Convert to []*types.Knowledge
+	knowledges := make([]*types.Knowledge, len(results))
+	for i, r := range results {
+		k := r.Knowledge
+		k.KnowledgeBaseName = r.KnowledgeBaseName
+		knowledges[i] = &k
+	}
+	return knowledges, hasMore, nil
+}

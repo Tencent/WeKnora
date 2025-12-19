@@ -38,6 +38,18 @@ func (r *knowledgeBaseRepository) GetKnowledgeBaseByID(ctx context.Context, id s
 	return &kb, nil
 }
 
+// GetKnowledgeBaseByIDs gets knowledge bases by multiple ids
+func (r *knowledgeBaseRepository) GetKnowledgeBaseByIDs(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	if len(ids) == 0 {
+		return []*types.KnowledgeBase{}, nil
+	}
+	var kbs []*types.KnowledgeBase
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&kbs).Error; err != nil {
+		return nil, err
+	}
+	return kbs, nil
+}
+
 // ListKnowledgeBases lists all knowledge bases
 func (r *knowledgeBaseRepository) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
 	var kbs []*types.KnowledgeBase

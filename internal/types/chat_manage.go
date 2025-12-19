@@ -8,12 +8,15 @@ type ChatManage struct {
 	RewriteQuery string     `json:"rewrite_query,omitempty"` // Query after rewriting for better retrieval
 	History      []*History `json:"history,omitempty"`       // Chat history for context
 
-	KnowledgeBaseID  string   `json:"knowledge_base_id"`  // ID of the knowledge base to search against (deprecated, use KnowledgeBaseIDs)
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"` // IDs of knowledge bases to search (multi-KB support)
-	VectorThreshold  float64  `json:"vector_threshold"`   // Minimum score threshold for vector search results
-	KeywordThreshold float64  `json:"keyword_threshold"`  // Minimum score threshold for keyword search results
-	EmbeddingTopK    int      `json:"embedding_top_k"`    // Number of top results to retrieve from embedding search
-	VectorDatabase   string   `json:"vector_database"`    // Vector database type/name to use
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`      // IDs of knowledge bases to search (multi-KB support)
+	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"` // IDs of specific files to search (optional)
+	// SearchTargets is the pre-computed unified search targets
+	// Computed once at request entry point, used throughout the pipeline
+	SearchTargets    SearchTargets `json:"-"`
+	VectorThreshold  float64       `json:"vector_threshold"`  // Minimum score threshold for vector search results
+	KeywordThreshold float64       `json:"keyword_threshold"` // Minimum score threshold for keyword search results
+	EmbeddingTopK    int           `json:"embedding_top_k"`   // Number of top results to retrieve from embedding search
+	VectorDatabase   string        `json:"vector_database"`   // Vector database type/name to use
 
 	RerankModelID   string  `json:"rerank_model_id"`  // Model ID for reranking search results
 	RerankTopK      int     `json:"rerank_top_k"`     // Number of top results after reranking
@@ -33,13 +36,15 @@ type ChatManage struct {
 	RewritePromptUser    string `json:"rewrite_prompt_user"`    // Custom user prompt for rewrite stage
 
 	// Internal fields for pipeline data processing
-	SearchResult []*SearchResult `json:"-"` // Results from search phase
-	RerankResult []*SearchResult `json:"-"` // Results after reranking
-	MergeResult  []*SearchResult `json:"-"` // Final merged results after all processing
-	Entity       []string        `json:"-"` // List of identified entities
-	GraphResult  *GraphData      `json:"-"` // Graph data from search phase
-	UserContent  string          `json:"-"` // Processed user content
-	ChatResponse *ChatResponse   `json:"-"` // Final response from chat model
+	SearchResult    []*SearchResult   `json:"-"` // Results from search phase
+	RerankResult    []*SearchResult   `json:"-"` // Results after reranking
+	MergeResult     []*SearchResult   `json:"-"` // Final merged results after all processing
+	Entity          []string          `json:"-"` // List of identified entities
+	EntityKBIDs     []string          `json:"-"` // Knowledge base IDs with ExtractConfig enabled
+	EntityKnowledge map[string]string `json:"-"` // KnowledgeID -> KnowledgeBaseID mapping for graph-enabled files
+	GraphResult     *GraphData        `json:"-"` // Graph data from search phase
+	UserContent     string            `json:"-"` // Processed user content
+	ChatResponse    *ChatResponse     `json:"-"` // Final response from chat model
 
 	// Event system for streaming responses
 	EventBus  EventBusInterface `json:"-"` // EventBus for emitting streaming events
@@ -56,12 +61,16 @@ func (c *ChatManage) Clone() *ChatManage {
 	knowledgeBaseIDs := make([]string, len(c.KnowledgeBaseIDs))
 	copy(knowledgeBaseIDs, c.KnowledgeBaseIDs)
 
+	// Deep copy knowledge IDs slice
+	knowledgeIDs := make([]string, len(c.KnowledgeIDs))
+	copy(knowledgeIDs, c.KnowledgeIDs)
+
 	return &ChatManage{
 		Query:            c.Query,
 		RewriteQuery:     c.RewriteQuery,
 		SessionID:        c.SessionID,
-		KnowledgeBaseID:  c.KnowledgeBaseID,
 		KnowledgeBaseIDs: knowledgeBaseIDs,
+		KnowledgeIDs:     knowledgeIDs,
 		VectorThreshold:  c.VectorThreshold,
 		KeywordThreshold: c.KeywordThreshold,
 		EmbeddingTopK:    c.EmbeddingTopK,

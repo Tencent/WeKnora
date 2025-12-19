@@ -44,12 +44,8 @@ const sendMsg = (value: string) => {
 }
 
 async function createNewSession(value: string) {
-    const selectedKbs = settingsStore.settings.selectedKnowledgeBases;
-    
-    if (!selectedKbs || selectedKbs.length === 0) {
-        MessagePlugin.warning(t('createChat.messages.selectKnowledgeBase'));
-        return;
-    }
+    const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
+    const selectedFiles = settingsStore.settings.selectedFiles || [];
 
     // 构建 session 数据，包含 Agent 配置
     const sessionData: any = {};
@@ -60,6 +56,7 @@ async function createNewSession(value: string) {
         max_iterations: settingsStore.agentConfig.maxIterations,
         temperature: settingsStore.agentConfig.temperature,
         knowledge_bases: selectedKbs,  // 所有选中的知识库
+        knowledge_ids: selectedFiles,  // 所有选中的普通知识/文件
         allowed_tools: settingsStore.agentConfig.allowedTools
     };
 

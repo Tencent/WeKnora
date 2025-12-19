@@ -21,6 +21,7 @@ const (
 	MatchTypeRelationChunk // 关系Chunk匹配类型
 	MatchTypeGraph
 	MatchTypeWebSearch // 网络搜索匹配类型
+	MatchTypeDirectLoad // 直接加载匹配类型
 )
 
 // IndexInfo contains information about indexed content

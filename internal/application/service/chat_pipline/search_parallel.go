@@ -35,6 +35,7 @@ func NewPluginSearchParallel(
 	eventManager *EventManager,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
 	config *config.Config,
 	webSearchService interfaces.WebSearchService,
 	tenantService interfaces.TenantService,
@@ -47,6 +48,7 @@ func NewPluginSearchParallel(
 	searchPlugin := &PluginSearch{
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
+		chunkService:         chunkService,
 		config:               config,
 		webSearchService:     webSearchService,
 		tenantService:        tenantService,

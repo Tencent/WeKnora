@@ -764,3 +764,37 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 		"message": "Knowledge chunk image updated successfully",
 	})
 }
+
+// SearchKnowledge godoc
+// @Summary      Search knowledge
+// @Description  Search knowledge files by keyword across all knowledge bases
+// @Tags         Knowledge
+// @Accept       json
+// @Produce      json
+// @Param        keyword   query     string  false "Keyword to search"
+// @Param        offset    query     int     false "Offset for pagination"
+// @Param        limit     query     int     false "Limit for pagination (default 20)"
+// @Success      200       {object}  map[string]interface{}     "Search results"
+// @Failure      400       {object}  errors.AppError            "Invalid request"
+// @Security     Bearer
+// @Router       /knowledge/search [get]
+func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+	keyword := c.Query("keyword")
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+
+	// Retrieve knowledge entries (empty keyword returns recent files)
+	knowledges, hasMore, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"data":     knowledges,
+		"has_more": hasMore,
+	})
+}

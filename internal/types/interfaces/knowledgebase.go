@@ -111,6 +111,15 @@ type KnowledgeBaseRepository interface {
 	//   - Possible errors such as record not existing, database errors, etc.
 	GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error)
 
+	// GetKnowledgeBaseByIDs queries knowledge bases by multiple IDs
+	// Parameters:
+	//   - ctx: Context information
+	//   - ids: List of knowledge base IDs
+	// Returns:
+	//   - List of knowledge base objects
+	//   - Possible errors such as database errors, etc.
+	GetKnowledgeBaseByIDs(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error)
+
 	// ListKnowledgeBases lists all knowledge bases in the system
 	// Parameters:
 	//   - ctx: Context information

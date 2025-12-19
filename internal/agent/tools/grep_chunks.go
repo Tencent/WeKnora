@@ -20,10 +20,11 @@ type GrepChunksTool struct {
 	db               *gorm.DB
 	tenantID         uint64
 	knowledgeBaseIDs []string
+	knowledgeIDs     []string // Specific knowledge/document IDs to search within
 }
 
 // NewGrepChunksTool creates a new grep chunks tool
-func NewGrepChunksTool(db *gorm.DB, tenantID uint64, knowledgeBaseIDs []string) *GrepChunksTool {
+func NewGrepChunksTool(db *gorm.DB, tenantID uint64, knowledgeBaseIDs []string, knowledgeIDs []string) *GrepChunksTool {
 	description := `Unix-style text pattern matching tool for knowledge base chunks.
 
 Searches for text patterns in chunk content using strict literal text matching (fixed-string search). This tool performs exact keyword lookup, not semantic search.
@@ -68,6 +69,7 @@ grep_chunks scans enabled chunks across the specified knowledge bases and return
 		db:               db,
 		tenantID:         tenantID,
 		knowledgeBaseIDs: knowledgeBaseIDs,
+		knowledgeIDs:     knowledgeIDs,
 	}
 }
 
@@ -173,11 +175,11 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args map[string]interface{
 	// 	}
 	// }
 
-	logger.Infof(ctx, "[Tool][GrepChunks] Patterns: %v, MaxResults: %d",
-		patterns, maxResults)
+	logger.Infof(ctx, "[Tool][GrepChunks] Patterns: %v, MaxResults: %d, KnowledgeIDs: %v",
+		patterns, maxResults, t.knowledgeIDs)
 
 	// Build and execute query
-	results, totalCount, err := t.searchChunks(ctx, patterns, kbIDs)
+	results, totalCount, err := t.searchChunks(ctx, patterns, kbIDs, t.knowledgeIDs)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Search failed: %v", err)
 		return &types.ToolResult{
@@ -269,6 +271,7 @@ func (t *GrepChunksTool) searchChunks(
 	ctx context.Context,
 	patterns []string,
 	kbIDs []string,
+	knowledgeIDs []string,
 ) ([]chunkWithTitle, int64, error) {
 	// Build base query
 	query := t.db.Debug().WithContext(ctx).Table("chunks").
@@ -279,8 +282,12 @@ func (t *GrepChunksTool) searchChunks(
 		Where("chunks.deleted_at IS NULL").
 		Where("knowledges.deleted_at IS NULL")
 
-	// Apply knowledge base filter
-	if len(kbIDs) > 0 {
+	// Apply knowledge IDs filter (specific documents) - takes priority over KB filter
+	if len(knowledgeIDs) > 0 {
+		query = query.Where("chunks.knowledge_id IN ?", knowledgeIDs)
+		logger.Infof(ctx, "[Tool][GrepChunks] Filtering by %d specific knowledge IDs", len(knowledgeIDs))
+	} else if len(kbIDs) > 0 {
+		// Apply knowledge base filter only if no specific knowledge IDs
 		query = query.Where("chunks.knowledge_base_id IN ?", kbIDs)
 	}
 

@@ -1585,7 +1585,7 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "unauthorized") {
 			return false, "认证失败，请检查API Key"
 		} else if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "forbidden") {
-			return false, "权限不足，请检查API Key权限"
+			return false, "权限不足，请检查API Key权限：" + err.Error()
 		} else if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
 			return false, "API端点不存在，请检查Base URL"
 		} else if strings.Contains(err.Error(), "timeout") {

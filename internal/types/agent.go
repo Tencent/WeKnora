@@ -15,11 +15,13 @@ type AgentConfig struct {
 	AllowedTools            []string `json:"allowed_tools"`                        // List of allowed tool names
 	Temperature             float64  `json:"temperature"`                          // LLM temperature for agent
 	KnowledgeBases          []string `json:"knowledge_bases"`                      // Accessible knowledge base IDs
+	KnowledgeIDs            []string `json:"knowledge_ids"`                        // Accessible knowledge IDs (individual documents)
 	SystemPromptWebEnabled  string   `json:"system_prompt_web_enabled,omitempty"`  // Custom prompt when web search is enabled
 	SystemPromptWebDisabled string   `json:"system_prompt_web_disabled,omitempty"` // Custom prompt when web search is disabled
 	UseCustomSystemPrompt   bool     `json:"use_custom_system_prompt"`             // Whether to use custom system prompt instead of default
 	WebSearchEnabled        bool     `json:"web_search_enabled"`                   // Whether web search tool is enabled
 	WebSearchMaxResults     int      `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
+	SearchTargets           SearchTargets `json:"-"`                               // Pre-computed unified search targets (runtime only)
 }
 
 // SessionAgentConfig represents session-level agent configuration
@@ -28,6 +30,7 @@ type SessionAgentConfig struct {
 	AgentModeEnabled bool     `json:"agent_mode_enabled"` // Whether agent mode is enabled for this session
 	WebSearchEnabled bool     `json:"web_search_enabled"` // Whether web search is enabled for this session
 	KnowledgeBases   []string `json:"knowledge_bases"`    // Accessible knowledge base IDs for this session
+	KnowledgeIDs     []string `json:"knowledge_ids"`      // Accessible knowledge IDs (individual documents) for this session
 }
 
 // Value implements driver.Valuer interface for AgentConfig

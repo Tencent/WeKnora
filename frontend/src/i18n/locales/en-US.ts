@@ -638,6 +638,9 @@ export default {
     confirmDelete: 'Confirm Delete',
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Delete failed',
+    file: 'File',
+    knowledgeBase: 'Knowledge Base',
+    noResult: 'No results',
   },
   file: {
     upload: 'Upload File',
@@ -746,6 +749,7 @@ export default {
   input: {
     addModel: 'Add Model',
     placeholder: 'Ask questions based on the knowledge base',
+    placeholderWithContext: 'Enter your question, will answer based on selected knowledge bases/files above',
     agentMode: 'Agent Mode',
     normalMode: 'Normal Mode',
     normalModeDesc: 'Knowledge base RAG Q&A',

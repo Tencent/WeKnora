@@ -32,9 +32,10 @@ type searchResultWithMeta struct {
 type KnowledgeSearchTool struct {
 	BaseTool
 	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
 	chunkService         interfaces.ChunkService
 	tenantID             uint64
-	allowedKBs           []string
+	searchTargets        types.SearchTargets // Pre-computed unified search targets
 	rerankModel          rerank.Reranker
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
@@ -43,9 +44,10 @@ type KnowledgeSearchTool struct {
 // NewKnowledgeSearchTool creates a new knowledge search tool
 func NewKnowledgeSearchTool(
 	knowledgeBaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	tenantID uint64,
-	allowedKBs []string,
+	searchTargets types.SearchTargets,
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	cfg *config.Config,
@@ -110,9 +112,10 @@ Results represent conceptual relevance, not literal keyword overlap.
 	return &KnowledgeSearchTool{
 		BaseTool:             NewBaseTool("knowledge_search", description),
 		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
 		chunkService:         chunkService,
 		tenantID:             tenantID,
-		allowedKBs:           allowedKBs,
+		searchTargets:        searchTargets,
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
 		config:               cfg,
@@ -155,29 +158,45 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args map[string]inter
 	argsJSON, _ := json.MarshalIndent(args, "", "  ")
 	logger.Debugf(ctx, "[Tool][KnowledgeSearch] Input args:\n%s", string(argsJSON))
 
-	// Determine which KBs to search
-	var kbIDs []string
+	// Determine which KBs to search - user can optionally filter to specific KBs
+	var userSpecifiedKBs []string
 	if kbIDsRaw, ok := args["knowledge_base_ids"].([]interface{}); ok && len(kbIDsRaw) > 0 {
 		for _, id := range kbIDsRaw {
 			if idStr, ok := id.(string); ok && idStr != "" {
-				kbIDs = append(kbIDs, idStr)
+				userSpecifiedKBs = append(userSpecifiedKBs, idStr)
 			}
 		}
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(kbIDs), kbIDs)
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
-	// If no KBs specified, use allowed KBs
-	if len(kbIDs) == 0 {
-		kbIDs = t.allowedKBs
-		if len(kbIDs) == 0 {
-			logger.Errorf(ctx, "[Tool][KnowledgeSearch] No knowledge bases available")
-			return &types.ToolResult{
-				Success: false,
-				Error:   "no knowledge bases specified and no allowed KBs configured",
-			}, fmt.Errorf("no knowledge bases available")
+	// Use pre-computed search targets, optionally filtered by user-specified KBs
+	searchTargets := t.searchTargets
+	if len(userSpecifiedKBs) > 0 {
+		// Filter search targets to only include user-specified KBs
+		userKBSet := make(map[string]bool)
+		for _, kbID := range userSpecifiedKBs {
+			userKBSet[kbID] = true
 		}
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] Using all allowed KBs (%d): %v", len(kbIDs), kbIDs)
+		var filteredTargets types.SearchTargets
+		for _, target := range t.searchTargets {
+			if userKBSet[target.KnowledgeBaseID] {
+				filteredTargets = append(filteredTargets, target)
+			}
+		}
+		searchTargets = filteredTargets
 	}
+
+	// Validate search targets
+	if len(searchTargets) == 0 {
+		logger.Errorf(ctx, "[Tool][KnowledgeSearch] No search targets available")
+		return &types.ToolResult{
+			Success: false,
+			Error:   "no knowledge bases specified and no search targets configured",
+		}, fmt.Errorf("no search targets available")
+	}
+
+	kbIDs := searchTargets.GetAllKnowledgeBaseIDs()
+	logger.Infof(ctx, "[Tool][KnowledgeSearch] Using %d search targets across %d KBs", len(searchTargets), len(kbIDs))
 
 	// Parse query parameter
 	var queries []string
@@ -256,11 +275,12 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args map[string]inter
 		minScore,
 	)
 
-	// Execute concurrent search (hybrid search handles both vector and keyword)
-	logger.Infof(ctx, "[Tool][KnowledgeSearch] Starting concurrent search across %d KBs", len(kbIDs))
+	// Execute concurrent search using pre-computed search targets
+	logger.Infof(ctx, "[Tool][KnowledgeSearch] Starting concurrent search with %d search targets",
+		len(searchTargets))
 	kbTypeMap := t.getKnowledgeBaseTypes(ctx, kbIDs)
 
-	allResults := t.concurrentSearch(ctx, queries, kbIDs,
+	allResults := t.concurrentSearchByTargets(ctx, queries, searchTargets,
 		topK, vectorThreshold, keywordThreshold, kbTypeMap)
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Concurrent search completed: %d raw results", len(allResults))
 
@@ -410,11 +430,12 @@ func (t *KnowledgeSearchTool) getKnowledgeBaseTypes(ctx context.Context, kbIDs [
 	return kbTypeMap
 }
 
-// concurrentSearch executes hybrid search across multiple KBs concurrently
-func (t *KnowledgeSearchTool) concurrentSearch(
+// concurrentSearchByTargets executes hybrid search using pre-computed search targets
+// This avoids duplicate searches when a knowledge file is already covered by its KB's full search
+func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	ctx context.Context,
 	queries []string,
-	kbsToSearch []string,
+	searchTargets types.SearchTargets,
 	topK int,
 	vectorThreshold, keywordThreshold float64,
 	kbTypeMap map[string]string,
@@ -424,24 +445,28 @@ func (t *KnowledgeSearchTool) concurrentSearch(
 	allResults := make([]*searchResultWithMeta, 0)
 
 	for _, query := range queries {
-		// Capture query in local variable to avoid closure issues
 		q := query
-		for _, kbID := range kbsToSearch {
-			// Capture kbID in local variable to avoid closure issues
-			kb := kbID
+		for _, target := range searchTargets {
+			st := target
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+
 				searchParams := types.SearchParams{
 					QueryText:        q,
 					MatchCount:       topK,
 					VectorThreshold:  vectorThreshold,
 					KeywordThreshold: keywordThreshold,
 				}
-				kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, kb, searchParams)
+
+				// If target has specific knowledge IDs, add them to search params
+				if st.Type == types.SearchTargetTypeKnowledge {
+					searchParams.KnowledgeIDs = st.KnowledgeIDs
+				}
+
+				kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, searchParams)
 				if err != nil {
-					// Log error but continue with other KBs
-					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to search knowledge base %s: %v", kb, err)
+					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
 					return
 				}
 
@@ -451,9 +476,9 @@ func (t *KnowledgeSearchTool) concurrentSearch(
 					allResults = append(allResults, &searchResultWithMeta{
 						SearchResult:      r,
 						SourceQuery:       q,
-						QueryType:         "hybrid", // Hybrid search combines both vector and keyword
-						KnowledgeBaseID:   kb,
-						KnowledgeBaseType: kbTypeMap[kb],
+						QueryType:         "hybrid",
+						KnowledgeBaseID:   st.KnowledgeBaseID,
+						KnowledgeBaseType: kbTypeMap[st.KnowledgeBaseID],
 					})
 				}
 				mu.Unlock()
@@ -470,34 +495,36 @@ func (t *KnowledgeSearchTool) rerankResults(
 	query string,
 	results []*searchResultWithMeta,
 ) ([]*searchResultWithMeta, error) {
-	// Separate FAQ and non-FAQ results. FAQ results keep original scores.
+	// Separate FAQ and normal results.
+	// FAQ results keep original scores and bypass reranking model.
 	faqResults := make([]*searchResultWithMeta, 0)
-	nonFAQResults := make([]*searchResultWithMeta, 0, len(results))
+	rerankCandidates := make([]*searchResultWithMeta, 0, len(results))
 
 	for _, result := range results {
+		// Skip reranking for FAQ results (they are explicitly matched Q&A pairs)
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
 			faqResults = append(faqResults, result)
 		} else {
-			nonFAQResults = append(nonFAQResults, result)
+			rerankCandidates = append(rerankCandidates, result)
 		}
 	}
 
-	// If there are no non-FAQ results, return original list (already all FAQ)
-	if len(nonFAQResults) == 0 {
+	// If there are no candidates to rerank, return original list (already all FAQ)
+	if len(rerankCandidates) == 0 {
 		return results, nil
 	}
 
 	var (
-		rerankedNonFAQ []*searchResultWithMeta
-		err            error
+		rerankedCandidates []*searchResultWithMeta
+		err                error
 	)
 
-	// Apply reranking only to non-FAQ results
+	// Apply reranking only to candidates
 	// Try rerankModel first, fallback to chatModel if rerankModel fails or returns no results
 	if t.rerankModel != nil {
-		rerankedNonFAQ, err = t.rerankWithModel(ctx, query, nonFAQResults)
+		rerankedCandidates, err = t.rerankWithModel(ctx, query, rerankCandidates)
 		// If rerankModel fails or returns no results, fallback to chatModel
-		if err != nil || len(rerankedNonFAQ) == 0 {
+		if err != nil || len(rerankedCandidates) == 0 {
 			if err != nil {
 				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model failed, falling back to chat model: %v", err)
 			} else {
@@ -507,18 +534,18 @@ func (t *KnowledgeSearchTool) rerankResults(
 			err = nil
 			// Try chatModel if available
 			if t.chatModel != nil {
-				rerankedNonFAQ, err = t.rerankWithLLM(ctx, query, nonFAQResults)
+				rerankedCandidates, err = t.rerankWithLLM(ctx, query, rerankCandidates)
 			} else {
 				// No fallback available, use original results
-				rerankedNonFAQ = nonFAQResults
+				rerankedCandidates = rerankCandidates
 			}
 		}
 	} else if t.chatModel != nil {
 		// No rerankModel, use chatModel directly
-		rerankedNonFAQ, err = t.rerankWithLLM(ctx, query, nonFAQResults)
+		rerankedCandidates, err = t.rerankWithLLM(ctx, query, rerankCandidates)
 	} else {
 		// No reranking available, use original results
-		rerankedNonFAQ = nonFAQResults
+		rerankedCandidates = rerankCandidates
 	}
 
 	if err != nil {
@@ -529,16 +556,16 @@ func (t *KnowledgeSearchTool) rerankResults(
 	logger.Debugf(ctx, "[Tool][KnowledgeSearch] Applying composite scoring")
 
 	// Store base scores before composite scoring
-	for _, result := range rerankedNonFAQ {
+	for _, result := range rerankedCandidates {
 		baseScore := result.Score
 		// Apply composite score
 		result.Score = t.compositeScore(result, result.Score, baseScore)
 	}
 
-	// Combine FAQ results (with original order) and reranked non-FAQ results
+	// Combine FAQ results (with original order) and reranked candidates
 	combined := make([]*searchResultWithMeta, 0, len(results))
 	combined = append(combined, faqResults...)
-	combined = append(combined, rerankedNonFAQ...)
+	combined = append(combined, rerankedCandidates...)
 
 	// Sort by score (descending) to keep consistent output order
 	sort.Slice(combined, func(i, j int) bool {

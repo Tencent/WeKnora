@@ -29,6 +29,7 @@ type AgentEngine struct {
 	chatModel            chat.Chat
 	eventBus             *event.EventBus
 	knowledgeBasesInfo   []*KnowledgeBaseInfo      // Detailed knowledge base information for prompt
+	selectedDocs         []*SelectedDocumentInfo   // User-selected documents (via @ mention)
 	contextManager       interfaces.ContextManager // Context manager for writing agent conversation to LLM context
 	sessionID            string                    // Session ID for context management
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
@@ -50,6 +51,7 @@ func NewAgentEngine(
 	toolRegistry *tools.ToolRegistry,
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
+	selectedDocs []*SelectedDocumentInfo,
 	contextManager interfaces.ContextManager,
 	sessionID string,
 	systemPromptTemplate string,
@@ -63,6 +65,7 @@ func NewAgentEngine(
 		chatModel:            chatModel,
 		eventBus:             eventBus,
 		knowledgeBasesInfo:   knowledgeBasesInfo,
+		selectedDocs:         selectedDocs,
 		contextManager:       contextManager,
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
@@ -99,6 +102,7 @@ func (e *AgentEngine) Execute(
 	systemPrompt := BuildSystemPrompt(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
+		e.selectedDocs,
 		e.systemPromptTemplate,
 	)
 	logger.Debugf(ctx, "[Agent] SystemPrompt Length: %d characters", len(systemPrompt))
@@ -774,6 +778,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	systemPrompt := BuildSystemPrompt(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
+		e.selectedDocs,
 		e.systemPromptTemplate,
 	)
 

@@ -141,6 +141,13 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
+	// Get selected documents information (user @ mentioned documents)
+	selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to get selected document details: %v", err)
+		selectedDocs = []*agent.SelectedDocumentInfo{}
+	}
+
 	systemPromptTemplate := ""
 	if config.UseCustomSystemPrompt {
 		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
@@ -153,6 +160,7 @@ func (s *agentService) CreateAgentEngine(
 		toolRegistry,
 		eventBus,
 		kbInfos,
+		selectedDocs,
 		contextManager,
 		sessionID,
 		systemPromptTemplate,
@@ -173,6 +181,29 @@ func (s *agentService) registerTools(
 ) error {
 	// If no specific tools allowed, register default tools
 	allowedTools := tools.DefaultAllowedTools()
+
+	// Filter out knowledge base tools if no knowledge bases or knowledge IDs are configured
+	hasKnowledge := len(config.KnowledgeBases) > 0 || len(config.KnowledgeIDs) > 0
+	if !hasKnowledge {
+		filteredTools := make([]string, 0)
+		kbTools := map[string]bool{
+			"knowledge_search":      true,
+			"grep_chunks":           true,
+			"list_knowledge_chunks": true,
+			"query_knowledge_graph": true,
+			"get_document_info":     true,
+			"database_query":        true,
+		}
+
+		for _, toolName := range allowedTools {
+			if !kbTools[toolName] {
+				filteredTools = append(filteredTools, toolName)
+			}
+		}
+		allowedTools = filteredTools
+		logger.Infof(ctx, "Pure Agent Mode: Knowledge base tools disabled due to empty configuration")
+	}
+
 	// If web search is enabled, add web_search to allowedTools
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, "web_search")
@@ -203,16 +234,17 @@ func (s *agentService) registerTools(
 			registry.RegisterTool(
 				tools.NewKnowledgeSearchTool(
 					s.knowledgeBaseService,
+					s.knowledgeService,
 					s.chunkService,
 					tenantID,
-					config.KnowledgeBases,
+					config.SearchTargets,
 					rerankModel,
 					chatModel,
 					s.cfg,
 				))
 		case "grep_chunks":
-			registry.RegisterTool(tools.NewGrepChunksTool(s.db, tenantID, config.KnowledgeBases))
-			logger.Infof(ctx, "Registered grep_chunks tool for tenant: %d", tenantID)
+			registry.RegisterTool(tools.NewGrepChunksTool(s.db, tenantID, config.KnowledgeBases, config.KnowledgeIDs))
+			logger.Infof(ctx, "Registered grep_chunks tool for tenant: %d, KBs: %d, KnowledgeIDs: %d", tenantID, len(config.KnowledgeBases), len(config.KnowledgeIDs))
 		case "list_knowledge_chunks":
 			registry.RegisterTool(tools.NewListKnowledgeChunksTool(tenantID, s.knowledgeService, s.chunkService))
 		case "query_knowledge_graph":
@@ -371,4 +403,55 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 	}
 
 	return kbInfos, nil
+}
+
+// getSelectedDocumentInfos retrieves detailed information for user-selected documents (via @ mention)
+// This loads the actual content of the documents to include in the system prompt
+func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string) ([]*agent.SelectedDocumentInfo, error) {
+	if len(knowledgeIDs) == 0 {
+		return []*agent.SelectedDocumentInfo{}, nil
+	}
+
+	// Get tenant ID from context
+	tenantID := uint64(0)
+	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+		tenantID = tid
+	}
+
+	// Fetch knowledge metadata
+	knowledges, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get knowledge batch: %w", err)
+	}
+
+	// Build map for quick lookup
+	knowledgeMap := make(map[string]*types.Knowledge)
+	for _, k := range knowledges {
+		if k != nil {
+			knowledgeMap[k.ID] = k
+		}
+	}
+
+	selectedDocs := make([]*agent.SelectedDocumentInfo, 0, len(knowledgeIDs))
+
+	for _, kid := range knowledgeIDs {
+		k, ok := knowledgeMap[kid]
+		if !ok {
+			logger.Warnf(ctx, "Selected knowledge %s not found", kid)
+			continue
+		}
+
+		docInfo := &agent.SelectedDocumentInfo{
+			KnowledgeID:     k.ID,
+			KnowledgeBaseID: k.KnowledgeBaseID,
+			Title:           k.Title,
+			FileName:        k.FileName,
+			FileType:        k.FileType,
+		}
+
+		selectedDocs = append(selectedDocs, docInfo)
+	}
+
+	logger.Infof(ctx, "Loaded %d selected documents metadata for prompt", len(selectedDocs))
+	return selectedDocs, nil
 }

@@ -142,18 +142,19 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 
 	// Prepare knowledge base IDs
 	knowledgeBaseIDs := request.KnowledgeBaseIDs
-	if len(knowledgeBaseIDs) == 0 && session.KnowledgeBaseID != "" {
-		knowledgeBaseIDs = []string{session.KnowledgeBaseID}
-		logger.Infof(
-			ctx,
-			"No knowledge base IDs in request, using session default: %s",
-			secutils.SanitizeForLog(session.KnowledgeBaseID),
-		)
-	}
+	// if len(knowledgeBaseIDs) == 0 && session.KnowledgeBaseID != "" {
+	// 	knowledgeBaseIDs = []string{session.KnowledgeBaseID}
+	// 	logger.Infof(
+	// 		ctx,
+	// 		"No knowledge base IDs in request, using session default: %s",
+	// 		secutils.SanitizeForLog(session.KnowledgeBaseID),
+	// 	)
+	// }
 
 	// Use shared function to handle KnowledgeQA request
 	h.handleKnowledgeQARequest(ctx, c, session, secutils.SanitizeForLog(request.Query),
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
+		secutils.SanitizeForLogArray(request.KnowledgeIds),
 		assistantMessage, true, secutils.SanitizeForLog(request.SummaryModelID), request.WebSearchEnabled)
 }
 
@@ -332,15 +333,6 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			)
 		}
 
-		// Validate at least one knowledge base is available
-		if len(knowledgeBaseIDs) == 0 {
-			logger.Error(ctx, "No knowledge base available for delegation")
-			c.Error(
-				errors.NewBadRequestError("No knowledge base available. Please configure at least one knowledge base."),
-			)
-			return
-		}
-
 		logger.Infof(
 			ctx,
 			"Delegating to KnowledgeQA with knowledge bases: %s",
@@ -355,6 +347,9 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			secutils.SanitizeForLog(request.Query),
 			secutils.SanitizeForLogArray(
 				knowledgeBaseIDs,
+			),
+			secutils.SanitizeForLogArray(
+				request.KnowledgeIds,
 			),
 			assistantMessage,
 			false,
@@ -455,7 +450,8 @@ func (h *Handler) AgentQA(c *gin.Context) {
 	}()
 
 	// Handle events for SSE (blocking until connection is done)
-	h.handleAgentEventsForSSE(ctx, c, sessionID, assistantMessage.ID, requestID, eventBus)
+	// Wait for title only if session has no title (first message in session)
+	h.handleAgentEventsForSSE(ctx, c, sessionID, assistantMessage.ID, requestID, eventBus, session.Title == "")
 }
 
 // handleKnowledgeQARequest handles a KnowledgeQA request with the given parameters
@@ -466,6 +462,7 @@ func (h *Handler) handleKnowledgeQARequest(
 	session *types.Session,
 	query string,
 	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
 	assistantMessage *types.Message,
 	generateTitle bool, // Whether to generate title if session has no title
 	summaryModelID string, // Optional summary model ID (overrides session default)
@@ -483,13 +480,6 @@ func (h *Handler) handleKnowledgeQARequest(
 	// Create assistant message (response)
 	if _, err := h.createAssistantMessage(ctx, assistantMessage); err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
-
-	// Validate knowledge bases
-	if len(knowledgeBaseIDs) == 0 {
-		logger.Error(ctx, "No knowledge base ID available")
-		c.Error(errors.NewBadRequestError("At least one knowledge base ID is required"))
 		return
 	}
 
@@ -559,6 +549,7 @@ func (h *Handler) handleKnowledgeQARequest(
 			session,
 			query,
 			knowledgeBaseIDs,
+			knowledgeIDs,
 			assistantMessage.ID,
 			summaryModelID,
 			webSearchEnabled,
@@ -581,7 +572,8 @@ func (h *Handler) handleKnowledgeQARequest(
 	}()
 
 	// Handle events for SSE (blocking until connection is done)
-	h.handleAgentEventsForSSE(ctx, c, sessionID, assistantMessage.ID, requestID, eventBus)
+	// Wait for title only if session has no title (first message in session)
+	h.handleAgentEventsForSSE(ctx, c, sessionID, assistantMessage.ID, requestID, eventBus, session.Title == "")
 }
 
 // completeAssistantMessage marks an assistant message as complete and updates it

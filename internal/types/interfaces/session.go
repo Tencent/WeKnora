@@ -28,11 +28,12 @@ type SessionService interface {
 	GenerateTitleAsync(ctx context.Context, session *types.Session, userQuery string, eventBus *event.EventBus)
 	// KnowledgeQA performs knowledge-based question answering
 	// knowledgeBaseIDs: list of knowledge base IDs to search (supports multi-KB)
+	// knowledgeIDs: list of specific knowledge (file) IDs to search
 	// summaryModelID: optional summary model ID override (if empty, uses session/KB default)
 	// webSearchEnabled: whether to enable web search to supplement knowledge base results
 	// Events are emitted through eventBus (references, answer chunks, completion)
 	KnowledgeQA(ctx context.Context,
-		session *types.Session, query string, knowledgeBaseIDs []string,
+		session *types.Session, query string, knowledgeBaseIDs []string, knowledgeIDs []string,
 		assistantMessageID string, summaryModelID string, webSearchEnabled bool, eventBus *event.EventBus,
 	) error
 	// KnowledgeQAByEvent performs knowledge-based question answering by event

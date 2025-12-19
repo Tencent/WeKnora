@@ -731,6 +731,9 @@ export default {
     confirmDelete: "确认删除",
     deleteSuccess: "删除成功",
     deleteFailed: "删除失败",
+    file: "文件",
+    knowledgeBase: "知识库",
+    noResult: "无结果",
   },
   file: {
     upload: "上传文件",
@@ -1150,6 +1153,9 @@ export default {
     messages: {
       deleted: "已删除",
       deleteFailed: "删除失败",
+    file: "文件",
+    knowledgeBase: "知识库",
+    noResult: "无结果",
     },
     features: {
       knowledgeGraph: "已启用知识图谱",
@@ -1422,6 +1428,7 @@ export default {
   input: {
     addModel: "添加模型",
     placeholder: "基于知识库提问",
+    placeholderWithContext: "输入问题，将基于上方选中的知识库/文件回答",
     agentMode: "Agent 模式",
     normalMode: "普通模式",
     normalModeDesc: "基于知识库的 RAG 问答",

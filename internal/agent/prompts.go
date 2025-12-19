@@ -57,6 +57,16 @@ type RecentDocInfo struct {
 	FAQAnswers          []string
 }
 
+// SelectedDocumentInfo contains summary information about a user-selected document (via @ mention)
+// Only metadata is included; content will be fetched via tools when needed
+type SelectedDocumentInfo struct {
+	KnowledgeID     string // Knowledge ID
+	KnowledgeBaseID string // Knowledge base ID
+	Title           string // Document title
+	FileName        string // Original file name
+	FileType        string // File type (pdf, docx, etc.)
+}
+
 // KnowledgeBaseInfo contains essential information about a knowledge base for agent prompt
 type KnowledgeBaseInfo struct {
 	ID          string
@@ -102,7 +112,8 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("\n")
+	builder.WriteString("\nThe following knowledge bases have been selected by the user for this conversation. ")
+	builder.WriteString("You should search within these knowledge bases to find relevant information.\n\n")
 	for i, kb := range kbInfos {
 		// Display knowledge base name and ID
 		builder.WriteString(fmt.Sprintf("%d. **%s** (knowledge_base_id: `%s`)\n", i+1, kb.Name, kb.ID))
@@ -184,6 +195,38 @@ func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseIn
 	return result
 }
 
+// formatSelectedDocuments formats selected documents for the prompt (summary only, no content)
+func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
+	if len(docs) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("\n### User Selected Documents (via @ mention)\n")
+	builder.WriteString("The user has explicitly selected the following documents. ")
+	builder.WriteString("**You should prioritize searching and retrieving information from these documents when answering.**\n")
+	builder.WriteString("Use `list_knowledge_chunks` with the provided Knowledge IDs to fetch their content.\n\n")
+
+	builder.WriteString("| # | Document Name | Type | Knowledge ID |\n")
+	builder.WriteString("|---|---------------|------|---------------|\n")
+
+	for i, doc := range docs {
+		title := doc.Title
+		if title == "" {
+			title = doc.FileName
+		}
+		fileType := doc.FileType
+		if fileType == "" {
+			fileType = "-"
+		}
+		builder.WriteString(fmt.Sprintf("| %d | %s | %s | `%s` |\n",
+			i+1, title, fileType, doc.KnowledgeID))
+	}
+	builder.WriteString("\n")
+
+	return builder.String()
+}
+
 // renderPromptPlaceholdersWithStatus renders placeholders including web search status
 // Supported placeholders:
 //   - {{knowledge_bases}}
@@ -239,18 +282,71 @@ func BuildSystemPromptWithoutWeb(
 	return renderPromptPlaceholdersWithStatus(template, knowledgeBases, false, currentTime)
 }
 
+// BuildPureAgentSystemPrompt builds the system prompt for Pure Agent mode (no KBs)
+func BuildPureAgentSystemPrompt(
+	webSearchEnabled bool,
+	systemPromptTemplate ...string,
+) string {
+	var template string
+	if len(systemPromptTemplate) > 0 && systemPromptTemplate[0] != "" {
+		template = systemPromptTemplate[0]
+	} else {
+		template = PureAgentSystemPrompt
+	}
+	currentTime := time.Now().Format(time.RFC3339)
+	// Pass empty KB list
+	return renderPromptPlaceholdersWithStatus(template, []*KnowledgeBaseInfo{}, webSearchEnabled, currentTime)
+}
+
 // BuildProgressiveRAGSystemPrompt builds the progressive RAG system prompt based on web search status
 // This is the main function to use - it automatically selects the appropriate version
 func BuildSystemPrompt(
 	knowledgeBases []*KnowledgeBaseInfo,
 	webSearchEnabled bool,
+	selectedDocs []*SelectedDocumentInfo,
 	systemPromptTemplate ...string,
 ) string {
-	if webSearchEnabled {
-		return BuildSystemPromptWithWeb(knowledgeBases, systemPromptTemplate...)
+	var basePrompt string
+
+	// If no knowledge bases, use Pure Agent prompt
+	if len(knowledgeBases) == 0 {
+		basePrompt = BuildPureAgentSystemPrompt(webSearchEnabled, systemPromptTemplate...)
+	} else if webSearchEnabled {
+		basePrompt = BuildSystemPromptWithWeb(knowledgeBases, systemPromptTemplate...)
+	} else {
+		basePrompt = BuildSystemPromptWithoutWeb(knowledgeBases, systemPromptTemplate...)
 	}
-	return BuildSystemPromptWithoutWeb(knowledgeBases, systemPromptTemplate...)
+
+	// Append selected documents section if any
+	if len(selectedDocs) > 0 {
+		basePrompt += formatSelectedDocuments(selectedDocs)
+	}
+
+	return basePrompt
 }
+
+// PureAgentSystemPrompt is the system prompt for Pure Agent mode (no Knowledge Bases)
+var PureAgentSystemPrompt = `### Role
+You are WeKnora, an intelligent assistant powered by ReAct. You operate in a Pure Agent mode without attached Knowledge Bases.
+
+### Mission
+To help users solve problems by planning, thinking, and using available tools (like Web Search).
+
+### Workflow
+1.  **Analyze:** Understand the user's request.
+2.  **Plan:** If the task is complex, use todo_write to create a plan.
+3.  **Execute:** Use available tools to gather information or perform actions.
+4.  **Synthesize:** Provide a comprehensive answer.
+
+### Tool Guidelines
+*   **web_search / web_fetch:** Use these if enabled to find information from the internet.
+*   **todo_write:** Use for managing multi-step tasks.
+*   **thinking:** Use to plan and reflect.
+
+### System Status
+Current Time: {{current_time}}
+Web Search: {{web_search_status}}
+`
 
 // ProgressiveRAGSystemPromptWithWeb is the progressive RAG system prompt template with web search enabled
 // This version emphasizes hybrid retrieval strategy: KB-first with web supplementation
@@ -324,7 +420,9 @@ For every retrieval attempt (Phase 1 or Phase 3), follow this exact chain:
 
 ### System Status
 Current Time: {{current_time}}
-Knowledge Bases: {{knowledge_bases}}
+
+### User Selected Knowledge Bases (via @ mention)
+{{knowledge_bases}}
 `
 
 // ProgressiveRAGSystemPromptWithoutWeb is the progressive RAG system prompt template without web search
@@ -407,5 +505,7 @@ For every information seeking step, strictly follow this 3-step atomic unit:
 
 ### System Status
 Current Time: {{current_time}}
-Knowledge Bases: {{knowledge_bases}}
+
+### User Selected Knowledge Bases (via @ mention)
+{{knowledge_bases}}
 `

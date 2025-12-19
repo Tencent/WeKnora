@@ -433,8 +433,15 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 	// Only retrieve enabled chunks
 	must = append(must, qdrant.NewMatchBool(fieldIsEnabled, true))
 
+	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
+	// - If only KnowledgeBaseIDs: search entire knowledge bases
+	// - If only KnowledgeIDs: search specific documents
+	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		must = append(must, qdrant.NewMatchKeywords(fieldKnowledgeBaseID, params.KnowledgeBaseIDs...))
+	}
+	if len(params.KnowledgeIDs) > 0 {
+		must = append(must, qdrant.NewMatchKeywords(fieldKnowledgeID, params.KnowledgeIDs...))
 	}
 
 	if len(params.ExcludeKnowledgeIDs) > 0 {
@@ -445,10 +452,12 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 		mustNot = append(mustNot, qdrant.NewMatchKeywords(fieldChunkID, params.ExcludeChunkIDs...))
 	}
 
-	return &qdrant.Filter{
+	filter := &qdrant.Filter{
 		Must:    must,
 		MustNot: mustNot,
 	}
+
+	return filter
 }
 
 // Retrieve dispatches the retrieval operation to the appropriate method based on retriever type

@@ -491,6 +491,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			TopK:             matchCount,
 			Threshold:        params.VectorThreshold,
 			RetrieverType:    types.VectorRetrieverType,
+			KnowledgeIDs:     params.KnowledgeIDs,
 		}
 
 		// For FAQ knowledge base, use FAQ index
@@ -512,6 +513,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			TopK:             matchCount,
 			Threshold:        params.KeywordThreshold,
 			RetrieverType:    types.KeywordsRetrieverType,
+			KnowledgeIDs:     params.KnowledgeIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}

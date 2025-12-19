@@ -43,6 +43,7 @@ type sessionService struct {
 	agentService         interfaces.AgentService         // Service for agent operations
 	sessionStorage       llmcontext.ContextStorage       // Session storage
 	knowledgeService     interfaces.KnowledgeService     // Service for knowledge operations
+	chunkService         interfaces.ChunkService         // Service for chunk operations
 	redisClient          *redis.Client                   // Redis client for temp KB state
 }
 
@@ -52,6 +53,7 @@ func NewSessionService(cfg *config.Config,
 	messageRepo interfaces.MessageRepository,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
 	modelService interfaces.ModelService,
 	tenantService interfaces.TenantService,
 	eventManager *chatpipline.EventManager,
@@ -65,6 +67,7 @@ func NewSessionService(cfg *config.Config,
 		messageRepo:          messageRepo,
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
+		chunkService:         chunkService,
 		modelService:         modelService,
 		tenantService:        tenantService,
 		eventManager:         eventManager,
@@ -394,6 +397,7 @@ func (s *sessionService) KnowledgeQA(
 	session *types.Session,
 	query string,
 	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
 	assistantMessageID string,
 	summaryModelID string,
 	webSearchEnabled bool,
@@ -414,14 +418,13 @@ func (s *sessionService) KnowledgeQA(
 			logger.Infof(ctx, "No knowledge base IDs provided, using session default: %s", session.KnowledgeBaseID)
 		} else {
 			logger.Warnf(ctx, "Session has no associated knowledge base, session ID: %s", session.ID)
-			return errors.New("session has no knowledge base")
 		}
 	}
 
 	logger.Infof(ctx, "Using knowledge bases: %v", knowledgeBaseIDs)
 
 	// Determine chat model ID: prioritize request's summaryModelID, then Remote models
-	chatModelID, err := s.selectChatModelIDWithOverride(ctx, session, knowledgeBaseIDs, summaryModelID)
+	chatModelID, err := s.selectChatModelIDWithOverride(ctx, session, knowledgeBaseIDs, knowledgeIDs, summaryModelID)
 	if err != nil {
 		return err
 	}
@@ -511,20 +514,29 @@ func (s *sessionService) KnowledgeQA(
 		logger.Infof(ctx, "Fallback strategy not set, using default: %v", fallbackStrategy)
 	}
 
+	// Build unified search targets (computed once, used throughout pipeline)
+	searchTargets, err := s.buildSearchTargets(ctx, session.TenantID, knowledgeBaseIDs, knowledgeIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to build search targets: %v", err)
+	}
+
 	// Create chat management object with session settings
 	logger.Infof(
 		ctx,
-		"Creating chat manage object, knowledge base IDs: %v, chat model ID: %s",
+		"Creating chat manage object, knowledge base IDs: %v, knowledge IDs: %v, chat model ID: %s, search targets: %d",
 		knowledgeBaseIDs,
+		knowledgeIDs,
 		chatModelID,
+		len(searchTargets),
 	)
 	chatManage := &types.ChatManage{
 		Query:                query,
 		RewriteQuery:         query,
 		SessionID:            session.ID,
-		MessageID:            assistantMessageID,  // NEW: For event emission in pipeline
-		KnowledgeBaseID:      knowledgeBaseIDs[0], // For backward compatibility, use first KB ID
-		KnowledgeBaseIDs:     knowledgeBaseIDs,    // Multi-KB support
+		MessageID:            assistantMessageID, // NEW: For event emission in pipeline
+		KnowledgeBaseIDs:     knowledgeBaseIDs,   // Multi-KB support
+		KnowledgeIDs:         knowledgeIDs,       // Specific knowledge (file) IDs
+		SearchTargets:        searchTargets,      // Pre-computed search targets
 		VectorThreshold:      vectorThreshold,
 		KeywordThreshold:     keywordThreshold,
 		EmbeddingTopK:        embeddingTopK,
@@ -546,9 +558,22 @@ func (s *sessionService) KnowledgeQA(
 		EnableQueryExpansion: enableQueryExpansion,
 	}
 
+	// Determine pipeline based on knowledge bases availability
+	// If no knowledge bases are selected, use pure chat pipeline
+	var pipeline []types.EventType
+	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 {
+		logger.Info(ctx, "No knowledge bases selected, using chat_stream pipeline")
+		pipeline = types.Pipline["chat_stream"]
+		// For pure chat, UserContent is the Query (since INTO_CHAT_MESSAGE is skipped)
+		chatManage.UserContent = query
+	} else {
+		logger.Info(ctx, "Knowledge bases selected, using rag_stream pipeline")
+		pipeline = types.Pipline["rag_stream"]
+	}
+
 	// Start knowledge QA event processing
-	logger.Info(ctx, "Triggering knowledge base question answering event")
-	err = s.KnowledgeQAByEvent(ctx, chatManage, types.Pipline["rag_stream"])
+	logger.Info(ctx, "Triggering question answering event")
+	err = s.KnowledgeQAByEvent(ctx, chatManage, pipeline)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id":        session.ID,
@@ -592,6 +617,7 @@ func (s *sessionService) selectChatModelIDWithOverride(
 	ctx context.Context,
 	session *types.Session,
 	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
 	summaryModelID string,
 ) (string, error) {
 	// First, check if request has summaryModelID override
@@ -612,33 +638,47 @@ func (s *sessionService) selectChatModelIDWithOverride(
 	}
 
 	// If no valid override, use default selection logic
-	return s.selectChatModelID(ctx, session, knowledgeBaseIDs)
+	return s.selectChatModelID(ctx, session, knowledgeBaseIDs, knowledgeIDs)
 }
 
 // selectChatModelID selects the appropriate chat model ID with priority for Remote models
 // Priority order:
 // 1. Session's SummaryModelID if it's a Remote model
-// 2. First knowledge base with a Remote model
+// 2. First knowledge base with a Remote model (from knowledgeBaseIDs or derived from knowledgeIDs)
 // 3. Session's SummaryModelID (if not Remote)
 // 4. First knowledge base's SummaryModelID
 func (s *sessionService) selectChatModelID(
 	ctx context.Context,
 	session *types.Session,
 	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
 ) (string, error) {
+
 	// First, check if session has a SummaryModelID and if it's a Remote model
 	if session.SummaryModelID != "" {
-		model, err := s.modelService.GetModelByID(ctx, session.SummaryModelID)
-		if err == nil && model != nil && model.Source == types.ModelSourceRemote {
-			logger.Infof(ctx, "Using session's Remote summary model: %s", session.SummaryModelID)
-			return session.SummaryModelID, nil
-		} else if err == nil && model != nil {
-			// Session has a model but it's not Remote, we'll check knowledge bases for Remote models
-			logger.Infof(ctx, "Session has summary model %s but it's not Remote, "+
-				"checking knowledge bases for Remote models", session.SummaryModelID)
+		return session.SummaryModelID, nil
+	}
+	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs
+	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
+		} else {
+			// Collect unique KB IDs from knowledge items
+			kbIDSet := make(map[string]bool)
+			for _, k := range knowledgeList {
+				if k != nil && k.KnowledgeBaseID != "" {
+					kbIDSet[k.KnowledgeBaseID] = true
+				}
+			}
+			for kbID := range kbIDSet {
+				knowledgeBaseIDs = append(knowledgeBaseIDs, kbID)
+			}
+			logger.Infof(ctx, "Derived %d knowledge base IDs from %d knowledge IDs for model selection",
+				len(knowledgeBaseIDs), len(knowledgeIDs))
 		}
 	}
-
 	// If no Remote model found from session, check knowledge bases for Remote models
 	if len(knowledgeBaseIDs) > 0 {
 		// Try to find a knowledge base with Remote model
@@ -683,10 +723,77 @@ func (s *sessionService) selectChatModelID(
 		}
 	}
 
+	// No knowledge bases - use session's SummaryModelID if available
+	if session.SummaryModelID != "" {
+		logger.Infof(ctx, "No knowledge bases, using session's summary model: %s", session.SummaryModelID)
+		return session.SummaryModelID, nil
+	}
+
 	logger.Error(ctx, "No chat model ID available")
 	return "", errors.New(
-		"no chat model ID available: session has no SummaryModelID and knowledge bases have no SummaryModelID",
+		"no chat model ID available: session has no SummaryModelID and no knowledge bases configured",
 	)
+}
+
+// buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs
+// This is called once at the request entry point to avoid repeated queries later in the pipeline
+// Logic:
+//   - For each knowledgeBaseID: create a SearchTargetTypeKnowledgeBase target
+//   - For each knowledgeID: find its knowledgeBaseID, if the KB is already in the list, skip (covered by full KB search)
+//     otherwise create a SearchTargetTypeKnowledge target grouped by KB
+func (s *sessionService) buildSearchTargets(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeBaseIDs []string,
+	knowledgeIDs []string,
+) (types.SearchTargets, error) {
+	var targets types.SearchTargets
+
+	// Track which KBs are fully searched
+	fullKBSet := make(map[string]bool)
+	for _, kbID := range knowledgeBaseIDs {
+		fullKBSet[kbID] = true
+		targets = append(targets, &types.SearchTarget{
+			Type:            types.SearchTargetTypeKnowledgeBase,
+			KnowledgeBaseID: kbID,
+		})
+	}
+
+	// Process individual knowledge IDs
+	if len(knowledgeIDs) > 0 {
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
+			return targets, nil // Return what we have, don't fail
+		}
+
+		// Group knowledge IDs by their KB, excluding those already covered by full KB search
+		kbToKnowledgeIDs := make(map[string][]string)
+		for _, k := range knowledgeList {
+			if k == nil || k.KnowledgeBaseID == "" {
+				continue
+			}
+			// Skip if this KB is already fully searched
+			if fullKBSet[k.KnowledgeBaseID] {
+				continue
+			}
+			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
+		}
+
+		// Create SearchTargetTypeKnowledge targets for each KB with specific files
+		for kbID, kidList := range kbToKnowledgeIDs {
+			targets = append(targets, &types.SearchTarget{
+				Type:            types.SearchTargetTypeKnowledge,
+				KnowledgeBaseID: kbID,
+				KnowledgeIDs:    kidList,
+			})
+		}
+	}
+
+	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB",
+		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs))
+
+	return targets, nil
 }
 
 // KnowledgeQAByEvent processes knowledge QA through a series of events in the pipeline
@@ -697,8 +804,8 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	defer span.End()
 
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
-	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, knowledge base ID: %s, query: %s",
-		chatManage.SessionID, chatManage.KnowledgeBaseID, chatManage.Query)
+	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s,  query: %s",
+		chatManage.SessionID, chatManage.Query)
 
 	// Prepare method list for logging and tracing
 	methods := []string{}
@@ -769,7 +876,6 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	chatManage := &types.ChatManage{
 		Query:               query,
 		RewriteQuery:        query,
-		KnowledgeBaseID:     knowledgeBaseID,
 		VectorThreshold:     s.cfg.Conversation.VectorThreshold,  // Use default configuration
 		KeywordThreshold:    s.cfg.Conversation.KeywordThreshold, // Use default configuration
 		EmbeddingTopK:       s.cfg.Conversation.EmbeddingTopK,    // Use default configuration
@@ -800,10 +906,10 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 	// Use specific event list, only including retrieval-related events, not LLM summarization
 	searchEvents := []types.EventType{
-		types.CHUNK_SEARCH,  // Vector search
-		types.CHUNK_RERANK,  // Rerank search results
-		types.CHUNK_MERGE,   // Merge search results
-		types.FILTER_TOP_K,  // Filter top K results
+		types.CHUNK_SEARCH, // Vector search
+		types.CHUNK_RERANK, // Rerank search results
+		types.CHUNK_MERGE,  // Merge search results
+		types.FILTER_TOP_K, // Filter top K results
 	}
 
 	ctx, span := tracing.ContextWithSpan(ctx, "SessionService.SearchKnowledge")
@@ -895,13 +1001,14 @@ func (s *sessionService) AgentQA(
 
 	// Create runtime AgentConfig by merging session and tenant configs
 	// Tenant config provides the runtime parameters (MaxIterations, Temperature, Tools, Models)
-	// Session config provides KnowledgeBases
+	// Session config provides KnowledgeBases and KnowledgeIDs
 	agentConfig := &types.AgentConfig{
 		MaxIterations:     tenantInfo.AgentConfig.MaxIterations,
 		ReflectionEnabled: tenantInfo.AgentConfig.ReflectionEnabled,
 		AllowedTools:      tools.DefaultAllowedTools(),
 		Temperature:       tenantInfo.AgentConfig.Temperature,
 		KnowledgeBases:    session.AgentConfig.KnowledgeBases,   // Use session's knowledge bases
+		KnowledgeIDs:      session.AgentConfig.KnowledgeIDs,     // Use session's knowledge IDs (individual documents)
 		WebSearchEnabled:  session.AgentConfig.WebSearchEnabled, // Web search enabled from session config
 	}
 
@@ -919,42 +1026,41 @@ func (s *sessionService) AgentQA(
 
 	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, sessionID)
 
+	// Log knowledge IDs if present
+	if len(agentConfig.KnowledgeIDs) > 0 {
+		logger.Infof(ctx, "Agent configured with %d individual knowledge ID(s): %v",
+			len(agentConfig.KnowledgeIDs), agentConfig.KnowledgeIDs)
+	}
+
 	// Determine knowledge bases for agent
 	// Priority: Session.AgentConfig.KnowledgeBases > Session.KnowledgeBaseID > All tenant knowledge bases
-	if len(agentConfig.KnowledgeBases) == 0 {
+	// Exception: If KnowledgeIDs are specified, don't auto-add all KBs (let buildSearchTargets handle it)
+	if len(agentConfig.KnowledgeBases) == 0 && len(agentConfig.KnowledgeIDs) == 0 {
 		if session.KnowledgeBaseID != "" {
 			// Use session's knowledge base as fallback
 			agentConfig.KnowledgeBases = []string{session.KnowledgeBaseID}
 			logger.Infof(ctx, "Using session's knowledge base for agent: %s", session.KnowledgeBaseID)
 		} else {
-			// Default to all knowledge bases under the tenant
-			logger.Infof(ctx, "No knowledge bases specified, fetching all knowledge bases for tenant")
-			allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
-			if err != nil {
-				logger.Errorf(ctx, "Failed to list knowledge bases for tenant: %v", err)
-				return fmt.Errorf("failed to list knowledge bases: %w", err)
-			}
-
-			if len(allKBs) == 0 {
-				logger.Warnf(ctx, "No knowledge bases available for agent session: %s", sessionID)
-				return errors.New("no knowledge bases available for agent")
-			}
-
-			// Extract knowledge base IDs
-			agentConfig.KnowledgeBases = make([]string, len(allKBs))
-			for i, kb := range allKBs {
-				if kb == nil {
-					continue
-				}
-				agentConfig.KnowledgeBases[i] = kb.ID
-			}
-			logger.Infof(ctx, "Agent defaulting to all %d knowledge base(s) in tenant: %v",
-				len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
+			// Allow running without knowledge bases (Pure Agent mode)
+			logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 		}
+	} else if len(agentConfig.KnowledgeIDs) > 0 && len(agentConfig.KnowledgeBases) == 0 {
+		// User specified individual files but no KBs - don't auto-add all KBs
+		logger.Infof(ctx, "Agent configured with %d individual knowledge ID(s), no KB auto-expansion",
+			len(agentConfig.KnowledgeIDs))
 	} else {
 		logger.Infof(ctx, "Agent configured with %d knowledge base(s): %v",
 			len(agentConfig.KnowledgeBases), agentConfig.KnowledgeBases)
 	}
+
+	// Build search targets for agent (pre-compute once to avoid repeated queries)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantInfo.ID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
+		// Continue without search targets, the tool will handle empty targets
+	}
+	agentConfig.SearchTargets = searchTargets
+	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
 	summaryModelID := session.SummaryModelID
 	if summaryModelID == "" && tenantInfo.ConversationConfig != nil {

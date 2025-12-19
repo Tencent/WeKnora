@@ -639,6 +639,9 @@ export default {
     confirmDelete: 'Подтвердить удаление',
     deleteSuccess: 'Успешно удалено',
     deleteFailed: 'Ошибка удаления',
+    file: 'Файл',
+    knowledgeBase: 'База знаний',
+    noResult: 'Нет результатов',
   },
   file: {
     upload: 'Загрузить файл',
@@ -1669,6 +1672,7 @@ export default {
   input: {
     addModel: 'Добавить модель',
     placeholder: 'Задайте вопрос на основе базы знаний',
+    placeholderWithContext: 'Введите вопрос, ответ будет основан на выбранных выше базах знаний/файлах',
     agentMode: 'Agent режим',
     normalMode: 'Обычный режим',
     normalModeDesc: 'RAG-вопросы и ответы по базе знаний',

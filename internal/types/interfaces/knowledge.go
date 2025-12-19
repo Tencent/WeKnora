@@ -119,6 +119,8 @@ type KnowledgeService interface {
 	SaveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error
 	// GetFAQImportProgress retrieves the progress of an FAQ import task
 	GetFAQImportProgress(ctx context.Context, taskID string) (*types.FAQImportProgress, error)
+	// SearchKnowledge searches knowledge items by keyword across the tenant.
+	SearchKnowledge(ctx context.Context, keyword string, offset, limit int) ([]*types.Knowledge, bool, error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.
@@ -156,4 +158,6 @@ type KnowledgeRepository interface {
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.
 	CountKnowledgeByStatus(ctx context.Context, tenantID uint64, kbID string, parseStatuses []string) (int64, error)
+	// SearchKnowledge searches knowledge items by keyword across the tenant.
+	SearchKnowledge(ctx context.Context, tenantID uint64, keyword string, offset, limit int) ([]*types.Knowledge, bool, error)
 }

@@ -236,8 +236,14 @@ func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 // getBaseConds creates the base query conditions for retrieval operations
 // Returns a slice of Query objects with must and must_not conditions
+// KnowledgeBaseIDs and KnowledgeIDs use AND logic (search specific documents within knowledge bases)
 func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams) []types.Query {
 	must := []types.Query{}
+
+	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
+	// - If only KnowledgeBaseIDs: search entire knowledge bases
+	// - If only KnowledgeIDs: search specific documents
+	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		must = append(must, types.Query{Terms: &types.TermsQuery{
 			TermsQuery: map[string]types.TermsQueryField{
@@ -245,6 +251,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 			},
 		}})
 	}
+	if len(params.KnowledgeIDs) > 0 {
+		must = append(must, types.Query{Terms: &types.TermsQuery{
+			TermsQuery: map[string]types.TermsQueryField{
+				"knowledge_id.keyword": params.KnowledgeIDs,
+			},
+		}})
+	}
+
 	mustNot := make([]types.Query, 0)
 	// Exclude disabled chunks (is_enabled = false)
 	// Note: Historical data without is_enabled field will be included (not matching must_not)

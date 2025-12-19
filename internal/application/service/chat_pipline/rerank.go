@@ -66,35 +66,54 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		return ErrGetRerankModel.WithError(err)
 	}
 
-	// Prepare passages for reranking
-	pipelineInfo(ctx, "Rerank", "build_passages", map[string]interface{}{
-		"candidate_cnt": len(chatManage.SearchResult),
-	})
+	// Prepare passages for reranking (excluding DirectLoad results)
 	var passages []string
+	var candidatesToRerank []*types.SearchResult
+	var directLoadResults []*types.SearchResult
+
 	for _, result := range chatManage.SearchResult {
+		if result.MatchType == types.MatchTypeDirectLoad {
+			directLoadResults = append(directLoadResults, result)
+			pipelineInfo(ctx, "Rerank", "direct_load_skip", map[string]interface{}{
+				"chunk_id": result.ID,
+			})
+			continue
+		}
 		// 合并Content和ImageInfo的文本内容
 		passage := getEnrichedPassage(ctx, result)
 		passages = append(passages, passage)
+		candidatesToRerank = append(candidatesToRerank, result)
 	}
 
-	// Single rerank call with RewriteQuery, use threshold degradation if no results
-	originalThreshold := chatManage.RerankThreshold
-	rerankResp := p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages)
+	pipelineInfo(ctx, "Rerank", "build_passages", map[string]interface{}{
+		"total_cnt":     len(chatManage.SearchResult),
+		"candidate_cnt": len(candidatesToRerank),
+		"direct_cnt":    len(directLoadResults),
+	})
 
-	// If no results and threshold is high enough, try with lower threshold
-	if len(rerankResp) == 0 && originalThreshold > 0.3 {
-		degradedThreshold := originalThreshold * 0.7
-		if degradedThreshold < 0.3 {
-			degradedThreshold = 0.3
+	var rerankResp []rerank.RankResult
+
+	// Only call rerank model if there are candidates
+	if len(candidatesToRerank) > 0 {
+		// Single rerank call with RewriteQuery, use threshold degradation if no results
+		originalThreshold := chatManage.RerankThreshold
+		rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+
+		// If no results and threshold is high enough, try with lower threshold
+		if len(rerankResp) == 0 && originalThreshold > 0.3 {
+			degradedThreshold := originalThreshold * 0.7
+			if degradedThreshold < 0.3 {
+				degradedThreshold = 0.3
+			}
+			pipelineInfo(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
+				"original": originalThreshold,
+				"degraded": degradedThreshold,
+			})
+			chatManage.RerankThreshold = degradedThreshold
+			rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
+			// Restore original threshold
+			chatManage.RerankThreshold = originalThreshold
 		}
-		pipelineInfo(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
-			"original": originalThreshold,
-			"degraded": degradedThreshold,
-		})
-		chatManage.RerankThreshold = degradedThreshold
-		rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages)
-		// Restore original threshold
-		chatManage.RerankThreshold = originalThreshold
 	}
 
 	pipelineInfo(ctx, "Rerank", "model_response", map[string]interface{}{
@@ -114,14 +133,36 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	for i := range chatManage.SearchResult {
 		chatManage.SearchResult[i].Metadata = ensureMetadata(chatManage.SearchResult[i].Metadata)
 	}
-	reranked := make([]*types.SearchResult, 0, len(rerankResp))
+	reranked := make([]*types.SearchResult, 0, len(rerankResp)+len(directLoadResults))
+
+	// Process reranked results
 	for _, rr := range rerankResp {
-		sr := chatManage.SearchResult[rr.Index]
+		if rr.Index >= len(candidatesToRerank) {
+			continue
+		}
+		sr := candidatesToRerank[rr.Index]
 		base := sr.Score
 		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
 		modelScore := rr.RelevanceScore
 		sr.Score = compositeScore(sr, modelScore, base)
 		pipelineInfo(ctx, "Rerank", "composite_calc", map[string]interface{}{
+			"chunk_id":    sr.ID,
+			"base_score":  fmt.Sprintf("%.4f", base),
+			"model_score": fmt.Sprintf("%.4f", modelScore),
+			"final_score": fmt.Sprintf("%.4f", sr.Score),
+			"match_type":  sr.MatchType,
+		})
+		reranked = append(reranked, sr)
+	}
+
+	// Process direct load results (bypass rerank model, assume high relevance)
+	for _, sr := range directLoadResults {
+		base := sr.Score
+		sr.Metadata["base_score"] = fmt.Sprintf("%.4f", base)
+		// Assign high model score for direct load items
+		modelScore := 1.0
+		sr.Score = compositeScore(sr, modelScore, base)
+		pipelineInfo(ctx, "Rerank", "composite_calc_direct", map[string]interface{}{
 			"chunk_id":    sr.ID,
 			"base_score":  fmt.Sprintf("%.4f", base),
 			"model_score": fmt.Sprintf("%.4f", modelScore),
@@ -160,6 +201,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 // rerank performs the actual reranking operation with given query and passages
 func (p *PluginRerank) rerank(ctx context.Context,
 	chatManage *types.ChatManage, rerankModel rerank.Reranker, query string, passages []string,
+	candidates []*types.SearchResult,
 ) []rerank.RankResult {
 	pipelineInfo(ctx, "Rerank", "model_call", map[string]interface{}{
 		"query_variant": query,
@@ -179,21 +221,26 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		"threshold": chatManage.RerankThreshold,
 	})
 	for i := range min(5, len(rerankResp)) {
-		pipelineInfo(ctx, "Rerank", "top_score", map[string]interface{}{
-			"rank":       i + 1,
-			"score":      rerankResp[i].RelevanceScore,
-			"chunk_id":   chatManage.SearchResult[rerankResp[i].Index].ID,
-			"match_type": chatManage.SearchResult[rerankResp[i].Index].MatchType,
-			"chunk_type": chatManage.SearchResult[rerankResp[i].Index].ChunkType,
-			"content":    chatManage.SearchResult[rerankResp[i].Index].Content,
-		})
+		if rerankResp[i].Index < len(candidates) {
+			pipelineInfo(ctx, "Rerank", "top_score", map[string]interface{}{
+				"rank":       i + 1,
+				"score":      rerankResp[i].RelevanceScore,
+				"chunk_id":   candidates[rerankResp[i].Index].ID,
+				"match_type": candidates[rerankResp[i].Index].MatchType,
+				"chunk_type": candidates[rerankResp[i].Index].ChunkType,
+				"content":    candidates[rerankResp[i].Index].Content,
+			})
+		}
 	}
 
 	// Filter results based on threshold with special handling for history matches
 	rankFilter := []rerank.RankResult{}
 	for _, result := range rerankResp {
+		if result.Index >= len(candidates) {
+			continue
+		}
 		th := chatManage.RerankThreshold
-		matchType := chatManage.SearchResult[result.Index].MatchType
+		matchType := candidates[result.Index].MatchType
 		if matchType == types.MatchTypeHistory {
 			th = math.Max(th-0.1, 0.5) // Lower threshold for history matches
 		}

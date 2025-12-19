@@ -5,6 +5,44 @@ import (
 	"encoding/json"
 )
 
+// SearchTargetType represents the type of search target
+type SearchTargetType string
+
+const (
+	// SearchTargetTypeKnowledgeBase - search entire knowledge base
+	SearchTargetTypeKnowledgeBase SearchTargetType = "knowledge_base"
+	// SearchTargetTypeKnowledge - search specific knowledge files within a knowledge base
+	SearchTargetTypeKnowledge SearchTargetType = "knowledge"
+)
+
+// SearchTarget represents a unified search target
+// Either search an entire knowledge base, or specific knowledge files within a knowledge base
+type SearchTarget struct {
+	// Type of search target
+	Type SearchTargetType `json:"type"`
+	// KnowledgeBaseID is the ID of the knowledge base to search
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
+	// Only used when Type is SearchTargetTypeKnowledge
+	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
+}
+
+// SearchTargets is a list of search targets, pre-computed at request entry point
+type SearchTargets []*SearchTarget
+
+// GetAllKnowledgeBaseIDs returns all unique knowledge base IDs from the search targets
+func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, t := range st {
+		if !seen[t.KnowledgeBaseID] {
+			seen[t.KnowledgeBaseID] = true
+			result = append(result, t.KnowledgeBaseID)
+		}
+	}
+	return result
+}
+
 // SearchResult represents the search result
 type SearchResult struct {
 	// ID
@@ -53,12 +91,13 @@ type SearchResult struct {
 
 // SearchParams represents the search parameters
 type SearchParams struct {
-	QueryText            string  `json:"query_text"`
-	VectorThreshold      float64 `json:"vector_threshold"`
-	KeywordThreshold     float64 `json:"keyword_threshold"`
-	MatchCount           int     `json:"match_count"`
-	DisableKeywordsMatch bool    `json:"disable_keywords_match"`
-	DisableVectorMatch   bool    `json:"disable_vector_match"`
+	QueryText            string   `json:"query_text"`
+	VectorThreshold      float64  `json:"vector_threshold"`
+	KeywordThreshold     float64  `json:"keyword_threshold"`
+	MatchCount           int      `json:"match_count"`
+	DisableKeywordsMatch bool     `json:"disable_keywords_match"`
+	DisableVectorMatch   bool     `json:"disable_vector_match"`
+	KnowledgeIDs         []string `json:"knowledge_ids"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

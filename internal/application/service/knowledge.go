@@ -5766,3 +5766,13 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	logger.Infof(ctx, "Created tag %s (ID: %s) in target KB %s", newTag.Name, newTag.ID, dstKnowledgeBaseID)
 	return newTag.ID
 }
+
+// SearchKnowledge searches knowledge items by keyword across the tenant
+func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int) ([]*types.Knowledge, bool, error) {
+	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		return nil, false, werrors.NewUnauthorizedError("Tenant ID not found in context")
+	}
+	return s.repo.SearchKnowledge(ctx, tenantID, keyword, offset, limit)
+}
+

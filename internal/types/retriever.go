@@ -30,6 +30,8 @@ type RetrieveParams struct {
 	Embedding []float32
 	// Knowledge base IDs
 	KnowledgeBaseIDs []string
+	// Knowledge IDs
+	KnowledgeIDs []string
 	// Excluded knowledge IDs
 	ExcludeKnowledgeIDs []string
 	// Excluded chunk IDs

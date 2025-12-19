@@ -311,18 +311,9 @@ const sendMsg = async (value, modelId = '') => {
     
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     const kbIds = useSettingsStoreInstance.settings.selectedKnowledgeBases || [];
+    const knowledgeIds = useSettingsStoreInstance.settings.selectedFiles || [];
     
-    // Validate knowledge_base_ids before sending (only when agent mode is enabled)
-    if (agentEnabled && kbIds.length === 0) {
-        MessagePlugin.warning(t('chat.selectKnowledgeBaseWarning'));
-        isReplying.value = false;
-        loading.value = false;
-        // 清空当前 assistant message ID
-        currentAssistantMessageId.value = '';
-        // Remove the user message that was just added
-        messagesList.pop();
-        return;
-    }
+
     
     // Use agent-chat endpoint when agent is enabled, otherwise use knowledge-chat
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
@@ -333,6 +324,7 @@ const sendMsg = async (value, modelId = '') => {
     await startStream({ 
         session_id: session_id.value, 
         knowledge_base_ids: kbIds,
+        knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,

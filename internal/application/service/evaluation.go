@@ -266,7 +266,6 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			StartTime: time.Now(),
 		},
 		Params: &types.ChatManage{
-			KnowledgeBaseID:  knowledgeBaseID,
 			VectorThreshold:  e.config.Conversation.VectorThreshold,
 			KeywordThreshold: e.config.Conversation.KeywordThreshold,
 			EmbeddingTopK:    e.config.Conversation.EmbeddingTopK,
@@ -311,7 +310,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		logger.Info(newCtx, "Evaluation task status set to running")
 
 		// Execute actual evaluation
-		if err := e.EvalDataset(newCtx, detail); err != nil {
+		if err := e.EvalDataset(newCtx, detail, knowledgeBaseID); err != nil {
 			detail.Task.Status = types.EvaluationStatueFailed
 			detail.Task.ErrMsg = err.Error()
 			logger.Errorf(newCtx, "Evaluation task failed: %v, task ID: %s", err, taskID)
@@ -329,7 +328,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 // EvalDataset performs the actual evaluation of a dataset
 // Processes each QA pair in parallel and records metrics
-func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.EvaluationDetail) error {
+func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.EvaluationDetail, knowledgeBaseID string) error {
 	logger.Info(ctx, "Start evaluating dataset")
 	logger.Infof(ctx, "Task ID: %s, Dataset ID: %s", detail.Task.ID, detail.Task.DatasetID)
 
@@ -352,7 +351,7 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	logger.Infof(ctx, "Creating knowledge from %d passages", len(passages))
 
 	// Create knowledge base from passages
-	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassage(ctx, detail.Params.KnowledgeBaseID, passages)
+	knowledge, err := e.knowledgeService.CreateKnowledgeFromPassage(ctx, knowledgeBaseID, passages)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create knowledge from passages: %v", err)
 		return err
@@ -366,12 +365,12 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
 		}
 
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", detail.Params.KnowledgeBaseID)
-		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, detail.Params.KnowledgeBaseID); err != nil {
+		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
+		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
 			logger.Errorf(
 				ctx,
 				"Failed to delete knowledge base: %v, knowledge base ID: %s",
-				err, detail.Params.KnowledgeBaseID,
+				err, knowledgeBaseID,
 			)
 		}
 	}()

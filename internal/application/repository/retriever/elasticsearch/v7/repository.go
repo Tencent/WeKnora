@@ -355,14 +355,27 @@ func (e *elasticsearchRepository) deleteByFieldList(ctx context.Context, field s
 
 // getBaseConds Construct base Elasticsearch query conditions based on retrieval parameters
 // It creates MUST conditions for required fields and MUST_NOT conditions for excluded fields
+// KnowledgeBaseIDs and KnowledgeIDs use AND logic (search specific documents within knowledge bases)
 // Returns a JSON string representing the query conditions
 func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams) string {
 	// Build MUST conditions (positive filters)
 	must := make([]map[string]interface{}, 0)
+
+	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
+	// - If only KnowledgeBaseIDs: search entire knowledge bases
+	// - If only KnowledgeIDs: search specific documents
+	// - If both: search specific documents within the knowledge bases (AND)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		must = append(must, map[string]interface{}{
 			"terms": map[string]interface{}{
 				"knowledge_base_id.keyword": params.KnowledgeBaseIDs,
+			},
+		})
+	}
+	if len(params.KnowledgeIDs) > 0 {
+		must = append(must, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"knowledge_id.keyword": params.KnowledgeIDs,
 			},
 		})
 	}
