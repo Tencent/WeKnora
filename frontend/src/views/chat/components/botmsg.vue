@@ -1,6 +1,23 @@
 <template>
     <div class="bot_msg">
         <div style="display: flex;flex-direction: column; gap:8px">
+            <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
+            <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
+                <span 
+                    v-for="item in mentionedItems" 
+                    :key="item.id" 
+                    class="mentioned_tag"
+                    :class="[
+                      item.type === 'kb' ? (item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
+                    ]"
+                >
+                    <span class="tag_icon">
+                        <t-icon v-if="item.type === 'kb'" :name="item.kb_type === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                        <t-icon v-else name="file" />
+                    </span>
+                    <span class="tag_name">{{ item.name }}</span>
+                </span>
+            </div>
             <docInfo :session="session"></docInfo>
             <AgentStreamDisplay :session="session" :user-query="userQuery" v-if="session.isAgentMode"></AgentStreamDisplay>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
@@ -74,6 +91,11 @@ const props = defineProps({
         type: String,
         required: false,
         default: ''
+    },
+    mentionedItems: {
+        type: Array,
+        required: false,
+        default: () => []
     },
     isFirstEnter: {
         type: Boolean,
@@ -248,6 +270,75 @@ onBeforeUnmount(() => {
 </script>
 <style lang="less" scoped>
 @import '../../../components/css/markdown.less';
+
+// @提及的知识库和文件标签样式
+.mentioned_items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
+    max-width: 100%;
+    margin-bottom: 2px;
+}
+
+.mentioned_tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    max-width: 200px;
+    cursor: default;
+    transition: all 0.15s;
+    background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+    border: 1px solid transparent;
+    color: var(--td-text-color-primary, #333);
+    
+    /* KB - Document (Greenish tint) */
+    &.kb-tag {
+        background: rgba(16, 185, 129, 0.08);
+        color: #059669;
+        
+        .tag_icon {
+            color: #10b981;
+        }
+    }
+
+    /* KB - FAQ (Blueish tint) */
+    &.faq-tag {
+        background: rgba(0, 82, 217, 0.08);
+        color: #0052d9;
+        
+        .tag_icon {
+            color: #0052d9;
+        }
+    }
+    
+    /* File (Orange tint) */
+    &.file-tag {
+        background: rgba(237, 123, 47, 0.08);
+        color: #e65100;
+        
+        .tag_icon {
+            color: #ed7b2f;
+        }
+    }
+    
+    .tag_icon {
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .tag_name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: currentColor;
+    }
+}
 
 // 内容包装器 - 与 Agent 模式的 answer 样式一致
 .content-wrapper {

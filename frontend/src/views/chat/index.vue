@@ -7,7 +7,7 @@
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" :mentioned-items="getUserMentionedItems(id)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter"></botmsg>
                     </div>
                 </div>
@@ -61,7 +61,7 @@ const useSettingsStoreInstance = useSettingsStore();
 const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
-const { menuArr, isFirstSession, firstQuery } = storeToRefs(usemenuStore);
+const { menuArr, isFirstSession, firstQuery, firstMentionedItems } = storeToRefs(usemenuStore);
 const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream } = useStream();
 const route = useRoute();
 const router = useRouter();
@@ -92,6 +92,18 @@ const getUserQuery = (index) => {
         return previous.content || '';
     }
     return '';
+};
+
+// 获取用户消息的 mentioned_items（用于 bot 消息显示）
+const getUserMentionedItems = (index) => {
+    if (index <= 0) {
+        return [];
+    }
+    const previous = messagesList[index - 1];
+    if (previous && previous.role === 'user') {
+        return previous.mentioned_items || [];
+    }
+    return [];
 };
 watch([() => route.params], (newvalue) => {
     isFirstEnter.value = true;
@@ -790,7 +802,7 @@ onMounted(async () => {
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
-        sendMsg(firstQuery.value);
+        sendMsg(firstQuery.value, '', firstMentionedItems.value || []);
         usemenuStore.changeFirstQuery('');
     } else {
         scrollLock.value = false;

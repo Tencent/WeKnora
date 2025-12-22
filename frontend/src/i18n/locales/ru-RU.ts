@@ -1671,8 +1671,10 @@ export default {
   },
   input: {
     addModel: 'Добавить модель',
-    placeholder: 'Задайте вопрос на основе базы знаний',
+    placeholder: 'Задайте вопрос напрямую модели',
     placeholderWithContext: 'Введите вопрос, ответ будет основан на выбранных выше базах знаний/файлах',
+    placeholderWebOnly: 'Введите вопрос, ответ будет основан на веб-поиске',
+    placeholderKbAndWeb: 'Введите вопрос, ответ будет основан на базе знаний и веб-поиске',
     agentMode: 'Agent режим',
     normalMode: 'Обычный режим',
     normalModeDesc: 'RAG-вопросы и ответы по базе знаний',

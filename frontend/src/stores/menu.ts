@@ -32,6 +32,7 @@ export const useMenuStore = defineStore('menuStore', () => {
 
   const isFirstSession = ref(false)
   const firstQuery = ref('')
+  const firstMentionedItems = ref<any[]>([])
 
   const applyMenuTranslations = () => {
     menuArr.forEach(item => {
@@ -90,14 +91,16 @@ export const useMenuStore = defineStore('menuStore', () => {
     isFirstSession.value = payload
   }
 
-  const changeFirstQuery = (payload: string) => {
+  const changeFirstQuery = (payload: string, mentionedItems: any[] = []) => {
     firstQuery.value = payload
+    firstMentionedItems.value = mentionedItems
   }
 
   return {
     menuArr,
     isFirstSession,
     firstQuery,
+    firstMentionedItems,
     clearMenuArr,
     updatemenuArr,
     updataMenuChildren,
