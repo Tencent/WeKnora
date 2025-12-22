@@ -38,6 +38,7 @@ services:
       - COS_PATH_PREFIX=${COS_PATH_PREFIX:-}
       - COS_ENABLE_OLD_DOMAIN=${COS_ENABLE_OLD_DOMAIN:-}
       - GIN_MODE=${GIN_MODE:-release}
+      - DISABLE_REGISTRATION=${DISABLE_REGISTRATION:-false}
       - DB_DRIVER=postgres
       - DB_HOST=postgres
       - DB_PORT=5432

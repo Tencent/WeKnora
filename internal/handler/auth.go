@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -47,11 +48,20 @@ func NewAuthHandler(configInfo *config.Config,
 // @Param        request  body      types.RegisterRequest  true  "注册请求参数"
 // @Success      201      {object}  types.RegisterResponse
 // @Failure      400      {object}  errors.AppError  "请求参数错误"
+// @Failure      403      {object}  errors.AppError  "注册功能已禁用"
 // @Router       /auth/register [post]
 func (h *AuthHandler) Register(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	logger.Info(ctx, "Start user registration")
+
+	// 通过环境变量 DISABLE_REGISTRATION=true 禁止注册
+	if os.Getenv("DISABLE_REGISTRATION") == "true" {
+		logger.Warn(ctx, "Registration is disabled by DISABLE_REGISTRATION env")
+		appErr := errors.NewForbiddenError("Registration is disabled")
+		c.Error(appErr)
+		return
+	}
 
 	var req types.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
