@@ -39,6 +39,7 @@ type EvaluationRequest struct {
 // @Success      200      {object}  map[string]interface{}  "评估任务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /evaluation/ [post]
 func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -101,6 +102,7 @@ type GetEvaluationRequest struct {
 // @Success      200      {object}  map[string]interface{}  "评估结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /evaluation/ [get]
 func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 	ctx := c.Request.Context()

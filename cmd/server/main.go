@@ -15,7 +15,12 @@
 // @securityDefinitions.apikey Bearer
 // @in header
 // @name Authorization
-// @description 输入 Bearer {token} 格式的 JWT 令牌
+// @description 用户登录认证：输入 Bearer {token} 格式的 JWT 令牌
+
+// @securityDefinitions.apikey ApiKeyAuth
+// @in header
+// @name X-API-Key
+// @description 租户身份认证：输入 sk- 开头的 API Key
 package main
 
 import (

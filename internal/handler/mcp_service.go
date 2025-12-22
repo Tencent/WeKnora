@@ -33,6 +33,7 @@ func NewMCPServiceHandler(mcpServiceService interfaces.MCPServiceService) *MCPSe
 // @Success      200      {object}  map[string]interface{}  "创建的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services [post]
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -73,6 +74,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "MCP服务列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services [get]
 func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -107,6 +109,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "MCP服务详情"
 // @Failure      404  {object}  errors.AppError         "服务不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services/{id} [get]
 func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -143,6 +146,7 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "更新后的MCP服务"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services/{id} [put]
 func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -273,6 +277,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services/{id} [delete]
 func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -308,6 +313,7 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "测试结果"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/test [post]
 func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -352,6 +358,7 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "工具列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/tools [get]
 func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -387,6 +394,7 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "资源列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/resources [get]
 func (h *MCPServiceHandler) GetMCPServiceResources(c *gin.Context) {
 	ctx := c.Request.Context()

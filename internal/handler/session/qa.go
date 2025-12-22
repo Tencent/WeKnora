@@ -26,6 +26,7 @@ import (
 // @Success      200      {object}  map[string]interface{}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/search [post]
 func (h *Handler) SearchKnowledge(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -88,6 +89,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 // @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/knowledge-qa [post]
 func (h *Handler) KnowledgeQA(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
@@ -170,6 +172,7 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 // @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/agent-qa [post]
 func (h *Handler) AgentQA(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())

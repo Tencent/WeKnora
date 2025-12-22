@@ -19,6 +19,7 @@ import (
 // @Success      200         {object}  map[string]interface{}  "生成的标题"
 // @Failure      400         {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/title [post]
 func (h *Handler) GenerateTitle(c *gin.Context) {
 	ctx := c.Request.Context()

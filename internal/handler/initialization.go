@@ -217,6 +217,7 @@ type InitializationRequest struct {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      404      {object}  errors.AppError         "知识库不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/kb/{kbId}/config [put]
 func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -397,6 +398,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "初始化成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/kb/{kbId} [post]
 func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -849,6 +851,7 @@ func (h *InitializationHandler) CheckOllamaStatus(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}   "模型状态"
 // @Failure      400      {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/ollama/models/check [post]
 func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -910,6 +913,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}    "下载任务信息"
 // @Failure      400      {object}  errors.AppError           "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/ollama/models/download [post]
 func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1021,6 +1025,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 // @Success      200     {object}  map[string]interface{}  "下载进度"
 // @Failure      404     {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/ollama/download/{taskId} [get]
 func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 	taskID := c.Param("taskId")
@@ -1053,6 +1058,7 @@ func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "任务列表"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/ollama/download/tasks [get]
 func (h *InitializationHandler) ListDownloadTasks(c *gin.Context) {
 	tasksMutex.RLock()
@@ -1077,6 +1083,7 @@ func (h *InitializationHandler) ListDownloadTasks(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "模型列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/ollama/models [get]
 func (h *InitializationHandler) ListOllamaModels(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1215,6 +1222,7 @@ func (h *InitializationHandler) updateTaskStatus(
 // @Success      200   {object}  map[string]interface{}  "配置信息"
 // @Failure      404   {object}  errors.AppError         "知识库不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/kb/{kbId}/config [get]
 func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1429,6 +1437,7 @@ type RemoteModelCheckRequest struct {
 // @Success      200      {object}  map[string]interface{}   "检查结果"
 // @Failure      400      {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/models/remote/check [post]
 func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1484,6 +1493,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "测试结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/models/embedding/test [post]
 func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1647,6 +1657,7 @@ func (h *InitializationHandler) checkRerankModelConnection(ctx context.Context,
 // @Success      200      {object}  map[string]interface{}  "检查结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/models/rerank/check [post]
 func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1730,6 +1741,7 @@ type testMultimodalForm struct {
 // @Success      200               {object}  map[string]interface{}  "测试结果"
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/multimodal/test [post]
 func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1999,6 +2011,7 @@ type TextRelationExtractionResponse struct {
 // @Success      200      {object}  map[string]interface{}         "提取结果"
 // @Failure      400      {object}  errors.AppError                "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/extract/relations [post]
 func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2103,6 +2116,7 @@ type FabriTextResponse struct {
 // @Success      200      {object}  map[string]interface{}  "生成的文本"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /initialization/fabri/text [post]
 func (h *InitializationHandler) FabriText(c *gin.Context) {
 	ctx := c.Request.Context()

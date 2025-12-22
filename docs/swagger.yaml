@@ -64,6 +64,11 @@ definitions:
         items:
           type: string
         type: array
+      knowledge_ids:
+        description: Accessible knowledge IDs (individual documents)
+        items:
+          type: string
+        type: array
       max_iterations:
         description: Maximum number of ReAct iterations
         type: integer
@@ -424,6 +429,9 @@ definitions:
       knowledge_base_id:
         description: ID of the knowledge base
         type: string
+      knowledge_base_name:
+        description: Knowledge base name (not stored in database, populated on query)
+        type: string
       metadata:
         description: Metadata of the knowledge
         items:
@@ -700,8 +708,10 @@ definitions:
     - 5
     - 6
     - 7
+    - 8
     type: integer
     x-enum-comments:
+      MatchTypeDirectLoad: 直接加载匹配类型
       MatchTypeParentChunk: 父Chunk匹配类型
       MatchTypeRelationChunk: 关系Chunk匹配类型
       MatchTypeWebSearch: 网络搜索匹配类型
@@ -714,6 +724,7 @@ definitions:
     - 关系Chunk匹配类型
     - ""
     - 网络搜索匹配类型
+    - 直接加载匹配类型
     x-enum-varnames:
     - MatchTypeEmbedding
     - MatchTypeKeywords
@@ -723,6 +734,20 @@ definitions:
     - MatchTypeRelationChunk
     - MatchTypeGraph
     - MatchTypeWebSearch
+    - MatchTypeDirectLoad
+  github_com_Tencent_WeKnora_internal_types.MentionedItem:
+    properties:
+      id:
+        type: string
+      kb_type:
+        description: '"document" or "faq" (only for kb type)'
+        type: string
+      name:
+        type: string
+      type:
+        description: '"kb" for knowledge base, "file" for file'
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.Message:
     properties:
       agent_steps:
@@ -753,6 +778,13 @@ definitions:
         description: References to knowledge chunks used in the response
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SearchResult'
+        type: array
+      mentioned_items:
+        description: |-
+          Mentioned knowledge bases and files (for user messages)
+          Stores the @mentioned items when user sends a message
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem'
         type: array
       request_id:
         description: Request identifier for tracking API requests
@@ -915,6 +947,10 @@ definitions:
         type: boolean
       keyword_threshold:
         type: number
+      knowledge_ids:
+        items:
+          type: string
+        type: array
       match_count:
         type: integer
       query_text:
@@ -1067,6 +1103,11 @@ definitions:
         type: boolean
       knowledge_bases:
         description: Accessible knowledge base IDs for this session
+        items:
+          type: string
+        type: array
+      knowledge_ids:
+        description: Accessible knowledge IDs (individual documents) for this session
         items:
           type: string
         type: array
@@ -1584,6 +1625,16 @@ definitions:
         items:
           type: string
         type: array
+      knowledge_ids:
+        description: Selected knowledge ID for this request
+        items:
+          type: string
+        type: array
+      mentioned_items:
+        description: '@mentioned knowledge bases and files'
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
       query:
         description: Query text for knowledge base search
         type: string
@@ -1622,6 +1673,19 @@ definitions:
         type: array
     required:
     - messages
+    type: object
+  internal_handler_session.MentionedItemRequest:
+    properties:
+      id:
+        type: string
+      kb_type:
+        description: '"document" or "faq" (only for kb type)'
+        type: string
+      name:
+        type: string
+      type:
+        description: '"kb" for knowledge base, "file" for file'
+        type: string
     type: object
   internal_handler_session.SearchKnowledgeRequest:
     properties:
@@ -1696,22 +1760,6 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
-  /api/v1/web-search/providers:
-    get:
-      consumes:
-      - application/json
-      description: Returns the list of available web search providers from configuration
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: List of providers
-          schema:
-            additionalProperties: true
-            type: object
-      summary: Get available web search providers
-      tags:
-      - web-search
   /auth/change-password:
     post:
       consumes:
@@ -1919,6 +1967,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除知识下所有分块
       tags:
       - 分块管理
@@ -1956,6 +2005,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取知识分块列表
       tags:
       - 分块管理
@@ -1993,6 +2043,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除分块
       tags:
       - 分块管理
@@ -2035,6 +2086,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新分块
       tags:
       - 分块管理
@@ -2067,6 +2119,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 通过ID获取分块
       tags:
       - 分块管理
@@ -2108,6 +2161,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除生成的问题
       tags:
       - 分块管理
@@ -2136,6 +2190,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取评估结果
       tags:
       - 评估
@@ -2164,9 +2219,39 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 执行评估
       tags:
       - 评估
+  /faq/import/progress/{task_id}:
+    get:
+      consumes:
+      - application/json
+      description: 获取FAQ导入任务的进度
+      parameters:
+      - description: 任务ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 导入进度
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 任务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取FAQ导入进度
+      tags:
+      - FAQ管理
   /initialization/extract/relations:
     post:
       consumes:
@@ -2193,6 +2278,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 提取文本关系
       tags:
       - 初始化
@@ -2238,6 +2324,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 生成示例文本
       tags:
       - 初始化
@@ -2272,6 +2359,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 初始化知识库配置
       tags:
       - 初始化
@@ -2300,6 +2388,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取知识库配置
       tags:
       - 初始化
@@ -2337,6 +2426,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新知识库配置
       tags:
       - 初始化
@@ -2366,6 +2456,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 测试Embedding模型
       tags:
       - 初始化
@@ -2395,6 +2486,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 检查远程模型
       tags:
       - 初始化
@@ -2424,6 +2516,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 检查Rerank模型
       tags:
       - 初始化
@@ -2475,6 +2568,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 测试多模态功能
       tags:
       - 初始化
@@ -2503,6 +2597,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取下载进度
       tags:
       - 初始化
@@ -2521,6 +2616,7 @@ paths:
             type: object
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 列出下载任务
       tags:
       - 初始化
@@ -2543,6 +2639,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 列出Ollama模型
       tags:
       - 初始化
@@ -2577,6 +2674,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 检查Ollama模型状态
       tags:
       - 初始化
@@ -2609,6 +2707,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 下载Ollama模型
       tags:
       - 初始化
@@ -2647,6 +2746,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取知识库列表
       tags:
       - 知识库
@@ -2675,6 +2775,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 创建知识库
       tags:
       - 知识库
@@ -2703,6 +2804,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除知识库
       tags:
       - 知识库
@@ -2734,6 +2836,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取知识库详情
       tags:
       - 知识库
@@ -2767,6 +2870,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新知识库
       tags:
       - 知识库
@@ -2806,6 +2910,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 批量删除FAQ条目
       tags:
       - FAQ管理
@@ -2849,6 +2954,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取FAQ条目列表
       tags:
       - FAQ管理
@@ -2882,6 +2988,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 批量更新/插入FAQ条目
       tags:
       - FAQ管理
@@ -2921,6 +3028,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新FAQ条目
       tags:
       - FAQ管理
@@ -2948,6 +3056,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 导出FAQ条目
       tags:
       - FAQ管理
@@ -2982,6 +3091,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 批量更新FAQ字段
       tags:
       - FAQ管理
@@ -3016,6 +3126,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 批量更新FAQ标签
       tags:
       - FAQ管理
@@ -3050,6 +3161,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 创建单个FAQ条目
       tags:
       - FAQ管理
@@ -3084,6 +3196,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 搜索FAQ
       tags:
       - FAQ管理
@@ -3118,6 +3231,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 混合搜索
       tags:
       - 知识库
@@ -3166,6 +3280,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取知识列表
       tags:
       - 知识管理
@@ -3216,6 +3331,7 @@ paths:
             type: object
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 从文件创建知识
       tags:
       - 知识管理
@@ -3250,6 +3366,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 手工创建知识
       tags:
       - 知识管理
@@ -3296,6 +3413,7 @@ paths:
             type: object
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 从URL创建知识
       tags:
       - 知识管理
@@ -3336,6 +3454,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取标签列表
       tags:
       - 标签管理
@@ -3376,6 +3495,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 创建标签
       tags:
       - 标签管理
@@ -3413,6 +3533,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除标签
       tags:
       - 标签管理
@@ -3451,6 +3572,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新标签
       tags:
       - 标签管理
@@ -3458,7 +3580,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 将一个知识库的内容复制到另一个知识库
+      description: 将一个知识库的内容复制到另一个知识库（异步任务）
       parameters:
       - description: 复制请求
         in: body
@@ -3470,7 +3592,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: 复制成功
+          description: 任务ID
           schema:
             additionalProperties: true
             type: object
@@ -3480,7 +3602,37 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 复制知识库
+      tags:
+      - 知识库
+  /knowledge-bases/copy/progress/{task_id}:
+    get:
+      consumes:
+      - application/json
+      description: 获取知识库复制任务的进度
+      parameters:
+      - description: 任务ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 进度信息
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 任务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取知识库复制进度
       tags:
       - 知识库
   /knowledge/{id}:
@@ -3508,6 +3660,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除知识
       tags:
       - 知识管理
@@ -3539,6 +3692,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取知识详情
       tags:
       - 知识管理
@@ -3572,6 +3726,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新知识
       tags:
       - 知识管理
@@ -3599,6 +3754,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 下载知识文件
       tags:
       - 知识管理
@@ -3630,6 +3786,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 批量获取知识
       tags:
       - 知识管理
@@ -3672,6 +3829,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新图像信息
       tags:
       - 知识管理
@@ -3706,9 +3864,46 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新手工知识
       tags:
       - 知识管理
+  /knowledge/search:
+    get:
+      consumes:
+      - application/json
+      description: Search knowledge files by keyword across all knowledge bases
+      parameters:
+      - description: Keyword to search
+        in: query
+        name: keyword
+        type: string
+      - description: Offset for pagination
+        in: query
+        name: offset
+        type: integer
+      - description: Limit for pagination (default 20)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Search results
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Search knowledge
+      tags:
+      - Knowledge
   /knowledge/tags:
     put:
       consumes:
@@ -3735,6 +3930,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 批量更新知识标签
       tags:
       - 知识管理
@@ -3757,6 +3953,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取MCP服务列表
       tags:
       - MCP服务
@@ -3785,6 +3982,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 创建MCP服务
       tags:
       - MCP服务
@@ -3813,6 +4011,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除MCP服务
       tags:
       - MCP服务
@@ -3840,6 +4039,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取MCP服务详情
       tags:
       - MCP服务
@@ -3873,6 +4073,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新MCP服务
       tags:
       - MCP服务
@@ -3901,6 +4102,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取MCP服务资源列表
       tags:
       - MCP服务
@@ -3929,6 +4131,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 测试MCP服务连接
       tags:
       - MCP服务
@@ -3957,6 +4160,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取MCP服务工具列表
       tags:
       - MCP服务
@@ -3990,6 +4194,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除消息
       tags:
       - 消息
@@ -4027,6 +4232,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 加载消息历史
       tags:
       - 消息
@@ -4049,6 +4255,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取模型列表
       tags:
       - 模型管理
@@ -4077,6 +4284,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 创建模型
       tags:
       - 模型管理
@@ -4105,6 +4313,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除模型
       tags:
       - 模型管理
@@ -4132,6 +4341,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取模型详情
       tags:
       - 模型管理
@@ -4165,6 +4375,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新模型
       tags:
       - 模型管理
@@ -4196,6 +4407,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取会话列表
       tags:
       - 会话
@@ -4224,6 +4436,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 创建会话
       tags:
       - 会话
@@ -4252,6 +4465,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 删除会话
       tags:
       - 会话
@@ -4279,6 +4493,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取会话详情
       tags:
       - 会话
@@ -4312,6 +4527,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新会话
       tags:
       - 会话
@@ -4346,6 +4562,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: Agent问答
       tags:
       - 问答
@@ -4379,6 +4596,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 继续流式响应
       tags:
       - 问答
@@ -4413,6 +4631,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 知识问答
       tags:
       - 问答
@@ -4447,6 +4666,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 停止生成
       tags:
       - 问答
@@ -4481,6 +4701,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 生成会话标题
       tags:
       - 会话
@@ -4510,6 +4731,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 知识搜索
       tags:
       - 问答
@@ -4634,6 +4856,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取租户详情
       tags:
       - 租户管理
@@ -4717,6 +4940,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取租户KV配置
       tags:
       - 租户管理
@@ -4750,6 +4974,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 更新租户KV配置
       tags:
       - 租户管理
@@ -4772,6 +4997,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取租户Agent配置
       tags:
       - 租户管理
@@ -4794,6 +5020,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取租户对话配置
       tags:
       - 租户管理
@@ -4816,6 +5043,7 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 获取租户网络搜索配置
       tags:
       - 租户管理
@@ -4857,12 +5085,37 @@ paths:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
+      - ApiKeyAuth: []
       summary: 搜索租户
       tags:
       - 租户管理
+  /web-search/providers:
+    get:
+      consumes:
+      - application/json
+      description: Returns the list of available web search providers from configuration
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of providers
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Get available web search providers
+      tags:
+      - web-search
 securityDefinitions:
+  ApiKeyAuth:
+    description: 租户身份认证：输入 sk- 开头的 API Key
+    in: header
+    name: X-API-Key
+    type: apiKey
   Bearer:
-    description: 输入 Bearer {token} 格式的 JWT 令牌
+    description: 用户登录认证：输入 Bearer {token} 格式的 JWT 令牌
     in: header
     name: Authorization
     type: apiKey

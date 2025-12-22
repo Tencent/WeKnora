@@ -35,6 +35,7 @@ func NewTagHandler(tagService interfaces.KnowledgeTagService) *TagHandler {
 // @Success      200        {object}  map[string]interface{}  "标签列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags [get]
 func (h *TagHandler) ListTags(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -79,6 +80,7 @@ type createTagRequest struct {
 // @Success      200      {object}  map[string]interface{}  "创建的标签"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags [post]
 func (h *TagHandler) CreateTag(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -125,6 +127,7 @@ type updateTagRequest struct {
 // @Success      200      {object}  map[string]interface{}  "更新后的标签"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags/{tag_id} [put]
 func (h *TagHandler) UpdateTag(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -164,6 +167,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 // @Success      200     {object}  map[string]interface{}  "删除成功"
 // @Failure      400     {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags/{tag_id} [delete]
 func (h *TagHandler) DeleteTag(c *gin.Context) {
 	ctx := c.Request.Context()

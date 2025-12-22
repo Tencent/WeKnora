@@ -102,6 +102,7 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "租户不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/{id} [get]
 func (h *TenantHandler) GetTenant(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -338,6 +339,7 @@ func (h *TenantHandler) ListAllTenants(c *gin.Context) {
 // @Success      200        {object}  map[string]interface{}  "搜索结果"
 // @Failure      403        {object}  errors.AppError         "权限不足"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/search [get]
 func (h *TenantHandler) SearchTenants(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -435,6 +437,7 @@ type AgentConfigRequest struct {
 // @Success      200  {object}  map[string]interface{}  "Agent配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/kv/agent-config [get]
 func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -591,6 +594,7 @@ func (h *TenantHandler) updateTenantAgentConfigInternal(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "配置值"
 // @Failure      400  {object}  errors.AppError         "不支持的键"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/kv/{key} [get]
 func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -624,6 +628,7 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "不支持的键"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/kv/{key} [put]
 func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -699,6 +704,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "网络搜索配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/kv/web-search-config [get]
 func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -784,6 +790,7 @@ func validateConversationConfig(req *types.ConversationConfig) error {
 // @Success      200  {object}  map[string]interface{}  "对话配置"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /tenants/kv/conversation-config [get]
 func (h *TenantHandler) GetTenantConversationConfig(c *gin.Context) {
 	ctx := c.Request.Context()

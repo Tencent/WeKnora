@@ -33,6 +33,7 @@ func NewChunkHandler(service interfaces.ChunkService) *ChunkHandler {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "分块不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /chunks/by-id/{id} [get]
 func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -102,6 +103,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 // @Success      200           {object}  map[string]interface{}  "分块列表"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id} [get]
 func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -236,6 +238,7 @@ func (h *ChunkHandler) validateAndGetChunk(c *gin.Context) (*types.Chunk, string
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Failure      404           {object}  errors.AppError         "分块不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id}/{id} [put]
 func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -287,6 +290,7 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Failure      404           {object}  errors.AppError         "分块不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id}/{id} [delete]
 func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -321,6 +325,7 @@ func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
 // @Success      200           {object}  map[string]interface{}  "删除成功"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id} [delete]
 func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -359,6 +364,7 @@ func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Failure      404      {object}  errors.AppError              "分块不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /chunks/by-id/{id}/questions [delete]
 func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 	ctx := c.Request.Context()

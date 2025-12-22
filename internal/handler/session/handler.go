@@ -49,6 +49,7 @@ func NewHandler(
 // @Success      201      {object}  map[string]interface{}  "创建的会话"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions [post]
 func (h *Handler) CreateSession(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -207,6 +208,7 @@ func (h *Handler) applyConversationDefaults(ctx context.Context, session *types.
 // @Success      200  {object}  map[string]interface{}  "会话详情"
 // @Failure      404  {object}  errors.AppError         "会话不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{id} [get]
 func (h *Handler) GetSession(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -254,6 +256,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions [get]
 func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -295,6 +298,7 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "更新后的会话"
 // @Failure      404      {object}  errors.AppError         "会话不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{id} [put]
 func (h *Handler) UpdateSession(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -356,6 +360,7 @@ func (h *Handler) UpdateSession(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      404  {object}  errors.AppError         "会话不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{id} [delete]
 func (h *Handler) DeleteSession(c *gin.Context) {
 	ctx := c.Request.Context()

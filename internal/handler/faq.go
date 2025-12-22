@@ -36,6 +36,7 @@ func NewFAQHandler(knowledgeService interfaces.KnowledgeService) *FAQHandler {
 // @Success      200        {object}  map[string]interface{}  "FAQ列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries [get]
 func (h *FAQHandler) ListEntries(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -73,6 +74,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}    "任务ID"
 // @Failure      400      {object}  errors.AppError           "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries [post]
 func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -109,6 +111,7 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "创建的FAQ条目"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entry [post]
 func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -144,6 +147,7 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 // @Success      200       {object}  map[string]interface{}  "更新成功"
 // @Failure      400       {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [put]
 func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -177,6 +181,7 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/tags [put]
 func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -208,6 +213,7 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}        "更新成功"
 // @Failure      400      {object}  errors.AppError               "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/fields [put]
 func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -249,6 +255,7 @@ type faqEntryTagBatchRequest struct {
 // @Success      200      {object}  map[string]interface{}  "删除成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries [delete]
 func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -283,6 +290,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/search [post]
 func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -322,6 +330,7 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 // @Success      200  {file}    file    "CSV文件"
 // @Failure      400  {object}  errors.AppError  "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/export [get]
 func (h *FAQHandler) ExportEntries(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -352,6 +361,7 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "导入进度"
 // @Failure      404      {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /faq/import/progress/{task_id} [get]
 func (h *FAQHandler) GetImportProgress(c *gin.Context) {
 	ctx := c.Request.Context()

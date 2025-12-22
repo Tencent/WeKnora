@@ -26,6 +26,7 @@ import (
 // @Success      200         {object}  map[string]interface{}  "流式响应"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/continue [get]
 func (h *Handler) ContinueStream(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -185,6 +186,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 // @Success      200         {object}  map[string]interface{}  "停止成功"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/stop [post]
 func (h *Handler) StopSession(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())

@@ -19,30 +19,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/v1/web-search/providers": {
-            "get": {
-                "description": "Returns the list of available web search providers from configuration",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "web-search"
-                ],
-                "summary": "Get available web search providers",
-                "responses": {
-                    "200": {
-                        "description": "List of providers",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    }
-                }
-            }
-        },
         "/auth/change-password": {
             "post": {
                 "security": [
@@ -333,6 +309,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "仅通过分块ID获取分块详情（不需要knowledge_id）",
@@ -383,6 +362,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除分块中生成的问题",
@@ -447,6 +429,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取指定知识下的所有分块列表，支持分页",
@@ -503,6 +488,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除指定知识下的所有分块",
@@ -547,6 +535,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新指定分块的内容和属性",
@@ -611,6 +602,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除指定的分块",
@@ -668,6 +662,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据任务ID获取评估结果",
@@ -710,6 +707,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "对知识库进行评估测试",
@@ -751,11 +751,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/faq/import/progress/{task_id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "获取FAQ导入任务的进度",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "FAQ管理"
+                ],
+                "summary": "获取FAQ导入进度",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "导入进度",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/initialization/extract/relations": {
             "post": {
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "从文本中提取实体和关系",
@@ -826,6 +876,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据标签生成示例文本",
@@ -872,6 +925,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据知识库ID执行完整配置更新",
@@ -925,6 +981,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据知识库ID获取当前配置信息",
@@ -967,6 +1026,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据知识库ID更新模型和分块配置",
@@ -1026,6 +1088,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "测试Embedding接口是否可用并返回向量维度",
@@ -1072,6 +1137,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "检查远程API模型连接是否正常",
@@ -1118,6 +1186,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "检查Rerank模型连接和功能是否正常",
@@ -1164,6 +1235,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "上传图片测试多模态处理功能",
@@ -1241,6 +1315,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "列出所有Ollama模型下载任务",
@@ -1270,6 +1347,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取Ollama模型下载任务的进度",
@@ -1314,6 +1394,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "列出已安装的Ollama模型",
@@ -1349,6 +1432,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "检查指定的Ollama模型是否已安装",
@@ -1403,6 +1489,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "异步下载指定的Ollama模型",
@@ -1478,6 +1567,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取当前租户的所有知识库",
@@ -1511,6 +1603,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "创建新的知识库",
@@ -1557,9 +1652,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
-                "description": "将一个知识库的内容复制到另一个知识库",
+                "description": "将一个知识库的内容复制到另一个知识库（异步任务）",
                 "consumes": [
                     "application/json"
                 ],
@@ -1583,7 +1681,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "复制成功",
+                        "description": "任务ID",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -1598,11 +1696,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge-bases/copy/progress/{task_id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "获取知识库复制任务的进度",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识库"
+                ],
+                "summary": "获取知识库复制进度",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "进度信息",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge-bases/{id}": {
             "get": {
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID获取知识库详情",
@@ -1651,6 +1799,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新知识库的名称、描述和配置",
@@ -1702,6 +1853,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除指定的知识库及其所有内容",
@@ -1746,6 +1900,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取知识库下的FAQ条目列表，支持分页和筛选",
@@ -1812,6 +1969,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "异步批量更新或插入FAQ条目",
@@ -1863,6 +2023,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "批量删除指定的FAQ条目",
@@ -1924,6 +2087,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "将所有FAQ条目导出为CSV文件",
@@ -1967,6 +2133,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "批量更新FAQ条目的多个字段（is_enabled, is_recommended, tag_id）",
@@ -2020,6 +2189,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "批量更新FAQ条目的标签",
@@ -2073,6 +2245,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新指定的FAQ条目",
@@ -2133,6 +2308,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "同步创建单个FAQ条目",
@@ -2186,6 +2364,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "使用混合搜索在FAQ中搜索",
@@ -2239,6 +2420,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "在知识库中执行向量和关键词混合搜索",
@@ -2292,6 +2476,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取知识库下的知识列表，支持分页和筛选",
@@ -2366,6 +2553,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "上传文件并创建知识条目",
@@ -2442,6 +2632,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "手工录入Markdown格式的知识内容",
@@ -2495,6 +2688,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "从指定URL抓取内容并创建知识条目",
@@ -2566,6 +2762,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取知识库下的所有标签及统计信息",
@@ -2626,6 +2825,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "在知识库下创建新标签",
@@ -2690,6 +2892,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新标签信息",
@@ -2748,6 +2953,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除标签，可使用force=true强制删除被引用的标签",
@@ -2805,6 +3013,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID列表批量获取知识条目",
@@ -2853,6 +3064,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新知识分块的图像信息",
@@ -2918,6 +3132,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新手工录入的Markdown知识内容",
@@ -2966,11 +3183,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/knowledge/search": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Search knowledge files by keyword across all knowledge bases",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Knowledge"
+                ],
+                "summary": "Search knowledge",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Keyword to search",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset for pagination",
+                        "name": "offset",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Limit for pagination (default 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Search results",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/knowledge/tags": {
             "put": {
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "批量更新知识条目的标签",
@@ -3017,6 +3295,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID获取知识条目详情",
@@ -3065,6 +3346,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新知识条目信息",
@@ -3116,6 +3400,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID删除知识条目",
@@ -3160,6 +3447,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "下载知识条目关联的原始文件",
@@ -3203,6 +3493,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取当前租户的所有MCP服务",
@@ -3236,6 +3529,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "创建新的MCP服务配置",
@@ -3282,6 +3578,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID获取MCP服务详情",
@@ -3324,6 +3623,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新MCP服务配置",
@@ -3375,6 +3677,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除指定的MCP服务",
@@ -3419,6 +3724,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取MCP服务提供的资源列表",
@@ -3463,6 +3771,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "测试MCP服务是否可以正常连接",
@@ -3507,6 +3818,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取MCP服务提供的工具列表",
@@ -3551,6 +3865,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "加载会话的消息历史，支持分页和时间筛选",
@@ -3608,6 +3925,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "从会话中删除指定消息",
@@ -3659,6 +3979,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取当前租户的所有模型",
@@ -3692,6 +4015,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "创建新的模型配置",
@@ -3738,6 +4064,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID获取模型详情",
@@ -3780,6 +4109,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新模型配置信息",
@@ -3831,6 +4163,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除指定的模型",
@@ -3875,6 +4210,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取当前租户的会话列表，支持分页",
@@ -3922,6 +4260,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "创建新的对话会话",
@@ -3968,6 +4309,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "在知识库中搜索（不使用LLM总结）",
@@ -4014,6 +4358,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID获取会话详情",
@@ -4056,6 +4403,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新会话属性",
@@ -4107,6 +4457,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "删除指定的会话",
@@ -4151,6 +4504,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "基于Agent的智能问答，支持多轮对话和SSE流式响应",
@@ -4204,6 +4560,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "继续获取正在进行的流式响应",
@@ -4255,6 +4614,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "基于知识库的问答（使用LLM总结），支持SSE流式响应",
@@ -4308,6 +4670,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "停止当前正在进行的生成任务",
@@ -4361,6 +4726,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据消息内容自动生成会话标题",
@@ -4551,6 +4919,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取租户的全局Agent配置（默认应用于所有会话）",
@@ -4586,6 +4957,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取租户的全局对话配置（默认应用于普通模式会话）",
@@ -4621,6 +4995,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取租户的网络搜索配置",
@@ -4656,6 +5033,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "获取租户级别的KV配置（支持agent-config、web-search-config、conversation-config）",
@@ -4698,6 +5078,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "更新租户级别的KV配置（支持agent-config、web-search-config、conversation-config）",
@@ -4751,6 +5134,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "分页搜索租户（需要跨租户访问权限）",
@@ -4814,6 +5200,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
                     }
                 ],
                 "description": "根据ID获取租户详情",
@@ -4951,6 +5340,38 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/web-search/providers": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns the list of available web search providers from configuration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "web-search"
+                ],
+                "summary": "Get available web search providers",
+                "responses": {
+                    "200": {
+                        "description": "List of providers",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -5025,6 +5446,13 @@ const docTemplate = `{
                 },
                 "knowledge_bases": {
                     "description": "Accessible knowledge base IDs",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "knowledge_ids": {
+                    "description": "Accessible knowledge IDs (individual documents)",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -5548,6 +5976,10 @@ const docTemplate = `{
                     "description": "ID of the knowledge base",
                     "type": "string"
                 },
+                "knowledge_base_name": {
+                    "description": "Knowledge base name (not stored in database, populated on query)",
+                    "type": "string"
+                },
                 "metadata": {
                     "description": "Metadata of the knowledge",
                     "type": "array",
@@ -5960,9 +6392,11 @@ const docTemplate = `{
                 4,
                 5,
                 6,
-                7
+                7,
+                8
             ],
             "x-enum-comments": {
+                "MatchTypeDirectLoad": "直接加载匹配类型",
                 "MatchTypeParentChunk": "父Chunk匹配类型",
                 "MatchTypeRelationChunk": "关系Chunk匹配类型",
                 "MatchTypeWebSearch": "网络搜索匹配类型"
@@ -5975,7 +6409,8 @@ const docTemplate = `{
                 "父Chunk匹配类型",
                 "关系Chunk匹配类型",
                 "",
-                "网络搜索匹配类型"
+                "网络搜索匹配类型",
+                "直接加载匹配类型"
             ],
             "x-enum-varnames": [
                 "MatchTypeEmbedding",
@@ -5985,8 +6420,28 @@ const docTemplate = `{
                 "MatchTypeParentChunk",
                 "MatchTypeRelationChunk",
                 "MatchTypeGraph",
-                "MatchTypeWebSearch"
+                "MatchTypeWebSearch",
+                "MatchTypeDirectLoad"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.MentionedItem": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kb_type": {
+                    "description": "\"document\" or \"faq\" (only for kb type)",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"kb\" for knowledge base, \"file\" for file",
+                    "type": "string"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.Message": {
             "type": "object",
@@ -6027,6 +6482,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchResult"
+                    }
+                },
+                "mentioned_items": {
+                    "description": "Mentioned knowledge bases and files (for user messages)\nStores the @mentioned items when user sends a message",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem"
                     }
                 },
                 "request_id": {
@@ -6253,6 +6715,12 @@ const docTemplate = `{
                 "keyword_threshold": {
                     "type": "number"
                 },
+                "knowledge_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "match_count": {
                     "type": "integer"
                 },
@@ -6469,6 +6937,13 @@ const docTemplate = `{
                 },
                 "knowledge_bases": {
                     "description": "Accessible knowledge base IDs for this session",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "knowledge_ids": {
+                    "description": "Accessible knowledge IDs (individual documents) for this session",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -7231,6 +7706,20 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "knowledge_ids": {
+                    "description": "Selected knowledge ID for this request",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mentioned_items": {
+                    "description": "@mentioned knowledge bases and files",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
                 "query": {
                     "description": "Query text for knowledge base search",
                     "type": "string"
@@ -7282,6 +7771,25 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Message"
                     }
+                }
+            }
+        },
+        "internal_handler_session.MentionedItemRequest": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kb_type": {
+                    "description": "\"document\" or \"faq\" (only for kb type)",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"kb\" for knowledge base, \"file\" for file",
+                    "type": "string"
                 }
             }
         },
@@ -7380,8 +7888,14 @@ const docTemplate = `{
         }
     },
     "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "租户身份认证：输入 sk- 开头的 API Key",
+            "type": "apiKey",
+            "name": "X-API-Key",
+            "in": "header"
+        },
         "Bearer": {
-            "description": "输入 Bearer {token} 格式的 JWT 令牌",
+            "description": "用户登录认证：输入 Bearer {token} 格式的 JWT 令牌",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"

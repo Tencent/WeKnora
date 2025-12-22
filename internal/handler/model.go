@@ -78,6 +78,7 @@ type CreateModelRequest struct {
 // @Success      201      {object}  map[string]interface{}  "创建的模型"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /models [post]
 func (h *ModelHandler) CreateModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -141,6 +142,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "模型详情"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /models/{id} [get]
 func (h *ModelHandler) GetModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -190,6 +192,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "模型列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /models [get]
 func (h *ModelHandler) ListModels(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -248,6 +251,7 @@ type UpdateModelRequest struct {
 // @Success      200      {object}  map[string]interface{}  "更新后的模型"
 // @Failure      404      {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /models/{id} [put]
 func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -320,6 +324,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /models/{id} [delete]
 func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	ctx := c.Request.Context()

@@ -97,6 +97,7 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 // @Failure      400               {object}  errors.AppError         "请求参数错误"
 // @Failure      409               {object}  map[string]interface{}  "文件重复"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/file [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -194,6 +195,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/url [post]
 func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -261,6 +263,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}       "创建的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/manual [post]
 func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -311,6 +314,7 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "知识不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/{id} [get]
 func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -360,6 +364,7 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @Success      200        {object}  map[string]interface{}  "知识列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge [get]
 func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -430,6 +435,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/{id} [delete]
 func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -469,6 +475,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 // @Success      200  {file}    file    "文件内容"
 // @Failure      400  {object}  errors.AppError  "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/{id}/download [get]
 func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -536,6 +543,7 @@ type GetKnowledgeBatchRequest struct {
 // @Success      200  {object}  map[string]interface{}  "知识列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/batch [get]
 func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -594,6 +602,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/{id} [put]
 func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -636,6 +645,7 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}       "更新后的知识"
 // @Failure      400      {object}  errors.AppError              "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/manual/{id} [put]
 func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -689,6 +699,7 @@ type knowledgeTagBatchRequest struct {
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -720,6 +731,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 // @Success      200       {object}  map[string]interface{}     "更新成功"
 // @Failure      400       {object}  errors.AppError            "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/image/{id}/{chunk_id} [put]
 func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -777,6 +789,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Success      200       {object}  map[string]interface{}     "Search results"
 // @Failure      400       {object}  errors.AppError            "Invalid request"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge/search [get]
 func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()

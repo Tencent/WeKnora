@@ -28,7 +28,9 @@ func NewWebSearchHandler(cfg *config.Config) *WebSearchHandler {
 // @Accept json
 // @Produce json
 // @Success 200 {object} map[string]interface{} "List of providers"
-// @Router /api/v1/web-search/providers [get]
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router /web-search/providers [get]
 func (h *WebSearchHandler) GetProviders(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Getting web search providers")

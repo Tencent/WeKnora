@@ -48,6 +48,7 @@ func NewKnowledgeBaseHandler(
 // @Success      200      {object}  map[string]interface{}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
 func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -99,6 +100,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 // @Success      201      {object}  map[string]interface{}  "创建的知识库"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases [post]
 func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -186,6 +188,7 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "知识库不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [get]
 func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	// Validate and get the knowledge base
@@ -209,6 +212,7 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "知识库列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases [get]
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -245,6 +249,7 @@ type UpdateKnowledgeBaseRequest struct {
 // @Success      200      {object}  map[string]interface{}     "更新后的知识库"
 // @Failure      400      {object}  errors.AppError            "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [put]
 func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -294,6 +299,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [delete]
 func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -347,6 +353,7 @@ type CopyKnowledgeBaseResponse struct {
 // @Success      200      {object}  map[string]interface{}     "任务ID"
 // @Failure      400      {object}  errors.AppError            "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/copy [post]
 func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -432,6 +439,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 // @Success      200      {object}  map[string]interface{}  "进度信息"
 // @Failure      404      {object}  errors.AppError         "任务不存在"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /knowledge-bases/copy/progress/{task_id} [get]
 func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 	ctx := c.Request.Context()

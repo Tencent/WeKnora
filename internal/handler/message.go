@@ -42,6 +42,7 @@ func NewMessageHandler(messageService interfaces.MessageService) *MessageHandler
 // @Success      200          {object}  map[string]interface{}  "消息列表"
 // @Failure      400          {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /messages/{session_id}/load [get]
 func (h *MessageHandler) LoadMessages(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -129,6 +130,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 // @Success      200         {object}  map[string]interface{}  "删除成功"
 // @Failure      500         {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
+// @Security     ApiKeyAuth
 // @Router       /messages/{session_id}/{id} [delete]
 func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 	ctx := c.Request.Context()
