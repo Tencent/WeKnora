@@ -4,7 +4,7 @@
             <div class="msg_list">
                 <div v-for="(session, id) in messagesList" :key='id'>
                     <div v-if="session.role == 'user'">
-                        <usermsg :content="session.content"></usermsg>
+                        <usermsg :content="session.content" :mentioned_items="session.mentioned_items"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
                         <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
@@ -23,7 +23,7 @@
         </div>
         <div style="min-height: 115px; margin: 16px auto 4px;width: 100%;max-width: 800px;">
             <InputField 
-                @send-msg="(query, modelId) => sendMsg(query, modelId)" 
+                @send-msg="(query, modelId, mentionedItems) => sendMsg(query, modelId, mentionedItems)" 
                 @stop-generation="handleStopGeneration"
                 :isReplying="isReplying" 
                 :sessionId="session_id"
@@ -296,11 +296,12 @@ const handleStopGeneration = () => {
     // API 调用成功后，后端的 stop 事件会清空它
 };
 
-const sendMsg = async (value, modelId = '') => {
+const sendMsg = async (value, modelId = '', mentionedItems = []) => {
     userquery.value = value;
     isReplying.value = true;
     loading.value = true;
-    messagesList.push({ content: value, role: 'user' });
+    // 将@提及的知识库和文件信息存入用户消息
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems });
     scrollToBottom();
     
     // Get agent mode status from settings store
@@ -329,6 +330,7 @@ const sendMsg = async (value, modelId = '') => {
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,
         mcp_service_ids: mcpServiceIds,
+        mentioned_items: mentionedItems,
         query: value, 
         method: 'POST', 
         url: endpoint

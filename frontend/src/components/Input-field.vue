@@ -816,7 +816,14 @@ const createSession = (val: string) => {
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
   }
-  emit('send-msg', val, selectedModelId.value);
+  // 获取@提及的知识库和文件信息
+  const mentionedItems = allSelectedItems.value.map(item => ({
+    id: item.id,
+    name: item.name,
+    type: item.type,
+    kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined
+  }));
+  emit('send-msg', val, selectedModelId.value, mentionedItems);
   clearvalue();
 }
 

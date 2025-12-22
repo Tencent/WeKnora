@@ -20,6 +20,39 @@ type History struct {
 	KnowledgeReferences References // Knowledge references used in the answer
 }
 
+// MentionedItem represents a mentioned knowledge base or file
+type MentionedItem struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`    // "kb" for knowledge base, "file" for file
+	KBType string `json:"kb_type"` // "document" or "faq" (only for kb type)
+}
+
+// MentionedItems is a slice of MentionedItem for database storage
+type MentionedItems []MentionedItem
+
+// Value implements the driver.Valuer interface for database serialization
+func (m MentionedItems) Value() (driver.Value, error) {
+	if m == nil {
+		return json.Marshal([]MentionedItem{})
+	}
+	return json.Marshal(m)
+}
+
+// Scan implements the sql.Scanner interface for database deserialization
+func (m *MentionedItems) Scan(value interface{}) error {
+	if value == nil {
+		*m = make(MentionedItems, 0)
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		*m = make(MentionedItems, 0)
+		return nil
+	}
+	return json.Unmarshal(b, m)
+}
+
 // Message represents a conversation message
 // Each message belongs to a conversation session and can be from either user or system
 // Messages can contain references to knowledge chunks used to generate responses
@@ -40,6 +73,9 @@ type Message struct {
 	// This contains the detailed reasoning process and tool calls made by the agent
 	// Stored for user history display, but NOT included in LLM context to avoid redundancy
 	AgentSteps AgentSteps `json:"agent_steps,omitempty" gorm:"type:jsonb,column:agent_steps"`
+	// Mentioned knowledge bases and files (for user messages)
+	// Stores the @mentioned items when user sends a message
+	MentionedItems MentionedItems `json:"mentioned_items,omitempty" gorm:"type:jsonb,column:mentioned_items"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Message creation timestamp
@@ -90,6 +126,9 @@ func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	if m.AgentSteps == nil {
 		m.AgentSteps = make(AgentSteps, 0)
+	}
+	if m.MentionedItems == nil {
+		m.MentionedItems = make(MentionedItems, 0)
 	}
 	return nil
 }

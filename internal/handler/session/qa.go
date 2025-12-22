@@ -155,7 +155,8 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 	h.handleKnowledgeQARequest(ctx, c, session, secutils.SanitizeForLog(request.Query),
 		secutils.SanitizeForLogArray(knowledgeBaseIDs),
 		secutils.SanitizeForLogArray(request.KnowledgeIds),
-		assistantMessage, true, secutils.SanitizeForLog(request.SummaryModelID), request.WebSearchEnabled)
+		assistantMessage, true, secutils.SanitizeForLog(request.SummaryModelID), request.WebSearchEnabled,
+		convertMentionedItems(request.MentionedItems))
 }
 
 // AgentQA godoc
@@ -386,6 +387,7 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			false,
 			secutils.SanitizeForLog(request.SummaryModelID),
 			request.WebSearchEnabled,
+			convertMentionedItems(request.MentionedItems),
 		)
 		return
 	}
@@ -410,7 +412,7 @@ func (h *Handler) AgentQA(c *gin.Context) {
 	setSSEHeaders(c)
 
 	// Create user message
-	if err := h.createUserMessage(ctx, sessionID, secutils.SanitizeForLog(request.Query), requestID); err != nil {
+	if err := h.createUserMessage(ctx, sessionID, secutils.SanitizeForLog(request.Query), requestID, convertMentionedItems(request.MentionedItems)); err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
@@ -498,12 +500,13 @@ func (h *Handler) handleKnowledgeQARequest(
 	generateTitle bool, // Whether to generate title if session has no title
 	summaryModelID string, // Optional summary model ID (overrides session default)
 	webSearchEnabled bool, // Whether web search is enabled
+	mentionedItems types.MentionedItems, // @mentioned knowledge bases and files
 ) {
 	sessionID := session.ID
 	requestID := getRequestID(c)
 
 	// Create user message
-	if err := h.createUserMessage(ctx, sessionID, query, requestID); err != nil {
+	if err := h.createUserMessage(ctx, sessionID, query, requestID, mentionedItems); err != nil {
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}

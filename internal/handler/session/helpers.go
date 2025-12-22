@@ -12,6 +12,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// convertMentionedItems converts MentionedItemRequest slice to types.MentionedItems
+func convertMentionedItems(items []MentionedItemRequest) types.MentionedItems {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make(types.MentionedItems, len(items))
+	for i, item := range items {
+		result[i] = types.MentionedItem{
+			ID:     item.ID,
+			Name:   item.Name,
+			Type:   item.Type,
+			KBType: item.KBType,
+		}
+	}
+	return result
+}
+
 // setSSEHeaders sets the standard Server-Sent Events headers
 func setSSEHeaders(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
@@ -77,14 +94,15 @@ func createAgentQueryEvent(sessionID, assistantMessageID string) interfaces.Stre
 }
 
 // createUserMessage creates a user message
-func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string) error {
+func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems) error {
 	_, err := h.messageService.CreateMessage(ctx, &types.Message{
-		SessionID:   sessionID,
-		Role:        "user",
-		Content:     query,
-		RequestID:   requestID,
-		CreatedAt:   time.Now(),
-		IsCompleted: true,
+		SessionID:      sessionID,
+		Role:           "user",
+		Content:        query,
+		RequestID:      requestID,
+		CreatedAt:      time.Now(),
+		IsCompleted:    true,
+		MentionedItems: mentionedItems,
 	})
 	return err
 }
