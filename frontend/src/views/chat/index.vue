@@ -7,7 +7,7 @@
                         <usermsg :content="session.content" :mentioned_items="session.mentioned_items"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
-                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" :mentioned-items="getUserMentionedItems(id)" @scroll-bottom="scrollToBottom"
+                        <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
                             :isFirstEnter="isFirstEnter"></botmsg>
                     </div>
                 </div>
@@ -92,18 +92,6 @@ const getUserQuery = (index) => {
         return previous.content || '';
     }
     return '';
-};
-
-// 获取用户消息的 mentioned_items（用于 bot 消息显示）
-const getUserMentionedItems = (index) => {
-    if (index <= 0) {
-        return [];
-    }
-    const previous = messagesList[index - 1];
-    if (previous && previous.role === 'user') {
-        return previous.mentioned_items || [];
-    }
-    return [];
 };
 watch([() => route.params], (newvalue) => {
     isFirstEnter.value = true;
