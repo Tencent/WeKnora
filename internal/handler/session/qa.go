@@ -234,10 +234,11 @@ func (h *Handler) AgentQA(c *gin.Context) {
 
 	// Detect if knowledge bases or agent mode has changed
 	knowledgeBasesChanged := false
+	knowledgeIdsChanged := false
 	configChanged := false
 
 	// Check if knowledge bases array has changed
-	if len(request.KnowledgeBaseIDs) > 0 {
+	if len(request.KnowledgeBaseIDs) > 0 || len(session.AgentConfig.KnowledgeBases) > 0 {
 		// Compare arrays to detect changes
 		currentKBs := session.AgentConfig.KnowledgeBases
 		if len(currentKBs) != len(request.KnowledgeBaseIDs) {
@@ -261,6 +262,35 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			logger.Infof(ctx, "Knowledge bases changed from %s to %s",
 				secutils.SanitizeForLog(fmt.Sprintf("%v", session.AgentConfig.KnowledgeBases)),
 				secutils.SanitizeForLog(fmt.Sprintf("%v", request.KnowledgeBaseIDs)),
+			)
+		}
+	}
+
+	// Check if knowledge IDs array has changed
+	if len(request.KnowledgeIds) > 0 || len(session.AgentConfig.KnowledgeIDs) > 0 {
+		// Compare arrays to detect changes
+		currentKIDs := session.AgentConfig.KnowledgeIDs
+		if len(currentKIDs) != len(request.KnowledgeIds) {
+			knowledgeIdsChanged = true
+			configChanged = true
+		} else {
+			// Check if contents are different
+			kidMap := make(map[string]bool)
+			for _, kid := range currentKIDs {
+				kidMap[kid] = true
+			}
+			for _, kid := range request.KnowledgeIds {
+				if !kidMap[kid] {
+					knowledgeIdsChanged = true
+					configChanged = true
+					break
+				}
+			}
+		}
+		if knowledgeIdsChanged {
+			logger.Infof(ctx, "Knowledge IDs changed from %s to %s",
+				secutils.SanitizeForLog(fmt.Sprintf("%v", session.AgentConfig.KnowledgeIDs)),
+				secutils.SanitizeForLog(fmt.Sprintf("%v", request.KnowledgeIds)),
 			)
 		}
 	}
@@ -301,6 +331,7 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			// Continue anyway - this is not a fatal error
 		}
 		session.AgentConfig.KnowledgeBases = secutils.SanitizeForLogArray(request.KnowledgeBaseIDs)
+		session.AgentConfig.KnowledgeIDs = secutils.SanitizeForLogArray(request.KnowledgeIds)
 		session.AgentConfig.AgentModeEnabled = request.AgentEnabled
 		session.AgentConfig.WebSearchEnabled = request.WebSearchEnabled
 		session.SummaryModelID = secutils.SanitizeForLog(summaryModelID)

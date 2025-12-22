@@ -195,6 +195,11 @@ func (s *agentService) registerTools(
 			"database_query":        true,
 		}
 
+		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
+		if !config.WebSearchEnabled {
+			kbTools["todo_write"] = true
+		}
+
 		for _, toolName := range allowedTools {
 			if !kbTools[toolName] {
 				filteredTools = append(filteredTools, toolName)

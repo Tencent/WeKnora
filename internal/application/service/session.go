@@ -558,16 +558,21 @@ func (s *sessionService) KnowledgeQA(
 		EnableQueryExpansion: enableQueryExpansion,
 	}
 
-	// Determine pipeline based on knowledge bases availability
-	// If no knowledge bases are selected, use pure chat pipeline
+	// Determine pipeline based on knowledge bases availability and web search setting
+	// If no knowledge bases are selected AND web search is disabled, use pure chat pipeline
+	// Otherwise use rag_stream pipeline (which handles both KB search and web search)
 	var pipeline []types.EventType
-	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 {
-		logger.Info(ctx, "No knowledge bases selected, using chat_stream pipeline")
+	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 && !webSearchEnabled {
+		logger.Info(ctx, "No knowledge bases selected and web search disabled, using chat_stream pipeline")
 		pipeline = types.Pipline["chat_stream"]
 		// For pure chat, UserContent is the Query (since INTO_CHAT_MESSAGE is skipped)
 		chatManage.UserContent = query
 	} else {
-		logger.Info(ctx, "Knowledge bases selected, using rag_stream pipeline")
+		if webSearchEnabled && len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 {
+			logger.Info(ctx, "Web search enabled without knowledge bases, using rag_stream pipeline for web search only")
+		} else {
+			logger.Info(ctx, "Knowledge bases selected, using rag_stream pipeline")
+		}
 		pipeline = types.Pipline["rag_stream"]
 	}
 
