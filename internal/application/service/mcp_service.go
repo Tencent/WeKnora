@@ -31,6 +31,22 @@ func NewMCPServiceService(
 
 // CreateMCPService creates a new MCP service
 func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types.MCPService) error {
+	// Security validation for stdio transport type
+	if service.TransportType == types.MCPTransportStdio {
+		if service.StdioConfig == nil {
+			return fmt.Errorf("stdio_config is required for stdio transport")
+		}
+		// Validate stdio configuration to prevent command injection (CWE-78)
+		if err := secutils.ValidateStdioConfig(
+			service.StdioConfig.Command,
+			service.StdioConfig.Args,
+			service.EnvVars,
+		); err != nil {
+			logger.GetLogger(ctx).Warnf("MCP service creation blocked due to security validation: %v", err)
+			return fmt.Errorf("security validation failed: %w", err)
+		}
+	}
+
 	// Set default advanced config if not provided
 	if service.AdvancedConfig == nil {
 		service.AdvancedConfig = types.GetDefaultAdvancedConfig()
@@ -111,6 +127,33 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	}
 	if existing == nil {
 		return fmt.Errorf("MCP service not found")
+	}
+
+	// Security validation for stdio transport type when updating stdio config
+	// Determine the final transport type and stdio config after merge
+	finalTransportType := existing.TransportType
+	if service.TransportType != "" {
+		finalTransportType = service.TransportType
+	}
+	finalStdioConfig := existing.StdioConfig
+	if service.StdioConfig != nil {
+		finalStdioConfig = service.StdioConfig
+	}
+	finalEnvVars := existing.EnvVars
+	if service.EnvVars != nil {
+		finalEnvVars = service.EnvVars
+	}
+
+	// Validate if the final configuration uses stdio transport
+	if finalTransportType == types.MCPTransportStdio && finalStdioConfig != nil {
+		if err := secutils.ValidateStdioConfig(
+			finalStdioConfig.Command,
+			finalStdioConfig.Args,
+			finalEnvVars,
+		); err != nil {
+			logger.GetLogger(ctx).Warnf("MCP service update blocked due to security validation: %v", err)
+			return fmt.Errorf("security validation failed: %w", err)
+		}
 	}
 
 	// Store old enabled state BEFORE any updates

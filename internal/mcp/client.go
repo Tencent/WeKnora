@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -120,6 +121,16 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	case types.MCPTransportStdio:
 		if config.Service.StdioConfig == nil {
 			return nil, fmt.Errorf("stdio_config is required for stdio transport")
+		}
+
+		// Security validation: validate command, args, and env vars before execution
+		// This prevents command injection attacks (CWE-78)
+		if err := secutils.ValidateStdioConfig(
+			config.Service.StdioConfig.Command,
+			config.Service.StdioConfig.Args,
+			config.Service.EnvVars,
+		); err != nil {
+			return nil, fmt.Errorf("stdio configuration validation failed: %w", err)
 		}
 
 		// Convert env vars map to []string format (KEY=value)

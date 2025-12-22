@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"html"
 	"regexp"
 	"strings"
@@ -216,4 +217,164 @@ func SanitizeForLogArray(input []string) []string {
 	}
 
 	return sanitized
+}
+
+// AllowedStdioCommands defines the whitelist of allowed commands for MCP stdio transport
+// These are the standard MCP server launchers that are considered safe
+var AllowedStdioCommands = map[string]bool{
+	"uvx": true, // Python package runner (uv)
+	"npx": true, // Node.js package runner
+}
+
+// DangerousArgPatterns contains patterns that indicate potentially dangerous arguments
+var DangerousArgPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^-c$`),                                   // Shell command execution flag
+	regexp.MustCompile(`(?i)^--command$`),                            // Shell command execution flag
+	regexp.MustCompile(`(?i)^-e$`),                                   // Eval flag
+	regexp.MustCompile(`(?i)^--eval$`),                               // Eval flag
+	regexp.MustCompile(`(?i)[;&|]`),                                  // Shell command chaining
+	regexp.MustCompile(`(?i)\$\(`),                                   // Command substitution
+	regexp.MustCompile("(?i)`"),                                      // Backtick command substitution
+	regexp.MustCompile(`(?i)>\s*[/~]`),                               // Output redirection to absolute/home path
+	regexp.MustCompile(`(?i)<\s*[/~]`),                               // Input redirection from absolute/home path
+	regexp.MustCompile(`(?i)^/bin/`),                                 // Direct binary path
+	regexp.MustCompile(`(?i)^/usr/bin/`),                             // Direct binary path
+	regexp.MustCompile(`(?i)^/sbin/`),                                // Direct binary path
+	regexp.MustCompile(`(?i)^/usr/sbin/`),                            // Direct binary path
+	regexp.MustCompile(`(?i)^\.\./`),                                 // Path traversal
+	regexp.MustCompile(`(?i)/\.\./`),                                 // Path traversal in middle
+	regexp.MustCompile(`(?i)^(bash|sh|zsh|ksh|csh|tcsh|fish|dash)$`), // Shell interpreters as args
+	regexp.MustCompile(`(?i)^(curl|wget|nc|netcat|ncat)$`),           // Network tools as args
+	regexp.MustCompile(`(?i)^(rm|dd|mkfs|fdisk)$`),                   // Destructive commands as args
+}
+
+// DangerousEnvVarPatterns contains patterns for dangerous environment variable names or values
+var DangerousEnvVarPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^LD_PRELOAD$`),      // Library injection
+	regexp.MustCompile(`(?i)^LD_LIBRARY_PATH$`), // Library path manipulation
+	regexp.MustCompile(`(?i)^DYLD_`),            // macOS dynamic linker
+	regexp.MustCompile(`(?i)^PATH$`),            // PATH manipulation
+	regexp.MustCompile(`(?i)^PYTHONPATH$`),      // Python path manipulation
+	regexp.MustCompile(`(?i)^NODE_OPTIONS$`),    // Node.js options injection
+	regexp.MustCompile(`(?i)^BASH_ENV$`),        // Bash environment file
+	regexp.MustCompile(`(?i)^ENV$`),             // Shell environment file
+	regexp.MustCompile(`(?i)^SHELL$`),           // Shell override
+}
+
+// ValidateStdioCommand validates the command for MCP stdio transport
+// Returns an error if the command is not in the whitelist or contains dangerous patterns
+func ValidateStdioCommand(command string) error {
+	if command == "" {
+		return fmt.Errorf("command cannot be empty")
+	}
+
+	// Normalize command (extract base name if it's a path)
+	baseCommand := command
+	if strings.Contains(command, "/") {
+		parts := strings.Split(command, "/")
+		baseCommand = parts[len(parts)-1]
+	}
+
+	// Check against whitelist
+	if !AllowedStdioCommands[baseCommand] {
+		return fmt.Errorf("command '%s' is not in the allowed list. Allowed commands: uvx, npx, node, python, python3, deno, bun", baseCommand)
+	}
+
+	// Additional check: command should not contain path traversal
+	if strings.Contains(command, "..") {
+		return fmt.Errorf("command path contains invalid characters")
+	}
+
+	return nil
+}
+
+// ValidateStdioArgs validates the arguments for MCP stdio transport
+// Returns an error if any argument contains dangerous patterns
+func ValidateStdioArgs(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+
+	for i, arg := range args {
+		// Check length
+		if len(arg) > 1024 {
+			return fmt.Errorf("argument %d exceeds maximum length (1024 characters)", i)
+		}
+
+		// Check against dangerous patterns
+		for _, pattern := range DangerousArgPatterns {
+			if pattern.MatchString(arg) {
+				return fmt.Errorf("argument %d contains potentially dangerous pattern: %s", i, SanitizeForLog(arg))
+			}
+		}
+
+		// Check for null bytes
+		if strings.Contains(arg, "\x00") {
+			return fmt.Errorf("argument %d contains null bytes", i)
+		}
+	}
+
+	return nil
+}
+
+// ValidateStdioEnvVars validates environment variables for MCP stdio transport
+// Returns an error if any env var name or value is dangerous
+func ValidateStdioEnvVars(envVars map[string]string) error {
+	if len(envVars) == 0 {
+		return nil
+	}
+
+	for key, value := range envVars {
+		// Check key against dangerous patterns
+		for _, pattern := range DangerousEnvVarPatterns {
+			if pattern.MatchString(key) {
+				return fmt.Errorf("environment variable '%s' is not allowed for security reasons", key)
+			}
+		}
+
+		// Check key length
+		if len(key) > 256 {
+			return fmt.Errorf("environment variable name '%s' exceeds maximum length", SanitizeForLog(key[:50]))
+		}
+
+		// Check value length
+		if len(value) > 4096 {
+			return fmt.Errorf("environment variable '%s' value exceeds maximum length", key)
+		}
+
+		// Check for null bytes in value
+		if strings.Contains(value, "\x00") {
+			return fmt.Errorf("environment variable '%s' value contains null bytes", key)
+		}
+
+		// Check value for shell injection patterns
+		for _, pattern := range DangerousArgPatterns {
+			if pattern.MatchString(value) {
+				return fmt.Errorf("environment variable '%s' value contains potentially dangerous pattern", key)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateStdioConfig performs comprehensive validation of stdio configuration
+// This should be called before creating or executing any stdio-based MCP client
+func ValidateStdioConfig(command string, args []string, envVars map[string]string) error {
+	// Validate command
+	if err := ValidateStdioCommand(command); err != nil {
+		return fmt.Errorf("invalid command: %w", err)
+	}
+
+	// Validate arguments
+	if err := ValidateStdioArgs(args); err != nil {
+		return fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	// Validate environment variables
+	if err := ValidateStdioEnvVars(envVars); err != nil {
+		return fmt.Errorf("invalid environment variables: %w", err)
+	}
+
+	return nil
 }
