@@ -37,7 +37,7 @@ services:
       - COS_APP_ID=${COS_APP_ID:-}
       - COS_PATH_PREFIX=${COS_PATH_PREFIX:-}
       - COS_ENABLE_OLD_DOMAIN=${COS_ENABLE_OLD_DOMAIN:-}
-      - GIN_MODE=${GIN_MODE:-}
+      - GIN_MODE=${GIN_MODE:-release}
       - DB_DRIVER=postgres
       - DB_HOST=postgres
       - DB_PORT=5432
