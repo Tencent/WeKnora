@@ -993,6 +993,8 @@ const allTools = [
   { value: 'query_knowledge_graph', label: '查询知识图谱', description: '从知识图谱中查询关系', requiresKB: true },
   { value: 'get_document_info', label: '获取文档信息', description: '查看文档元数据', requiresKB: true },
   { value: 'database_query', label: '查询数据库', description: '查询数据库中的信息', requiresKB: true },
+  { value: 'data_analysis', label: '数据分析', description: '理解数据文件并进行数据分析', requiresKB: true },
+  { value: 'data_schema', label: '查看数据元信息', description: '获取表格文件的元信息', requiresKB: true },
 ];
 
 // 根据知识库配置动态计算是否有知识库能力

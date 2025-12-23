@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,12 +17,40 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
 	webFetchTimeout  = 60 * time.Second // timeout for web fetch
 	webFetchMaxChars = 100000           // maximum number of characters to fetch
 )
+
+var webFetchTool = BaseTool{
+	name: ToolWebFetch,
+	description: `Fetch detailed web content from previously discovered URLs and analyze it with an LLM.
+
+## Usage
+- Receive one or more {url, prompt} combinations
+- Fetch web page content and convert to Markdown text
+- Use prompt to call small model for analysis and summary (if model is available)
+- Return summary result and original content fragment
+
+## When to Use
+- **MANDATORY**: After web_search returns results, if content is truncated or incomplete, use web_fetch to get full page content
+- When web_search snippet is insufficient for answering the question`,
+	schema: utils.GenerateSchema[WebFetchInput](),
+}
+
+// WebFetchInput defines the input parameters for web fetch tool
+type WebFetchInput struct {
+	Items []WebFetchItem `json:"items" jsonschema:"批量抓取任务，每项包含 url 与 prompt"`
+}
+
+// WebFetchItem represents a single web fetch task
+type WebFetchItem struct {
+	URL    string `json:"url" jsonschema:"待抓取的网页 URL，需来自 web_search 结果"`
+	Prompt string `json:"prompt" jsonschema:"分析该网页内容时使用的提示词"`
+}
 
 // webFetchParams is the parameters for the web fetch tool
 type webFetchParams struct {
@@ -45,21 +74,8 @@ type WebFetchTool struct {
 
 // NewWebFetchTool creates a new web_fetch tool instance
 func NewWebFetchTool(chatModel chat.Chat) *WebFetchTool {
-	description := `Fetch detailed web content from previously discovered URLs and analyze it with an LLM.
-
-## Usage
-- Receive one or more {url, prompt} combinations
-- Fetch web page content and convert to Markdown text
-- Use prompt to call small model for analysis and summary (if model is available)
-- Return summary result and original content fragment
-
-## When to Use
-- **MANDATORY**: After web_search returns results, if content is truncated or incomplete, use web_fetch to get full page content
-- When web_search snippet is insufficient for answering the question
-`
-
 	return &WebFetchTool{
-		BaseTool: NewBaseTool("web_fetch", description),
+		BaseTool: webFetchTool,
 		client: &http.Client{
 			Timeout: webFetchTimeout,
 		},
@@ -67,41 +83,21 @@ func NewWebFetchTool(chatModel chat.Chat) *WebFetchTool {
 	}
 }
 
-// Parameters 返回工具参数的 JSON Schema
-func (t *WebFetchTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"items": map[string]interface{}{
-				"type":        "array",
-				"description": "批量抓取任务，每项包含 url 与 prompt",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"url": map[string]interface{}{
-							"type":        "string",
-							"description": "待抓取的网页 URL，需来自 web_search 结果",
-						},
-						"prompt": map[string]interface{}{
-							"type":        "string",
-							"description": "分析该网页内容时使用的提示词",
-						},
-					},
-					"required": []string{"url", "prompt"},
-				},
-				"minItems": 1,
-			},
-		},
-		"required": []string{"items"},
-	}
-}
-
 // Execute 执行 web_fetch 工具
-func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][WebFetch] Execute started")
 
-	rawItems, ok := args["items"]
-	if !ok {
+	// Parse args from json.RawMessage
+	var input WebFetchInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][WebFetch] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
+	if len(input.Items) == 0 {
 		logger.Errorf(ctx, "[Tool][WebFetch] 参数缺失: items")
 		return &types.ToolResult{
 			Success: false,
@@ -109,25 +105,19 @@ func (t *WebFetchTool) Execute(ctx context.Context, args map[string]interface{})
 		}, nil
 	}
 
-	itemsSlice, ok := rawItems.([]interface{})
-	if !ok || len(itemsSlice) == 0 {
-		logger.Errorf(ctx, "[Tool][WebFetch] items 解析失败或为空: %#v", rawItems)
-		return &types.ToolResult{
-			Success: false,
-			Error:   "'items' must be a non-empty array",
-		}, nil
-	}
-
-	results := make([]*webFetchItemResult, len(itemsSlice))
+	results := make([]*webFetchItemResult, len(input.Items))
 
 	var wg sync.WaitGroup
-	wg.Add(len(itemsSlice))
+	wg.Add(len(input.Items))
 
-	for idx := range itemsSlice {
+	for idx := range input.Items {
 		i := idx
-		itemAny := itemsSlice[i]
+		item := input.Items[i]
 
-		params := t.parseParams(itemAny)
+		params := webFetchParams{
+			URL:    item.URL,
+			Prompt: item.Prompt,
+		}
 
 		go func(index int, p webFetchParams) {
 			defer wg.Done()

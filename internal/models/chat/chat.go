@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -18,23 +19,24 @@ type Tool struct {
 
 // FunctionDef represents a function definition
 type FunctionDef struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 // ChatOptions 聊天选项
 type ChatOptions struct {
-	Temperature         float64 `json:"temperature"`           // 温度参数
-	TopP                float64 `json:"top_p"`                 // Top P 参数
-	Seed                int     `json:"seed"`                  // 随机种子
-	MaxTokens           int     `json:"max_tokens"`            // 最大 token 数
-	MaxCompletionTokens int     `json:"max_completion_tokens"` // 最大完成 token 数
-	FrequencyPenalty    float64 `json:"frequency_penalty"`     // 频率惩罚
-	PresencePenalty     float64 `json:"presence_penalty"`      // 存在惩罚
-	Thinking            *bool   `json:"thinking"`              // 是否启用思考
-	Tools               []Tool  `json:"tools,omitempty"`       // 可用工具列表
-	ToolChoice          string  `json:"tool_choice,omitempty"` // "auto", "required", "none", or specific tool
+	Temperature         float64         `json:"temperature"`           // 温度参数
+	TopP                float64         `json:"top_p"`                 // Top P 参数
+	Seed                int             `json:"seed"`                  // 随机种子
+	MaxTokens           int             `json:"max_tokens"`            // 最大 token 数
+	MaxCompletionTokens int             `json:"max_completion_tokens"` // 最大完成 token 数
+	FrequencyPenalty    float64         `json:"frequency_penalty"`     // 频率惩罚
+	PresencePenalty     float64         `json:"presence_penalty"`      // 存在惩罚
+	Thinking            *bool           `json:"thinking"`              // 是否启用思考
+	Tools               []Tool          `json:"tools,omitempty"`       // 可用工具列表
+	ToolChoice          string          `json:"tool_choice,omitempty"` // "auto", "required", "none", or specific tool
+	Format              json.RawMessage `json:"format,omitempty"`      // 响应格式定义
 }
 
 // Message 表示聊天消息

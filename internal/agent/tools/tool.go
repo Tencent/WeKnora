@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -10,13 +11,15 @@ import (
 type BaseTool struct {
 	name        string
 	description string
+	schema      json.RawMessage
 }
 
 // NewBaseTool creates a new base tool
-func NewBaseTool(name, description string) BaseTool {
+func NewBaseTool(name, description string, schema json.RawMessage) BaseTool {
 	return BaseTool{
 		name:        name,
 		description: description,
+		schema:      schema,
 	}
 }
 
@@ -28,6 +31,11 @@ func (t *BaseTool) Name() string {
 // Description returns the tool description
 func (t *BaseTool) Description() string {
 	return t.description
+}
+
+// Parameters returns the tool parameters schema
+func (t *BaseTool) Parameters() json.RawMessage {
+	return t.schema
 }
 
 // ToolExecutor is a helper interface for executing tools

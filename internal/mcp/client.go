@@ -245,21 +245,11 @@ func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 	// Convert to our types
 	tools := make([]*types.MCPTool, len(result.Tools))
 	for i, tool := range result.Tools {
-		// Convert InputSchema
-		var inputSchema map[string]interface{}
-		// Convert InputSchema to map
-		data, err := json.Marshal(tool.InputSchema)
-		if err == nil {
-			var schemaMap map[string]interface{}
-			if err := json.Unmarshal(data, &schemaMap); err == nil {
-				inputSchema = schemaMap
-			}
-		}
-
+		data, _ := json.Marshal(tool.InputSchema)
 		tools[i] = &types.MCPTool{
 			Name:        tool.Name,
 			Description: tool.Description,
-			InputSchema: inputSchema,
+			InputSchema: data,
 		}
 	}
 

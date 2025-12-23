@@ -1030,7 +1030,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		}
 
 		// Add nearby chunks (prev and next)
-		if chunk.ChunkType == types.ChunkTypeText {
+		if slices.Contains([]string{types.ChunkTypeText}, chunk.ChunkType) {
 			if chunk.NextChunkID != "" && !processedChunkIDs[chunk.NextChunkID] {
 				additionalChunkIDs = append(additionalChunkIDs, chunk.NextChunkID)
 				processedChunkIDs[chunk.NextChunkID] = true
@@ -1163,6 +1163,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 func (s *knowledgeBaseService) isValidTextChunk(chunk *types.Chunk) bool {
 	return slices.Contains([]types.ChunkType{
 		types.ChunkTypeText, types.ChunkTypeSummary,
+		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,
 		types.ChunkTypeFAQ,
 	}, chunk.ChunkType)
 }

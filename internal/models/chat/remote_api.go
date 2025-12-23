@@ -202,6 +202,13 @@ func (c *RemoteAPIChat) buildChatCompletionRequest(messages []Message,
 				}
 			}
 		}
+
+		if len(opts.Format) > 0 {
+			req.ResponseFormat = &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			}
+			req.Messages[len(req.Messages)-1].Content += fmt.Sprintf("\nUse this JSON schema: %s", opts.Format)
+		}
 	}
 
 	req.ChatTemplateKwargs = map[string]interface{}{

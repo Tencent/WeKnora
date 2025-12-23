@@ -2,23 +2,19 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-// QueryKnowledgeGraphTool queries the knowledge graph for entities and relationships
-type QueryKnowledgeGraphTool struct {
-	BaseTool
-	knowledgeService interfaces.KnowledgeBaseService
-}
-
-// NewQueryKnowledgeGraphTool creates a new query knowledge graph tool
-func NewQueryKnowledgeGraphTool(knowledgeService interfaces.KnowledgeBaseService) *QueryKnowledgeGraphTool {
-	description := `Query knowledge graph to explore entity relationships and knowledge networks.
+var queryKnowledgeGraphTool = BaseTool{
+	name: ToolQueryKnowledgeGraph,
+	description: `Query knowledge graph to explore entity relationships and knowledge networks.
 
 ## Core Function
 Explores relationships between entities in knowledge bases that have graph extraction configured.
@@ -54,65 +50,59 @@ If KB is not configured with graph, tool will return regular search results.
 ## Notes
 - Results indicate graph configuration status
 - Cross-KB results are automatically deduplicated
-- Results are sorted by relevance`
+- Results are sorted by relevance`,
+	schema: utils.GenerateSchema[QueryKnowledgeGraphInput](),
+}
 
+// QueryKnowledgeGraphInput defines the input parameters for query knowledge graph tool
+type QueryKnowledgeGraphInput struct {
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids" jsonschema:"Array of knowledge base IDs to query"`
+	Query            string   `json:"query" jsonschema:"查询内容（实体名称或查询文本）"`
+}
+
+// QueryKnowledgeGraphTool queries the knowledge graph for entities and relationships
+type QueryKnowledgeGraphTool struct {
+	BaseTool
+	knowledgeService interfaces.KnowledgeBaseService
+}
+
+// NewQueryKnowledgeGraphTool creates a new query knowledge graph tool
+func NewQueryKnowledgeGraphTool(knowledgeService interfaces.KnowledgeBaseService) *QueryKnowledgeGraphTool {
 	return &QueryKnowledgeGraphTool{
-		BaseTool:         NewBaseTool("query_knowledge_graph", description),
+		BaseTool:         queryKnowledgeGraphTool,
 		knowledgeService: knowledgeService,
 	}
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *QueryKnowledgeGraphTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"knowledge_base_ids": map[string]interface{}{
-				"type":        "array",
-				"description": "Array of knowledge base IDs to query",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-				"minItems": 1,
-				"maxItems": 10,
-			},
-			"query": map[string]interface{}{
-				"type":        "string",
-				"description": "查询内容（实体名称或查询文本）",
-			},
-		},
-		"required": []string{"knowledge_base_ids", "query"},
-	}
-}
-
 // Execute performs the knowledge graph query with concurrent KB processing
-func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	// Parse args from json.RawMessage
+	var input QueryKnowledgeGraphInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
 	// Extract knowledge_base_ids array
-	kbIDsRaw, ok := args["knowledge_base_ids"].([]interface{})
-	if !ok || len(kbIDsRaw) == 0 {
+	if len(input.KnowledgeBaseIDs) == 0 {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "knowledge_base_ids is required and must be a non-empty array",
 		}, fmt.Errorf("knowledge_base_ids is required")
 	}
 
-	// Convert to string slice
-	var kbIDs []string
-	for _, id := range kbIDsRaw {
-		if idStr, ok := id.(string); ok && idStr != "" {
-			kbIDs = append(kbIDs, idStr)
-		}
-	}
-
-	if len(kbIDs) == 0 {
+	// Validate max 10 KBs
+	if len(input.KnowledgeBaseIDs) > 10 {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "knowledge_base_ids must contain at least one valid KB ID",
-		}, fmt.Errorf("no valid KB IDs provided")
+			Error:   "knowledge_base_ids must contain at most 10 KB IDs",
+		}, fmt.Errorf("too many KB IDs")
 	}
 
-	query, ok := args["query"].(string)
-	if !ok || query == "" {
+	query := input.Query
+	if query == "" {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "query is required",
@@ -136,7 +126,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args map[string]i
 		MatchCount: 10,
 	}
 
-	for _, kbID := range kbIDs {
+	for _, kbID := range input.KnowledgeBaseIDs {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
@@ -181,7 +171,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args map[string]i
 	graphConfigs := make(map[string]map[string]interface{})
 	kbCounts := make(map[string]int)
 
-	for _, kbID := range kbIDs {
+	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
 		if result.err != nil {
 			errors = append(errors, fmt.Sprintf("KB %s: %v", kbID, result.err))
@@ -218,7 +208,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args map[string]i
 			Success: true,
 			Output:  "未找到相关的图谱信息。",
 			Data: map[string]interface{}{
-				"knowledge_base_ids": kbIDs,
+				"knowledge_base_ids": input.KnowledgeBaseIDs,
 				"query":              query,
 				"results":            []interface{}{},
 				"graph_configs":      graphConfigs,
@@ -230,7 +220,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args map[string]i
 	// Format output with enhanced graph information
 	output := "=== 知识图谱查询 ===\n\n"
 	output += fmt.Sprintf("📊 查询: %s\n", query)
-	output += fmt.Sprintf("🎯 目标知识库: %v\n", kbIDs)
+	output += fmt.Sprintf("🎯 目标知识库: %v\n", input.KnowledgeBaseIDs)
 	output += fmt.Sprintf("✓ 找到 %d 条相关结果（已去重）\n\n", len(allResults))
 
 	if len(errors) > 0 {
@@ -354,7 +344,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args map[string]i
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
-			"knowledge_base_ids": kbIDs,
+			"knowledge_base_ids": input.KnowledgeBaseIDs,
 			"query":              query,
 			"results":            formattedResults,
 			"count":              len(allResults),

@@ -39,7 +39,6 @@ type AgentService interface {
 		eventBus *event.EventBus,
 		contextManager ContextManager,
 		sessionID string,
-		sessionService SessionService,
 	) (AgentEngine, error)
 
 	// ValidateConfig validates an agent configuration

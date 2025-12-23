@@ -17,13 +17,14 @@ import (
 
 // PluginSearch implements search functionality for chat pipeline
 type PluginSearch struct {
-	knowledgeBaseService interfaces.KnowledgeBaseService
-	knowledgeService     interfaces.KnowledgeService
-	chunkService         interfaces.ChunkService
-	config               *config.Config
-	webSearchService     interfaces.WebSearchService
-	tenantService        interfaces.TenantService
-	sessionService       interfaces.SessionService
+	knowledgeBaseService  interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeService
+	chunkService          interfaces.ChunkService
+	config                *config.Config
+	webSearchService      interfaces.WebSearchService
+	tenantService         interfaces.TenantService
+	sessionService        interfaces.SessionService
+	webSearchStateService interfaces.WebSearchStateService
 }
 
 func NewPluginSearch(eventManager *EventManager,
@@ -34,15 +35,17 @@ func NewPluginSearch(eventManager *EventManager,
 	webSearchService interfaces.WebSearchService,
 	tenantService interfaces.TenantService,
 	sessionService interfaces.SessionService,
+	webSearchStateService interfaces.WebSearchStateService,
 ) *PluginSearch {
 	res := &PluginSearch{
-		knowledgeBaseService: knowledgeBaseService,
-		knowledgeService:     knowledgeService,
-		chunkService:         chunkService,
-		config:               config,
-		webSearchService:     webSearchService,
-		tenantService:        tenantService,
-		sessionService:       sessionService,
+		knowledgeBaseService:  knowledgeBaseService,
+		knowledgeService:      knowledgeService,
+		chunkService:          chunkService,
+		config:                config,
+		webSearchService:      webSearchService,
+		tenantService:         tenantService,
+		sessionService:        sessionService,
+		webSearchStateService: webSearchStateService,
 	}
 	eventManager.Register(res)
 	return res
@@ -333,7 +336,7 @@ func (p *PluginSearch) searchByTargets(
 			// Try direct loading for specific knowledge targets
 			if t.Type == types.SearchTargetTypeKnowledge {
 				directResults, skippedIDs := p.tryDirectChunkLoading(ctx, chatManage.TenantID, t.KnowledgeIDs)
-				
+
 				if len(directResults) > 0 {
 					pipelineInfo(ctx, "Search", "direct_load", map[string]interface{}{
 						"kb_id":        t.KnowledgeBaseID,
@@ -513,8 +516,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	}
 	// Build questions using RewriteQuery only
 	questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
-	// Load session-scoped temp KB state from Redis using SessionService
-	tempKBID, seen, ids := p.sessionService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
+	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
+	tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
 	compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
 		ctx, chatManage.SessionID, tempKBID, questions, webResults, tenant.WebSearchConfig,
 		p.knowledgeBaseService, p.knowledgeService, seen, ids,
@@ -525,8 +528,8 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		})
 	} else {
 		webResults = compressed
-		// Persist temp KB state back into Redis using SessionService
-		p.sessionService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
+		// Persist temp KB state back into Redis using WebSearchStateRepository
+		p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
 	}
 	res := searchutil.ConvertWebSearchResults(webResults)
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{

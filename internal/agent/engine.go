@@ -80,6 +80,9 @@ func (e *AgentEngine) Execute(
 	llmContext []chat.Message,
 ) (*types.AgentState, error) {
 	logger.Infof(ctx, "========== Agent Execution Started ==========")
+	// Ensure tools are cleaned up after execution
+	defer e.toolRegistry.Cleanup(ctx)
+
 	logger.Infof(ctx, "[Agent] SessionID: %s, MessageID: %s", sessionID, messageID)
 	logger.Infof(ctx, "[Agent] User Query: %s", query)
 	logger.Infof(ctx, "[Agent] LLM Context Messages: %d", len(llmContext))
@@ -304,7 +307,7 @@ func (e *AgentEngine) executeLoop(
 					"tool_call_id": tc.ID,
 					"tool_index":   fmt.Sprintf("%d/%d", i+1, len(response.ToolCalls)),
 				})
-				result, err := e.toolRegistry.ExecuteTool(ctx, tc.Function.Name, args)
+				result, err := e.toolRegistry.ExecuteTool(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
 				duration := time.Since(toolCallStartTime).Milliseconds()
 				logger.Infof(ctx, "[Agent][Round-%d][Tool-%d/%d] Tool execution completed in %dms",
 					state.CurrentRound+1, i+1, len(response.ToolCalls), duration)

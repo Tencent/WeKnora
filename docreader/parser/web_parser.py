@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class StdWebParser(BaseParser):
     """Standard web page parser using Playwright and Trafilatura.
-    
+
     This parser scrapes web pages using Playwright's WebKit browser and extracts
     clean content using Trafilatura library. It supports proxy configuration and
     converts HTML content to markdown format.
@@ -24,7 +24,7 @@ class StdWebParser(BaseParser):
 
     def __init__(self, title: str, **kwargs):
         """Initialize the web parser.
-        
+
         Args:
             title: Title of the web page to be used as file name
             **kwargs: Additional arguments passed to BaseParser
@@ -37,10 +37,10 @@ class StdWebParser(BaseParser):
 
     async def scrape(self, url: str) -> str:
         """Scrape web page content using Playwright.
-        
+
         Args:
             url: The URL of the web page to scrape
-            
+
         Returns:
             HTML content of the web page as string, empty string on error
         """
@@ -74,8 +74,7 @@ class StdWebParser(BaseParser):
                 logger.info("Browser closed")
 
             # Return raw HTML content for further processing
-            logger.info("Parsing HTML with BeautifulSoup")
-            logger.info("Successfully parsed HTML content")
+            logger.info("Successfully retrieved HTML content")
             return content
 
         except Exception as e:
@@ -107,7 +106,6 @@ class StdWebParser(BaseParser):
             include_images=True,
             include_tables=True,
             include_links=True,
-            deduplicate=True,  # Remove duplicate content
         )
         if not md_text:
             logger.error("Failed to parse web page")
@@ -117,11 +115,12 @@ class StdWebParser(BaseParser):
 
 class WebParser(PipelineParser):
     """Web parser using pipeline pattern.
-    
+
     This parser chains StdWebParser (for web scraping and HTML to markdown conversion)
     with MarkdownParser (for markdown processing). The pipeline processes content
     sequentially through both parsers.
     """
+
     # Parser classes to be executed in sequence
     _parser_cls = (StdWebParser, MarkdownParser)
 

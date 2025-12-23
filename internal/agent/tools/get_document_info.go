@@ -2,28 +2,18 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-// GetDocumentInfoTool retrieves detailed information about a document/knowledge
-type GetDocumentInfoTool struct {
-	BaseTool
-	tenantID         uint64
-	knowledgeService interfaces.KnowledgeService
-	chunkService     interfaces.ChunkService
-}
-
-// NewGetDocumentInfoTool creates a new get document info tool
-func NewGetDocumentInfoTool(
-	tenantID uint64,
-	knowledgeService interfaces.KnowledgeService,
-	chunkService interfaces.ChunkService,
-) *GetDocumentInfoTool {
-	description := `Retrieve detailed metadata information about documents.
+var getDocumentInfoTool = BaseTool{
+	name: ToolGetDocumentInfo,
+	description: `Retrieve detailed metadata information about documents.
 
 ## When to Use
 
@@ -50,56 +40,61 @@ Do not use when:
 
 - Concurrent query for multiple documents provides better performance
 - Returns complete document metadata, not just title
-- Can check document processing status (parse_status)`
+- Can check document processing status (parse_status)`,
+	schema: utils.GenerateSchema[GetDocumentInfoInput](),
+}
 
+// GetDocumentInfoInput defines the input parameters for get document info tool
+type GetDocumentInfoInput struct {
+	KnowledgeIDs []string `json:"knowledge_ids" jsonschema:"Array of document/knowledge IDs, obtained from knowledge_id field in search results, supports concurrent batch queries"`
+}
+
+// GetDocumentInfoTool retrieves detailed information about a document/knowledge
+type GetDocumentInfoTool struct {
+	BaseTool
+	knowledgeService interfaces.KnowledgeService
+	chunkService     interfaces.ChunkService
+}
+
+// NewGetDocumentInfoTool creates a new get document info tool
+func NewGetDocumentInfoTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+) *GetDocumentInfoTool {
 	return &GetDocumentInfoTool{
-		BaseTool:         NewBaseTool("get_document_info", description),
-		tenantID:         tenantID,
+		BaseTool:         getDocumentInfoTool,
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
 	}
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *GetDocumentInfoTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"knowledge_ids": map[string]interface{}{
-				"type":        "array",
-				"description": "Array of document/knowledge IDs, obtained from knowledge_id field in search results, supports concurrent batch queries",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-				"minItems": 1,
-				"maxItems": 10,
-			},
-		},
-		"required": []string{"knowledge_ids"},
-	}
-}
-
 // Execute retrieves document information with concurrent processing
-func (t *GetDocumentInfoTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	tenantID := uint64(0)
+	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+		tenantID = tid
+	}
+
+	// Parse args from json.RawMessage
+	var input GetDocumentInfoInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
 	// Extract knowledge_ids array
-	knowledgeIDsRaw, ok := args["knowledge_ids"].([]interface{})
-	if !ok || len(knowledgeIDsRaw) == 0 {
+	knowledgeIDs := input.KnowledgeIDs
+	if len(knowledgeIDs) == 0 {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "knowledge_ids is required and must be a non-empty array",
 		}, fmt.Errorf("knowledge_ids is required")
 	}
 
-	// Convert to string slice
-	var knowledgeIDs []string
-	for _, id := range knowledgeIDsRaw {
-		if idStr, ok := id.(string); ok && idStr != "" {
-			knowledgeIDs = append(knowledgeIDs, idStr)
-		}
-	}
-
-	// Check if knowledge IDs are valid
-	if len(knowledgeIDs) == 0 {
+	// Validate max 10 documents
+	if len(knowledgeIDs) > 10 {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "knowledge_ids must contain at least one valid knowledge ID",
@@ -124,7 +119,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args map[string]inter
 			defer wg.Done()
 
 			// Get knowledge metadata
-			knowledge, err := t.knowledgeService.GetRepository().GetKnowledgeByID(ctx, t.tenantID, id)
+			knowledge, err := t.knowledgeService.GetRepository().GetKnowledgeByID(ctx, tenantID, id)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
@@ -136,7 +131,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args map[string]inter
 
 			// Get chunk count
 			_, total, err := t.chunkService.GetRepository().
-				ListPagedChunksByKnowledgeID(ctx, t.tenantID, id, &types.Pagination{
+				ListPagedChunksByKnowledgeID(ctx, tenantID, id, &types.Pagination{
 					Page:     1,
 					PageSize: 1000,
 				}, []types.ChunkType{"text"}, "", "", "", "", "")

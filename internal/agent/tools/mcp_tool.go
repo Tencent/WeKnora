@@ -12,6 +12,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+type MCPInput = map[string]any
+
 // MCPTool wraps an MCP service tool to implement the Tool interface
 type MCPTool struct {
 	service    *types.MCPService
@@ -47,21 +49,30 @@ func (t *MCPTool) Description() string {
 }
 
 // Parameters returns the JSON Schema for tool parameters
-func (t *MCPTool) Parameters() map[string]interface{} {
-	if t.mcpTool.InputSchema != nil {
+func (t *MCPTool) Parameters() json.RawMessage {
+	if len(t.mcpTool.InputSchema) > 0 {
 		return t.mcpTool.InputSchema
 	}
-
 	// Return a default schema if none provided
-	return map[string]interface{}{
-		"type":       "object",
-		"properties": map[string]interface{}{},
-	}
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {}
+	}`)
 }
 
 // Execute executes the MCP tool
-func (t *MCPTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
+
+	// Parse args from json.RawMessage
+	var input MCPInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
 
 	// Get or create MCP client
 	client, err := t.mcpManager.GetOrCreateClient(t.service)
@@ -86,7 +97,7 @@ func (t *MCPTool) Execute(ctx context.Context, args map[string]interface{}) (*ty
 	}
 
 	// Call the tool via MCP
-	result, err := client.CallTool(ctx, t.mcpTool.Name, args)
+	result, err := client.CallTool(ctx, t.mcpTool.Name, input)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("MCP tool call failed: %v", err)
 		return &types.ToolResult{

@@ -140,6 +140,7 @@ const (
 	ENTITY_SEARCH          EventType = "entity_search"          // Search for relevant entities
 	CHUNK_RERANK           EventType = "chunk_rerank"           // Rerank search results
 	CHUNK_MERGE            EventType = "chunk_merge"            // Merge similar chunks
+	DATA_ANALYSIS          EventType = "data_analysis"          // Data analysis for CSV/Excel files
 	INTO_CHAT_MESSAGE      EventType = "into_chat_message"      // Convert chunks into chat messages
 	CHAT_COMPLETION        EventType = "chat_completion"        // Generate chat completion
 	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream" // Stream chat completion
@@ -174,6 +175,7 @@ var Pipline = map[string][]EventType{
 		CHUNK_RERANK,
 		CHUNK_MERGE,
 		FILTER_TOP_K,
+		DATA_ANALYSIS,
 		INTO_CHAT_MESSAGE,
 		CHAT_COMPLETION_STREAM,
 		STREAM_FILTER,
