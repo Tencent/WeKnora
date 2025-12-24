@@ -21,21 +21,17 @@ global:
   # - name: regcred
 
   # -- Default security context for all pods
-  # Following CNCF security best practices
+  # Note: Official images (nginx, postgres, redis) run as root by default
+  # Enable runAsNonRoot only if using non-root compatible images
   # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
   podSecurityContext:
-    runAsNonRoot: true
     seccompProfile:
       type: RuntimeDefault
 
   # -- Default security context for all containers
+  # Note: readOnlyRootFilesystem disabled as images require writable filesystem
   containerSecurityContext:
-    runAsNonRoot: true
-    readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
 
 # -- ServiceAccount configuration
 # Ref: https://helm.sh/docs/chart_best_practices/rbac/
@@ -64,8 +60,8 @@ app:
   image:
     # -- Image repository
     repository: wechatopenai/weknora-app
-    # -- Image tag (defaults to Chart.appVersion)
-    tag: ""
+    # -- Image tag (use "latest" until versioned tags are available)
+    tag: "latest"
     # -- Image pull policy
     pullPolicy: IfNotPresent
 
@@ -85,7 +81,7 @@ app:
   # -- Container security context override
   # Note: App requires write access for file storage
   securityContext:
-    runAsNonRoot: true
+    # runAsNonRoot: true  # Disabled - official images run as root
     allowPrivilegeEscalation: false
     capabilities:
       drop:
@@ -174,8 +170,8 @@ frontend:
 
   # -- Container security context
   securityContext:
-    runAsNonRoot: true
-    readOnlyRootFilesystem: true
+    # runAsNonRoot: true  # Disabled - official images run as root
+    # readOnlyRootFilesystem: true  # Disabled - images require writable fs
     allowPrivilegeEscalation: false
     capabilities:
       drop:
@@ -224,7 +220,7 @@ docreader:
 
   # -- Container security context
   securityContext:
-    runAsNonRoot: true
+    # runAsNonRoot: true  # Disabled - official images run as root
     allowPrivilegeEscalation: false
     capabilities:
       drop:
@@ -273,7 +269,7 @@ postgresql:
   # -- Container security context
   # Note: PostgreSQL requires specific user permissions
   securityContext:
-    runAsNonRoot: true
+    # runAsNonRoot: true  # Disabled - official images run as root
     allowPrivilegeEscalation: false
 
   # -- Persistence configuration
@@ -318,8 +314,8 @@ redis:
 
   # -- Container security context
   securityContext:
-    runAsNonRoot: true
-    readOnlyRootFilesystem: true
+    # runAsNonRoot: true  # Disabled - official images run as root
+    # readOnlyRootFilesystem: true  # Disabled - images require writable fs
     allowPrivilegeEscalation: false
     capabilities:
       drop:
