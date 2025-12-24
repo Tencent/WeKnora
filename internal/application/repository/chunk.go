@@ -98,19 +98,40 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 		}
 		if keyword != "" {
 			like := "%" + keyword + "%"
+			// 根据数据库类型使用不同的 JSON 查询语法
+			isPostgres := db.Dialector.Name() == "postgres"
+
 			switch searchField {
 			case "standard_question":
 				// Search only in standard_question field of metadata
-				db = db.Where("metadata->>'standard_question' ILIKE ?", like)
+				if isPostgres {
+					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
+				} else {
+					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
+					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
+					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
+				}
 			case "similar_questions":
 				// Search in similar_questions array of metadata
-				db = db.Where("metadata->'similar_questions'::text ILIKE ?", like)
+				if isPostgres {
+					db = db.Where("metadata->'similar_questions'::text ILIKE ?", like)
+				} else {
+					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
+				}
 			case "answers":
 				// Search in answers array of metadata
-				db = db.Where("metadata->'answers'::text ILIKE ?", like)
+				if isPostgres {
+					db = db.Where("metadata->'answers'::text ILIKE ?", like)
+				} else {
+					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
+				}
 			default:
 				// Search in all fields (content and metadata)
-				db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
+				if isPostgres {
+					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
+				} else {
+					db = db.Where("(content LIKE ? OR CAST(metadata AS CHAR) LIKE ?)", like, like)
+				}
 			}
 		}
 		return db
