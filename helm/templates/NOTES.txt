@@ -1,0 +1,121 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+Post-installation notes for WeKnora Helm chart.
+Ref: https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/templates/NOTES.txt
+*/}}
+
+================================================================================
+  WeKnora has been installed successfully!
+================================================================================
+
+Release: {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+Version: {{ .Chart.AppVersion }}
+
+--------------------------------------------------------------------------------
+  ACCESSING WEKNORA
+--------------------------------------------------------------------------------
+
+{{- if .Values.ingress.enabled }}
+WeKnora is accessible via Ingress:
+
+  URL: {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+
+{{- else }}
+
+To access WeKnora, use port-forwarding:
+
+  # Frontend (Web UI)
+  kubectl port-forward svc/frontend -n {{ .Release.Namespace }} 8080:80
+
+  # Then open: http://localhost:8080
+
+{{- end }}
+
+{{- if not .Values.ingress.enabled }}
+
+To expose WeKnora externally, enable Ingress:
+
+  helm upgrade {{ .Release.Name }} ./helm \
+    --set ingress.enabled=true \
+    --set ingress.host=weknora.example.com
+
+{{- end }}
+
+--------------------------------------------------------------------------------
+  CONFIGURATION
+--------------------------------------------------------------------------------
+
+Components deployed:
+{{- if .Values.app.enabled }}
+  - Backend API ({{ include "weknora.app.image" . }})
+{{- end }}
+{{- if .Values.frontend.enabled }}
+  - Frontend UI ({{ include "weknora.frontend.image" . }})
+{{- end }}
+{{- if .Values.docreader.enabled }}
+  - Document Reader ({{ include "weknora.docreader.image" . }})
+{{- end }}
+{{- if .Values.postgresql.enabled }}
+  - PostgreSQL/ParadeDB ({{ include "weknora.postgresql.image" . }})
+{{- end }}
+{{- if .Values.redis.enabled }}
+  - Redis ({{ include "weknora.redis.image" . }})
+{{- end }}
+
+{{- if or .Values.minio.enabled .Values.neo4j.enabled .Values.qdrant.enabled .Values.jaeger.enabled }}
+
+Optional components enabled:
+{{- if .Values.minio.enabled }}
+  - MinIO (S3-compatible storage)
+{{- end }}
+{{- if .Values.neo4j.enabled }}
+  - Neo4j (Knowledge Graph)
+{{- end }}
+{{- if .Values.qdrant.enabled }}
+  - Qdrant (Vector Database)
+{{- end }}
+{{- if .Values.jaeger.enabled }}
+  - Jaeger (Distributed Tracing)
+{{- end }}
+{{- end }}
+
+--------------------------------------------------------------------------------
+  CONNECTING TO LLM
+--------------------------------------------------------------------------------
+
+WeKnora requires an LLM backend. Configure via environment variables:
+
+  helm upgrade {{ .Release.Name }} ./helm \
+    --set app.extraEnv[0].name=OLLAMA_BASE_URL \
+    --set app.extraEnv[0].value=http://ollama:11434 \
+    --set app.extraEnv[1].name=INIT_LLM_MODEL_NAME \
+    --set app.extraEnv[1].value=qwen2.5:7b
+
+Supported LLM backends:
+  - Ollama (local)
+  - OpenAI API compatible endpoints
+  - Qwen, DeepSeek, and other Chinese LLMs
+
+--------------------------------------------------------------------------------
+  DOCUMENTATION
+--------------------------------------------------------------------------------
+
+  GitHub:  https://github.com/Tencent/WeKnora
+  API Docs: https://github.com/Tencent/WeKnora/blob/main/docs/API.md
+  FAQ:     https://github.com/Tencent/WeKnora/blob/main/docs/QA.md
+
+--------------------------------------------------------------------------------
+  TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+Check pod status:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+View logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=app -f
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=frontend -f
+
+================================================================================

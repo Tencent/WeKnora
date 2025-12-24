@@ -1,0 +1,173 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+WeKnora Backend API Server Deployment and Service.
+*/}}
+{{- if .Values.app.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-app
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "app" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "app" "context" .) | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "app" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- with .Values.app.podSecurityContext | default .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ include "weknora.app.image" . }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          {{- with .Values.app.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+            # Application settings
+            - name: GIN_MODE
+              value: {{ .Values.app.env.GIN_MODE | quote }}
+            - name: TZ
+              value: {{ .Values.app.env.TZ | quote }}
+            # Database configuration
+            - name: DB_DRIVER
+              value: "postgres"
+            - name: DB_HOST
+              value: "postgres"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_NAME
+            # Redis configuration
+            - name: REDIS_ADDR
+              value: "redis:6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: REDIS_PASSWORD
+            - name: REDIS_DB
+              value: "0"
+            - name: REDIS_PREFIX
+              value: "stream:"
+            - name: STREAM_MANAGER_TYPE
+              value: {{ .Values.app.env.STREAM_MANAGER_TYPE | quote }}
+            # Security
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: JWT_SECRET
+            - name: TENANT_AES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: TENANT_AES_KEY
+            # Retrieval & Storage
+            - name: RETRIEVE_DRIVER
+              value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
+            - name: STORAGE_TYPE
+              value: {{ .Values.app.env.STORAGE_TYPE | quote }}
+            - name: LOCAL_STORAGE_BASE_DIR
+              value: {{ .Values.app.env.LOCAL_STORAGE_BASE_DIR | quote }}
+            # Document reader
+            - name: DOCREADER_ADDR
+              value: "docreader:50051"
+            # Processing
+            - name: AUTO_RECOVER_DIRTY
+              value: {{ .Values.app.env.AUTO_RECOVER_DIRTY | quote }}
+            - name: CONCURRENCY_POOL_SIZE
+              value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
+            - name: ENABLE_GRAPH_RAG
+              value: {{ .Values.app.env.ENABLE_GRAPH_RAG | quote }}
+            {{- with .Values.app.extraEnv }}
+            # Additional environment variables
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: data-files
+              mountPath: /data/files
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          {{- with .Values.app.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.app.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data-files
+          {{- if .Values.dataFiles.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.dataFiles.persistence.existingClaim | default (printf "%s-data-files" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Service name must be "app" - frontend nginx config hardcodes this
+  name: app
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "app" "context" .) | nindent 4 }}
+spec:
+  type: {{ .Values.app.service.type }}
+  selector:
+    {{- include "weknora.componentSelectorLabels" (dict "component" "app" "context" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.app.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

@@ -1,0 +1,62 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+Persistent Volume Claims for stateful components.
+*/}}
+
+{{/* PostgreSQL PVC */}}
+{{- if and .Values.postgresql.enabled .Values.postgresql.persistence.enabled (not .Values.postgresql.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "database" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+---
+{{- end }}
+
+{{/* Redis PVC */}}
+{{- if and .Values.redis.enabled .Values.redis.persistence.enabled (not .Values.redis.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "cache" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.redis.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+---
+{{- end }}
+
+{{/* Data Files PVC */}}
+{{- if and .Values.dataFiles.persistence.enabled (not .Values.dataFiles.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-data-files
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "storage" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.dataFiles.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+{{- end }}

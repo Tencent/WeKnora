@@ -1,0 +1,102 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+WeKnora Document Reader (gRPC) Deployment and Service.
+*/}}
+{{- if .Values.docreader.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-docreader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "docreader" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.docreader.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "docreader" "context" .) | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "docreader" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- with .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: docreader
+          image: {{ include "weknora.docreader.image" . }}
+          imagePullPolicy: {{ .Values.docreader.image.pullPolicy }}
+          {{- with .Values.docreader.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 50051
+              name: grpc
+              protocol: TCP
+          env:
+            - name: STORAGE_TYPE
+              value: {{ .Values.docreader.env.STORAGE_TYPE | quote }}
+          resources:
+            {{- toYaml .Values.docreader.resources | nindent 12 }}
+          # gRPC health check using grpc_health_probe
+          livenessProbe:
+            exec:
+              command:
+                - grpc_health_probe
+                - -addr=:50051
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - grpc_health_probe
+                - -addr=:50051
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      {{- with .Values.docreader.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.docreader.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.docreader.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Service name must be "docreader" - app references this
+  name: docreader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "docreader" "context" .) | nindent 4 }}
+spec:
+  type: {{ .Values.docreader.service.type }}
+  selector:
+    {{- include "weknora.componentSelectorLabels" (dict "component" "docreader" "context" .) | nindent 4 }}
+  ports:
+    - name: grpc
+      port: {{ .Values.docreader.service.port }}
+      targetPort: grpc
+      protocol: TCP
+{{- end }}

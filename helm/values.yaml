@@ -1,0 +1,469 @@
+# Copyright 2025 Tencent
+# SPDX-License-Identifier: MIT
+#
+# WeKnora Helm Chart Values
+#
+# Best Practices References:
+# - https://helm.sh/docs/chart_best_practices/values/
+# - https://github.com/argoproj/argo-helm/blob/main/charts/argo-cd/values.yaml
+# - https://github.com/cert-manager/cert-manager/blob/master/deploy/charts/cert-manager/values.yaml
+
+# -- Global configuration shared across all components
+# @default -- See values.yaml
+global:
+  # -- Storage class for all PersistentVolumeClaims
+  # Set to "-" to use cluster default, or specify a storage class name
+  storageClass: ""
+
+  # -- Image pull secrets for private registries
+  # @default -- []
+  imagePullSecrets: []
+  # - name: regcred
+
+  # -- Default security context for all pods
+  # Following CNCF security best practices
+  # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+  # -- Default security context for all containers
+  containerSecurityContext:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+# -- ServiceAccount configuration
+# Ref: https://helm.sh/docs/chart_best_practices/rbac/
+serviceAccount:
+  # -- Create a ServiceAccount
+  create: true
+  # -- ServiceAccount name (auto-generated if empty)
+  name: ""
+  # -- Annotations to add to the ServiceAccount
+  annotations: {}
+  # -- Labels to add to the ServiceAccount
+  labels: {}
+  # -- Automount API credentials for the ServiceAccount
+  automountServiceAccountToken: false
+
+# -----------------------------------------------------------------------------
+# App (Backend API Server)
+# -----------------------------------------------------------------------------
+app:
+  # -- Enable the app component
+  enabled: true
+
+  # -- Number of replicas
+  replicaCount: 1
+
+  image:
+    # -- Image repository
+    repository: wechatopenai/weknora-app
+    # -- Image tag (defaults to Chart.appVersion)
+    tag: ""
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+  # -- Resource requests and limits
+  # Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # -- Pod security context override
+  podSecurityContext: {}
+
+  # -- Container security context override
+  # Note: App requires write access for file storage
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # -- Environment variables for the app container
+  # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
+  env:
+    GIN_MODE: release
+    # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
+    RETRIEVE_DRIVER: postgres
+    # -- Storage type: local, minio, cos
+    STORAGE_TYPE: local
+    LOCAL_STORAGE_BASE_DIR: /data/files
+    AUTO_RECOVER_DIRTY: "true"
+    STREAM_MANAGER_TYPE: redis
+    CONCURRENCY_POOL_SIZE: "5"
+    ENABLE_GRAPH_RAG: "false"
+    TZ: UTC
+
+  # -- Additional environment variables
+  extraEnv: []
+  # - name: OLLAMA_BASE_URL
+  #   value: "http://ollama:11434"
+
+  # -- Service configuration
+  service:
+    type: ClusterIP
+    port: 8080
+
+  # -- Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # -- Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Frontend (Web UI)
+# -----------------------------------------------------------------------------
+frontend:
+  # -- Enable the frontend component
+  enabled: true
+
+  # -- Number of replicas
+  replicaCount: 1
+
+  image:
+    # -- Image repository
+    repository: wechatopenai/weknora-ui
+    # -- Image tag
+    tag: latest
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # -- Container security context
+  securityContext:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # -- Service configuration
+  service:
+    type: ClusterIP
+    port: 80
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Docreader (Document Parser - gRPC)
+# -----------------------------------------------------------------------------
+docreader:
+  # -- Enable the docreader component
+  enabled: true
+
+  # -- Number of replicas
+  replicaCount: 1
+
+  image:
+    # -- Image repository
+    repository: wechatopenai/weknora-docreader
+    # -- Image tag
+    tag: latest
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- Container security context
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # -- Environment variables
+  env:
+    STORAGE_TYPE: local
+
+  # -- Service configuration
+  service:
+    type: ClusterIP
+    port: 50051
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# PostgreSQL (ParadeDB - Vector + BM25 Search)
+# -----------------------------------------------------------------------------
+postgresql:
+  # -- Enable PostgreSQL
+  enabled: true
+
+  image:
+    # -- Image repository (ParadeDB for vector search)
+    repository: paradedb/paradedb
+    # -- Image tag
+    tag: v0.18.9-pg17
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # -- Container security context
+  # Note: PostgreSQL requires specific user permissions
+  securityContext:
+    runAsNonRoot: true
+    allowPrivilegeEscalation: false
+
+  # -- Persistence configuration
+  persistence:
+    # -- Enable persistence
+    enabled: true
+    # -- Size of the PVC
+    size: 10Gi
+    # -- Use existing PVC (leave empty to create new)
+    existingClaim: ""
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Redis (Stream & Task Queue)
+# -----------------------------------------------------------------------------
+redis:
+  # -- Enable Redis
+  enabled: true
+
+  image:
+    # -- Image repository
+    repository: redis
+    # -- Image tag
+    tag: 7-alpine
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # -- Container security context
+  securityContext:
+    runAsNonRoot: true
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # -- Persistence configuration
+  persistence:
+    # -- Enable persistence
+    enabled: true
+    # -- Size of the PVC
+    size: 1Gi
+    # -- Use existing PVC (leave empty to create new)
+    existingClaim: ""
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Data Files Storage
+# -----------------------------------------------------------------------------
+dataFiles:
+  persistence:
+    # -- Enable persistence for uploaded files
+    enabled: true
+    # -- Size of the PVC
+    size: 10Gi
+    # -- Use existing PVC (leave empty to create new)
+    existingClaim: ""
+
+# -----------------------------------------------------------------------------
+# Ingress Configuration
+# -----------------------------------------------------------------------------
+ingress:
+  # -- Enable ingress
+  enabled: false
+
+  # -- Ingress class name
+  className: nginx
+
+  # -- Ingress hostname
+  host: weknora.example.com
+
+  # -- TLS configuration
+  tls:
+    # -- Enable TLS
+    enabled: false
+    # -- TLS secret name
+    secretName: ""
+
+  # -- Additional annotations
+  # Ref: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+
+# -----------------------------------------------------------------------------
+# Secrets Configuration
+# -----------------------------------------------------------------------------
+# IMPORTANT: Do NOT use default values in production!
+# Use --set or external secret management (External Secrets Operator, Vault, etc.)
+#
+# Example installation:
+#   helm install weknora ./helm \
+#     --set secrets.dbPassword=<secure-password> \
+#     --set secrets.redisPassword=<secure-password> \
+#     --set secrets.jwtSecret=<secure-random-string>
+#
+secrets:
+  # -- Database username
+  dbUser: postgres
+  # -- Database password (REQUIRED: change in production)
+  dbPassword: ""
+  # -- Database name
+  dbName: weknora
+  # -- Redis password (REQUIRED: change in production)
+  redisPassword: ""
+  # -- JWT signing secret (REQUIRED: change in production)
+  jwtSecret: ""
+  # -- Tenant AES encryption key
+  tenantAesKey: ""
+
+  # -- Use existing secret instead of creating one
+  # The secret must contain keys: DB_USER, DB_PASSWORD, DB_NAME, REDIS_PASSWORD, JWT_SECRET, TENANT_AES_KEY
+  existingSecret: ""
+
+# -----------------------------------------------------------------------------
+# Optional Components (Profiles from docker-compose)
+# -----------------------------------------------------------------------------
+
+# -- MinIO configuration (S3-compatible storage)
+# Equivalent to: docker compose --profile minio
+minio:
+  # -- Enable MinIO
+  enabled: false
+  image:
+    repository: minio/minio
+    tag: latest
+  # -- Root user
+  rootUser: minioadmin
+  # -- Root password (REQUIRED if enabled)
+  rootPassword: ""
+  persistence:
+    enabled: true
+    size: 20Gi
+
+# -- Neo4j configuration (Knowledge Graph)
+# Equivalent to: docker compose --profile neo4j
+neo4j:
+  # -- Enable Neo4j for GraphRAG
+  enabled: false
+  image:
+    repository: neo4j
+    tag: 5-community
+  # -- Authentication password (REQUIRED if enabled)
+  password: ""
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# -- Qdrant configuration (Vector Database)
+# Equivalent to: docker compose --profile qdrant
+qdrant:
+  # -- Enable Qdrant as alternative vector store
+  enabled: false
+  image:
+    repository: qdrant/qdrant
+    tag: latest
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# -- Jaeger configuration (Distributed Tracing)
+# Equivalent to: docker compose --profile jaeger
+jaeger:
+  # -- Enable Jaeger tracing
+  enabled: false
+  image:
+    repository: jaegertracing/all-in-one
+    tag: latest
