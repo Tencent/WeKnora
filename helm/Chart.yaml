@@ -5,7 +5,7 @@ description: |
   with document parsing, vector search, and LLM integration.
 type: application
 version: 0.1.0
-appVersion: "0.2.5"
+appVersion: "v0.2.5"
 kubeVersion: ">=1.25.0-0"
 home: https://github.com/Tencent/WeKnora
 icon: https://raw.githubusercontent.com/Tencent/WeKnora/main/docs/images/logo.png

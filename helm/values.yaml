@@ -60,8 +60,8 @@ app:
   image:
     # -- Image repository
     repository: wechatopenai/weknora-app
-    # -- Image tag (use "latest" until versioned tags are available)
-    tag: "latest"
+    # -- Image tag (defaults to Chart.appVersion if empty)
+    tag: ""
     # -- Image pull policy
     pullPolicy: IfNotPresent
 
@@ -83,9 +83,6 @@ app:
   securityContext:
     # runAsNonRoot: true  # Disabled - official images run as root
     allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
 
   # -- Environment variables for the app container
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
@@ -173,9 +170,6 @@ frontend:
     # runAsNonRoot: true  # Disabled - official images run as root
     # readOnlyRootFilesystem: true  # Disabled - images require writable fs
     allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
 
   # -- Service configuration
   service:
@@ -222,9 +216,6 @@ docreader:
   securityContext:
     # runAsNonRoot: true  # Disabled - official images run as root
     allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
 
   # -- Environment variables
   env:
@@ -317,9 +308,6 @@ redis:
     # runAsNonRoot: true  # Disabled - official images run as root
     # readOnlyRootFilesystem: true  # Disabled - images require writable fs
     allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-        - ALL
 
   # -- Persistence configuration
   persistence:
