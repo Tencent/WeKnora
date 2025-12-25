@@ -140,8 +140,9 @@ func (c *Client) UpdateTag(ctx context.Context,
 // DeleteTag deletes a tag.
 // Set force to true to delete even if the tag is referenced.
 // Set contentOnly to true to only delete the content under the tag but keep the tag itself.
+// excludeIDs: IDs of chunks to exclude from deletion.
 func (c *Client) DeleteTag(ctx context.Context,
-	knowledgeBaseID, tagID string, force bool, contentOnly bool,
+	knowledgeBaseID, tagID string, force bool, contentOnly bool, excludeIDs []string,
 ) error {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/tags/%s", knowledgeBaseID, tagID)
 	query := url.Values{}
@@ -152,7 +153,14 @@ func (c *Client) DeleteTag(ctx context.Context,
 		query.Add("content_only", "true")
 	}
 
-	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil, query)
+	var body interface{}
+	if len(excludeIDs) > 0 {
+		body = map[string]interface{}{
+			"exclude_ids": excludeIDs,
+		}
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, body, query)
 	if err != nil {
 		return err
 	}

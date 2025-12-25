@@ -313,10 +313,50 @@ func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID ui
 }
 
 // DeleteChunksByTagID deletes all chunks with the specified tag ID
-func (r *chunkRepository) DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string) error {
-	return r.db.WithContext(ctx).Where(
-		"tenant_id = ? AND knowledge_base_id = ? AND tag_id = ?", tenantID, kbID, tagID,
-	).Delete(&types.Chunk{}).Error
+// Returns the IDs of deleted chunks for index cleanup
+func (r *chunkRepository) DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, excludeIDs []string) ([]string, error) {
+	// Build exclude set for O(1) lookup
+	excludeSet := make(map[string]struct{}, len(excludeIDs))
+	for _, id := range excludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+
+	// Get all chunk IDs for this tag
+	var allIDs []string
+	if err := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id = ?", tenantID, kbID, tagID).
+		Pluck("id", &allIDs).Error; err != nil {
+		return nil, err
+	}
+
+	// Filter out excluded IDs
+	toDelete := make([]string, 0, len(allIDs))
+	for _, id := range allIDs {
+		if _, excluded := excludeSet[id]; !excluded {
+			toDelete = append(toDelete, id)
+		}
+	}
+
+	if len(toDelete) == 0 {
+		return nil, nil
+	}
+
+	// Delete in batches
+	const batchSize = 1000
+	for i := 0; i < len(toDelete); i += batchSize {
+		end := i + batchSize
+		if end > len(toDelete) {
+			end = len(toDelete)
+		}
+		batch := toDelete[i:end]
+
+		if err := r.db.WithContext(ctx).Where("id IN ?", batch).Delete(&types.Chunk{}).Error; err != nil {
+			// Return already planned deletions up to this point for index cleanup
+			return toDelete[:i], err
+		}
+	}
+
+	return toDelete, nil
 }
 
 // CountChunksByKnowledgeBaseID counts the number of chunks in a knowledge base

@@ -17,6 +17,11 @@ type TagHandler struct {
 	tagService interfaces.KnowledgeTagService
 }
 
+// DeleteTagRequest represents the request body for deleting a tag
+type DeleteTagRequest struct {
+	ExcludeIDs []string `json:"exclude_ids"` // Chunk IDs to exclude from deletion
+}
+
 // NewTagHandler creates a new TagHandler.
 func NewTagHandler(tagService interfaces.KnowledgeTagService) *TagHandler {
 	return &TagHandler{tagService: tagService}
@@ -161,10 +166,11 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 // @Tags         标签管理
 // @Accept       json
 // @Produce      json
-// @Param        id            path      string  true   "知识库ID"
-// @Param        tag_id        path      string  true   "标签ID"
-// @Param        force         query     bool    false  "强制删除"
-// @Param        content_only  query     bool    false  "仅删除内容，保留标签"
+// @Param        id            path      string              true   "知识库ID"
+// @Param        tag_id        path      string              true   "标签ID"
+// @Param        force         query     bool                false  "强制删除"
+// @Param        content_only  query     bool                false  "仅删除内容，保留标签"
+// @Param        body          body      DeleteTagRequest    false  "删除选项"
 // @Success      200           {object}  map[string]interface{}  "删除成功"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -177,7 +183,11 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 	force := c.Query("force") == "true"
 	contentOnly := c.Query("content_only") == "true"
 
-	if err := h.tagService.DeleteTag(ctx, tagID, force, contentOnly); err != nil {
+	var req DeleteTagRequest
+	// Ignore bind error since body is optional
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.tagService.DeleteTag(ctx, tagID, force, contentOnly, req.ExcludeIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tag_id": tagID,
 		})
