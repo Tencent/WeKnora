@@ -419,17 +419,52 @@ minio:
 
 # -- Neo4j configuration (Knowledge Graph)
 # Equivalent to: docker compose --profile neo4j
+# Required for GraphRAG feature (ENABLE_GRAPH_RAG=true)
 neo4j:
   # -- Enable Neo4j for GraphRAG
   enabled: false
+
   image:
+    # -- Image repository
     repository: neo4j
-    tag: 5-community
-  # -- Authentication password (REQUIRED if enabled)
+    # -- Image tag (matches docker-compose.yml)
+    tag: "2025.10.1"
+
+  # -- Neo4j authentication username
+  username: neo4j
+  # -- Neo4j authentication password (REQUIRED if enabled)
   password: ""
+
+  # -- Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  # -- Persistence configuration
   persistence:
+    # -- Enable persistence
     enabled: true
+    # -- Size of the PVC
     size: 10Gi
+    # -- Use existing PVC (leave empty to create new)
+    existingClaim: ""
+
+  # -- Node selector
+  nodeSelector: {}
+
+  # -- Tolerations
+  tolerations: []
+
+  # -- Affinity rules
+  affinity: {}
 
 # -- Qdrant configuration (Vector Database)
 # Equivalent to: docker compose --profile qdrant

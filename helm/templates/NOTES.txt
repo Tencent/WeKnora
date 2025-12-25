@@ -99,6 +99,27 @@ Supported LLM backends:
   - OpenAI API compatible endpoints
   - Qwen, DeepSeek, and other Chinese LLMs
 
+{{- if .Values.neo4j.enabled }}
+
+--------------------------------------------------------------------------------
+  GRAPHRAG (KNOWLEDGE GRAPH)
+--------------------------------------------------------------------------------
+
+Neo4j is enabled for GraphRAG feature.
+
+To use GraphRAG, set ENABLE_GRAPH_RAG=true in the app:
+
+  helm upgrade {{ .Release.Name }} ./helm \
+    --set app.env.ENABLE_GRAPH_RAG=true \
+    --set neo4j.enabled=true \
+    --set neo4j.password=<your-secure-password>
+
+Access Neo4j Browser:
+  kubectl port-forward svc/neo4j -n {{ .Release.Namespace }} 7474:7474 7687:7687
+  # Open: http://localhost:7474
+
+{{- end }}
+
 --------------------------------------------------------------------------------
   DOCUMENTATION
 --------------------------------------------------------------------------------

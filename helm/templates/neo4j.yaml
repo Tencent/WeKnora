@@ -1,0 +1,136 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+Neo4j Graph Database Deployment and Service.
+Neo4j is used for GraphRAG feature - knowledge graph storage and querying.
+Equivalent to: docker compose --profile neo4j
+*/}}
+{{- if .Values.neo4j.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-neo4j
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "graph" "context" .) | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "graph" "context" .) | nindent 6 }}
+  # Use Recreate strategy for database to avoid data corruption
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "graph" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- with .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: neo4j
+          image: {{ include "weknora.neo4j.image" . }}
+          imagePullPolicy: IfNotPresent
+          {{- with .Values.neo4j.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 7474
+              name: http
+              protocol: TCP
+            - containerPort: 7687
+              name: bolt
+              protocol: TCP
+          env:
+            # Neo4j 5.0+ requires admin username to be "neo4j"
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: NEO4J_PASSWORD
+            - name: NEO4J_AUTH
+              value: "neo4j/$(NEO4J_PASSWORD)"
+            # Disable strict validation to avoid conflict with K8s injected env vars
+            # (K8s injects NEO4J_PORT_* from Service named "neo4j")
+            - name: NEO4J_server_config_strict__validation_enabled
+              value: "false"
+            # APOC plugin configuration
+            - name: NEO4J_apoc_export_file_enabled
+              value: "true"
+            - name: NEO4J_apoc_import_file_enabled
+              value: "true"
+            - name: NEO4J_apoc_import_file_use__neo4j__config
+              value: "true"
+            - name: NEO4J_PLUGINS
+              value: '["apoc"]'
+          volumeMounts:
+            - name: neo4j-data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.neo4j.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: neo4j-data
+          {{- if .Values.neo4j.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.neo4j.persistence.existingClaim | default (printf "%s-neo4j" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.neo4j.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.neo4j.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.neo4j.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  # Service name must be "neo4j" - app references this
+  name: neo4j
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "graph" "context" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "weknora.componentSelectorLabels" (dict "component" "graph" "context" .) | nindent 4 }}
+  ports:
+    - name: http
+      port: 7474
+      targetPort: http
+      protocol: TCP
+    - name: bolt
+      port: 7687
+      targetPort: bolt
+      protocol: TCP
+{{- end }}

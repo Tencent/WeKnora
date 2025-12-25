@@ -43,6 +43,25 @@ spec:
 ---
 {{- end }}
 
+{{/* Neo4j PVC */}}
+{{- if and .Values.neo4j.enabled .Values.neo4j.persistence.enabled (not .Values.neo4j.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "weknora.fullname" . }}-neo4j
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "graph" "context" .) | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.neo4j.persistence.size }}
+  {{- include "weknora.storageClass" . | nindent 2 }}
+---
+{{- end }}
+
 {{/* Data Files PVC */}}
 {{- if and .Values.dataFiles.persistence.enabled (not .Values.dataFiles.persistence.existingClaim) }}
 apiVersion: v1

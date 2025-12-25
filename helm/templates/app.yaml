@@ -115,6 +115,21 @@ spec:
               value: {{ .Values.app.env.CONCURRENCY_POOL_SIZE | quote }}
             - name: ENABLE_GRAPH_RAG
               value: {{ .Values.app.env.ENABLE_GRAPH_RAG | quote }}
+            {{- if .Values.neo4j.enabled }}
+            # Neo4j configuration (for GraphRAG)
+            - name: NEO4J_URI
+              value: "bolt://neo4j:7687"
+            - name: NEO4J_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: NEO4J_USERNAME
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: NEO4J_PASSWORD
+            {{- end }}
             {{- with .Values.app.extraEnv }}
             # Additional environment variables
             {{- toYaml . | nindent 12 }}

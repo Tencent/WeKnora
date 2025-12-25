@@ -141,6 +141,13 @@ Return the Redis image with tag.
 {{- end }}
 
 {{/*
+Return the Neo4j image with tag.
+*/}}
+{{- define "weknora.neo4j.image" -}}
+{{- printf "%s:%s" .Values.neo4j.image.repository .Values.neo4j.image.tag }}
+{{- end }}
+
+{{/*
 Create image pull secrets list.
 */}}
 {{- define "weknora.imagePullSecrets" -}}
