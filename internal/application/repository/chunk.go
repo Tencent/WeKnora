@@ -652,7 +652,7 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 
 	// Handle newTagID update (__untagged__ is stored as empty string)
 	if newTagID != nil {
-		if *newTagID == types.UntaggedTagID {
+		if *newTagID == types.UntaggedTagID || *newTagID == "" {
 			updates["tag_id"] = ""
 		} else {
 			updates["tag_id"] = *newTagID
