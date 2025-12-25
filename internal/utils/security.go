@@ -68,11 +68,6 @@ func ValidateInput(input string) (string, bool) {
 		return "", true
 	}
 
-	// 检查长度
-	if len(input) > 10000 {
-		return "", false
-	}
-
 	// 检查是否包含控制字符
 	for _, r := range input {
 		if r < 32 && r != 9 && r != 10 && r != 13 {
@@ -196,11 +191,6 @@ func SanitizeForLog(input string) string {
 	}
 
 	sanitized = builder.String()
-
-	// 限制长度,防止日志溢出
-	if len(sanitized) > 1000 {
-		sanitized = sanitized[:1000] + "...[truncated]"
-	}
 
 	return sanitized
 }

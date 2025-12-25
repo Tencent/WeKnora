@@ -12,7 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"gorm.io/gorm"
@@ -253,7 +252,7 @@ func (s *knowledgeTagService) enqueueIndexDeleteTask(ctx context.Context,
 		return
 	}
 
-	task := asynq.NewTask(types.TypeIndexDelete, payloadBytes, asynq.Queue(utils.GetAsynqQueueName("low")), asynq.MaxRetry(10))
+	task := asynq.NewTask(types.TypeIndexDelete, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(10))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue index delete task: %v", err)
