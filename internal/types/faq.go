@@ -228,6 +228,9 @@ type FAQSearchRequest struct {
 	MatchCount      int     `json:"match_count"`
 }
 
+// UntaggedTagID is the special tag ID representing uncategorized entries
+const UntaggedTagID = "__untagged__"
+
 // FAQEntryFieldsUpdate 单个FAQ条目的字段更新
 type FAQEntryFieldsUpdate struct {
 	IsEnabled     *bool   `json:"is_enabled,omitempty"`
@@ -243,7 +246,7 @@ type FAQEntryFieldsUpdate struct {
 type FAQEntryFieldsBatchUpdate struct {
 	// ByID 按条目ID更新，key为条目ID
 	ByID map[string]FAQEntryFieldsUpdate `json:"by_id,omitempty"`
-	// ByTag 按Tag批量更新，key为TagID（空字符串表示未分类）
+	// ByTag 按Tag批量更新，key为TagID（__untagged__表示未分类）
 	ByTag map[string]FAQEntryFieldsUpdate `json:"by_tag,omitempty"`
 	// ExcludeIDs 在ByTag操作中需要排除的ID列表
 	ExcludeIDs []string `json:"exclude_ids,omitempty"`
