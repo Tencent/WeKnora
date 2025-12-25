@@ -64,7 +64,7 @@ type ChunkRepository interface {
 	UpdateChunkFlagsBatch(ctx context.Context, tenantID uint64, kbID string, setFlags map[string]types.ChunkFlags, clearFlags map[string]types.ChunkFlags) error
 	// UpdateChunkFieldsByTagID updates fields for all chunks with the specified tag ID.
 	// Supports updating is_enabled and flags fields.
-	UpdateChunkFieldsByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, isEnabled *bool, setFlags types.ChunkFlags, clearFlags types.ChunkFlags) ([]string, error)
+	UpdateChunkFieldsByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, isEnabled *bool, setFlags types.ChunkFlags, clearFlags types.ChunkFlags, excludeIDs []string) ([]string, error)
 	// FAQChunkDiff compares FAQ chunks between two knowledge bases and returns the differences.
 	// Returns: chunksToAdd (content_hash in src but not in dst), chunksToDelete (content_hash in dst but not in src)
 	FAQChunkDiff(ctx context.Context, srcTenantID uint64, srcKBID string, dstTenantID uint64, dstKBID string) (chunksToAdd []string, chunksToDelete []string, err error)

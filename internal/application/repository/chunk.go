@@ -569,6 +569,7 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	isEnabled *bool,
 	setFlags types.ChunkFlags,
 	clearFlags types.ChunkFlags,
+	excludeIDs []string,
 ) ([]string, error) {
 	// First, get the IDs of chunks that will be affected (for is_enabled sync)
 	var affectedIDs []string
@@ -583,6 +584,11 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 		} else {
 			query = query.Where("tag_id = ?", tagID)
 		}
+
+		if len(excludeIDs) > 0 {
+			query = query.Where("id NOT IN ?", excludeIDs)
+		}
+
 		// Only get chunks that need to change
 		query = query.Where("is_enabled != ?", *isEnabled)
 		if err := query.Find(&chunks).Error; err != nil {
@@ -610,6 +616,10 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 		query = query.Where("(tag_id = '' OR tag_id IS NULL)")
 	} else {
 		query = query.Where("tag_id = ?", tagID)
+	}
+
+	if len(excludeIDs) > 0 {
+		query = query.Where("id NOT IN ?", excludeIDs)
 	}
 
 	// Handle flags update

@@ -3570,7 +3570,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			// Update all chunks with this tag
 			affectedIDs, err := s.chunkRepo.UpdateChunkFieldsByTagID(
 				ctx, tenantID, kb.ID, tagID,
-				update.IsEnabled, setFlags, clearFlags,
+				update.IsEnabled, setFlags, clearFlags, req.ExcludeIDs,
 			)
 			if err != nil {
 				return err

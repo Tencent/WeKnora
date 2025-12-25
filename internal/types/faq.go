@@ -245,6 +245,8 @@ type FAQEntryFieldsBatchUpdate struct {
 	ByID map[string]FAQEntryFieldsUpdate `json:"by_id,omitempty"`
 	// ByTag 按Tag批量更新，key为TagID（空字符串表示未分类）
 	ByTag map[string]FAQEntryFieldsUpdate `json:"by_tag,omitempty"`
+	// ExcludeIDs 在ByTag操作中需要排除的ID列表
+	ExcludeIDs []string `json:"exclude_ids,omitempty"`
 }
 
 // FAQImportTaskStatus 导入任务状态

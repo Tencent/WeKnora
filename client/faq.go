@@ -69,6 +69,8 @@ type FAQEntryFieldsBatchRequest struct {
 	ByID map[string]FAQEntryFieldsUpdate `json:"by_id,omitempty"`
 	// ByTag updates all entries under a tag, key is tag ID (empty string for uncategorized)
 	ByTag map[string]FAQEntryFieldsUpdate `json:"by_tag,omitempty"`
+	// ExcludeIDs IDs to exclude from the ByTag update
+	ExcludeIDs []string `json:"exclude_ids,omitempty"`
 }
 
 // FAQEntryTagBatchRequest updates tags in bulk.
@@ -255,10 +257,10 @@ func (c *Client) UpdateFAQEntry(ctx context.Context,
 //   - byID: update by entry ID, key is entry ID
 //   - byTag: update all entries under a tag, key is tag ID (empty string for uncategorized)
 func (c *Client) UpdateFAQEntryFieldsBatch(ctx context.Context,
-	knowledgeBaseID string, byID map[string]FAQEntryFieldsUpdate, byTag map[string]FAQEntryFieldsUpdate,
+	knowledgeBaseID string, byID map[string]FAQEntryFieldsUpdate, byTag map[string]FAQEntryFieldsUpdate, excludeIDs []string,
 ) error {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/faq/entries/fields", knowledgeBaseID)
-	resp, err := c.doRequest(ctx, http.MethodPut, path, &FAQEntryFieldsBatchRequest{ByID: byID, ByTag: byTag}, nil)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, &FAQEntryFieldsBatchRequest{ByID: byID, ByTag: byTag, ExcludeIDs: excludeIDs}, nil)
 	if err != nil {
 		return err
 	}
