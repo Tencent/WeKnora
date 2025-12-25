@@ -8,6 +8,7 @@ const (
 	TypeSummaryGeneration   = "summary:generation"   // 摘要生成任务
 	TypeKBClone             = "kb:clone"             // 知识库复制任务
 	TypeIndexDelete         = "index:delete"         // 索引删除任务
+	TypeKBDelete            = "kb:delete"            // 知识库删除任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -73,6 +74,13 @@ type IndexDeletePayload struct {
 	EmbeddingModelID string                  `json:"embedding_model_id"`
 	KBType           string                  `json:"kb_type"`
 	ChunkIDs         []string                `json:"chunk_ids"`
+	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
+}
+
+// KBDeletePayload represents the knowledge base delete task payload
+type KBDeletePayload struct {
+	TenantID         uint64                  `json:"tenant_id"`
+	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 }
 

@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/hibiken/asynq"
 )
 
 // KnowledgeBaseService defines the knowledge base service interface
@@ -88,6 +89,14 @@ type KnowledgeBaseService interface {
 	// Returns:
 	//   - interfaces.KnowledgeBaseRepository: Knowledge base repository
 	GetRepository() KnowledgeBaseRepository
+
+	// ProcessKBDelete handles async knowledge base deletion task
+	// Parameters:
+	//   - ctx: Context information
+	//   - t: Asynq task containing KBDeletePayload
+	// Returns:
+	//   - Possible errors during deletion
+	ProcessKBDelete(ctx context.Context, t *asynq.Task) error
 }
 
 // KnowledgeBaseRepository defines the knowledge base repository interface

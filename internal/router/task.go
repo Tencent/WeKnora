@@ -14,10 +14,11 @@ import (
 type AsynqTaskParams struct {
 	dig.In
 
-	Server           *asynq.Server
-	Extracter        interfaces.Extracter
-	KnowledgeService interfaces.KnowledgeService
-	TagService       interfaces.KnowledgeTagService
+	Server               *asynq.Server
+	Extracter            interfaces.Extracter
+	KnowledgeService     interfaces.KnowledgeService
+	KnowledgeBaseService interfaces.KnowledgeBaseService
+	TagService           interfaces.KnowledgeTagService
 }
 
 func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
@@ -79,6 +80,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register index delete handler
 	mux.HandleFunc(types.TypeIndexDelete, params.TagService.ProcessIndexDelete)
+
+	// Register KB delete handler
+	mux.HandleFunc(types.TypeKBDelete, params.KnowledgeBaseService.ProcessKBDelete)
 
 	go func() {
 		// Start the server

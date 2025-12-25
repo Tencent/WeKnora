@@ -269,6 +269,9 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 		return err
 	}
 
+	// Set tenant context for downstream services
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+
 	logger.Infof(ctx, "Processing index delete task for %d chunks in KB %s", len(payload.ChunkIDs), payload.KnowledgeBaseID)
 
 	// Create retrieve engine

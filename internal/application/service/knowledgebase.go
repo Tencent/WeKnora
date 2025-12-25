@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 )
 
 // ErrInvalidTenantID represents an error for invalid tenant ID
@@ -29,6 +30,7 @@ type knowledgeBaseService struct {
 	tenantRepo     interfaces.TenantRepository
 	fileSvc        interfaces.FileService
 	graphEngine    interfaces.RetrieveGraphRepository
+	asynqClient    *asynq.Client
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -40,6 +42,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
 	graphEngine interfaces.RetrieveGraphRepository,
+	asynqClient *asynq.Client,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:           repo,
@@ -50,6 +53,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		tenantRepo:     tenantRepo,
 		fileSvc:        fileSvc,
 		graphEngine:    graphEngine,
+		asynqClient:    asynqClient,
 	}
 }
 
@@ -213,6 +217,8 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 }
 
 // DeleteKnowledgeBase deletes a knowledge base by its ID
+// This method marks the knowledge base as deleted and enqueues an async task
+// to handle the heavy cleanup operations (embeddings, chunks, files, graph data)
 func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id string) error {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -223,13 +229,68 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 
 	// Get tenant ID from context
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 
-	// Step 1: Get all knowledge entries in this knowledge base
-	logger.Infof(ctx, "Fetching all knowledge entries in knowledge base, ID: %s", id)
-	knowledgeList, err := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, id)
+	// Step 1: Delete the knowledge base record first (mark as deleted)
+	logger.Infof(ctx, "Deleting knowledge base from database")
+	err := s.repo.DeleteKnowledgeBase(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"knowledge_base_id": id,
+		})
+		return err
+	}
+
+	// Step 2: Enqueue async task for heavy cleanup operations
+	payload := types.KBDeletePayload{
+		TenantID:         tenantID,
+		KnowledgeBaseID:  id,
+		EffectiveEngines: tenantInfo.GetEffectiveEngines(),
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to marshal KB delete payload: %v", err)
+		// Don't fail the request, the KB record is already deleted
+		return nil
+	}
+
+	task := asynq.NewTask(types.TypeKBDelete, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+	info, err := s.asynqClient.Enqueue(task)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to enqueue KB delete task: %v", err)
+		// Don't fail the request, the KB record is already deleted
+		return nil
+	}
+
+	logger.Infof(ctx, "KB delete task enqueued: %s, knowledge base ID: %s", info.ID, id)
+	logger.Infof(ctx, "Knowledge base deleted successfully, ID: %s", id)
+	return nil
+}
+
+// ProcessKBDelete handles async knowledge base deletion task
+// This method performs heavy cleanup operations: deleting embeddings, chunks, files, and graph data
+func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Task) error {
+	var payload types.KBDeletePayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "Failed to unmarshal KB delete payload: %v", err)
+		return err
+	}
+
+	tenantID := payload.TenantID
+	kbID := payload.KnowledgeBaseID
+
+	// Set tenant context for downstream services
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+
+	logger.Infof(ctx, "Processing KB delete task for knowledge base: %s", kbID)
+
+	// Step 1: Get all knowledge entries in this knowledge base
+	logger.Infof(ctx, "Fetching all knowledge entries in knowledge base, ID: %s", kbID)
+	knowledgeList, err := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": kbID,
 		})
 		return err
 	}
@@ -246,10 +307,9 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 
 		// Delete embeddings from vector store
 		logger.Infof(ctx, "Deleting embeddings from vector store")
-		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
-			tenantInfo.GetEffectiveEngines(),
+			payload.EffectiveEngines,
 		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
@@ -321,23 +381,13 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		logger.Infof(ctx, "Deleting knowledge entries from database")
 		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"knowledge_base_id": id,
+				"knowledge_base_id": kbID,
 			})
 			return err
 		}
 	}
 
-	// Step 3: Delete the knowledge base itself
-	logger.Infof(ctx, "Deleting knowledge base from database")
-	err = s.repo.DeleteKnowledgeBase(ctx, id)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_base_id": id,
-		})
-		return err
-	}
-
-	logger.Infof(ctx, "Knowledge base deleted successfully, ID: %s", id)
+	logger.Infof(ctx, "KB delete task completed successfully, knowledge base ID: %s", kbID)
 	return nil
 }
 
