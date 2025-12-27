@@ -494,7 +494,8 @@ const showLanguageMenu = ref(false)
 const languageOptions = [
   { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
   { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
-  { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' }
+  { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
+  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
 ]
 
 // Current language computed from i18n
