@@ -1429,6 +1429,7 @@ export default {
     zhCN: '简体中文',
     enUS: 'English',
     ruRU: 'Русский',
+    koKR: '한국어',
     selectLanguage: 'Select Language',
     language: 'Language',
     languageDescription: 'Select interface display language',

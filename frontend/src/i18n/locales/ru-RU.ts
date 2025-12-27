@@ -1282,6 +1282,7 @@ export default {
     zhCN: '简体中文',
     enUS: 'English',
     ruRU: 'Русский',
+    koKR: '한국어',
     selectLanguage: 'Выбрать язык',
     language: 'Язык',
     languageDescription: 'Выберите язык отображения интерфейса',
