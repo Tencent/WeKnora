@@ -80,6 +80,8 @@ type ChatConfig struct {
 	ModelName string
 	APIKey    string
 	ModelID   string
+	Provider  string
+	Extra     map[string]any
 }
 
 // NewChat 创建聊天实例

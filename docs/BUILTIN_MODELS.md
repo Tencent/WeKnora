@@ -21,8 +21,10 @@
 - 模型名称（name）
 - 模型类型（type）：`KnowledgeQA`、`Embedding`、`Rerank` 或 `VLLM`
 - 模型来源（source）：`local` 或 `remote`
-- 模型参数（parameters）：包括 base_url、api_key 等
+- 模型参数（parameters）：包括 base_url、api_key、provider 等
 - 租户ID（tenant_id）：建议使用小于10000的租户ID，避免冲突
+
+**支持的服务商（provider）**：`generic`（自定义）、`openai`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`deepseek`、`minimax`、`mimo`、`siliconflow`、`jina`、`openrouter`、`gemini`
 
 ### 2. 执行 SQL 插入语句
 
@@ -48,7 +50,7 @@ INSERT INTO models (
     'KnowledgeQA',                        -- 模型类型
     'remote',                             -- 模型来源
     '内置 LLM 模型',                       -- 描述
-    '{"base_url": "https://api.openai.com/v1", "api_key": "sk-xxx"}'::jsonb,  -- 参数（JSON格式）
+    '{"base_url": "https://api.openai.com/v1", "api_key": "sk-xxx", "provider": "openai"}'::jsonb,  -- 参数（JSON格式）
     false,                                -- 是否默认
     'active',                             -- 状态
     true                                  -- 标记为内置模型
@@ -73,7 +75,7 @@ INSERT INTO models (
     'Embedding',
     'remote',
     '内置 Embedding 模型',
-    '{"base_url": "https://api.openai.com/v1", "api_key": "sk-xxx", "embedding_parameters": {"dimension": 1536, "truncate_prompt_tokens": 0}}'::jsonb,
+    '{"base_url": "https://api.openai.com/v1", "api_key": "sk-xxx", "provider": "openai", "embedding_parameters": {"dimension": 1536, "truncate_prompt_tokens": 0}}'::jsonb,
     false,
     'active',
     true
@@ -98,7 +100,7 @@ INSERT INTO models (
     'Rerank',
     'remote',
     '内置 ReRank 模型',
-    '{"base_url": "https://api.example.com/v1", "api_key": "xxx"}'::jsonb,
+    '{"base_url": "https://api.jina.ai/v1", "api_key": "jina-xxx", "provider": "jina"}'::jsonb,
     false,
     'active',
     true
@@ -123,7 +125,7 @@ INSERT INTO models (
     'VLLM',
     'remote',
     '内置 VLLM 模型',
-    '{"base_url": "https://api.openai.com/v1", "api_key": "sk-xxx"}'::jsonb,
+    '{"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "sk-xxx", "provider": "aliyun"}'::jsonb,
     false,
     'active',
     true

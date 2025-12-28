@@ -313,6 +313,8 @@ func RegisterModelRoutes(r *gin.RouterGroup, handler *handler.ModelHandler) {
 	// 模型路由组
 	models := r.Group("/models")
 	{
+		// 获取模型厂商列表
+		models.GET("/providers", handler.ListModelProviders)
 		// 创建模型
 		models.POST("", handler.CreateModel)
 		// 获取模型列表

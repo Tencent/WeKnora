@@ -252,6 +252,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		ModelName:            model.Name,
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
+		Provider:             model.Parameters.Provider,
 	})
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

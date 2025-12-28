@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sashabaranov/go-openai"
 )
@@ -20,6 +20,7 @@ type RemoteAPIChat struct {
 	modelID   string
 	baseURL   string
 	apiKey    string
+	provider  provider.ProviderName // Provider identifier for routing
 }
 
 // QwenChatCompletionRequest 用于 qwen 模型的自定义请求结构体
@@ -35,12 +36,20 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	if baseURL := chatConfig.BaseURL; baseURL != "" {
 		config.BaseURL = baseURL
 	}
+
+	// Detect or use configured provider
+	providerName := provider.ProviderName(chatConfig.Provider)
+	if providerName == "" {
+		providerName = provider.DetectProvider(chatConfig.BaseURL)
+	}
+
 	return &RemoteAPIChat{
 		modelName: chatConfig.ModelName,
 		client:    openai.NewClientWithConfig(config),
 		modelID:   chatConfig.ModelID,
 		baseURL:   chatConfig.BaseURL,
 		apiKey:    apiKey,
+		provider:  providerName,
 	}, nil
 }
 
@@ -86,12 +95,12 @@ func (c *RemoteAPIChat) convertMessages(messages []Message) []openai.ChatComplet
 
 // isQwenModel 检查是否为 qwen 模型
 func (c *RemoteAPIChat) isAliyunQwen3Model() bool {
-	return strings.HasPrefix(c.modelName, "qwen3-") && c.baseURL == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	return c.provider == provider.ProviderAliyun && provider.IsQwen3Model(c.modelName)
 }
 
 // isDeepSeekModel 检查是否为 DeepSeek 模型
 func (c *RemoteAPIChat) isDeepSeekModel() bool {
-	return strings.Contains(strings.ToLower(c.modelName), "deepseek")
+	return provider.IsDeepSeekModel(c.modelName)
 }
 
 // buildQwenChatCompletionRequest 构建 qwen 模型的聊天请求参数

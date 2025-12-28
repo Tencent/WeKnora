@@ -32,9 +32,20 @@ const (
 type ModelSource string
 
 const (
-	ModelSourceLocal  ModelSource = "local"  // Local model
-	ModelSourceRemote ModelSource = "remote" // Remote model
-	ModelSourceAliyun ModelSource = "aliyun" // Aliyun DashScope model
+	ModelSourceLocal       ModelSource = "local"       // Local model
+	ModelSourceRemote      ModelSource = "remote"      // Remote model
+	ModelSourceAliyun      ModelSource = "aliyun"      // Aliyun DashScope model
+	ModelSourceZhipu       ModelSource = "zhipu"       // Zhipu model
+	ModelSourceVolcengine  ModelSource = "volcengine"  // Volcengine model
+	ModelSourceDeepseek    ModelSource = "deepseek"    // Deepseek model
+	ModelSourceHunyuan     ModelSource = "hunyuan"     // Hunyuan model
+	ModelSourceMinimax     ModelSource = "minimax"     // Minimax mode
+	ModelSourceOpenAI      ModelSource = "openai"      // OpenAI model
+	ModelSourceGemini      ModelSource = "gemini"      // Gemini model
+	ModelSourceMimo        ModelSource = "mimo"        // Mimo model
+	ModelSourceSiliconFlow ModelSource = "siliconflow" // SiliconFlow model
+	ModelSourceJina        ModelSource = "jina"        // Jina AI model
+	ModelSourceOpenRouter  ModelSource = "openrouter"  // OpenRouter model
 )
 
 // EmbeddingParameters represents the embedding parameters for a model
@@ -49,6 +60,8 @@ type ModelParameters struct {
 	InterfaceType       string              `yaml:"interface_type"       json:"interface_type"`
 	EmbeddingParameters EmbeddingParameters `yaml:"embedding_parameters" json:"embedding_parameters"`
 	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"` // Ollama model parameter size (e.g., "7B", "13B", "70B")
+	Provider            string              `yaml:"provider"             json:"provider"`       // Provider identifier: openai, aliyun, zhipu, generic
+	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`   // Provider-specific configuration
 }
 
 // Model represents the AI model

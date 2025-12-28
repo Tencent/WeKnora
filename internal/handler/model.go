@@ -6,6 +6,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -290,7 +291,8 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		model.Name = req.Name
 	}
 	model.Description = req.Description
-	if req.Parameters != (types.ModelParameters{}) {
+	// Check if any Parameters field is set (can't use struct comparison due to map field)
+	if req.Parameters.BaseURL != "" || req.Parameters.APIKey != "" || req.Parameters.Provider != "" {
 		model.Parameters = req.Parameters
 	}
 	model.Source = req.Source
@@ -354,5 +356,107 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Model deleted",
+	})
+}
+
+// ModelProviderDTO 模型厂商信息 DTO
+type ModelProviderDTO struct {
+	Value       string            `json:"value"`       // provider 标识符
+	Label       string            `json:"label"`       // 显示名称
+	Description string            `json:"description"` // 描述
+	DefaultURLs map[string]string `json:"defaultUrls"` // 按模型类型区分的默认 URL
+	ModelTypes  []string          `json:"modelTypes"`  // 支持的模型类型
+}
+
+// modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
+// KnowledgeQA -> chat, Embedding -> embedding, Rerank -> rerank, VLLM -> vllm
+func modelTypeToFrontend(mt types.ModelType) string {
+	switch mt {
+	case types.ModelTypeKnowledgeQA:
+		return "chat"
+	case types.ModelTypeEmbedding:
+		return "embedding"
+	case types.ModelTypeRerank:
+		return "rerank"
+	case types.ModelTypeVLLM:
+		return "vllm"
+	default:
+		return string(mt)
+	}
+}
+
+// ListModelProviders godoc
+// @Summary      获取模型厂商列表
+// @Description  根据模型类型获取支持的厂商列表及配置信息
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm)"
+// @Success      200         {object}  map[string]interface{}  "厂商列表"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/providers [get]
+func (h *ModelHandler) ListModelProviders(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	modelType := c.Query("model_type")
+	logger.Infof(ctx, "Listing model providers for type: %s", secutils.SanitizeForLog(modelType))
+
+	// 将前端类型映射到后端类型
+	// 前端: chat, embedding, rerank, vllm
+	// 后端: KnowledgeQA, Embedding, Rerank, VLLM
+	var backendModelType types.ModelType
+	switch modelType {
+	case "chat":
+		backendModelType = types.ModelTypeKnowledgeQA
+	case "embedding":
+		backendModelType = types.ModelTypeEmbedding
+	case "rerank":
+		backendModelType = types.ModelTypeRerank
+	case "vllm":
+		backendModelType = types.ModelTypeVLLM
+	default:
+		backendModelType = types.ModelType(modelType)
+	}
+
+	var providers []provider.ProviderInfo
+	if modelType != "" {
+		// 按模型类型过滤
+		providers = provider.ListByModelType(backendModelType)
+	} else {
+		// 返回所有 provider
+		providers = provider.List()
+	}
+
+	// 转换为 DTO
+	result := make([]ModelProviderDTO, 0, len(providers))
+	for _, p := range providers {
+		// 转换 DefaultURLs map[types.ModelType]string -> map[string]string
+		// 使用前端兼容的 key (chat 而不是 KnowledgeQA)
+		defaultURLs := make(map[string]string)
+		for mt, url := range p.DefaultURLs {
+			frontendType := modelTypeToFrontend(mt)
+			defaultURLs[frontendType] = url
+		}
+
+		// 转换 ModelTypes 为前端兼容格式
+		modelTypes := make([]string, 0, len(p.ModelTypes))
+		for _, mt := range p.ModelTypes {
+			modelTypes = append(modelTypes, modelTypeToFrontend(mt))
+		}
+
+		result = append(result, ModelProviderDTO{
+			Value:       string(p.Name),
+			Label:       p.DisplayName,
+			Description: p.Description,
+			DefaultURLs: defaultURLs,
+			ModelTypes:  modelTypes,
+		})
+	}
+
+	logger.Infof(ctx, "Retrieved %d providers", len(result))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
 	})
 }

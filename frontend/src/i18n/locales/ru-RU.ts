@@ -889,7 +889,64 @@ export default {
         baseUrlRequired: 'Введите Base URL',
         baseUrlEmpty: 'Base URL не может быть пустым',
         baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
-      }
+      },
+      // Переводы для провайдеров
+      providerLabel: 'Провайдер',
+      providerPlaceholder: 'Выберите провайдера модели',
+      providers: {
+        openai: {
+          label: 'OpenAI',
+          description: 'gpt-5.2, gpt-5-mini, etc.',
+        },
+        aliyun: {
+          label: 'Aliyun DashScope',
+          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.',
+        },
+        zhipu: {
+          label: 'Zhipu AI',
+          description: 'glm-4.7, embedding-3, rerank, etc.',
+        },
+        openrouter: {
+          label: 'OpenRouter',
+          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.',
+        },
+        generic: {
+          label: 'Пользовательский API',
+          description: 'Generic API endpoint',
+        },
+        siliconflow: {
+          label: 'SiliconFlow',
+          description: 'deepseek-ai/DeepSeek-V3.1, etc.',
+        },
+        jina: {
+          label: 'Jina AI',
+          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.',
+        },
+        volcengine: {
+          label: 'Volcengine',
+          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.',
+        },
+        deepseek: {
+          label: 'DeepSeek',
+          description: 'deepseek-chat, deepseek-reasoner, etc.',
+        },
+        hunyuan: {
+          label: 'Hunyuan',
+          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.',
+        },
+        minimax: {
+          label: 'MiniMax',
+          description: 'MiniMax-M2.1, MiniMax-M2.1-lightning, etc.',
+        },
+        mimo: {
+          label: 'MiMo',
+          description: 'mimo-v2-flash',
+        },
+        gemini: {
+          label: 'Google Gemini',
+          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.',
+        },
+      },
     }
   },
   createChat: {

@@ -1506,12 +1506,30 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		BaseURL   string `json:"baseUrl"`
 		APIKey    string `json:"apiKey"`
 		Dimension int    `json:"dimension"`
+		Provider  string `json:"provider"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse embedding test request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
+	}
+
+	// 检查是否是阿里云多模态 embedding 模型（暂不支持）
+	if strings.ToLower(req.Provider) == "aliyun" {
+		modelNameLower := strings.ToLower(req.ModelName)
+		if strings.Contains(modelNameLower, "vision") || strings.Contains(modelNameLower, "multimodal") {
+			logger.Infof(ctx, "Aliyun multimodal embedding model not supported: %s", req.ModelName)
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data": gin.H{
+					"available": false,
+					"message":   "阿里云多模态 Embedding 模型暂不支持，请使用纯文本 Embedding 模型（如 text-embedding-v4）",
+					"dimension": 0,
+				},
+			})
+			return
+		}
 	}
 
 	// 构造 embedder 配置
@@ -1523,6 +1541,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		TruncatePromptTokens: 256,
 		Dimensions:           req.Dimension,
 		ModelID:              "",
+		Provider:             req.Provider,
 	}
 
 	emb, err := embedding.NewEmbedder(cfg)

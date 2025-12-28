@@ -290,6 +290,7 @@ function convertToLegacyFormat(model: ModelConfig) {
     modelName: model.name,  // 显示名称作为模型名
     baseUrl: model.parameters.base_url || '',
     apiKey: model.parameters.api_key || '',
+    provider: model.parameters.provider || '', // 添加 provider 字段
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false
   }
@@ -400,6 +401,7 @@ const handleModelSave = async (modelData: any) => {
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
         api_key: modelData.apiKey?.trim() || '',
+        provider: modelData.provider || '', // 添加 provider 字段
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,

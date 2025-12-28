@@ -11,12 +11,14 @@ export interface ModelConfig {
   parameters: {
     base_url?: string;
     api_key?: string;
+    provider?: string; // Provider identifier: openai, aliyun, zhipu, generic
     embedding_parameters?: {
       dimension?: number;
       truncate_prompt_tokens?: number;
     };
     interface_type?: 'ollama' | 'openai'; // VLLM专用
     parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")
+    extra_config?: Record<string, string>; // Provider-specific configuration
   };
   is_default?: boolean;
   is_builtin?: boolean;

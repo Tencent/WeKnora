@@ -982,6 +982,39 @@ export default {
         baseUrlEmpty: "Base URL 不能为空",
         baseUrlInvalid: "Base URL 格式不正确，请输入有效的 URL",
       },
+      // Provider (厂商) 相关翻译
+      providerLabel: "服务商",
+      providerPlaceholder: "选择模型服务商",
+      providers: {
+        openai: {
+          label: "OpenAI",
+          description: "OpenAI 官方 API",
+        },
+        aliyun: {
+          label: "阿里云 DashScope",
+          description: "支持 Qwen、DeepSeek 等模型",
+        },
+        zhipu: {
+          label: "智谱 AI",
+          description: "支持 GLM-4 系列模型",
+        },
+        openrouter: {
+          label: "OpenRouter",
+          description: "多模型聚合平台",
+        },
+        generic: {
+          label: "自定义 API",
+          description: "OpenAI 兼容的自定义端点",
+        },
+        siliconflow: {
+          label: "SiliconFlow",
+          description: "硅基流动，支持多种模型",
+        },
+        jina: {
+          label: "Jina AI",
+          description: "专注于 Embedding 和 Rerank",
+        },
+      },
     },
   },
   language: {
@@ -1153,9 +1186,9 @@ export default {
     messages: {
       deleted: "已删除",
       deleteFailed: "删除失败",
-    file: "文件",
-    knowledgeBase: "知识库",
-    noResult: "无结果",
+      file: "文件",
+      knowledgeBase: "知识库",
+      noResult: "无结果",
     },
     features: {
       knowledgeGraph: "已启用知识图谱",

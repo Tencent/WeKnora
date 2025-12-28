@@ -278,6 +278,7 @@ export function testEmbeddingModel(modelConfig: {
     baseUrl?: string;
     apiKey?: string;
     dimension?: number;
+    provider?: string;
 }): Promise<{ available: boolean; message?: string; dimension?: number }> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/embedding/test', modelConfig)
@@ -318,7 +319,7 @@ export function testMultimodalFunction(testData: {
     vlm_base_url: string;
     vlm_api_key?: string;
     vlm_interface_type?: string;
-    storage_type?: 'cos'|'minio';
+    storage_type?: 'cos' | 'minio';
     // COS optional fields (required only when storage_type === 'cos')
     cos_secret_id?: string;
     cos_secret_key?: string;
@@ -397,18 +398,18 @@ export function testMultimodalFunction(testData: {
             headers,
             body: formData
         })
-        .then(response => response.json())
-        .then((data: any) => {
-            if (data.success) {
-                resolve(data.data || {});
-            } else {
-                resolve({ success: false, message: data.message || '测试失败' });
-            }
-        })
-        .catch((error: any) => {
-            console.error('多模态测试失败:', error);
-            reject(error);
-        });
+            .then(response => response.json())
+            .then((data: any) => {
+                if (data.success) {
+                    resolve(data.data || {});
+                } else {
+                    resolve({ success: false, message: data.message || '测试失败' });
+                }
+            })
+            .catch((error: any) => {
+                console.error('多模态测试失败:', error);
+                reject(error);
+            });
     });
 }
 
@@ -480,14 +481,14 @@ export function fabriText(request: FabriTextRequest): Promise<FabriTextResponse>
 }
 
 export interface FabriTagRequest {
-    llm_config: LLMConfig; 
+    llm_config: LLMConfig;
 }
 
 export interface FabriTagResponse {
     tags: string[];
 }
 
-// 文本内容生成
+// 标签生成
 export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/extract/fabri-tag', request)
@@ -497,6 +498,32 @@ export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
             .catch((error: any) => {
                 console.error('标签生成失败:', error);
                 reject(error);
+            });
+    });
+}
+
+// 模型厂商信息类型
+export interface ModelProviderOption {
+    value: string;        // provider 标识符
+    label: string;        // 显示名称
+    description: string;  // 描述
+    defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
+    modelTypes: string[]; // 支持的模型类型
+}
+
+// 获取模型厂商列表
+export function listModelProviders(modelType?: string): Promise<ModelProviderOption[]> {
+    return new Promise((resolve, reject) => {
+        const url = modelType
+            ? `/api/v1/models/providers?model_type=${encodeURIComponent(modelType)}`
+            : '/api/v1/models/providers';
+        get(url)
+            .then((response: any) => {
+                resolve(response.data || []);
+            })
+            .catch((error: any) => {
+                console.error('获取模型厂商列表失败:', error);
+                resolve([]); // 失败时返回空数组，前端可以回退到默认值
             });
     });
 }
