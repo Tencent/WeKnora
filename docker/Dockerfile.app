@@ -58,7 +58,7 @@ RUN useradd -m -s /bin/bash appuser
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
-    apt-get update && apt-get upgrade -y && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential postgresql-client default-mysql-client ca-certificates tzdata sed curl bash vim wget \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
