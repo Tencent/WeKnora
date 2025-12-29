@@ -7,7 +7,7 @@ WORKDIR /app
 ARG GOPRIVATE_ARG
 ARG GOPROXY_ARG
 ARG GOSUMDB_ARG=off
-ARG APK_MIRROR_ARG="mirrors.tencent.com"
+ARG APK_MIRROR_ARG
 
 # 设置Go环境变量
 ENV GOPRIVATE=${GOPRIVATE_ARG}
@@ -50,7 +50,7 @@ FROM debian:12.12-slim
 
 WORKDIR /app
 
-ARG APK_MIRROR_ARG="mirrors.tencent.com"
+ARG APK_MIRROR_ARG
 
 # Create a non-root user first
 RUN useradd -m -s /bin/bash appuser
