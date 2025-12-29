@@ -204,8 +204,13 @@ func (c *RemoteAPIChat) buildChatCompletionRequest(messages []Message,
 		}
 	}
 
-	req.ChatTemplateKwargs = map[string]interface{}{
-		"enable_thinking": thinking,
+	// ChatTemplateKwargs is only supported by custom backends like vLLM.
+	// Official APIs (OpenAI, Aliyun, Zhipu, etc.) do not support this parameter
+	// and will return 400 Bad Request if it's included.
+	if c.provider == provider.ProviderGeneric {
+		req.ChatTemplateKwargs = map[string]interface{}{
+			"enable_thinking": thinking,
+		}
 	}
 
 	// Log LLM request for debugging
