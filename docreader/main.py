@@ -57,8 +57,22 @@ logger.info("Initializing server logging")
 # Initialize request ID logging
 init_logging_request_id()
 
-# Set max message size to 50MB
-MAX_MESSAGE_LENGTH = 50 * 1024 * 1024
+
+def get_max_message_length() -> int:
+    """Get max gRPC message length from environment variable.
+    Default is 50MB, can be configured via MAX_FILE_SIZE_MB.
+    """
+    try:
+        size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
+        if size_mb > 0:
+            return size_mb * 1024 * 1024
+    except ValueError:
+        pass
+    return 50 * 1024 * 1024  # default 50MB
+
+
+# Set max message size (default 50MB, configurable via MAX_FILE_SIZE_MB)
+MAX_MESSAGE_LENGTH = get_max_message_length()
 
 
 parser = Parser()

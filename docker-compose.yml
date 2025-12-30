@@ -5,6 +5,8 @@ services:
     container_name: WeKnora-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"
+    environment:
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
     depends_on:
       app:
         condition: service_healthy
@@ -96,6 +98,8 @@ services:
       - INIT_RERANK_MODEL_NAME=${INIT_RERANK_MODEL_NAME:-}
       - INIT_RERANK_MODEL_BASE_URL=${INIT_RERANK_MODEL_BASE_URL:-}
       - INIT_RERANK_MODEL_API_KEY=${INIT_RERANK_MODEL_API_KEY:-}
+      # File size limit (in MB)
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
     depends_on:
       redis:
         condition: service_started
@@ -137,6 +141,8 @@ services:
       - MINIO_USE_SSL=${MINIO_USE_SSL:-}
       - WEB_PROXY=${WEB_PROXY:-}
       - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
+      # File size limit (in MB)
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
       interval: 30s
