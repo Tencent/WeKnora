@@ -110,11 +110,7 @@
             <div class="setting-info">
               <label>{{ $t('knowledgeEditor.advanced.multimodal.minio.bucketLabel') }} <span class="required">*</span></label>
               <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.minio.bucketDescription') }}</p>
-              <t-alert
-                theme="info"
-                :message="$t('knowledgeEditor.advanced.multimodal.minio.bucketHint')"
-                style="margin-top: 8px;"
-              />
+              <p class="hint">{{ $t('knowledgeEditor.advanced.multimodal.minio.bucketHint') }}</p>
             </div>
             <div class="setting-control bucket-control">
               <t-select
@@ -522,6 +518,13 @@ const handleConfigChange = () => {
     font-size: 13px;
     color: #666666;
     margin: 0;
+    line-height: 1.5;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: #999999;
+    margin: 6px 0 0 0;
     line-height: 1.5;
   }
 }
