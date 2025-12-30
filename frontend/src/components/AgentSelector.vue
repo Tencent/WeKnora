@@ -172,7 +172,7 @@ const dropdownStyle = ref<Record<string, string>>({});
 
 // 内置智能体
 const builtinAgents = computed(() => {
-  return [
+  const defaults = [
     {
       id: BUILTIN_QUICK_ANSWER_ID,
       name: t('input.normalMode'),
@@ -187,7 +187,23 @@ const builtinAgents = computed(() => {
       is_builtin: true,
       config: { agent_mode: 'smart-reasoning' as const }
     }
-  ] as CustomAgent[];
+  ];
+
+  return defaults.map(def => {
+    const apiAgent = agents.value.find(a => a.id === def.id);
+    if (apiAgent) {
+      return {
+        ...apiAgent,
+        name: def.name,
+        description: def.description,
+        config: {
+          ...(apiAgent.config || {}),
+          agent_mode: def.config.agent_mode
+        }
+      };
+    }
+    return def;
+  }) as CustomAgent[];
 });
 
 // 自定义智能体

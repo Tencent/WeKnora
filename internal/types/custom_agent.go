@@ -229,8 +229,14 @@ func GetBuiltinQuickAnswerAgent(tenantID uint64) *CustomAgent {
 		IsBuiltin:   true,
 		TenantID:    tenantID,
 		Config: CustomAgentConfig{
-			AgentMode:           AgentModeQuickAnswer,
-			SystemPrompt:        "",
+			AgentMode:    AgentModeQuickAnswer,
+			SystemPrompt: "",
+			ContextTemplate: `请根据以下参考资料回答用户问题。
+
+参考资料：
+{{contexts}}
+
+用户问题：{{query}}`,
 			Temperature:         0.7,
 			MaxCompletionTokens: 2048,
 			WebSearchEnabled:    true,
