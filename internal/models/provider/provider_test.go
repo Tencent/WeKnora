@@ -45,7 +45,7 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.hunyuan.cloud.tencent.com/v1", ProviderHunyuan},
 		{"https://api.minimaxi.com/v1", ProviderMiniMax},
 		{"https://api.minimax.io/v1", ProviderMiniMax},
-		{"https://api.mimo.xiaomi.com/v1", ProviderMimo},
+		{"https://api.xiaomimimo.com/v1", ProviderMimo},
 		{"https://custom-endpoint.example.com/v1", ProviderGeneric},
 		{"http://localhost:11434/v1", ProviderGeneric},
 	}

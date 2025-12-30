@@ -8,7 +8,7 @@ import (
 
 const (
 	// MimoBaseURL 小米 Mimo API BaseURL
-	MimoBaseURL = "https://api.mimo.xiaomi.com/v1"
+	MimoBaseURL = "https://api.xiaomimimo.com/v1"
 )
 
 // MimoProvider 实现小米 Mimo 的 Provider 接口

@@ -206,7 +206,7 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderHunyuan
 	case containsAny(baseURL, "minimax.io", "minimaxi.com"):
 		return ProviderMiniMax
-	case containsAny(baseURL, "mimo.xiaomi.com"):
+	case containsAny(baseURL, "xiaomimimo.com"):
 		return ProviderMimo
 	default:
 		return ProviderGeneric
