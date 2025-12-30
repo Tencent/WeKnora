@@ -129,9 +129,9 @@ const agentModelId = computed(() => {
   return currentAgentConfig.value?.model_id || null;
 });
 
-// 模型选择是否被智能体锁定
+// 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
 const isModelLockedByAgent = computed(() => {
-  return hasAgentConfig.value && !!agentModelId.value;
+  return false;
 });
 
 // Mention related state
