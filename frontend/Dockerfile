@@ -7,6 +7,10 @@ WORKDIR /app
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV VITE_IS_DOCKER=true
 
+# 文件大小限制(MB)，通过构建参数传入
+ARG MAX_FILE_SIZE_MB=50
+ENV VITE_MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB}
+
 # 复制依赖文件
 COPY package*.json ./
 COPY packages/xlsx-0.20.2.tgz ./packages/xlsx-0.20.2.tgz

@@ -1,7 +1,10 @@
 services:
   frontend:
     image: wechatopenai/weknora-ui:latest
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
     container_name: WeKnora-frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"
