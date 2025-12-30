@@ -95,6 +95,7 @@ export default {
     chunkCount: "共 {count} 个片段",
     viewOriginal: "查看原文件",
     viewChunks: "查看分块",
+    viewMerged: "全文",
     originalFileNotSupported: "该文件类型不支持原文件展示，请下载查看",
     loadOriginalFailed: "加载原文件内容失败",
     questions: "问题",

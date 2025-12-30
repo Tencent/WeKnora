@@ -96,6 +96,7 @@ export default {
     chunkCount: 'Total {count} segments',
     viewOriginal: 'View Original File',
     viewChunks: 'View Chunks',
+    viewMerged: 'Full Text',
     originalFileNotSupported: 'This file type does not support original file view. Please download to view.',
     loadOriginalFailed: 'Failed to load original file content',
     questions: 'Questions',

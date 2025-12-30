@@ -14,6 +14,8 @@ const { t } = useI18n();
 marked.use({
   mangle: false,
   headerIds: false,
+  breaks: true,      // 启用单行换行转 <br>
+  gfm: true,         // 启用 GitHub Flavored Markdown
 });
 const renderer = new marked.Renderer();
 let page = 1;
@@ -21,37 +23,86 @@ let doc = null;
 let down = ref()
 let mdContentWrap = ref()
 let url = ref('')
-// 视图模式：chunks / original
-const viewMode = ref<'chunks' | 'original'>('chunks');
+// 视图模式：chunks / original / merged
+const viewMode = ref<'chunks' | 'original' | 'merged'>('merged');
 const originalContent = ref<string>('');
 const loadingOriginal = ref(false);
+
+// 合并后的文档内容
+const mergedContent = ref<string>('');
+
+/**
+ * 根据 start_at 和 end_at 字段合并有 overlap 的 chunks
+ * 返回合并后的完整文档内容
+ */
+const mergeChunks = (chunks: any[]): string => {
+  if (!chunks || chunks.length === 0) return '';
+  
+  // 按 start_at 排序
+  const sortedChunks = [...chunks].sort((a, b) => {
+    const startA = a.start_at ?? a.chunk_index ?? 0;
+    const startB = b.start_at ?? b.chunk_index ?? 0;
+    return startA - startB;
+  });
+  
+  // 使用字符位置进行精确合并
+  const segments: { start: number; end: number; content: string }[] = [];
+  
+  for (const chunk of sortedChunks) {
+    const start = chunk.start_at ?? 0;
+    const end = chunk.end_at ?? (start + (chunk.content?.length || 0));
+    const content = chunk.content || '';
+    
+    if (segments.length === 0) {
+      segments.push({ start, end, content });
+      continue;
+    }
+    
+    const lastSegment = segments[segments.length - 1];
+    
+    // 检查是否有重叠
+    if (start <= lastSegment.end) {
+      // 有重叠，需要合并
+      const overlapStart = start;
+      const overlapEnd = Math.min(end, lastSegment.end);
+      const overlapLength = overlapEnd - overlapStart;
+      
+      if (overlapLength > 0 && end > lastSegment.end) {
+        // 计算需要追加的新内容（去除重叠部分）
+        const newContentStart = overlapLength;
+        const newContent = content.slice(newContentStart);
+        lastSegment.content += newContent;
+        lastSegment.end = end;
+      } else if (end > lastSegment.end) {
+        // 完全包含当前 chunk 的情况
+        lastSegment.end = end;
+      }
+    } else {
+      // 无重叠，检查是否有间隙
+      if (start > lastSegment.end) {
+        // 有间隙，添加分隔符
+        lastSegment.content += '\n\n---\n\n';
+      }
+      // 添加新段落
+      segments.push({ start, end, content });
+    }
+  }
+  
+  // 合并所有段落
+  return segments.map(s => s.content).join('\n\n');
+};
+
 onMounted(() => {
   nextTick(() => {
     doc = document.getElementsByClassName('t-drawer__body')[0]
     doc.addEventListener('scroll', handleDetailsScroll);
   })
-  // 提供全局复制方法，供代码块按钮使用
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  window.copyCodeBlock = (codeId: string) => {
-    const el = document.getElementById(codeId);
-    if (!el) return;
-    const text = el.innerText || '';
-    navigator.clipboard?.writeText(text).then(() => {
-      MessagePlugin.success(t('common.copySuccess') || '复制成功');
-    }).catch(() => {
-      MessagePlugin.error(t('common.copyFailed') || '复制失败');
-    });
-  };
 })
 onUpdated(() => {
   page = 1
 })
 onUnmounted(() => {
   doc.removeEventListener('scroll', handleDetailsScroll);
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  delete window.copyCodeBlock;
 })
 const checkImage = (url) => {
   return new Promise((resolve) => {
@@ -75,7 +126,7 @@ renderer.image = function (href, title, text) {
             </figure>`;
 };
 
-// 自定义代码块渲染器，添加语言标签与复制按钮
+// 自定义代码块渲染器，只显示语言标签
 renderer.code = function (code, infostring) {
   const lang = (infostring || '').trim();
   let detectedLang = lang;
@@ -93,21 +144,27 @@ renderer.code = function (code, infostring) {
     detectedLang = auto.language || lang;
   }
   const displayLang = detectedLang || 'Code';
-  const codeId = `code-block-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   return `
-    <div class="code-block-wrapper" data-code-id="${codeId}">
+    <div class="code-block-wrapper">
       <div class="code-block-header">
         <span class="code-block-lang">${displayLang}</span>
-        <button class="code-block-copy-btn" onclick="window.copyCodeBlock && window.copyCodeBlock('${codeId}')" title="${t('common.copy') || '复制'}">
-          ${t('common.copy') || '复制'}
-        </button>
       </div>
-      <pre class="code-block-pre"><code class="hljs language-${detectedLang || ''}" id="${codeId}">${highlighted}</code></pre>
+      <pre class="code-block-pre"><code class="hljs language-${detectedLang || ''}">${highlighted}</code></pre>
     </div>
   `;
 };
 const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
+
+// 监听 chunks 变化，自动更新合并内容
+watch(() => props.details?.md, (newChunks) => {
+  if (newChunks && newChunks.length > 0) {
+    mergedContent.value = mergeChunks(newChunks);
+  } else {
+    mergedContent.value = '';
+  }
+}, { immediate: true, deep: true });
+
 const isTextFile = (fileType?: string): boolean => {
   if (!fileType) return false;
   const textTypes = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts', 'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml', 'ini', 'conf', 'log'];
@@ -137,16 +194,6 @@ const loadOriginalContent = async () => {
     loadingOriginal.value = false;
   }
 };
-const toggleViewMode = () => {
-  if (viewMode.value === 'chunks') {
-    viewMode.value = 'original';
-    if (!originalContent.value && props.details.type === 'file') {
-      loadOriginalContent();
-    }
-  } else {
-    viewMode.value = 'chunks';
-  }
-};
 watch(() => props.details.md, (newVal) => {
   nextTick(async () => {
     const images = mdContentWrap.value.querySelectorAll('img.markdown-image');
@@ -165,8 +212,20 @@ watch(() => props.details.md, (newVal) => {
 const processMarkdown = (markdownText) => {
   if (!markdownText || typeof markdownText !== 'string') return '';
 
+  // 先还原原始文本中的 HTML 实体，让它们作为普通字符参与渲染
+  let processedText = markdownText
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#34;/g, '"')
+    .replace(/&#x22;/gi, '"')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
   // 处理被 <p> 包裹的表格行，转换为正常的表格行，并在前后补空行
-  let processedText = markdownText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
+  processedText = processedText.replace(/<p>\s*(\|[\s\S]*?\|)\s*<\/p>/gi, '\n$1\n');
 
   // 保留表格单元格中的 <br>，不转成换行，避免打散表格；其他区域原样交给 marked 处理
 
@@ -181,12 +240,14 @@ const processMarkdown = (markdownText) => {
   html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
 
   // 最终安全清理
-  return sanitizeHTML(html);
+  let result = sanitizeHTML(html);
+  
+  return result;
 };
 const handleClose = () => {
   emit("closeDoc", false);
   doc.scrollTop = 0;
-  viewMode.value = 'chunks';
+  viewMode.value = 'merged';
   originalContent.value = '';
 };
 
@@ -455,37 +516,45 @@ const handleDetailsScroll = () => {
         <div class="header-left">
           <div class="title-row">
             <span class="label">{{ getContentLabel() }}</span>
-            <span v-if="viewMode === 'chunks' && details.total > 0" class="chunk-count">
+            <span v-if="details.total > 0" class="chunk-count">
               {{ $t('knowledgeBase.chunkCount', { count: details.total }) || `共 ${details.total} 个片段` }}
             </span>
           </div>
           <div class="meta-row">
             <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
-            <t-button 
-              v-if="details.type === 'file'" 
-              size="small" 
-              variant="outline" 
-              theme="primary"
-              @click="toggleViewMode"
-              :loading="loadingOriginal && viewMode === 'original'"
-              class="view-mode-toggle"
-            >
-              {{ viewMode === 'chunks' 
-                ? (t('knowledgeBase.viewOriginal') || '查看原文件') 
-                : (t('knowledgeBase.viewChunks') || '查看分块') }}
-            </t-button>
+            <div class="view-mode-buttons">
+              <t-button 
+                size="small" 
+                :variant="viewMode === 'merged' ? 'base' : 'outline'" 
+                :theme="viewMode === 'merged' ? 'primary' : 'default'"
+                @click="viewMode = 'merged'"
+                class="view-mode-btn"
+              >
+                {{ $t('knowledgeBase.viewMerged') || '全文' }}
+              </t-button>
+              <t-button 
+                size="small" 
+                :variant="viewMode === 'chunks' ? 'base' : 'outline'" 
+                :theme="viewMode === 'chunks' ? 'primary' : 'default'"
+                @click="viewMode = 'chunks'"
+                class="view-mode-btn"
+              >
+                {{ $t('knowledgeBase.viewChunks') || '分块' }}
+              </t-button>
+
+            </div>
           </div>
         </div>
       </div>
       
-      <!-- 原文件视图 -->
-      <div v-if="viewMode === 'original'">
-        <div v-if="isMarkdownFile(details.file_type)" class="md-content original-md" v-html="processMarkdown(originalContent || '')"></div>
-        <pre v-else class="original-text">{{ originalContent }}</pre>
+      <!-- 合并视图 -->
+      <div v-if="viewMode === 'merged'">
+        <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
+        <div v-else class="md-content" v-html="processMarkdown(mergedContent)"></div>
       </div>
-
+      
       <!-- 分块视图 -->
-      <div v-else>
+      <div v-else-if="viewMode === 'chunks'">
         <div v-if="details.md.length == 0" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="chunk-list">
           <div class="chunk-item" 
@@ -556,7 +625,7 @@ const handleDetailsScroll = () => {
   width: 654px !important;
 }
 
-// 代码块样式（带语言头与复制）
+// 代码块样式
 :deep(.code-block-wrapper) {
   margin: 12px 0;
   border: 1px solid #d1d5db;
@@ -568,26 +637,12 @@ const handleDetailsScroll = () => {
   .code-block-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 8px 12px;
     background: #f3f4f6;
     border-bottom: 1px solid #e5e7eb;
     font-size: 12px;
     font-weight: 600;
     color: #1f2937;
-  }
-
-  .code-block-copy-btn {
-    padding: 4px 8px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: #6b7280;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 12px;
-    &:hover { background: #e5e7eb; color: #374151; }
-    &:active { background: #d1d5db; }
   }
 
   .code-block-pre {
@@ -767,6 +822,16 @@ const handleDetailsScroll = () => {
     background: #07c05f14;
     padding: 4px 8px;
     border-radius: 12px;
+  }
+
+  .view-mode-buttons {
+    display: flex;
+    gap: 4px;
+    
+    .view-mode-btn {
+      height: 28px;
+      min-width: 60px;
+    }
   }
 
   .view-mode-toggle {

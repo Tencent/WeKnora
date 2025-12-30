@@ -94,6 +94,7 @@ export default {
     chunkCount: "총 {count}개 조각",
     viewOriginal: "원본 파일 보기",
     viewChunks: "청크 보기",
+    viewMerged: "전체 텍스트",
     originalFileNotSupported: "이 파일 유형은 원본 파일 표시를 지원하지 않습니다. 다운로드하여 확인하세요",
     loadOriginalFailed: "원본 파일 내용 로드 실패",
     questions: "질문",

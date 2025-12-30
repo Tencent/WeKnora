@@ -95,6 +95,7 @@ export default {
     chunkCount: 'Всего {count} фрагментов',
     viewOriginal: 'Просмотр исходного файла',
     viewChunks: 'Просмотр фрагментов',
+    viewMerged: 'Полный текст',
     originalFileNotSupported: 'Этот тип файла не поддерживает просмотр исходного файла. Пожалуйста, загрузите для просмотра.',
     loadOriginalFailed: 'Не удалось загрузить содержимое исходного файла',
     questions: 'Вопросы',
