@@ -98,6 +98,7 @@ type SearchParams struct {
 	DisableKeywordsMatch bool     `json:"disable_keywords_match"`
 	DisableVectorMatch   bool     `json:"disable_vector_match"`
 	KnowledgeIDs         []string `json:"knowledge_ids"`
+	TagIDs               []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

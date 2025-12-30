@@ -542,6 +542,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			Threshold:        params.VectorThreshold,
 			RetrieverType:    types.VectorRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,
+			TagIDs:           params.TagIDs,
 		}
 
 		// For FAQ knowledge base, use FAQ index
@@ -564,6 +565,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			Threshold:        params.KeywordThreshold,
 			RetrieverType:    types.KeywordsRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,
+			TagIDs:           params.TagIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}
@@ -618,7 +620,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		logger.Info(ctx, "Only vector results, keeping original embedding scores")
 		chunkInfoMap := make(map[string]*types.IndexWithScore)
 		for _, r := range vectorResults {
-			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
+			// Keep the highest score for each chunk (FAQ may have multiple similar questions)
+			if existing, exists := chunkInfoMap[r.ChunkID]; !exists || r.Score > existing.Score {
 				chunkInfoMap[r.ChunkID] = r
 			}
 		}
@@ -656,16 +659,17 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		}
 
 		// Collect all unique chunks and compute RRF scores
+		// Keep the highest score for each chunk from each retriever
 		chunkInfoMap := make(map[string]*types.IndexWithScore)
 		rrfScores := make(map[string]float64)
 
-		// Process vector results
+		// Process vector results - keep highest score per chunk
 		for _, r := range vectorResults {
-			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
+			if existing, exists := chunkInfoMap[r.ChunkID]; !exists || r.Score > existing.Score {
 				chunkInfoMap[r.ChunkID] = r
 			}
 		}
-		// Process keyword results
+		// Process keyword results - only add if not already from vector
 		for _, r := range keywordResults {
 			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
 				chunkInfoMap[r.ChunkID] = r
@@ -717,9 +721,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	// Check if we need iterative retrieval for FAQ with separate indexing
 	// Only use iterative retrieval if we don't have enough unique chunks after first deduplication
-	totalRetrieved := len(vectorResults) + len(keywordResults)
 	needsIterativeRetrieval := len(deduplicatedChunks) < params.MatchCount &&
-		kb.Type == types.KnowledgeBaseTypeFAQ && totalRetrieved == matchCount*2
+		kb.Type == types.KnowledgeBaseTypeFAQ && len(vectorResults) == matchCount
 	if needsIterativeRetrieval {
 		logger.Info(ctx, "Not enough unique chunks, using iterative retrieval for FAQ")
 		// Use iterative retrieval to get more unique chunks (with negative question filtering inside)
@@ -746,7 +749,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 // iterativeRetrieveWithDeduplication performs iterative retrieval until enough unique chunks are found
 // This is used for FAQ knowledge bases with separate indexing mode
-// Negative question filtering is applied after each iteration to ensure we have enough valid chunks
+// Negative question filtering is applied after each iteration with chunk data caching
 func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Context,
 	retrieveEngine *retriever.CompositeRetrieveEngine,
 	retrieveParams []types.RetrieveParams,
@@ -754,8 +757,17 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	queryText string,
 ) []*types.IndexWithScore {
 	maxIterations := 5
-	currentTopK := matchCount
+	// Start with a larger TopK since we're called when first retrieval wasn't enough
+	// The first retrieval already used matchCount*3, so start from there
+	currentTopK := matchCount * 3
 	uniqueChunks := make(map[string]*types.IndexWithScore)
+	// Cache chunk data to avoid repeated DB queries across iterations
+	chunkDataCache := make(map[string]*types.Chunk)
+	// Track chunks that have been filtered out by negative questions
+	filteredOutChunks := make(map[string]struct{})
+
+	queryTextLower := strings.ToLower(strings.TrimSpace(queryText))
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 	for i := 0; i < maxIterations; i++ {
 		// Update TopK in retrieve params
@@ -783,42 +795,59 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			break
 		}
 
-		// Check if we got fewer results than requested - means no more results available
 		totalRetrieved := len(iterationResults)
-		if totalRetrieved < currentTopK {
-			logger.Infof(
-				ctx,
-				"Retrieved %d results (less than TopK %d), no more results available",
-				totalRetrieved,
-				currentTopK,
-			)
+
+		// Collect new chunk IDs that need to be fetched from DB
+		newChunkIDs := make([]string, 0)
+		for _, result := range iterationResults {
+			if _, cached := chunkDataCache[result.ChunkID]; !cached {
+				if _, filtered := filteredOutChunks[result.ChunkID]; !filtered {
+					newChunkIDs = append(newChunkIDs, result.ChunkID)
+				}
+			}
 		}
 
-		// Deduplicate and merge (keep highest score for each chunk)
-		// Multiple similar questions hitting the same chunk will keep the highest score
+		// Batch fetch only new chunks
+		if len(newChunkIDs) > 0 {
+			newChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, newChunkIDs)
+			if err != nil {
+				logger.Warnf(ctx, "Failed to fetch chunks at iteration %d: %v", i+1, err)
+			} else {
+				for _, chunk := range newChunks {
+					chunkDataCache[chunk.ID] = chunk
+				}
+			}
+		}
+
+		// Deduplicate, merge, and filter in one pass
 		for _, result := range iterationResults {
+			// Skip if already filtered out
+			if _, filtered := filteredOutChunks[result.ChunkID]; filtered {
+				continue
+			}
+
+			// Check negative questions using cached data
+			if chunkData, ok := chunkDataCache[result.ChunkID]; ok {
+				if chunkData.ChunkType == types.ChunkTypeFAQ {
+					if meta, err := chunkData.FAQMetadata(); err == nil && meta != nil {
+						if s.matchesNegativeQuestions(queryTextLower, meta.NegativeQuestions) {
+							filteredOutChunks[result.ChunkID] = struct{}{}
+							delete(uniqueChunks, result.ChunkID)
+							continue
+						}
+					}
+				}
+			}
+
+			// Keep highest score for each chunk
 			if existing, ok := uniqueChunks[result.ChunkID]; !ok || result.Score > existing.Score {
 				uniqueChunks[result.ChunkID] = result
 			}
 		}
 
-		// Convert to slice for filtering
-		chunksSlice := make([]*types.IndexWithScore, 0, len(uniqueChunks))
-		for _, chunk := range uniqueChunks {
-			chunksSlice = append(chunksSlice, chunk)
-		}
-
-		// Filter by negative questions
-		chunksSlice = s.filterByNegativeQuestions(ctx, chunksSlice, queryText)
-		// Update uniqueChunks map with filtered results
-		uniqueChunks = make(map[string]*types.IndexWithScore, len(chunksSlice))
-		for _, chunk := range chunksSlice {
-			uniqueChunks[chunk.ChunkID] = chunk
-		}
-
 		logger.Infof(
 			ctx,
-			"After iteration %d: retrieved %d results, found %d unique chunks after filtering (target: %d)",
+			"After iteration %d: retrieved %d results, found %d valid unique chunks (target: %d)",
 			i+1,
 			totalRetrieved,
 			len(uniqueChunks),
@@ -833,7 +862,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 
 		// Early stop: If we got fewer results than TopK, there are no more results to retrieve
 		if totalRetrieved < currentTopK {
-			logger.Infof(ctx, "No more results available, stopping iteration")
+			logger.Infof(ctx, "No more results available (got %d < %d), stopping iteration", totalRetrieved, currentTopK)
 			break
 		}
 

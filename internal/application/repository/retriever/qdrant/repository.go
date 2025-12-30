@@ -25,6 +25,7 @@ const (
 	fieldChunkID          = "chunk_id"
 	fieldKnowledgeID      = "knowledge_id"
 	fieldKnowledgeBaseID  = "knowledge_base_id"
+	fieldTagID            = "tag_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 )
@@ -443,6 +444,10 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 	if len(params.KnowledgeIDs) > 0 {
 		must = append(must, qdrant.NewMatchKeywords(fieldKnowledgeID, params.KnowledgeIDs...))
 	}
+	// Filter by tag IDs if specified
+	if len(params.TagIDs) > 0 {
+		must = append(must, qdrant.NewMatchKeywords(fieldTagID, params.TagIDs...))
+	}
 
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		mustNot = append(mustNot, qdrant.NewMatchKeywords(fieldKnowledgeID, params.ExcludeKnowledgeIDs...))
@@ -531,6 +536,7 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 				ChunkID:         payload[fieldChunkID].GetStringValue(),
 				KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
 				KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
+				TagID:           payload[fieldTagID].GetStringValue(),
 			},
 			Score: float64(point.Score),
 		}
@@ -623,6 +629,7 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 					ChunkID:         payload[fieldChunkID].GetStringValue(),
 					KnowledgeID:     payload[fieldKnowledgeID].GetStringValue(),
 					KnowledgeBaseID: payload[fieldKnowledgeBaseID].GetStringValue(),
+					TagID:           payload[fieldTagID].GetStringValue(),
 				},
 				Score: 1.0,
 			}
@@ -805,6 +812,7 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldChunkID:         embedding.ChunkID,
 		fieldKnowledgeID:     embedding.KnowledgeID,
 		fieldKnowledgeBaseID: embedding.KnowledgeBaseID,
+		fieldTagID:           embedding.TagID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
 	return qdrant.NewValueMap(payload)
@@ -862,6 +870,7 @@ func toQdrantVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		TagID:           embedding.TagID,
 		IsEnabled:       true, // Default to enabled
 	}
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
@@ -884,6 +893,7 @@ func fromQdrantVectorEmbedding(id string,
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

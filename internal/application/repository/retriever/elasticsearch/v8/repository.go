@@ -258,6 +258,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 			},
 		}})
 	}
+	// Filter by tag IDs if specified
+	if len(params.TagIDs) > 0 {
+		must = append(must, types.Query{Terms: &types.TermsQuery{
+			TermsQuery: map[string]types.TermsQueryField{
+				"tag_id.keyword": params.TagIDs,
+			},
+		}})
+	}
 
 	mustNot := make([]types.Query, 0)
 	// Exclude disabled chunks (is_enabled = false)

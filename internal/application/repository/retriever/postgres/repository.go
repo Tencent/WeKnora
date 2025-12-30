@@ -185,6 +185,14 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			Values: common.ToInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
+	// Filter by tag IDs if specified
+	if len(params.TagIDs) > 0 {
+		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by tag IDs: %v", params.TagIDs)
+		conds = append(conds, clause.IN{
+			Column: "tag_id",
+			Values: common.ToInterfaceSlice(params.TagIDs),
+		})
+	}
 	conds = append(conds, clause.Expr{
 		SQL:  "id @@@ paradedb.match(field => 'content', value => ?, distance => 1)",
 		Vars: []interface{}{params.Query},
@@ -209,6 +217,7 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			"chunk_id",
 			"knowledge_id",
 			"knowledge_base_id",
+			"tag_id",
 		}).
 		Limit(int(params.TopK)).
 		Find(&embeddingDBList).Error
@@ -293,6 +302,21 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)",
 			strings.Join(placeholders, ", ")))
 	}
+	// Filter by tag IDs if specified
+	if len(params.TagIDs) > 0 {
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering vector search by tag IDs: %v",
+			params.TagIDs,
+		)
+		placeholders := make([]string, len(params.TagIDs))
+		paramStart := len(allVars) + 1
+		for i := range params.TagIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, params.TagIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("tag_id IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
 
 	// is_enabled filter
 	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
@@ -323,11 +347,11 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 
 	querySQL := fmt.Sprintf(`
 		SELECT 
-			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id,
+			id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
 			(1 - distance) as score
 		FROM (
 			SELECT 
-				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id,
+				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
 				embedding::halfvec(%d) <=> $1::halfvec as distance
 			FROM embeddings
 			%s

@@ -379,6 +379,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 			},
 		})
 	}
+	// Filter by tag IDs if specified
+	if len(params.TagIDs) > 0 {
+		must = append(must, map[string]interface{}{
+			"terms": map[string]interface{}{
+				"tag_id.keyword": params.TagIDs,
+			},
+		})
+	}
 
 	// Build MUST_NOT conditions (negative filters)
 	mustNot := make([]map[string]interface{}, 0)

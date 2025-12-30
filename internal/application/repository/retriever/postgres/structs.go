@@ -21,6 +21,7 @@ type pgVector struct {
 	ChunkID         string              `json:"chunk_id"          gorm:"column:chunk_id"`
 	KnowledgeID     string              `json:"knowledge_id"      gorm:"column:knowledge_id"`
 	KnowledgeBaseID string              `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`
+	TagID           string              `json:"tag_id"            gorm:"column:tag_id;index"`
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
@@ -37,6 +38,7 @@ type pgVectorWithScore struct {
 	ChunkID         string              `json:"chunk_id"          gorm:"column:chunk_id"`
 	KnowledgeID     string              `json:"knowledge_id"      gorm:"column:knowledge_id"`
 	KnowledgeBaseID string              `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`
+	TagID           string              `json:"tag_id"            gorm:"column:tag_id;index"`
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
@@ -62,6 +64,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		ChunkID:         indexInfo.ChunkID,
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
+		TagID:           indexInfo.TagID,
 		Content:         common.CleanInvalidUTF8(indexInfo.Content),
 		IsEnabled:       true, // Default to enabled
 	}
@@ -92,6 +95,7 @@ func fromDBVectorEmbeddingWithScore(embedding *pgVectorWithScore, matchType type
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,

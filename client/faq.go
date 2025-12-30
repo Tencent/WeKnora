@@ -85,9 +85,11 @@ type FAQDeleteRequest struct {
 
 // FAQSearchRequest represents the hybrid FAQ search request.
 type FAQSearchRequest struct {
-	QueryText       string  `json:"query_text"`
-	VectorThreshold float64 `json:"vector_threshold"`
-	MatchCount      int     `json:"match_count"`
+	QueryText            string   `json:"query_text"`
+	VectorThreshold      float64  `json:"vector_threshold"`
+	MatchCount           int      `json:"match_count"`
+	FirstPriorityTagIDs  []string `json:"first_priority_tag_ids"`  // First priority tag IDs, highest priority
+	SecondPriorityTagIDs []string `json:"second_priority_tag_ids"` // Second priority tag IDs, lower than first
 }
 
 // FAQEntriesPage contains paginated FAQ results.

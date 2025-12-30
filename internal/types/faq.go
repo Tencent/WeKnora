@@ -223,9 +223,11 @@ type FAQBatchUpsertPayload struct {
 
 // FAQSearchRequest FAQ检索请求参数
 type FAQSearchRequest struct {
-	QueryText       string  `json:"query_text"       binding:"required"`
-	VectorThreshold float64 `json:"vector_threshold"`
-	MatchCount      int     `json:"match_count"`
+	QueryText            string   `json:"query_text"             binding:"required"`
+	VectorThreshold      float64  `json:"vector_threshold"`
+	MatchCount           int      `json:"match_count"`
+	FirstPriorityTagIDs  []string `json:"first_priority_tag_ids"`  // 第一优先级标签ID列表，限定命中范围，优先级最高
+	SecondPriorityTagIDs []string `json:"second_priority_tag_ids"` // 第二优先级标签ID列表，限定命中范围，优先级低于第一优先级
 }
 
 // UntaggedTagID is the special tag ID representing uncategorized entries
