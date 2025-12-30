@@ -1229,7 +1229,7 @@ export default {
       overlapDescription: 'Number of overlapping characters between adjacent chunks (0-500)',
       separatorsLabel: 'Separators',
       separatorsDescription: 'Separators used when chunking documents',
-      separatorsPlaceholder: 'Select separators',
+      separatorsPlaceholder: 'Select or customize separators',
       separators: {
         doubleNewline: 'Double newline (\
 \

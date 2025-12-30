@@ -1582,7 +1582,7 @@ export default {
       overlapDescription: "相邻文档块之间的重叠字符数（0-500）",
       separatorsLabel: "分隔符",
       separatorsDescription: "文档分块时使用的分隔符",
-      separatorsPlaceholder: "选择分隔符",
+      separatorsPlaceholder: "选择或自定义分隔符",
       separators: {
         doubleNewline: "双换行 (\\n\\n)",
         singleNewline: "单换行 (\\n)",

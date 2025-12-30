@@ -61,6 +61,8 @@
             v-model="localSeparators"
             :options="separatorOptions"
             multiple
+            creatable
+            filterable
             :placeholder="$t('knowledgeEditor.chunking.separatorsPlaceholder')"
             @change="handleSeparatorsChange"
             style="width: 280px;"

@@ -1357,7 +1357,7 @@ export default {
       overlapDescription: "인접 문서 청크 간의 중복 문자 수 (0-500)",
       separatorsLabel: "구분자",
       separatorsDescription: "문서 청킹 시 사용되는 구분자",
-      separatorsPlaceholder: "구분자 선택",
+      separatorsPlaceholder: "구분자 선택 또는 사용자 정의",
       separators: {
         doubleNewline: "이중 줄바꿈 (\\n\\n)",
         singleNewline: "단일 줄바꿈 (\\n)",
