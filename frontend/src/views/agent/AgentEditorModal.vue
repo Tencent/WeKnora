@@ -1417,6 +1417,21 @@ watch(isAgentMode, (isAgent) => {
   }
 });
 
+// 监听设置弹窗关闭，刷新模型列表
+watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
+  // 从设置页面返回时（弹窗关闭），刷新模型列表
+  if (prevVisible && !visible && props.visible) {
+    try {
+      const models = await listModels();
+      if (models && models.length > 0) {
+        allModels.value = models;
+      }
+    } catch (e) {
+      console.warn('Failed to refresh models after settings closed', e);
+    }
+  }
+});
+
 // 加载依赖数据
 const loadDependencies = async () => {
   try {
