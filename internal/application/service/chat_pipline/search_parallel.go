@@ -40,19 +40,21 @@ func NewPluginSearchParallel(
 	webSearchService interfaces.WebSearchService,
 	tenantService interfaces.TenantService,
 	sessionService interfaces.SessionService,
+	webSearchStateService interfaces.WebSearchStateService,
 	graphRepository interfaces.RetrieveGraphRepository,
 	chunkRepository interfaces.ChunkRepository,
 	knowledgeRepository interfaces.KnowledgeRepository,
 ) *PluginSearchParallel {
 	// Create internal plugins without registering them
 	searchPlugin := &PluginSearch{
-		knowledgeBaseService: knowledgeBaseService,
-		knowledgeService:     knowledgeService,
-		chunkService:         chunkService,
-		config:               config,
-		webSearchService:     webSearchService,
-		tenantService:        tenantService,
-		sessionService:       sessionService,
+		knowledgeBaseService:  knowledgeBaseService,
+		knowledgeService:      knowledgeService,
+		chunkService:          chunkService,
+		config:                config,
+		webSearchService:      webSearchService,
+		tenantService:         tenantService,
+		sessionService:        sessionService,
+		webSearchStateService: webSearchStateService,
 	}
 
 	searchEntityPlugin := &PluginSearchEntity{

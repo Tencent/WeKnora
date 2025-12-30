@@ -491,7 +491,7 @@ func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint6
 
 // searchWebIfEnabled executes web search when enabled and returns converted results
 func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
-	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil || chatManage.TenantID <= 0 {
+	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil {
 		return nil
 	}
 	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
