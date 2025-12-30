@@ -432,17 +432,26 @@ const handleSessionMenuClick = (data: { value: string }, index: number, item: an
 const delCard = (index: number, item: any) => {
     delSession(item.id).then((res: any) => {
         if (res && (res as any).success) {
-            // 使用 originalIndex 找到正确的位置进行删除
-            const actualIndex = index !== undefined ? index : 
-                (menuArr.value as any[])[1]?.children?.findIndex((s: any) => s.id === item.id);
+            // 找到 'creatChat' 菜单项
+            const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
             
-            if (actualIndex !== -1) {
-                (menuArr.value as any[])[1]?.children?.splice(actualIndex, 1);
+            if (chatMenuItem && chatMenuItem.children) {
+                const children = chatMenuItem.children;
+                // 通过ID查找索引，比依赖传入的index更安全
+                const actualIndex = children.findIndex((s: any) => s.id === item.id);
+                
+                if (actualIndex !== -1) {
+                    children.splice(actualIndex, 1);
+                }
             }
             
             if (item.id == route.params.chatid) {
                 // 删除当前会话后，跳转到全局创建聊天页面
                 router.push('/platform/creatChat');
+            }
+            // 更新总数
+            if (total.value > 0) {
+                total.value--;
             }
         } else {
             MessagePlugin.error("删除失败，请稍后再试!");
