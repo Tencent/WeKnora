@@ -166,6 +166,15 @@ instance.interceptors.response.use(
       }
     }
     
+    // 处理 Nginx 413 Request Entity Too Large
+    if (error.response.status === 413) {
+      return Promise.reject({ 
+        status: 413, 
+        message: '文件大小超过限制，请上传较小的文件',
+        success: false
+      });
+    }
+
     const { status, data } = error.response;
     // 将HTTP状态码一并抛出，方便上层判断401等场景
     // 后端返回格式: { success: false, error: { code, message, details } }
