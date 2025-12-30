@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
@@ -154,4 +158,195 @@ func (h *SystemHandler) isMinioEnabled() bool {
 	secretAccessKey := os.Getenv("MINIO_SECRET_ACCESS_KEY")
 
 	return endpoint != "" && accessKeyID != "" && secretAccessKey != ""
+}
+
+// MinioBucketInfo represents bucket information with access policy
+type MinioBucketInfo struct {
+	Name      string `json:"name"`
+	Policy    string `json:"policy"` // "public", "private", "custom"
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// ListMinioBucketsResponse defines the response structure for listing buckets
+type ListMinioBucketsResponse struct {
+	Buckets []MinioBucketInfo `json:"buckets"`
+}
+
+// ListMinioBuckets godoc
+// @Summary      列出 MinIO 存储桶
+// @Description  获取所有 MinIO 存储桶及其访问权限
+// @Tags         系统
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  ListMinioBucketsResponse  "存储桶列表"
+// @Failure      400  {object}  map[string]interface{}    "MinIO 未启用"
+// @Failure      500  {object}  map[string]interface{}    "服务器错误"
+// @Router       /system/minio/buckets [get]
+func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	// Check if MinIO is enabled
+	if !h.isMinioEnabled() {
+		logger.Warn(ctx, "MinIO is not enabled")
+		c.JSON(400, gin.H{
+			"code":    400,
+			"msg":     "MinIO is not enabled",
+			"success": false,
+		})
+		return
+	}
+
+	// Get MinIO configuration from environment
+	endpoint := os.Getenv("MINIO_ENDPOINT")
+	accessKeyID := os.Getenv("MINIO_ACCESS_KEY_ID")
+	secretAccessKey := os.Getenv("MINIO_SECRET_ACCESS_KEY")
+	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
+
+	// Create MinIO client
+	minioClient, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+		Secure: useSSL,
+	})
+	if err != nil {
+		logger.Error(ctx, "Failed to create MinIO client", "error", err)
+		c.JSON(500, gin.H{
+			"code":    500,
+			"msg":     "Failed to connect to MinIO",
+			"success": false,
+		})
+		return
+	}
+
+	// List all buckets
+	buckets, err := minioClient.ListBuckets(context.Background())
+	if err != nil {
+		logger.Error(ctx, "Failed to list MinIO buckets", "error", err)
+		c.JSON(500, gin.H{
+			"code":    500,
+			"msg":     "Failed to list buckets",
+			"success": false,
+		})
+		return
+	}
+
+	// Get policy for each bucket
+	bucketInfos := make([]MinioBucketInfo, 0, len(buckets))
+	for _, bucket := range buckets {
+		policy := "private" // default: no policy means private
+
+		// Try to get bucket policy
+		policyStr, err := minioClient.GetBucketPolicy(context.Background(), bucket.Name)
+		if err == nil && policyStr != "" {
+			policy = parseBucketPolicy(policyStr)
+		}
+		// If err != nil or policyStr is empty, bucket has no policy (private)
+
+		bucketInfos = append(bucketInfos, MinioBucketInfo{
+			Name:      bucket.Name,
+			Policy:    policy,
+			CreatedAt: bucket.CreationDate.Format("2006-01-02 15:04:05"),
+		})
+	}
+
+	logger.Info(ctx, "Listed MinIO buckets successfully", "count", len(bucketInfos))
+	c.JSON(200, gin.H{
+		"code":    0,
+		"msg":     "success",
+		"success": true,
+		"data":    ListMinioBucketsResponse{Buckets: bucketInfos},
+	})
+}
+
+// BucketPolicy represents the S3 bucket policy structure
+type BucketPolicy struct {
+	Version   string            `json:"Version"`
+	Statement []PolicyStatement `json:"Statement"`
+}
+
+// PolicyStatement represents a single statement in the bucket policy
+type PolicyStatement struct {
+	Effect    string      `json:"Effect"`
+	Principal interface{} `json:"Principal"` // Can be "*" or {"AWS": [...]}
+	Action    interface{} `json:"Action"`    // Can be string or []string
+	Resource  interface{} `json:"Resource"`  // Can be string or []string
+}
+
+// parseBucketPolicy parses the policy JSON and determines the access type
+func parseBucketPolicy(policyStr string) string {
+	var policy BucketPolicy
+	if err := json.Unmarshal([]byte(policyStr), &policy); err != nil {
+		// If we can't parse the policy, treat it as custom
+		return "custom"
+	}
+
+	// Check if any statement grants public read access
+	hasPublicRead := false
+	for _, stmt := range policy.Statement {
+		if stmt.Effect != "Allow" {
+			continue
+		}
+
+		// Check if Principal is "*" (public)
+		if !isPrincipalPublic(stmt.Principal) {
+			continue
+		}
+
+		// Check if Action includes s3:GetObject
+		if !hasGetObjectAction(stmt.Action) {
+			continue
+		}
+
+		hasPublicRead = true
+		break
+	}
+
+	if hasPublicRead {
+		return "public"
+	}
+
+	// Has policy but not public read
+	return "custom"
+}
+
+// isPrincipalPublic checks if the principal allows public access
+func isPrincipalPublic(principal interface{}) bool {
+	switch p := principal.(type) {
+	case string:
+		return p == "*"
+	case map[string]interface{}:
+		// Check for {"AWS": "*"} or {"AWS": ["*"]}
+		if aws, ok := p["AWS"]; ok {
+			switch a := aws.(type) {
+			case string:
+				return a == "*"
+			case []interface{}:
+				for _, v := range a {
+					if s, ok := v.(string); ok && s == "*" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasGetObjectAction checks if the action includes s3:GetObject
+func hasGetObjectAction(action interface{}) bool {
+	checkAction := func(a string) bool {
+		a = strings.ToLower(a)
+		return a == "s3:getobject" || a == "s3:*" || a == "*"
+	}
+
+	switch act := action.(type) {
+	case string:
+		return checkAction(act)
+	case []interface{}:
+		for _, v := range act {
+			if s, ok := v.(string); ok && checkAction(s) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -959,7 +959,8 @@ const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq';
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 
 // 系统默认配置（用于内置智能体显示默认提示词）
-const defaultSystemPrompt = ref('');  // 统一的默认系统提示词
+const defaultAgentSystemPrompt = ref('');  // Agent 模式的默认系统提示词（来自 agent-config）
+const defaultNormalSystemPrompt = ref('');  // 普通模式的默认系统提示词（来自 conversation-config）
 const defaultContextTemplate = ref('');
 const defaultRewritePromptSystem = ref('');
 const defaultRewritePromptUser = ref('');
@@ -993,6 +994,8 @@ const allTools = [
   { value: 'query_knowledge_graph', label: '查询知识图谱', description: '从知识图谱中查询关系', requiresKB: true },
   { value: 'get_document_info', label: '获取文档信息', description: '查看文档元数据', requiresKB: true },
   { value: 'database_query', label: '查询数据库', description: '查询数据库中的信息', requiresKB: true },
+  { value: 'data_analysis', label: '数据分析', description: '理解数据文件并进行数据分析', requiresKB: true },
+  { value: 'data_schema', label: '查看数据元信息', description: '获取表格文件的元信息', requiresKB: true },
 ];
 
 // 根据知识库配置动态计算是否有知识库能力
@@ -1293,14 +1296,14 @@ const fillBuiltinAgentDefaults = () => {
   const isAgent = config.agent_mode === 'smart-reasoning';
   
   if (isAgent) {
-    // Agent 模式：填入统一的默认提示词
-    if (!config.system_prompt && defaultSystemPrompt.value) {
-      config.system_prompt = defaultSystemPrompt.value;
+    // Agent 模式：使用 agent-config 的默认提示词
+    if (!config.system_prompt && defaultAgentSystemPrompt.value) {
+      config.system_prompt = defaultAgentSystemPrompt.value;
     }
   } else {
-    // 普通模式：填入默认系统提示词和上下文模板
-    if (!config.system_prompt && defaultSystemPrompt.value) {
-      config.system_prompt = defaultSystemPrompt.value;
+    // 普通模式：使用 conversation-config 的默认系统提示词和上下文模板
+    if (!config.system_prompt && defaultNormalSystemPrompt.value) {
+      config.system_prompt = defaultNormalSystemPrompt.value;
     }
     if (!config.context_template && defaultContextTemplate.value) {
       config.context_template = defaultContextTemplate.value;
@@ -1414,6 +1417,21 @@ watch(isAgentMode, (isAgent) => {
   }
 });
 
+// 监听设置弹窗关闭，刷新模型列表
+watch(() => uiStore.showSettingsModal, async (visible, prevVisible) => {
+  // 从设置页面返回时（弹窗关闭），刷新模型列表
+  if (prevVisible && !visible && props.visible) {
+    try {
+      const models = await listModels();
+      if (models && models.length > 0) {
+        allModels.value = models;
+      }
+    } catch (e) {
+      console.warn('Failed to refresh models after settings closed', e);
+    }
+  }
+});
+
 // 加载依赖数据
 const loadDependencies = async () => {
   try {
@@ -1456,17 +1474,16 @@ const loadDependencies = async () => {
       console.warn('Failed to load placeholders', e);
     }
 
-    // 加载 Agent 模式默认提示词（统一提示词）
+    // 加载 Agent 模式默认提示词（来自 agent-config，用于 smart-reasoning 模式）
     const agentConfig = await getAgentConfig();
     if (agentConfig.data?.system_prompt) {
-      defaultSystemPrompt.value = agentConfig.data.system_prompt;
+      defaultAgentSystemPrompt.value = agentConfig.data.system_prompt;
     }
 
-    // 加载系统默认配置（用于普通模式）
+    // 加载系统默认配置（来自 conversation-config，用于普通模式 quick-answer）
     const conversationConfig = await getConversationConfig();
-    if (conversationConfig.data?.prompt && !defaultSystemPrompt.value) {
-      // 如果 Agent 配置没有提供默认提示词，则使用普通模式的
-      defaultSystemPrompt.value = conversationConfig.data.prompt;
+    if (conversationConfig.data?.prompt) {
+      defaultNormalSystemPrompt.value = conversationConfig.data.prompt;
     }
     if (conversationConfig.data?.context_template) {
       defaultContextTemplate.value = conversationConfig.data.context_template;

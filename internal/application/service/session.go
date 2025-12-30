@@ -19,7 +19,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -31,18 +30,18 @@ func generateEventID(suffix string) string {
 
 // sessionService implements the SessionService interface for managing conversation sessions
 type sessionService struct {
-	cfg                  *config.Config                  // Application configuration
-	sessionRepo          interfaces.SessionRepository    // Repository for session data
-	messageRepo          interfaces.MessageRepository    // Repository for message data
-	knowledgeBaseService interfaces.KnowledgeBaseService // Service for knowledge base operations
-	modelService         interfaces.ModelService         // Service for model operations
-	tenantService        interfaces.TenantService        // Service for tenant operations
-	eventManager         *chatpipline.EventManager       // Event manager for chat pipeline
-	agentService         interfaces.AgentService         // Service for agent operations
-	sessionStorage       llmcontext.ContextStorage       // Session storage
-	knowledgeService     interfaces.KnowledgeService     // Service for knowledge operations
-	chunkService         interfaces.ChunkService         // Service for chunk operations
-	redisClient          *redis.Client                   // Redis client for temp KB state
+	cfg                  *config.Config                   // Application configuration
+	sessionRepo          interfaces.SessionRepository     // Repository for session data
+	messageRepo          interfaces.MessageRepository     // Repository for message data
+	knowledgeBaseService interfaces.KnowledgeBaseService  // Service for knowledge base operations
+	modelService         interfaces.ModelService          // Service for model operations
+	tenantService        interfaces.TenantService         // Service for tenant operations
+	eventManager         *chatpipline.EventManager        // Event manager for chat pipeline
+	agentService         interfaces.AgentService          // Service for agent operations
+	sessionStorage       llmcontext.ContextStorage        // Session storage
+	knowledgeService     interfaces.KnowledgeService      // Service for knowledge operations
+	chunkService         interfaces.ChunkService          // Service for chunk operations
+	webSearchStateRepo   interfaces.WebSearchStateService // Service for web search state
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -57,7 +56,7 @@ func NewSessionService(cfg *config.Config,
 	eventManager *chatpipline.EventManager,
 	agentService interfaces.AgentService,
 	sessionStorage llmcontext.ContextStorage,
-	redisClient *redis.Client,
+	webSearchStateRepo interfaces.WebSearchStateService,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                  cfg,
@@ -71,7 +70,7 @@ func NewSessionService(cfg *config.Config,
 		eventManager:         eventManager,
 		agentService:         agentService,
 		sessionStorage:       sessionStorage,
-		redisClient:          redisClient,
+		webSearchStateRepo:   webSearchStateRepo,
 	}
 }
 
@@ -200,7 +199,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 	// Cleanup temporary KB stored in Redis for this session
-	if err := s.DeleteWebSearchTempKBState(ctx, id); err != nil {
+	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 	}
 
@@ -705,7 +704,6 @@ func (s *sessionService) selectChatModelID(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 ) (string, error) {
-
 	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
@@ -1238,7 +1236,6 @@ func (s *sessionService) AgentQA(
 		eventBus,
 		contextManager,
 		session.ID,
-		s,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
@@ -1319,110 +1316,6 @@ func (s *sessionService) getContextForSession(
 func (s *sessionService) ClearContext(ctx context.Context, sessionID string) error {
 	logger.Infof(ctx, "Clearing context for session: %s", sessionID)
 	return s.sessionStorage.Delete(ctx, sessionID)
-}
-
-// GetWebSearchTempKBState retrieves the temporary KB state for web search from Redis
-func (s *sessionService) GetWebSearchTempKBState(
-	ctx context.Context,
-	sessionID string,
-) (tempKBID string, seenURLs map[string]bool, knowledgeIDs []string) {
-	stateKey := fmt.Sprintf("tempkb:%s", sessionID)
-	if raw, getErr := s.redisClient.Get(ctx, stateKey).Bytes(); getErr == nil && len(raw) > 0 {
-		var state struct {
-			KBID         string          `json:"kbID"`
-			KnowledgeIDs []string        `json:"knowledgeIDs"`
-			SeenURLs     map[string]bool `json:"seenURLs"`
-		}
-		if err := json.Unmarshal(raw, &state); err == nil {
-			tempKBID = state.KBID
-			ids := state.KnowledgeIDs
-			if state.SeenURLs != nil {
-				seenURLs = state.SeenURLs
-			} else {
-				seenURLs = make(map[string]bool)
-			}
-			return tempKBID, seenURLs, ids
-		}
-	}
-	return "", make(map[string]bool), []string{}
-}
-
-// SaveWebSearchTempKBState saves the temporary KB state for web search to Redis
-func (s *sessionService) SaveWebSearchTempKBState(
-	ctx context.Context,
-	sessionID string,
-	tempKBID string,
-	seenURLs map[string]bool,
-	knowledgeIDs []string,
-) {
-	stateKey := fmt.Sprintf("tempkb:%s", sessionID)
-	state := struct {
-		KBID         string          `json:"kbID"`
-		KnowledgeIDs []string        `json:"knowledgeIDs"`
-		SeenURLs     map[string]bool `json:"seenURLs"`
-	}{
-		KBID:         tempKBID,
-		KnowledgeIDs: knowledgeIDs,
-		SeenURLs:     seenURLs,
-	}
-	if b, err := json.Marshal(state); err == nil {
-		_ = s.redisClient.Set(ctx, stateKey, b, 0).Err()
-	}
-}
-
-// DeleteWebSearchTempKBState deletes the temporary KB state for web search from Redis
-// and cleans up associated knowledge base and knowledge items.
-func (s *sessionService) DeleteWebSearchTempKBState(ctx context.Context, sessionID string) error {
-	if s.redisClient == nil {
-		return nil
-	}
-
-	stateKey := fmt.Sprintf("tempkb:%s", sessionID)
-	raw, getErr := s.redisClient.Get(ctx, stateKey).Bytes()
-	if getErr != nil || len(raw) == 0 {
-		// No state found, nothing to clean up
-		return nil
-	}
-
-	var state struct {
-		KBID         string          `json:"kbID"`
-		KnowledgeIDs []string        `json:"knowledgeIDs"`
-		SeenURLs     map[string]bool `json:"seenURLs"`
-	}
-	if err := json.Unmarshal(raw, &state); err != nil {
-		// Invalid state, just delete the key
-		_ = s.redisClient.Del(ctx, stateKey).Err()
-		return nil
-	}
-
-	// If KBID is empty, just delete the Redis key
-	if strings.TrimSpace(state.KBID) == "" {
-		_ = s.redisClient.Del(ctx, stateKey).Err()
-		return nil
-	}
-
-	logger.Infof(ctx, "Cleaning temporary KB for session %s: %s", sessionID, state.KBID)
-
-	// Delete all knowledge items
-	for _, kid := range state.KnowledgeIDs {
-		if delErr := s.knowledgeService.DeleteKnowledge(ctx, kid); delErr != nil {
-			logger.Warnf(ctx, "Failed to delete temp knowledge %s: %v", kid, delErr)
-		}
-	}
-
-	// Delete the knowledge base
-	if delErr := s.knowledgeBaseService.DeleteKnowledgeBase(ctx, state.KBID); delErr != nil {
-		logger.Warnf(ctx, "Failed to delete temp knowledge base %s: %v", state.KBID, delErr)
-	}
-
-	// Delete the Redis key
-	if delErr := s.redisClient.Del(ctx, stateKey).Err(); delErr != nil {
-		logger.Warnf(ctx, "Failed to delete Redis key %s: %v", stateKey, delErr)
-		return fmt.Errorf("failed to delete Redis key: %w", delErr)
-	}
-
-	logger.Infof(ctx, "Successfully cleaned up temporary KB for session %s", sessionID)
-	return nil
 }
 
 // handleFallbackResponse handles fallback response based on strategy

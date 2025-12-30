@@ -118,6 +118,8 @@ services:
       - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
       - MINIO_USE_SSL=${MINIO_USE_SSL:-}
       - WEB_PROXY=${WEB_PROXY:-}
+      # File size limit (in MB)
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
       interval: 30s

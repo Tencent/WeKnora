@@ -348,6 +348,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		knowledge.ID,
 	)
 
+	if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(safeFilename)) {
+		NewDataTableSummaryTask(ctx, s.task, tenantID, knowledge.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+	}
+
 	logger.Infof(ctx, "Knowledge from file created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
 }

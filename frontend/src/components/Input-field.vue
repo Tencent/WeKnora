@@ -1177,8 +1177,8 @@ const handleSelectAgent = (agent: CustomAgent) => {
   
   // 内置智能体检查 - 从实际的智能体配置来判断
   if (agent.is_builtin) {
-    // 从 agents 列表中获取实际的内置智能体数据
-    const builtinAgent = agents.value.find(a => a.id === agent.id);
+    // 从 agents 列表中获取实际的内置智能体数据，如果没找到则使用传入的 agent (此时应该包含合并后的配置)
+    const builtinAgent = agents.value.find(a => a.id === agent.id) || agent;
     if (builtinAgent) {
       const notReadyReasons = getBuiltinAgentNotReadyReasons(builtinAgent, isAgentType);
       if (notReadyReasons.length > 0) {
@@ -1200,18 +1200,26 @@ const handleSelectAgent = (agent: CustomAgent) => {
   selectedAgentId.value = agent.id;
   settingsStore.toggleAgent(!!isAgentType);
   
-  // 如果是自定义智能体，同步网络搜索状态和模型
-  if (!agent.is_builtin) {
-    const agentWebSearch = agent.config?.web_search_enabled;
-    if (agentWebSearch !== undefined) {
-      // 智能体配置了网络搜索设置，同步到 store
-      settingsStore.toggleWebSearch(agentWebSearch);
-    }
-    
-    // 如果智能体配置了模型，同步到 store
-    const agentModel = agent.config?.model_id;
-    if (agentModel) {
-      selectedModelId.value = agentModel;
+  // 同步智能体的配置状态（包括内置和自定义智能体）
+  // 1. 同步网络搜索状态
+  const agentWebSearch = agent.config?.web_search_enabled;
+  if (agentWebSearch !== undefined) {
+    // 智能体配置了网络搜索设置，同步到 store
+    settingsStore.toggleWebSearch(agentWebSearch);
+  } else if (agent.is_builtin) {
+    // 如果是内置智能体且未配置网络搜索，不强制修改，保留当前用户设置
+    // 或者可以考虑恢复默认值，视需求而定
+  }
+  
+  // 2. 同步模型
+  const agentModel = agent.config?.model_id;
+  if (agentModel) {
+    selectedModelId.value = agentModel;
+  } else if (agent.is_builtin) {
+    // 如果是内置智能体且未配置特定模型，恢复为系统默认模型
+    // 这样可以确保从专用模型切换回普通模式时，模型也切回通用模型
+    if (conversationConfig.value?.summary_model_id) {
+      selectedModelId.value = conversationConfig.value.summary_model_id;
     }
   }
   

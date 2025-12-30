@@ -2,33 +2,22 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"gorm.io/gorm"
 )
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
-	tools            map[string]types.Tool
-	knowledgeService interfaces.KnowledgeService
-	chunkService     interfaces.ChunkService
-	db               *gorm.DB
+	tools map[string]types.Tool
 }
 
 // NewToolRegistry creates a new tool registry
-func NewToolRegistry(
-	knowledgeService interfaces.KnowledgeService,
-	chunkService interfaces.ChunkService,
-	db *gorm.DB, // gorm.DB for database operations
-) *ToolRegistry {
+func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools:            make(map[string]types.Tool),
-		knowledgeService: knowledgeService,
-		chunkService:     chunkService,
-		db:               db,
+		tools: make(map[string]types.Tool),
 	}
 }
 
@@ -72,7 +61,7 @@ func (r *ToolRegistry) GetFunctionDefinitions() []types.FunctionDefinition {
 func (r *ToolRegistry) ExecuteTool(
 	ctx context.Context,
 	name string,
-	args map[string]interface{},
+	args json.RawMessage,
 ) (*types.ToolResult, error) {
 	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
 		"tool": name,
@@ -111,4 +100,14 @@ func (r *ToolRegistry) ExecuteTool(
 	}
 
 	return result, execErr
+}
+
+// Cleanup cleans up all registered tools that implement the Cleanup method
+func (r *ToolRegistry) Cleanup(ctx context.Context) {
+	// Check specifically for DataAnalysisTool
+	if tool, exists := r.tools[ToolDataAnalysis]; exists {
+		if dataAnalysisTool, ok := tool.(*DataAnalysisTool); ok {
+			dataAnalysisTool.Cleanup(ctx)
+		}
+	}
 }

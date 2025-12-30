@@ -2,36 +2,16 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// SequentialThinkingTool is a dynamic and reflective problem-solving tool
-// This tool helps analyze problems through a flexible thinking process that can adapt and evolve
-type SequentialThinkingTool struct {
-	BaseTool
-	thoughtHistory []ThoughtData
-	branches       map[string][]ThoughtData
-}
-
-// ThoughtData represents a single thought in the sequential thinking process
-type ThoughtData struct {
-	Thought           string `json:"thought"`
-	ThoughtNumber     int    `json:"thought_number"`
-	TotalThoughts     int    `json:"total_thoughts"`
-	IsRevision        bool   `json:"is_revision,omitempty"`
-	RevisesThought    *int   `json:"revises_thought,omitempty"`
-	BranchFromThought *int   `json:"branch_from_thought,omitempty"`
-	BranchID          string `json:"branch_id,omitempty"`
-	NeedsMoreThoughts bool   `json:"needs_more_thoughts,omitempty"`
-	NextThoughtNeeded bool   `json:"next_thought_needed"`
-}
-
-// NewSequentialThinkingTool creates a new sequential thinking tool instance
-func NewSequentialThinkingTool() *SequentialThinkingTool {
-	description := `A detailed tool for dynamic and reflective problem-solving through thoughts.
+var sequentialThinkingTool = BaseTool{
+	name: ToolThinking,
+	description: `A detailed tool for dynamic and reflective problem-solving through thoughts.
 
 This tool helps analyze problems through a flexible thinking process that can adapt and evolve.
 
@@ -99,72 +79,101 @@ Each thought can build on, question, or revise previous insights as understandin
 8. Verify the hypothesis based on the Chain of Thought steps
 9. Repeat the process until satisfied with the solution
 10. Provide a single, ideally correct answer as the final output
-11. Only set next_thought_needed to false when truly done and a satisfactory answer is reached`
-
-	return &SequentialThinkingTool{
-		BaseTool:       NewBaseTool("thinking", description),
-		thoughtHistory: make([]ThoughtData, 0),
-		branches:       make(map[string][]ThoughtData),
-	}
+11. Only set next_thought_needed to false when truly done and a satisfactory answer is reached`,
+	schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "thought": {
+      "type": "string",
+      "description": "Your current thinking step. Write in natural, user-friendly language. NEVER mention tool names (like \"grep_chunks\", \"knowledge_search\", \"web_search\", etc.). Instead, describe actions in plain language (e.g., \"I'll search for key terms\" instead of \"I'll use grep_chunks\"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use)."
+    },
+    "nextThoughtNeeded": {
+      "type": "boolean",
+      "description": "Whether another thought step is needed"
+    },
+    "thoughtNumber": {
+      "type": "integer",
+      "description": "Current thought number (numeric value, e.g., 1, 2, 3)",
+      "minimum": 1
+    },
+    "totalThoughts": {
+      "type": "integer",
+      "description": "Estimated total thoughts needed (numeric value, e.g., 5, 10)",
+      "minimum": 5
+    },
+    "isRevision": {
+      "type": "boolean",
+      "description": "Whether this revises previous thinking"
+    },
+    "revisesThought": {
+      "type": "integer",
+      "description": "Which thought is being reconsidered",
+      "minimum": 1
+    },
+    "branchFromThought": {
+      "type": "integer",
+      "description": "Branching point thought number",
+      "minimum": 1
+    },
+    "branchId": {
+      "type": "string",
+      "description": "Branch identifier"
+    },
+    "needsMoreThoughts": {
+      "type": "boolean",
+      "description": "If more thoughts are needed"
+    }
+  },
+  "required": ["thought", "nextThoughtNeeded", "thoughtNumber", "totalThoughts"]
+}`),
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *SequentialThinkingTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"thought": map[string]interface{}{
-				"type":        "string",
-				"description": `Your current thinking step. Write in natural, user-friendly language. NEVER mention tool names (like "grep_chunks", "knowledge_search", "web_search", etc.). Instead, describe actions in plain language (e.g., "I'll search for key terms" instead of "I'll use grep_chunks"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use).`,
-			},
-			"nextThoughtNeeded": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Whether another thought step is needed",
-			},
-			"thoughtNumber": map[string]interface{}{
-				"type":        "integer",
-				"description": "Current thought number (numeric value, e.g., 1, 2, 3)",
-				"minimum":     1,
-			},
-			"totalThoughts": map[string]interface{}{
-				"type":        "integer",
-				"description": "Estimated total thoughts needed (numeric value, e.g., 5, 10)",
-				"minimum":     5,
-			},
-			"isRevision": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Whether this revises previous thinking",
-			},
-			"revisesThought": map[string]interface{}{
-				"type":        "integer",
-				"description": "Which thought is being reconsidered",
-				"minimum":     1,
-			},
-			"branchFromThought": map[string]interface{}{
-				"type":        "integer",
-				"description": "Branching point thought number",
-				"minimum":     1,
-			},
-			"branchId": map[string]interface{}{
-				"type":        "string",
-				"description": "Branch identifier",
-			},
-			"needsMoreThoughts": map[string]interface{}{
-				"type":        "boolean",
-				"description": "If more thoughts are needed",
-			},
-		},
-		"required": []string{"thought", "nextThoughtNeeded", "thoughtNumber", "totalThoughts"},
+// SequentialThinkingTool is a dynamic and reflective problem-solving tool
+// This tool helps analyze problems through a flexible thinking process that can adapt and evolve
+type SequentialThinkingTool struct {
+	BaseTool
+	thoughtHistory []SequentialThinkingInput
+	branches       map[string][]SequentialThinkingInput
+}
+
+// SequentialThinkingInput defines the input parameters for sequential thinking tool
+type SequentialThinkingInput struct {
+	Thought           string `json:"thought"`
+	ThoughtNumber     int    `json:"thought_number"`
+	TotalThoughts     int    `json:"total_thoughts"`
+	IsRevision        bool   `json:"is_revision,omitempty"`
+	RevisesThought    *int   `json:"revises_thought,omitempty"`
+	BranchFromThought *int   `json:"branch_from_thought,omitempty"`
+	BranchID          string `json:"branch_id,omitempty"`
+	NeedsMoreThoughts bool   `json:"needs_more_thoughts,omitempty"`
+	NextThoughtNeeded bool   `json:"next_thought_needed"`
+}
+
+// NewSequentialThinkingTool creates a new sequential thinking tool instance
+func NewSequentialThinkingTool() *SequentialThinkingTool {
+	return &SequentialThinkingTool{
+		BaseTool:       sequentialThinkingTool,
+		thoughtHistory: make([]SequentialThinkingInput, 0),
+		branches:       make(map[string][]SequentialThinkingInput),
 	}
 }
 
 // Execute executes the sequential thinking tool
-func (t *SequentialThinkingTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *SequentialThinkingTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][SequentialThinking] Execute started")
 
+	// Parse args from json.RawMessage
+	var input SequentialThinkingInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][SequentialThinking] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
 	// Validate and parse input
-	thoughtData, err := t.validateThoughtData(args)
-	if err != nil {
+	if err := t.validate(input); err != nil {
 		logger.Errorf(ctx, "[Tool][SequentialThinking] Validation failed: %v", err)
 		return &types.ToolResult{
 			Success: false,
@@ -173,22 +182,22 @@ func (t *SequentialThinkingTool) Execute(ctx context.Context, args map[string]in
 	}
 
 	// Adjust totalThoughts if thoughtNumber exceeds it
-	if thoughtData.ThoughtNumber > thoughtData.TotalThoughts {
-		thoughtData.TotalThoughts = thoughtData.ThoughtNumber
+	if input.ThoughtNumber > input.TotalThoughts {
+		input.TotalThoughts = input.ThoughtNumber
 	}
 
 	// Add to thought history
-	t.thoughtHistory = append(t.thoughtHistory, thoughtData)
+	t.thoughtHistory = append(t.thoughtHistory, input)
 
 	// Handle branching
-	if thoughtData.BranchFromThought != nil && thoughtData.BranchID != "" {
-		if t.branches[thoughtData.BranchID] == nil {
-			t.branches[thoughtData.BranchID] = make([]ThoughtData, 0)
+	if input.BranchFromThought != nil && input.BranchID != "" {
+		if t.branches[input.BranchID] == nil {
+			t.branches[input.BranchID] = make([]SequentialThinkingInput, 0)
 		}
-		t.branches[thoughtData.BranchID] = append(t.branches[thoughtData.BranchID], thoughtData)
+		t.branches[input.BranchID] = append(t.branches[input.BranchID], input)
 	}
 
-	logger.Debugf(ctx, "[Tool][SequentialThinking] %s", thoughtData.Thought)
+	logger.Debugf(ctx, "[Tool][SequentialThinking] %s", input.Thought)
 
 	// Prepare response data
 	branchKeys := make([]string, 0, len(t.branches))
@@ -196,25 +205,25 @@ func (t *SequentialThinkingTool) Execute(ctx context.Context, args map[string]in
 		branchKeys = append(branchKeys, k)
 	}
 
-	incomplete := thoughtData.NextThoughtNeeded || thoughtData.NeedsMoreThoughts ||
-		thoughtData.ThoughtNumber < thoughtData.TotalThoughts
+	incomplete := input.NextThoughtNeeded || input.NeedsMoreThoughts ||
+		input.ThoughtNumber < input.TotalThoughts
 
 	responseData := map[string]interface{}{
-		"thought_number":         thoughtData.ThoughtNumber,
-		"total_thoughts":         thoughtData.TotalThoughts,
-		"next_thought_needed":    thoughtData.NextThoughtNeeded,
+		"thought_number":         input.ThoughtNumber,
+		"total_thoughts":         input.TotalThoughts,
+		"next_thought_needed":    input.NextThoughtNeeded,
 		"branches":               branchKeys,
 		"thought_history_length": len(t.thoughtHistory),
 		"display_type":           "thinking",
-		"thought":                thoughtData.Thought,
+		"thought":                input.Thought,
 		"incomplete_steps":       incomplete,
 	}
 
 	logger.Infof(
 		ctx,
 		"[Tool][SequentialThinking] Execute completed - Thought %d/%d",
-		thoughtData.ThoughtNumber,
-		thoughtData.TotalThoughts,
+		input.ThoughtNumber,
+		input.TotalThoughts,
 	)
 
 	outputMsg := "Thought process recorded"
@@ -229,82 +238,22 @@ func (t *SequentialThinkingTool) Execute(ctx context.Context, args map[string]in
 	}, nil
 }
 
-// validateThoughtData validates and parses the input arguments
-func (t *SequentialThinkingTool) validateThoughtData(input map[string]interface{}) (ThoughtData, error) {
-	var data ThoughtData
-
+// validate validates the input thought data
+func (t *SequentialThinkingTool) validate(data SequentialThinkingInput) error {
 	// Validate thought (required)
-	thought, ok := input["thought"].(string)
-	if !ok || thought == "" {
-		return data, fmt.Errorf("invalid thought: must be a non-empty string")
+	if data.Thought == "" {
+		return fmt.Errorf("invalid thought: must be a non-empty string")
 	}
-	data.Thought = thought
 
 	// Validate thoughtNumber (required)
-	thoughtNumber, ok := input["thoughtNumber"].(float64)
-	if !ok {
-		// Try int type
-		if num, ok := input["thoughtNumber"].(int); ok {
-			data.ThoughtNumber = num
-		} else {
-			return data, fmt.Errorf("invalid thoughtNumber: must be a number")
-		}
-	} else {
-		data.ThoughtNumber = int(thoughtNumber)
-	}
 	if data.ThoughtNumber < 1 {
-		return data, fmt.Errorf("invalid thoughtNumber: must be >= 1")
+		return fmt.Errorf("invalid thoughtNumber: must be >= 1")
 	}
 
 	// Validate totalThoughts (required)
-	totalThoughts, ok := input["totalThoughts"].(float64)
-	if !ok {
-		// Try int type
-		if num, ok := input["totalThoughts"].(int); ok {
-			data.TotalThoughts = num
-		} else {
-			return data, fmt.Errorf("invalid totalThoughts: must be a number")
-		}
-	} else {
-		data.TotalThoughts = int(totalThoughts)
-	}
 	if data.TotalThoughts < 1 {
-		return data, fmt.Errorf("invalid totalThoughts: must be >= 1")
+		return fmt.Errorf("invalid totalThoughts: must be >= 1")
 	}
 
-	// Validate nextThoughtNeeded (required)
-	nextThoughtNeeded, ok := input["nextThoughtNeeded"].(bool)
-	if !ok {
-		return data, fmt.Errorf("invalid nextThoughtNeeded: must be a boolean")
-	}
-	data.NextThoughtNeeded = nextThoughtNeeded
-
-	// Optional fields
-	if isRevision, ok := input["isRevision"].(bool); ok {
-		data.IsRevision = isRevision
-	}
-
-	if revisesThought, ok := input["revisesThought"].(float64); ok {
-		num := int(revisesThought)
-		data.RevisesThought = &num
-	} else if revisesThought, ok := input["revisesThought"].(int); ok {
-		data.RevisesThought = &revisesThought
-	}
-
-	if branchFromThought, ok := input["branchFromThought"].(float64); ok {
-		num := int(branchFromThought)
-		data.BranchFromThought = &num
-	} else if branchFromThought, ok := input["branchFromThought"].(int); ok {
-		data.BranchFromThought = &branchFromThought
-	}
-
-	if branchID, ok := input["branchId"].(string); ok {
-		data.BranchID = branchID
-	}
-
-	if needsMoreThoughts, ok := input["needsMoreThoughts"].(bool); ok {
-		data.NeedsMoreThoughts = needsMoreThoughts
-	}
-
-	return data, nil
+	return nil
 }

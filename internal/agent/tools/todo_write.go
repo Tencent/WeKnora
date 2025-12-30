@@ -6,25 +6,12 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-// TodoWriteTool implements a planning tool for complex tasks
-// This is an optional tool that helps organize multi-step research
-type TodoWriteTool struct {
-	BaseTool
-}
-
-// PlanStep represents a single step in the research plan
-type PlanStep struct {
-	ID          string   `json:"id"`
-	Description string   `json:"description"`
-	ToolsToUse  []string `json:"tools_to_use"`
-	Status      string   `json:"status"` // pending, in_progress, completed, skipped
-}
-
-// NewTodoWriteTool creates a new todo_write tool instance
-func NewTodoWriteTool() *TodoWriteTool {
-	description := `Use this tool to create and manage a structured task list for retrieval and research tasks. This helps you track progress, organize complex retrieval operations, and demonstrate thoroughness to the user.
+var todoWriteTool = BaseTool{
+	name: ToolTodoWrite,
+	description: `Use this tool to create and manage a structured task list for retrieval and research tasks. This helps you track progress, organize complex retrieval operations, and demonstrate thoroughness to the user.
 
 **CRITICAL - Focus on Retrieval Tasks Only**:
 - This tool is for tracking RETRIEVAL and RESEARCH tasks (e.g., searching knowledge bases, retrieving documents, gathering information)
@@ -144,82 +131,56 @@ The assistant did not use the todo list because this is an informational request
 
 **Important**: After completing all retrieval tasks in todo_write, use the thinking tool to synthesize findings and generate the final answer. The todo_write tool tracks WHAT to retrieve, while thinking tool handles HOW to synthesize and present the information.
 
-When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all retrieval requirements successfully.`
-
-	return &TodoWriteTool{
-		BaseTool: NewBaseTool("todo_write", description),
-	}
+When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all retrieval requirements successfully.`,
+	schema: utils.GenerateSchema[TodoWriteInput](),
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *TodoWriteTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"task": map[string]interface{}{
-				"type":        "string",
-				"description": "The complex task or question you need to create a plan for",
-			},
-			"steps": map[string]interface{}{
-				"type":        "array",
-				"description": "Array of research plan steps with status tracking",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"id": map[string]interface{}{
-							"type":        "string",
-							"description": "Unique identifier for this step (e.g., 'step1', 'step2')",
-						},
-						"description": map[string]interface{}{
-							"type":        "string",
-							"description": "Clear description of what to investigate or accomplish in this step",
-						},
-						// "tools_to_use": map[string]interface{}{
-						// 	"type":        "array",
-						// 	"description": "Suggested tools for this step (e.g., ['knowledge_search', 'list_knowledge_chunks'])",
-						// 	"items": map[string]interface{}{
-						// 		"type": "string",
-						// 	},
-						// },
-						"status": map[string]interface{}{
-							"type":        "string",
-							"enum":        []string{"pending", "in_progress", "completed"},
-							"description": "Current status: pending (not started), in_progress (executing), completed (finished)",
-						},
-					},
-					"required": []string{"id", "description", "status"},
-				},
-			},
-		},
-		"required": []string{"task", "steps"},
+// TodoWriteTool implements a planning tool for complex tasks
+// This is an optional tool that helps organize multi-step research
+type TodoWriteTool struct {
+	BaseTool
+}
+
+// TodoWriteInput defines the input parameters for todo_write tool
+type TodoWriteInput struct {
+	Task  string     `json:"task" jsonschema:"The complex task or question you need to create a plan for"`
+	Steps []PlanStep `json:"steps" jsonschema:"Array of research plan steps with status tracking"`
+}
+
+// PlanStep represents a single step in the research plan
+type PlanStep struct {
+	ID          string `json:"id" jsonschema:"Unique identifier for this step (e.g., 'step1', 'step2')"`
+	Description string `json:"description" jsonschema:"Clear description of what to investigate or accomplish in this step"`
+	Status      string `json:"status" jsonschema:"Current status: pending (not started), in_progress (executing), completed (finished)"`
+}
+
+// NewTodoWriteTool creates a new todo_write tool instance
+func NewTodoWriteTool() *TodoWriteTool {
+	return &TodoWriteTool{
+		BaseTool: todoWriteTool,
 	}
 }
 
 // Execute executes the todo_write tool
-func (t *TodoWriteTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
-	task, ok := args["task"].(string)
-	if !ok {
-		task = "未提供任务描述"
+func (t *TodoWriteTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	// Parse args from json.RawMessage
+	var input TodoWriteInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
+	if input.Task == "" {
+		input.Task = "未提供任务描述"
 	}
 
 	// Parse plan steps
-	var planSteps []PlanStep
-	if stepsData, ok := args["steps"].([]interface{}); ok {
-		for _, stepData := range stepsData {
-			if stepMap, ok := stepData.(map[string]interface{}); ok {
-				step := PlanStep{
-					ID:          getStringField(stepMap, "id"),
-					Description: getStringField(stepMap, "description"),
-					ToolsToUse:  getStringArrayField(stepMap, "tools_to_use"),
-					Status:      getStringField(stepMap, "status"),
-				}
-				planSteps = append(planSteps, step)
-			}
-		}
-	}
+	planSteps := input.Steps
 
 	// Generate formatted output
-	output := generatePlanOutput(task, planSteps)
+	output := generatePlanOutput(input.Task, planSteps)
 
 	// Prepare structured data for response
 	stepsJSON, _ := json.Marshal(planSteps)
@@ -228,7 +189,7 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args map[string]interface{}
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
-			"task":         task,
+			"task":         input.Task,
 			"steps":        planSteps,
 			"steps_json":   string(stepsJSON),
 			"total_steps":  len(planSteps),

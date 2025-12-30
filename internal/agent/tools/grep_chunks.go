@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -13,19 +14,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// GrepChunksTool performs text pattern matching in knowledge base chunks
-// Similar to grep command in Unix-like systems, but operates on knowledge base content
-type GrepChunksTool struct {
-	BaseTool
-	db               *gorm.DB
-	tenantID         uint64
-	knowledgeBaseIDs []string
-	knowledgeIDs     []string // Specific knowledge/document IDs to search within
-}
-
-// NewGrepChunksTool creates a new grep chunks tool
-func NewGrepChunksTool(db *gorm.DB, tenantID uint64, knowledgeBaseIDs []string, knowledgeIDs []string) *GrepChunksTool {
-	description := `Unix-style text pattern matching tool for knowledge base chunks.
+var grepChunksTool = BaseTool{
+	name: ToolGrepChunks,
+	description: `Unix-style text pattern matching tool for knowledge base chunks.
 
 Searches for text patterns in chunk content using strict literal text matching (fixed-string search). This tool performs exact keyword lookup, not semantic search.
 
@@ -61,76 +52,81 @@ grep_chunks scans enabled chunks across the specified knowledge bases and return
 - Exact keyword presence checks
 - Fast preliminary filtering before semantic search
 - Situations requiring deterministic text search
+`,
+	schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "pattern": {
+      "type": "array",
+      "description": "REQUIRED: Text patterns to search for. Can be a single pattern or multiple patterns. Treated as literal text (fixed string matching). Results match any of the patterns (OR logic).",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "knowledge_base_ids": {
+      "type": "array",
+      "description": "Filter by knowledge base IDs. If empty, searches all allowed KBs.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "max_results": {
+      "type": "integer",
+      "description": "Maximum number of matching chunks to return (default: 50, max: 200)",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 200
+    }
+  },
+  "required": ["pattern"]
+}`),
+}
 
-`
+// GrepChunksInput defines the input parameters for grep chunks tool
+type GrepChunksInput struct {
+	Pattern          []string `json:"pattern" `
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+	MaxResults       int      `json:"max_results,omitempty"`
+}
 
+// GrepChunksTool performs text pattern matching in knowledge base chunks
+// Similar to grep command in Unix-like systems, but operates on knowledge base content
+type GrepChunksTool struct {
+	BaseTool
+	db               *gorm.DB
+	knowledgeBaseIDs []string
+	knowledgeIDs     []string // Specific knowledge/document IDs to search within
+}
+
+// NewGrepChunksTool creates a new grep chunks tool
+func NewGrepChunksTool(db *gorm.DB, knowledgeBaseIDs []string, knowledgeIDs []string) *GrepChunksTool {
 	return &GrepChunksTool{
-		BaseTool:         NewBaseTool("grep_chunks", description),
+		BaseTool:         grepChunksTool,
 		db:               db,
-		tenantID:         tenantID,
 		knowledgeBaseIDs: knowledgeBaseIDs,
 		knowledgeIDs:     knowledgeIDs,
 	}
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *GrepChunksTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"pattern": map[string]interface{}{
-				"type":        "array",
-				"description": "REQUIRED: Text patterns to search for. Can be a single pattern or multiple patterns. Treated as literal text (fixed string matching). Results match any of the patterns (OR logic).",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-				"minItems": 1,
-			},
-			"knowledge_base_ids": map[string]interface{}{
-				"type":        "array",
-				"description": "Filter by knowledge base IDs. If empty, searches all allowed KBs.",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-			},
-			// "knowledge_ids": map[string]interface{}{
-			// 	"type":        "array",
-			// 	"description": "Filter by document/knowledge IDs. If empty, searches all documents.",
-			// 	"items": map[string]interface{}{
-			// 		"type": "string",
-			// 	},
-			// },
-			"max_results": map[string]interface{}{
-				"type":        "integer",
-				"description": "Maximum number of matching chunks to return (default: 50, max: 200)",
-				"default":     50,
-				"minimum":     1,
-				"maximum":     200,
-			},
-		},
-		"required": []string{"pattern"},
-	}
-}
-
 // Execute executes the grep chunks tool
-func (t *GrepChunksTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][GrepChunks] Execute started")
 
+	// Parse args from json.RawMessage
+	var input GrepChunksInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
 	// Parse pattern parameter (required) - support multiple patterns
-	var patterns []string
-	if patternsRaw, ok := args["pattern"].([]interface{}); ok && len(patternsRaw) > 0 {
-		for _, p := range patternsRaw {
-			if pStr, ok := p.(string); ok && strings.TrimSpace(pStr) != "" {
-				patterns = append(patterns, strings.TrimSpace(pStr))
-			}
-		}
-	}
-	// Also support single string for backward compatibility
-	if len(patterns) == 0 {
-		if patternStr, ok := args["pattern"].(string); ok && strings.TrimSpace(patternStr) != "" {
-			patterns = append(patterns, strings.TrimSpace(patternStr))
-		}
-	}
+	patterns := input.Pattern
+
+	// Validate patterns
 	if len(patterns) == 0 {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Missing or invalid pattern parameter")
 		return &types.ToolResult{
@@ -143,8 +139,8 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args map[string]interface{
 	countOnly := false // default: show results
 
 	maxResults := 50
-	if mr, ok := args["max_results"].(float64); ok {
-		maxResults = int(mr)
+	if input.MaxResults > 0 {
+		maxResults = input.MaxResults
 		if maxResults < 1 {
 			maxResults = 1
 		} else if maxResults > 200 {
@@ -153,14 +149,7 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args map[string]interface{
 	}
 
 	// Parse knowledge_base_ids filter
-	var kbIDs []string
-	if kbIDsRaw, ok := args["knowledge_base_ids"].([]interface{}); ok {
-		for _, id := range kbIDsRaw {
-			if idStr, ok := id.(string); ok && idStr != "" {
-				kbIDs = append(kbIDs, idStr)
-			}
-		}
-	}
+	kbIDs := input.KnowledgeBaseIDs
 	if len(kbIDs) == 0 {
 		kbIDs = t.knowledgeBaseIDs
 	}
@@ -273,11 +262,15 @@ func (t *GrepChunksTool) searchChunks(
 	kbIDs []string,
 	knowledgeIDs []string,
 ) ([]chunkWithTitle, int64, error) {
+	tenantID := uint64(0)
+	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+		tenantID = tid
+	}
 	// Build base query
 	query := t.db.Debug().WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, knowledges.title as knowledge_title, COUNT(*) OVER (PARTITION BY chunks.knowledge_id) AS total_chunk_count").
 		Joins("LEFT JOIN knowledges ON chunks.knowledge_id = knowledges.id").
-		Where("chunks.tenant_id = ?", t.tenantID).
+		Where("chunks.tenant_id = ?", tenantID).
 		Where("chunks.is_enabled = ?", true).
 		Where("chunks.deleted_at IS NULL").
 		Where("knowledges.deleted_at IS NULL")

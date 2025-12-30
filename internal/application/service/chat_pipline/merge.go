@@ -61,9 +61,12 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	}
 
 	// Group chunks by their knowledge source ID
-	knowledgeGroup := make(map[string][]*types.SearchResult)
+	knowledgeGroup := make(map[string]map[string][]*types.SearchResult)
 	for _, chunk := range searchResult {
-		knowledgeGroup[chunk.KnowledgeID] = append(knowledgeGroup[chunk.KnowledgeID], chunk)
+		if _, ok := knowledgeGroup[chunk.KnowledgeID]; !ok {
+			knowledgeGroup[chunk.KnowledgeID] = make(map[string][]*types.SearchResult)
+		}
+		knowledgeGroup[chunk.KnowledgeID][chunk.ChunkType] = append(knowledgeGroup[chunk.KnowledgeID][chunk.ChunkType], chunk)
 	}
 
 	pipelineInfo(ctx, "Merge", "group_summary", map[string]interface{}{
@@ -72,70 +75,63 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 
 	mergedChunks := []*types.SearchResult{}
 	// Process each knowledge source separately
-	for knowledgeID, chunks := range knowledgeGroup {
-		pipelineInfo(ctx, "Merge", "group_process", map[string]interface{}{
-			"knowledge_id": knowledgeID,
-			"chunk_cnt":    len(chunks),
-		})
+	for knowledgeID, chunkGroup := range knowledgeGroup {
+		for _, chunks := range chunkGroup {
+			pipelineInfo(ctx, "Merge", "group_process", map[string]interface{}{
+				"knowledge_id": knowledgeID,
+				"chunk_cnt":    len(chunks),
+			})
 
-		// Sort chunks by their start position in the original document
-		sort.Slice(chunks, func(i, j int) bool {
-			if chunks[i].StartAt == chunks[j].StartAt {
-				return chunks[i].EndAt < chunks[j].EndAt
-			}
-			return chunks[i].StartAt < chunks[j].StartAt
-		})
+			// Sort chunks by their start position in the original document
+			sort.Slice(chunks, func(i, j int) bool {
+				if chunks[i].StartAt == chunks[j].StartAt {
+					return chunks[i].EndAt < chunks[j].EndAt
+				}
+				return chunks[i].StartAt < chunks[j].StartAt
+			})
 
-		// Merge overlapping or adjacent chunks
-		knowledgeMergedChunks := []*types.SearchResult{}
-		if chunks[0].ChunkType == types.ChunkTypeSummary {
-			knowledgeMergedChunks = append(knowledgeMergedChunks, chunks[0])
-			// skip the first chunk if it is summary chunk
-			// This is to avoid merging the summary chunk with the first content chunk
-			chunks = chunks[1:]
-		}
-		if len(chunks) > 0 {
-			knowledgeMergedChunks = append(knowledgeMergedChunks, chunks[0])
-		}
-		for i := 1; i < len(chunks); i++ {
-			lastChunk := knowledgeMergedChunks[len(knowledgeMergedChunks)-1]
-			// If the current chunk starts after the last chunk ends, add it to the merged chunks
-			if chunks[i].StartAt > lastChunk.EndAt {
-				knowledgeMergedChunks = append(knowledgeMergedChunks, chunks[i])
-				continue
-			}
-			// Merge overlapping chunks
-			if chunks[i].EndAt > lastChunk.EndAt {
-				lastChunk.Content = lastChunk.Content +
-					string([]rune(chunks[i].Content)[lastChunk.EndAt-chunks[i].StartAt:])
-				lastChunk.EndAt = chunks[i].EndAt
-				lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
+			// Merge overlapping or adjacent chunks
+			knowledgeMergedChunks := []*types.SearchResult{chunks[0]}
+			for i := 1; i < len(chunks); i++ {
+				lastChunk := knowledgeMergedChunks[len(knowledgeMergedChunks)-1]
+				// If the current chunk starts after the last chunk ends, add it to the merged chunks
+				if chunks[i].StartAt > lastChunk.EndAt {
+					knowledgeMergedChunks = append(knowledgeMergedChunks, chunks[i])
+					continue
+				}
+				// Merge overlapping chunks
+				if chunks[i].EndAt > lastChunk.EndAt {
+					lastChunk.Content = lastChunk.Content +
+						string([]rune(chunks[i].Content)[lastChunk.EndAt-chunks[i].StartAt:])
+					lastChunk.EndAt = chunks[i].EndAt
+					lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
 
-				// 合并 ImageInfo
-				if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
-					pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
-						"knowledge_id": knowledgeID,
-						"error":        err.Error(),
-					})
+					// 合并 ImageInfo
+					if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
+						pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
+							"knowledge_id": knowledgeID,
+							"error":        err.Error(),
+						})
+					}
+				}
+				if chunks[i].Score > lastChunk.Score {
+					lastChunk.Score = chunks[i].Score
 				}
 			}
-			if chunks[i].Score > lastChunk.Score {
-				lastChunk.Score = chunks[i].Score
-			}
+
+			pipelineInfo(ctx, "Merge", "group_output", map[string]interface{}{
+				"knowledge_id":  knowledgeID,
+				"merged_chunks": len(knowledgeMergedChunks),
+			})
+
+			// Sort merged chunks by their score (highest first)
+			sort.Slice(knowledgeMergedChunks, func(i, j int) bool {
+				return knowledgeMergedChunks[i].Score > knowledgeMergedChunks[j].Score
+			})
+
+			mergedChunks = append(mergedChunks, knowledgeMergedChunks...)
 		}
-
-		pipelineInfo(ctx, "Merge", "group_output", map[string]interface{}{
-			"knowledge_id":  knowledgeID,
-			"merged_chunks": len(knowledgeMergedChunks),
-		})
-
-		mergedChunks = append(mergedChunks, knowledgeMergedChunks...)
 	}
-
-	// Sort merged chunks by their score (highest first)
-	sort.Slice(mergedChunks, func(i, j int) bool {
-		return mergedChunks[i].Score > mergedChunks[j].Score
-	})
 
 	pipelineInfo(ctx, "Merge", "output", map[string]interface{}{
 		"merged_total": len(mergedChunks),

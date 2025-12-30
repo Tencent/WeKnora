@@ -9,7 +9,7 @@ import (
 )
 
 // ChunkType 定义了不同类型的 Chunk
-type ChunkType string
+type ChunkType = string
 
 const (
 	// ChunkTypeText 表示普通的文本 Chunk
@@ -28,6 +28,10 @@ const (
 	ChunkTypeFAQ ChunkType = "faq"
 	// ChunkTypeWebSearch 表示 Web 搜索结果的 Chunk
 	ChunkTypeWebSearch ChunkType = "web_search"
+	// ChunkTypeTableSummary 表示数据表摘要的 Chunk
+	ChunkTypeTableSummary ChunkType = "table_summary"
+	// ChunkTypeTableColumn 表示数据表列描述的 Chunk
+	ChunkTypeTableColumn ChunkType = "table_column"
 )
 
 // ChunkStatus 定义了不同状态的 Chunk

@@ -9,92 +9,14 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	"gorm.io/gorm"
 )
 
-// SQLSecurityValidator provides comprehensive SQL injection protection using PostgreSQL's official parser
-type SQLSecurityValidator struct {
-	allowedTables    map[string]bool
-	allowedFunctions map[string]bool
-	tenantID         uint64
-}
-
-// NewSQLSecurityValidator creates a new SQL security validator
-func NewSQLSecurityValidator(tenantID uint64) *SQLSecurityValidator {
-	return &SQLSecurityValidator{
-		allowedTables: map[string]bool{
-			"tenants":         true,
-			"knowledge_bases": true,
-			"knowledges":      true,
-			"sessions":        true,
-			"messages":        true,
-			"chunks":          true,
-			"embeddings":      true,
-			"models":          true,
-		},
-		// Whitelist of allowed SQL functions (aggregates and safe functions only)
-		allowedFunctions: map[string]bool{
-			// Aggregate functions
-			"count":            true,
-			"sum":              true,
-			"avg":              true,
-			"min":              true,
-			"max":              true,
-			"array_agg":        true,
-			"string_agg":       true,
-			"bool_and":         true,
-			"bool_or":          true,
-			"json_agg":         true,
-			"jsonb_agg":        true,
-			"json_object_agg":  true,
-			"jsonb_object_agg": true,
-			// Safe scalar functions
-			"coalesce":          true,
-			"nullif":            true,
-			"greatest":          true,
-			"least":             true,
-			"abs":               true,
-			"ceil":              true,
-			"floor":             true,
-			"round":             true,
-			"length":            true,
-			"lower":             true,
-			"upper":             true,
-			"trim":              true,
-			"ltrim":             true,
-			"rtrim":             true,
-			"substring":         true,
-			"concat":            true,
-			"concat_ws":         true,
-			"replace":           true,
-			"left":              true,
-			"right":             true,
-			"now":               true,
-			"current_date":      true,
-			"current_timestamp": true,
-			"date_trunc":        true,
-			"extract":           true,
-			"to_char":           true,
-			"to_date":           true,
-			"to_timestamp":      true,
-			"date_part":         true,
-			"age":               true,
-		},
-		tenantID: tenantID,
-	}
-}
-
-// DatabaseQueryTool allows AI to query the database with auto-injected tenant_id for security
-type DatabaseQueryTool struct {
-	BaseTool
-	db       *gorm.DB
-	tenantID uint64
-}
-
-// NewDatabaseQueryTool creates a new database query tool
-func NewDatabaseQueryTool(db *gorm.DB, tenantID uint64) *DatabaseQueryTool {
-	description := `Execute SQL queries to retrieve information from the database.
+var databaseQueryTool = BaseTool{
+	name: ToolDatabaseQuery,
+	description: `Execute SQL queries to retrieve information from the database.
 
 ## Security Features
 - Automatic tenant_id injection: All queries are automatically filtered by the logged-in user's tenant_id
@@ -171,36 +93,123 @@ Join knowledge bases and documents:
 - Only SELECT queries are allowed
 - Limit results with LIMIT clause for better performance
 - Use appropriate JOINs when querying across tables
-- All timestamps are in UTC with time zone`
+- All timestamps are in UTC with time zone`,
+	schema: utils.GenerateSchema[DatabaseQueryInput](),
+}
 
-	return &DatabaseQueryTool{
-		BaseTool: NewBaseTool("database_query", description),
-		db:       db,
+type DatabaseQueryInput struct {
+	SQL string `json:"sql" jsonschema:"The SELECT SQL query to execute. DO NOT include tenant_id condition - it will be automatically added for security."`
+}
+
+// SQLSecurityValidator provides comprehensive SQL injection protection using PostgreSQL's official parser
+type SQLSecurityValidator struct {
+	allowedTables    map[string]bool
+	allowedFunctions map[string]bool
+	tenantID         uint64
+}
+
+// NewSQLSecurityValidator creates a new SQL security validator
+func NewSQLSecurityValidator(tenantID uint64) *SQLSecurityValidator {
+	return &SQLSecurityValidator{
+		allowedTables: map[string]bool{
+			"tenants":         true,
+			"knowledge_bases": true,
+			"knowledges":      true,
+			"sessions":        true,
+			"messages":        true,
+			"chunks":          true,
+			"embeddings":      true,
+			"models":          true,
+		},
+		// Whitelist of allowed SQL functions (aggregates and safe functions only)
+		allowedFunctions: map[string]bool{
+			// Aggregate functions
+			"count":            true,
+			"sum":              true,
+			"avg":              true,
+			"min":              true,
+			"max":              true,
+			"array_agg":        true,
+			"string_agg":       true,
+			"bool_and":         true,
+			"bool_or":          true,
+			"json_agg":         true,
+			"jsonb_agg":        true,
+			"json_object_agg":  true,
+			"jsonb_object_agg": true,
+			// Safe scalar functions
+			"coalesce":          true,
+			"nullif":            true,
+			"greatest":          true,
+			"least":             true,
+			"abs":               true,
+			"ceil":              true,
+			"floor":             true,
+			"round":             true,
+			"length":            true,
+			"lower":             true,
+			"upper":             true,
+			"trim":              true,
+			"ltrim":             true,
+			"rtrim":             true,
+			"substring":         true,
+			"concat":            true,
+			"concat_ws":         true,
+			"replace":           true,
+			"left":              true,
+			"right":             true,
+			"now":               true,
+			"current_date":      true,
+			"current_timestamp": true,
+			"date_trunc":        true,
+			"extract":           true,
+			"to_char":           true,
+			"to_date":           true,
+			"to_timestamp":      true,
+			"date_part":         true,
+			"age":               true,
+		},
 		tenantID: tenantID,
 	}
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *DatabaseQueryTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"sql": map[string]interface{}{
-				"type":        "string",
-				"description": "The SELECT SQL query to execute. DO NOT include tenant_id condition - it will be automatically added for security.",
-			},
-		},
-		"required": []string{"sql"},
+// DatabaseQueryInput defines the input parameters for database query tool
+
+// DatabaseQueryTool allows AI to query the database with auto-injected tenant_id for security
+type DatabaseQueryTool struct {
+	BaseTool
+	db *gorm.DB
+}
+
+// NewDatabaseQueryTool creates a new database query tool
+func NewDatabaseQueryTool(db *gorm.DB) *DatabaseQueryTool {
+	return &DatabaseQueryTool{
+		BaseTool: databaseQueryTool,
+		db:       db,
 	}
 }
 
 // Execute executes the database query tool
-func (t *DatabaseQueryTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute started")
 
-	// Extract SQL from args
-	sqlQuery, ok := args["sql"].(string)
-	if !ok || sqlQuery == "" {
+	tenantID := uint64(0)
+	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+		tenantID = tid
+	}
+
+	// Parse args from json.RawMessage
+	var input DatabaseQueryInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][DatabaseQuery] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
+	// Extract SQL from input
+	if input.SQL == "" {
 		logger.Errorf(ctx, "[Tool][DatabaseQuery] Missing or invalid SQL parameter")
 		return &types.ToolResult{
 			Success: false,
@@ -208,12 +217,12 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args map[string]interfa
 		}, fmt.Errorf("missing sql parameter")
 	}
 
-	logger.Infof(ctx, "[Tool][DatabaseQuery] Original SQL query:\n%s", sqlQuery)
-	logger.Infof(ctx, "[Tool][DatabaseQuery] Tenant ID: %d", t.tenantID)
+	logger.Infof(ctx, "[Tool][DatabaseQuery] Original SQL query:\n%s", input.SQL)
+	logger.Infof(ctx, "[Tool][DatabaseQuery] Tenant ID: %d", tenantID)
 
 	// Validate and secure the SQL query
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Validating and securing SQL...")
-	securedSQL, err := t.validateAndSecureSQL(sqlQuery)
+	securedSQL, err := t.validateAndSecureSQL(input.SQL, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DatabaseQuery] SQL validation failed: %v", err)
 		return &types.ToolResult{
@@ -224,7 +233,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args map[string]interfa
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Secured SQL query:\n%s", securedSQL)
 	logger.Infof(ctx, "Executing secured SQL query - original: %s, secured: %s, tenant_id: %d",
-		sqlQuery, securedSQL, t.tenantID)
+		input.SQL, securedSQL, tenantID)
 
 	// Execute the query
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Executing query against database...")
@@ -312,15 +321,15 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args map[string]interfa
 			"rows":         results,
 			"row_count":    len(results),
 			"query":        securedSQL,
-			"tenant_id":    t.tenantID,
+			"tenant_id":    tenantID,
 			"display_type": "database_query",
 		},
 	}, nil
 }
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
-func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string) (string, error) {
-	validator := NewSQLSecurityValidator(t.tenantID)
+func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
+	validator := NewSQLSecurityValidator(tenantID)
 	return validator.ValidateAndSecure(sqlQuery)
 }
 

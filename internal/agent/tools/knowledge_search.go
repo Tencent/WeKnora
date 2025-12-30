@@ -19,40 +19,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// searchResultWithMeta wraps search result with metadata about which query matched it
-type searchResultWithMeta struct {
-	*types.SearchResult
-	SourceQuery       string
-	QueryType         string // "vector" or "keyword"
-	KnowledgeBaseID   string // ID of the knowledge base this result came from
-	KnowledgeBaseType string // Type of the knowledge base (document, faq, etc.)
-}
-
-// KnowledgeSearchTool searches knowledge bases with flexible query modes
-type KnowledgeSearchTool struct {
-	BaseTool
-	knowledgeBaseService interfaces.KnowledgeBaseService
-	knowledgeService     interfaces.KnowledgeService
-	chunkService         interfaces.ChunkService
-	tenantID             uint64
-	searchTargets        types.SearchTargets // Pre-computed unified search targets
-	rerankModel          rerank.Reranker
-	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
-	config               *config.Config // Global config for fallback values
-}
-
-// NewKnowledgeSearchTool creates a new knowledge search tool
-func NewKnowledgeSearchTool(
-	knowledgeBaseService interfaces.KnowledgeBaseService,
-	knowledgeService interfaces.KnowledgeService,
-	chunkService interfaces.ChunkService,
-	tenantID uint64,
-	searchTargets types.SearchTargets,
-	rerankModel rerank.Reranker,
-	chatModel chat.Chat,
-	cfg *config.Config,
-) *KnowledgeSearchTool {
-	description := `Semantic/vector search tool for retrieving knowledge by meaning, intent, and conceptual relevance.
+var knowledgeSearchTool = BaseTool{
+	name: ToolKnowledgeSearch,
+	description: `Semantic/vector search tool for retrieving knowledge by meaning, intent, and conceptual relevance.
 
 This tool uses embeddings to understand the user's query and find semantically similar content across knowledge base chunks.
 
@@ -106,15 +75,75 @@ Avoid:
 
 ## Output
 Returns chunks ranked by semantic similarity, reranked when applicable.  
-Results represent conceptual relevance, not literal keyword overlap.
-`
+Results represent conceptual relevance, not literal keyword overlap.`,
+	schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "queries": {
+      "type": "array",
+      "description": "REQUIRED: 1-5 semantic questions/topics (e.g., ['What is RAG?', 'RAG benefits'])",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 5
+    },
+    "knowledge_base_ids": {
+      "type": "array",
+      "description": "Optional: KB IDs to search",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 0,
+      "maxItems": 10
+    }
+  },
+  "required": ["queries"]
+}`),
+}
 
+// KnowledgeSearchInput defines the input parameters for knowledge search tool
+type KnowledgeSearchInput struct {
+	Queries          []string `json:"queries"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
+}
+
+// searchResultWithMeta wraps search result with metadata about which query matched it
+type searchResultWithMeta struct {
+	*types.SearchResult
+	SourceQuery       string
+	QueryType         string // "vector" or "keyword"
+	KnowledgeBaseID   string // ID of the knowledge base this result came from
+	KnowledgeBaseType string // Type of the knowledge base (document, faq, etc.)
+}
+
+// KnowledgeSearchTool searches knowledge bases with flexible query modes
+type KnowledgeSearchTool struct {
+	BaseTool
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	chunkService         interfaces.ChunkService
+	searchTargets        types.SearchTargets // Pre-computed unified search targets
+	rerankModel          rerank.Reranker
+	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
+	config               *config.Config // Global config for fallback values
+}
+
+// NewKnowledgeSearchTool creates a new knowledge search tool
+func NewKnowledgeSearchTool(
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+	searchTargets types.SearchTargets,
+	rerankModel rerank.Reranker,
+	chatModel chat.Chat,
+	cfg *config.Config,
+) *KnowledgeSearchTool {
 	return &KnowledgeSearchTool{
-		BaseTool:             NewBaseTool("knowledge_search", description),
+		BaseTool:             knowledgeSearchTool,
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
 		chunkService:         chunkService,
-		tenantID:             tenantID,
 		searchTargets:        searchTargets,
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
@@ -122,50 +151,28 @@ Results represent conceptual relevance, not literal keyword overlap.
 	}
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *KnowledgeSearchTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"queries": map[string]interface{}{
-				"type":        "array",
-				"description": "REQUIRED: 1-5 semantic questions/topics (e.g., ['What is RAG?', 'RAG benefits'])",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-				"minItems": 1,
-				"maxItems": 5,
-			},
-			"knowledge_base_ids": map[string]interface{}{
-				"type":        "array",
-				"description": "Optional: KB IDs to search",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-				"minItems": 0,
-				"maxItems": 10,
-			},
-		},
-		"required": []string{"queries"},
-	}
-}
-
 // Execute executes the knowledge search tool
-func (t *KnowledgeSearchTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Execute started")
 
+	// Parse args from json.RawMessage
+	var input KnowledgeSearchInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][KnowledgeSearch] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
 	// Log input arguments
-	argsJSON, _ := json.MarshalIndent(args, "", "  ")
+	argsJSON, _ := json.MarshalIndent(input, "", "  ")
 	logger.Debugf(ctx, "[Tool][KnowledgeSearch] Input args:\n%s", string(argsJSON))
 
 	// Determine which KBs to search - user can optionally filter to specific KBs
 	var userSpecifiedKBs []string
-	if kbIDsRaw, ok := args["knowledge_base_ids"].([]interface{}); ok && len(kbIDsRaw) > 0 {
-		for _, id := range kbIDsRaw {
-			if idStr, ok := id.(string); ok && idStr != "" {
-				userSpecifiedKBs = append(userSpecifiedKBs, idStr)
-			}
-		}
+	if len(input.KnowledgeBaseIDs) > 0 {
+		userSpecifiedKBs = input.KnowledgeBaseIDs
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] User specified %d knowledge bases: %v", len(userSpecifiedKBs), userSpecifiedKBs)
 	}
 
@@ -199,14 +206,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args map[string]inter
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Using %d search targets across %d KBs", len(searchTargets), len(kbIDs))
 
 	// Parse query parameter
-	var queries []string
-	if queriesRaw, ok := args["queries"].([]interface{}); ok && len(queriesRaw) > 0 {
-		for _, q := range queriesRaw {
-			if qStr, ok := q.(string); ok && qStr != "" {
-				queries = append(queries, qStr)
-			}
-		}
-	}
+	queries := input.Queries
 
 	// Validate: query must be provided
 	if len(queries) == 0 {
@@ -965,6 +965,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 	kbsToSearch []string,
 	queries []string,
 ) (*types.ToolResult, error) {
+	tenantID := uint64(0)
+	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+		tenantID = tid
+	}
 	if len(results) == 0 {
 		data := map[string]interface{}{
 			"knowledge_base_ids": kbsToSearch,
@@ -1050,7 +1054,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 			// Get total chunk count for this knowledge (cache it)
 			if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
 				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-					t.tenantID, result.KnowledgeID,
+					tenantID, result.KnowledgeID,
 					&types.Pagination{Page: 1, PageSize: 1},
 					[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
 				)

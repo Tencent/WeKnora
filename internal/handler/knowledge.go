@@ -118,6 +118,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
+	// Validate file size (configurable via MAX_FILE_SIZE_MB)
+	maxSize := secutils.GetMaxFileSize()
+	if file.Size > maxSize {
+		logger.Error(ctx, "File size too large")
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB())))
+		return
+	}
+
 	// Get custom filename if provided (for folder uploads with path)
 	customFileName := c.PostForm("fileName")
 	customFileName = secutils.SanitizeForLog(customFileName)

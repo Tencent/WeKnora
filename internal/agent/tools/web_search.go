@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -9,29 +10,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-// WebSearchTool performs web searches and returns results
-type WebSearchTool struct {
-	BaseTool
-	webSearchService     interfaces.WebSearchService
-	knowledgeBaseService interfaces.KnowledgeBaseService
-	knowledgeService     interfaces.KnowledgeService
-	sessionService       interfaces.SessionService
-	sessionID            string
-	maxResults           int
-}
-
-// NewWebSearchTool creates a new web search tool
-func NewWebSearchTool(
-	webSearchService interfaces.WebSearchService,
-	knowledgeBaseService interfaces.KnowledgeBaseService,
-	knowledgeService interfaces.KnowledgeService,
-	sessionService interfaces.SessionService,
-	sessionID string,
-	maxResults int,
-) *WebSearchTool {
-	description := `Search the web for current information and news. This tool searches the internet to find up-to-date information that may not be in the knowledge base.
+var webSearchTool = BaseTool{
+	name: ToolWebSearch,
+	description: `Search the web for current information and news. This tool searches the internet to find up-to-date information that may not be in the knowledge base.
 
 ## CRITICAL - KB First Rule
 **ABSOLUTE RULE**: You MUST complete KB retrieval (grep_chunks AND knowledge_search) FIRST before using this tool.
@@ -57,10 +41,7 @@ func NewWebSearchTool(
 **Parameters**:
 - query (required): Search query string
 
-**Returns**: Web search results with title, URL, snippet, and content (up to ` + fmt.Sprintf(
-		"%d",
-		maxResults,
-	) + ` results)
+**Returns**: Web search results with title, URL, snippet, and content (up to %d results)
 
 ## Examples
 
@@ -83,42 +64,66 @@ func NewWebSearchTool(
 - Use this tool when knowledge bases don't have the information you need
 - Results include URL, title, snippet, and content snippet (may be truncated)
 - **CRITICAL**: If content is truncated or you need full details, use **web_fetch** to fetch complete page content
-- Maximum ` + fmt.Sprintf(
-		"%d",
-		maxResults,
-	) + ` results will be returned per search`
-
-	return &WebSearchTool{
-		BaseTool:             NewBaseTool("web_search", description),
-		webSearchService:     webSearchService,
-		knowledgeBaseService: knowledgeBaseService,
-		knowledgeService:     knowledgeService,
-		sessionService:       sessionService,
-		sessionID:            sessionID,
-		maxResults:           maxResults,
-	}
+- Maximum %d results will be returned per search`,
+	schema: utils.GenerateSchema[WebSearchInput](),
 }
 
-// Parameters returns the JSON schema for the tool's parameters
-func (t *WebSearchTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"query": map[string]interface{}{
-				"type":        "string",
-				"description": "Search query string",
-			},
-		},
-		"required": []string{"query"},
+// WebSearchInput defines the input parameters for web search tool
+type WebSearchInput struct {
+	Query string `json:"query" jsonschema:"Search query string"`
+}
+
+// WebSearchTool performs web searches and returns results
+type WebSearchTool struct {
+	BaseTool
+	webSearchService      interfaces.WebSearchService
+	knowledgeBaseService  interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeService
+	webSearchStateService interfaces.WebSearchStateService
+	sessionID             string
+	maxResults            int
+}
+
+// NewWebSearchTool creates a new web search tool
+func NewWebSearchTool(
+	webSearchService interfaces.WebSearchService,
+	knowledgeBaseService interfaces.KnowledgeBaseService,
+	knowledgeService interfaces.KnowledgeService,
+	webSearchStateService interfaces.WebSearchStateService,
+	sessionID string,
+	maxResults int,
+) *WebSearchTool {
+	tool := webSearchTool
+	tool.description = fmt.Sprintf(tool.description, maxResults, maxResults)
+
+	return &WebSearchTool{
+		BaseTool:              tool,
+		webSearchService:      webSearchService,
+		knowledgeBaseService:  knowledgeBaseService,
+		knowledgeService:      knowledgeService,
+		webSearchStateService: webSearchStateService,
+		sessionID:             sessionID,
+		maxResults:            maxResults,
 	}
 }
 
 // Execute executes the web search tool
-func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
+func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][WebSearch] Execute started")
 
+	// Parse args from json.RawMessage
+	var input WebSearchInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		logger.Errorf(ctx, "[Tool][WebSearch] Failed to parse args: %v", err)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
 	// Parse query
-	query, ok := args["query"].(string)
+	query := input.Query
+	ok := query != ""
 	if !ok || query == "" {
 		logger.Errorf(ctx, "[Tool][WebSearch] Query is required")
 		return &types.ToolResult{
@@ -178,8 +183,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 	// Apply RAG compression if configured
 	if len(webResults) > 0 && tenant.WebSearchConfig.CompressionMethod != "none" &&
 		tenant.WebSearchConfig.CompressionMethod != "" {
-		// Load session-scoped temp KB state from Redis using SessionService
-		tempKBID, seen, ids := t.sessionService.GetWebSearchTempKBState(ctx, t.sessionID)
+		// Load session-scoped temp KB state from Redis using WebSearchStateRepository
+		tempKBID, seen, ids := t.webSearchStateService.GetWebSearchTempKBState(ctx, t.sessionID)
 
 		// Build questions for RAG compression
 		questions := []string{strings.TrimSpace(query)}
@@ -193,8 +198,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 			logger.Warnf(ctx, "[Tool][WebSearch] RAG compression failed, using raw results: %v", err)
 		} else {
 			webResults = compressed
-			// Persist temp KB state back into Redis using SessionService
-			t.sessionService.SaveWebSearchTempKBState(ctx, t.sessionID, kbID, newSeen, newIDs)
+			// Persist temp KB state back into Redis using WebSearchStateRepository
+			t.webSearchStateService.SaveWebSearchTempKBState(ctx, t.sessionID, kbID, newSeen, newIDs)
 			logger.Infof(ctx, "[Tool][WebSearch] RAG compression completed, %d results", len(webResults))
 		}
 	}

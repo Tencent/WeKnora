@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/agent"
@@ -22,16 +23,18 @@ const MAX_ITERATIONS = 100 // Max iterations for agent execution
 
 // agentService implements agent-related business logic
 type agentService struct {
-	cfg                  *config.Config
-	modelService         interfaces.ModelService
-	mcpServiceService    interfaces.MCPServiceService
-	mcpManager           *mcp.MCPManager
-	eventBus             *event.EventBus
-	db                   *gorm.DB
-	webSearchService     interfaces.WebSearchService
-	knowledgeBaseService interfaces.KnowledgeBaseService
-	knowledgeService     interfaces.KnowledgeService
-	chunkService         interfaces.ChunkService
+	cfg                   *config.Config
+	modelService          interfaces.ModelService
+	mcpServiceService     interfaces.MCPServiceService
+	mcpManager            *mcp.MCPManager
+	eventBus              *event.EventBus
+	db                    *gorm.DB
+	webSearchService      interfaces.WebSearchService
+	knowledgeBaseService  interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeService
+	chunkService          interfaces.ChunkService
+	duckdb                *sql.DB
+	webSearchStateService interfaces.WebSearchStateService
 }
 
 // NewAgentService creates a new agent service
@@ -46,18 +49,22 @@ func NewAgentService(
 	eventBus *event.EventBus,
 	db *gorm.DB,
 	webSearchService interfaces.WebSearchService,
+	duckdb *sql.DB,
+	webSearchStateService interfaces.WebSearchStateService,
 ) interfaces.AgentService {
 	return &agentService{
-		cfg:                  cfg,
-		modelService:         modelService,
-		knowledgeBaseService: knowledgeBaseService,
-		knowledgeService:     knowledgeService,
-		chunkService:         chunkService,
-		mcpServiceService:    mcpServiceService,
-		mcpManager:           mcpManager,
-		eventBus:             eventBus,
-		db:                   db,
-		webSearchService:     webSearchService,
+		cfg:                   cfg,
+		modelService:          modelService,
+		knowledgeBaseService:  knowledgeBaseService,
+		knowledgeService:      knowledgeService,
+		chunkService:          chunkService,
+		mcpServiceService:     mcpServiceService,
+		mcpManager:            mcpManager,
+		eventBus:              eventBus,
+		db:                    db,
+		webSearchService:      webSearchService,
+		duckdb:                duckdb,
+		webSearchStateService: webSearchStateService,
 	}
 }
 
@@ -70,7 +77,6 @@ func (s *agentService) CreateAgentEngine(
 	eventBus *event.EventBus,
 	contextManager interfaces.ContextManager,
 	sessionID string,
-	sessionService interfaces.SessionService,
 ) (interfaces.AgentEngine, error) {
 	logger.Infof(ctx, "Creating agent engine with custom EventBus")
 
@@ -87,10 +93,10 @@ func (s *agentService) CreateAgentEngine(
 	// The registerTools function will filter out knowledge-related tools in this case
 
 	// Create tool registry
-	toolRegistry := tools.NewToolRegistry(s.knowledgeService, s.chunkService, s.db)
+	toolRegistry := tools.NewToolRegistry()
 
 	// Register tools
-	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID, sessionService); err != nil {
+	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 
@@ -202,7 +208,6 @@ func (s *agentService) registerTools(
 	rerankModel rerank.Reranker,
 	chatModel chat.Chat,
 	sessionID string,
-	sessionService interfaces.SessionService,
 ) error {
 	// Use config's allowed tools if specified, otherwise use defaults
 	var allowedTools []string
@@ -220,17 +225,19 @@ func (s *agentService) registerTools(
 	if !hasKnowledge {
 		filteredTools := make([]string, 0)
 		kbTools := map[string]bool{
-			"knowledge_search":      true,
-			"grep_chunks":           true,
-			"list_knowledge_chunks": true,
-			"query_knowledge_graph": true,
-			"get_document_info":     true,
-			"database_query":        true,
+			tools.ToolKnowledgeSearch:     true,
+			tools.ToolGrepChunks:          true,
+			tools.ToolListKnowledgeChunks: true,
+			tools.ToolQueryKnowledgeGraph: true,
+			tools.ToolGetDocumentInfo:     true,
+			tools.ToolDatabaseQuery:       true,
+			tools.ToolDataAnalysis:        true,
+			tools.ToolDataSchema:          true,
 		}
 
 		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
 		if !config.WebSearchEnabled {
-			kbTools["todo_write"] = true
+			kbTools[tools.ToolTodoWrite] = true
 		}
 
 		for _, toolName := range allowedTools {
@@ -244,75 +251,73 @@ func (s *agentService) registerTools(
 
 	// If web search is enabled, add web_search to allowedTools
 	if config.WebSearchEnabled {
-		allowedTools = append(allowedTools, "web_search")
-		allowedTools = append(allowedTools, "web_fetch")
+		allowedTools = append(allowedTools, tools.ToolWebSearch)
+		allowedTools = append(allowedTools, tools.ToolWebFetch)
 	}
-
-	// Get tenant ID from context
-	tenantID := uint64(0)
-	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-		tenantID = tid
-	}
-	logger.Infof(
-		ctx,
-		"Registering tools: %v, tenant ID: %d, webSearchEnabled: %v",
-		allowedTools,
-		tenantID,
-		config.WebSearchEnabled,
-	)
+	logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 
 	// Register each allowed tool
 	for _, toolName := range allowedTools {
+		var toolToRegister types.Tool
+
 		switch toolName {
-		case "thinking":
-			registry.RegisterTool(tools.NewSequentialThinkingTool())
-		case "todo_write":
-			registry.RegisterTool(tools.NewTodoWriteTool())
-		case "knowledge_search":
-			registry.RegisterTool(
-				tools.NewKnowledgeSearchTool(
-					s.knowledgeBaseService,
-					s.knowledgeService,
-					s.chunkService,
-					tenantID,
-					config.SearchTargets,
-					rerankModel,
-					chatModel,
-					s.cfg,
-				))
-		case "grep_chunks":
-			registry.RegisterTool(tools.NewGrepChunksTool(s.db, tenantID, config.KnowledgeBases, config.KnowledgeIDs))
-			logger.Infof(ctx, "Registered grep_chunks tool for tenant: %d, KBs: %d, KnowledgeIDs: %d", tenantID, len(config.KnowledgeBases), len(config.KnowledgeIDs))
-		case "list_knowledge_chunks":
-			registry.RegisterTool(tools.NewListKnowledgeChunksTool(tenantID, s.knowledgeService, s.chunkService))
-		case "query_knowledge_graph":
-			registry.RegisterTool(tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService))
-		case "get_document_info":
-			registry.RegisterTool(tools.NewGetDocumentInfoTool(tenantID, s.knowledgeService, s.chunkService))
-		case "database_query":
-			registry.RegisterTool(tools.NewDatabaseQueryTool(s.db, tenantID))
-		case "web_search":
-			registry.RegisterTool(tools.NewWebSearchTool(
+		case tools.ToolThinking:
+			toolToRegister = tools.NewSequentialThinkingTool()
+		case tools.ToolTodoWrite:
+			toolToRegister = tools.NewTodoWriteTool()
+		case tools.ToolKnowledgeSearch:
+			toolToRegister = tools.NewKnowledgeSearchTool(
+				s.knowledgeBaseService,
+				s.knowledgeService,
+				s.chunkService,
+				config.SearchTargets,
+				rerankModel,
+				chatModel,
+				s.cfg,
+			)
+		case tools.ToolGrepChunks:
+			toolToRegister = tools.NewGrepChunksTool(s.db, config.KnowledgeBases, config.KnowledgeIDs)
+			logger.Infof(ctx, "Registered grep_chunks tool, KBs: %d, KnowledgeIDs: %d", len(config.KnowledgeBases), len(config.KnowledgeIDs))
+		case tools.ToolListKnowledgeChunks:
+			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService)
+		case tools.ToolQueryKnowledgeGraph:
+			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService)
+		case tools.ToolGetDocumentInfo:
+			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService)
+		case tools.ToolDatabaseQuery:
+			toolToRegister = tools.NewDatabaseQueryTool(s.db)
+		case tools.ToolWebSearch:
+			toolToRegister = tools.NewWebSearchTool(
 				s.webSearchService,
 				s.knowledgeBaseService,
 				s.knowledgeService,
-				sessionService,
-				sessionID,
-				config.WebSearchMaxResults,
-			))
-			logger.Infof(
-				ctx,
-				"Registered web_search tool for session: %s, maxResults: %d",
+				s.webSearchStateService,
 				sessionID,
 				config.WebSearchMaxResults,
 			)
+			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d", sessionID, config.WebSearchMaxResults)
 
-		case "web_fetch":
-			registry.RegisterTool(tools.NewWebFetchTool(chatModel))
+		case tools.ToolWebFetch:
+			toolToRegister = tools.NewWebFetchTool(chatModel)
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
+
+		case tools.ToolDataAnalysis:
+			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeService, s.duckdb, sessionID)
+			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
+
+		case tools.ToolDataSchema:
+			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository())
+			logger.Infof(ctx, "Registered data_schema tool")
 
 		default:
 			logger.Warnf(ctx, "Unknown tool: %s", toolName)
+		}
+
+		if toolToRegister != nil {
+			if toolToRegister.Name() != toolName {
+				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
+			}
+			registry.RegisterTool(toolToRegister)
 		}
 	}
 

@@ -2,7 +2,9 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -28,12 +30,17 @@ func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*Ol
 
 // convertMessages 转换消息格式为Ollama API格式
 func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
-	ollamaMessages := make([]ollamaapi.Message, len(messages))
-	for i, msg := range messages {
-		ollamaMessages[i] = ollamaapi.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
+	ollamaMessages := make([]ollamaapi.Message, 0, len(messages))
+	for _, msg := range messages {
+		msgOllama := ollamaapi.Message{
+			Role:      msg.Role,
+			Content:   msg.Content,
+			ToolCalls: c.toolCallFrom(msg.ToolCalls),
 		}
+		if msg.Role == "tool" {
+			msgOllama.ToolName = msg.Name
+		}
+		ollamaMessages = append(ollamaMessages, msgOllama)
 	}
 	return ollamaMessages
 }
@@ -67,6 +74,12 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 				Value: *opts.Thinking,
 			}
 		}
+		if len(opts.Format) > 0 {
+			chatReq.Format = opts.Format
+		}
+		if len(opts.Tools) > 0 {
+			chatReq.Tools = c.toolFrom(opts.Tools)
+		}
 	}
 
 	return chatReq
@@ -86,11 +99,13 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 	logger.GetLogger(ctx).Infof("发送聊天请求到模型 %s", c.modelName)
 
 	var responseContent string
+	var toolCalls []types.LLMToolCall
 	var promptTokens, completionTokens int
 
 	// 使用 Ollama 客户端发送请求
 	err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 		responseContent = resp.Message.Content
+		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
 
 		// 获取token计数
 		if resp.EvalCount > 0 {
@@ -106,7 +121,8 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 
 	// 构建响应
 	return &types.ChatResponse{
-		Content: responseContent,
+		Content:   responseContent,
+		ToolCalls: toolCalls,
 		Usage: struct {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
@@ -152,6 +168,14 @@ func (c *OllamaChat) ChatStream(
 				}
 			}
 
+			if len(resp.Message.ToolCalls) > 0 {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeToolCall,
+					ToolCalls:    c.toolCallTo(resp.Message.ToolCalls),
+					Done:         false,
+				}
+			}
+
 			if resp.Done {
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
@@ -188,4 +212,98 @@ func (c *OllamaChat) GetModelName() string {
 // GetModelID 获取模型ID
 func (c *OllamaChat) GetModelID() string {
 	return c.modelID
+}
+
+// toolFrom 将本模块的 Tool 转换为 Ollama 的 Tool
+func (c *OllamaChat) toolFrom(tools []Tool) ollamaapi.Tools {
+	if len(tools) == 0 {
+		return nil
+	}
+	ollamaTools := make(ollamaapi.Tools, 0, len(tools))
+	for _, tool := range tools {
+		function := ollamaapi.ToolFunction{
+			Name:        tool.Function.Name,
+			Description: tool.Function.Description,
+		}
+		if len(tool.Function.Parameters) > 0 {
+			_ = json.Unmarshal(tool.Function.Parameters, &function.Parameters)
+		}
+
+		ollamaTools = append(ollamaTools, ollamaapi.Tool{
+			Type:     tool.Type,
+			Function: function,
+		})
+	}
+	return ollamaTools
+}
+
+// toolTo 将 Ollama 的 Tool 转换为本模块的 Tool
+func (c *OllamaChat) toolTo(ollamaTools ollamaapi.Tools) []Tool {
+	if len(ollamaTools) == 0 {
+		return nil
+	}
+	tools := make([]Tool, 0, len(ollamaTools))
+	for _, tool := range ollamaTools {
+		paramsBytes, _ := json.Marshal(tool.Function.Parameters)
+		tools = append(tools, Tool{
+			Type: tool.Type,
+			Function: FunctionDef{
+				Name:        tool.Function.Name,
+				Description: tool.Function.Description,
+				Parameters:  paramsBytes,
+			},
+		})
+	}
+	return tools
+}
+
+// toolCallFrom 将本模块的 ToolCall 转换为 Ollama 的 ToolCall
+func (c *OllamaChat) toolCallFrom(toolCalls []ToolCall) []ollamaapi.ToolCall {
+	if len(toolCalls) == 0 {
+		return nil
+	}
+	ollamaToolCalls := make([]ollamaapi.ToolCall, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		var args map[string]interface{}
+		if tc.Function.Arguments != "" {
+			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+		}
+		ollamaToolCalls = append(ollamaToolCalls, ollamaapi.ToolCall{
+			Function: ollamaapi.ToolCallFunction{
+				Index:     tools2i(tc.ID),
+				Name:      tc.Function.Name,
+				Arguments: args,
+			},
+		})
+	}
+	return ollamaToolCalls
+}
+
+// toolCallTo 将 Ollama 的 ToolCall 转换为本模块的 ToolCall
+func (c *OllamaChat) toolCallTo(ollamaToolCalls []ollamaapi.ToolCall) []types.LLMToolCall {
+	if len(ollamaToolCalls) == 0 {
+		return nil
+	}
+	toolCalls := make([]types.LLMToolCall, 0, len(ollamaToolCalls))
+	for _, tc := range ollamaToolCalls {
+		argsBytes, _ := json.Marshal(tc.Function.Arguments)
+		toolCalls = append(toolCalls, types.LLMToolCall{
+			ID:   tooli2s(tc.Function.Index),
+			Type: "function",
+			Function: types.FunctionCall{
+				Name:      tc.Function.Name,
+				Arguments: string(argsBytes),
+			},
+		})
+	}
+	return toolCalls
+}
+
+func tooli2s(i int) string {
+	return strconv.Itoa(i)
+}
+
+func tools2i(s string) int {
+	i, _ := strconv.Atoi(s)
+	return i
 }

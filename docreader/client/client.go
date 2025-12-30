@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Tencent/WeKnora/docreader/proto"
@@ -12,9 +13,16 @@ import (
 	"google.golang.org/grpc/resolver"
 )
 
-const (
-	maxMessageSize = 50 * 1024 * 1024 // 50MB
-)
+// getMaxMessageSize returns the maximum gRPC message size in bytes.
+// Default is 50MB, can be configured via MAX_FILE_SIZE_MB environment variable.
+func getMaxMessageSize() int {
+	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
+		if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
+			return size * 1024 * 1024
+		}
+	}
+	return 50 * 1024 * 1024 // default 50MB
+}
 
 // Logger is the default logger used by the client
 var Logger = log.New(os.Stdout, "[DocReader] ", log.LstdFlags|log.Lmicroseconds)
@@ -40,13 +48,14 @@ type Client struct {
 func NewClient(addr string) (*Client, error) {
 	Logger.Printf("INFO: Creating new DocReader client connecting to %s", addr)
 
-	// 设置消息大小限制
+	// 设置消息大小限制 (configurable via GRPC_MAX_MESSAGE_SIZE_MB)
+	maxMsgSize := getMaxMessageSize()
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(maxMessageSize),
-			grpc.MaxCallSendMsgSize(maxMessageSize),
+			grpc.MaxCallRecvMsgSize(maxMsgSize),
+			grpc.MaxCallSendMsgSize(maxMsgSize),
 		),
 	}
 	resolver.SetDefaultScheme("dns")

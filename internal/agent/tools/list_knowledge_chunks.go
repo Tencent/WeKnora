@@ -10,21 +10,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// ListKnowledgeChunksTool retrieves chunk snapshots for a specific knowledge document.
-type ListKnowledgeChunksTool struct {
-	BaseTool
-	tenantID         uint64
-	chunkService     interfaces.ChunkService
-	knowledgeService interfaces.KnowledgeService
-}
-
-// NewListKnowledgeChunksTool creates a new tool instance.
-func NewListKnowledgeChunksTool(
-	tenantID uint64,
-	knowledgeService interfaces.KnowledgeService,
-	chunkService interfaces.ChunkService,
-) *ListKnowledgeChunksTool {
-	description := `Retrieve full chunk content for a document by knowledge_id.
+var listKnowledgeChunksTool = BaseTool{
+	name: ToolListKnowledgeChunks,
+	description: `Retrieve full chunk content for a document by knowledge_id.
 
 ## Use After grep_chunks or knowledge_search:
 1. grep_chunks(["keyword", "变体"]) → get knowledge_id  
@@ -41,46 +29,76 @@ func NewListKnowledgeChunksTool(
 - offset (optional): Start position (default 0)
 
 ## Output:
-Full chunk content with chunk_id, chunk_index, and content text.`
+Full chunk content with chunk_id, chunk_index, and content text.`,
+	schema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "knowledge_id": {
+      "type": "string",
+      "description": "Document ID to retrieve chunks from"
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Chunks per page (default 20, max 100)",
+      "default": 20,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "offset": {
+      "type": "integer",
+      "description": "Start position (default 0)",
+      "default": 0,
+      "minimum": 0
+    }
+  },
+  "required": ["knowledge_id", "limit", "offset"]
+}`),
+}
 
+// ListKnowledgeChunksInput defines the input parameters for list knowledge chunks tool
+type ListKnowledgeChunksInput struct {
+	KnowledgeID string `json:"knowledge_id"`
+	Limit       int    `json:"limit"`
+	Offset      int    `json:"offset"`
+}
+
+// ListKnowledgeChunksTool retrieves chunk snapshots for a specific knowledge document.
+type ListKnowledgeChunksTool struct {
+	BaseTool
+	chunkService     interfaces.ChunkService
+	knowledgeService interfaces.KnowledgeService
+}
+
+// NewListKnowledgeChunksTool creates a new tool instance.
+func NewListKnowledgeChunksTool(
+	knowledgeService interfaces.KnowledgeService,
+	chunkService interfaces.ChunkService,
+) *ListKnowledgeChunksTool {
 	return &ListKnowledgeChunksTool{
-		BaseTool:         NewBaseTool("list_knowledge_chunks", description),
-		tenantID:         tenantID,
+		BaseTool:         listKnowledgeChunksTool,
 		chunkService:     chunkService,
 		knowledgeService: knowledgeService,
 	}
 }
 
-// Parameters returns the JSON schema describing accepted arguments.
-func (t *ListKnowledgeChunksTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"knowledge_id": map[string]interface{}{
-				"type":        "string",
-				"description": "Document ID to retrieve chunks from",
-			},
-			"limit": map[string]interface{}{
-				"type":        "integer",
-				"description": "Chunks per page (default 20, max 100)",
-				"default":     20,
-				"minimum":     1,
-				"maximum":     100,
-			},
-			"offset": map[string]interface{}{
-				"type":        "integer",
-				"description": "Start position (default 0)",
-				"default":     0,
-				"minimum":     0,
-			},
-		},
-		"required": []string{"knowledge_id", "limit", "offset"},
-	}
-}
-
 // Execute performs the chunk fetch against the chunk service.
-func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args map[string]interface{}) (*types.ToolResult, error) {
-	knowledgeID, ok := args["knowledge_id"].(string)
+func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
+	tenantID := uint64(0)
+	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+		tenantID = tid
+	}
+
+	// Parse args from json.RawMessage
+	var input ListKnowledgeChunksInput
+	if err := json.Unmarshal(args, &input); err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Failed to parse args: %v", err),
+		}, err
+	}
+
+	knowledgeID := input.KnowledgeID
+	ok := knowledgeID != ""
 	if !ok || strings.TrimSpace(knowledgeID) == "" {
 		return &types.ToolResult{
 			Success: false,
@@ -90,22 +108,12 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args map[string]i
 	knowledgeID = strings.TrimSpace(knowledgeID)
 
 	chunkLimit := 20
-	offset := 0
-	if rawLimit, exists := args["limit"]; exists {
-		switch v := rawLimit.(type) {
-		case float64:
-			chunkLimit = int(v)
-		case int:
-			chunkLimit = v
-		}
+	if input.Limit > 0 {
+		chunkLimit = input.Limit
 	}
-	if rawOffset, exists := args["offset"]; exists {
-		switch v := rawOffset.(type) {
-		case float64:
-			offset = int(v)
-		case int:
-			offset = v
-		}
+	offset := 0
+	if input.Offset > 0 {
+		offset = input.Offset
 	}
 	if offset < 0 {
 		offset = 0
@@ -117,7 +125,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args map[string]i
 	}
 
 	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-		t.tenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
+		tenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,

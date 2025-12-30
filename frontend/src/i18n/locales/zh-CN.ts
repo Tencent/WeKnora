@@ -1621,7 +1621,13 @@ export default {
         minio: {
           bucketLabel: "Bucket 名称",
           bucketDescription: "MinIO 存储桶名称（必填）",
-          bucketPlaceholder: "请输入 Bucket 名称（必填）",
+          bucketPlaceholder: "选择或输入 Bucket 名称",
+          bucketHint: "选择已存在的公有读权限 Bucket，或输入新名称将自动创建",
+          policyLabels: {
+            public: "公有读",
+            private: "私有",
+            custom: "自定义"
+          },
           useSslLabel: "使用 SSL",
           useSslDescription: "是否使用 SSL 连接",
           pathPrefixLabel: "路径前缀",

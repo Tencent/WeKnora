@@ -379,6 +379,7 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 	systemRoutes := r.Group("/system")
 	{
 		systemRoutes.GET("/info", handler.GetSystemInfo)
+		systemRoutes.GET("/minio/buckets", handler.ListMinioBuckets)
 	}
 }
 
