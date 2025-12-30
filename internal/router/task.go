@@ -3,6 +3,7 @@ package router
 import (
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -23,12 +24,18 @@ type AsynqTaskParams struct {
 }
 
 func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
+	db := 0
+	if dbStr := os.Getenv("REDIS_DB"); dbStr != "" {
+		if parsed, err := strconv.Atoi(dbStr); err == nil {
+			db = parsed
+		}
+	}
 	opt := &asynq.RedisClientOpt{
 		Addr:         os.Getenv("REDIS_ADDR"),
 		Password:     os.Getenv("REDIS_PASSWORD"),
 		ReadTimeout:  100 * time.Millisecond,
 		WriteTimeout: 200 * time.Millisecond,
-		DB:           0,
+		DB:           db,
 	}
 	return opt
 }
