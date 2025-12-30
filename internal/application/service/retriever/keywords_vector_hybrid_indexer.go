@@ -181,3 +181,11 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkEnabledStatu
 ) error {
 	return v.indexRepository.BatchUpdateChunkEnabledStatus(ctx, chunkStatusMap)
 }
+
+// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkTagID(
+	ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	return v.indexRepository.BatchUpdateChunkTagID(ctx, chunkTagMap)
+}

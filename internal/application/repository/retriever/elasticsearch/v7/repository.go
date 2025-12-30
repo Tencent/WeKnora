@@ -1235,3 +1235,64 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 	log.Infof("[ElasticsearchV7] Successfully batch updated chunk enabled status")
 	return nil
 }
+
+// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+func (e *elasticsearchRepository) BatchUpdateChunkTagID(
+	ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	log := logger.GetLogger(ctx)
+	if len(chunkTagMap) == 0 {
+		log.Warnf("[ElasticsearchV7] Chunk tag map is empty, skipping update")
+		return nil
+	}
+
+	log.Infof("[ElasticsearchV7] Batch updating chunk tag ID, count: %d", len(chunkTagMap))
+
+	// Group chunks by tag ID for batch updates
+	tagGroups := make(map[string][]string)
+	for chunkID, tagID := range chunkTagMap {
+		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
+	}
+
+	// Batch update chunks for each tag ID using update_by_query
+	for tagID, chunkIDs := range tagGroups {
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"terms": map[string]interface{}{
+					"chunk_id.keyword": chunkIDs,
+				},
+			},
+			"script": map[string]interface{}{
+				"source": "ctx._source.tag_id = params.tag_id",
+				"lang":   "painless",
+				"params": map[string]interface{}{
+					"tag_id": tagID,
+				},
+			},
+		}
+		queryJSON, _ := json.Marshal(query)
+		res, err := esapi.UpdateByQueryRequest{
+			Index: []string{e.index},
+			Body:  strings.NewReader(string(queryJSON)),
+		}.Do(ctx, e.client)
+		if err != nil {
+			log.Errorf("[ElasticsearchV7] Failed to update chunks with tag_id %s: %v", tagID, err)
+			return err
+		}
+		defer res.Body.Close()
+		if res.IsError() {
+			var e map[string]interface{}
+			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
+				log.Errorf("[ElasticsearchV7] Error parsing the response body: %v", err)
+			} else {
+				log.Errorf("[ElasticsearchV7] Error updating chunks with tag_id: %v", e["error"])
+			}
+			return fmt.Errorf("elasticsearch update_by_query failed with status: %d", res.StatusCode)
+		}
+		log.Infof("[ElasticsearchV7] Updated %d chunks to tag_id=%s", len(chunkIDs), tagID)
+	}
+
+	log.Infof("[ElasticsearchV7] Successfully batch updated chunk tag ID")
+	return nil
+}

@@ -585,3 +585,35 @@ func (g *pgRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkS
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk enabled status")
 	return nil
 }
+
+// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error {
+	if len(chunkTagMap) == 0 {
+		logger.GetLogger(ctx).Warnf("[Postgres] Chunk tag map is empty, skipping update")
+		return nil
+	}
+
+	logger.GetLogger(ctx).Infof("[Postgres] Batch updating chunk tag ID, count: %d", len(chunkTagMap))
+
+	// Group chunks by tag ID for batch updates
+	tagGroups := make(map[string][]string)
+	for chunkID, tagID := range chunkTagMap {
+		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
+	}
+
+	// Batch update chunks for each tag ID
+	for tagID, chunkIDs := range tagGroups {
+		result := g.db.WithContext(ctx).Model(&pgVector{}).
+			Where("chunk_id IN ?", chunkIDs).
+			Update("tag_id", tagID)
+		if result.Error != nil {
+			logger.GetLogger(ctx).Errorf("[Postgres] Failed to update chunks with tag_id %s: %v", tagID, result.Error)
+			return result.Error
+		}
+		logger.GetLogger(ctx).
+			Infof("[Postgres] Updated %d chunks to tag_id=%s, rows affected: %d", len(chunkIDs), tagID, result.RowsAffected)
+	}
+
+	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")
+	return nil
+}

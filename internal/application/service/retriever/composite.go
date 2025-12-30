@@ -115,6 +115,19 @@ func (c *CompositeRetrieveEngine) BatchUpdateChunkEnabledStatus(
 	})
 }
 
+// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+func (c *CompositeRetrieveEngine) BatchUpdateChunkTagID(
+	ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	return c.concurrentExecWithError(ctx, func(ctx context.Context, engineInfo *engineInfo) error {
+		if err := engineInfo.retrieveEngine.BatchUpdateChunkTagID(ctx, chunkTagMap); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 // concurrentRetrieve is a helper function for concurrent processing of retrieval parameters
 // and collecting results
 func concurrentRetrieve(

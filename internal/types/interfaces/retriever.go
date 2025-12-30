@@ -56,6 +56,10 @@ type RetrieveEngineRepository interface {
 	// chunkStatusMap: map of chunk ID to enabled status (true = enabled, false = disabled)
 	BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error
 
+	// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+	// chunkTagMap: map of chunk ID to tag ID (empty string means no tag)
+	BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error
+
 	// RetrieveEngine retrieves the engine
 	RetrieveEngine
 }
@@ -118,6 +122,10 @@ type RetrieveEngineService interface {
 	// BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
 	// chunkStatusMap: map of chunk ID to enabled status (true = enabled, false = disabled)
 	BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error
+
+	// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+	// chunkTagMap: map of chunk ID to tag ID (empty string means no tag)
+	BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error
 
 	// RetrieveEngine retrieves the engine
 	RetrieveEngine

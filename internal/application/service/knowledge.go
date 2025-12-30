@@ -3558,6 +3558,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 	enabledUpdates := make(map[string]bool)
+	tagUpdates := make(map[string]string)
 
 	// Handle ByTag updates first
 	if len(req.ByTag) > 0 {
@@ -3583,9 +3584,16 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 			}
 
 			// Collect affected IDs for retriever sync
-			if update.IsEnabled != nil && len(affectedIDs) > 0 {
-				for _, id := range affectedIDs {
-					enabledUpdates[id] = *update.IsEnabled
+			if len(affectedIDs) > 0 {
+				if update.IsEnabled != nil {
+					for _, id := range affectedIDs {
+						enabledUpdates[id] = *update.IsEnabled
+					}
+				}
+				if update.TagID != nil {
+					for _, id := range affectedIDs {
+						tagUpdates[id] = *update.TagID
+					}
 				}
 			}
 		}
@@ -3644,6 +3652,7 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 				}
 				if chunk.TagID != newTagID {
 					chunk.TagID = newTagID
+					tagUpdates[chunk.ID] = newTagID
 					needUpdate = true
 				}
 			}
@@ -3669,8 +3678,8 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 		}
 	}
 
-	// Sync enabled status to retriever engines
-	if len(enabledUpdates) > 0 {
+	// Sync to retriever engines
+	if len(enabledUpdates) > 0 || len(tagUpdates) > 0 {
 		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
@@ -3679,8 +3688,15 @@ func (s *knowledgeService) UpdateFAQEntryFieldsBatch(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if err := retrieveEngine.BatchUpdateChunkEnabledStatus(ctx, enabledUpdates); err != nil {
-			return err
+		if len(enabledUpdates) > 0 {
+			if err := retrieveEngine.BatchUpdateChunkEnabledStatus(ctx, enabledUpdates); err != nil {
+				return err
+			}
+		}
+		if len(tagUpdates) > 0 {
+			if err := retrieveEngine.BatchUpdateChunkTagID(ctx, tagUpdates); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -3810,9 +3826,27 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 		resolvedTagID = tag.ID
 	}
 
+	// Check if tag actually changed
+	if chunk.TagID == resolvedTagID {
+		return nil
+	}
+
 	chunk.TagID = resolvedTagID
 	chunk.UpdatedAt = time.Now()
-	return s.chunkRepo.UpdateChunk(ctx, chunk)
+	if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
+		return err
+	}
+
+	// Sync tag update to retriever engines
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+		s.retrieveEngine,
+		tenantInfo.GetEffectiveEngines(),
+	)
+	if err != nil {
+		return err
+	}
+	return retrieveEngine.BatchUpdateChunkTagID(ctx, map[string]string{chunk.ID: resolvedTagID})
 }
 
 // UpdateFAQEntryTagBatch updates tags for FAQ entries in batch.
@@ -3889,7 +3923,26 @@ func (s *knowledgeService) UpdateFAQEntryTagBatch(ctx context.Context, kbID stri
 	}
 
 	if len(chunksToUpdate) > 0 {
-		return s.chunkRepo.UpdateChunks(ctx, chunksToUpdate)
+		if err := s.chunkRepo.UpdateChunks(ctx, chunksToUpdate); err != nil {
+			return err
+		}
+
+		// Sync tag updates to retriever engines
+		tagUpdates := make(map[string]string)
+		for _, chunk := range chunksToUpdate {
+			tagUpdates[chunk.ID] = chunk.TagID
+		}
+		tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
+			s.retrieveEngine,
+			tenantInfo.GetEffectiveEngines(),
+		)
+		if err != nil {
+			return err
+		}
+		if err := retrieveEngine.BatchUpdateChunkTagID(ctx, tagUpdates); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -690,3 +690,55 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 	log.Infof("[Elasticsearch] Successfully batch updated chunk enabled status")
 	return nil
 }
+
+// BatchUpdateChunkTagID updates the tag ID of chunks in batch
+func (e *elasticsearchRepository) BatchUpdateChunkTagID(
+	ctx context.Context,
+	chunkTagMap map[string]string,
+) error {
+	log := logger.GetLogger(ctx)
+	if len(chunkTagMap) == 0 {
+		log.Warnf("[Elasticsearch] Chunk tag map is empty, skipping update")
+		return nil
+	}
+
+	log.Infof("[Elasticsearch] Batch updating chunk tag ID, count: %d", len(chunkTagMap))
+
+	// Group chunks by tag ID for batch updates
+	tagGroups := make(map[string][]string)
+	for chunkID, tagID := range chunkTagMap {
+		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
+	}
+
+	// Batch update chunks for each tag ID using update_by_query
+	for tagID, chunkIDs := range tagGroups {
+		query := types.NewQuery()
+		query.Bool = &types.BoolQuery{
+			Must: []types.Query{
+				{Terms: &types.TermsQuery{
+					TermsQuery: map[string]types.TermsQueryField{
+						"chunk_id.keyword": chunkIDs,
+					},
+				}},
+			},
+		}
+		source := "ctx._source.tag_id = params.tag_id"
+		lang := scriptlanguage.Painless
+		script := types.Script{
+			Source: &source,
+			Lang:   &lang,
+			Params: map[string]json.RawMessage{
+				"tag_id": json.RawMessage(`"` + tagID + `"`),
+			},
+		}
+		_, err := e.client.UpdateByQuery(e.index).Query(query).Script(&script).Do(ctx)
+		if err != nil {
+			log.Errorf("[Elasticsearch] Failed to update chunks with tag_id %s: %v", tagID, err)
+			return err
+		}
+		log.Infof("[Elasticsearch] Updated %d chunks to tag_id=%s", len(chunkIDs), tagID)
+	}
+
+	log.Infof("[Elasticsearch] Successfully batch updated chunk tag ID")
+	return nil
+}
