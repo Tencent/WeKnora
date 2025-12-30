@@ -96,3 +96,17 @@ export function updateConversationConfig(config: ConversationConfig): Promise<{ 
 export function getPromptTemplates(): Promise<{ data: PromptTemplatesConfig }> {
   return get('/api/v1/tenants/kv/prompt-templates')
 }
+
+export interface MinioBucketInfo {
+  name: string
+  policy: 'public' | 'private' | 'custom'
+  created_at?: string
+}
+
+export interface ListMinioBucketsResponse {
+  buckets: MinioBucketInfo[]
+}
+
+export function listMinioBuckets(): Promise<{ data: ListMinioBucketsResponse }> {
+  return get('/api/v1/system/minio/buckets')
+}

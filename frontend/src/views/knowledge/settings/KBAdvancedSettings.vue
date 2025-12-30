@@ -110,14 +110,51 @@
             <div class="setting-info">
               <label>{{ $t('knowledgeEditor.advanced.multimodal.minio.bucketLabel') }} <span class="required">*</span></label>
               <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.minio.bucketDescription') }}</p>
+              <t-alert
+                theme="info"
+                :message="$t('knowledgeEditor.advanced.multimodal.minio.bucketHint')"
+                style="margin-top: 8px;"
+              />
             </div>
-            <div class="setting-control">
-              <t-input
+            <div class="setting-control bucket-control">
+              <t-select
                 v-model="localMultimodal.minio.bucketName"
                 :placeholder="$t('knowledgeEditor.advanced.multimodal.minio.bucketPlaceholder')"
+                :loading="loadingBuckets"
+                filterable
+                creatable
                 @change="handleConfigChange"
+                @focus="loadMinioBuckets"
                 style="width: 280px;"
-              />
+              >
+                <t-option
+                  v-for="bucket in minioBuckets"
+                  :key="bucket.name"
+                  :value="bucket.name"
+                  :label="bucket.name"
+                >
+                  <div class="bucket-option">
+                    <span class="bucket-name">{{ bucket.name }}</span>
+                    <t-tag
+                      :theme="bucket.policy === 'public' ? 'success' : bucket.policy === 'private' ? 'default' : 'warning'"
+                      size="small"
+                      variant="light"
+                    >
+                      {{ $t(`knowledgeEditor.advanced.multimodal.minio.policyLabels.${bucket.policy}`) }}
+                    </t-tag>
+                  </div>
+                </t-option>
+              </t-select>
+              <t-button
+                theme="default"
+                variant="outline"
+                size="small"
+                :loading="loadingBuckets"
+                @click="loadMinioBuckets"
+                style="margin-left: 8px;"
+              >
+                <template #icon><refresh-icon /></template>
+              </t-button>
             </div>
           </div>
 
@@ -252,9 +289,10 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
+import { RefreshIcon } from 'tdesign-icons-vue-next'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useUIStore } from '@/stores/ui'
-import { getSystemInfo } from '@/api/system'
+import { getSystemInfo, listMinioBuckets, type MinioBucketInfo } from '@/api/system'
 
 const uiStore = useUIStore()
 
@@ -302,6 +340,25 @@ const localQuestionGeneration = ref<QuestionGenerationConfig>(
 
 const vllmSelectorRef = ref()
 const isMinioEnabled = ref(false)
+const minioBuckets = ref<MinioBucketInfo[]>([])
+const loadingBuckets = ref(false)
+
+// Load MinIO buckets
+const loadMinioBuckets = async () => {
+  if (!isMinioEnabled.value || loadingBuckets.value) return
+  
+  loadingBuckets.value = true
+  try {
+    const response = await listMinioBuckets()
+    if (response.data?.buckets) {
+      minioBuckets.value = response.data.buckets
+    }
+  } catch (error) {
+    console.error('Failed to load MinIO buckets:', error)
+  } finally {
+    loadingBuckets.value = false
+  }
+}
 
 // Check system status on mount
 onMounted(async () => {
@@ -315,6 +372,11 @@ onMounted(async () => {
     if (!isMinioEnabled.value && localMultimodal.value.storageType === 'minio') {
       localMultimodal.value.storageType = 'cos'
       emit('update:multimodal', localMultimodal.value)
+    }
+    
+    // Load MinIO buckets if enabled
+    if (isMinioEnabled.value) {
+      loadMinioBuckets()
     }
   } catch (error) {
     console.error('Failed to fetch system info:', error)
@@ -511,6 +573,25 @@ const handleConfigChange = () => {
 
 .storage-config {
   margin-top: 8px;
+}
+
+.bucket-control {
+  display: flex;
+  align-items: center;
+}
+
+.bucket-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  
+  .bucket-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 .config-item {
