@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 
@@ -231,20 +232,14 @@ func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 	// Get policy for each bucket
 	bucketInfos := make([]MinioBucketInfo, 0, len(buckets))
 	for _, bucket := range buckets {
-		policy := "private" // default
+		policy := "private" // default: no policy means private
 
 		// Try to get bucket policy
 		policyStr, err := minioClient.GetBucketPolicy(context.Background(), bucket.Name)
 		if err == nil && policyStr != "" {
-			// Check if policy contains public read access
-			if strings.Contains(policyStr, `"Effect":"Allow"`) &&
-				strings.Contains(policyStr, `"Principal":"*"`) &&
-				strings.Contains(policyStr, `"s3:GetObject"`) {
-				policy = "public"
-			} else {
-				policy = "custom"
-			}
+			policy = parseBucketPolicy(policyStr)
 		}
+		// If err != nil or policyStr is empty, bucket has no policy (private)
 
 		bucketInfos = append(bucketInfos, MinioBucketInfo{
 			Name:      bucket.Name,
@@ -260,4 +255,98 @@ func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 		"success": true,
 		"data":    ListMinioBucketsResponse{Buckets: bucketInfos},
 	})
+}
+
+// BucketPolicy represents the S3 bucket policy structure
+type BucketPolicy struct {
+	Version   string            `json:"Version"`
+	Statement []PolicyStatement `json:"Statement"`
+}
+
+// PolicyStatement represents a single statement in the bucket policy
+type PolicyStatement struct {
+	Effect    string      `json:"Effect"`
+	Principal interface{} `json:"Principal"` // Can be "*" or {"AWS": [...]}
+	Action    interface{} `json:"Action"`    // Can be string or []string
+	Resource  interface{} `json:"Resource"`  // Can be string or []string
+}
+
+// parseBucketPolicy parses the policy JSON and determines the access type
+func parseBucketPolicy(policyStr string) string {
+	var policy BucketPolicy
+	if err := json.Unmarshal([]byte(policyStr), &policy); err != nil {
+		// If we can't parse the policy, treat it as custom
+		return "custom"
+	}
+
+	// Check if any statement grants public read access
+	hasPublicRead := false
+	for _, stmt := range policy.Statement {
+		if stmt.Effect != "Allow" {
+			continue
+		}
+
+		// Check if Principal is "*" (public)
+		if !isPrincipalPublic(stmt.Principal) {
+			continue
+		}
+
+		// Check if Action includes s3:GetObject
+		if !hasGetObjectAction(stmt.Action) {
+			continue
+		}
+
+		hasPublicRead = true
+		break
+	}
+
+	if hasPublicRead {
+		return "public"
+	}
+
+	// Has policy but not public read
+	return "custom"
+}
+
+// isPrincipalPublic checks if the principal allows public access
+func isPrincipalPublic(principal interface{}) bool {
+	switch p := principal.(type) {
+	case string:
+		return p == "*"
+	case map[string]interface{}:
+		// Check for {"AWS": "*"} or {"AWS": ["*"]}
+		if aws, ok := p["AWS"]; ok {
+			switch a := aws.(type) {
+			case string:
+				return a == "*"
+			case []interface{}:
+				for _, v := range a {
+					if s, ok := v.(string); ok && s == "*" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// hasGetObjectAction checks if the action includes s3:GetObject
+func hasGetObjectAction(action interface{}) bool {
+	checkAction := func(a string) bool {
+		a = strings.ToLower(a)
+		return a == "s3:getobject" || a == "s3:*" || a == "*"
+	}
+
+	switch act := action.(type) {
+	case string:
+		return checkAction(act)
+	case []interface{}:
+		for _, v := range act {
+			if s, ok := v.(string); ok && checkAction(s) {
+				return true
+			}
+		}
+	}
+	return false
 }
