@@ -1,6 +1,6 @@
 services:
   frontend:
-    image: wechatopenai/weknora-ui:latest
+    image: wechatopenai/weknora-ui:${WEKNORA_VERSION:-latest}
     build:
       context: ./frontend
       args:
@@ -18,7 +18,7 @@ services:
     restart: unless-stopped
 
   app:
-    image: wechatopenai/weknora-app:latest
+    image: wechatopenai/weknora-app:${WEKNORA_VERSION:-latest}
     build:
       context: .
       dockerfile: docker/Dockerfile.app
@@ -119,7 +119,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   docreader:
-    image: wechatopenai/weknora-docreader:latest
+    image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
     build:
       context: .
       dockerfile: docker/Dockerfile.docreader
