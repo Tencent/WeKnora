@@ -120,7 +120,7 @@ type sseStreamContext struct {
 }
 
 // setupSSEStream sets up the SSE streaming context
-func (h *Handler) setupSSEStream(reqCtx *qaRequestContext) *sseStreamContext {
+func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *sseStreamContext {
 	// Set SSE headers
 	setSSEHeaders(reqCtx.c)
 
@@ -146,7 +146,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext) *sseStreamContext {
 		reqCtx.requestID, reqCtx.assistantMessage, eventBus)
 
 	// Generate title if needed
-	if reqCtx.session.Title == "" {
+	if generateTitle && reqCtx.session.Title == "" {
 		// Use the same model as the conversation for title generation
 		modelID := ""
 		if reqCtx.customAgent != nil && reqCtx.customAgent.Config.ModelID != "" {
@@ -320,7 +320,7 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 	logger.Infof(ctx, "Using knowledge bases: %v", reqCtx.knowledgeBaseIDs)
 
 	// Setup SSE stream
-	streamCtx := h.setupSSEStream(reqCtx)
+	streamCtx := h.setupSSEStream(reqCtx, generateTitle)
 
 	// Setup completion handler for normal mode
 	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
@@ -421,8 +421,8 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 
 	logger.Infof(ctx, "Calling agent QA service, session ID: %s", sessionID)
 
-	// Setup SSE stream
-	streamCtx := h.setupSSEStream(reqCtx)
+	// Setup SSE stream (agent mode always generates title)
+	streamCtx := h.setupSSEStream(reqCtx, true)
 
 	// Execute AgentQA asynchronously
 	go func() {
