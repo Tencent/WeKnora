@@ -98,6 +98,12 @@ type CustomAgentConfig struct {
 	// Associated knowledge base IDs (only used when KBSelectionMode is "selected")
 	KnowledgeBases []string `yaml:"knowledge_bases" json:"knowledge_bases"`
 
+	// ===== File Type Restriction Settings =====
+	// Supported file types for this agent (e.g., ["csv", "xlsx", "xls"])
+	// Empty means all file types are supported
+	// When set, only files with matching extensions can be used with this agent
+	SupportedFileTypes []string `yaml:"supported_file_types" json:"supported_file_types"`
+
 	// ===== FAQ Strategy Settings =====
 	// Whether FAQ priority strategy is enabled (FAQ answers prioritized over document chunks)
 	FAQPriorityEnabled bool `yaml:"faq_priority_enabled" json:"faq_priority_enabled"`
@@ -297,6 +303,83 @@ func GetBuiltinSmartReasoningAgent(tenantID uint64) *CustomAgent {
 	}
 }
 
+// GetBuiltinDataAnalystAgent returns the built-in data analyst agent
+// This agent specializes in analyzing CSV/Excel data using SQL queries via DuckDB
+func GetBuiltinDataAnalystAgent(tenantID uint64) *CustomAgent {
+	return &CustomAgent{
+		ID:          BuiltinDataAnalystID,
+		Name:        "数据分析师",
+		Description: "专业数据分析智能体，支持 CSV/Excel 文件的 SQL 查询与统计分析",
+		Avatar:      "📊",
+		IsBuiltin:   true,
+		TenantID:    tenantID,
+		Config: CustomAgentConfig{
+			AgentMode:           AgentModeSmartReasoning,
+			SystemPrompt: `### Role
+You are WeKnora Data Analyst, an intelligent data analysis assistant powered by DuckDB. You specialize in analyzing structured data from CSV and Excel files using SQL queries.
+
+### Mission
+Help users explore, analyze, and derive insights from their tabular data through intelligent SQL query generation and execution.
+
+### Critical Constraints
+1. **Schema First:** ALWAYS call data_schema before writing any SQL query to understand the table structure.
+2. **Read-Only:** Only SELECT queries allowed. INSERT, UPDATE, DELETE, CREATE, DROP are forbidden.
+3. **Iterative Refinement:** If a query fails, analyze the error and refine your approach.
+
+### Workflow
+1. **Understand:** Call data_schema to get table name, columns, types, and row count.
+2. **Plan:** For complex questions, use todo_write to break into sub-queries.
+3. **Query:** Call data_analysis with the knowledge_id and SQL query.
+4. **Analyze:** Interpret results and provide insights.
+
+### SQL Best Practices for DuckDB
+- Use double quotes for identifiers: SELECT "Column Name" FROM "table_name"
+- Aggregate functions: COUNT(*), SUM(), AVG(), MIN(), MAX(), MEDIAN(), STDDEV()
+- String matching: LIKE, ILIKE (case-insensitive), REGEXP
+- Use LIMIT to prevent overwhelming output (default to 100 rows max)
+
+### Tool Guidelines
+- **data_schema:** ALWAYS use first. Required before any query.
+- **data_analysis:** Execute SQL queries. Only SELECT queries allowed.
+- **thinking:** Plan complex analyses, debug query issues.
+- **todo_write:** Track multi-step analysis tasks.
+
+### Output Standards
+- Present results in well-formatted tables or summaries
+- Provide actionable insights, not just raw numbers
+- Relate findings back to the user's original question
+
+Current Time: {{current_time}}
+`,
+			Temperature:         0.3, // Lower temperature for precise SQL generation
+			MaxCompletionTokens: 4096,
+			MaxIterations:       30,
+			KBSelectionMode:     "all",
+			// Only support CSV and Excel files for data analysis
+			// Use standard values (xlsx), backend will auto-include xls via alias
+			SupportedFileTypes: []string{"csv", "xlsx"},
+			// Core tools for data analysis
+			AllowedTools: []string{
+				"thinking",
+				"todo_write",
+				"data_schema",   // Get table schema information
+				"data_analysis", // Execute SQL queries on data
+			},
+			WebSearchEnabled:    false, // Data analysis doesn't need web search
+			WebSearchMaxResults: 0,
+			ReflectionEnabled:   true, // Enable reflection for query optimization
+			MultiTurnEnabled:    true,
+			HistoryTurns:        10, // More history for iterative analysis
+			// Retrieval strategy (minimal, as we focus on data tools)
+			EmbeddingTopK:    5,
+			KeywordThreshold: 0.3,
+			VectorThreshold:  0.5,
+			RerankTopK:       5,
+			RerankThreshold:  0.3,
+		},
+	}
+}
+
 // Deprecated: Use GetBuiltinQuickAnswerAgent instead
 func GetBuiltinNormalAgent(tenantID uint64) *CustomAgent {
 	return GetBuiltinQuickAnswerAgent(tenantID)
@@ -311,6 +394,7 @@ func GetBuiltinAgentAgent(tenantID uint64) *CustomAgent {
 var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{
 	BuiltinQuickAnswerID:    GetBuiltinQuickAnswerAgent,
 	BuiltinSmartReasoningID: GetBuiltinSmartReasoningAgent,
+	BuiltinDataAnalystID:    GetBuiltinDataAnalystAgent,
 }
 
 // builtinAgentIDsOrdered defines the fixed display order of built-in agents

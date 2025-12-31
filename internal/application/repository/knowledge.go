@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -302,6 +303,7 @@ func (r *knowledgeRepository) SearchKnowledge(
 	tenantID uint64,
 	keyword string,
 	offset, limit int,
+	fileTypes []string,
 ) ([]*types.Knowledge, bool, error) {
 	// Use raw query to properly map knowledge_base_name
 	type KnowledgeWithKBName struct {
@@ -321,6 +323,55 @@ func (r *knowledgeRepository) SearchKnowledge(
 	// If keyword is provided, filter by file_name or title
 	if keyword != "" {
 		query = query.Where("knowledges.file_name LIKE ? ", "%"+keyword+"%")
+	}
+
+	// If fileTypes is provided, filter by file extension
+	if len(fileTypes) > 0 {
+		// Build file extension patterns (e.g., "%.csv", "%.xlsx")
+		seen := make(map[string]bool)
+		var uniquePatterns []string
+		for _, ft := range fileTypes {
+			ft = strings.ToLower(strings.TrimPrefix(ft, "."))
+			pattern := "%." + ft
+			if !seen[pattern] {
+				seen[pattern] = true
+				uniquePatterns = append(uniquePatterns, pattern)
+			}
+			// Handle common aliases
+			var aliases []string
+			switch ft {
+			case "xlsx":
+				aliases = []string{"%.xls"}
+			case "xls":
+				aliases = []string{"%.xlsx"}
+			case "docx":
+				aliases = []string{"%.doc"}
+			case "doc":
+				aliases = []string{"%.docx"}
+			case "jpg":
+				aliases = []string{"%.jpeg", "%.png"}
+			case "jpeg":
+				aliases = []string{"%.jpg", "%.png"}
+			case "png":
+				aliases = []string{"%.jpg", "%.jpeg"}
+			}
+			for _, alias := range aliases {
+				if !seen[alias] {
+					seen[alias] = true
+					uniquePatterns = append(uniquePatterns, alias)
+				}
+			}
+		}
+		// Build OR conditions for file extensions
+		if len(uniquePatterns) > 0 {
+			orConditions := make([]string, len(uniquePatterns))
+			args := make([]interface{}, len(uniquePatterns))
+			for i, p := range uniquePatterns {
+				orConditions[i] = "LOWER(knowledges.file_name) LIKE ?"
+				args[i] = p
+			}
+			query = query.Where("("+strings.Join(orConditions, " OR ")+")", args...)
+		}
 	}
 
 	// Fetch limit+1 to check if there are more results

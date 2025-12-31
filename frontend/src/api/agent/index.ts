@@ -26,6 +26,11 @@ export interface CustomAgentConfig {
   kb_selection_mode?: 'all' | 'selected' | 'none';
   knowledge_bases?: string[];
 
+  // ===== 文件类型限制 =====
+  // 支持的文件类型（如 ["csv", "xlsx", "xls"]）
+  // 为空表示支持所有文件类型
+  supported_file_types?: string[];
+
   // ===== 网络搜索设置 =====
   web_search_enabled?: boolean;
   web_search_max_results?: number;
@@ -85,7 +90,7 @@ export interface UpdateAgentRequest {
   config?: CustomAgentConfig;
 }
 
-// 内置智能体 ID
+// 内置智能体 ID（常用的保留常量，便于代码引用）
 export const BUILTIN_QUICK_ANSWER_ID = 'builtin-quick-answer';
 export const BUILTIN_SMART_REASONING_ID = 'builtin-smart-reasoning';
 
@@ -97,12 +102,6 @@ export const AGENT_MODE_SMART_REASONING = 'smart-reasoning';
 export const BUILTIN_AGENT_NORMAL_ID = BUILTIN_QUICK_ANSWER_ID;
 // Deprecated: Use BUILTIN_SMART_REASONING_ID instead
 export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
-
-// 所有内置智能体 ID 列表（便于扩展）
-export const BUILTIN_AGENT_IDS = [
-  BUILTIN_QUICK_ANSWER_ID,
-  BUILTIN_SMART_REASONING_ID,
-] as const;
 
 // 获取智能体列表（包括内置智能体）
 export function listAgents() {
@@ -134,9 +133,9 @@ export function copyAgent(id: string) {
   return post<{ data: CustomAgent }>(`/api/v1/agents/${id}/copy`);
 }
 
-// 判断是否为内置智能体
+// 判断是否为内置智能体（通过 agent.is_builtin 字段或 ID 前缀判断）
 export function isBuiltinAgent(agentId: string): boolean {
-  return (BUILTIN_AGENT_IDS as readonly string[]).includes(agentId);
+  return agentId.startsWith('builtin-');
 }
 
 // 占位符定义

@@ -33,8 +33,15 @@
                 :class="{ 'selected': currentAgentId === agent.id }"
                 @click="selectAgent(agent)"
               >
-                <div class="builtin-icon" :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
+                <!-- 快速回答和智能推理使用图标，其他内置智能体使用 avatar -->
+                <div v-if="agent.id === BUILTIN_QUICK_ANSWER_ID || agent.id === BUILTIN_SMART_REASONING_ID" 
+                     class="builtin-icon" 
+                     :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
                   <TIcon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
+                </div>
+                <div v-else-if="agent.avatar" class="builtin-avatar">{{ agent.avatar }}</div>
+                <div v-else class="builtin-icon normal">
+                  <TIcon name="app" size="14px" />
                 </div>
                 <span class="agent-option-name">{{ agent.name }}</span>
                 <svg 
@@ -51,8 +58,15 @@
               <template #content>
                 <div class="agent-tooltip-content">
                   <div class="agent-tooltip-header">
-                    <div class="builtin-icon" :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
+                    <!-- 快速回答和智能推理使用图标，其他内置智能体使用 avatar -->
+                    <div v-if="agent.id === BUILTIN_QUICK_ANSWER_ID || agent.id === BUILTIN_SMART_REASONING_ID" 
+                         class="builtin-icon" 
+                         :class="agent.config?.agent_mode === 'smart-reasoning' ? 'agent' : 'normal'">
                       <TIcon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
+                    </div>
+                    <div v-else-if="agent.avatar" class="builtin-avatar">{{ agent.avatar }}</div>
+                    <div v-else class="builtin-icon normal">
+                      <TIcon name="app" size="14px" />
                     </div>
                     <div class="agent-tooltip-title">
                       <span class="agent-tooltip-name">{{ agent.name }}</span>
@@ -170,40 +184,29 @@ const emit = defineEmits<{
 const agents = ref<CustomAgent[]>([]);
 const dropdownStyle = ref<Record<string, string>>({});
 
-// 内置智能体
+// 内置智能体（从 API 获取，对特定 ID 使用本地化名称）
 const builtinAgents = computed(() => {
-  const defaults = [
-    {
-      id: BUILTIN_QUICK_ANSWER_ID,
-      name: t('input.normalMode'),
-      description: t('input.normalModeDesc'),
-      is_builtin: true,
-      config: { agent_mode: 'quick-answer' as const }
-    },
-    {
-      id: BUILTIN_SMART_REASONING_ID,
-      name: t('input.agentMode'),
-      description: t('input.agentModeDesc'),
-      is_builtin: true,
-      config: { agent_mode: 'smart-reasoning' as const }
-    }
-  ];
-
-  return defaults.map(def => {
-    const apiAgent = agents.value.find(a => a.id === def.id);
-    if (apiAgent) {
+  // 从 API 获取的内置智能体
+  const apiBuiltins = agents.value.filter(a => a.is_builtin);
+  
+  // 对特定内置智能体使用本地化名称和描述
+  return apiBuiltins.map(agent => {
+    if (agent.id === BUILTIN_QUICK_ANSWER_ID) {
       return {
-        ...apiAgent,
-        name: def.name,
-        description: def.description,
-        config: {
-          ...(apiAgent.config || {}),
-          agent_mode: def.config.agent_mode
-        }
+        ...agent,
+        name: t('input.normalMode'),
+        description: t('input.normalModeDesc'),
+      };
+    } else if (agent.id === BUILTIN_SMART_REASONING_ID) {
+      return {
+        ...agent,
+        name: t('input.agentMode'),
+        description: t('input.agentModeDesc'),
       };
     }
-    return def;
-  }) as CustomAgent[];
+    // 其他内置智能体使用 API 返回的名称和描述
+    return agent;
+  });
 });
 
 // 自定义智能体
@@ -466,6 +469,18 @@ onMounted(() => {
   }
 }
 
+.builtin-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  font-size: 16px;
+  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+}
+
 .check-icon {
   width: 14px;
   height: 14px;
@@ -490,6 +505,12 @@ onMounted(() => {
   .builtin-icon {
     width: 28px;
     height: 28px;
+  }
+  
+  .builtin-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 18px;
   }
 }
 

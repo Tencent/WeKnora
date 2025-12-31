@@ -617,6 +617,30 @@
                       </div>
                     </div>
 
+                    <!-- 支持的文件类型（限制用户可选择的文件类型） -->
+                    <div v-if="hasKnowledgeBase" class="setting-row">
+                      <div class="setting-info">
+                        <label>支持的文件类型</label>
+                        <p class="desc">限制可选择的文件类型，留空表示支持所有类型</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-select 
+                          v-model="formData.config.supported_file_types" 
+                          multiple 
+                          placeholder="全部类型"
+                          :min-collapsed-num="3"
+                          clearable
+                        >
+                          <t-option 
+                            v-for="ft in availableFileTypes" 
+                            :key="ft.value" 
+                            :value="ft.value" 
+                            :label="ft.label"
+                          />
+                        </t-select>
+                      </div>
+                    </div>
+
                     <!-- ReRank 模型（当配置了知识库时显示） -->
                     <div v-if="needsRerankModel" class="setting-row">
                       <div class="setting-info">
@@ -978,6 +1002,9 @@ const defaultTemperature = ref(0.7);
 // 知识库相关工具列表
 const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'query_knowledge_graph', 'get_document_info', 'database_query'];
 
+// 初始化标志，防止初始化时触发 watch 自动添加工具
+const isInitializing = ref(false);
+
 // 知识库选择模式：all=全部, selected=指定, none=不使用
 const kbSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
@@ -1021,6 +1048,17 @@ const availableTools = computed(() => {
     disabled: tool.requiresKB && !hasKnowledgeBase.value
   }));
 });
+
+// 可用文件类型列表
+const availableFileTypes = [
+  { value: 'pdf', label: 'PDF', description: 'PDF 文档' },
+  { value: 'docx', label: 'Word', description: 'Word 文档 (.docx/.doc)' },
+  { value: 'txt', label: '文本', description: '纯文本文件 (.txt)' },
+  { value: 'md', label: 'Markdown', description: 'Markdown 文档' },
+  { value: 'csv', label: 'CSV', description: '逗号分隔值文件' },
+  { value: 'xlsx', label: 'Excel', description: 'Excel 表格 (.xlsx/.xls)' },
+  { value: 'jpg', label: '图片', description: '图片文件 (.jpg/.jpeg/.png)' },
+];
 
 // 占位符相关 - 从 API 获取
 const placeholderData = ref<{
@@ -1145,6 +1183,8 @@ const defaultFormData = {
     // 知识库设置
     kb_selection_mode: 'none' as 'all' | 'selected' | 'none',
     knowledge_bases: [] as string[],
+    // 文件类型限制
+    supported_file_types: [] as string[],
     // FAQ 策略设置
     faq_priority_enabled: true, // 是否启用 FAQ 优先策略
     faq_direct_answer_threshold: 0.9, // FAQ 直接回答阈值（相似度高于此值直接使用 FAQ 答案）
@@ -1227,6 +1267,7 @@ watch(() => props.visible, async (val) => {
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
+      if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
       if (!agentData.config.agent_mode) {
@@ -1234,10 +1275,16 @@ watch(() => props.visible, async (val) => {
         agentData.config.agent_mode = isAgent ? 'smart-reasoning' : 'quick-answer';
       }
 
+      // 设置初始化标志，防止 watch 自动添加工具
+      isInitializing.value = true;
       formData.value = agentData;
       // 初始化知识库选择模式
       initKbSelectionMode();
       initMcpSelectionMode();
+      // 初始化完成后重置标志
+      nextTick(() => {
+        isInitializing.value = false;
+      });
       // 内置智能体：如果提示词为空，填入系统默认值
       if (agentData.is_builtin) {
         fillBuiltinAgentDefaults();
@@ -1390,7 +1437,8 @@ watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
     currentSection.value = 'basic';
   }
   
-  if (!isAgentMode.value) return; // 只在Agent模式下处理工具
+  // 初始化期间或非 Agent 模式下不自动调整工具
+  if (isInitializing.value || !isAgentMode.value) return;
   
   if (hasKB && !oldHasKB) {
     // 从无知识库变为有知识库，自动添加知识库相关工具

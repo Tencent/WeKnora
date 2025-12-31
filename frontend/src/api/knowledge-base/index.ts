@@ -232,6 +232,10 @@ export function getFAQImportProgress(taskId: string) {
   return get(`/api/v1/faq/import/progress/${taskId}`);
 }
 
-export function searchKnowledge(keyword: string, offset = 0, limit = 20) {
-  return get(`/api/v1/knowledge/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}&limit=${limit}`);
+export function searchKnowledge(keyword: string, offset = 0, limit = 20, fileTypes?: string[]) {
+  let url = `/api/v1/knowledge/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}&limit=${limit}`;
+  if (fileTypes && fileTypes.length > 0) {
+    url += `&file_types=${encodeURIComponent(fileTypes.join(','))}`;
+  }
+  return get(url);
 }

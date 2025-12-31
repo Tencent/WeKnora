@@ -129,6 +129,12 @@ const agentModelId = computed(() => {
   return currentAgentConfig.value?.model_id || null;
 });
 
+// 智能体支持的文件类型（空数组表示支持所有类型）
+const agentSupportedFileTypes = computed(() => {
+  if (!hasAgentConfig.value) return [];
+  return currentAgentConfig.value?.supported_file_types || [];
+});
+
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
 const isModelLockedByAgent = computed(() => {
   return false;
@@ -355,9 +361,12 @@ const loadConversationConfig = async () => {
     const response = await getConversationConfig();
     conversationConfig.value = response.data;
     const modelId = response.data?.summary_model_id || '';
+    
+    // 保留当前已选择的模型（如果有），避免覆盖从其他页面传递的模型选择
+    const currentSelectedModel = settingsStore.conversationModels.selectedChatModelId;
     settingsStore.updateConversationModels({
       summaryModelId: modelId,
-      selectedChatModelId: modelId,
+      selectedChatModelId: currentSelectedModel || modelId,  // 优先保留当前选择
       rerankModelId: response.data?.rerank_model_id || '',
     });
     if (!selectedModelId.value) {
@@ -615,7 +624,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   if (shouldLoadFiles) {
     mentionLoading.value = true;
     try {
-      const res: any = await searchKnowledge(q || '', mentionOffset.value, MENTION_PAGE_SIZE);
+      // 将文件类型过滤传递给后端
+      const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
+      const res: any = await searchKnowledge(q || '', mentionOffset.value, MENTION_PAGE_SIZE, fileTypesParam);
       console.log('[Mention] searchKnowledge response:', res);
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
