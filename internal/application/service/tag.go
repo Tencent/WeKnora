@@ -110,6 +110,16 @@ func (s *knowledgeTagService) CreateTag(
 	if err != nil {
 		return nil, err
 	}
+
+	// Check if tag with same name already exists
+	existingTag, err := s.repo.GetByName(ctx, kb.TenantID, kbID, name)
+	if err == nil && existingTag != nil {
+		return nil, werrors.NewConflictError("标签名称已存在")
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
 	now := time.Now()
 	tag := &types.KnowledgeTag{
 		ID:              uuid.New().String(),

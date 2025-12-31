@@ -60,18 +60,35 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 	// Special handling for references event
 	if evt.Type == types.ResponseTypeReferences {
 		refsData := evt.Data["references"]
-		logger.GetLogger(context.Background()).Info("buildStreamResponse references event",
-			"refsData_type", fmt.Sprintf("%T", refsData),
-			"refsData", refsData)
 		if refs, ok := refsData.(types.References); ok {
-			logger.GetLogger(context.Background()).Info("buildStreamResponse: matched types.References")
 			response.KnowledgeReferences = refs
 		} else if refs, ok := refsData.([]*types.SearchResult); ok {
-			logger.GetLogger(context.Background()).Info("buildStreamResponse: matched []*types.SearchResult")
 			response.KnowledgeReferences = types.References(refs)
-		} else {
-			logger.GetLogger(context.Background()).Warn("buildStreamResponse: references type assertion failed",
-				"actual_type", fmt.Sprintf("%T", refsData))
+		} else if refs, ok := refsData.([]interface{}); ok {
+			// Handle case where data was serialized/deserialized (e.g., from Redis)
+			searchResults := make([]*types.SearchResult, 0, len(refs))
+			for _, ref := range refs {
+				if refMap, ok := ref.(map[string]interface{}); ok {
+					sr := &types.SearchResult{
+						ID:                getString(refMap, "id"),
+						Content:           getString(refMap, "content"),
+						KnowledgeID:       getString(refMap, "knowledge_id"),
+						ChunkIndex:        int(getFloat64(refMap, "chunk_index")),
+						KnowledgeTitle:    getString(refMap, "knowledge_title"),
+						StartAt:           int(getFloat64(refMap, "start_at")),
+						EndAt:             int(getFloat64(refMap, "end_at")),
+						Seq:               int(getFloat64(refMap, "seq")),
+						Score:             getFloat64(refMap, "score"),
+						ChunkType:         getString(refMap, "chunk_type"),
+						ParentChunkID:     getString(refMap, "parent_chunk_id"),
+						ImageInfo:         getString(refMap, "image_info"),
+						KnowledgeFilename: getString(refMap, "knowledge_filename"),
+						KnowledgeSource:   getString(refMap, "knowledge_source"),
+					}
+					searchResults = append(searchResults, sr)
+				}
+			}
+			response.KnowledgeReferences = types.References(searchResults)
 		}
 	}
 
