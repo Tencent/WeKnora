@@ -105,7 +105,11 @@ if err != nil {
 }
 
 // 流式问答
-err = apiClient.KnowledgeQAStream(context.Background(), session.ID, "什么是机器学习?", func(response *client.StreamResponse) error {
+err = apiClient.KnowledgeQAStream(context.Background(), session.ID, &client.KnowledgeQARequest{
+    Query:            "什么是机器学习?",
+    KnowledgeBaseIDs: []string{knowledgeBaseID}, // 可选：指定知识库
+    WebSearchEnabled: false,                      // 可选：是否启用网络搜索
+}, func(response *client.StreamResponse) error {
     // 处理每个响应片段
     fmt.Print(response.Content)
     return nil

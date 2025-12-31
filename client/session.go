@@ -227,7 +227,13 @@ func (c *Client) GenerateTitle(ctx context.Context, sessionID string, request *G
 
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
-	Query string `json:"query"`
+	Query            string   `json:"query"`              // Query text for knowledge base search
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"` // Selected knowledge base IDs for this request
+	KnowledgeIDs     []string `json:"knowledge_ids"`      // Selected knowledge IDs for this request
+	AgentEnabled     bool     `json:"agent_enabled"`      // Whether agent mode is enabled for this request
+	AgentID          string   `json:"agent_id"`           // Selected custom agent ID for this request
+	WebSearchEnabled bool     `json:"web_search_enabled"` // Whether web search is enabled for this request
+	SummaryModelID   string   `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
 }
 
 type ResponseType string
@@ -250,15 +256,11 @@ type StreamResponse struct {
 func (c *Client) KnowledgeQAStream(
 	ctx context.Context,
 	sessionID string,
-	query string,
+	request *KnowledgeQARequest,
 	callback func(*StreamResponse) error,
 ) error {
 	path := fmt.Sprintf("/api/v1/knowledge-chat/%s", sessionID)
-	fmt.Printf("Starting KnowledgeQAStream request, session ID: %s, query: %s\n", sessionID, query)
-
-	request := &KnowledgeQARequest{
-		Query: query,
-	}
+	fmt.Printf("Starting KnowledgeQAStream request, session ID: %s, query: %s\n", sessionID, request.Query)
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, request, nil)
 	if err != nil {

@@ -150,7 +150,7 @@ func ExampleUsage() {
 
 	err = apiClient.KnowledgeQAStream(context.Background(),
 		session.ID,
-		question,
+		&KnowledgeQARequest{Query: question},
 		func(response *StreamResponse) error {
 			if response.ResponseType == ResponseTypeAnswer {
 				answer.WriteString(response.Content)
@@ -181,7 +181,7 @@ func ExampleUsage() {
 
 	err = apiClient.KnowledgeQAStream(context.Background(),
 		session.ID,
-		streamQuestion,
+		&KnowledgeQARequest{Query: streamQuestion},
 		func(response *StreamResponse) error {
 			fmt.Print(response.Content)
 			return nil
