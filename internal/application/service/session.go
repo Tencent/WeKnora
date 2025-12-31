@@ -447,6 +447,7 @@ func (s *sessionService) KnowledgeQA(
 		Temperature:         s.cfg.Conversation.Summary.Temperature,
 		NoMatchPrefix:       s.cfg.Conversation.Summary.NoMatchPrefix,
 		MaxCompletionTokens: s.cfg.Conversation.Summary.MaxCompletionTokens,
+		Thinking:            s.cfg.Conversation.Summary.Thinking,
 	}
 
 	// Set default fallback strategy if not set
