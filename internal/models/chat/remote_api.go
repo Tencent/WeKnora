@@ -419,12 +419,22 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context,
 		for {
 			response, err := stream.Recv()
 			if err != nil {
-				// 发送最后一个响应，包含收集到的 tool calls
-				streamChan <- types.StreamResponse{
-					ResponseType: types.ResponseTypeAnswer,
-					Content:      "",
-					Done:         true,
-					ToolCalls:    buildOrderedToolCalls(),
+				// Check if it's a normal end of stream (io.EOF)
+				if err.Error() == "EOF" {
+					// Normal end of stream, send final response with collected tool calls
+					streamChan <- types.StreamResponse{
+						ResponseType: types.ResponseTypeAnswer,
+						Content:      "",
+						Done:         true,
+						ToolCalls:    buildOrderedToolCalls(),
+					}
+				} else {
+					// Actual error, send error response
+					streamChan <- types.StreamResponse{
+						ResponseType: types.ResponseTypeError,
+						Content:      err.Error(),
+						Done:         true,
+					}
 				}
 				return
 			}

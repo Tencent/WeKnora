@@ -354,12 +354,14 @@ const loadConversationConfig = async () => {
   try {
     const response = await getConversationConfig();
     conversationConfig.value = response.data;
+    const modelId = response.data?.summary_model_id || '';
     settingsStore.updateConversationModels({
-      summaryModelId: response.data?.summary_model_id || '',
+      summaryModelId: modelId,
+      selectedChatModelId: modelId,
       rerankModelId: response.data?.rerank_model_id || '',
     });
     if (!selectedModelId.value) {
-      selectedModelId.value = response.data?.summary_model_id || '';
+      selectedModelId.value = modelId;
     }
     ensureModelSelection();
   } catch (error) {
@@ -437,6 +439,7 @@ const handleModelChange = async (value: string | number | Array<string | number>
       // 同步到 store
       settingsStore.updateConversationModels({
         summaryModelId: val,
+        selectedChatModelId: val,
         rerankModelId: conversationConfig.value?.rerank_model_id || '',
       });
       

@@ -189,7 +189,8 @@ func (c *OllamaChat) ChatStream(
 			logger.GetLogger(ctx).Errorf("流式聊天请求失败: %v", err)
 			// 发送错误响应
 			streamChan <- types.StreamResponse{
-				ResponseType: types.ResponseTypeAnswer,
+				ResponseType: types.ResponseTypeError,
+				Content:      err.Error(),
 				Done:         true,
 			}
 		}

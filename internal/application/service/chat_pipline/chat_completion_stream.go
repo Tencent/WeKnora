@@ -104,6 +104,24 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		var finalContent string
 
 		for response := range responseChan {
+			// Handle error responses from the stream
+			if response.ResponseType == types.ResponseTypeError {
+				logger.Errorf(ctx, "Stream error received: %s", response.Content)
+				if err := eventBus.Emit(ctx, types.Event{
+					ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
+					Type:      types.EventType(event.EventError),
+					SessionID: chatManage.SessionID,
+					Data: event.ErrorData{
+						Error:     response.Content,
+						Stage:     "chat_completion_stream",
+						SessionID: chatManage.SessionID,
+					},
+				}); err != nil {
+					logger.Errorf(ctx, "Failed to emit error event: %v", err)
+				}
+				continue
+			}
+
 			// Emit event for each answer chunk
 			if response.ResponseType == types.ResponseTypeAnswer {
 				finalContent += response.Content

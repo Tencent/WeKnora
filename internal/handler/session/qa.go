@@ -443,6 +443,7 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 			reqCtx.session,
 			reqCtx.query,
 			reqCtx.assistantMessage.ID,
+			reqCtx.summaryModelID,
 			streamCtx.eventBus,
 			reqCtx.customAgent,
 			reqCtx.knowledgeBaseIDs,

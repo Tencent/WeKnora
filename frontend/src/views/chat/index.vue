@@ -61,7 +61,7 @@ const useSettingsStoreInstance = useSettingsStore();
 const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
-const { menuArr, isFirstSession, firstQuery, firstMentionedItems } = storeToRefs(usemenuStore);
+const { menuArr, isFirstSession, firstQuery, firstMentionedItems, firstModelId } = storeToRefs(usemenuStore);
 const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream } = useStream();
 const route = useRoute();
 const router = useRouter();
@@ -672,13 +672,21 @@ const handleAgentChunk = (data) => {
                 
                 // If this is an error response without tool data, handle it
                 if (data.response_type === 'error' && !toolName) {
-                    message.content = data.content || t('chat.processError');
+                    const errorMsg = data.content || t('chat.processError');
+                    message.content = errorMsg;
                     isReplying.value = false;
+                    loading.value = false;
+                    MessagePlugin.error(errorMsg);
+                    console.error('[Chat Error]', errorMsg);
                 }
             } else if (data.response_type === 'error') {
                 // Generic error without tool context
-                message.content = data.content || t('chat.processError');
+                const errorMsg = data.content || t('chat.processError');
+                message.content = errorMsg;
                 isReplying.value = false;
+                loading.value = false;
+                MessagePlugin.error(errorMsg);
+                console.error('[Chat Error]', errorMsg);
             }
             break;
             
@@ -793,8 +801,8 @@ onMounted(async () => {
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
-        sendMsg(firstQuery.value, '', firstMentionedItems.value || []);
-        usemenuStore.changeFirstQuery('');
+        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || []);
+        usemenuStore.changeFirstQuery('', [], '');
     } else {
         scrollLock.value = false;
         let data = {

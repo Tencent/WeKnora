@@ -49,11 +49,13 @@ type SessionService interface {
 	// AgentQA performs agent-based question answering with conversation history and streaming support
 	// eventBus is optional - if nil, uses service's default EventBus
 	// customAgent is optional - if provided, uses custom agent configuration instead of tenant defaults
+	// summaryModelID is optional - if provided, overrides the model from customAgent config
 	AgentQA(
 		ctx context.Context,
 		session *types.Session,
 		query string,
 		assistantMessageID string,
+		summaryModelID string,
 		eventBus *event.EventBus,
 		customAgent *types.CustomAgent,
 		knowledgeBaseIDs []string,

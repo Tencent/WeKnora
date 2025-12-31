@@ -461,8 +461,9 @@ func (s *sessionService) KnowledgeQA(
 		// Ensure defaults are set
 		customAgent.EnsureDefaults()
 
-		// Override model ID
-		if customAgent.Config.ModelID != "" {
+		// Override model ID only if request didn't specify summaryModelID
+		// Request's summaryModelID has highest priority
+		if summaryModelID == "" && customAgent.Config.ModelID != "" {
 			chatModelID = customAgent.Config.ModelID
 			logger.Infof(ctx, "Using custom agent's model_id: %s", chatModelID)
 		}
@@ -1055,11 +1056,13 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 
 // AgentQA performs agent-based question answering with conversation history and streaming support
 // customAgent is optional - if provided, uses custom agent configuration instead of tenant defaults
+// summaryModelID is optional - if provided, overrides the model from customAgent config
 func (s *sessionService) AgentQA(
 	ctx context.Context,
 	session *types.Session,
 	query string,
 	assistantMessageID string,
+	summaryModelID string,
 	eventBus *event.EventBus,
 	customAgent *types.CustomAgent,
 	knowledgeBaseIDs []string,
@@ -1163,15 +1166,23 @@ func (s *sessionService) AgentQA(
 	agentConfig.SearchTargets = searchTargets
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
-	// Get summary model from custom agent config
+	// Get summary model: prioritize request's summaryModelID, then custom agent config
 	// Note: tenantInfo.ConversationConfig is deprecated, all config comes from customAgent now
-	summaryModelID := customAgent.Config.ModelID
-	if summaryModelID == "" {
+	effectiveModelID := summaryModelID
+	if effectiveModelID == "" {
+		effectiveModelID = customAgent.Config.ModelID
+	}
+	if effectiveModelID == "" {
 		logger.Warnf(ctx, "No summary model configured for custom agent %s", customAgent.ID)
 		return errors.New("summary model (model_id) is not configured in custom agent settings")
 	}
+	if summaryModelID != "" {
+		logger.Infof(ctx, "Using request's summary model override: %s", effectiveModelID)
+	} else {
+		logger.Infof(ctx, "Using custom agent's model_id: %s", effectiveModelID)
+	}
 
-	summaryModel, err := s.modelService.GetChatModel(ctx, summaryModelID)
+	summaryModel, err := s.modelService.GetChatModel(ctx, effectiveModelID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
