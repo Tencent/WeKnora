@@ -69,6 +69,7 @@ type CreateKnowledgeQARequest struct {
 	WebSearchEnabled bool                   `json:"web_search_enabled"`                    // Whether web search is enabled for this request
 	SummaryModelID   string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
+	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
 }
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization

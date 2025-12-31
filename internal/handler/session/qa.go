@@ -250,14 +250,14 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 // @Router       /sessions/{session_id}/knowledge-qa [post]
 func (h *Handler) KnowledgeQA(c *gin.Context) {
 	// Parse and validate request
-	reqCtx, _, err := h.parseQARequest(c, "KnowledgeQA")
+	reqCtx, request, err := h.parseQARequest(c, "KnowledgeQA")
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	// Execute normal mode QA
-	h.executeNormalModeQA(reqCtx, true)
+	// Execute normal mode QA, generate title unless disabled
+	h.executeNormalModeQA(reqCtx, !request.DisableTitle)
 }
 
 // AgentQA godoc

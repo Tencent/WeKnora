@@ -235,6 +235,7 @@ type KnowledgeQARequest struct {
 	AgentID          string   `json:"agent_id"`           // Selected custom agent ID for this request
 	WebSearchEnabled bool     `json:"web_search_enabled"` // Whether web search is enabled for this request
 	SummaryModelID   string   `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
+	DisableTitle     bool     `json:"disable_title"`      // Whether to disable auto title generation
 }
 
 type ResponseType string
