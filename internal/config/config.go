@@ -78,6 +78,7 @@ type SummaryConfig struct {
 	Seed                int     `yaml:"seed"                  json:"seed"`
 	MaxCompletionTokens int     `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	NoMatchPrefix       string  `yaml:"no_match_prefix"       json:"no_match_prefix"`
+	Thinking            *bool   `yaml:"thinking"              json:"thinking"`
 }
 
 // ServerConfig 服务器配置

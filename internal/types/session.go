@@ -43,6 +43,8 @@ type SummaryConfig struct {
 	Seed int `json:"seed"`
 	// Max completion tokens
 	MaxCompletionTokens int `json:"max_completion_tokens"`
+	// Thinking - whether to enable thinking mode
+	Thinking *bool `json:"thinking"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression

@@ -113,6 +113,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			Temperature:         c.SummaryConfig.Temperature,
 			Seed:                c.SummaryConfig.Seed,
 			MaxCompletionTokens: c.SummaryConfig.MaxCompletionTokens,
+			Thinking:            c.SummaryConfig.Thinking,
 		},
 		FallbackStrategy:     c.FallbackStrategy,
 		FallbackResponse:     c.FallbackResponse,

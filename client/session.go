@@ -47,6 +47,7 @@ type SummaryConfig struct {
 	Temperature         float64 `json:"temperature"`
 	Seed                int     `json:"seed"`
 	MaxCompletionTokens int     `json:"max_completion_tokens"`
+	Thinking            *bool   `json:"thinking"`
 }
 
 // SessionAgentConfig defines session-level agent configuration (matches server struct).
@@ -66,10 +67,10 @@ type CreateSessionRequest struct {
 
 // ContextConfig configures LLM context management
 type ContextConfig struct {
-	MaxTokens           int    `json:"max_tokens"`            // Maximum tokens allowed in LLM context
-	CompressionStrategy string `json:"compression_strategy"`  // Compression strategy: "sliding_window" or "smart"
-	RecentMessageCount  int    `json:"recent_message_count"`  // Number of recent messages to keep
-	SummarizeThreshold  int    `json:"summarize_threshold"`   // Number of messages before summarization
+	MaxTokens           int    `json:"max_tokens"`           // Maximum tokens allowed in LLM context
+	CompressionStrategy string `json:"compression_strategy"` // Compression strategy: "sliding_window" or "smart"
+	RecentMessageCount  int    `json:"recent_message_count"` // Number of recent messages to keep
+	SummarizeThreshold  int    `json:"summarize_threshold"`  // Number of messages before summarization
 }
 
 // Session session information
@@ -425,10 +426,10 @@ func (c *Client) StopSession(ctx context.Context, sessionID string, messageID st
 
 // SearchKnowledgeRequest knowledge search request
 type SearchKnowledgeRequest struct {
-	Query            string   `json:"query"`                         // Query content
-	KnowledgeBaseID  string   `json:"knowledge_base_id,omitempty"`   // Single knowledge base ID (for backward compatibility)
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`  // Knowledge base IDs (multi-KB support)
-	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`       // Specific knowledge (file) IDs
+	Query            string   `json:"query"`                        // Query content
+	KnowledgeBaseID  string   `json:"knowledge_base_id,omitempty"`  // Single knowledge base ID (for backward compatibility)
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"` // Knowledge base IDs (multi-KB support)
+	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"`      // Specific knowledge (file) IDs
 }
 
 // SearchKnowledgeResponse search results response

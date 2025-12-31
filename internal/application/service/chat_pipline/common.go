@@ -46,6 +46,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		MaxCompletionTokens: chatManage.SummaryConfig.MaxCompletionTokens,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
+		Thinking:            chatManage.SummaryConfig.Thinking,
 	}
 
 	return chatModel, opt, nil
