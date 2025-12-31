@@ -961,6 +961,7 @@ export default {
     customAgentMissingSummaryModel: 'Chat Model (Summary Model)',
     customAgentMissingRerankModel: 'Rerank Model',
     goToAgentEditor: 'Go to configure →',
+    agentNotReadyDetail: 'Agent "{agentName}" is not ready. Please configure: {reasons}',
     builtinAgentNotReadyDetail: 'Built-in agent "{agentName}" is not ready. Please configure: {reasons}',
     builtinAgentSettingName: 'Intelligent Reasoning',
     builtinNormalSettingName: 'Quick Q&A',

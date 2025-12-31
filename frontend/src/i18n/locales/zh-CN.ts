@@ -1681,6 +1681,7 @@ export default {
     customAgentMissingSummaryModel: "对话模型（Summary Model）",
     customAgentMissingRerankModel: "重排模型（Rerank Model）",
     goToAgentEditor: "前往配置 →",
+    agentNotReadyDetail: "智能体「{agentName}」未就绪，需要配置以下内容：{reasons}",
     builtinAgentNotReadyDetail: "内置智能体「{agentName}」未就绪，需要配置以下内容：{reasons}",
     builtinAgentSettingName: "智能推理",
     builtinNormalSettingName: "快速问答",
