@@ -951,7 +951,6 @@ export default {
     normalModeDesc: 'Knowledge base RAG Q&A',
     agentModeDesc: 'Multi-step thinking, deep analysis',
     agentNotReadyTooltip: 'Agent is not ready. Please finish configuration first.',
-    agentNotReadyDetail: 'Agent is not ready. Please configure the following: {reasons}',
     agentMissingAllowedTools: 'Allowed tools',
     agentMissingSummaryModel: 'Chat Model (Summary Model)',
     agentMissingRerankModel: 'Rerank Model',
