@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.8] - 2025-12-31
+
+### 🚀 New Features
+- **NEW**: Data Analyst Agent & Tools
+  - Added built-in Data Analyst agent
+  - Added DataSchema tool for retrieving schema from CSV/Excel files
+  - Support for agent file type restrictions
+- **NEW**: Thinking Mode Support
+  - Added configuration support for Thinking mode
+  - Added Thinking field to Summary configuration
+- **NEW**: Enhanced File & Storage Management
+  - Support listing MinIO buckets and permissions
+  - Configurable file upload size limits
+  - Full-text merge view mode
+- **NEW**: Conversation Enhancements
+  - Added option to disable automatic title generation
+  - Enhanced KnowledgeQAStream parameters
+  - Support for streaming response types and tool calls
+- **NEW**: System & Configuration
+  - Added `WEKNORA_VERSION` environment variable support
+  - APK mirror configuration support in Docker
+  - Enhanced chunking separator options
+  - FAQ two-level priority tag filtering
+  - Update index fields when batch updating tags
+
+### ⚡ Improvements
+- **IMPROVED**: Agent & Model Handling
+  - Unified agent not ready message logic
+  - Optimized built-in agent configuration synchronization
+  - Removed model locking logic to allow free switching
+  - Enhanced model selection and error handling
+- **IMPROVED**: Refactoring
+  - Simplified session creation request structure
+  - Converted knowledgeRefs to References type
+  - Refactored SSE stream setup
+  - Refactored bucket policy parsing logic
+  - Streamlined Docker package installation
+
+### 🐛 Bug Fixes
+- **FIXED**: Localization placeholder display issues
+- **FIXED**: Duplicate tag creation and stream response parsing
+- **FIXED**: Missing WebSearchStateService in parallel search
+- **FIXED**: Model list refresh on settings popup close
+- **FIXED**: Asynq Redis DB configuration
+- **FIXED**: Menu deletion logic and count updates
+- **FIXED**: OpenAI API compatibility (exclude ChatTemplateKwargs)
+- **FIXED**: Handled Nginx 413 (Payload Too Large) requests
+- **FIXED**: Added existence check for embeddings table in tag_id migration
+
+
 ## [0.2.6] - 2025-12-29
 
 ### 🚀 New Features
@@ -459,6 +509,7 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.2.7]: https://github.com/Tencent/WeKnora/tree/v0.2.7
 [0.2.6]: https://github.com/Tencent/WeKnora/tree/v0.2.6
 [0.2.5]: https://github.com/Tencent/WeKnora/tree/v0.2.5
 [0.2.4]: https://github.com/Tencent/WeKnora/tree/v0.2.4
