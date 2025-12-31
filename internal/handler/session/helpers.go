@@ -59,8 +59,19 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 
 	// Special handling for references event
 	if evt.Type == types.ResponseTypeReferences {
-		if refs, ok := evt.Data["references"].(types.References); ok {
+		refsData := evt.Data["references"]
+		logger.GetLogger(context.Background()).Info("buildStreamResponse references event",
+			"refsData_type", fmt.Sprintf("%T", refsData),
+			"refsData", refsData)
+		if refs, ok := refsData.(types.References); ok {
+			logger.GetLogger(context.Background()).Info("buildStreamResponse: matched types.References")
 			response.KnowledgeReferences = refs
+		} else if refs, ok := refsData.([]*types.SearchResult); ok {
+			logger.GetLogger(context.Background()).Info("buildStreamResponse: matched []*types.SearchResult")
+			response.KnowledgeReferences = types.References(refs)
+		} else {
+			logger.GetLogger(context.Background()).Warn("buildStreamResponse: references type assertion failed",
+				"actual_type", fmt.Sprintf("%T", refsData))
 		}
 	}
 

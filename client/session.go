@@ -191,20 +191,45 @@ type KnowledgeQARequest struct {
 	DisableTitle     bool     `json:"disable_title"`      // Whether to disable auto title generation
 }
 
+// LLMToolCall represents a function/tool call from the LLM
+type LLMToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // "function"
+	Function FunctionCall `json:"function"`
+}
+
+// FunctionCall represents the function details
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
+}
+
 type ResponseType string
 
 const (
-	ResponseTypeAnswer     ResponseType = "answer"
-	ResponseTypeReferences ResponseType = "references"
+	ResponseTypeAnswer       ResponseType = "answer"
+	ResponseTypeReferences   ResponseType = "references"
+	ResponseTypeThinking     ResponseType = "thinking"
+	ResponseTypeToolCall     ResponseType = "tool_call"
+	ResponseTypeToolResult   ResponseType = "tool_result"
+	ResponseTypeError        ResponseType = "error"
+	ResponseTypeReflection   ResponseType = "reflection"
+	ResponseTypeSessionTitle ResponseType = "session_title"
+	ResponseTypeAgentQuery   ResponseType = "agent_query"
+	ResponseTypeComplete     ResponseType = "complete"
 )
 
 // StreamResponse streaming response
 type StreamResponse struct {
-	ID                  string          `json:"id"`                   // Unique identifier
-	ResponseType        ResponseType    `json:"response_type"`        // Response type
-	Content             string          `json:"content"`              // Current content fragment
-	Done                bool            `json:"done"`                 // Whether completed
-	KnowledgeReferences []*SearchResult `json:"knowledge_references"` // Knowledge references
+	ID                  string                 `json:"id"`                             // Unique identifier
+	ResponseType        ResponseType           `json:"response_type"`                  // Response type
+	Content             string                 `json:"content"`                        // Current content fragment
+	Done                bool                   `json:"done"`                           // Whether completed
+	KnowledgeReferences []*SearchResult        `json:"knowledge_references,omitempty"` // Knowledge references
+	SessionID           string                 `json:"session_id,omitempty"`           // Session ID (for agent_query event)
+	AssistantMessageID  string                 `json:"assistant_message_id,omitempty"` // Assistant Message ID (for agent_query event)
+	ToolCalls           []LLMToolCall          `json:"tool_calls,omitempty"`           // Tool calls for streaming (partial)
+	Data                map[string]interface{} `json:"data,omitempty"`                 // Additional metadata for enhanced display
 }
 
 // KnowledgeQAStream knowledge Q&A streaming API
