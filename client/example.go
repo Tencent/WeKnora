@@ -111,25 +111,8 @@ func ExampleUsage() {
 	// 4. Create a session
 	fmt.Println("\n4. Creating session...")
 	sessionRequest := &CreateSessionRequest{
-		KnowledgeBaseID: createdKB.ID,
-		SessionStrategy: &SessionStrategy{
-			MaxRounds:        10,
-			EnableRewrite:    true,
-			FallbackStrategy: "fixed_answer",
-			FallbackResponse: "Sorry, I cannot answer this question",
-			EmbeddingTopK:    5,
-			KeywordThreshold: 0.5,
-			VectorThreshold:  0.7,
-			RerankModelID:    "rerank_model_id",
-			RerankTopK:       3,
-			RerankThreshold:  0.8,
-			SummaryModelID:   "summary_model_id",
-			SummaryParameters: &SummaryConfig{
-				Temperature: 0.7,
-				TopP:        0.9,
-				MaxTokens:   100,
-			},
-		},
+		Title:       "Test Session",
+		Description: "A test session for knowledge Q&A",
 	}
 
 	session, err := apiClient.CreateSession(context.Background(), sessionRequest)

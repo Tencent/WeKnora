@@ -16,23 +16,6 @@ import (
 	"strings"
 )
 
-// SessionStrategy defines session strategy
-type SessionStrategy struct {
-	MaxRounds         int            `json:"max_rounds"`          // Maximum number of rounds to maintain
-	EnableRewrite     bool           `json:"enable_rewrite"`      // Enable query rewrite
-	FallbackStrategy  string         `json:"fallback_strategy"`   // Fallback strategy
-	FallbackResponse  string         `json:"fallback_response"`   // Fixed fallback response content
-	EmbeddingTopK     int            `json:"embedding_top_k"`     // Top K for vector retrieval
-	KeywordThreshold  float64        `json:"keyword_threshold"`   // Keyword retrieval threshold
-	VectorThreshold   float64        `json:"vector_threshold"`    // Vector retrieval threshold
-	RerankModelID     string         `json:"rerank_model_id"`     // Rerank model ID
-	RerankTopK        int            `json:"rerank_top_k"`        // Top K for reranking
-	RerankThreshold   float64        `json:"reranking_threshold"` // Reranking threshold
-	SummaryModelID    string         `json:"summary_model_id"`    // Summary model ID
-	SummaryParameters *SummaryConfig `json:"summary_parameters"`  // Summary model parameters
-	NoMatchPrefix     string         `json:"no_match_prefix"`     // Fallback response prefix
-}
-
 // SummaryConfig defines summary configuration
 type SummaryConfig struct {
 	MaxTokens           int     `json:"max_tokens"`
@@ -50,52 +33,22 @@ type SummaryConfig struct {
 	Thinking            *bool   `json:"thinking"`
 }
 
-// SessionAgentConfig defines session-level agent configuration (matches server struct).
-// Sessions only store Enabled and KnowledgeBases; other configs are read from Tenant at runtime
-type SessionAgentConfig struct {
-	AgentModeEnabled bool     `json:"agent_mode_enabled"` // Whether agent mode is enabled for this session
-	WebSearchEnabled bool     `json:"web_search_enabled"` // Whether web search is enabled for this session
-	KnowledgeBases   []string `json:"knowledge_bases"`    // Accessible knowledge base IDs for this session
-}
-
 // CreateSessionRequest session creation request
+// Sessions are now knowledge-base-independent and serve as conversation containers.
+// All configuration comes from custom agent at query time.
 type CreateSessionRequest struct {
-	KnowledgeBaseID string              `json:"knowledge_base_id"` // Associated knowledge base ID (optional in agent mode)
-	SessionStrategy *SessionStrategy    `json:"session_strategy"`  // Session strategy
-	AgentConfig     *SessionAgentConfig `json:"agent_config"`      // Agent configuration (optional, for agent mode)
-}
-
-// ContextConfig configures LLM context management
-type ContextConfig struct {
-	MaxTokens           int    `json:"max_tokens"`           // Maximum tokens allowed in LLM context
-	CompressionStrategy string `json:"compression_strategy"` // Compression strategy: "sliding_window" or "smart"
-	RecentMessageCount  int    `json:"recent_message_count"` // Number of recent messages to keep
-	SummarizeThreshold  int    `json:"summarize_threshold"`  // Number of messages before summarization
+	Title       string `json:"title"`       // Session title (optional)
+	Description string `json:"description"` // Session description (optional)
 }
 
 // Session session information
 type Session struct {
-	ID                string              `json:"id"`
-	TenantID          uint64              `json:"tenant_id"`
-	KnowledgeBaseID   string              `json:"knowledge_base_id"`
-	Title             string              `json:"title"`
-	Description       string              `json:"description"`
-	MaxRounds         int                 `json:"max_rounds"`
-	EnableRewrite     bool                `json:"enable_rewrite"`
-	FallbackStrategy  string              `json:"fallback_strategy"`
-	FallbackResponse  string              `json:"fallback_response"`
-	EmbeddingTopK     int                 `json:"embedding_top_k"`
-	KeywordThreshold  float64             `json:"keyword_threshold"`
-	VectorThreshold   float64             `json:"vector_threshold"`
-	RerankModelID     string              `json:"rerank_model_id"`
-	RerankTopK        int                 `json:"rerank_top_k"`
-	RerankThreshold   float64             `json:"rerank_threshold"` // Reranking threshold
-	SummaryModelID    string              `json:"summary_model_id"`
-	SummaryParameters *SummaryConfig      `json:"summary_parameters"`
-	AgentConfig       *SessionAgentConfig `json:"agent_config"`   // Agent configuration (optional)
-	ContextConfig     *ContextConfig      `json:"context_config"` // Context management configuration (optional)
-	CreatedAt         string              `json:"created_at"`
-	UpdatedAt         string              `json:"updated_at"`
+	ID          string `json:"id"`
+	TenantID    uint64 `json:"tenant_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // SessionResponse session response

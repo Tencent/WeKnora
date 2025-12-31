@@ -71,10 +71,9 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		return
 	}
 
-	// Validate session creation request
 	// Sessions are now knowledge-base-independent:
 	// - All configuration comes from custom agent at query time
-	// - Session only stores basic info (tenant ID, title, etc.)
+	// - Session only stores basic info (tenant ID, title, description)
 	logger.Infof(
 		ctx,
 		"Processing session creation request, tenant ID: %d",
@@ -83,7 +82,9 @@ func (h *Handler) CreateSession(c *gin.Context) {
 
 	// Create session object with base properties
 	createdSession := &types.Session{
-		TenantID: tenantID.(uint64),
+		TenantID:    tenantID.(uint64),
+		Title:       request.Title,
+		Description: request.Description,
 	}
 
 	// Call service to create session

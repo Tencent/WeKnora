@@ -4,46 +4,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// SessionStrategy defines the configuration for a conversation session strategy
-type SessionStrategy struct {
-	// Maximum number of conversation rounds to maintain
-	MaxRounds int `json:"max_rounds"`
-	// Whether to enable query rewrite for multi-round conversations
-	EnableRewrite bool `json:"enable_rewrite"`
-	// Strategy to use when no relevant knowledge is found
-	FallbackStrategy types.FallbackStrategy `json:"fallback_strategy"`
-	// Fixed response content for fallback
-	FallbackResponse string `json:"fallback_response"`
-	// Number of top results to retrieve from vector search
-	EmbeddingTopK int `json:"embedding_top_k"`
-	// Threshold for keyword-based retrieval
-	KeywordThreshold float64 `json:"keyword_threshold"`
-	// Threshold for vector-based retrieval
-	VectorThreshold float64 `json:"vector_threshold"`
-	// ID of the model used for reranking results
-	RerankModelID string `json:"rerank_model_id"`
-	// Number of top results after reranking
-	RerankTopK int `json:"rerank_top_k"`
-	// Threshold for reranking results
-	RerankThreshold float64 `json:"rerank_threshold"`
-	// ID of the model used for summarization
-	SummaryModelID string `json:"summary_model_id"`
-	// Parameters for the summary model
-	SummaryParameters *types.SummaryConfig `json:"summary_parameters" gorm:"type:json"`
-	// Prefix for responses when no match is found
-	NoMatchPrefix string `json:"no_match_prefix"`
-}
-
 // CreateSessionRequest represents a request to create a new session
 // Sessions are now knowledge-base-independent and serve as conversation containers.
-// Knowledge bases can be specified dynamically in each query request (AgentQA/KnowledgeQA).
+// All configuration (knowledge bases, model settings, etc.) comes from custom agent at query time.
 type CreateSessionRequest struct {
-	// ID of the associated knowledge base (optional, can be set/changed during queries)
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	// Session strategy configuration
-	SessionStrategy *SessionStrategy `json:"session_strategy"`
-	// Agent configuration (optional, session-level config only: enabled and knowledge_bases)
-	AgentConfig *types.SessionAgentConfig `json:"agent_config"`
+	// Title for the session (optional)
+	Title string `json:"title"`
+	// Description for the session (optional)
+	Description string `json:"description"`
 }
 
 // GenerateTitleRequest defines the request structure for generating a session title
