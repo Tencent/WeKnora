@@ -3,13 +3,13 @@ FROM golang:1.24-bookworm AS builder
 
 WORKDIR /app
 
-# 通过构建参数接收敏感信息
+# 빌드 매개변수를 통해 민감한 정보 수신
 ARG GOPRIVATE_ARG
 ARG GOPROXY_ARG
 ARG GOSUMDB_ARG=off
 ARG APK_MIRROR_ARG
 
-# 设置Go环境变量
+# Go 환경 변수 설정
 ENV GOPRIVATE=${GOPRIVATE_ARG}
 ENV GOPROXY=${GOPROXY_ARG}
 ENV GOSUMDB=${GOSUMDB_ARG}

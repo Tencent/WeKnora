@@ -27,16 +27,16 @@ type AvailableTool struct {
 // Keep this in sync with registered tools in this package.
 func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
-		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具"},
-		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划"},
-		{Name: ToolGrepChunks, Label: "关键词搜索", Description: "快速定位包含特定关键词的文档和分块"},
-		{Name: ToolKnowledgeSearch, Label: "语义搜索", Description: "理解问题并查找语义相关内容"},
-		{Name: ToolListKnowledgeChunks, Label: "查看文档分块", Description: "获取文档完整分块内容"},
-		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系"},
-		{Name: ToolGetDocumentInfo, Label: "获取文档信息", Description: "查看文档元数据"},
-		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
-		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
-		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
+		{Name: ToolThinking, Label: "생각", Description: "동적이고 반성적인 문제 해결 사고 도구"},
+		{Name: ToolTodoWrite, Label: "계획 수립", Description: "구조화된 연구 계획 생성"},
+		{Name: ToolGrepChunks, Label: "키워드 검색", Description: "특정 키워드가 포함된 문서 및 청크를 빠르게 찾기"},
+		{Name: ToolKnowledgeSearch, Label: "의미 검색", Description: "문제를 이해하고 의미론적으로 관련된 내용 찾기"},
+		{Name: ToolListKnowledgeChunks, Label: "문서 청크 보기", Description: "문서의 전체 청크 내용 가져오기"},
+		{Name: ToolQueryKnowledgeGraph, Label: "지식 그래프 쿼리", Description: "지식 그래프에서 관계 쿼리"},
+		{Name: ToolGetDocumentInfo, Label: "문서 정보 가져오기", Description: "문서 메타데이터 보기"},
+		{Name: ToolDatabaseQuery, Label: "데이터베이스 쿼리", Description: "데이터베이스에서 정보 쿼리"},
+		{Name: ToolDataAnalysis, Label: "데이터 분석", Description: "데이터 파일을 이해하고 데이터 분석 수행"},
+		{Name: ToolDataSchema, Label: "데이터 메타 정보 보기", Description: "테이블 파일의 메타 정보 가져오기"},
 	}
 }
 

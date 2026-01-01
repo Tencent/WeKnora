@@ -3,7 +3,7 @@
 //
 // @title           WeKnora API
 // @version         1.0
-// @description     WeKnora 知识库管理系统 API 文档
+// @description     WeKnora 지식 베이스 관리 시스템 API 문서
 // @termsOfService  http://swagger.io/terms/
 //
 // @contact.name   WeKnora Github
@@ -14,12 +14,12 @@
 // @securityDefinitions.apikey Bearer
 // @in header
 // @name Authorization
-// @description 用户登录认证：输入 Bearer {token} 格式的 JWT 令牌
+// @description 사용자 로그인 인증: Bearer {token} 형식의 JWT 토큰 입력
 
 // @securityDefinitions.apikey ApiKeyAuth
 // @in header
 // @name X-API-Key
-// @description 租户身份认证：输入 sk- 开头的 API Key
+// @description 테넌트 인증: sk- 로 시작하는 API Key 입력
 package main
 
 import (

@@ -4,7 +4,7 @@ import App from "./App.vue";
 import router from "./router";
 import "./assets/fonts.css";
 import TDesign from "tdesign-vue-next";
-// 引入组件库的少量全局样式变量
+// 컴포넌트 라이브러리의 소량의 전역 스타일 변수 가져오기
 import "tdesign-vue-next/es/style/index.css";
 import "@/assets/theme/theme.css";
 import i18n from "./i18n";

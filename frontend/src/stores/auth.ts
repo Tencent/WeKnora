@@ -5,7 +5,7 @@ import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
 
 export const useAuthStore = defineStore('auth', () => {
-  // 状态
+  // 상태
   const user = ref<UserInfo | null>(null)
   const tenant = ref<TenantInfo | null>(null)
   const token = ref<string>('')
@@ -16,7 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
   const selectedTenantName = ref<string | null>(null)
   const allTenants = ref<TenantInfoFromAPI[]>([])
 
-  // 计算属性
+  // 계산된 속성
   const isLoggedIn = computed(() => {
     return !!token.value && !!user.value
   })
@@ -38,20 +38,20 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
   const effectiveTenantId = computed(() => {
-    // 如果选择了其他租户，使用选择的租户ID，否则使用用户默认租户ID
+    // 다른 테넌트를 선택한 경우 선택한 테넌트 ID를 사용하고, 그렇지 않으면 사용자의 기본 테넌트 ID를 사용합니다.
     return selectedTenantId.value || (tenant.value?.id ? Number(tenant.value.id) : null)
   })
 
-  // 操作方法
+  // 작업 방법
   const setUser = (userData: UserInfo) => {
     user.value = userData
-    // 保存到localStorage
+    // localStorage에 저장
     localStorage.setItem('weknora_user', JSON.stringify(userData))
   }
 
   const setTenant = (tenantData: TenantInfo) => {
     tenant.value = tenantData
-    // 保存到localStorage
+    // localStorage에 저장
     localStorage.setItem('weknora_tenant', JSON.stringify(tenantData))
   }
 
@@ -66,7 +66,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const setKnowledgeBases = (kbList: KnowledgeBaseInfo[]) => {
-    // 确保输入是数组
+    // 입력이 배열인지 확인
     knowledgeBases.value = Array.isArray(kbList) ? kbList : []
     localStorage.setItem('weknora_knowledge_bases', JSON.stringify(knowledgeBases.value))
   }
@@ -104,7 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
 
 
   const logout = () => {
-    // 清空状态
+    // 상태 초기화
     user.value = null
     tenant.value = null
     token.value = ''
@@ -115,7 +115,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantName.value = null
     allTenants.value = []
 
-    // 清空localStorage
+    // localStorage 지우기
     localStorage.removeItem('weknora_user')
     localStorage.removeItem('weknora_tenant')
     localStorage.removeItem('weknora_token')
@@ -128,7 +128,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const initFromStorage = () => {
-    // 从localStorage恢复状态
+    // localStorage에서 상태 복원
     const storedUser = localStorage.getItem('weknora_user')
     const storedTenant = localStorage.getItem('weknora_tenant')
     const storedToken = localStorage.getItem('weknora_token')
@@ -194,11 +194,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // 初始化时从localStorage恢复状态
+  // 초기화 시 localStorage에서 상태 복원
   initFromStorage()
 
   return {
-    // 状态
+    // 상태
     user,
     tenant,
     token,
@@ -209,7 +209,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantName,
     allTenants,
     
-    // 计算属性
+    // 계산된 속성
     isLoggedIn,
     hasValidTenant,
     currentTenantId,
@@ -217,7 +217,7 @@ export const useAuthStore = defineStore('auth', () => {
     canAccessAllTenants,
     effectiveTenantId,
     
-    // 方法
+    // 방법
     setUser,
     setTenant,
     setToken,

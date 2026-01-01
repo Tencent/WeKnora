@@ -1,6 +1,6 @@
 import { get, post, put } from '../../utils/request';
 
-// 初始化配置数据类型
+// 초기화 구성 데이터 유형
 export interface InitializationConfig {
     llm: {
         source: string;
@@ -13,7 +13,7 @@ export interface InitializationConfig {
         modelName: string;
         baseUrl?: string;
         apiKey?: string;
-        dimension?: number; // 添加embedding维度字段
+        dimension?: number; // 임베딩 차원 필드 추가
     };
     rerank: {
         modelName: string;
@@ -59,7 +59,7 @@ export interface InitializationConfig {
     }
 }
 
-// 下载任务状态类型
+// 다운로드 작업 상태 유형
 export interface DownloadTask {
     id: string;
     modelName: string;
@@ -70,7 +70,7 @@ export interface DownloadTask {
     endTime?: string;
 }
 
-// 简化版知识库配置更新接口（只传模型ID）
+// 간소화된 지식 베이스 구성 업데이트 인터페이스 (모델 ID만 전달)
 export interface KBModelConfigRequest {
     llmModelId: string
     embeddingModelId: string
@@ -115,36 +115,36 @@ export interface KBModelConfigRequest {
 
 export function updateKBConfig(kbId: string, config: KBModelConfigRequest): Promise<any> {
     return new Promise((resolve, reject) => {
-        console.log('开始知识库配置更新（简化版）...', kbId, config);
+        console.log('지식 베이스 구성 업데이트 시작 (간소화 버전)...', kbId, config);
         put(`/api/v1/initialization/config/${kbId}`, config)
             .then((response: any) => {
-                console.log('知识库配置更新完成', response);
+                console.log('지식 베이스 구성 업데이트 완료', response);
                 resolve(response);
             })
             .catch((error: any) => {
-                console.error('知识库配置更新失败:', error);
+                console.error('지식 베이스 구성 업데이트 실패:', error);
                 reject(error.error || error);
             });
     });
 }
 
-// 根据知识库ID执行配置更新（旧版，保留兼容性）
+// 지식 베이스 ID에 따라 구성 업데이트 실행 (이전 버전, 호환성 유지)
 export function initializeSystemByKB(kbId: string, config: InitializationConfig): Promise<any> {
     return new Promise((resolve, reject) => {
-        console.log('开始知识库配置更新...', kbId, config);
+        console.log('지식 베이스 구성 업데이트 시작...', kbId, config);
         post(`/api/v1/initialization/initialize/${kbId}`, config)
             .then((response: any) => {
-                console.log('知识库配置更新完成', response);
+                console.log('지식 베이스 구성 업데이트 완료', response);
                 resolve(response);
             })
             .catch((error: any) => {
-                console.error('知识库配置更新失败:', error);
+                console.error('지식 베이스 구성 업데이트 실패:', error);
                 reject(error.error || error);
             });
     });
 }
 
-// 检查Ollama服务状态
+// Ollama 서비스 상태 확인
 export function checkOllamaStatus(): Promise<{ available: boolean; version?: string; error?: string; baseUrl?: string }> {
     return new Promise((resolve, reject) => {
         get('/api/v1/initialization/ollama/status')
@@ -152,13 +152,13 @@ export function checkOllamaStatus(): Promise<{ available: boolean; version?: str
                 resolve(response.data || { available: false });
             })
             .catch((error: any) => {
-                console.error('检查Ollama状态失败:', error);
-                resolve({ available: false, error: error.message || '检查失败' });
+                console.error('Ollama 상태 확인 실패:', error);
+                resolve({ available: false, error: error.message || '확인 실패' });
             });
     });
 }
 
-// Ollama 模型详细信息接口
+// Ollama 모델 상세 정보 인터페이스
 export interface OllamaModelInfo {
     name: string;
     size: number;
@@ -166,7 +166,7 @@ export interface OllamaModelInfo {
     modified_at: string;
 }
 
-// 列出已安装的 Ollama 模型（详细信息）
+// 설치된 Ollama 모델 목록 (상세 정보)
 export function listOllamaModels(): Promise<OllamaModelInfo[]> {
     return new Promise((resolve, reject) => {
         get('/api/v1/initialization/ollama/models')
@@ -174,13 +174,13 @@ export function listOllamaModels(): Promise<OllamaModelInfo[]> {
                 resolve((response.data && response.data.models) || []);
             })
             .catch((error: any) => {
-                console.error('获取 Ollama 模型列表失败:', error);
+                console.error('Ollama 모델 목록 가져오기 실패:', error);
                 resolve([]);
             });
     });
 }
 
-// 检查Ollama模型状态
+// Ollama 모델 상태 확인
 export function checkOllamaModels(models: string[]): Promise<{ models: Record<string, boolean> }> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/ollama/models/check', { models })
@@ -188,13 +188,13 @@ export function checkOllamaModels(models: string[]): Promise<{ models: Record<st
                 resolve(response.data || { models: {} });
             })
             .catch((error: any) => {
-                console.error('检查Ollama模型状态失败:', error);
+                console.error('Ollama 모델 상태 확인 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 启动Ollama模型下载（异步）
+// Ollama 모델 다운로드 시작 (비동기)
 export function downloadOllamaModel(modelName: string): Promise<{ taskId: string; modelName: string; status: string; progress: number }> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/ollama/models/download', { modelName })
@@ -202,13 +202,13 @@ export function downloadOllamaModel(modelName: string): Promise<{ taskId: string
                 resolve(response.data || { taskId: '', modelName, status: 'failed', progress: 0 });
             })
             .catch((error: any) => {
-                console.error('启动Ollama模型下载失败:', error);
+                console.error('Ollama 모델 다운로드 시작 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 查询下载进度
+// 다운로드 진행 상황 조회
 export function getDownloadProgress(taskId: string): Promise<DownloadTask> {
     return new Promise((resolve, reject) => {
         get(`/api/v1/initialization/ollama/download/progress/${taskId}`)
@@ -216,13 +216,13 @@ export function getDownloadProgress(taskId: string): Promise<DownloadTask> {
                 resolve(response.data);
             })
             .catch((error: any) => {
-                console.error('查询下载进度失败:', error);
+                console.error('다운로드 진행 상황 조회 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 获取所有下载任务
+// 모든 다운로드 작업 가져오기
 export function listDownloadTasks(): Promise<DownloadTask[]> {
     return new Promise((resolve, reject) => {
         get('/api/v1/initialization/ollama/download/tasks')
@@ -230,7 +230,7 @@ export function listDownloadTasks(): Promise<DownloadTask[]> {
                 resolve(response.data || []);
             })
             .catch((error: any) => {
-                console.error('获取下载任务列表失败:', error);
+                console.error('다운로드 작업 목록 가져오기 실패:', error);
                 reject(error);
             });
     });
@@ -244,13 +244,13 @@ export function getCurrentConfigByKB(kbId: string): Promise<InitializationConfig
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('获取知识库配置失败:', error);
+                console.error('지식 베이스 구성 가져오기 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 检查远程API模型
+// 원격 API 모델 확인
 export function checkRemoteModel(modelConfig: {
     modelName: string;
     baseUrl: string;
@@ -265,13 +265,13 @@ export function checkRemoteModel(modelConfig: {
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('检查远程模型失败:', error);
+                console.error('원격 모델 확인 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 测试 Embedding 模型（本地/远程）是否可用
+// 임베딩 모델(로컬/원격) 사용 가능 여부 테스트
 export function testEmbeddingModel(modelConfig: {
     source: 'local' | 'remote';
     modelName: string;
@@ -286,7 +286,7 @@ export function testEmbeddingModel(modelConfig: {
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('测试Embedding模型失败:', error);
+                console.error('임베딩 모델 테스트 실패:', error);
                 reject(error);
             });
     });
@@ -307,7 +307,7 @@ export function checkRerankModel(modelConfig: {
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('检查Rerank模型失败:', error);
+                console.error('Rerank 모델 확인 실패:', error);
                 reject(error);
             });
     });
@@ -370,14 +370,14 @@ export function testMultimodalFunction(testData: {
         formData.append('chunk_overlap', testData.chunk_overlap.toString());
         formData.append('separators', JSON.stringify(testData.separators));
 
-        // 获取鉴权Token
+        // 인증 토큰 가져오기
         const token = localStorage.getItem('weknora_token');
         const headers: Record<string, string> = {};
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // 添加跨租户访问请求头（如果选择了其他租户）
+        // 테넌트 간 액세스 요청 헤더 추가 (다른 테넌트를 선택한 경우)
         const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
         const defaultTenantId = localStorage.getItem('weknora_tenant');
         if (selectedTenantId) {
@@ -388,11 +388,11 @@ export function testMultimodalFunction(testData: {
                     headers['X-Tenant-ID'] = selectedTenantId;
                 }
             } catch (e) {
-                console.error('Failed to parse tenant info', e);
+                console.error('테넌트 정보 파싱 실패', e);
             }
         }
 
-        // 使用原生fetch因为需要发送FormData
+        // FormData를 보내야 하므로 네이티브 fetch 사용
         fetch('/api/v1/initialization/multimodal/test', {
             method: 'POST',
             headers,
@@ -403,17 +403,17 @@ export function testMultimodalFunction(testData: {
                 if (data.success) {
                     resolve(data.data || {});
                 } else {
-                    resolve({ success: false, message: data.message || '测试失败' });
+                    resolve({ success: false, message: data.message || '테스트 실패' });
                 }
             })
             .catch((error: any) => {
-                console.error('多模态测试失败:', error);
+                console.error('멀티모달 테스트 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 文本内容关系提取接口
+// 텍스트 내용 관계 추출 인터페이스
 export interface TextRelationExtractionRequest {
     text: string;
     tags: string[];
@@ -443,7 +443,7 @@ export interface TextRelationExtractionResponse {
     relations: Relation[];
 }
 
-// 文本内容关系提取
+// 텍스트 내용 관계 추출
 export function extractTextRelations(request: TextRelationExtractionRequest): Promise<TextRelationExtractionResponse> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/extract/text-relation', request, { timeout: 60000 })
@@ -451,7 +451,7 @@ export function extractTextRelations(request: TextRelationExtractionRequest): Pr
                 resolve(response.data || { nodes: [], relations: [] });
             })
             .catch((error: any) => {
-                console.error('文本内容关系提取失败:', error);
+                console.error('텍스트 내용 관계 추출 실패:', error);
                 reject(error);
             });
     });
@@ -466,7 +466,7 @@ export interface FabriTextResponse {
     text: string;
 }
 
-// 文本内容生成
+// 텍스트 내용 생성
 export function fabriText(request: FabriTextRequest): Promise<FabriTextResponse> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/extract/fabri-text', request)
@@ -474,7 +474,7 @@ export function fabriText(request: FabriTextRequest): Promise<FabriTextResponse>
                 resolve(response.data || { text: '' });
             })
             .catch((error: any) => {
-                console.error('文本内容生成失败:', error);
+                console.error('텍스트 내용 생성 실패:', error);
                 reject(error);
             });
     });
@@ -488,7 +488,7 @@ export interface FabriTagResponse {
     tags: string[];
 }
 
-// 标签生成
+// 태그 생성
 export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/extract/fabri-tag', request)
@@ -496,22 +496,22 @@ export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
                 resolve(response.data || { tags: [] as string[] });
             })
             .catch((error: any) => {
-                console.error('标签生成失败:', error);
+                console.error('태그 생성 실패:', error);
                 reject(error);
             });
     });
 }
 
-// 模型厂商信息类型
+// 모델 공급업체 정보 유형
 export interface ModelProviderOption {
-    value: string;        // provider 标识符
-    label: string;        // 显示名称
-    description: string;  // 描述
-    defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
-    modelTypes: string[]; // 支持的模型类型
+    value: string;        // provider 식별자
+    label: string;        // 표시 이름
+    description: string;  // 설명
+    defaultUrls: Record<string, string>;  // 모델 유형별 기본 URL
+    modelTypes: string[]; // 지원되는 모델 유형
 }
 
-// 获取模型厂商列表
+// 모델 공급업체 목록 가져오기
 export function listModelProviders(modelType?: string): Promise<ModelProviderOption[]> {
     return new Promise((resolve, reject) => {
         const url = modelType
@@ -522,8 +522,8 @@ export function listModelProviders(modelType?: string): Promise<ModelProviderOpt
                 resolve(response.data || []);
             })
             .catch((error: any) => {
-                console.error('获取模型厂商列表失败:', error);
-                resolve([]); // 失败时返回空数组，前端可以回退到默认值
+                console.error('모델 공급업체 목록 가져오기 실패:', error);
+                resolve([]); // 실패 시 빈 배열 반환, 프론트엔드는 기본값으로 되돌릴 수 있음
             });
     });
 }

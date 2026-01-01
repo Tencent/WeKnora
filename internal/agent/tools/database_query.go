@@ -801,20 +801,20 @@ func (t *DatabaseQueryTool) formatQueryResults(
 	results []map[string]interface{},
 	query string,
 ) string {
-	output := "=== 查询结果 ===\n\n"
-	output += fmt.Sprintf("执行的SQL: %s\n\n", query)
-	output += fmt.Sprintf("返回 %d 行数据\n\n", len(results))
+	output := "=== 쿼리 결과 ===\n\n"
+	output += fmt.Sprintf("실행된 SQL: %s\n\n", query)
+	output += fmt.Sprintf("%d 행 반환\n\n", len(results))
 
 	if len(results) == 0 {
-		output += "未找到匹配的记录。\n"
+		output += "일치하는 기록을 찾을 수 없습니다.\n"
 		return output
 	}
 
-	output += "=== 数据详情 ===\n\n"
+	output += "=== 데이터 세부 정보 ===\n\n"
 
 	// Format each row
 	for i, row := range results {
-		output += fmt.Sprintf("--- 记录 #%d ---\n", i+1)
+		output += fmt.Sprintf("--- 기록 #%d ---\n", i+1)
 		for _, col := range columns {
 			value := row[col]
 			// Format the value
@@ -842,7 +842,7 @@ func (t *DatabaseQueryTool) formatQueryResults(
 
 	// Add summary statistics if applicable
 	if len(results) > 10 {
-		output += fmt.Sprintf("注意: 显示了前 %d 条记录，共 %d 条。建议使用 LIMIT 子句限制结果数量。\n", len(results), len(results))
+		output += fmt.Sprintf("주의: 처음 %d 개 기록만 표시되며, 총 %d 개입니다. LIMIT 절을 사용하여 결과 수를 제한하는 것이 좋습니다.\n", len(results), len(results))
 	}
 
 	return output
