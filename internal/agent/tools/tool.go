@@ -52,13 +52,13 @@ type ToolExecutor interface {
 func GetRelevanceLevel(score float64) string {
 	switch {
 	case score >= 0.8:
-		return "高相关"
+		return "매우 높음"
 	case score >= 0.6:
-		return "中相关"
+		return "중간"
 	case score >= 0.4:
-		return "低相关"
+		return "낮음"
 	default:
-		return "弱相关"
+		return "매우 낮음"
 	}
 }
 
@@ -66,20 +66,20 @@ func GetRelevanceLevel(score float64) string {
 func FormatMatchType(mt types.MatchType) string {
 	switch mt {
 	case types.MatchTypeEmbedding:
-		return "向量匹配"
+		return "벡터 일치"
 	case types.MatchTypeKeywords:
-		return "关键词匹配"
+		return "키워드 일치"
 	case types.MatchTypeNearByChunk:
-		return "相邻块匹配"
+		return "인접 청크 일치"
 	case types.MatchTypeHistory:
-		return "历史匹配"
+		return "기록 일치"
 	case types.MatchTypeParentChunk:
-		return "父块匹配"
+		return "상위 청크 일치"
 	case types.MatchTypeRelationChunk:
-		return "关系块匹配"
+		return "관계 청크 일치"
 	case types.MatchTypeGraph:
-		return "图谱匹配"
+		return "그래프 일치"
 	default:
-		return fmt.Sprintf("未知类型(%d)", mt)
+		return fmt.Sprintf("알 수 없는 유형(%d)", mt)
 	}
 }

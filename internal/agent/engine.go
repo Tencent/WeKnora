@@ -463,7 +463,7 @@ func (e *AgentEngine) executeLoop(
 			common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 				"error": err.Error(),
 			})
-			state.FinalAnswer = "抱歉，我无法生成完整的答案。"
+			state.FinalAnswer = "죄송합니다. 완전한 답변을 생성할 수 없습니다."
 		}
 		state.IsComplete = true
 	}
@@ -637,13 +637,13 @@ func (e *AgentEngine) streamReflectionToEventBus(
 	sessionID string,
 ) (string, error) {
 	// Simplified reflection without BuildReflectionPrompt
-	reflectionPrompt := fmt.Sprintf(`请评估刚才调用工具 %s 的结果，并决定下一步行动。
+	reflectionPrompt := fmt.Sprintf(`방금 호출한 도구 %s의 결과를 평가하고 다음 행동을 결정해 주세요.
 
-工具返回: %s
+도구 반환값: %s
 
-思考:
-1. 结果是否满足需求？
-2. 下一步应该做什么？`, toolName, result)
+생각:
+1. 결과가 요구 사항을 충족하는가?
+2. 다음에는 무엇을 해야 하는가?`, toolName, result)
 
 	messages := []chat.Message{
 		{Role: "user", Content: reflectionPrompt},
@@ -797,7 +797,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			toolResultCount++
 			messages = append(messages, chat.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("工具 %s 返回: %s", toolCall.Name, toolCall.Result.Output),
+				Content: fmt.Sprintf("도구 %s 반환: %s", toolCall.Name, toolCall.Result.Output),
 			})
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
@@ -808,17 +808,17 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		len(messages), toolResultCount)
 
 	// Add final answer prompt
-	finalPrompt := fmt.Sprintf(`基于上述工具调用结果，请为用户问题生成完整答案。
+	finalPrompt := fmt.Sprintf(`위의 도구 호출 결과를 바탕으로 사용자 질문에 대한 완전한 답변을 생성해 주세요.
 
-用户问题: %s
+사용자 질문: %s
 
-要求:
-1. 基于实际检索到的内容回答
-2. 清晰标注信息来源 (chunk_id, 文档名)
-3. 结构化组织答案
-4. 如信息不足，诚实说明
+요구 사항:
+1. 실제로 검색된 내용을 기반으로 답변하세요.
+2. 정보 출처(chunk_id, 문서 이름)를 명확하게 표시하세요.
+3. 답변을 구조적으로 정리하세요.
+4. 정보가 부족한 경우 솔직하게 설명하세요.
 
-现在请生成最终答案:`, query)
+이제 최종 답변을 생성해 주세요:`, query)
 
 	messages = append(messages, chat.Message{
 		Role:    "user",

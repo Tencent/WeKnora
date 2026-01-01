@@ -5,48 +5,48 @@ import { generateRandomString } from '@/utils/index';
 
 
 interface StreamOptions {
-  // 请求方法 (默认POST)
+  // 요청 방법 (기본값 POST)
   method?: 'GET' | 'POST'
-  // 请求头
+  // 요청 헤더
   headers?: Record<string, string>
-  // 请求体自动序列化
+  // 요청 본문 자동 직렬화
   body?: Record<string, any>
-  // 流式渲染间隔 (ms)
+  // 스트리밍 렌더링 간격 (ms)
   chunkInterval?: number
 }
 
 export function useStream() {
-  // 响应式状态
-  const output = ref('')              // 显示内容
-  const isStreaming = ref(false)      // 流状态
-  const isLoading = ref(false)        // 初始加载
-  const error = ref<string | null>(null)// 错误信息
+  // 반응형 상태
+  const output = ref('')              // 표시 내용
+  const isStreaming = ref(false)      // 스트리밍 상태
+  const isLoading = ref(false)        // 초기 로딩
+  const error = ref<string | null>(null)// 오류 메시지
   let controller = new AbortController()
 
-  // 流式渲染缓冲
+  // 스트리밍 렌더링 버퍼
   let buffer: string[] = []
   let renderTimer: number | null = null
 
-  // 启动流式请求
+  // 스트리밍 요청 시작
   const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; agent_enabled?: boolean; agent_id?: string; web_search_enabled?: boolean; summary_model_id?: string; mcp_service_ids?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string}>; method: string; url: string }) => {
-    // 重置状态
+    // 상태 초기화
     output.value = '';
     error.value = null;
     isStreaming.value = true;
     isLoading.value = true;
 
-    // 获取API配置
+    // API 구성 가져오기
     const apiUrl = import.meta.env.VITE_IS_DOCKER ? "" : "http://localhost:8080";
     
-    // 获取JWT Token
+    // JWT 토큰 가져오기
     const token = localStorage.getItem('weknora_token');
     if (!token) {
-      error.value = "未找到登录令牌，请重新登录";
+      error.value = "로그인 토큰을 찾을 수 없습니다. 다시 로그인해 주세요.";
       stopStream();
       return;
     }
 
-    // 获取跨租户访问请求头
+    // 테넌트 간 액세스 요청 헤더 가져오기
     const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
     const defaultTenantId = localStorage.getItem('weknora_tenant');
     let tenantIdHeader: string | null = null;
@@ -131,15 +131,15 @@ export function useStream() {
         },
 
         onmessage: (ev) => {
-          buffer.push(JSON.parse(ev.data)); // 数据存入缓冲
-          // 执行自定义处理
+          buffer.push(JSON.parse(ev.data)); // 데이터 버퍼에 저장
+          // 사용자 정의 처리 실행
           if (chunkHandler) {
             chunkHandler(JSON.parse(ev.data));
           }
         },
 
         onerror: (err) => {
-          throw new Error(`流式连接失败: ${err}`);
+          throw new Error(`스트리밍 연결 실패: ${err}`);
         },
 
         onclose: () => {
@@ -153,30 +153,30 @@ export function useStream() {
   }
 
   let chunkHandler: ((data: any) => void) | null = null
-  // 注册块处理器
+  // 청크 처리기 등록
   const onChunk = (handler: () => void) => {
     chunkHandler = handler
   }
 
 
-  // 停止流
+  // 스트리밍 중지
   const stopStream = () => {
     controller.abort();
-    controller = new AbortController(); // 重置控制器（如需重新发起）
+    controller = new AbortController(); // 컨트롤러 재설정 (다시 시작해야 할 경우)
     isStreaming.value = false;
     isLoading.value = false;
   }
 
-  // 组件卸载时自动清理
+  // 컴포넌트 마운트 해제 시 자동 정리
   onUnmounted(stopStream)
 
   return {
-    output,          // 显示内容
-    isStreaming,     // 是否在流式传输中
-    isLoading,       // 初始连接状态
+    output,          // 표시 내용
+    isStreaming,     // 스트리밍 전송 중인지 여부
+    isLoading,       // 초기 연결 상태
     error,
     onChunk,
-    startStream,     // 启动流
-    stopStream       // 手动停止
+    startStream,     // 스트리밍 시작
+    stopStream       // 수동 중지
   }
 }

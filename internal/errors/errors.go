@@ -106,7 +106,7 @@ func NewConflictError(message string) *AppError {
 // NewInternalServerError creates an internal server error
 func NewInternalServerError(message string) *AppError {
 	if message == "" {
-		message = "服务器内部错误"
+		message = "서버 내부 오류"
 	}
 	return &AppError{
 		Code:     ErrInternalServer,
@@ -128,7 +128,7 @@ func NewValidationError(message string) *AppError {
 func NewTenantNotFoundError() *AppError {
 	return &AppError{
 		Code:     ErrTenantNotFound,
-		Message:  "租户不存在",
+		Message:  "테넌트가 존재하지 않습니다",
 		HTTPCode: http.StatusNotFound,
 	}
 }
@@ -137,7 +137,7 @@ func NewTenantNotFoundError() *AppError {
 func NewTenantAlreadyExistsError() *AppError {
 	return &AppError{
 		Code:     ErrTenantAlreadyExists,
-		Message:  "租户已存在",
+		Message:  "테넌트가 이미 존재합니다",
 		HTTPCode: http.StatusConflict,
 	}
 }
@@ -146,7 +146,7 @@ func NewTenantAlreadyExistsError() *AppError {
 func NewTenantInactiveError() *AppError {
 	return &AppError{
 		Code:     ErrTenantInactive,
-		Message:  "租户已停用",
+		Message:  "테넌트가 비활성화되었습니다",
 		HTTPCode: http.StatusForbidden,
 	}
 }
@@ -155,7 +155,7 @@ func NewTenantInactiveError() *AppError {
 func NewAgentMissingThinkingModelError() *AppError {
 	return &AppError{
 		Code:     ErrAgentMissingThinkingModel,
-		Message:  "启用Agent模式前，请先选择思考模型",
+		Message:  "Agent 모드를 활성화하기 전에 생각 모델을 선택해 주세요",
 		HTTPCode: http.StatusBadRequest,
 	}
 }
@@ -163,7 +163,7 @@ func NewAgentMissingThinkingModelError() *AppError {
 func NewAgentMissingAllowedToolsError() *AppError {
 	return &AppError{
 		Code:     ErrAgentMissingAllowedTools,
-		Message:  "至少需要选择一个允许的工具",
+		Message:  "허용된 도구를 하나 이상 선택해야 합니다",
 		HTTPCode: http.StatusBadRequest,
 	}
 }
@@ -171,7 +171,7 @@ func NewAgentMissingAllowedToolsError() *AppError {
 func NewAgentInvalidMaxIterationsError() *AppError {
 	return &AppError{
 		Code:     ErrAgentInvalidMaxIterations,
-		Message:  "最大迭代次数必须在1-20之间",
+		Message:  "최대 반복 횟수는 1에서 20 사이여야 합니다",
 		HTTPCode: http.StatusBadRequest,
 	}
 }
@@ -179,7 +179,7 @@ func NewAgentInvalidMaxIterationsError() *AppError {
 func NewAgentInvalidTemperatureError() *AppError {
 	return &AppError{
 		Code:     ErrAgentInvalidTemperature,
-		Message:  "温度参数必须在0-2之间",
+		Message:  "온도 매개변수는 0에서 2 사이여야 합니다",
 		HTTPCode: http.StatusBadRequest,
 	}
 }

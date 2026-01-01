@@ -1173,7 +1173,7 @@ func (t *KnowledgeSearchTool) formatOutput(
 	}
 
 	// Add statistics and recommendations for each knowledge
-	output += "\n=== 检索统计与建议 ===\n\n"
+	output += "\n=== 검색 통계 및 제안 ===\n\n"
 	for knowledgeID, retrievedChunks := range knowledgeChunkMap {
 		totalChunks := knowledgeTotalMap[knowledgeID]
 		retrievedCount := len(retrievedChunks)
@@ -1183,10 +1183,10 @@ func (t *KnowledgeSearchTool) formatOutput(
 			percentage := float64(retrievedCount) / float64(totalChunks) * 100
 			remaining := totalChunks - int64(retrievedCount)
 
-			output += fmt.Sprintf("文档: %s (%s)\n", title, knowledgeID)
-			output += fmt.Sprintf("  总 Chunk 数: %d\n", totalChunks)
-			output += fmt.Sprintf("  已召回: %d 个 (%.1f%%)\n", retrievedCount, percentage)
-			output += fmt.Sprintf("  未召回: %d 个\n", remaining)
+			output += fmt.Sprintf("문서: %s (%s)\n", title, knowledgeID)
+			output += fmt.Sprintf("  총 청크 수: %d\n", totalChunks)
+			output += fmt.Sprintf("  리콜됨: %d 개 (%.1f%%)\n", retrievedCount, percentage)
+			output += fmt.Sprintf("  리콜되지 않음: %d 개\n", remaining)
 
 		}
 	}
@@ -1250,10 +1250,10 @@ func (t *KnowledgeSearchTool) getEnrichedPassage(ctx context.Context, result *ty
 	var imageTexts []string
 	for _, img := range imageInfos {
 		if img.Caption != "" {
-			imageTexts = append(imageTexts, fmt.Sprintf("图片描述: %s", img.Caption))
+			imageTexts = append(imageTexts, fmt.Sprintf("이미지 설명: %s", img.Caption))
 		}
 		if img.OCRText != "" {
-			imageTexts = append(imageTexts, fmt.Sprintf("图片文本: %s", img.OCRText))
+			imageTexts = append(imageTexts, fmt.Sprintf("이미지 텍스트: %s", img.OCRText))
 		}
 	}
 

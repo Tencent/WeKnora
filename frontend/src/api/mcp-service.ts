@@ -80,12 +80,12 @@ export async function deleteMCPService(id: string): Promise<void> {
 // Test MCP service connection
 export async function testMCPService(id: string): Promise<MCPTestResult> {
   const response: any = await post(`/api/v1/mcp-services/${id}/test`, {})
-  // 后端返回格式: { success: true, data: MCPTestResult }
-  // response interceptor 已经返回了 data，所以 response 就是 { success: true, data: {...} }
+  // 백엔드 반환 형식: { success: true, data: MCPTestResult }
+  // response interceptor가 이미 data를 반환했으므로, response는 { success: true, data: {...} }입니다.
   if (response && response.data) {
     return response.data
   }
-  // 如果格式不对，尝试直接返回 response（可能是直接返回的数据）
+  // 형식이 올바르지 않은 경우 response를 직접 반환해 봅니다 (직접 반환된 데이터일 수 있음).
   return response
 }
 
