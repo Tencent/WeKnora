@@ -30,8 +30,8 @@ export interface AgentConfig {
   temperature: number
   knowledge_bases?: string[]
   system_prompt?: string  // Unified system prompt (uses {{web_search_status}} placeholder)
-  available_tools?: ToolDefinition[]  // GET 响应中包含，POST/PUT 不需要
-  available_placeholders?: PlaceholderDefinition[]  // GET 响应中包含，POST/PUT 不需要
+  available_tools?: ToolDefinition[]  // Included in GET response, not required for POST/PUT
+  available_placeholders?: PlaceholderDefinition[]  // Included in GET response, not required for POST/PUT
 }
 
 export interface ConversationConfig {

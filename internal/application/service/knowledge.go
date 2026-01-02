@@ -39,17 +39,17 @@ import (
 // Error definitions for knowledge service operations
 var (
 	// ErrInvalidFileType is returned when an unsupported file type is provided
-	ErrInvalidFileType = errors.New("unsupported file type")
+	ErrInvalidFileType = errors.New("지원하지 않는 파일 형식입니다")
 	// ErrInvalidURL is returned when an invalid URL is provided
-	ErrInvalidURL = errors.New("invalid URL")
+	ErrInvalidURL = errors.New("유효하지 않은 URL입니다")
 	// ErrChunkNotFound is returned when a requested chunk cannot be found
-	ErrChunkNotFound = errors.New("chunk not found")
+	ErrChunkNotFound = errors.New("청크를 찾을 수 없습니다")
 	// ErrDuplicateFile is returned when trying to add a file that already exists
-	ErrDuplicateFile = errors.New("file already exists")
+	ErrDuplicateFile = errors.New("파일이 이미 존재합니다")
 	// ErrDuplicateURL is returned when trying to add a URL that already exists
-	ErrDuplicateURL = errors.New("URL already exists")
+	ErrDuplicateURL = errors.New("URL이 이미 존재합니다")
 	// ErrImageNotParse is returned when trying to update image information without enabling multimodel
-	ErrImageNotParse = errors.New("image not parse without enable multimodel")
+	ErrImageNotParse = errors.New("멀티모달이 활성화되지 않아 이미지를 분석할 수 없습니다")
 )
 
 // knowledgeService implements the knowledge service interface
@@ -175,19 +175,19 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 				kb.StorageConfig.Region == "" || kb.StorageConfig.BucketName == "" ||
 				kb.StorageConfig.AppID == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("이미지 파일을 업로드하려면 전체 개체 스토리지 구성 정보가 필요합니다. 시스템 설정 페이지로 이동하여 완료하세요")
 			}
 		case "minio":
 			if kb.StorageConfig.BucketName == "" {
 				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("이미지 파일을 업로드하려면 전체 개체 스토리지 구성 정보가 필요합니다. 시스템 설정 페이지로 이동하여 완료하세요")
 			}
 		}
 
 		// 检查VLM配置
 		if !kb.VLMConfig.Enabled || kb.VLMConfig.ModelID == "" {
 			logger.Error(ctx, "VLM model is not configured")
-			return nil, werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
+			return nil, werrors.NewBadRequestError("이미지 파일을 업로드하려면 VLM 모델을 설정해야 합니다")
 		}
 
 		logger.Info(ctx, "Image multimodal configuration validation passed")
@@ -253,7 +253,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	safeFilename, isValid := secutils.ValidateInput(fileName)
 	if !isValid {
 		logger.Errorf(ctx, "Invalid filename: %s", fileName)
-		return nil, werrors.NewValidationError("文件名包含非法字符")
+		return nil, werrors.NewValidationError("파일 이름에 유효하지 않은 문자가 포함되어 있습니다")
 	}
 
 	// Create knowledge record
@@ -503,20 +503,20 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
 	if payload == nil {
-		return nil, werrors.NewBadRequestError("请求内容不能为空")
+		return nil, werrors.NewBadRequestError("요청 내용은 비워둘 수 없습니다")
 	}
 
 	cleanContent := secutils.CleanMarkdown(payload.Content)
 	if strings.TrimSpace(cleanContent) == "" {
-		return nil, werrors.NewValidationError("内容不能为空")
+		return nil, werrors.NewValidationError("내용은 비워둘 수 없습니다")
 	}
 	if len([]rune(cleanContent)) > manualContentMaxLength {
-		return nil, werrors.NewValidationError(fmt.Sprintf("内容长度超出限制（最多%d个字符）", manualContentMaxLength))
+		return nil, werrors.NewValidationError(fmt.Sprintf("내용 길이가 제한을 초과했습니다 (최대 %d자)", manualContentMaxLength))
 	}
 
 	safeTitle, ok := secutils.ValidateInput(payload.Title)
 	if !ok {
-		return nil, werrors.NewValidationError("标题包含非法字符或超出长度限制")
+		return nil, werrors.NewValidationError("제목에 유효하지 않은 문자가 포함되어 있거나 길이 제한을 초과했습니다")
 	}
 
 	status := strings.ToLower(strings.TrimSpace(payload.Status))
@@ -524,7 +524,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		status = types.ManualKnowledgeStatusDraft
 	}
 	if status != types.ManualKnowledgeStatusDraft && status != types.ManualKnowledgeStatusPublish {
-		return nil, werrors.NewValidationError("状态仅支持 draft 或 publish")
+		return nil, werrors.NewValidationError("상태는 draft 또는 publish만 지원합니다")
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
@@ -599,7 +599,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		safePassage, isValid := secutils.ValidateInput(p)
 		if !isValid {
 			logger.Errorf(ctx, "Invalid passage content at index %d", i)
-			return nil, werrors.NewValidationError(fmt.Sprintf("段落 %d 包含非法内容", i+1))
+			return nil, werrors.NewValidationError(fmt.Sprintf("단락 %d에 유효하지 않은 내용이 포함되어 있습니다", i+1))
 		}
 		safePassages = append(safePassages, safePassage)
 	}
@@ -1307,7 +1307,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Check if there's enough storage quota available
 		if tenantInfo.StorageUsed+totalStorageSize > tenantInfo.StorageQuota {
 			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = "存储空间不足"
+			knowledge.ErrorMessage = "저장 공간이 부족합니다"
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
 			span.RecordError(errors.New("storage quota exceeded"))
@@ -1950,12 +1950,12 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	// Build context section
 	var contextSection string
 	if prevContent != "" || nextContent != "" {
-		contextSection = "## 上下文信息（仅供参考，帮助理解主要内容）\n"
+		contextSection = "## 문맥 정보 (참고용, 주요 내용 이해 도움)\n"
 		if prevContent != "" {
-			contextSection += fmt.Sprintf("【前文】%s\n", prevContent)
+			contextSection += fmt.Sprintf("【이전 글】%s\n", prevContent)
 		}
 		if nextContent != "" {
-			contextSection += fmt.Sprintf("【后文】%s\n", nextContent)
+			contextSection += fmt.Sprintf("【다음 글】%s\n", nextContent)
 		}
 		contextSection += "\n"
 	}
@@ -2003,32 +2003,32 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 }
 
 // Default prompt for question generation with context support
-const defaultQuestionGenerationPrompt = `你是一个专业的问题生成助手。你的任务是根据给定的【主要内容】生成用户可能会问的相关问题。
+const defaultQuestionGenerationPrompt = `당신은 전문적인 질문 생성 도우미입니다. 당신의 임무는 주어진 【주요 내용】을 바탕으로 사용자가 질문할 수 있는 관련 질문을 생성하는 것입니다.
 
 {{context}}
-## 主要内容（请基于此内容生成问题）
-文档名称：{{doc_name}}
-文档内容：
+## 주요 내용 (이 내용을 바탕으로 질문을 생성하세요)
+문서 이름: {{doc_name}}
+문서 내용:
 {{content}}
 
-## 核心要求
-- 生成的问题必须与【主要内容】直接相关
-- 问题中禁止使用任何代词或指代词（如"它"、"这个"、"该文档"、"本文"、"文中"、"其"等），必须用具体名称替代
-- 问题必须是完整独立的，脱离上下文也能被理解
-- 问题应该是用户在实际场景中可能会提出的自然问题
-- 问题应该多样化，覆盖内容的不同方面
-- 每个问题应该简洁明了，长度控制在30字以内
-- 生成的问题数量为 {{question_count}} 个
+## 핵심 요구사항
+- 생성된 질문은 반드시 【주요 내용】과 직접적으로 관련되어야 합니다.
+- 질문에는 대명사나 지시대명사(예: "그것", "이것", "해당 문서", "본문", "글에서", "그" 등)를 사용해서는 안 되며, 반드시 구체적인 명사로 대체해야 합니다.
+- 질문은 완전하고 독립적이어야 하며, 문맥을 벗어나서도 이해될 수 있어야 합니다.
+- 질문은 사용자가 실제 상황에서 자연스럽게 물어볼 수 있는 질문이어야 합니다.
+- 질문은 다양해야 하며, 내용의 다양한 측면을 포괄해야 합니다.
+- 각 질문은 간결하고 명확해야 하며, 길이는 30자 이내로 제한합니다.
+- 생성할 질문의 개수는 {{question_count}}개입니다.
 
-## 问题类型建议
-- 定义类：什么是...？...是什么？
-- 原因类：为什么...？...的原因是什么？
-- 方法类：如何...？怎样...？
-- 比较类：...和...有什么区别？
-- 应用类：...可以用于什么场景？
+## 질문 유형 제안
+- 정의형: ...란 무엇인가? ...은 무엇인가?
+- 원인형: 왜 ...인가? ...의 원인은 무엇인가?
+- 방법형: 어떻게 ...하는가? ...하는 방법은?
+- 비교형: ...와 ...의 차이점은 무엇인가?
+- 적용형: ...은 어떤 상황에서 사용할 수 있는가?
 
-## 输出格式
-直接输出问题列表，每行一个问题，不要有序号或其他前缀。`
+## 출력 형식
+질문 목록을 직접 출력하세요. 각 줄에 하나의 질문을 작성하며, 번호나 다른 접두사를 붙이지 마세요.`
 
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
@@ -2074,20 +2074,20 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start updating manual knowledge entry")
 	if payload == nil {
-		return nil, werrors.NewBadRequestError("请求内容不能为空")
+		return nil, werrors.NewBadRequestError("요청 내용은 비워둘 수 없습니다")
 	}
 
 	cleanContent := secutils.CleanMarkdown(payload.Content)
 	if strings.TrimSpace(cleanContent) == "" {
-		return nil, werrors.NewValidationError("内容不能为空")
+		return nil, werrors.NewValidationError("내용은 비워둘 수 없습니다")
 	}
 	if len([]rune(cleanContent)) > manualContentMaxLength {
-		return nil, werrors.NewValidationError(fmt.Sprintf("内容长度超出限制（最多%d个字符）", manualContentMaxLength))
+		return nil, werrors.NewValidationError(fmt.Sprintf("내용 길이가 제한을 초과했습니다 (최대 %d자)", manualContentMaxLength))
 	}
 
 	safeTitle, ok := secutils.ValidateInput(payload.Title)
 	if !ok {
-		return nil, werrors.NewValidationError("标题包含非法字符或超出长度限制")
+		return nil, werrors.NewValidationError("제목에 유효하지 않은 문자가 포함되어 있거나 길이 제한을 초과했습니다")
 	}
 
 	status := strings.ToLower(strings.TrimSpace(payload.Status))
@@ -2095,7 +2095,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		status = types.ManualKnowledgeStatusDraft
 	}
 	if status != types.ManualKnowledgeStatusDraft && status != types.ManualKnowledgeStatusPublish {
-		return nil, werrors.NewValidationError("状态仅支持 draft 或 publish")
+		return nil, werrors.NewValidationError("상태는 draft 또는 publish만 지원합니다")
 	}
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
@@ -2105,7 +2105,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, err
 	}
 	if !existing.IsManual() {
-		return nil, werrors.NewBadRequestError("仅支持手工知识的在线编辑")
+		return nil, werrors.NewBadRequestError("수동 지식의 온라인 편집만 지원합니다")
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
@@ -2763,7 +2763,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		Progress:    0,
 		Total:       len(payload.Entries),
 		Processed:   0,
-		Message:     "任务已创建，等待处理",
+		Message:     "작업이 생성되었습니다. 처리 대기 중",
 		CreatedAt:   time.Now().Unix(),
 		UpdatedAt:   time.Now().Unix(),
 	}
@@ -3211,7 +3211,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		actualProcessed += len(batch)
 		// 更新任务进度
 		progress := int(float64(actualProcessed) / float64(totalEntries) * 100)
-		if err := s.updateFAQImportProgressStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("正在处理第 %d/%d 条", actualProcessed, totalEntries), ""); err != nil {
+		if err := s.updateFAQImportProgressStatus(ctx, taskID, types.FAQImportStatusProcessing, progress, totalEntries, actualProcessed, fmt.Sprintf("%d/%d 항목 처리 중", actualProcessed, totalEntries), ""); err != nil {
 			logger.Errorf(ctx, "Failed to update task progress: %v", err)
 		}
 
@@ -3365,7 +3365,7 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 	kbID string, entryID string,
 ) (*types.FAQEntry, error) {
 	if entryID == "" {
-		return nil, werrors.NewBadRequestError("条目ID不能为空")
+		return nil, werrors.NewBadRequestError("항목 ID는 비워둘 수 없습니다")
 	}
 
 	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
@@ -3384,12 +3384,12 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 
 	// 验证chunk属于当前知识库
 	if chunk.KnowledgeBaseID != kb.ID || chunk.TenantID != tenantID {
-		return nil, werrors.NewNotFoundError("FAQ条目不存在")
+		return nil, werrors.NewNotFoundError("FAQ 항목이 존재하지 않습니다")
 	}
 
 	// 验证是FAQ类型
 	if chunk.ChunkType != types.ChunkTypeFAQ {
-		return nil, werrors.NewNotFoundError("FAQ条目不存在")
+		return nil, werrors.NewNotFoundError("FAQ 항목이 존재하지 않습니다")
 	}
 
 	// 转换为FAQEntry返回
@@ -3427,10 +3427,10 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return err
 	}
 	if chunk.KnowledgeBaseID != kb.ID {
-		return werrors.NewForbiddenError("无权操作该 FAQ 条目")
+		return werrors.NewForbiddenError("해당 FAQ 항목을 조작할 권한이 없습니다")
 	}
 	if chunk.ChunkType != types.ChunkTypeFAQ {
-		return werrors.NewBadRequestError("仅支持更新 FAQ 条目")
+		return werrors.NewBadRequestError("FAQ 항목 업데이트만 지원합니다")
 	}
 	meta, err := sanitizeFAQEntryPayload(payload)
 	if err != nil {
@@ -3811,7 +3811,7 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 		return err
 	}
 	if chunk.KnowledgeBaseID != kb.ID || chunk.ChunkType != types.ChunkTypeFAQ {
-		return werrors.NewBadRequestError("仅支持更新 FAQ 条目标签")
+		return werrors.NewBadRequestError("FAQ 항목 태그 업데이트만 지원합니다")
 	}
 
 	var resolvedTagID string
@@ -3821,7 +3821,7 @@ func (s *knowledgeService) UpdateFAQEntryTag(ctx context.Context, kbID string, e
 			return err
 		}
 		if tag.KnowledgeBaseID != kb.ID {
-			return werrors.NewBadRequestError("标签不属于当前知识库")
+			return werrors.NewBadRequestError("태그가 현재 지식베이스에 속하지 않습니다")
 		}
 		resolvedTagID = tag.ID
 	}
@@ -4174,7 +4174,7 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 	kbID string, entryIDs []string,
 ) error {
 	if len(entryIDs) == 0 {
-		return werrors.NewBadRequestError("请选择需要删除的 FAQ 条目")
+		return werrors.NewBadRequestError("삭제할 FAQ 항목을 선택하세요")
 	}
 	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
@@ -4193,7 +4193,7 @@ func (s *knowledgeService) DeleteFAQEntries(ctx context.Context,
 			return err
 		}
 		if chunk.KnowledgeBaseID != kb.ID || chunk.ChunkType != types.ChunkTypeFAQ {
-			return werrors.NewBadRequestError("包含无效的 FAQ 条目")
+			return werrors.NewBadRequestError("유효하지 않은 FAQ 항목이 포함되어 있습니다")
 		}
 		if err := s.chunkService.DeleteChunk(ctx, id); err != nil {
 			return err
@@ -4274,14 +4274,14 @@ func (s *knowledgeService) buildFAQCSV(chunks []*types.Chunk, tagMap map[string]
 
 	// Write CSV header (matching import example format)
 	headers := []string{
-		"分类(必填)",
-		"问题(必填)",
-		"相似问题(选填-多个用##分隔)",
-		"反例问题(选填-多个用##分隔)",
-		"机器人回答(必填-多个用##分隔)",
-		"是否全部回复(选填-默认FALSE)",
-		"是否停用(选填-默认FALSE)",
-		"是否禁止被推荐(选填-默认False 可被推荐)",
+		"분류(필수)",
+		"질문(필수)",
+		"유사 질문(선택-##로 구분)",
+		"반례 질문(선택-##로 구분)",
+		"로봇 답변(필수-##로 구분)",
+		"모든 답변 여부(선택-기본값 FALSE)",
+		"비활성화 여부(선택-기본값 FALSE)",
+		"추천 금지 여부(선택-기본값 False 추천 가능)",
 	}
 	buf.WriteString(strings.Join(headers, ","))
 	buf.WriteString("\n")
@@ -4338,7 +4338,7 @@ func boolToCSV(b bool) string {
 
 func (s *knowledgeService) validateFAQKnowledgeBase(ctx context.Context, kbID string) (*types.KnowledgeBase, error) {
 	if kbID == "" {
-		return nil, werrors.NewBadRequestError("知识库 ID 不能为空")
+		return nil, werrors.NewBadRequestError("지식베이스 ID는 비워둘 수 없습니다")
 	}
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -4346,7 +4346,7 @@ func (s *knowledgeService) validateFAQKnowledgeBase(ctx context.Context, kbID st
 	}
 	kb.EnsureDefaults()
 	if kb.Type != types.KnowledgeBaseTypeFAQ {
-		return nil, werrors.NewBadRequestError("仅 FAQ 知识库支持该操作")
+		return nil, werrors.NewBadRequestError("FAQ 지식베이스만 이 작업을 지원합니다")
 	}
 	return kb, nil
 }
@@ -4385,7 +4385,7 @@ func (s *knowledgeService) ensureFAQKnowledge(
 		KnowledgeBaseID:  kb.ID,
 		Type:             types.KnowledgeTypeFAQ,
 		Title:            fmt.Sprintf("%s - FAQ", kb.Name),
-		Description:      "FAQ 条目容器",
+		Description:      "FAQ 항목 컨테이너",
 		Source:           types.KnowledgeTypeFAQ,
 		ParseStatus:      "completed",
 		EnableStatus:     "enabled",
@@ -4589,7 +4589,7 @@ func (s *knowledgeService) resolveTagID(ctx context.Context, kbID string, payloa
 	}
 
 	// 如果提供了 tag_name，查找或创建标签
-	if payload.TagName != "" && payload.TagName != "未分类" {
+	if payload.TagName != "" && payload.TagName != "미분류" {
 		tag, err := s.tagService.FindOrCreateTagByName(ctx, kbID, payload.TagName)
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve tag by name '%s': %w", payload.TagName, err)
@@ -4609,7 +4609,7 @@ func sanitizeFAQEntryPayload(payload *types.FAQEntryPayload) (*types.FAQChunkMet
 		case types.AnswerStrategyAll, types.AnswerStrategyRandom:
 			answerStrategy = *payload.AnswerStrategy
 		default:
-			return nil, werrors.NewBadRequestError("answer_strategy 必须是 'all' 或 'random'")
+			return nil, werrors.NewBadRequestError("answer_strategy는 'all' 또는 'random'이어야 합니다")
 		}
 	}
 	meta := &types.FAQChunkMetadata{
@@ -4623,10 +4623,10 @@ func sanitizeFAQEntryPayload(payload *types.FAQEntryPayload) (*types.FAQChunkMet
 	}
 	meta.Normalize()
 	if meta.StandardQuestion == "" {
-		return nil, werrors.NewBadRequestError("标准问不能为空")
+		return nil, werrors.NewBadRequestError("표준 질문은 비워둘 수 없습니다")
 	}
 	if len(meta.Answers) == 0 {
-		return nil, werrors.NewBadRequestError("至少提供一个答案")
+		return nil, werrors.NewBadRequestError("최소 하나의 답변을 제공해야 합니다")
 	}
 	return meta, nil
 }
@@ -5460,7 +5460,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 更新任务状态为运行中
 	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusProcessing, 0,
-		originalTotalEntries, processedCount, "开始处理导入任务", ""); err != nil {
+		originalTotalEntries, processedCount, "가져오기 작업 처리 시작", ""); err != nil {
 		logger.Errorf(ctx, "Failed to update task status to running: %v", err)
 	}
 
@@ -5490,7 +5490,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 任务成功完成
 	logger.Infof(ctx, "FAQ import task completed: %s", payload.TaskID)
-	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusCompleted, 100, originalTotalEntries, originalTotalEntries, "导入完成", ""); err != nil {
+	if err := s.updateFAQImportProgressStatus(ctx, payload.TaskID, types.FAQImportStatusCompleted, 100, originalTotalEntries, originalTotalEntries, "가져오기 완료", ""); err != nil {
 		logger.Errorf(ctx, "Failed to update task status to success: %v", err)
 	}
 

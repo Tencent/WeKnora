@@ -4,10 +4,10 @@
             <img class="logo" src="@/assets/img/weknora.png" alt="">
         </div>
         
-        <!-- 租户选择器：仅在用户可切换租户时显示 -->
+        <!-- Tenant selector: only shown when user can switch tenants -->
         <TenantSelector v-if="canAccessAllTenants" />
         
-        <!-- 上半部分：知识库和对话 -->
+        <!-- Top part: Knowledge Base and Chat -->
         <div class="menu_top">
             <div v-if="showKbActions" class="kb-action-wrapper">
                 <div class="kb-action-label">{{ t('knowledgeBase.quickActions') }}</div>
@@ -184,7 +184,7 @@
         </div>
         
         
-        <!-- 下半部分：用户菜单 -->
+        <!-- Bottom part: User Menu -->
         <div class="menu_bottom">
             <UserMenu />
         </div>
@@ -235,40 +235,40 @@ const page_size = ref(30);
 const total = ref(0);
 const currentSecondpath = ref('');
 const submenuscrollContainer = ref(null);
-// 计算总页数
+// Calculate total pages
 const totalPages = computed(() => Math.ceil(total.value / page_size.value));
 const hasMore = computed(() => currentPage.value < totalPages.value);
 type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[] };
 const { menuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 
-// 是否可以访问所有租户
+// Whether user can access all tenants
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
 
-// 是否处于知识库详情页（不包括全局聊天）
+// Whether in knowledge base detail page (excluding global chat)
 const isInKnowledgeBase = computed<boolean>(() => {
     return route.name === 'knowledgeBaseDetail' || 
            route.name === 'kbCreatChat' || 
            route.name === 'knowledgeBaseSettings';
 });
 
-// 是否在知识库列表页面
+// Whether in knowledge base list page
 const isInKnowledgeBaseList = computed<boolean>(() => {
     return route.name === 'knowledgeBaseList';
 });
 
-// 是否在创建聊天页面
+// Whether in create chat page
 const isInCreatChat = computed<boolean>(() => {
     return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
 });
 
-// 是否在对话详情页
+// Whether in chat detail page
 const isInChatDetail = computed<boolean>(() => route.name === 'chat');
 
-// 是否在智能体列表页面
+// Whether in agent list page
 const isInAgentList = computed<boolean>(() => route.name === 'agentList');
 
-// 统一的菜单项激活状态判断
+// Unified menu item active state judgment
 const isMenuItemActive = (itemPath: string): boolean => {
     const currentRoute = route.name;
     
@@ -288,7 +288,7 @@ const isMenuItemActive = (itemPath: string): boolean => {
     }
 };
 
-// 统一的图标激活状态判断
+// Unified icon active state judgment
 const getIconActiveState = (itemPath: string) => {
     const currentRoute = route.name;
     
@@ -304,7 +304,7 @@ const getIconActiveState = (itemPath: string) => {
     };
 };
 
-// 分离上下两部分菜单
+// Separate top and bottom menus
 const topMenuItems = computed<MenuItem[]>(() => {
     return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
         item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'creatChat'
@@ -320,7 +320,7 @@ const bottomMenuItems = computed<MenuItem[]>(() => {
     });
 });
 
-// 当前知识库信息
+// Current knowledge base info
 const currentKbName = ref<string>('')
 const currentKbInfo = ref<any>(null)
 const docUploadInput = ref<HTMLInputElement | null>(null)
@@ -330,7 +330,7 @@ const selectedFaqCount = ref<number>(0)
 const selectedFaqEnabledCount = ref<number>(0)
 const selectedFaqDisabledCount = ref<number>(0)
 
-// 监听FAQ选中数量变化
+// Listen for FAQ selection count changes
 const handleFaqSelectionChanged = ((event: CustomEvent<{ count: number; enabledCount?: number; disabledCount?: number }>) => {
   const count = event.detail?.count || 0
   selectedFaqCount.value = count
@@ -351,7 +351,7 @@ const showFaqActions = computed(() => showKbActions.value && isInKnowledgeBase.v
 const showCreateKbAction = computed(() => showKbActions.value && (isInKnowledgeBaseList.value || isInCreatChat.value || isInChatDetail.value))
 const showCreateAgentAction = computed(() => showKbActions.value && isInAgentList.value)
 
-// 时间分组函数
+// Time grouping function
 const getTimeCategory = (dateStr: string): string => {
     if (!dateStr) return t('time.earlier');
     
@@ -380,7 +380,7 @@ const getTimeCategory = (dateStr: string): string => {
     }
 };
 
-// 按时间分组Session列表
+// Group session list by time
 const groupedSessions = computed(() => {
     const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'creatChat');
     if (!chatMenu || !chatMenu.children || chatMenu.children.length === 0) {
@@ -396,7 +396,7 @@ const groupedSessions = computed(() => {
         [t('time.earlier')]: []
     };
     
-    // 将sessions按时间分组
+    // Group sessions by time
     (chatMenu.children as any[]).forEach((session: any, index: number) => {
         const category = getTimeCategory(session.updated_at || session.created_at);
         groups[category].push({
@@ -405,7 +405,7 @@ const groupedSessions = computed(() => {
         });
     });
     
-    // 按顺序返回非空分组
+    // Return non-empty groups in order
     const orderedLabels = [t('time.today'), t('time.yesterday'), t('time.last7Days'), t('time.last30Days'), t('time.lastYear'), t('time.earlier')];
     return orderedLabels
         .filter(label => groups[label].length > 0)
@@ -432,12 +432,12 @@ const handleSessionMenuClick = (data: { value: string }, index: number, item: an
 const delCard = (index: number, item: any) => {
     delSession(item.id).then((res: any) => {
         if (res && (res as any).success) {
-            // 找到 'creatChat' 菜单项
+            // Find 'creatChat' menu item
             const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
             
             if (chatMenuItem && chatMenuItem.children) {
                 const children = chatMenuItem.children;
-                // 通过ID查找索引，比依赖传入的index更安全
+                // Find index by ID, safer than relying on passed index
                 const actualIndex = children.findIndex((s: any) => s.id === item.id);
                 
                 if (actualIndex !== -1) {
@@ -446,15 +446,15 @@ const delCard = (index: number, item: any) => {
             }
             
             if (item.id == route.params.chatid) {
-                // 删除当前会话后，跳转到全局创建聊天页面
+                // After deleting current session, jump to global create chat page
                 router.push('/platform/creatChat');
             }
-            // 更新总数
+            // Update total count
             if (total.value > 0) {
                 total.value--;
             }
         } else {
-            MessagePlugin.error("删除失败，请稍后再试!");
+            MessagePlugin.error("삭제 실패, 나중에 다시 시도해주세요!");
         }
     })
 }
@@ -465,13 +465,13 @@ const debounce = (fn: (...args: any[]) => void, delay: number) => {
         timer = setTimeout(() => fn(...args), delay)
     }
 }
-// 滚动处理
+// Scroll handling
 const checkScrollBottom = () => {
     const container = submenuscrollContainer.value
     if (!container || !container[0]) return
 
     const { scrollTop, scrollHeight, clientHeight } = container[0]
-    const isBottom = scrollHeight - (scrollTop + clientHeight) < 100 // 触底阈值
+    const isBottom = scrollHeight - (scrollTop + clientHeight) < 100 // Bottom threshold
     
     if (isBottom && hasMore.value && !loading.value) {
         currentPage.value++;
@@ -483,9 +483,9 @@ const getMessageList = async (isLoadMore = false) => {
     if (loading.value) return Promise.resolve();
     loading.value = true;
     
-    // 只有在首次加载或路由变化时才清空数组，滚动加载时不清空
+    // Clear array only on first load or route change, not on scroll load
     if (!isLoadMore) {
-        currentPage.value = 1; // 重置页码
+        currentPage.value = 1; // Reset page number
         usemenuStore.clearMenuArr();
     }
     
@@ -521,7 +521,7 @@ onMounted(async () => {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
     
-    // 初始化知识库信息
+    // Initialize knowledge base info
     const kbId = (route.params as any)?.kbId as string
     if (kbId && isInKnowledgeBase.value) {
         try {
@@ -536,10 +536,10 @@ onMounted(async () => {
         currentKbInfo.value = null
     }
     
-    // 加载对话列表
+    // Load session list
     getMessageList();
     
-    // 监听FAQ选中数量变化
+    // Listen for FAQ selection count changes
     window.addEventListener('faqSelectionChanged', handleFaqSelectionChanged)
 });
 
@@ -548,7 +548,7 @@ onUnmounted(() => {
 })
 
 watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
-    // 切换知识库时重置选中数量
+    // Reset selection count when switching knowledge base
     if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
         selectedFaqCount.value = 0
     }
@@ -560,23 +560,23 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
         currentSecondpath.value = "";
     }
     
-    // 只在必要时刷新对话列表，避免不必要的重新加载导致列表抖动
-    // 需要刷新的情况：
-    // 1. 创建新会话后（从 creatChat/kbCreatChat 跳转到 chat/:id）
-    // 2. 删除会话后已在 delCard 中处理，不需要在这里刷新
+    // Refresh session list only when necessary to avoid unnecessary reload causing list jitter
+    // Cases needing refresh:
+    // 1. After creating new session (jump from creatChat/kbCreatChat to chat/:id)
+    // 2. After deleting session, already handled in delCard, no need to refresh here
     const oldRouteNameStr = typeof oldvalue?.[0] === 'string' ? (oldvalue[0] as string) : (oldvalue?.[0] ? String(oldvalue[0]) : '')
     const isCreatingNewSession = (oldRouteNameStr === 'globalCreatChat' || oldRouteNameStr === 'kbCreatChat') && 
                                  nameStr !== 'globalCreatChat' && nameStr !== 'kbCreatChat';
     
-    // 只在创建新会话时才刷新列表
+    // Refresh list only when creating new session
     if (isCreatingNewSession) {
         getMessageList();
     }
     
-    // 路由变化时更新图标状态和知识库信息（不涉及对话列表）
+    // Update icon state and knowledge base info on route change (not involving session list)
     getIcon(nameStr);
     
-    // 如果切换了知识库，更新知识库名称但不重新加载对话列表
+    // If knowledge base switched, update knowledge base name but do not reload session list
     if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
         const kbId = (newvalue[1] as any)?.kbId as string;
         if (kbId && isInKnowledgeBase.value) {
@@ -597,37 +597,37 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
 let knowledgeIcon = ref('zhishiku-green.svg');
 let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
-let settingIcon = ref('setting.svg'); // 设置图标
-let agentIcon = ref('agent.svg'); // 智能体图标
+let settingIcon = ref('setting.svg'); // Setting icon
+let agentIcon = ref('agent.svg'); // Agent icon
 let pathPrefix = ref(route.name)
   const getIcon = (path: string) => {
-      // 根据当前路由状态更新所有图标
+      // Update all icons based on current route state
       const kbActiveState = getIconActiveState('knowledge-bases');
       const creatChatActiveState = getIconActiveState('creatChat');
       const settingsActiveState = getIconActiveState('settings');
       const agentsActiveState = route.name === 'agentList';
       
-      // 知识库图标：只在知识库页面显示绿色
+      // Knowledge base icon: show green only on knowledge base page
       knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
       
-      // 智能体图标：只在智能体页面显示绿色
+      // Agent icon: show green only on agent page
       agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
       
-      // 对话图标：只在对话创建页面显示绿色，在知识库页面显示灰色，其他情况显示默认
+      // Chat icon: show green only on chat create page, grey on knowledge base page, default otherwise
       prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 
                         kbActiveState.isKbActive ? 'prefixIcon-grey.svg' : 
                         'prefixIcon.svg';
       
-      // 设置图标：只在设置页面显示绿色
+      // Setting icon: show green only on setting page
       settingIcon.value = settingsActiveState.isSettingsActive ? 'setting-green.svg' : 'setting.svg';
       
-      // 退出图标：始终显示默认
+      // Logout icon: always show default
       logoutIcon.value = 'logout.svg';
 }
 getIcon(typeof route.name === 'string' ? route.name as string : (route.name ? String(route.name) : ''))
 const handleMenuClick = async (path: string) => {
     if (path === 'knowledge-bases') {
-        // 知识库菜单项：如果在知识库内部，跳转到当前知识库文件页；否则跳转到知识库列表
+        // Knowledge base menu item: if inside knowledge base, jump to current knowledge base file page; otherwise jump to knowledge base list
         const kbId = await getCurrentKbId()
         if (kbId) {
             router.push(`/platform/knowledge-bases/${kbId}`)
@@ -635,10 +635,10 @@ const handleMenuClick = async (path: string) => {
             router.push('/platform/knowledge-bases')
         }
     } else if (path === 'agents') {
-        // 智能体菜单项：跳转到智能体列表
+        // Agent menu item: jump to agent list
         router.push('/platform/agents')
     } else if (path === 'settings') {
-        // 设置菜单项：打开设置弹窗并跳转路由
+        // Setting menu item: open setting dialog and jump route
         uiStore.openSettings()
         router.push('/platform/settings')
     } else {
@@ -646,7 +646,7 @@ const handleMenuClick = async (path: string) => {
     }
 }
 
-// 处理退出登录确认
+// Handle logout confirmation
 const handleLogout = () => {
     gotopage('logout')
 }
@@ -661,27 +661,27 @@ const getCurrentKbId = async (): Promise<string | null> => {
 
 const gotopage = async (path: string) => {
     pathPrefix.value = path;
-    // 处理退出登录
+    // Handle logout
     if (path === 'logout') {
         try {
-            // 调用后端API注销
+            // Call backend API to logout
             await logoutApi();
         } catch (error) {
-            // 即使API调用失败，也继续执行本地清理
+            // Continue local cleanup even if API call fails
             console.error('注销API调用失败:', error);
         }
-        // 清理所有状态和本地存储
+        // Clear all states and local storage
         authStore.logout();
-        MessagePlugin.success('已退出登录');
+        MessagePlugin.success('로그아웃되었습니다');
         router.push('/login');
         return;
     } else {
         if (path === 'creatChat') {
-            // 如果在知识库详情页，跳转到全局对话创建页
+            // If in knowledge base detail page, jump to global create chat page
             if (isInKnowledgeBase.value) {
                 router.push('/platform/creatChat')
             } else {
-                // 如果不在知识库内，进入对话创建页
+                // If not in knowledge base, enter create chat page
                 router.push(`/platform/creatChat`)
             }
         } else {
@@ -775,14 +775,14 @@ const handleDocFileChange = async (event: Event) => {
         return
     }
 
-    // 过滤有效文件
+    // Filter valid files
     const validFiles: File[] = []
     let invalidCount = 0
     const isSingleFile = files.length === 1
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i]
-        // 单文件时显示错误，多文件时静默过滤
+        // Show error for single file, silent filter for multiple files
         if (kbFileTypeVerification(file, !isSingleFile)) {
             invalidCount++
         } else {
@@ -790,30 +790,30 @@ const handleDocFileChange = async (event: Event) => {
         }
     }
 
-    // 如果没有有效文件，多文件时显示汇总提示
+    // If no valid files, show summary hint for multiple files
     if (validFiles.length === 0) {
         if (!isSingleFile && invalidCount > 0) {
             MessagePlugin.error(t('knowledgeBase.noValidFilesSelected'))
         }
-        // 单文件的错误已经在 kbFileTypeVerification 中显示了
+        // Single file error already shown in kbFileTypeVerification
         input.value = ''
         return
     }
 
-    // 批量上传
+    // Batch upload
     let successCount = 0
     let failCount = 0
     const totalCount = validFiles.length
     const failedFiles: Array<{ name: string; reason: string }> = []
 
-    // 为每个文件创建上传任务并发送事件通知
+    // Create upload task for each file and send event notification
     const uploadPromises = validFiles.map(async (file) => {
         const uploadId = `${file.name}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         let progress = 0
         let status: 'uploading' | 'success' | 'error' = 'uploading'
         let error: string | undefined
 
-        // 发送开始上传事件
+        // Send start upload event
         window.dispatchEvent(new CustomEvent('knowledgeFileUploadStart', {
             detail: { 
                 kbId, 
@@ -829,7 +829,7 @@ const handleDocFileChange = async (event: Event) => {
                 (progressEvent: any) => {
                     if (progressEvent.total) {
                         progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-                        // 发送进度更新事件
+                        // Send progress update event
                         window.dispatchEvent(new CustomEvent('knowledgeFileUploadProgress', {
                             detail: { 
                                 kbId, 
@@ -853,12 +853,12 @@ const handleDocFileChange = async (event: Event) => {
             error = errorReason
             failedFiles.push({ name: file.name, reason: errorReason })
 
-            // 只在单文件上传时显示详细错误
+            // Show detailed error only for single file upload
             if (totalCount === 1) {
                 MessagePlugin.error(errorReason)
             }
         } finally {
-            // 发送上传完成事件
+            // Send upload complete event
             window.dispatchEvent(new CustomEvent('knowledgeFileUploadComplete', {
                 detail: { 
                     kbId, 
@@ -871,10 +871,10 @@ const handleDocFileChange = async (event: Event) => {
         }
     })
 
-    // 等待所有上传完成
+    // Wait for all uploads to complete
     await Promise.allSettled(uploadPromises)
 
-    // 显示上传结果
+    // Show upload result
     if (successCount > 0) {
         window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
             detail: { kbId }
@@ -885,7 +885,7 @@ const handleDocFileChange = async (event: Event) => {
         if (successCount === 1) {
             MessagePlugin.success(t('knowledgeBase.uploadSuccess'))
         }
-        // 单文件失败时已经在上面显示了详细错误
+        // Single file failure already shown detailed error above
     } else {
         if (failCount === 0) {
             MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }))
@@ -950,10 +950,10 @@ const handleDocFolderChange = async (event: Event) => {
         return
     }
 
-    // 检查是否启用了VLM
+    // Check if VLM is enabled
     const vlmEnabled = currentKbInfo.value?.vlm_config?.enabled || false
 
-    // 过滤有效文件（文件夹上传始终使用静默模式）
+    // Filter valid files (folder upload always uses silent mode)
     const validFiles: File[] = []
     let invalidCount = 0
     let hiddenFileCount = 0
@@ -963,8 +963,8 @@ const handleDocFolderChange = async (event: Event) => {
         const file = files[i]
         const relativePath = (file as any).webkitRelativePath || file.name
         
-        // 1. 过滤隐藏文件和隐藏文件夹
-        // 检查路径中是否包含以 . 开头的文件或文件夹
+        // 1. Filter hidden files and hidden folders
+        // Check if path contains file or folder starting with .
         const pathParts = relativePath.split('/')
         const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'))
         if (hasHiddenComponent) {
@@ -972,7 +972,7 @@ const handleDocFolderChange = async (event: Event) => {
             continue
         }
         
-        // 2. 如果未启用VLM，过滤图片文件
+        // 2. If VLM is not enabled, filter image files
         if (!vlmEnabled) {
             const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase()
             const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
@@ -982,7 +982,7 @@ const handleDocFolderChange = async (event: Event) => {
             }
         }
         
-        // 3. 文件类型验证（文件夹上传时始终静默过滤）
+        // 3. File type verification (folder upload always uses silent filter)
         if (kbFileTypeVerification(file, true)) {
             invalidCount++
         } else {
@@ -990,7 +990,7 @@ const handleDocFolderChange = async (event: Event) => {
         }
     }
 
-    // 如果没有有效文件，直接返回
+    // If no valid files, return directly
     if (validFiles.length === 0) {
         const totalFiltered = invalidCount + hiddenFileCount + imageFilteredCount
         if (totalFiltered > 0) {
@@ -1012,7 +1012,7 @@ const handleDocFolderChange = async (event: Event) => {
         return
     }
 
-    // 显示过滤后的上传提示
+    // Show filtered upload hint
     const totalCount = validFiles.length
     const totalFiltered = invalidCount + hiddenFileCount + imageFilteredCount
     if (totalFiltered > 0) {
@@ -1036,13 +1036,13 @@ const handleDocFolderChange = async (event: Event) => {
         MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: totalCount }))
     }
 
-    // 批量上传文件夹内容
+    // Batch upload folder content
     let successCount = 0
     let failCount = 0
     const failedFiles: Array<{ name: string; reason: string }> = []
 
     for (const file of validFiles) {
-        // 获取文件的相对路径(webkitRelativePath)，用于保留子目录结构
+        // Get file relative path (webkitRelativePath) to preserve subdirectory structure
         const relativePath = (file as any).webkitRelativePath
         let fileName = file.name
         if (relativePath) {
@@ -1232,7 +1232,7 @@ const faqBatchActionOptions = computed(() => {
     }
   ]
   
-  // 根据选中条目的状态显示批量启用或禁用
+  // Show batch enable or disable based on selected entries status
   if (selectedFaqDisabledCount.value > 0) {
     options.push({
       content: `${t('knowledgeEditor.faq.batchEnable')} (${selectedFaqDisabledCount.value})`,
@@ -1264,7 +1264,7 @@ const handleFaqBatchActionFromMenu = async (data: { value: string }) => {
     return
   }
   if (selectedFaqCount.value === 0) {
-    MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst') || '请先选中要操作的FAQ条目')
+    MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst') || '먼저 작업할 FAQ 항목을 선택하세요')
     return
   }
   dispatchFaqMenuAction(data.value as 'batchTag' | 'batchEnable' | 'batchDisable' | 'batchDelete', kbId)
@@ -1275,7 +1275,7 @@ const handleCreateKnowledgeBase = () => {
 }
 
 const handleCreateAgent = () => {
-    // 触发创建智能体事件，由 AgentList 页面监听处理
+    // Trigger create agent event, handled by AgentList page
     window.dispatchEvent(new CustomEvent('openAgentEditor', {
         detail: { mode: 'create' }
     }))
@@ -1663,7 +1663,7 @@ const handleCreateAgent = () => {
     }
 }
 
-/* 知识库下拉菜单样式 */
+/* Knowledge base dropdown menu style */
 .kb-dropdown-icon {
     margin-left: auto;
     color: #666;
@@ -1768,8 +1768,8 @@ const handleCreateAgent = () => {
 }
 </style>
 <style lang="less">
-// 上传操作下拉菜单样式 - 全局样式（因为 TDesign 的下拉菜单挂载到 body 上）
-// 使用更具体的选择器来匹配上传操作下拉菜单
+// Upload action dropdown menu style - Global style (because TDesign dropdown mounts on body)
+// Use more specific selector to match upload action dropdown menu
 .t-popup[data-popper-placement^="right"] {
     .t-popup__content {
         .t-dropdown__menu {
@@ -1808,7 +1808,7 @@ const handleCreateAgent = () => {
     }
 }
 
-// 退出登录确认框样式
+// Logout confirmation box style
 :deep(.t-popconfirm) {
     .t-popconfirm__content {
         background: #fff;

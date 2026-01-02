@@ -408,22 +408,22 @@ class BaseParser(ABC):
     def _split_into_units(self, text: str) -> List[str]:
         """
         Args:
-            text: 文本内容
+            text: 텍스트 내용
 
         Returns:
-            基本单元的列表
+            기본 단위 목록
         """
         logger.info(f"Splitting text into basic units, text length: {len(text)}")
 
-        # 定义所有需要作为整体保护的结构模式 ---
+        # 전체적으로 보호해야 하는 모든 구조 패턴 정의 ---
         table_pattern = r"(?m)(^\|.*\|[ \t]*\r?\n(?:[ \t]*\r?\n)?^\|\s*:?--+.*\r?\n(?:^\|.*\|\r?\n?)*)"
 
-        # 其他需要保护的结构（代码块、公式块、行内元素）
+        # 기타 보호해야 하는 구조 (코드 블록, 수식 블록, 인라인 요소)
         code_block_pattern = r"```[\s\S]*?```"
         math_block_pattern = r"\$\$[\s\S]*?\$\$"
         inline_pattern = r"!\[.*?\]\(.*?\)|\[.*?\]\(.*?\)"
 
-        # 查找所有受保护结构的位置 ---
+        # 보호된 모든 구조의 위치 찾기 ---
         protected_ranges = []
         for pattern in [
             table_pattern,
@@ -432,29 +432,29 @@ class BaseParser(ABC):
             inline_pattern,
         ]:
             for match in re.finditer(pattern, text):
-                # 确保匹配到的不是空字符串，避免无效范围
+                # 일치하는 항목이 빈 문자열이 아닌지 확인하여 유효하지 않은 범위 방지
                 if match.group(0).strip():
                     protected_ranges.append((match.start(), match.end()))
 
-        # 按起始位置排序
+        # 시작 위치별로 정렬
         protected_ranges.sort(key=lambda x: x[0])
         logger.info(
             f"Found {len(protected_ranges)} protected structures "
             "(tables, code, formulas, images, links)."
         )
 
-        # 合并可能重叠的保护范围 ---
-        # 确保我们有一组不相交的、需要保护的文本块
+        # 겹칠 수 있는 보호 범위 병합 ---
+        # 분리된 보호 텍스트 블록 세트가 있는지 확인
         if protected_ranges:
             merged_ranges = []
             current_start, current_end = protected_ranges[0]
 
             for next_start, next_end in protected_ranges[1:]:
                 if next_start < current_end:
-                    # 如果下一个范围与当前范围重叠，则合并它们
+                    # 다음 범위가 현재 범위와 겹치면 병합
                     current_end = max(current_end, next_end)
                 else:
-                    # 如果不重叠，则完成当前范围并开始一个新的范围
+                    # 겹치지 않으면 현재 범위를 완료하고 새 범위 시작
                     merged_ranges.append((current_start, current_end))
                     current_start, current_end = next_start, next_end
 
@@ -464,32 +464,32 @@ class BaseParser(ABC):
                 f"After overlaps, {len(protected_ranges)} protected ranges remain."
             )
 
-        # 根据保护范围和分隔符来分割文本 ---
+        # 보호 범위 및 구분 기호를 기반으로 텍스트 분할 ---
         units = []
         last_end = 0
 
-        # 定义分隔符的正则表达式，通过加括号来保留分隔符本身
+        # 구분 기호 정규식 정의, 구분 기호 자체를 유지하기 위해 괄호 추가
         separator_pattern = f"({'|'.join(re.escape(s) for s in self.separators)})"
 
         for start, end in protected_ranges:
-            # a. 处理受保护范围之前的文本
+            # a. 보호된 범위 이전의 텍스트 처리
             if start > last_end:
                 pre_text = text[last_end:start]
-                # 对这部分非保护文本进行分割，并保留分隔符
+                # 구분 기호를 유지하면서 이 비보호 부분 분할
                 segments = re.split(separator_pattern, pre_text)
-                units.extend([s for s in segments if s])  # 添加所有非空部分
+                units.extend([s for s in segments if s])  # 비어 있지 않은 모든 부분 추가
 
-            # b. 将整个受保护的块（例如，一个完整的表格）作为一个不可分割的单元添加
+            # b. 전체 보호 블록(예: 전체 테이블)을 분할할 수 없는 단위로 추가
             protected_text = text[start:end]
             units.append(protected_text)
 
             last_end = end
 
-        # c. 处理最后一个受保护范围之后的文本
+        # c. 마지막 보호 범위 이후의 텍스트 처리
         if last_end < len(text):
             post_text = text[last_end:]
             segments = re.split(separator_pattern, post_text)
-            units.extend([s for s in segments if s])  # 添加所有非空部分
+            units.extend([s for s in segments if s])  # 비어 있지 않은 모든 부분 추가
 
         logger.info(f"Text splitting complete, created {len(units)} final basic units.")
         return units

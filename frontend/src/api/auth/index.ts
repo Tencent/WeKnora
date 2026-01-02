@@ -1,6 +1,6 @@
 import { post, get, put } from '@/utils/request'
 
-// 用户登录接口
+// User login interface
 export interface LoginRequest {
   email: string
   password: string
@@ -36,7 +36,7 @@ export interface LoginResponse {
   refresh_token?: string
 }
 
-// 用户注册接口
+// User registration interface
 export interface RegisterRequest {
   username: string
   email: string
@@ -60,7 +60,7 @@ export interface RegisterResponse {
   }
 }
 
-// 用户信息接口
+// User information interface
 export interface UserInfo {
   id: string
   username: string
@@ -72,7 +72,7 @@ export interface UserInfo {
   updated_at: string
 }
 
-// 租户信息接口
+// Tenant information interface
 export interface TenantInfo {
   id: string
   name: string
@@ -88,7 +88,7 @@ export interface TenantInfo {
   knowledge_bases?: KnowledgeBaseInfo[]
 }
 
-// 知识库信息接口
+// Knowledge base information interface
 export interface KnowledgeBaseInfo {
   id: string
   name: string
@@ -100,7 +100,7 @@ export interface KnowledgeBaseInfo {
   chunk_count?: number
 }
 
-// 模型信息接口
+// Model information interface
 export interface ModelInfo {
   id: string
   name: string
@@ -113,7 +113,7 @@ export interface ModelInfo {
 }
 
 /**
- * 用户登录
+ * User login
  */
 export async function login(data: LoginRequest): Promise<LoginResponse> {
   try {
@@ -122,13 +122,13 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '登录失败'
+      message: error.message || '로그인 실패'
     }
   }
 }
 
 /**
- * 用户注册
+ * User registration
  */
 export async function register(data: RegisterRequest): Promise<RegisterResponse> {
   try {
@@ -137,13 +137,13 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '注册失败'
+      message: error.message || '회원가입 실패'
     }
   }
 }
 
 /**
- * 获取当前用户信息
+ * Get current user information
  */
 export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant: TenantInfo }; message?: string }> {
   try {
@@ -152,13 +152,13 @@ export async function getCurrentUser(): Promise<{ success: boolean; data?: { use
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '获取用户信息失败'
+      message: error.message || '사용자 정보 가져오기 실패'
     }
   }
 }
 
 /**
- * 获取当前租户信息
+ * Get current tenant information
  */
 export async function getCurrentTenant(): Promise<{ success: boolean; data?: TenantInfo; message?: string }> {
   try {
@@ -167,13 +167,13 @@ export async function getCurrentTenant(): Promise<{ success: boolean; data?: Ten
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '获取租户信息失败'
+      message: error.message || '테넌트 정보 가져오기 실패'
     }
   }
 }
 
 /**
- * 刷新Token
+ * Refresh Token
  */
 export async function refreshToken(refreshToken: string): Promise<{ success: boolean; data?: { token: string; refreshToken: string }; message?: string }> {
   try {
@@ -190,21 +190,21 @@ export async function refreshToken(refreshToken: string): Promise<{ success: boo
       }
     }
 
-    // 其他情况直接返回原始消息
+    // Other cases return original message directly
     return {
       success: false,
-      message: response?.message || '刷新Token失败'
+      message: response?.message || '토큰 갱신 실패'
     }
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '刷新Token失败'
+      message: error.message || '토큰 갱신 실패'
     }
   }
 }
 
 /**
- * 用户登出
+ * User logout
  */
 export async function logout(): Promise<{ success: boolean; message?: string }> {
   try {
@@ -215,13 +215,13 @@ export async function logout(): Promise<{ success: boolean; message?: string }> 
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '登出失败'
+      message: error.message || '로그아웃 실패'
     }
   }
 }
 
 /**
- * 验证Token有效性
+ * Validate Token
  */
 export async function validateToken(): Promise<{ success: boolean; valid?: boolean; message?: string }> {
   try {
@@ -231,11 +231,7 @@ export async function validateToken(): Promise<{ success: boolean; valid?: boole
     return {
       success: false,
       valid: false,
-      message: error.message || 'Token验证失败'
+      message: error.message || '토큰 검증 실패'
     }
   }
 }
-
-
-
-

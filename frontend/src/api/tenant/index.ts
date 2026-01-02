@@ -1,6 +1,6 @@
 import { get } from '@/utils/request'
 
-// 租户信息接口
+// Tenant information interface
 export interface TenantInfo {
   id: number
   name: string
@@ -14,7 +14,7 @@ export interface TenantInfo {
   updated_at: string
 }
 
-// 搜索租户参数
+// Search tenants parameters
 export interface SearchTenantsParams {
   keyword?: string
   tenant_id?: number
@@ -22,7 +22,7 @@ export interface SearchTenantsParams {
   page_size?: number
 }
 
-// 搜索租户响应
+// Search tenants response
 export interface SearchTenantsResponse {
   success: boolean
   data?: {
@@ -35,8 +35,8 @@ export interface SearchTenantsResponse {
 }
 
 /**
- * 获取所有租户列表（需要跨租户访问权限）
- * @deprecated 建议使用 searchTenants 代替，支持分页和搜索
+ * Get all tenants list (requires cross-tenant access permission)
+ * @deprecated Recommend using searchTenants instead, supports pagination and search
  */
 export async function listAllTenants(): Promise<{ success: boolean; data?: { items: TenantInfo[] }; message?: string }> {
   try {
@@ -45,13 +45,13 @@ export async function listAllTenants(): Promise<{ success: boolean; data?: { ite
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '获取租户列表失败'
+      message: error.message || '테넌트 목록 가져오기 실패'
     }
   }
 }
 
 /**
- * 搜索租户（支持分页、关键词搜索和租户ID过滤）
+ * Search tenants (supports pagination, keyword search, and tenant ID filtering)
  */
 export async function searchTenants(params: SearchTenantsParams = {}): Promise<SearchTenantsResponse> {
   try {
@@ -76,8 +76,7 @@ export async function searchTenants(params: SearchTenantsParams = {}): Promise<S
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '搜索租户失败'
+      message: error.message || '테넌트 검색 실패'
     }
   }
 }
-

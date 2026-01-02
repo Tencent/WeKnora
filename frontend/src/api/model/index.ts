@@ -1,6 +1,6 @@
 import { get, post, put, del } from '../../utils/request';
 
-// 模型类型定义
+// Model type definition
 export interface ModelConfig {
   id?: string;
   tenant_id?: number;
@@ -16,8 +16,8 @@ export interface ModelConfig {
       dimension?: number;
       truncate_prompt_tokens?: number;
     };
-    interface_type?: 'ollama' | 'openai'; // VLLM专用
-    parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")
+    interface_type?: 'ollama' | 'openai'; // VLLM specific
+    parameter_size?: string; // Ollama model parameter size (e.g., "7B", "13B", "70B")
     extra_config?: Record<string, string>; // Provider-specific configuration
   };
   is_default?: boolean;
@@ -28,7 +28,7 @@ export interface ModelConfig {
   deleted_at?: string | null;
 }
 
-// 创建模型
+// Create model
 export function createModel(data: ModelConfig): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {
     post('/api/v1/models', data)
@@ -36,17 +36,17 @@ export function createModel(data: ModelConfig): Promise<ModelConfig> {
         if (response.success && response.data) {
           resolve(response.data);
         } else {
-          reject(new Error(response.message || '创建模型失败'));
+          reject(new Error(response.message || '모델 생성 실패'));
         }
       })
       .catch((error: any) => {
-        console.error('创建模型失败:', error);
+        console.error('모델 생성 실패:', error);
         reject(error);
       });
   });
 }
 
-// 获取模型列表
+// Get model list
 export function listModels(type?: string): Promise<ModelConfig[]> {
   return new Promise((resolve, reject) => {
     const url = `/api/v1/models`;
@@ -62,13 +62,13 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
         }
       })
       .catch((error: any) => {
-        console.error('获取模型列表失败:', error);
+        console.error('모델 목록 가져오기 실패:', error);
         resolve([]);
       });
   });
 }
 
-// 获取单个模型
+// Get single model
 export function getModel(id: string): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {
     get(`/api/v1/models/${id}`)
@@ -76,17 +76,17 @@ export function getModel(id: string): Promise<ModelConfig> {
         if (response.success && response.data) {
           resolve(response.data);
         } else {
-          reject(new Error(response.message || '获取模型失败'));
+          reject(new Error(response.message || '모델 가져오기 실패'));
         }
       })
       .catch((error: any) => {
-        console.error('获取模型失败:', error);
+        console.error('모델 가져오기 실패:', error);
         reject(error);
       });
   });
 }
 
-// 更新模型
+// Update model
 export function updateModel(id: string, data: Partial<ModelConfig>): Promise<ModelConfig> {
   return new Promise((resolve, reject) => {
     put(`/api/v1/models/${id}`, data)
@@ -94,17 +94,17 @@ export function updateModel(id: string, data: Partial<ModelConfig>): Promise<Mod
         if (response.success && response.data) {
           resolve(response.data);
         } else {
-          reject(new Error(response.message || '更新模型失败'));
+          reject(new Error(response.message || '모델 업데이트 실패'));
         }
       })
       .catch((error: any) => {
-        console.error('更新模型失败:', error);
+        console.error('모델 업데이트 실패:', error);
         reject(error);
       });
   });
 }
 
-// 删除模型
+// Delete model
 export function deleteModel(id: string): Promise<void> {
   return new Promise((resolve, reject) => {
     del(`/api/v1/models/${id}`)
@@ -112,13 +112,12 @@ export function deleteModel(id: string): Promise<void> {
         if (response.success) {
           resolve();
         } else {
-          reject(new Error(response.message || '删除模型失败'));
+          reject(new Error(response.message || '모델 삭제 실패'));
         }
       })
       .catch((error: any) => {
-        console.error('删除模型失败:', error);
+        console.error('모델 삭제 실패:', error);
         reject(error);
       });
   });
 }
-

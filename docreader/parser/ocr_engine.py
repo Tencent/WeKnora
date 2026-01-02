@@ -53,10 +53,10 @@ class PaddleOCRBackend(OCRBackend):
             paddle.device.set_device("cpu")
 
             # Try to detect if CPU supports AVX instruction set
-            # 尝试检测CPU是否支持AVX指令集
+            # CPU가 AVX 명령어 세트를 지원하는지 감지 시도
             try:
                 # Detect if CPU supports AVX
-                # 检测CPU是否支持AVX
+                # CPU가 AVX를 지원하는지 감지
                 if platform.system() == "Linux":
                     try:
                         result = subprocess.run(
@@ -72,7 +72,7 @@ class PaddleOCRBackend(OCRBackend):
                                 "using compatibility mode"
                             )
                             # Further restrict instruction set usage
-                            # 进一步限制指令集使用
+                            # 명령어 세트 사용 추가 제한
                             os.environ["FLAGS_use_avx2"] = "0"
                             os.environ["FLAGS_use_avx"] = "1"
                     except (
@@ -99,9 +99,9 @@ class PaddleOCRBackend(OCRBackend):
                 "use_gpu": False,
                 "text_det_limit_type": "max",
                 "text_det_limit_side_len": 960,
-                "use_doc_orientation_classify": True,  # Enable document orientation classification / 启用文档方向分类
+                "use_doc_orientation_classify": True,  # Enable document orientation classification / 문서 방향 분류 활성화
                 "use_doc_unwarping": False,
-                "use_textline_orientation": True,  # Enable text line orientation detection / 启用文本行方向检测
+                "use_textline_orientation": True,  # Enable text line orientation detection / 텍스트 라인 방향 감지 활성화
                 "text_recognition_model_name": "PP-OCRv4_server_rec",
                 "text_detection_model_name": "PP-OCRv4_server_det",
                 "text_det_thresh": 0.3,
@@ -223,30 +223,30 @@ class NanonetsOCRBackend(OCRBackend):
         self.temperature = 0.0
         self.max_tokens = 15000
         # Prompt for OCR text extraction with specific formatting requirements
-        self.prompt = """## 任务说明
+        self.prompt = """## 작업 설명
 
-请从上传的文档中提取文字内容，严格按自然阅读顺序（从上到下，从左到右）输出，并遵循以下格式规范。
+업로드된 문서에서 텍스트 내용을 추출하고, 자연스러운 읽기 순서(위에서 아래로, 왼쪽에서 오른쪽)를 엄격히 준수하며 다음 형식 사양을 따르십시오.
 
-### 1. **文本处理**
+### 1. **텍스트 처리**
 
-* 按正常阅读顺序提取文字，语句流畅自然。
+* 정상적인 읽기 순서에 따라 텍스트를 추출하고 문장이 자연스럽고 매끄럽게 이어지도록 합니다.
 
-### 2. **表格**
+### 2. **표**
 
-* 所有表格统一转换为 **Markdown 表格格式**。
-* 内容保持清晰、对齐整齐，便于阅读。
+* 모든 표는 **Markdown 표 형식**으로 통일하여 변환합니다.
+* 내용이 명확하고 정렬이 잘 되어 있어 읽기 편하도록 유지합니다.
 
-### 3. **公式**
+### 3. **수식**
 
-* 所有公式转换为 **LaTeX 格式**，使用 `$$公式$$` 包裹。
+* 모든 수식은 **LaTeX 형식**으로 변환하고 `$$수식$$`으로 감쌉니다.
 
-### 4. **图片**
+### 4. **이미지**
 
-* 忽略图片信息
+* 이미지 정보는 무시합니다.
 
-### 5. **链接**
+### 5. **링크**
 
-* 不要猜测或补全不确定的链接地址。
+* 불확실한 링크 주소를 추측하거나 완성하지 마십시오.
 """
 
     def predict(self, image: Union[str, bytes, Image.Image]) -> str:

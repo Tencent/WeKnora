@@ -1,25 +1,25 @@
-# 使用 uv 运行 WeKnora MCP 服务器
+# uv를 사용하여 WeKnora MCP 서버 실행
 
-> 更推荐使用`uv`来运行基于python的MCP服务。
+> Python 기반 MCP 서비스를 실행하려면 `uv`를 사용하는 것이 좋습니다.
 
-## 1. 安装 uv
+## 1. uv 설치
 
 ```bash
 # macOS/Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 或使用 Homebrew (macOS)
+# 또는 Homebrew 사용 (macOS)
 brew install uv
 
 # Windows
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-## 2. MCP 客户端配置
+## 2. MCP 클라이언트 구성
 
-### Claude Desktop 配置
+### Claude Desktop 구성
 
-在 Claude Desktop 设置中添加:
+Claude Desktop 설정에 다음을 추가합니다:
 
 ```json
 {
@@ -41,33 +41,9 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 }
 ```
 
-### Cursor 配置
+### Cursor 구성
 
-在 Cursor 中，编辑 MCP 配置文件 (通常在 `~/.cursor/mcp-config.json`):
-
-```json
-{
-  "mcpServers": {
-    "weknora": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "/path/WeKnora/mcp-server",
-        "run",
-        "run_server.py"
-      ],
-      "env": {
-        "WEKNORA_API_KEY": "your_api_key_here",
-        "WEKNORA_BASE_URL": "http://localhost:8080/api/v1"
-      }
-    }
-  }
-}
-```
-
-### KiloCode 配置
-
-对于 KiloCode 或其他支持 MCP 的编辑器，配置如下:
+Cursor에서 MCP 구성 파일(일반적으로 `~/.cursor/mcp-config.json`)을 편집합니다:
 
 ```json
 {
@@ -89,9 +65,33 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 }
 ```
 
-### 其他 MCP 客户端
+### KiloCode 구성
 
-对于一般 MCP 客户端配置:
+KiloCode 또는 MCP를 지원하는 다른 편집기의 경우 다음과 같이 구성합니다:
+
+```json
+{
+  "mcpServers": {
+    "weknora": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/WeKnora/mcp-server",
+        "run",
+        "run_server.py"
+      ],
+      "env": {
+        "WEKNORA_API_KEY": "your_api_key_here",
+        "WEKNORA_BASE_URL": "http://localhost:8080/api/v1"
+      }
+    }
+  }
+}
+```
+
+### 기타 MCP 클라이언트
+
+일반적인 MCP 클라이언트 구성:
 
 ```json
 {

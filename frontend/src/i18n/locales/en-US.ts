@@ -1183,7 +1183,7 @@ export default {
       appendMode: 'Append',
       replaceMode: 'Replace existing entries',
       fileLabel: 'Select File',
-      fileTip: 'Supports JSON / CSV / Excel. CSV/Excel headers: 分类(必填), 问题(必填), 相似问题(选填-多个用##分隔), 反例问题(选填-多个用##分隔), 机器人回答(必填-多个用##分隔), 是否全部回复(选填-默认FALSE), 是否停用(选填-默认FALSE), 是否禁止被推荐(选填-默认False 可被推荐). Also supports old format: standard_question, answers, similar_questions, negative_questions',
+      fileTip: 'Supports JSON / CSV / Excel. CSV/Excel headers: 분류(필수), 질문(필수), 유사 질문(선택-##로 구분), 반례 질문(선택-##로 구분), 로봇 답변(필수-##로 구분), 모든 답변 여부(선택-기본값 FALSE), 비활성화 여부(선택-기본값 FALSE), 추천 금지 여부(선택-기본값 False 추천 가능). Also supports old format: standard_question, answers, similar_questions, negative_questions',
       clickToUpload: 'Click to upload file',
       dragDropTip: 'or drag and drop file here',
       importButton: 'Import FAQ',
@@ -1700,7 +1700,7 @@ export default {
     }
   },
   language: {
-    zhCN: '简体中文',
+    zhCN: 'Simplified Chinese',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',

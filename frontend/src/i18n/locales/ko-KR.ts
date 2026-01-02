@@ -986,7 +986,7 @@ export default {
     },
   },
   language: {
-    zhCN: "简体中文",
+    zhCN: "중국어 간체",
     enUS: "English",
     ruRU: "Русский",
     koKR: "한국어",
@@ -1879,6 +1879,95 @@ export default {
       updated: "MCP 서비스가 업데이트되었습니다",
       createFailed: "MCP 서비스 생성 실패",
       updateFailed: "MCP 서비스 업데이트 실패",
+    },
+  },
+  promptTemplate: {
+    noTemplates: "템플릿 없음",
+    selectTemplate: "템플릿 선택",
+    useTemplate: "템플릿 사용",
+    withKnowledgeBase: "지식베이스",
+    withWebSearch: "웹 검색",
+    systemPrompt: {
+      defaultKB: {
+        name: "지식베이스 Q&A 도우미",
+        desc: "대부분의 시나리오에 적합한 기본 지식베이스 Q&A 템플릿",
+      },
+      expert: {
+        name: "분야 전문가 도우미",
+        desc: "기술 또는 전문 분야에 적합한 심층적이고 전문적인 답변 스타일",
+      },
+      customerService: {
+        name: "고객 서비스 도우미",
+        desc: "고객 서비스 시나리오에 적합한 친절하고 열정적인 서비스 스타일",
+      },
+      techSupport: {
+        name: "기술 지원",
+        desc: "코드 예제를 포함한 전문적인 기술 문제 해결",
+      },
+      pureChat: {
+        name: "일반 대화",
+        desc: "지식베이스에 의존하지 않는 일반 대화 도우미",
+      },
+      webSearch: {
+        name: "웹 검색 도우미",
+        desc: "웹 검색을 결합하여 최신 정보 획득",
+      },
+    },
+    contextTemplate: {
+      default: {
+        name: "표준 템플릿",
+        desc: "참고 자료와 질문을 명확하게 보여주는 기본 컨텍스트 템플릿",
+      },
+      detailed: {
+        name: "상세 템플릿",
+        desc: "상세한 설명과 답변 요구 사항을 포함한 전체 템플릿",
+      },
+      simple: {
+        name: "간결한 템플릿",
+        desc: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식",
+      },
+      qa: {
+        name: "Q&A 템플릿",
+        desc: "Q&A 시나리오에 최적화된 템플릿",
+      },
+    },
+    rewriteSystem: {
+      default: {
+        name: "표준 재작성",
+        desc: "대명사 해결 및 생략 보완을 위한 표준 재작성 규칙",
+      },
+      strict: {
+        name: "엄격한 재작성",
+        desc: "질문의 완전성과 독립성을 보장하는 더 엄격한 재작성 요구 사항",
+      },
+    },
+    rewriteUser: {
+      default: {
+        name: "표준 형식",
+        desc: "대화 기록과 현재 질문을 포함하는 표준 형식",
+      },
+      detailed: {
+        name: "상세 형식",
+        desc: "작업 설명이 포함된 상세 형식",
+      },
+    },
+    fallback: {
+      default: {
+        name: "표준 폴백",
+        desc: "답변 불가 안내 및 제안 제공",
+      },
+      polite: {
+        name: "정중한 폴백",
+        desc: "더 정중하고 상세한 답변 불가 안내",
+      },
+      brief: {
+        name: "간결한 폴백",
+        desc: "짧은 답변 불가 안내",
+      },
+      model: {
+        name: "모델 폴백 프롬프트",
+        desc: "모델이 일반 지식을 기반으로 답변하도록 유도하는 프롬프트",
+      },
     },
   },
 };
