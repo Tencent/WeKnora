@@ -5,32 +5,32 @@ import (
 	"encoding/json"
 )
 
-// SearchTargetType represents the type of search target
+// SearchTargetType 검색 대상의 유형을 나타냅니다.
 type SearchTargetType string
 
 const (
-	// SearchTargetTypeKnowledgeBase - search entire knowledge base
+	// SearchTargetTypeKnowledgeBase - 전체 지식베이스 검색
 	SearchTargetTypeKnowledgeBase SearchTargetType = "knowledge_base"
-	// SearchTargetTypeKnowledge - search specific knowledge files within a knowledge base
+	// SearchTargetTypeKnowledge - 지식베이스 내 특정 지식 파일 검색
 	SearchTargetTypeKnowledge SearchTargetType = "knowledge"
 )
 
-// SearchTarget represents a unified search target
-// Either search an entire knowledge base, or specific knowledge files within a knowledge base
+// SearchTarget 통합 검색 대상을 나타냅니다.
+// 전체 지식베이스 검색 또는 지식베이스 내 특정 지식 파일 검색
 type SearchTarget struct {
-	// Type of search target
+	// 검색 대상 유형
 	Type SearchTargetType `json:"type"`
-	// KnowledgeBaseID is the ID of the knowledge base to search
+	// KnowledgeBaseID는 검색할 지식베이스의 ID입니다.
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
-	// Only used when Type is SearchTargetTypeKnowledge
+	// KnowledgeIDs는 지식베이스 내에서 검색할 특정 지식 ID의 목록입니다.
+	// Type이 SearchTargetTypeKnowledge일 때만 사용됩니다.
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
 }
 
-// SearchTargets is a list of search targets, pre-computed at request entry point
+// SearchTargets 요청 진입 시 미리 계산된 검색 대상 목록입니다.
 type SearchTargets []*SearchTarget
 
-// GetAllKnowledgeBaseIDs returns all unique knowledge base IDs from the search targets
+// GetAllKnowledgeBaseIDs 검색 대상에서 모든 고유 지식베이스 ID를 반환합니다.
 func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 	seen := make(map[string]bool)
 	var result []string
@@ -43,53 +43,53 @@ func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 	return result
 }
 
-// SearchResult represents the search result
+// SearchResult 검색 결과를 나타냅니다.
 type SearchResult struct {
 	// ID
 	ID string `gorm:"column:id"              json:"id"`
-	// Content
+	// 내용
 	Content string `gorm:"column:content"         json:"content"`
-	// Knowledge ID
+	// 지식 ID
 	KnowledgeID string `gorm:"column:knowledge_id"    json:"knowledge_id"`
-	// Chunk index
+	// 청크 인덱스
 	ChunkIndex int `gorm:"column:chunk_index"     json:"chunk_index"`
-	// Knowledge title
+	// 지식 제목
 	KnowledgeTitle string `gorm:"column:knowledge_title" json:"knowledge_title"`
-	// Start at
+	// 시작 위치
 	StartAt int `gorm:"column:start_at"        json:"start_at"`
-	// End at
+	// 종료 위치
 	EndAt int `gorm:"column:end_at"          json:"end_at"`
-	// Seq
+	// 순서
 	Seq int `gorm:"column:seq"             json:"seq"`
-	// Score
+	// 점수
 	Score float64 `                              json:"score"`
-	// Match type
+	// 매칭 유형
 	MatchType MatchType `                              json:"match_type"`
-	// SubChunkIndex
+	// 하위 청크 ID
 	SubChunkID []string `                              json:"sub_chunk_id"`
-	// Metadata
+	// 메타데이터
 	Metadata map[string]string `                              json:"metadata"`
 
-	// Chunk 类型
+	// Chunk 유형
 	ChunkType string `json:"chunk_type"`
-	// 父 Chunk ID
+	// 상위 Chunk ID
 	ParentChunkID string `json:"parent_chunk_id"`
-	// 图片信息 (JSON 格式)
+	// 이미지 정보 (JSON 형식)
 	ImageInfo string `json:"image_info"`
 
-	// Knowledge file name
-	// Used for file type knowledge, contains the original file name
+	// 지식 파일 이름
+	// 파일 유형 지식에 사용되며 원본 파일 이름을 포함합니다.
 	KnowledgeFilename string `json:"knowledge_filename"`
 
-	// Knowledge source
-	// Used to indicate the source of the knowledge, such as "url"
+	// 지식 소스
+	// 지식의 출처를 나타내는 데 사용됩니다 (예: "url").
 	KnowledgeSource string `json:"knowledge_source"`
 
-	// ChunkMetadata stores chunk-level metadata (e.g., generated questions)
+	// ChunkMetadata 청크 수준 메타데이터 (예: 생성된 질문) 저장
 	ChunkMetadata JSON `json:"chunk_metadata,omitempty"`
 }
 
-// SearchParams represents the search parameters
+// SearchParams 검색 매개변수를 나타냅니다.
 type SearchParams struct {
 	QueryText            string   `json:"query_text"`
 	VectorThreshold      float64  `json:"vector_threshold"`
@@ -98,15 +98,15 @@ type SearchParams struct {
 	DisableKeywordsMatch bool     `json:"disable_keywords_match"`
 	DisableVectorMatch   bool     `json:"disable_vector_match"`
 	KnowledgeIDs         []string `json:"knowledge_ids"`
-	TagIDs               []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	TagIDs               []string `json:"tag_ids"` // 필터링을 위한 태그 ID (FAQ 우선순위 필터링에 사용)
 }
 
-// Value implements the driver.Valuer interface, used to convert SearchResult to database value
+// Value SearchResult를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c SearchResult) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to SearchResult
+// Scan 데이터베이스 값을 SearchResult로 변환하는 sql.Scanner 인터페이스 구현
 func (c *SearchResult) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -118,15 +118,15 @@ func (c *SearchResult) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// Pagination represents the pagination parameters
+// Pagination 페이징 매개변수를 나타냅니다.
 type Pagination struct {
-	// Page
+	// 페이지
 	Page int `form:"page"      json:"page"      binding:"omitempty,min=1"`
-	// Page size
+	// 페이지 크기
 	PageSize int `form:"page_size" json:"page_size" binding:"omitempty,min=1,max=100"`
 }
 
-// GetPage gets the page number, default is 1
+// GetPage 페이지 번호를 가져옵니다. 기본값은 1입니다.
 func (p *Pagination) GetPage() int {
 	if p.Page < 1 {
 		return 1
@@ -134,7 +134,7 @@ func (p *Pagination) GetPage() int {
 	return p.Page
 }
 
-// GetPageSize gets the page size, default is 20
+// GetPageSize 페이지 크기를 가져옵니다. 기본값은 20입니다.
 func (p *Pagination) GetPageSize() int {
 	if p.PageSize < 1 {
 		return 20
@@ -145,25 +145,25 @@ func (p *Pagination) GetPageSize() int {
 	return p.PageSize
 }
 
-// Offset gets the offset for database query
+// Offset 데이터베이스 쿼리를 위한 오프셋을 가져옵니다.
 func (p *Pagination) Offset() int {
 	return (p.GetPage() - 1) * p.GetPageSize()
 }
 
-// Limit gets the limit for database query
+// Limit 데이터베이스 쿼리를 위한 제한을 가져옵니다.
 func (p *Pagination) Limit() int {
 	return p.GetPageSize()
 }
 
-// PageResult represents the pagination query result
+// PageResult 페이징 쿼리 결과를 나타냅니다.
 type PageResult struct {
-	Total    int64       `json:"total"`     // Total number of records
-	Page     int         `json:"page"`      // Current page number
-	PageSize int         `json:"page_size"` // Page size
-	Data     interface{} `json:"data"`      // Data
+	Total    int64       `json:"total"`     // 총 레코드 수
+	Page     int         `json:"page"`      // 현재 페이지 번호
+	PageSize int         `json:"page_size"` // 페이지 크기
+	Data     interface{} `json:"data"`      // 데이터
 }
 
-// NewPageResult creates a new pagination result
+// NewPageResult 새로운 페이징 결과를 생성합니다.
 func NewPageResult(total int64, page *Pagination, data interface{}) *PageResult {
 	return &PageResult{
 		Total:    total,

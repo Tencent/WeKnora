@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// BuiltinAgentID constants for built-in agents
+// BuiltinAgentID built-in agent constants
 const (
 	// BuiltinQuickAnswerID is the ID for the built-in quick answer (RAG) agent
 	BuiltinQuickAnswerID = "builtin-quick-answer"
@@ -230,19 +230,19 @@ func (a *CustomAgent) IsAgentMode() bool {
 func GetBuiltinQuickAnswerAgent(tenantID uint64) *CustomAgent {
 	return &CustomAgent{
 		ID:          BuiltinQuickAnswerID,
-		Name:        "快速问答",
-		Description: "基于知识库的 RAG 问答，快速准确地回答问题",
+		Name:        "빠른 답변",
+		Description: "지식베이스 기반의 RAG 질의응답으로, 질문에 빠르고 정확하게 답변합니다",
 		IsBuiltin:   true,
 		TenantID:    tenantID,
 		Config: CustomAgentConfig{
 			AgentMode:    AgentModeQuickAnswer,
 			SystemPrompt: "",
-			ContextTemplate: `请根据以下参考资料回答用户问题。
+			ContextTemplate: `다음 참고 자료를 바탕으로 사용자의 질문에 답변해 주세요.
 
-参考资料：
+참고 자료:
 {{contexts}}
 
-用户问题：{{query}}`,
+사용자 질문: {{query}}`,
 			Temperature:         0.7,
 			MaxCompletionTokens: 2048,
 			WebSearchEnabled:    true,
@@ -272,8 +272,8 @@ func GetBuiltinQuickAnswerAgent(tenantID uint64) *CustomAgent {
 func GetBuiltinSmartReasoningAgent(tenantID uint64) *CustomAgent {
 	return &CustomAgent{
 		ID:          BuiltinSmartReasoningID,
-		Name:        "智能推理",
-		Description: "ReAct 推理框架，支持多步思考和工具调用",
+		Name:        "지능형 추론",
+		Description: "ReAct 추론 프레임워크로, 다단계 사고와 도구 호출을 지원합니다",
 		IsBuiltin:   true,
 		TenantID:    tenantID,
 		Config: CustomAgentConfig{
@@ -308,8 +308,8 @@ func GetBuiltinSmartReasoningAgent(tenantID uint64) *CustomAgent {
 func GetBuiltinDataAnalystAgent(tenantID uint64) *CustomAgent {
 	return &CustomAgent{
 		ID:          BuiltinDataAnalystID,
-		Name:        "数据分析师",
-		Description: "专业数据分析智能体，支持 CSV/Excel 文件的 SQL 查询与统计分析",
+		Name:        "데이터 분석가",
+		Description: "전문 데이터 분석 에이전트로, CSV/Excel 파일의 SQL 쿼리 및 통계 분석을 지원합니다",
 		Avatar:      "📊",
 		IsBuiltin:   true,
 		TenantID:    tenantID,

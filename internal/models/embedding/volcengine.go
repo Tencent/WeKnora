@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// VolcengineMultimodalEmbeddingPath 火山引擎 Ark 多模态 Embedding API 路径
+	// VolcengineMultimodalEmbeddingPath Volcengine Ark 멀티모달 Embedding API 경로
 	VolcengineMultimodalEmbeddingPath = "/api/v3/embeddings/multimodal"
 )
 

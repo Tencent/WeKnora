@@ -12,9 +12,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// AgentStreamHandler handles agent events for SSE streaming
-// It uses a dedicated EventBus per request to avoid SessionID filtering
-// Events are appended to StreamManager without accumulation
+// AgentStreamHandler SSE 스트리밍을 위한 에이전트 이벤트를 처리합니다.
+// SessionID 필터링을 피하기 위해 요청당 전용 EventBus를 사용합니다.
+// 이벤트는 누적되지 않고 StreamManager에 추가됩니다.
 type AgentStreamHandler struct {
 	ctx                context.Context
 	sessionID          string
@@ -25,14 +25,14 @@ type AgentStreamHandler struct {
 
 	eventBus *event.EventBus
 
-	// State tracking
+	// 상태 추적
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
-	eventStartTimes map[string]time.Time // Track start time for duration calculation
+	eventStartTimes map[string]time.Time // 기간 계산을 위한 시작 시간 추적
 	mu              sync.Mutex
 }
 
-// NewAgentStreamHandler creates a new handler for agent SSE streaming
+// NewAgentStreamHandler 에이전트 SSE 스트리밍을 위한 새 핸들러 생성
 func NewAgentStreamHandler(
 	ctx context.Context,
 	sessionID, assistantMessageID, requestID string,
@@ -53,10 +53,10 @@ func NewAgentStreamHandler(
 	}
 }
 
-// Subscribe subscribes to all agent streaming events on the dedicated EventBus
-// No SessionID filtering needed since we have a dedicated EventBus per request
+// Subscribe 전용 EventBus의 모든 에이전트 스트리밍 이벤트를 구독합니다.
+// 요청당 전용 EventBus가 있으므로 SessionID 필터링이 필요하지 않습니다.
 func (h *AgentStreamHandler) Subscribe() {
-	// Subscribe to all agent streaming events on the dedicated EventBus
+	// 전용 EventBus의 모든 에이전트 스트리밍 이벤트 구독
 	h.eventBus.On(event.EventAgentThought, h.handleThought)
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
@@ -68,7 +68,7 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentComplete, h.handleComplete)
 }
 
-// handleThought handles agent thought events
+// handleThought 에이전트 생각 이벤트 처리
 func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentThoughtData)
 	if !ok {
@@ -77,12 +77,12 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 
 	h.mu.Lock()
 
-	// Track start time on first chunk
+	// 첫 번째 청크에서 시작 시간 추적
 	if _, exists := h.eventStartTimes[evt.ID]; !exists {
 		h.eventStartTimes[evt.ID] = time.Now()
 	}
 
-	// Calculate duration if done
+	// 완료 시 기간 계산
 	var metadata map[string]interface{}
 	if data.Done {
 		startTime := h.eventStartTimes[evt.ID]
@@ -101,11 +101,11 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 
 	h.mu.Unlock()
 
-	// Append this chunk to stream (no accumulation - frontend will accumulate)
+	// 이 청크를 스트림에 추가 (누적 없음 - 프론트엔드에서 누적)
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeThinking,
-		Content:   data.Content, // Just this chunk
+		Content:   data.Content, // 이 청크만
 		Done:      data.Done,
 		Timestamp: time.Now(),
 		Data:      metadata,
@@ -116,7 +116,7 @@ func (h *AgentStreamHandler) handleThought(ctx context.Context, evt event.Event)
 	return nil
 }
 
-// handleToolCall handles tool call events
+// handleToolCall 도구 호출 이벤트 처리
 func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentToolCallData)
 	if !ok {
@@ -124,7 +124,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 	}
 
 	h.mu.Lock()
-	// Track start time for this tool call (use tool_call_id as key)
+	// 이 도구 호출에 대한 시작 시간 추적 (tool_call_id를 키로 사용)
 	h.eventStartTimes[data.ToolCallID] = time.Now()
 	h.mu.Unlock()
 
@@ -134,7 +134,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 		"tool_call_id": data.ToolCallID,
 	}
 
-	// Append event to stream
+	// 이벤트를 스트림에 추가
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeToolCall,
@@ -149,7 +149,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 	return nil
 }
 
-// handleToolResult handles tool result events
+// handleToolResult 도구 결과 이벤트 처리
 func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentToolResultData)
 	if !ok {
@@ -157,18 +157,18 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	}
 
 	h.mu.Lock()
-	// Calculate duration from start time if available, otherwise use provided duration
+	// 가능한 경우 시작 시간에서 기간 계산, 그렇지 않으면 제공된 기간 사용
 	var durationMs int64
 	if startTime, exists := h.eventStartTimes[data.ToolCallID]; exists {
 		durationMs = time.Since(startTime).Milliseconds()
 		delete(h.eventStartTimes, data.ToolCallID)
 	} else if data.Duration > 0 {
-		// Fallback to provided duration if start time not tracked
+		// 시작 시간이 추적되지 않은 경우 제공된 기간으로 대체
 		durationMs = data.Duration
 	}
 	h.mu.Unlock()
 
-	// Send SSE response (both success and failure)
+	// SSE 응답 전송 (성공 및 실패 모두)
 	responseType := types.ResponseTypeToolResult
 	content := data.Output
 	if !data.Success {
@@ -178,7 +178,7 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 		}
 	}
 
-	// Build metadata including tool result data for rich frontend rendering
+	// 풍부한 프론트엔드 렌더링을 위해 도구 결과 데이터를 포함한 메타데이터 구축
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
 		"success":      data.Success,
@@ -188,14 +188,14 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 		"tool_call_id": data.ToolCallID,
 	}
 
-	// Merge tool result data (contains display_type, formatted results, etc.)
+	// 도구 결과 데이터 병합 (display_type, 포맷된 결과 등 포함)
 	if data.Data != nil {
 		for k, v := range data.Data {
 			metadata[k] = v
 		}
 	}
 
-	// Append event to stream
+	// 이벤트를 스트림에 추가
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      responseType,
@@ -210,7 +210,7 @@ func (h *AgentStreamHandler) handleToolResult(ctx context.Context, evt event.Eve
 	return nil
 }
 
-// handleReferences handles knowledge references events
+// handleReferences 지식 참조 이벤트 처리
 func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentReferencesData)
 	if !ok {
@@ -220,17 +220,17 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Extract knowledge references
-	// Try to cast directly to []*types.SearchResult first
+	// 지식 참조 추출
+	// 먼저 []*types.SearchResult로 직접 캐스팅 시도
 	if searchResults, ok := data.References.([]*types.SearchResult); ok {
 		h.knowledgeRefs = append(h.knowledgeRefs, searchResults...)
 	} else if refs, ok := data.References.([]interface{}); ok {
-		// Fallback: convert from []interface{}
+		// 대체: []interface{}에서 변환
 		for _, ref := range refs {
 			if sr, ok := ref.(*types.SearchResult); ok {
 				h.knowledgeRefs = append(h.knowledgeRefs, sr)
 			} else if refMap, ok := ref.(map[string]interface{}); ok {
-				// Parse from map if needed
+				// 필요한 경우 맵에서 파싱
 				searchResult := &types.SearchResult{
 					ID:             getString(refMap, "id"),
 					Content:        getString(refMap, "content"),
@@ -255,10 +255,10 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 		}
 	}
 
-	// Update assistant message references
+	// 어시스턴트 메시지 참조 업데이트
 	h.assistantMessage.KnowledgeReferences = h.knowledgeRefs
 
-	// Append references event to stream
+	// 참조 이벤트를 스트림에 추가
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeReferences,
@@ -275,7 +275,7 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 	return nil
 }
 
-// handleFinalAnswer handles final answer events
+// handleFinalAnswer 최종 답변 이벤트 처리
 func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentFinalAnswerData)
 	if !ok {
@@ -283,15 +283,15 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	}
 
 	h.mu.Lock()
-	// Track start time on first chunk
+	// 첫 번째 청크에서 시작 시간 추적
 	if _, exists := h.eventStartTimes[evt.ID]; !exists {
 		h.eventStartTimes[evt.ID] = time.Now()
 	}
 
-	// Accumulate final answer locally for assistant message (database)
+	// 어시스턴트 메시지(데이터베이스)를 위해 로컬에 최종 답변 누적
 	h.finalAnswer += data.Content
 
-	// Calculate duration if done
+	// 완료 시 기간 계산
 	var metadata map[string]interface{}
 	if data.Done {
 		startTime := h.eventStartTimes[evt.ID]
@@ -309,11 +309,11 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	}
 	h.mu.Unlock()
 
-	// Append this chunk to stream (frontend will accumulate by event ID)
+	// 이 청크를 스트림에 추가 (프론트엔드에서 이벤트 ID별로 누적)
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeAnswer,
-		Content:   data.Content, // Just this chunk
+		Content:   data.Content, // 이 청크만
 		Done:      data.Done,
 		Timestamp: time.Now(),
 		Data:      metadata,
@@ -324,18 +324,18 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 	return nil
 }
 
-// handleReflection handles agent reflection events
+// handleReflection 에이전트 성찰 이벤트 처리
 func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentReflectionData)
 	if !ok {
 		return nil
 	}
 
-	// Append this chunk to stream (frontend will accumulate by event ID)
+	// 이 청크를 스트림에 추가 (프론트엔드에서 이벤트 ID별로 누적)
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeReflection,
-		Content:   data.Content, // Just this chunk
+		Content:   data.Content, // 이 청크만
 		Done:      data.Done,
 		Timestamp: time.Now(),
 	}); err != nil {
@@ -345,20 +345,20 @@ func (h *AgentStreamHandler) handleReflection(ctx context.Context, evt event.Eve
 	return nil
 }
 
-// handleError handles error events
+// handleError 오류 이벤트 처리
 func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.ErrorData)
 	if !ok {
 		return nil
 	}
 
-	// Build error metadata
+	// 오류 메타데이터 구축
 	metadata := map[string]interface{}{
 		"stage": data.Stage,
 		"error": data.Error,
 	}
 
-	// Append error event to stream
+	// 오류 이벤트를 스트림에 추가
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeError,
@@ -373,17 +373,17 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 	return nil
 }
 
-// handleSessionTitle handles session title update events
+// handleSessionTitle 세션 제목 업데이트 이벤트 처리
 func (h *AgentStreamHandler) handleSessionTitle(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.SessionTitleData)
 	if !ok {
 		return nil
 	}
 
-	// Use background context for title event since it may arrive after stream completion
+	// 제목 이벤트는 스트림 완료 후에 도착할 수 있으므로 백그라운드 컨텍스트 사용
 	bgCtx := context.Background()
 
-	// Append title event to stream
+	// 제목 이벤트를 스트림에 추가
 	if err := h.streamManager.AppendEvent(bgCtx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeSessionTitle,
@@ -401,7 +401,7 @@ func (h *AgentStreamHandler) handleSessionTitle(ctx context.Context, evt event.E
 	return nil
 }
 
-// handleComplete handles agent complete events
+// handleComplete 에이전트 완료 이벤트 처리
 func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentCompleteData)
 	if !ok {
@@ -411,12 +411,12 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Update assistant message with final data
+	// 최종 데이터로 어시스턴트 메시지 업데이트
 	if data.MessageID == h.assistantMessageID {
 		// h.assistantMessage.Content = data.FinalAnswer
 		h.assistantMessage.IsCompleted = true
 
-		// Update knowledge references if provided
+		// 제공된 경우 지식 참조 업데이트
 		if len(data.KnowledgeRefs) > 0 {
 			knowledgeRefs := make([]*types.SearchResult, 0, len(data.KnowledgeRefs))
 			for _, ref := range data.KnowledgeRefs {
@@ -427,7 +427,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			h.assistantMessage.KnowledgeReferences = knowledgeRefs
 		}
 
-		// Update agent steps if provided
+		// 제공된 경우 에이전트 단계 업데이트
 		if data.AgentSteps != nil {
 			if steps, ok := data.AgentSteps.([]types.AgentStep); ok {
 				h.assistantMessage.AgentSteps = steps
@@ -435,7 +435,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		}
 	}
 
-	// Send completion event to stream manager so SSE can detect completion
+	// SSE가 완료를 감지할 수 있도록 완료 이벤트를 스트림 관리자에 전송
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,

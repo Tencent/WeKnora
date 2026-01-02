@@ -8,20 +8,20 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 )
 
-// ErrorHandler 是一个处理应用错误的中间件
+// ErrorHandler 애플리케이션 오류를 처리하는 미들웨어
 func ErrorHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 处理请求
+		// 요청 처리
 		c.Next()
 
-		// 检查是否有错误
+		// 오류가 있는지 확인
 		if len(c.Errors) > 0 {
-			// 获取最后一个错误
+			// 마지막 오류 가져오기
 			err := c.Errors.Last().Err
 
-			// 检查是否为应用错误
+			// 애플리케이션 오류인지 확인
 			if appErr, ok := errors.IsAppError(err); ok {
-				// 返回应用错误
+				// 애플리케이션 오류 반환
 				c.JSON(appErr.HTTPCode, gin.H{
 					"success": false,
 					"error": gin.H{
@@ -33,7 +33,7 @@ func ErrorHandler() gin.HandlerFunc {
 				return
 			}
 
-			// 处理其他类型的错误
+			// 기타 유형의 오류 처리
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"success": false,
 				"error": gin.H{

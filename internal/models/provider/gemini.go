@@ -9,18 +9,18 @@ import (
 const (
 	// GeminiBaseURL Google Gemini API BaseURL
 	GeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
-	// GeminiOpenAICompatBaseURL Gemini OpenAI 兼容模式 BaseURL
+	// GeminiOpenAICompatBaseURL Gemini OpenAI 호환 모드 BaseURL
 	GeminiOpenAICompatBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 )
 
-// GeminiProvider 实现 Google Gemini 的 Provider 接口
+// GeminiProvider Google Gemini의 Provider 인터페이스 구현
 type GeminiProvider struct{}
 
 func init() {
 	Register(&GeminiProvider{})
 }
 
-// Info 返回 Gemini provider 的元数据
+// Info Gemini provider의 메타데이터 반환
 func (p *GeminiProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderGemini,
@@ -36,7 +36,7 @@ func (p *GeminiProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证 Gemini provider 配置
+// ValidateConfig Gemini provider 구성 검증
 func (p *GeminiProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for Google Gemini provider")

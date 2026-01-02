@@ -14,13 +14,13 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
-// SystemHandler handles system-related requests
+// SystemHandler 시스템 관련 요청 처리
 type SystemHandler struct {
 	cfg         *config.Config
 	neo4jDriver neo4j.Driver
 }
 
-// NewSystemHandler creates a new system handler
+// NewSystemHandler 새로운 시스템 핸들러 생성
 func NewSystemHandler(cfg *config.Config, neo4jDriver neo4j.Driver) *SystemHandler {
 	return &SystemHandler{
 		cfg:         cfg,
@@ -28,7 +28,7 @@ func NewSystemHandler(cfg *config.Config, neo4jDriver neo4j.Driver) *SystemHandl
 	}
 }
 
-// GetSystemInfoResponse defines the response structure for system info
+// GetSystemInfoResponse 시스템 정보에 대한 응답 구조 정의
 type GetSystemInfoResponse struct {
 	Version             string `json:"version"`
 	CommitID            string `json:"commit_id,omitempty"`
@@ -40,7 +40,7 @@ type GetSystemInfoResponse struct {
 	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
 }
 
-// 编译时注入的版本信息
+// 컴파일 시 주입되는 버전 정보
 var (
 	Version   = "unknown"
 	CommitID  = "unknown"
@@ -49,26 +49,26 @@ var (
 )
 
 // GetSystemInfo godoc
-// @Summary      获取系统信息
-// @Description  获取系统版本、构建信息和引擎配置
-// @Tags         系统
+// @Summary      시스템 정보 가져오기
+// @Description  시스템 버전, 빌드 정보 및 엔진 구성 가져오기
+// @Tags         시스템
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  GetSystemInfoResponse  "系统信息"
+// @Success      200  {object}  GetSystemInfoResponse  "시스템 정보"
 // @Router       /system/info [get]
 func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
-	// Get keyword index engine from RETRIEVE_DRIVER
+	// RETRIEVE_DRIVER에서 키워드 인덱스 엔진 가져오기
 	keywordIndexEngine := h.getKeywordIndexEngine()
 
-	// Get vector store engine from config or RETRIEVE_DRIVER
+	// config 또는 RETRIEVE_DRIVER에서 벡터 저장소 엔진 가져오기
 	vectorStoreEngine := h.getVectorStoreEngine()
 
-	// Get graph database engine from NEO4J_ENABLE
+	// NEO4J_ENABLE에서 그래프 데이터베이스 엔진 가져오기
 	graphDatabaseEngine := h.getGraphDatabaseEngine()
 
-	// Get MinIO enabled status
+	// MinIO 활성화 상태 가져오기
 	minioEnabled := h.isMinioEnabled()
 
 	response := GetSystemInfoResponse{
@@ -90,15 +90,15 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	})
 }
 
-// getKeywordIndexEngine returns the keyword index engine name
+// getKeywordIndexEngine 키워드 인덱스 엔진 이름 반환
 func (h *SystemHandler) getKeywordIndexEngine() string {
 	retrieveDriver := os.Getenv("RETRIEVE_DRIVER")
 	if retrieveDriver == "" {
-		return "未配置"
+		return "미구성"
 	}
 
 	drivers := strings.Split(retrieveDriver, ",")
-	// Filter out engines that support keyword retrieval
+	// 키워드 검색을 지원하는 엔진 필터링
 	keywordEngines := []string{}
 	for _, driver := range drivers {
 		driver = strings.TrimSpace(driver)
@@ -108,26 +108,26 @@ func (h *SystemHandler) getKeywordIndexEngine() string {
 	}
 
 	if len(keywordEngines) == 0 {
-		return "未配置"
+		return "미구성"
 	}
 	return strings.Join(keywordEngines, ", ")
 }
 
-// getVectorStoreEngine returns the vector store engine name
+// getVectorStoreEngine 벡터 저장소 엔진 이름 반환
 func (h *SystemHandler) getVectorStoreEngine() string {
-	// First check config.yaml
+	// 먼저 config.yaml 확인
 	if h.cfg != nil && h.cfg.VectorDatabase != nil && h.cfg.VectorDatabase.Driver != "" {
 		return h.cfg.VectorDatabase.Driver
 	}
 
-	// Fallback to RETRIEVE_DRIVER for vector support
+	// 벡터 지원을 위해 RETRIEVE_DRIVER로 대체
 	retrieveDriver := os.Getenv("RETRIEVE_DRIVER")
 	if retrieveDriver == "" {
-		return "未配置"
+		return "미구성"
 	}
 
 	drivers := strings.Split(retrieveDriver, ",")
-	// Filter out engines that support vector retrieval
+	// 벡터 검색을 지원하는 엔진 필터링
 	vectorEngines := []string{}
 	for _, driver := range drivers {
 		driver = strings.TrimSpace(driver)
@@ -137,22 +137,22 @@ func (h *SystemHandler) getVectorStoreEngine() string {
 	}
 
 	if len(vectorEngines) == 0 {
-		return "未配置"
+		return "미구성"
 	}
 	return strings.Join(vectorEngines, ", ")
 }
 
-// getGraphDatabaseEngine returns the graph database engine name
+// getGraphDatabaseEngine 그래프 데이터베이스 엔진 이름 반환
 func (h *SystemHandler) getGraphDatabaseEngine() string {
 	if h.neo4jDriver == nil {
-		return "未启用"
+		return "비활성화됨"
 	}
 	return "Neo4j"
 }
 
-// isMinioEnabled checks if MinIO is enabled
+// isMinioEnabled MinIO 활성화 여부 확인
 func (h *SystemHandler) isMinioEnabled() bool {
-	// Check if all required MinIO environment variables are set
+	// 필수 MinIO 환경 변수가 모두 설정되었는지 확인
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	accessKeyID := os.Getenv("MINIO_ACCESS_KEY_ID")
 	secretAccessKey := os.Getenv("MINIO_SECRET_ACCESS_KEY")
@@ -160,32 +160,32 @@ func (h *SystemHandler) isMinioEnabled() bool {
 	return endpoint != "" && accessKeyID != "" && secretAccessKey != ""
 }
 
-// MinioBucketInfo represents bucket information with access policy
+// MinioBucketInfo 접근 정책이 포함된 버킷 정보
 type MinioBucketInfo struct {
 	Name      string `json:"name"`
 	Policy    string `json:"policy"` // "public", "private", "custom"
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
-// ListMinioBucketsResponse defines the response structure for listing buckets
+// ListMinioBucketsResponse 버킷 목록 응답 구조 정의
 type ListMinioBucketsResponse struct {
 	Buckets []MinioBucketInfo `json:"buckets"`
 }
 
 // ListMinioBuckets godoc
-// @Summary      列出 MinIO 存储桶
-// @Description  获取所有 MinIO 存储桶及其访问权限
-// @Tags         系统
+// @Summary      MinIO 버킷 목록 조회
+// @Description  모든 MinIO 버킷 및 접근 권한 조회
+// @Tags         시스템
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  ListMinioBucketsResponse  "存储桶列表"
-// @Failure      400  {object}  map[string]interface{}    "MinIO 未启用"
-// @Failure      500  {object}  map[string]interface{}    "服务器错误"
+// @Success      200  {object}  ListMinioBucketsResponse  "버킷 목록"
+// @Failure      400  {object}  map[string]interface{}    "MinIO 비활성화됨"
+// @Failure      500  {object}  map[string]interface{}    "서버 오류"
 // @Router       /system/minio/buckets [get]
 func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
-	// Check if MinIO is enabled
+	// MinIO 활성화 여부 확인
 	if !h.isMinioEnabled() {
 		logger.Warn(ctx, "MinIO is not enabled")
 		c.JSON(400, gin.H{
@@ -196,13 +196,13 @@ func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 		return
 	}
 
-	// Get MinIO configuration from environment
+	// 환경 변수에서 MinIO 구성 가져오기
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	accessKeyID := os.Getenv("MINIO_ACCESS_KEY_ID")
 	secretAccessKey := os.Getenv("MINIO_SECRET_ACCESS_KEY")
 	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
 
-	// Create MinIO client
+	// MinIO 클라이언트 생성
 	minioClient, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
 		Secure: useSSL,
@@ -217,7 +217,7 @@ func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 		return
 	}
 
-	// List all buckets
+	// 모든 버킷 나열
 	buckets, err := minioClient.ListBuckets(context.Background())
 	if err != nil {
 		logger.Error(ctx, "Failed to list MinIO buckets", "error", err)
@@ -229,17 +229,17 @@ func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 		return
 	}
 
-	// Get policy for each bucket
+	// 각 버킷의 정책 가져오기
 	bucketInfos := make([]MinioBucketInfo, 0, len(buckets))
 	for _, bucket := range buckets {
-		policy := "private" // default: no policy means private
+		policy := "private" // 기본값: 정책이 없으면 비공개
 
-		// Try to get bucket policy
+		// 버킷 정책 가져오기 시도
 		policyStr, err := minioClient.GetBucketPolicy(context.Background(), bucket.Name)
 		if err == nil && policyStr != "" {
 			policy = parseBucketPolicy(policyStr)
 		}
-		// If err != nil or policyStr is empty, bucket has no policy (private)
+		// err != nil이거나 policyStr이 비어 있으면 버킷에 정책이 없음 (비공개)
 
 		bucketInfos = append(bucketInfos, MinioBucketInfo{
 			Name:      bucket.Name,
@@ -257,41 +257,41 @@ func (h *SystemHandler) ListMinioBuckets(c *gin.Context) {
 	})
 }
 
-// BucketPolicy represents the S3 bucket policy structure
+// BucketPolicy S3 버킷 정책 구조
 type BucketPolicy struct {
 	Version   string            `json:"Version"`
 	Statement []PolicyStatement `json:"Statement"`
 }
 
-// PolicyStatement represents a single statement in the bucket policy
+// PolicyStatement 버킷 정책의 단일 문장
 type PolicyStatement struct {
 	Effect    string      `json:"Effect"`
-	Principal interface{} `json:"Principal"` // Can be "*" or {"AWS": [...]}
-	Action    interface{} `json:"Action"`    // Can be string or []string
-	Resource  interface{} `json:"Resource"`  // Can be string or []string
+	Principal interface{} `json:"Principal"` // "*" 또는 {"AWS": [...]} 가능
+	Action    interface{} `json:"Action"`    // 문자열 또는 []문자열 가능
+	Resource  interface{} `json:"Resource"`  // 문자열 또는 []문자열 가능
 }
 
-// parseBucketPolicy parses the policy JSON and determines the access type
+// parseBucketPolicy 정책 JSON을 파싱하고 접근 유형 결정
 func parseBucketPolicy(policyStr string) string {
 	var policy BucketPolicy
 	if err := json.Unmarshal([]byte(policyStr), &policy); err != nil {
-		// If we can't parse the policy, treat it as custom
+		// 정책을 파싱할 수 없는 경우 사용자 정의로 처리
 		return "custom"
 	}
 
-	// Check if any statement grants public read access
+	// 공개 읽기 액세스를 허용하는 문장이 있는지 확인
 	hasPublicRead := false
 	for _, stmt := range policy.Statement {
 		if stmt.Effect != "Allow" {
 			continue
 		}
 
-		// Check if Principal is "*" (public)
+		// Principal이 "*" (공개)인지 확인
 		if !isPrincipalPublic(stmt.Principal) {
 			continue
 		}
 
-		// Check if Action includes s3:GetObject
+		// Action에 s3:GetObject가 포함되어 있는지 확인
 		if !hasGetObjectAction(stmt.Action) {
 			continue
 		}
@@ -304,17 +304,17 @@ func parseBucketPolicy(policyStr string) string {
 		return "public"
 	}
 
-	// Has policy but not public read
+	// 정책은 있지만 공개 읽기가 아님
 	return "custom"
 }
 
-// isPrincipalPublic checks if the principal allows public access
+// isPrincipalPublic Principal이 공개 액세스를 허용하는지 확인
 func isPrincipalPublic(principal interface{}) bool {
 	switch p := principal.(type) {
 	case string:
 		return p == "*"
 	case map[string]interface{}:
-		// Check for {"AWS": "*"} or {"AWS": ["*"]}
+		// {"AWS": "*"} 또는 {"AWS": ["*"]} 확인
 		if aws, ok := p["AWS"]; ok {
 			switch a := aws.(type) {
 			case string:
@@ -331,7 +331,7 @@ func isPrincipalPublic(principal interface{}) bool {
 	return false
 }
 
-// hasGetObjectAction checks if the action includes s3:GetObject
+// hasGetObjectAction Action에 s3:GetObject가 포함되어 있는지 확인
 func hasGetObjectAction(action interface{}) bool {
 	checkAction := func(a string) bool {
 		a = strings.ToLower(a)

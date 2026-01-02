@@ -1,37 +1,37 @@
-# 事件系统使用示例
+# 이벤트 시스템 사용 예제
 
-## 在 Chat Pipeline 中集成事件系统
+## Chat Pipeline에 이벤트 시스템 통합
 
-### 1. 在服务初始化时设置事件总线
+### 1. 서비스 초기화 시 이벤트 버스 설정
 
 ```go
-// internal/container/container.go 或 main.go
+// internal/container/container.go 또는 main.go
 
 import (
     "github.com/Tencent/WeKnora/internal/event"
 )
 
 func InitializeEventSystem() {
-    // 获取全局事件总线
+    // 전역 이벤트 버스 가져오기
     bus := event.GetGlobalEventBus()
     
-    // 注册监控处理器
+    // 모니터링 핸들러 등록
     event.NewMonitoringHandler(bus)
     
-    // 注册分析处理器
+    // 분석 핸들러 등록
     event.NewAnalyticsHandler(bus)
     
-    // 或者注册自定义处理器
+    // 또는 사용자 정의 핸들러 등록
     bus.On(event.EventQueryReceived, func(ctx context.Context, e event.Event) error {
-        // 自定义处理逻辑
+        // 사용자 정의 처리 로직
         return nil
     })
 }
 ```
 
-### 2. 在查询处理服务中发送事件
+### 2. 쿼리 처리 서비스에서 이벤트 전송
 
-#### 示例：在 search.go 中添加事件
+#### 예제: search.go에 이벤트 추가
 
 ```go
 // internal/application/service/chat_pipline/search.go
@@ -47,7 +47,7 @@ func (p *PluginSearch) OnEvent(
     chatManage *types.ChatManage,
     next func() *PluginError,
 ) *PluginError {
-    // 发送检索开始事件
+    // 검색 시작 이벤트 전송
     startTime := time.Now()
     event.Emit(ctx, event.NewEvent(event.EventRetrievalStart, event.RetrievalData{
         Query:           chatManage.ProcessedQuery,
@@ -56,10 +56,10 @@ func (p *PluginSearch) OnEvent(
         RetrievalType:   "vector",
     }).WithSessionID(chatManage.SessionID))
     
-    // 执行检索逻辑
+    // 검색 로직 실행
     results, err := p.performSearch(ctx, chatManage)
     if err != nil {
-        // 发送错误事件
+        // 오류 이벤트 전송
         event.Emit(ctx, event.NewEvent(event.EventError, event.ErrorData{
             Error:     err.Error(),
             Stage:     "retrieval",
@@ -69,7 +69,7 @@ func (p *PluginSearch) OnEvent(
         return ErrSearch.WithError(err)
     }
     
-    // 发送检索完成事件
+    // 검색 완료 이벤트 전송
     event.Emit(ctx, event.NewEvent(event.EventRetrievalComplete, event.RetrievalData{
         Query:           chatManage.ProcessedQuery,
         KnowledgeBaseID: chatManage.KnowledgeBaseID,
@@ -85,7 +85,7 @@ func (p *PluginSearch) OnEvent(
 }
 ```
 
-#### 示例：在 rewrite.go 中添加事件
+#### 예제: rewrite.go에 이벤트 추가
 
 ```go
 // internal/application/service/chat_pipline/rewrite.go
@@ -96,19 +96,19 @@ func (p *PluginRewriteQuery) OnEvent(
     chatManage *types.ChatManage,
     next func() *PluginError,
 ) *PluginError {
-    // 发送改写开始事件
+    // 재작성 시작 이벤트 전송
     event.Emit(ctx, event.NewEvent(event.EventQueryRewrite, event.QueryData{
         OriginalQuery: chatManage.Query,
         SessionID:     chatManage.SessionID,
     }).WithSessionID(chatManage.SessionID))
     
-    // 执行查询改写
+    // 쿼리 재작성 실행
     rewrittenQuery, err := p.rewriteQuery(ctx, chatManage)
     if err != nil {
         return ErrRewrite.WithError(err)
     }
     
-    // 发送改写完成事件
+    // 재작성 완료 이벤트 전송
     event.Emit(ctx, event.NewEvent(event.EventQueryRewritten, event.QueryData{
         OriginalQuery:  chatManage.Query,
         RewrittenQuery: rewrittenQuery,
@@ -120,7 +120,7 @@ func (p *PluginRewriteQuery) OnEvent(
 }
 ```
 
-#### 示例：在 rerank.go 中添加事件
+#### 예제: rerank.go에 이벤트 추가
 
 ```go
 // internal/application/service/chat_pipline/rerank.go
@@ -131,7 +131,7 @@ func (p *PluginRerank) OnEvent(
     chatManage *types.ChatManage,
     next func() *PluginError,
 ) *PluginError {
-    // 发送排序开始事件
+    // 재순위 시작 이벤트 전송
     startTime := time.Now()
     inputCount := len(chatManage.SearchResult)
     
@@ -141,13 +141,13 @@ func (p *PluginRerank) OnEvent(
         ModelID:    chatManage.RerankModelID,
     }).WithSessionID(chatManage.SessionID))
     
-    // 执行排序
+    // 재순위 실행
     rerankResults, err := p.performRerank(ctx, chatManage)
     if err != nil {
         return ErrRerank.WithError(err)
     }
     
-    // 发送排序完成事件
+    // 재순위 완료 이벤트 전송
     event.Emit(ctx, event.NewEvent(event.EventRerankComplete, event.RerankData{
         Query:       chatManage.ProcessedQuery,
         InputCount:  inputCount,
@@ -162,7 +162,7 @@ func (p *PluginRerank) OnEvent(
 }
 ```
 
-#### 示例：在 chat_completion.go 中添加事件
+#### 예제: chat_completion.go에 이벤트 추가
 
 ```go
 // internal/application/service/chat_pipline/chat_completion.go
@@ -173,7 +173,7 @@ func (p *PluginChatCompletion) OnEvent(
     chatManage *types.ChatManage,
     next func() *PluginError,
 ) *PluginError {
-    // 发送聊天开始事件
+    // 채팅 시작 이벤트 전송
     startTime := time.Now()
     event.Emit(ctx, event.NewEvent(event.EventChatStart, event.ChatData{
         Query:    chatManage.Query,
@@ -181,7 +181,7 @@ func (p *PluginChatCompletion) OnEvent(
         IsStream: false,
     }).WithSessionID(chatManage.SessionID))
     
-    // 准备模型和消息
+    // 모델 및 메시지 준비
     chatModel, opt, err := prepareChatModel(ctx, p.modelService, chatManage)
     if err != nil {
         return ErrGetChatModel.WithError(err)
@@ -189,7 +189,7 @@ func (p *PluginChatCompletion) OnEvent(
     
     chatMessages := prepareMessagesWithHistory(chatManage)
     
-    // 调用模型
+    // 모델 호출
     chatResponse, err := chatModel.Chat(ctx, chatMessages, opt)
     if err != nil {
         event.Emit(ctx, event.NewEvent(event.EventError, event.ErrorData{
@@ -201,7 +201,7 @@ func (p *PluginChatCompletion) OnEvent(
         return ErrModelCall.WithError(err)
     }
     
-    // 发送聊天完成事件
+    // 채팅 완료 이벤트 전송
     event.Emit(ctx, event.NewEvent(event.EventChatComplete, event.ChatData{
         Query:      chatManage.Query,
         ModelID:    chatManage.ChatModelID,
@@ -216,7 +216,7 @@ func (p *PluginChatCompletion) OnEvent(
 }
 ```
 
-### 3. 在 Handler 层发送请求接收事件
+### 3. Handler 계층에서 요청 수신 이벤트 전송
 
 ```go
 // internal/handler/message.go
@@ -224,25 +224,25 @@ func (p *PluginChatCompletion) OnEvent(
 func (h *MessageHandler) SendMessage(c *gin.Context) {
     ctx := c.Request.Context()
     
-    // 解析请求
+    // 요청 파싱
     var req types.SendMessageRequest
     if err := c.ShouldBindJSON(&req); err != nil {
         c.JSON(400, gin.H{"error": err.Error()})
         return
     }
     
-    // 发送查询接收事件
+    // 쿼리 수신 이벤트 전송
     event.Emit(ctx, event.NewEvent(event.EventQueryReceived, event.QueryData{
         OriginalQuery: req.Content,
         SessionID:     req.SessionID,
         UserID:        c.GetString("user_id"),
     }).WithSessionID(req.SessionID).WithRequestID(c.GetString("request_id")))
     
-    // 处理消息...
+    // 메시지 처리...
 }
 ```
 
-### 4. 自定义监控处理器
+### 4. 사용자 정의 모니터링 핸들러
 
 ```go
 // internal/monitoring/event_monitor.go
@@ -281,7 +281,7 @@ func init() {
 func SetupEventMonitoring() {
     bus := event.GetGlobalEventBus()
     
-    // 监控检索性能
+    // 검색 성능 모니터링
     bus.On(event.EventRetrievalComplete, func(ctx context.Context, e event.Event) error {
         data := e.Data.(event.RetrievalData)
         retrievalDuration.WithLabelValues(
@@ -291,7 +291,7 @@ func SetupEventMonitoring() {
         return nil
     })
     
-    // 监控排序性能
+    // 재순위 성능 모니터링
     bus.On(event.EventRerankComplete, func(ctx context.Context, e event.Event) error {
         data := e.Data.(event.RerankData)
         rerankDuration.WithLabelValues(data.ModelID).Observe(float64(data.Duration))
@@ -300,7 +300,7 @@ func SetupEventMonitoring() {
 }
 ```
 
-### 5. 日志记录处理器
+### 5. 로깅 핸들러
 
 ```go
 // internal/logging/event_logger.go
@@ -317,7 +317,7 @@ import (
 func SetupEventLogging() {
     bus := event.GetGlobalEventBus()
     
-    // 对所有事件进行结构化日志记录
+    // 모든 이벤트에 대해 구조화된 로깅 수행
     logHandler := event.ApplyMiddleware(
         func(ctx context.Context, e event.Event) error {
             data, _ := json.Marshal(e.Data)
@@ -328,7 +328,7 @@ func SetupEventLogging() {
         event.WithTiming(),
     )
     
-    // 注册到所有关键事件
+    // 모든 주요 이벤트에 등록
     bus.On(event.EventQueryReceived, logHandler)
     bus.On(event.EventQueryRewritten, logHandler)
     bus.On(event.EventRetrievalComplete, logHandler)
@@ -338,82 +338,81 @@ func SetupEventLogging() {
 }
 ```
 
-### 6. 完整的初始化流程
+### 6. 전체 초기화 프로세스
 
 ```go
-// cmd/server/main.go 或 internal/container/container.go
+// cmd/server/main.go 또는 internal/container/container.go
 
 func Initialize() {
-    // 1. 初始化事件系统
+    // 1. 이벤트 시스템 초기화
     eventBus := event.GetGlobalEventBus()
     
-    // 2. 设置监控
+    // 2. 모니터링 설정
     event.NewMonitoringHandler(eventBus)
     
-    // 3. 设置分析
+    // 3. 분석 설정
     event.NewAnalyticsHandler(eventBus)
     
-    // 4. 设置 Prometheus 监控（如果需要）
+    // 4. Prometheus 모니터링 설정 (필요한 경우)
     // monitoring.SetupEventMonitoring()
     
-    // 5. 设置结构化日志（如果需要）
+    // 5. 구조화된 로깅 설정 (필요한 경우)
     // logging.SetupEventLogging()
     
-    // 6. 其他初始化...
+    // 6. 기타 초기화...
 }
 ```
 
-## 测试事件系统
+## 이벤트 시스템 테스트
 
 ```go
-// 在测试中使用独立的事件总线
+// 테스트에서 독립적인 이벤트 버스 사용
 func TestMyService(t *testing.T) {
     ctx := context.Background()
     
-    // 创建测试专用的事件总线
+    // 테스트 전용 이벤트 버스 생성
     testBus := event.NewEventBus()
     
-    // 注册测试监听器
+    // 테스트 리스너 등록
     var receivedEvents []event.Event
     testBus.On(event.EventQueryReceived, func(ctx context.Context, e event.Event) error {
         receivedEvents = append(receivedEvents, e)
         return nil
     })
     
-    // 执行测试...
+    // 테스트 실행...
     testBus.Emit(ctx, event.NewEvent(event.EventQueryReceived, event.QueryData{
         OriginalQuery: "test",
     }))
     
-    // 验证事件
+    // 이벤트 검증
     if len(receivedEvents) != 1 {
         t.Errorf("Expected 1 event, got %d", len(receivedEvents))
     }
 }
 ```
 
-## 异步处理示例
+## 비동기 처리 예제
 
 ```go
-// 对于不影响主流程的事件，可以使用异步模式
+// 주 프로세스에 영향을 주지 않는 이벤트의 경우 비동기 모드 사용 가능
 func SetupAsyncAnalytics() {
     asyncBus := event.NewAsyncEventBus()
     
     asyncBus.On(event.EventQueryReceived, func(ctx context.Context, e event.Event) error {
-        // 异步发送到分析平台，不阻塞主流程
+        // 분석 플랫폼으로 비동기 전송, 주 프로세스 차단하지 않음
         // sendToAnalyticsPlatform(e)
         return nil
     })
     
-    // 使用异步总线发送事件
+    // 비동기 버스를 사용하여 이벤트 전송
     // asyncBus.Emit(ctx, event)
 }
 ```
 
-## 性能优化建议
+## 성능 최적화 제안
 
-1. **避免在关键路径上使用同步事件总线**：对于不影响业务逻辑的监控、日志等，使用异步模式
-2. **合理使用中间件**：只在需要的地方使用中间件，避免不必要的开销
-3. **控制事件数据大小**：避免在事件中传递大量数据，特别是在异步模式下
-4. **使用专用的监听器**：不要在一个监听器中做太多事情，保持单一职责
-
+1. **중요 경로에서 동기 이벤트 버스 사용 지양**: 비즈니스 로직에 영향을 주지 않는 모니터링, 로깅 등은 비동기 모드 사용
+2. **미들웨어 적절히 사용**: 필요한 곳에만 미들웨어를 사용하여 불필요한 오버헤드 방지
+3. **이벤트 데이터 크기 제어**: 특히 비동기 모드에서 이벤트에 대량의 데이터 전달 지양
+4. **전용 리스너 사용**: 하나의 리스너에서 너무 많은 일을 하지 말고, 리스너를 단일 책임으로 유지

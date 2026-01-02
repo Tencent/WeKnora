@@ -16,15 +16,15 @@ import (
 )
 
 // ContinueStream godoc
-// @Summary      继续流式响应
-// @Description  继续获取正在进行的流式响应
-// @Tags         问答
+// @Summary      스트림 응답 계속
+// @Description  진행 중인 스트림 응답 계속 받기
+// @Tags         질의응답
 // @Accept       json
 // @Produce      text/event-stream
-// @Param        session_id  path      string  true  "会话ID"
-// @Param        message_id  query     string  true  "消息ID"
-// @Success      200         {object}  map[string]interface{}  "流式响应"
-// @Failure      404         {object}  errors.AppError         "会话或消息不存在"
+// @Param        session_id  path      string  true  "세션 ID"
+// @Param        message_id  query     string  true  "메시지 ID"
+// @Success      200         {object}  map[string]interface{}  "스트림 응답"
+// @Failure      404         {object}  errors.AppError         "세션 또는 메시지가 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/continue [get]
@@ -33,7 +33,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 
 	logger.Info(ctx, "Start continuing stream response processing")
 
-	// Get session ID from URL parameter
+	// URL 매개변수에서 세션 ID 가져오기
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
 	if sessionID == "" {
 		logger.Error(ctx, "Session ID is empty")
@@ -41,7 +41,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		return
 	}
 
-	// Get message ID from query parameter
+	// 쿼리 매개변수에서 메시지 ID 가져오기
 	messageID := secutils.SanitizeForLog(c.Query("message_id"))
 	if messageID == "" {
 		logger.Error(ctx, "Message ID is empty")
@@ -51,7 +51,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 
 	logger.Infof(ctx, "Continuing stream, session ID: %s, message ID: %s", sessionID, messageID)
 
-	// Verify that the session exists and belongs to this tenant
+	// 세션이 존재하고 이 테넌트에 속하는지 확인
 	_, err := h.sessionService.GetSession(ctx, sessionID)
 	if err != nil {
 		if err == errors.ErrSessionNotFound {
@@ -64,7 +64,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		return
 	}
 
-	// Get the incomplete message
+	// 완료되지 않은 메시지 가져오기
 	message, err := h.messageService.GetMessage(ctx, sessionID, messageID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -81,7 +81,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		return
 	}
 
-	// Get initial events from stream (offset 0)
+	// 스트림에서 초기 이벤트 가져오기 (오프셋 0)
 	events, currentOffset, err := h.streamManager.GetEvents(ctx, sessionID, messageID, 0)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -103,10 +103,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		len(events), sessionID, messageID,
 	)
 
-	// Set headers for SSE
+	// SSE 헤더 설정
 	setSSEHeaders(c)
 
-	// Check if stream is already completed
+	// 스트림이 이미 완료되었는지 확인
 	streamCompleted := false
 	for _, evt := range events {
 		if evt.Type == "complete" {
@@ -115,7 +115,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		}
 	}
 
-	// Replay existing events
+	// 기존 이벤트 재생
 	logger.Debugf(ctx, "Replaying %d existing events", len(events))
 	for _, evt := range events {
 		response := buildStreamResponse(evt, message.RequestID)
@@ -123,14 +123,14 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		c.Writer.Flush()
 	}
 
-	// If stream is already completed, send final event and return
+	// 스트림이 이미 완료된 경우, 최종 이벤트 전송 후 반환
 	if streamCompleted {
 		logger.Infof(ctx, "Stream already completed, session ID: %s, message ID: %s", sessionID, messageID)
 		sendCompletionEvent(c, message.RequestID)
 		return
 	}
 
-	// Continue polling for new events
+	// 새로운 이벤트 폴링 계속
 	logger.Debug(ctx, "Starting event update monitoring")
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -142,17 +142,17 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			return
 
 		case <-ticker.C:
-			// Get new events from current offset
+			// 현재 오프셋에서 새 이벤트 가져오기
 			newEvents, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, messageID, currentOffset)
 			if err != nil {
 				logger.Errorf(ctx, "Failed to get new events: %v", err)
 				return
 			}
 
-			// Send new events
+			// 새 이벤트 전송
 			streamCompletedNow := false
 			for _, evt := range newEvents {
-				// Check for completion event
+				// 완료 이벤트 확인
 				if evt.Type == "complete" {
 					streamCompletedNow = true
 				}
@@ -162,10 +162,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 				c.Writer.Flush()
 			}
 
-			// Update offset
+			// 오프셋 업데이트
 			currentOffset = newOffset
 
-			// If stream completed, send final event and exit
+			// 스트림 완료 시, 최종 이벤트 전송 후 종료
 			if streamCompletedNow {
 				logger.Infof(ctx, "Stream completed, session ID: %s, message ID: %s", sessionID, messageID)
 				sendCompletionEvent(c, message.RequestID)
@@ -176,15 +176,15 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 }
 
 // StopSession godoc
-// @Summary      停止生成
-// @Description  停止当前正在进行的生成任务
-// @Tags         问答
+// @Summary      생성 중지
+// @Description  현재 진행 중인 생성 작업 중지
+// @Tags         질의응답
 // @Accept       json
 // @Produce      json
-// @Param        session_id  path      string              true  "会话ID"
-// @Param        request     body      StopSessionRequest  true  "停止请求"
-// @Success      200         {object}  map[string]interface{}  "停止成功"
-// @Failure      404         {object}  errors.AppError         "会话或消息不存在"
+// @Param        session_id  path      string              true  "세션 ID"
+// @Param        request     body      StopSessionRequest  true  "중지 요청"
+// @Success      200         {object}  map[string]interface{}  "중지 성공"
+// @Failure      404         {object}  errors.AppError         "세션 또는 메시지가 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/stop [post]
@@ -197,7 +197,7 @@ func (h *Handler) StopSession(c *gin.Context) {
 		return
 	}
 
-	// Parse request body to get message_id
+	// 요청 본문 파싱하여 message_id 가져오기
 	var req StopSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -210,7 +210,7 @@ func (h *Handler) StopSession(c *gin.Context) {
 	assistantMessageID := secutils.SanitizeForLog(req.MessageID)
 	logger.Infof(ctx, "Stop generation request for session: %s, message: %s", sessionID, assistantMessageID)
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
@@ -219,7 +219,7 @@ func (h *Handler) StopSession(c *gin.Context) {
 	}
 	tenantIDUint := tenantID.(uint64)
 
-	// Verify message ownership and status
+	// 메시지 소유권 및 상태 확인
 	message, err := h.messageService.GetMessage(ctx, sessionID, assistantMessageID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -230,14 +230,14 @@ func (h *Handler) StopSession(c *gin.Context) {
 		return
 	}
 
-	// Verify message belongs to this session (double check)
+	// 메시지가 이 세션에 속하는지 확인 (이중 확인)
 	if message.SessionID != sessionID {
 		logger.Warnf(ctx, "Message %s does not belong to session %s", assistantMessageID, sessionID)
 		c.JSON(403, gin.H{"error": "Message does not belong to this session"})
 		return
 	}
 
-	// Verify message belongs to the current tenant
+	// 메시지가 현재 테넌트에 속하는지 확인
 	session, err := h.sessionService.GetSession(ctx, sessionID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -253,7 +253,7 @@ func (h *Handler) StopSession(c *gin.Context) {
 		return
 	}
 
-	// Check if message is already completed (stopped)
+	// 메시지가 이미 완료(중지)되었는지 확인
 	if message.IsCompleted {
 		logger.Infof(ctx, "Message %s is already completed, no need to stop", assistantMessageID)
 		c.JSON(200, gin.H{
@@ -263,7 +263,7 @@ func (h *Handler) StopSession(c *gin.Context) {
 		return
 	}
 
-	// Write stop event to StreamManager for distributed support
+	// 분산 지원을 위해 StreamManager에 중지 이벤트 기록
 	stopEvent := interfaces.StreamEvent{
 		ID:        fmt.Sprintf("stop-%d", time.Now().UnixNano()),
 		Type:      types.ResponseType(event.EventStop),
@@ -293,10 +293,10 @@ func (h *Handler) StopSession(c *gin.Context) {
 	})
 }
 
-// handleAgentEventsForSSE handles agent events for SSE streaming using an existing handler
-// The handler is already subscribed to events and AgentQA is already running
-// This function polls StreamManager and pushes events to SSE, allowing graceful handling of disconnections
-// waitForTitle: if true, wait for title event after completion (for new sessions without title)
+// handleAgentEventsForSSE 기존 핸들러를 사용하여 SSE 스트리밍을 위한 에이전트 이벤트 처리
+// 핸들러는 이미 이벤트를 구독하고 있으며 AgentQA는 이미 실행 중입니다.
+// 이 함수는 StreamManager를 폴링하고 이벤트를 SSE로 푸시하여 연결 끊김을 정상적으로 처리합니다.
+// waitForTitle: true인 경우 완료 후 제목 이벤트를 기다림 (제목이 없는 새 세션의 경우)
 func (h *Handler) handleAgentEventsForSSE(
 	ctx context.Context,
 	c *gin.Context,
@@ -315,7 +315,7 @@ func (h *Handler) handleAgentEventsForSSE(
 	for {
 		select {
 		case <-c.Request.Context().Done():
-			// Connection closed, exit gracefully without panic
+			// 연결 종료, 패닉 없이 정상 종료
 			log.Infof(
 				"Client disconnected, stopping SSE streaming for session=%s, message=%s",
 				sessionID,
@@ -324,22 +324,22 @@ func (h *Handler) handleAgentEventsForSSE(
 			return
 
 		case <-ticker.C:
-			// Get new events from StreamManager using offset
+			// 오프셋을 사용하여 StreamManager에서 새 이벤트 가져오기
 			events, newOffset, err := h.streamManager.GetEvents(ctx, sessionID, assistantMessageID, lastOffset)
 			if err != nil {
 				log.Warnf("Failed to get events from stream: %v", err)
 				continue
 			}
 
-			// Send any new events
+			// 새 이벤트 전송
 			streamCompleted := false
 			titleReceived := false
 			for _, evt := range events {
-				// Check for stop event
+				// 중지 이벤트 확인
 				if evt.Type == types.ResponseType(event.EventStop) {
 					log.Infof("Detected stop event, triggering stop via EventBus for session=%s", sessionID)
 
-					// Emit stop event to the EventBus to trigger context cancellation
+					// 컨텍스트 취소를 트리거하기 위해 EventBus에 중지 이벤트 방출
 					if eventBus != nil {
 						eventBus.Emit(ctx, event.Event{
 							Type:      event.EventStop,
@@ -352,7 +352,7 @@ func (h *Handler) handleAgentEventsForSSE(
 						})
 					}
 
-					// Send stop notification to frontend
+					// 프론트엔드에 중지 알림 전송
 					c.SSEvent("message", &types.StreamResponse{
 						ID:           requestID,
 						ResponseType: "stop",
@@ -363,20 +363,20 @@ func (h *Handler) handleAgentEventsForSSE(
 					return
 				}
 
-				// Build StreamResponse from StreamEvent
+				// StreamEvent에서 StreamResponse 생성
 				response := buildStreamResponse(evt, requestID)
 
-				// Check for completion event
+				// 완료 이벤트 확인
 				if evt.Type == "complete" {
 					streamCompleted = true
 				}
 
-				// Check for title event
+				// 제목 이벤트 확인
 				if evt.Type == types.ResponseTypeSessionTitle {
 					titleReceived = true
 				}
 
-				// Check if connection is still alive before writing
+				// 쓰기 전에 연결이 여전히 살아있는지 확인
 				if c.Request.Context().Err() != nil {
 					log.Info("Connection closed during event sending, stopping")
 					return
@@ -386,14 +386,14 @@ func (h *Handler) handleAgentEventsForSSE(
 				c.Writer.Flush()
 			}
 
-			// Update offset
+			// 오프셋 업데이트
 			lastOffset = newOffset
 
-			// Check if stream is completed - wait for title event only if needed and not already received
+			// 스트림이 완료되었는지 확인 - 필요한 경우 제목 이벤트를 기다리고 이미 수신되지 않은 경우에만
 			if streamCompleted {
 				if waitForTitle && !titleReceived {
 					log.Infof("Stream completed for session=%s, message=%s, waiting for title event", sessionID, assistantMessageID)
-					// Wait up to 3 seconds for title event after completion
+					// 완료 후 제목 이벤트를 위해 최대 3초 대기
 					titleTimeout := time.After(3 * time.Second)
 				titleWaitLoop:
 					for {
@@ -405,7 +405,7 @@ func (h *Handler) handleAgentEventsForSSE(
 							log.Info("Connection closed while waiting for title")
 							return
 						default:
-							// Check for new events (title event)
+							// 새 이벤트 확인 (제목 이벤트)
 							events, newOff, err := h.streamManager.GetEvents(c.Request.Context(), sessionID, assistantMessageID, lastOffset)
 							if err != nil {
 								log.Warnf("Error getting events while waiting for title: %v", err)
@@ -416,7 +416,7 @@ func (h *Handler) handleAgentEventsForSSE(
 									response := buildStreamResponse(evt, requestID)
 									c.SSEvent("message", response)
 									c.Writer.Flush()
-									// If we got the title, we can exit
+									// 제목을 받으면 종료 가능
 									if evt.Type == types.ResponseTypeSessionTitle {
 										log.Infof("Title event received: %s", evt.Content)
 										break titleWaitLoop
@@ -424,7 +424,7 @@ func (h *Handler) handleAgentEventsForSSE(
 								}
 								lastOffset = newOff
 							} else {
-								// No events, wait a bit before checking again
+								// 이벤트 없음, 다시 확인하기 전에 잠시 대기
 								time.Sleep(100 * time.Millisecond)
 							}
 						}

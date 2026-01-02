@@ -16,25 +16,25 @@ import (
 )
 
 const (
-	maxBodySize = 1024 * 10 // 最大记录10KB的body内容
+	maxBodySize = 1024 * 10 // 최대 10KB의 body 내용 기록
 )
 
-// loggerResponseBodyWriter 自定义ResponseWriter用于捕获响应内容（用于logger中间件）
+// loggerResponseBodyWriter 응답 내용을 캡처하기 위한 사용자 정의 ResponseWriter (로거 미들웨어용)
 type loggerResponseBodyWriter struct {
 	gin.ResponseWriter
 	body *bytes.Buffer
 }
 
-// Write 重写Write方法，同时写入buffer和原始writer
+// Write Write 메서드 재정의, 버퍼와 원본 writer 모두에 쓰기
 func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 	r.body.Write(b)
 	return r.ResponseWriter.Write(b)
 }
 
-// sanitizeBody 清理敏感信息
+// sanitizeBody 민감한 정보 정리
 func sanitizeBody(body string) string {
 	result := body
-	// 替换常见的敏感字段（JSON格式）
+	// 일반적인 민감한 필드 대체 (JSON 형식)
 	sensitivePatterns := []struct {
 		pattern     string
 		replacement string
@@ -58,30 +58,30 @@ func sanitizeBody(body string) string {
 	return result
 }
 
-// readRequestBody 读取请求体（限制大小用于日志，但完整读取用于重置）
+// readRequestBody 요청 본문 읽기 (로그용 크기 제한, 리셋용 전체 읽기)
 func readRequestBody(c *gin.Context) string {
 	if c.Request.Body == nil {
 		return ""
 	}
 
-	// 检查Content-Type，只记录JSON类型
+	// Content-Type 확인, JSON 유형만 기록
 	contentType := c.GetHeader("Content-Type")
 	if !strings.Contains(contentType, "application/json") &&
 		!strings.Contains(contentType, "application/x-www-form-urlencoded") &&
 		!strings.Contains(contentType, "text/") {
-		return "[非文本类型，已跳过]"
+		return "[텍스트 유형이 아님, 건너뜀]"
 	}
 
-	// 完整读取body内容（不限制大小），因为需要完整重置给后续handler使用
+	// body 내용 전체 읽기 (크기 제한 없음), 후속 핸들러 사용을 위해 전체 리셋 필요
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		return "[读取请求体失败]"
+		return "[요청 본문 읽기 실패]"
 	}
 
-	// 重置request body，使用完整内容，确保后续handler能读取到完整数据
+	// request body 리셋, 전체 내용 사용, 후속 핸들러가 전체 데이터를 읽을 수 있도록 보장
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
-	// 用于日志的body（限制大小）
+	// 로그용 body (크기 제한)
 	var logBodyBytes []byte
 	if len(bodyBytes) > maxBodySize {
 		logBodyBytes = bodyBytes[:maxBodySize]
@@ -91,33 +91,33 @@ func readRequestBody(c *gin.Context) string {
 
 	bodyStr := string(logBodyBytes)
 	if len(bodyBytes) > maxBodySize {
-		bodyStr += "... [内容过长，已截断]"
+		bodyStr += "... [내용이 너무 김, 잘림]"
 	}
 
 	return sanitizeBody(bodyStr)
 }
 
-// RequestID middleware adds a unique request ID to the context
+// RequestID 컨텍스트에 고유 요청 ID를 추가하는 미들웨어
 func RequestID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Get request ID from header or generate a new one
+		// 헤더에서 요청 ID를 가져오거나 새로 생성
 		requestID := c.GetHeader("X-Request-ID")
 		if requestID == "" {
 			requestID = uuid.New().String()
 		}
 		safeRequestID := secutils.SanitizeForLog(requestID)
-		// Set request ID in header
+		// 헤더에 요청 ID 설정
 		c.Header("X-Request-ID", requestID)
 
-		// Set request ID in context
+		// 컨텍스트에 요청 ID 설정
 		c.Set(types.RequestIDContextKey.String(), requestID)
 
-		// Set logger in context
+		// 컨텍스트에 로거 설정
 		requestLogger := logger.GetLogger(c)
 		requestLogger = requestLogger.WithField("request_id", safeRequestID)
 		c.Set(types.LoggerContextKey.String(), requestLogger)
 
-		// Set request ID in the global context for logging
+		// 로깅을 위해 전역 컨텍스트에 요청 ID 설정
 		c.Request = c.Request.WithContext(
 			context.WithValue(
 				context.WithValue(c.Request.Context(), types.RequestIDContextKey, requestID),
@@ -129,20 +129,20 @@ func RequestID() gin.HandlerFunc {
 	}
 }
 
-// Logger middleware logs request details with request ID, input and output
+// Logger 요청 ID, 입력 및 출력과 함께 요청 세부 정보를 기록하는 미들웨어
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
 
-		// 读取请求体（在Next之前读取，因为Next会消费body）
+		// 요청 본문 읽기 (Next 이전에 읽어야 함, Next가 본문을 소비하기 때문)
 		var requestBody string
 		if c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH" {
 			requestBody = readRequestBody(c)
 		}
 
-		// 创建响应体捕获器
+		// 응답 본문 캡처기 생성
 		responseBody := &bytes.Buffer{}
 		responseWriter := &loggerResponseBodyWriter{
 			ResponseWriter: c.Writer,
@@ -150,10 +150,10 @@ func Logger() gin.HandlerFunc {
 		}
 		c.Writer = responseWriter
 
-		// Process request
+		// 요청 처리
 		c.Next()
 
-		// Get request ID from context
+		// 컨텍스트에서 요청 ID 가져오기
 		requestID, exists := c.Get(types.RequestIDContextKey.String())
 		requestIDStr := "unknown"
 		if exists {
@@ -163,10 +163,10 @@ func Logger() gin.HandlerFunc {
 		}
 		safeRequestID := secutils.SanitizeForLog(requestIDStr)
 
-		// Calculate latency
+		// 지연 시간 계산
 		latency := time.Since(start)
 
-		// Get client IP and status code
+		// 클라이언트 IP 및 상태 코드 가져오기
 		clientIP := c.ClientIP()
 		statusCode := c.Writer.Status()
 		method := c.Request.Method
@@ -175,26 +175,26 @@ func Logger() gin.HandlerFunc {
 			path = path + "?" + raw
 		}
 
-		// 读取响应体
+		// 응답 본문 읽기
 		responseBodyStr := ""
 		if responseBody.Len() > 0 {
-			// 检查Content-Type，只记录JSON类型
+			// Content-Type 확인, JSON 유형만 기록
 			contentType := c.Writer.Header().Get("Content-Type")
 			if strings.Contains(contentType, "application/json") ||
 				strings.Contains(contentType, "text/") {
 				bodyBytes := responseBody.Bytes()
 				if len(bodyBytes) > maxBodySize {
-					responseBodyStr = string(bodyBytes[:maxBodySize]) + "... [内容过长，已截断]"
+					responseBodyStr = string(bodyBytes[:maxBodySize]) + "... [내용이 너무 김, 잘림]"
 				} else {
 					responseBodyStr = string(bodyBytes)
 				}
 				responseBodyStr = sanitizeBody(responseBodyStr)
 			} else {
-				responseBodyStr = "[非文本类型，已跳过]"
+				responseBodyStr = "[텍스트 유형이 아님, 건너뜀]"
 			}
 		}
 
-		// 构建日志消息
+		// 로그 메시지 구성
 		logMsg := logger.GetLogger(c)
 		logMsg = logMsg.WithFields(map[string]interface{}{
 			"request_id":  safeRequestID,
@@ -206,12 +206,12 @@ func Logger() gin.HandlerFunc {
 			"client_ip":   secutils.SanitizeForLog(clientIP),
 		})
 
-		// 添加请求体（如果有）
+		// 요청 본문 추가 (있는 경우)
 		if requestBody != "" {
 			logMsg = logMsg.WithField("request_body", secutils.SanitizeForLog(requestBody))
 		}
 
-		// 添加响应体（如果有）
+		// 응답 본문 추가 (있는 경우)
 		if responseBodyStr != "" {
 			logMsg = logMsg.WithField("response_body", secutils.SanitizeForLog(responseBodyStr))
 		}

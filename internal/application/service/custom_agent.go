@@ -15,10 +15,10 @@ import (
 
 // Custom agent related errors
 var (
-	ErrAgentNotFound       = errors.New("agent not found")
-	ErrCannotModifyBuiltin = errors.New("cannot modify built-in agent basic info")
-	ErrCannotDeleteBuiltin = errors.New("cannot delete built-in agent")
-	ErrAgentNameRequired   = errors.New("agent name is required")
+	ErrAgentNotFound       = errors.New("에이전트를 찾을 수 없습니다")
+	ErrCannotModifyBuiltin = errors.New("기본 에이전트의 기본 정보는 수정할 수 없습니다")
+	ErrCannotDeleteBuiltin = errors.New("기본 에이전트는 삭제할 수 없습니다")
+	ErrAgentNameRequired   = errors.New("에이전트 이름은 필수입니다")
 )
 
 // customAgentService implements the CustomAgentService interface
@@ -368,7 +368,7 @@ func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.C
 	// Create a new agent with copied data
 	newAgent := &types.CustomAgent{
 		ID:          uuid.New().String(),
-		Name:        sourceAgent.Name + " (副本)",
+		Name:        sourceAgent.Name + " (사본)",
 		Description: sourceAgent.Description,
 		Avatar:      sourceAgent.Avatar,
 		IsBuiltin:   false, // Copied agents are never built-in

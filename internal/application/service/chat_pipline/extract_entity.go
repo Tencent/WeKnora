@@ -468,7 +468,7 @@ func (f *Formater) rebuildGraph(ctx context.Context, graph *types.GraphData) {
 	for _, node := range graph.Node {
 		if prenode, ok := nodeMap[node.Name]; ok {
 			logger.Infof(ctx, "Duplicate node ID: %s, merge attribute", node.Name)
-			// 修复panic：检查Attributes是否为nil
+			// panic 수정: Attributes가 nil인지 확인
 			if node.Attributes == nil {
 				node.Attributes = make([]string, 0)
 			}

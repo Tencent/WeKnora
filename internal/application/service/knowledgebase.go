@@ -17,10 +17,10 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// ErrInvalidTenantID represents an error for invalid tenant ID
-var ErrInvalidTenantID = errors.New("invalid tenant ID")
+// ErrInvalidTenantID 테넌트 ID가 유효하지 않음을 나타내는 오류
+var ErrInvalidTenantID = errors.New("유효하지 않은 테넌트 ID")
 
-// knowledgeBaseService implements the knowledge base service interface
+// knowledgeBaseService 지식베이스 서비스 인터페이스 구현
 type knowledgeBaseService struct {
 	repo           interfaces.KnowledgeBaseRepository
 	kgRepo         interfaces.KnowledgeRepository
@@ -33,7 +33,7 @@ type knowledgeBaseService struct {
 	asynqClient    *asynq.Client
 }
 
-// NewKnowledgeBaseService creates a new knowledge base service
+// NewKnowledgeBaseService 새로운 지식베이스 서비스 생성
 func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	kgRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
@@ -57,21 +57,21 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	}
 }
 
-// GetRepository gets the knowledge base repository
+// GetRepository 지식베이스 리포지토리 반환
 // Parameters:
-//   - ctx: Context with authentication and request information
+//   - ctx: 인증 및 요청 정보를 포함한 컨텍스트
 //
 // Returns:
-//   - interfaces.KnowledgeBaseRepository: Knowledge base repository
+//   - interfaces.KnowledgeBaseRepository: 지식베이스 리포지토리
 func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepository {
 	return s.repo
 }
 
-// CreateKnowledgeBase creates a new knowledge base
+// CreateKnowledgeBase 새로운 지식베이스 생성
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
-	// Generate UUID and set creation timestamps
+	// UUID 생성 및 생성 타임스탬프 설정
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
 	}
@@ -94,7 +94,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
-// GetKnowledgeBaseByID retrieves a knowledge base by its ID
+// GetKnowledgeBaseByID ID로 지식베이스 검색
 func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -113,7 +113,7 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id stri
 	return kb, nil
 }
 
-// ListKnowledgeBases returns all knowledge bases for a tenant
+// ListKnowledgeBases 테넌트의 모든 지식베이스 반환
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
@@ -129,11 +129,11 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		return nil, err
 	}
 
-	// Query knowledge count and chunk count for each knowledge base
+	// 각 지식베이스의 지식 수와 청크 수 조회
 	for _, kb := range kbs {
 		kb.EnsureDefaults()
 
-		// Get knowledge count
+		// 지식 수 가져오기
 		switch kb.Type {
 		case types.KnowledgeBaseTypeDocument:
 			knowledgeCount, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID)
@@ -143,7 +143,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 				kb.KnowledgeCount = knowledgeCount
 			}
 		case types.KnowledgeBaseTypeFAQ:
-			// Get chunk count
+			// 청크 수 가져오기
 			chunkCount, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID)
 			if err != nil {
 				logger.Warnf(ctx, "Failed to get chunk count for knowledge base %s: %v", kb.ID, err)
@@ -152,7 +152,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 			}
 		}
 
-		// Check if there is a processing import task
+		// 처리 중인 가져오기 작업이 있는지 확인
 		processingCount, err := s.kgRepo.CountKnowledgeByStatus(
 			ctx,
 			tenantID,
@@ -169,7 +169,7 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 	return kbs, nil
 }
 
-// UpdateKnowledgeBase updates a knowledge base's properties
+// UpdateKnowledgeBase 지식베이스 속성 업데이트
 func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	id string,
 	name string,
@@ -183,7 +183,7 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 
 	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s", id, name)
 
-	// Get existing knowledge base
+	// 기존 지식베이스 가져오기
 	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -192,12 +192,12 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		return nil, err
 	}
 
-	// Update the knowledge base properties
+	// 지식베이스 속성 업데이트
 	kb.Name = name
 	kb.Description = description
 	kb.ChunkingConfig = config.ChunkingConfig
 	kb.ImageProcessingConfig = config.ImageProcessingConfig
-	// Update FAQ config if provided
+	// FAQ 구성이 제공된 경우 업데이트
 	if config.FAQConfig != nil {
 		kb.FAQConfig = config.FAQConfig
 	}
@@ -216,9 +216,9 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
-// DeleteKnowledgeBase deletes a knowledge base by its ID
-// This method marks the knowledge base as deleted and enqueues an async task
-// to handle the heavy cleanup operations (embeddings, chunks, files, graph data)
+// DeleteKnowledgeBase ID로 지식베이스 삭제
+// 이 메서드는 지식베이스를 삭제된 것으로 표시하고 비동기 작업을 대기열에 추가하여
+// 대규모 정리 작업(임베딩, 청크, 파일, 그래프 데이터)을 처리합니다.
 func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id string) error {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -227,11 +227,11 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 
 	logger.Infof(ctx, "Deleting knowledge base, ID: %s", id)
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 
-	// Step 1: Delete the knowledge base record first (mark as deleted)
+	// 1단계: 데이터베이스에서 지식베이스 레코드 먼저 삭제 (삭제된 것으로 표시)
 	logger.Infof(ctx, "Deleting knowledge base from database")
 	err := s.repo.DeleteKnowledgeBase(ctx, id)
 	if err != nil {
@@ -241,7 +241,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		return err
 	}
 
-	// Step 2: Enqueue async task for heavy cleanup operations
+	// 2단계: 대규모 정리 작업을 위한 비동기 작업 대기열에 추가
 	payload := types.KBDeletePayload{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  id,
@@ -251,7 +251,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to marshal KB delete payload: %v", err)
-		// Don't fail the request, the KB record is already deleted
+		// KB 레코드가 이미 삭제되었으므로 요청을 실패시키지 않음
 		return nil
 	}
 
@@ -259,7 +259,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	info, err := s.asynqClient.Enqueue(task)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to enqueue KB delete task: %v", err)
-		// Don't fail the request, the KB record is already deleted
+		// KB 레코드가 이미 삭제되었으므로 요청을 실패시키지 않음
 		return nil
 	}
 
@@ -268,8 +268,8 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	return nil
 }
 
-// ProcessKBDelete handles async knowledge base deletion task
-// This method performs heavy cleanup operations: deleting embeddings, chunks, files, and graph data
+// ProcessKBDelete 비동기 지식베이스 삭제 작업 처리
+// 이 메서드는 대규모 정리 작업을 수행합니다: 임베딩, 청크, 파일 및 그래프 데이터 삭제
 func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Task) error {
 	var payload types.KBDeletePayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
@@ -280,12 +280,12 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	tenantID := payload.TenantID
 	kbID := payload.KnowledgeBaseID
 
-	// Set tenant context for downstream services
+	// 다운스트림 서비스를 위한 테넌트 컨텍스트 설정
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 
 	logger.Infof(ctx, "Processing KB delete task for knowledge base: %s", kbID)
 
-	// Step 1: Get all knowledge entries in this knowledge base
+	// 1단계: 이 지식베이스의 모든 지식 항목 가져오기
 	logger.Infof(ctx, "Fetching all knowledge entries in knowledge base, ID: %s", kbID)
 	knowledgeList, err := s.kgRepo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)
 	if err != nil {
@@ -296,7 +296,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	}
 	logger.Infof(ctx, "Found %d knowledge entries to delete", len(knowledgeList))
 
-	// Step 2: Delete all knowledge entries and their resources
+	// 2단계: 모든 지식 항목 및 관련 리소스 삭제
 	if len(knowledgeList) > 0 {
 		knowledgeIDs := make([]string, 0, len(knowledgeList))
 		for _, knowledge := range knowledgeList {
@@ -305,7 +305,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 
 		logger.Infof(ctx, "Deleting all knowledge entries and their resources")
 
-		// Delete embeddings from vector store
+		// 벡터 저장소에서 임베딩 삭제
 		logger.Infof(ctx, "Deleting embeddings from vector store")
 		retrieveEngine, err := retriever.NewCompositeRetrieveEngine(
 			s.retrieveEngine,
@@ -314,7 +314,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create retrieve engine: %v", err)
 		} else {
-			// Group knowledge by embedding model and type
+			// 임베딩 모델 및 유형별로 지식 그룹화
 			type groupKey struct {
 				EmbeddingModelID string
 				Type             string
@@ -337,7 +337,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete all chunks
+		// 모든 청크 삭제
 		logger.Infof(ctx, "Deleting all chunks in knowledge base")
 		for _, knowledgeID := range knowledgeIDs {
 			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, tenantID, knowledgeID); err != nil {
@@ -345,7 +345,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete physical files and adjust storage
+		// 물리적 파일 삭제 및 스토리지 조정
 		logger.Infof(ctx, "Deleting physical files")
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
@@ -362,7 +362,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete knowledge graph data
+		// 지식 그래프 데이터 삭제
 		logger.Infof(ctx, "Deleting knowledge graph data")
 		namespaces := make([]types.NameSpace, 0, len(knowledgeList))
 		for _, knowledge := range knowledgeList {
@@ -377,7 +377,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete all knowledge entries from database
+		// 데이터베이스에서 모든 지식 항목 삭제
 		logger.Infof(ctx, "Deleting knowledge entries from database")
 		if err := s.kgRepo.DeleteKnowledgeList(ctx, tenantID, knowledgeIDs); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -391,7 +391,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	return nil
 }
 
-// SetEmbeddingModel sets the embedding model for a knowledge base
+// SetEmbeddingModel 지식베이스의 임베딩 모델 설정
 func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string, modelID string) error {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -405,7 +405,7 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 
 	logger.Infof(ctx, "Setting embedding model for knowledge base, knowledge base ID: %s, model ID: %s", id, modelID)
 
-	// Get the knowledge base
+	// 지식베이스 가져오기
 	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -414,7 +414,7 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 		return err
 	}
 
-	// Update the knowledge base's embedding model
+	// 지식베이스의 임베딩 모델 업데이트
 	kb.EmbeddingModelID = modelID
 	kb.UpdatedAt = time.Now()
 
@@ -437,8 +437,8 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 	return nil
 }
 
-// CopyKnowledgeBase copies a knowledge base to a new knowledge base
-// 浅拷贝
+// CopyKnowledgeBase 지식베이스를 새 지식베이스로 복사
+// 얕은 복사
 func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	srcKB string, dstKB string,
 ) (*types.KnowledgeBase, *types.KnowledgeBase, error) {
@@ -483,7 +483,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	return sourceKB, targetKB, nil
 }
 
-// HybridSearch performs hybrid search, including vector retrieval and keyword retrieval
+// HybridSearch 벡터 검색 및 키워드 검색을 포함한 하이브리드 검색 수행
 func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	id string,
 	params types.SearchParams,
@@ -492,7 +492,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 
-	// Create a composite retrieval engine with tenant's configured retrievers
+	// 테넌트의 구성된 리트리버로 복합 검색 엔진 생성
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create retrieval engine: %v", err)
@@ -513,7 +513,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	matchCount := params.MatchCount * 3
 
-	// Add vector retrieval params if supported
+	// 벡터 검색이 지원되고 비활성화되지 않은 경우 매개변수 추가
 	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
@@ -525,7 +525,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		}
 		logger.Infof(ctx, "Embedding model retrieved: %v", embeddingModel)
 
-		// Generate embedding vector for the query text
+		// 쿼리 텍스트에 대한 임베딩 벡터 생성
 		logger.Info(ctx, "Starting to generate query embedding")
 		queryEmbedding, err := embeddingModel.Embed(ctx, params.QueryText)
 		if err != nil {
@@ -545,7 +545,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			TagIDs:           params.TagIDs,
 		}
 
-		// For FAQ knowledge base, use FAQ index
+		// FAQ 지식베이스의 경우 FAQ 인덱스 사용
 		if kb.Type == types.KnowledgeBaseTypeFAQ {
 			vectorParams.KnowledgeType = types.KnowledgeTypeFAQ
 		}
@@ -554,7 +554,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		logger.Info(ctx, "Vector retrieval parameters setup completed")
 	}
 
-	// Add keyword retrieval params if supported and not FAQ
+	// 키워드 검색이 지원되고 비활성화되지 않았으며 FAQ가 아닌 경우 매개변수 추가
 	if retrieveEngine.SupportRetriever(types.KeywordsRetrieverType) && !params.DisableKeywordsMatch &&
 		kb.Type != types.KnowledgeBaseTypeFAQ {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
@@ -575,7 +575,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, errors.New("no retrieve params")
 	}
 
-	// Execute retrieval using the configured engines
+	// 구성된 엔진을 사용하여 검색 실행
 	logger.Infof(ctx, "Starting retrieval, parameter count: %d", len(retrieveParams))
 	retrieveResults, err := retrieveEngine.Retrieve(ctx, retrieveParams)
 	if err != nil {
@@ -586,10 +586,10 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	// Collect all results from different retrievers and deduplicate by chunk ID
+	// 다른 리트리버의 모든 결과를 수집하고 청크 ID로 중복 제거
 	logger.Infof(ctx, "Processing retrieval results")
 
-	// Separate results by retriever type for RRF fusion
+	// RRF 퓨전을 위해 리트리버 유형별로 결과 분리
 	var vectorResults []*types.IndexWithScore
 	var keywordResults []*types.IndexWithScore
 	for _, retrieveResult := range retrieveResults {
@@ -605,7 +605,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		}
 	}
 
-	// Early return if no results
+	// 결과가 없으면 조기 반환
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
 		return nil, nil
@@ -614,13 +614,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	var deduplicatedChunks []*types.IndexWithScore
 
-	// If only vector results (no keyword results), keep original embedding scores
-	// This is important for FAQ search which only uses vector retrieval
+	// 벡터 결과만 있는 경우(키워드 결과 없음), 원본 임베딩 점수 유지
+	// 이는 벡터 검색만 사용하는 FAQ 검색에 중요합니다
 	if len(keywordResults) == 0 {
 		logger.Info(ctx, "Only vector results, keeping original embedding scores")
 		chunkInfoMap := make(map[string]*types.IndexWithScore)
 		for _, r := range vectorResults {
-			// Keep the highest score for each chunk (FAQ may have multiple similar questions)
+			// 각 청크에 대해 가장 높은 점수 유지 (FAQ에는 여러 유사한 질문이 있을 수 있음)
 			if existing, exists := chunkInfoMap[r.ChunkID]; !exists || r.Score > existing.Score {
 				chunkInfoMap[r.ChunkID] = r
 			}
@@ -639,44 +639,44 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		})
 		logger.Infof(ctx, "Result count after deduplication: %d", len(deduplicatedChunks))
 	} else {
-		// Use RRF (Reciprocal Rank Fusion) to merge results from multiple retrievers
-		// RRF score = sum(1 / (k + rank)) for each retriever where the chunk appears
-		// k=60 is a common choice that works well in practice
+		// RRF(Reciprocal Rank Fusion)를 사용하여 여러 리트리버의 결과 병합
+		// RRF 점수 = 청크가 나타나는 각 리트리버에 대해 sum(1 / (k + rank))
+		// k=60은 실제로 잘 작동하는 일반적인 선택입니다
 		const rrfK = 60
 
-		// Build rank maps for each retriever (already sorted by score from retriever)
+		// 각 리트리버에 대한 순위 맵 구축 (이미 리트리버에서 점수순으로 정렬됨)
 		vectorRanks := make(map[string]int)
 		for i, r := range vectorResults {
 			if _, exists := vectorRanks[r.ChunkID]; !exists {
-				vectorRanks[r.ChunkID] = i + 1 // 1-indexed rank
+				vectorRanks[r.ChunkID] = i + 1 // 1부터 시작하는 순위
 			}
 		}
 		keywordRanks := make(map[string]int)
 		for i, r := range keywordResults {
 			if _, exists := keywordRanks[r.ChunkID]; !exists {
-				keywordRanks[r.ChunkID] = i + 1 // 1-indexed rank
+				keywordRanks[r.ChunkID] = i + 1 // 1부터 시작하는 순위
 			}
 		}
 
-		// Collect all unique chunks and compute RRF scores
-		// Keep the highest score for each chunk from each retriever
+		// 모든 고유 청크 수집 및 RRF 점수 계산
+		// 각 리트리버에서 각 청크에 대해 가장 높은 점수 유지
 		chunkInfoMap := make(map[string]*types.IndexWithScore)
 		rrfScores := make(map[string]float64)
 
-		// Process vector results - keep highest score per chunk
+		// 벡터 결과 처리 - 청크당 최고 점수 유지
 		for _, r := range vectorResults {
 			if existing, exists := chunkInfoMap[r.ChunkID]; !exists || r.Score > existing.Score {
 				chunkInfoMap[r.ChunkID] = r
 			}
 		}
-		// Process keyword results - only add if not already from vector
+		// 키워드 결과 처리 - 벡터에 아직 없는 경우에만 추가
 		for _, r := range keywordResults {
 			if _, exists := chunkInfoMap[r.ChunkID]; !exists {
 				chunkInfoMap[r.ChunkID] = r
 			}
 		}
 
-		// Compute RRF scores
+		// RRF 점수 계산
 		for chunkID := range chunkInfoMap {
 			rrfScore := 0.0
 			if rank, ok := vectorRanks[chunkID]; ok {
@@ -688,10 +688,10 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			rrfScores[chunkID] = rrfScore
 		}
 
-		// Convert to slice and sort by RRF score
+		// 슬라이스로 변환하고 RRF 점수순으로 정렬
 		deduplicatedChunks = make([]*types.IndexWithScore, 0, len(chunkInfoMap))
 		for chunkID, info := range chunkInfoMap {
-			// Store RRF score in the Score field for downstream processing
+			// 다운스트림 처리를 위해 Score 필드에 RRF 점수 저장
 			info.Score = rrfScores[chunkID]
 			deduplicatedChunks = append(deduplicatedChunks, info)
 		}
@@ -706,7 +706,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 		logger.Infof(ctx, "Result count after RRF fusion: %d", len(deduplicatedChunks))
 
-		// Log top results after RRF fusion for debugging
+		// 디버깅을 위해 RRF 퓨전 후 상위 결과 로깅
 		for i, chunk := range deduplicatedChunks {
 			if i < 15 {
 				vRank, vOk := vectorRanks[chunk.ChunkID]
@@ -719,13 +719,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 	kb.EnsureDefaults()
 
-	// Check if we need iterative retrieval for FAQ with separate indexing
-	// Only use iterative retrieval if we don't have enough unique chunks after first deduplication
+	// 개별 인덱싱이 있는 FAQ에 대해 반복 검색이 필요한지 확인
+	// 첫 번째 중복 제거 후 고유 청크가 충분하지 않은 경우에만 반복 검색 사용
 	needsIterativeRetrieval := len(deduplicatedChunks) < params.MatchCount &&
 		kb.Type == types.KnowledgeBaseTypeFAQ && len(vectorResults) == matchCount
 	if needsIterativeRetrieval {
 		logger.Info(ctx, "Not enough unique chunks, using iterative retrieval for FAQ")
-		// Use iterative retrieval to get more unique chunks (with negative question filtering inside)
+		// 반복 검색을 사용하여 더 많은 고유 청크 확보 (내부에서 부정 질문 필터링 수행)
 		deduplicatedChunks = s.iterativeRetrieveWithDeduplication(
 			ctx,
 			retrieveEngine,
@@ -734,12 +734,12 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			params.QueryText,
 		)
 	} else if kb.Type == types.KnowledgeBaseTypeFAQ {
-		// Filter by negative questions if not using iterative retrieval
+		// 반복 검색을 사용하지 않는 경우 부정 질문으로 필터링
 		deduplicatedChunks = s.filterByNegativeQuestions(ctx, deduplicatedChunks, params.QueryText)
 		logger.Infof(ctx, "Result count after negative question filtering: %d", len(deduplicatedChunks))
 	}
 
-	// Limit to MatchCount
+	// MatchCount로 제한
 	if len(deduplicatedChunks) > params.MatchCount {
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
@@ -747,9 +747,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	return s.processSearchResults(ctx, deduplicatedChunks)
 }
 
-// iterativeRetrieveWithDeduplication performs iterative retrieval until enough unique chunks are found
-// This is used for FAQ knowledge bases with separate indexing mode
-// Negative question filtering is applied after each iteration with chunk data caching
+// iterativeRetrieveWithDeduplication 충분한 고유 청크가 발견될 때까지 반복 검색 수행
+// 개별 인덱싱 모드가 있는 FAQ 지식베이스에 사용됨
+// 각 반복 후 청크 데이터 캐싱과 함께 부정 질문 필터링 적용
 func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Context,
 	retrieveEngine *retriever.CompositeRetrieveEngine,
 	retrieveParams []types.RetrieveParams,
@@ -757,34 +757,34 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	queryText string,
 ) []*types.IndexWithScore {
 	maxIterations := 5
-	// Start with a larger TopK since we're called when first retrieval wasn't enough
-	// The first retrieval already used matchCount*3, so start from there
+	// 첫 번째 검색이 충분하지 않았을 때 호출되므로 더 큰 TopK로 시작
+	// 첫 번째 검색은 이미 matchCount*3을 사용했으므로 거기서부터 시작
 	currentTopK := matchCount * 3
 	uniqueChunks := make(map[string]*types.IndexWithScore)
-	// Cache chunk data to avoid repeated DB queries across iterations
+	// 반복 간에 반복적인 DB 쿼리를 피하기 위해 청크 데이터 캐시
 	chunkDataCache := make(map[string]*types.Chunk)
-	// Track chunks that have been filtered out by negative questions
+	// 부정 질문에 의해 필터링된 청크 추적
 	filteredOutChunks := make(map[string]struct{})
 
 	queryTextLower := strings.ToLower(strings.TrimSpace(queryText))
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 	for i := 0; i < maxIterations; i++ {
-		// Update TopK in retrieve params
+		// 검색 매개변수에서 TopK 업데이트
 		updatedParams := make([]types.RetrieveParams, len(retrieveParams))
 		for j := range retrieveParams {
 			updatedParams[j] = retrieveParams[j]
 			updatedParams[j].TopK = currentTopK
 		}
 
-		// Execute retrieval
+		// 검색 실행
 		retrieveResults, err := retrieveEngine.Retrieve(ctx, updatedParams)
 		if err != nil {
 			logger.Warnf(ctx, "Iterative retrieval failed at iteration %d: %v", i+1, err)
 			break
 		}
 
-		// Collect results
+		// 결과 수집
 		iterationResults := []*types.IndexWithScore{}
 		for _, retrieveResult := range retrieveResults {
 			iterationResults = append(iterationResults, retrieveResult.Results...)
@@ -797,7 +797,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 
 		totalRetrieved := len(iterationResults)
 
-		// Collect new chunk IDs that need to be fetched from DB
+		// DB에서 가져와야 할 새 청크 ID 수집
 		newChunkIDs := make([]string, 0)
 		for _, result := range iterationResults {
 			if _, cached := chunkDataCache[result.ChunkID]; !cached {
@@ -807,7 +807,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			}
 		}
 
-		// Batch fetch only new chunks
+		// 새 청크만 일괄 가져오기
 		if len(newChunkIDs) > 0 {
 			newChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, newChunkIDs)
 			if err != nil {
@@ -819,14 +819,14 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			}
 		}
 
-		// Deduplicate, merge, and filter in one pass
+		// 한 번의 패스로 중복 제거, 병합 및 필터링
 		for _, result := range iterationResults {
-			// Skip if already filtered out
+			// 이미 필터링된 경우 건너뜀
 			if _, filtered := filteredOutChunks[result.ChunkID]; filtered {
 				continue
 			}
 
-			// Check negative questions using cached data
+			// 캐시된 데이터를 사용하여 부정 질문 확인
 			if chunkData, ok := chunkDataCache[result.ChunkID]; ok {
 				if chunkData.ChunkType == types.ChunkTypeFAQ {
 					if meta, err := chunkData.FAQMetadata(); err == nil && meta != nil {
@@ -839,7 +839,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 				}
 			}
 
-			// Keep highest score for each chunk
+			// 각 청크에 대해 가장 높은 점수 유지
 			if existing, ok := uniqueChunks[result.ChunkID]; !ok || result.Score > existing.Score {
 				uniqueChunks[result.ChunkID] = result
 			}
@@ -854,29 +854,29 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			matchCount,
 		)
 
-		// Early stop: Check if we have enough unique chunks after deduplication and filtering
+		// 조기 종료: 중복 제거 및 필터링 후 충분한 고유 청크가 있는지 확인
 		if len(uniqueChunks) >= matchCount {
 			logger.Infof(ctx, "Found enough unique chunks after %d iterations", i+1)
 			break
 		}
 
-		// Early stop: If we got fewer results than TopK, there are no more results to retrieve
+		// 조기 종료: TopK보다 적은 결과를 얻었다면 더 이상 검색할 결과가 없음
 		if totalRetrieved < currentTopK {
 			logger.Infof(ctx, "No more results available (got %d < %d), stopping iteration", totalRetrieved, currentTopK)
 			break
 		}
 
-		// Increase TopK for next iteration
+		// 다음 반복을 위해 TopK 증가
 		currentTopK *= 2
 	}
 
-	// Convert map to slice and sort by score
+	// 맵을 슬라이스로 변환하고 점수순으로 정렬
 	result := make([]*types.IndexWithScore, 0, len(uniqueChunks))
 	for _, chunk := range uniqueChunks {
 		result = append(result, chunk)
 	}
 
-	// Sort by score descending
+	// 점수 내림차순 정렬
 	slices.SortFunc(result, func(a, b *types.IndexWithScore) int {
 		if a.Score > b.Score {
 			return -1
@@ -890,7 +890,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	return result
 }
 
-// filterByNegativeQuestions filters out chunks that match negative questions for FAQ knowledge bases.
+// filterByNegativeQuestions FAQ 지식베이스에 대해 부정 질문과 일치하는 청크 필터링
 func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 	chunks []*types.IndexWithScore,
 	queryText string,
@@ -906,65 +906,65 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-	// Collect chunk IDs
+	// 청크 ID 수집
 	chunkIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		chunkIDs = append(chunkIDs, chunk.ChunkID)
 	}
 
-	// Batch fetch chunks to get negative questions
+	// 부정 질문을 가져오기 위해 청크 일괄 가져오기
 	allChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to fetch chunks for negative question filtering: %v", err)
-		// If we can't fetch chunks, return original results
+		// 청크를 가져올 수 없는 경우 원본 결과 반환
 		return chunks
 	}
 
-	// Build chunk map for quick lookup
+	// 빠른 조회를 위한 청크 맵 구축
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
 	for _, chunk := range allChunks {
 		chunkMap[chunk.ID] = chunk
 	}
 
-	// Filter out chunks that match negative questions
+	// 부정 질문과 일치하는 청크 필터링
 	filteredChunks := make([]*types.IndexWithScore, 0, len(chunks))
 	for _, chunk := range chunks {
 		chunkData, ok := chunkMap[chunk.ChunkID]
 		if !ok {
-			// If chunk not found, keep it (shouldn't happen, but be safe)
+			// 청크를 찾을 수 없는 경우 유지 (발생하면 안 되지만 안전하게 처리)
 			filteredChunks = append(filteredChunks, chunk)
 			continue
 		}
 
-		// Only filter FAQ type chunks
+		// FAQ 유형 청크만 필터링
 		if chunkData.ChunkType != types.ChunkTypeFAQ {
 			filteredChunks = append(filteredChunks, chunk)
 			continue
 		}
 
-		// Get FAQ metadata and check negative questions
+		// FAQ 메타데이터 가져오기 및 부정 질문 확인
 		meta, err := chunkData.FAQMetadata()
 		if err != nil || meta == nil {
-			// If we can't parse metadata, keep the chunk
+			// 메타데이터를 파싱할 수 없는 경우 청크 유지
 			filteredChunks = append(filteredChunks, chunk)
 			continue
 		}
 
-		// Check if query matches any negative question
+		// 쿼리가 부정 질문과 일치하는지 확인
 		if s.matchesNegativeQuestions(queryTextLower, meta.NegativeQuestions) {
 			logger.Debugf(ctx, "Filtered FAQ chunk %s due to negative question match", chunk.ChunkID)
 			continue
 		}
 
-		// Keep the chunk
+		// 청크 유지
 		filteredChunks = append(filteredChunks, chunk)
 	}
 
 	return filteredChunks
 }
 
-// matchesNegativeQuestions checks if the query text matches any negative questions.
-// Returns true if the query matches any negative question, false otherwise.
+// matchesNegativeQuestions 쿼리 텍스트가 부정 질문과 일치하는지 확인
+// 쿼리가 부정 질문과 일치하면 true 반환, 그렇지 않으면 false 반환
 func (s *knowledgeBaseService) matchesNegativeQuestions(queryTextLower string, negativeQuestions []string) bool {
 	if len(negativeQuestions) == 0 {
 		return false
@@ -975,7 +975,7 @@ func (s *knowledgeBaseService) matchesNegativeQuestions(queryTextLower string, n
 		if negativeQLower == "" {
 			continue
 		}
-		// Check if query text is exactly the same as the negative question
+		// 쿼리 텍스트가 부정 질문과 정확히 일치하는지 확인
 		if queryTextLower == negativeQLower {
 			return true
 		}
@@ -983,7 +983,7 @@ func (s *knowledgeBaseService) matchesNegativeQuestions(queryTextLower string, n
 	return false
 }
 
-// processSearchResults handles the processing of search results, optimizing database queries
+// processSearchResults 검색 결과 처리, 데이터베이스 쿼리 최적화
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
 ) ([]*types.SearchResult, error) {
@@ -993,14 +993,14 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-	// Prepare data structures for efficient processing
+	// 효율적인 처리를 위한 데이터 구조 준비
 	var knowledgeIDs []string
 	var chunkIDs []string
 	chunkScores := make(map[string]float64)
 	chunkMatchTypes := make(map[string]types.MatchType)
 	processedKnowledgeIDs := make(map[string]bool)
 
-	// Collect all knowledge and chunk IDs
+	// 모든 지식 및 청크 ID 수집
 	for _, chunk := range chunks {
 		if !processedKnowledgeIDs[chunk.KnowledgeID] {
 			knowledgeIDs = append(knowledgeIDs, chunk.KnowledgeID)
@@ -1012,14 +1012,14 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		chunkMatchTypes[chunk.ChunkID] = chunk.MatchType
 	}
 
-	// Batch fetch knowledge data
+	// 지식 데이터 일괄 가져오기
 	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(knowledgeIDs))
 	knowledgeMap, err := s.fetchKnowledgeData(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	// Batch fetch all chunks in one go
+	// 모든 청크 일괄 가져오기
 	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(chunkIDs))
 	allChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
 	if err != nil {
@@ -1031,34 +1031,34 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 	logger.Infof(ctx, "Chunk data fetched successfully, count: %d", len(allChunks))
 
-	// Build chunk map and collect additional IDs to fetch
+	// 청크 맵 구축 및 가져올 추가 ID 수집
 	chunkMap := make(map[string]*types.Chunk, len(allChunks))
 	var additionalChunkIDs []string
 	processedChunkIDs := make(map[string]bool)
 
-	// First pass: Build chunk map and collect parent IDs
+	// 첫 번째 패스: 청크 맵 구축 및 부모 ID 수집
 	for _, chunk := range allChunks {
 		chunkMap[chunk.ID] = chunk
 		processedChunkIDs[chunk.ID] = true
 
-		// Collect parent chunks
+		// 부모 청크 수집
 		if chunk.ParentChunkID != "" && !processedChunkIDs[chunk.ParentChunkID] {
 			additionalChunkIDs = append(additionalChunkIDs, chunk.ParentChunkID)
 			processedChunkIDs[chunk.ParentChunkID] = true
 
-			// Pass score to parent
+			// 부모에게 점수 전달
 			chunkScores[chunk.ParentChunkID] = chunkScores[chunk.ID]
 			chunkMatchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
 		}
 
-		// Collect related chunks
+		// 관련 청크 수집
 		relationChunkIDs := s.collectRelatedChunkIDs(chunk, processedChunkIDs)
 		for _, chunkID := range relationChunkIDs {
 			additionalChunkIDs = append(additionalChunkIDs, chunkID)
 			chunkMatchTypes[chunkID] = types.MatchTypeRelationChunk
 		}
 
-		// Add nearby chunks (prev and next)
+		// 인접 청크 추가 (이전 및 다음)
 		if slices.Contains([]string{types.ChunkTypeText}, chunk.ChunkType) {
 			if chunk.NextChunkID != "" && !processedChunkIDs[chunk.NextChunkID] {
 				additionalChunkIDs = append(additionalChunkIDs, chunk.NextChunkID)
@@ -1073,26 +1073,26 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		}
 	}
 
-	// Fetch all additional chunks in one go if needed
+	// 필요한 경우 모든 추가 청크 일괄 가져오기
 	if len(additionalChunkIDs) > 0 {
 		logger.Infof(ctx, "Fetching %d additional chunks", len(additionalChunkIDs))
 		additionalChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, additionalChunkIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to fetch some additional chunks: %v", err)
-			// Continue with what we have
+			// 있는 것으로 계속 진행
 		} else {
-			// Add to chunk map
+			// 청크 맵에 추가
 			for _, chunk := range additionalChunks {
 				chunkMap[chunk.ID] = chunk
 			}
 		}
 	}
 
-	// Build final search results - preserve original order from input chunks
+	// 최종 검색 결과 구축 - 입력 청크의 원래 순서 유지
 	var searchResults []*types.SearchResult
 	addedChunkIDs := make(map[string]bool)
 
-	// First pass: Add results in the original order from input chunks
+	// 첫 번째 패스: 입력 청크의 원래 순서대로 결과 추가
 	for _, inputChunk := range chunks {
 		chunk, exists := chunkMap[inputChunk.ChunkID]
 		if !exists {
@@ -1117,7 +1117,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		}
 	}
 
-	// Second pass: Add additional chunks (parent, nearby, relation) that weren't in original input
+	// 두 번째 패스: 원래 입력에 없었던 추가 청크(부모, 인접, 관계) 추가
 	for chunkID, chunk := range chunkMap {
 		if addedChunkIDs[chunkID] || !s.isValidTextChunk(chunk) {
 			continue
@@ -1143,10 +1143,10 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	return searchResults, nil
 }
 
-// collectRelatedChunkIDs extracts related chunk IDs from a chunk
+// collectRelatedChunkIDs 청크에서 관련 청크 ID 추출
 func (s *knowledgeBaseService) collectRelatedChunkIDs(chunk *types.Chunk, processedIDs map[string]bool) []string {
 	var relatedIDs []string
-	// Process direct relations
+	// 직접적인 관계 처리
 	if len(chunk.RelationChunks) > 0 {
 		var relations []string
 		if err := json.Unmarshal(chunk.RelationChunks, &relations); err == nil {
@@ -1161,7 +1161,7 @@ func (s *knowledgeBaseService) collectRelatedChunkIDs(chunk *types.Chunk, proces
 	return relatedIDs
 }
 
-// buildSearchResult creates a search result from chunk and knowledge
+// buildSearchResult 청크와 지식에서 검색 결과 생성
 func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
@@ -1188,7 +1188,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	}
 }
 
-// isValidTextChunk checks if a chunk is a valid text chunk
+// isValidTextChunk 청크가 유효한 텍스트 청크인지 확인
 func (s *knowledgeBaseService) isValidTextChunk(chunk *types.Chunk) bool {
 	return slices.Contains([]types.ChunkType{
 		types.ChunkTypeText, types.ChunkTypeSummary,
@@ -1197,7 +1197,7 @@ func (s *knowledgeBaseService) isValidTextChunk(chunk *types.Chunk) bool {
 	}, chunk.ChunkType)
 }
 
-// fetchKnowledgeData gets knowledge data in batch
+// fetchKnowledgeData 지식 데이터를 일괄 가져오기
 func (s *knowledgeBaseService) fetchKnowledgeData(ctx context.Context,
 	tenantID uint64,
 	knowledgeIDs []string,

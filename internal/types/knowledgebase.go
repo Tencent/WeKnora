@@ -8,118 +8,118 @@ import (
 	"gorm.io/gorm"
 )
 
-// KnowledgeBaseType represents the type of the knowledge base
+// KnowledgeBaseType 지식베이스 유형을 나타냅니다
 const (
-	// KnowledgeBaseTypeDocument represents the document knowledge base type
+	// KnowledgeBaseTypeDocument 문서 지식베이스 유형을 나타냅니다
 	KnowledgeBaseTypeDocument = "document"
 	KnowledgeBaseTypeFAQ      = "faq"
 )
 
-// FAQIndexMode represents the FAQ index mode: only index questions or index questions and answers
+// FAQIndexMode FAQ 인덱스 모드: 질문만 인덱싱 또는 질문과 답변 인덱싱
 type FAQIndexMode string
 
 const (
-	// FAQIndexModeQuestionOnly only index questions and similar questions
+	// FAQIndexModeQuestionOnly 질문과 유사 질문만 인덱싱
 	FAQIndexModeQuestionOnly FAQIndexMode = "question_only"
-	// FAQIndexModeQuestionAnswer index questions and answers together
+	// FAQIndexModeQuestionAnswer 질문과 답변을 함께 인덱싱
 	FAQIndexModeQuestionAnswer FAQIndexMode = "question_answer"
 )
 
-// FAQQuestionIndexMode represents the FAQ question index mode: index together or index separately
+// FAQQuestionIndexMode FAQ 질문 인덱스 모드: 함께 인덱싱 또는 별도 인덱싱
 type FAQQuestionIndexMode string
 
 const (
-	// FAQQuestionIndexModeCombined index questions and similar questions together
+	// FAQQuestionIndexModeCombined 질문과 유사 질문을 함께 인덱싱
 	FAQQuestionIndexModeCombined FAQQuestionIndexMode = "combined"
-	// FAQQuestionIndexModeSeparate index questions and similar questions separately
+	// FAQQuestionIndexModeSeparate 질문과 유사 질문을 별도로 인덱싱
 	FAQQuestionIndexModeSeparate FAQQuestionIndexMode = "separate"
 )
 
-// KnowledgeBase represents a knowledge base entity
+// KnowledgeBase 지식베이스 엔티티를 나타냅니다
 type KnowledgeBase struct {
-	// Unique identifier of the knowledge base
+	// 지식베이스 고유 식별자
 	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey"`
-	// Name of the knowledge base
+	// 지식베이스 이름
 	Name string `yaml:"name"                    json:"name"`
-	// Type of the knowledge base (document, faq, etc.)
+	// 지식베이스 유형 (document, faq 등)
 	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'"`
-	// Whether this knowledge base is temporary (ephemeral) and should be hidden from UI
+	// 임시(일시적) 지식베이스 여부 (UI에서 숨김)
 	IsTemporary bool `yaml:"is_temporary"            json:"is_temporary"            gorm:"default:false"`
-	// Description of the knowledge base
+	// 지식베이스 설명
 	Description string `yaml:"description"             json:"description"`
-	// Tenant ID
+	// 테넌트 ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
-	// Chunking configuration
+	// 청크 구성
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"         gorm:"type:json"`
-	// Image processing configuration
+	// 이미지 처리 구성
 	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config" gorm:"type:json"`
-	// ID of the embedding model
+	// 임베딩 모델 ID
 	EmbeddingModelID string `yaml:"embedding_model_id"      json:"embedding_model_id"`
-	// Summary model ID
+	// 요약 모델 ID
 	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id"`
-	// VLM config
+	// VLM 구성
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
-	// Storage config
+	// 저장소 구성
 	StorageConfig StorageConfig `yaml:"cos_config"              json:"cos_config"              gorm:"column:cos_config;type:json"`
-	// Extract config
+	// 추출 구성
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
-	// FAQConfig stores FAQ specific configuration such as indexing strategy
+	// FAQConfig 인덱싱 전략과 같은 FAQ 고유 구성 저장
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
-	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
+	// QuestionGenerationConfig 문서 지식베이스에 대한 질문 생성 구성 저장
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
-	// Creation time of the knowledge base
+	// 지식베이스 생성 시간
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
-	// Last updated time of the knowledge base
+	// 지식베이스 마지막 업데이트 시간
 	UpdatedAt time.Time `yaml:"updated_at"              json:"updated_at"`
-	// Deletion time of the knowledge base
+	// 지식베이스 삭제 시간
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"              json:"deleted_at"              gorm:"index"`
-	// Knowledge count (not stored in database, calculated on query)
+	// 지식 수 (데이터베이스에 저장되지 않음, 쿼리 시 계산됨)
 	KnowledgeCount int64 `yaml:"knowledge_count"         json:"knowledge_count"         gorm:"-"`
-	// Chunk count (not stored in database, calculated on query)
+	// 청크 수 (데이터베이스에 저장되지 않음, 쿼리 시 계산됨)
 	ChunkCount int64 `yaml:"chunk_count"             json:"chunk_count"             gorm:"-"`
-	// IsProcessing indicates if there is a processing import task (for FAQ type knowledge bases)
+	// IsProcessing 처리 중인 가져오기 작업이 있는지 여부 (FAQ 유형 지식베이스용)
 	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-"`
-	// ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)
+	// ProcessingCount 처리 중인 지식 항목 수 (문서 유형 지식베이스용)
 	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-"`
 }
 
-// KnowledgeBaseConfig represents the knowledge base configuration
+// KnowledgeBaseConfig 지식베이스 구성을 나타냅니다
 type KnowledgeBaseConfig struct {
-	// Chunking configuration
+	// 청크 구성
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"`
-	// Image processing configuration
+	// 이미지 처리 구성
 	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
-	// FAQ configuration (only for FAQ type knowledge bases)
+	// FAQ 구성 (FAQ 유형 지식베이스에만 해당)
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
 }
 
-// ChunkingConfig represents the document splitting configuration
+// ChunkingConfig 문서 분할 구성을 나타냅니다
 type ChunkingConfig struct {
-	// Chunk size
+	// 청크 크기
 	ChunkSize int `yaml:"chunk_size"    json:"chunk_size"`
-	// Chunk overlap
+	// 청크 중복
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
-	// Separators
+	// 구분자
 	Separators []string `yaml:"separators"    json:"separators"`
-	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
+	// EnableMultimodal (더 이상 사용되지 않음, 이전 데이터와의 호환성을 위해 유지됨)
 	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
 }
 
-// COSConfig represents the COS configuration
+// StorageConfig COS 구성을 나타냅니다
 type StorageConfig struct {
 	// Secret ID
 	SecretID string `yaml:"secret_id"   json:"secret_id"`
 	// Secret Key
 	SecretKey string `yaml:"secret_key"  json:"secret_key"`
-	// Region
+	// 지역
 	Region string `yaml:"region"      json:"region"`
-	// Bucket Name
+	// 버킷 이름
 	BucketName string `yaml:"bucket_name" json:"bucket_name"`
-	// App ID
+	// 앱 ID
 	AppID string `yaml:"app_id"      json:"app_id"`
-	// Path Prefix
+	// 경로 접두사
 	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
-	// Provider
+	// 공급자
 	Provider string `yaml:"provider"    json:"provider"`
 }
 
@@ -138,18 +138,18 @@ func (c *StorageConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// ImageProcessingConfig represents the image processing configuration
+// ImageProcessingConfig 이미지 처리 구성을 나타냅니다
 type ImageProcessingConfig struct {
-	// Model ID
+	// 모델 ID
 	ModelID string `yaml:"model_id" json:"model_id"`
 }
 
-// Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value
+// Value ChunkingConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c ChunkingConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to ChunkingConfig
+// Scan 데이터베이스 값을 ChunkingConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (c *ChunkingConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -161,12 +161,12 @@ func (c *ChunkingConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// Value implements the driver.Valuer interface, used to convert ImageProcessingConfig to database value
+// Value ImageProcessingConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c ImageProcessingConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to ImageProcessingConfig
+// Scan 데이터베이스 값을 ImageProcessingConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (c *ImageProcessingConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -178,52 +178,52 @@ func (c *ImageProcessingConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// VLMConfig represents the VLM configuration
+// VLMConfig VLM 구성을 나타냅니다
 type VLMConfig struct {
 	Enabled bool   `yaml:"enabled"  json:"enabled"`
 	ModelID string `yaml:"model_id" json:"model_id"`
 
-	// 兼容老版本
-	// Model Name
+	// 이전 버전 호환성
+	// 모델 이름
 	ModelName string `yaml:"model_name" json:"model_name"`
-	// Base URL
+	// 기본 URL
 	BaseURL string `yaml:"base_url" json:"base_url"`
-	// API Key
+	// API 키
 	APIKey string `yaml:"api_key" json:"api_key"`
-	// Interface Type: "ollama" or "openai"
+	// 인터페이스 유형: "ollama" 또는 "openai"
 	InterfaceType string `yaml:"interface_type" json:"interface_type"`
 }
 
-// IsEnabled 判断多模态是否启用（兼容新老版本）
-// 新版本：Enabled && ModelID != ""
-// 老版本：ModelName != "" && BaseURL != ""
+// IsEnabled 멀티모달 활성화 여부 판단 (신규 및 구형 구성 호환)
+// 신규: Enabled && ModelID != ""
+// 구형: ModelName != "" && BaseURL != ""
 func (c VLMConfig) IsEnabled() bool {
-	// 新版本配置
+	// 신규 버전 구성
 	if c.Enabled && c.ModelID != "" {
 		return true
 	}
-	// 兼容老版本配置
+	// 구형 버전 호환 구성
 	if c.ModelName != "" && c.BaseURL != "" {
 		return true
 	}
 	return false
 }
 
-// QuestionGenerationConfig represents the question generation configuration for document knowledge bases
-// When enabled, the system will use LLM to generate questions for each chunk during document parsing
-// These generated questions will be indexed separately to improve recall
+// QuestionGenerationConfig 문서 지식베이스에 대한 질문 생성 구성을 나타냅니다
+// 활성화되면 시스템은 문서 파싱 중에 각 청크에 대해 LLM을 사용하여 질문을 생성합니다
+// 생성된 질문은 재현율을 높이기 위해 별도로 인덱싱됩니다
 type QuestionGenerationConfig struct {
 	Enabled bool `yaml:"enabled"  json:"enabled"`
-	// Number of questions to generate per chunk (default: 3, max: 10)
+	// 청크당 생성할 질문 수 (기본값: 3, 최대: 10)
 	QuestionCount int `yaml:"question_count" json:"question_count"`
 }
 
-// Value implements the driver.Valuer interface
+// Value driver.Valuer 인터페이스 구현
 func (c QuestionGenerationConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface
+// Scan sql.Scanner 인터페이스 구현
 func (c *QuestionGenerationConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -235,12 +235,12 @@ func (c *QuestionGenerationConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// Value implements the driver.Valuer interface, used to convert VLMConfig to database value
+// Value VLMConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c VLMConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to VLMConfig
+// Scan 데이터베이스 값을 VLMConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (c *VLMConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -252,7 +252,7 @@ func (c *VLMConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// ExtractConfig represents the extract configuration for a knowledge base
+// ExtractConfig 지식베이스에 대한 추출 구성을 나타냅니다
 type ExtractConfig struct {
 	Enabled   bool             `yaml:"enabled"   json:"enabled"`
 	Text      string           `yaml:"text"      json:"text,omitempty"`
@@ -261,12 +261,12 @@ type ExtractConfig struct {
 	Relations []*GraphRelation `yaml:"relations" json:"relations,omitempty"`
 }
 
-// Value implements the driver.Valuer interface, used to convert ExtractConfig to database value
+// Value ExtractConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (e ExtractConfig) Value() (driver.Value, error) {
 	return json.Marshal(e)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to ExtractConfig
+// Scan 데이터베이스 값을 ExtractConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (e *ExtractConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -278,18 +278,18 @@ func (e *ExtractConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, e)
 }
 
-// FAQConfig 存储 FAQ 知识库的特有配置
+// FAQConfig FAQ 지식베이스 고유 구성 저장
 type FAQConfig struct {
 	IndexMode         FAQIndexMode         `yaml:"index_mode"          json:"index_mode"`
 	QuestionIndexMode FAQQuestionIndexMode `yaml:"question_index_mode" json:"question_index_mode"`
 }
 
-// Value implements driver.Valuer
+// Value driver.Valuer 구현
 func (f FAQConfig) Value() (driver.Value, error) {
 	return json.Marshal(f)
 }
 
-// Scan implements sql.Scanner
+// Scan sql.Scanner 구현
 func (f *FAQConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -301,7 +301,7 @@ func (f *FAQConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, f)
 }
 
-// EnsureDefaults 确保类型与配置具备默认值
+// EnsureDefaults 유형 및 구성에 기본값이 있는지 확인
 func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb == nil {
 		return
@@ -328,18 +328,18 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	}
 }
 
-// IsMultimodalEnabled 判断多模态是否启用（兼容新老版本配置）
-// 新版本：VLMConfig.IsEnabled()
-// 老版本：ChunkingConfig.EnableMultimodal
+// IsMultimodalEnabled 멀티모달 활성화 여부 판단 (신규 및 구형 구성 호환)
+// 신규: VLMConfig.IsEnabled()
+// 구형: ChunkingConfig.EnableMultimodal
 func (kb *KnowledgeBase) IsMultimodalEnabled() bool {
 	if kb == nil {
 		return false
 	}
-	// 新版本配置优先
+	// 신규 버전 구성 우선
 	if kb.VLMConfig.IsEnabled() {
 		return true
 	}
-	// 兼容老版本：chunking_config 中的 enable_multimodal 字段
+	// 구형 버전 호환: chunking_config의 enable_multimodal 필드
 	if kb.ChunkingConfig.EnableMultimodal {
 		return true
 	}

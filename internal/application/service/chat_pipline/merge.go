@@ -106,7 +106,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 					lastChunk.EndAt = chunks[i].EndAt
 					lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
 
-					// 合并 ImageInfo
+					// ImageInfo 병합
 					if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
 						pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
 							"knowledge_id": knowledgeID,
@@ -144,9 +144,9 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	return next()
 }
 
-// mergeImageInfo 合并两个chunk的ImageInfo
+// mergeImageInfo 두 chunk의 ImageInfo 병합
 func mergeImageInfo(ctx context.Context, target *types.SearchResult, source *types.SearchResult) error {
-	// 如果source没有ImageInfo，不需要合并
+	// source에 ImageInfo가 없으면 병합할 필요 없음
 	if source.ImageInfo == "" {
 		return nil
 	}
@@ -159,40 +159,40 @@ func mergeImageInfo(ctx context.Context, target *types.SearchResult, source *typ
 		return err
 	}
 
-	// 如果source的ImageInfo为空，不需要合并
+	// source의 ImageInfo가 비어 있으면 병합할 필요 없음
 	if len(sourceImageInfos) == 0 {
 		return nil
 	}
 
-	// 处理target的ImageInfo
+	// target의 ImageInfo 처리
 	var targetImageInfos []types.ImageInfo
 	if target.ImageInfo != "" {
 		if err := json.Unmarshal([]byte(target.ImageInfo), &targetImageInfos); err != nil {
 			pipelineWarn(ctx, "Merge", "image_unmarshal_target", map[string]interface{}{
 				"error": err.Error(),
 			})
-			// 如果目标解析失败，直接使用源数据
+			// target 파싱 실패 시 source 데이터 사용
 			target.ImageInfo = source.ImageInfo
 			return nil
 		}
 	}
 
-	// 合并ImageInfo
+	// ImageInfo 병합
 	targetImageInfos = append(targetImageInfos, sourceImageInfos...)
 
-	// 去重
+	// 중복 제거
 	uniqueMap := make(map[string]bool)
 	uniqueImageInfos := make([]types.ImageInfo, 0, len(targetImageInfos))
 
 	for _, imgInfo := range targetImageInfos {
-		// 使用URL作为唯一标识
+		// URL을 고유 식별자로 사용
 		if imgInfo.URL != "" && !uniqueMap[imgInfo.URL] {
 			uniqueMap[imgInfo.URL] = true
 			uniqueImageInfos = append(uniqueImageInfos, imgInfo)
 		}
 	}
 
-	// 序列化合并后的ImageInfo
+	// 병합된 ImageInfo 직렬화
 	mergedImageInfoJSON, err := json.Marshal(uniqueImageInfos)
 	if err != nil {
 		pipelineWarn(ctx, "Merge", "image_marshal", map[string]interface{}{
@@ -201,7 +201,7 @@ func mergeImageInfo(ctx context.Context, target *types.SearchResult, source *typ
 		return err
 	}
 
-	// 更新目标chunk的ImageInfo
+	// target chunk의 ImageInfo 업데이트
 	target.ImageInfo = string(mergedImageInfoJSON)
 	pipelineInfo(ctx, "Merge", "image_merged", map[string]interface{}{
 		"image_refs": len(uniqueImageInfos),

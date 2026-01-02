@@ -15,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 无需认证的API列表
+// 인증이 필요하지 않은 API 목록
 var noAuthAPI = map[string][]string{
 	"/health":               {"GET"},
 	"/api/v1/auth/register": {"POST"},
@@ -23,10 +23,10 @@ var noAuthAPI = map[string][]string{
 	"/api/v1/auth/refresh":  {"POST"},
 }
 
-// 检查请求是否在无需认证的API列表中
+// 요청이 인증이 필요 없는 API 목록에 있는지 확인
 func isNoAuthAPI(path string, method string) bool {
 	for api, methods := range noAuthAPI {
-		// 如果以*结尾，按照前缀匹配，否则按照全路径匹配
+		// *로 끝나는 경우 접두사 일치 확인, 그렇지 않으면 전체 경로 일치 확인
 		if strings.HasSuffix(api, "*") {
 			if strings.HasPrefix(path, strings.TrimSuffix(api, "*")) && slices.Contains(methods, method) {
 				return true
@@ -40,23 +40,23 @@ func isNoAuthAPI(path string, method string) bool {
 
 // canAccessTenant checks if a user can access a target tenant
 func canAccessTenant(user *types.User, targetTenantID uint64, cfg *config.Config) bool {
-	// 1. 检查功能是否启用
+	// 1. 기능 활성화 여부 확인
 	if cfg == nil || cfg.Tenant == nil || !cfg.Tenant.EnableCrossTenantAccess {
 		return false
 	}
-	// 2. 检查用户权限
+	// 2. 사용자 권한 확인
 	if !user.CanAccessAllTenants {
 		return false
 	}
-	// 3. 如果目标租户是用户自己的租户，允许访问
+	// 3. 목표 테넌트가 사용자의 테넌트인 경우 허용
 	if user.TenantID == targetTenantID {
 		return true
 	}
-	// 4. 用户有跨租户权限，允许访问（具体验证在中间件中完成）
+	// 4. 사용자가 크로스 테넌트 권한이 있으면 허용 (구체적인 검증은 미들웨어에서 수행)
 	return true
 }
 
-// Auth 认证中间件
+// Auth 인증 미들웨어
 func Auth(
 	tenantService interfaces.TenantService,
 	userService interfaces.UserService,
@@ -69,29 +69,29 @@ func Auth(
 			return
 		}
 
-		// 检查请求是否在无需认证的API列表中
+		// 요청이 인증이 필요 없는 API 목록에 있는지 확인
 		if isNoAuthAPI(c.Request.URL.Path, c.Request.Method) {
 			c.Next()
 			return
 		}
 
-		// 尝试JWT Token认证
+		// JWT 토큰 인증 시도
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			user, err := userService.ValidateToken(c.Request.Context(), token)
 			if err == nil && user != nil {
-				// JWT Token认证成功
-				// 检查是否有跨租户访问请求
+				// JWT 토큰 인증 성공
+				// 크로스 테넌트 액세스 요청 확인
 				targetTenantID := user.TenantID
 				tenantHeader := c.GetHeader("X-Tenant-ID")
 				if tenantHeader != "" {
-					// 解析目标租户ID
+					// 목표 테넌트 ID 파싱
 					parsedTenantID, err := strconv.ParseUint(tenantHeader, 10, 64)
 					if err == nil {
-						// 检查用户是否有跨租户访问权限
+						// 사용자에게 크로스 테넌트 액세스 권한이 있는지 확인
 						if canAccessTenant(user, parsedTenantID, cfg) {
-							// 验证目标租户是否存在
+							// 목표 테넌트 존재 여부 확인
 							targetTenant, err := tenantService.GetTenantByID(c.Request.Context(), parsedTenantID)
 							if err == nil && targetTenant != nil {
 								targetTenantID = parsedTenantID
@@ -105,7 +105,7 @@ func Auth(
 								return
 							}
 						} else {
-							// 用户没有权限访问目标租户
+							// 사용자가 목표 테넌트에 액세스할 권한이 없음
 							log.Printf("User %s attempted to access tenant %d without permission", user.ID, parsedTenantID)
 							c.JSON(http.StatusForbidden, gin.H{
 								"error": "Forbidden: insufficient permissions to access target tenant",
@@ -116,7 +116,7 @@ func Auth(
 					}
 				}
 
-				// 获取租户信息（使用目标租户ID）
+				// 테넌트 정보 가져오기 (목표 테넌트 ID 사용)
 				tenant, err := tenantService.GetTenantByID(c.Request.Context(), targetTenantID)
 				if err != nil {
 					log.Printf("Error getting tenant by ID: %v, tenantID: %d, userID: %s", err, targetTenantID, user.ID)
@@ -127,7 +127,7 @@ func Auth(
 					return
 				}
 
-				// 存储用户和租户信息到上下文
+				// 사용자 및 테넌트 정보를 컨텍스트에 저장
 				c.Set(types.TenantIDContextKey.String(), targetTenantID)
 				c.Set(types.TenantInfoContextKey.String(), tenant)
 				c.Set("user", user)
@@ -145,7 +145,7 @@ func Auth(
 			}
 		}
 
-		// 尝试X-API-Key认证（兼容模式）
+		// X-API-Key 인증 시도 (호환 모드)
 		apiKey := c.GetHeader("X-API-Key")
 		if apiKey != "" {
 			// Get tenant information
@@ -190,7 +190,7 @@ func Auth(
 			return
 		}
 
-		// 没有提供任何认证信息
+		// 인증 정보가 제공되지 않음
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized: missing authentication"})
 		c.Abort()
 	}

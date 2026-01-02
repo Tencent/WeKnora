@@ -1,89 +1,89 @@
-# WeKnora 事件系统总结
+# WeKnora 이벤트 시스템 요약
 
-## 概述
+## 개요
 
-已成功为 WeKnora 项目创建了一个完整的事件发送和监听机制，支持对用户查询处理流程中的各个步骤进行事件处理。
+WeKnora 프로젝트를 위해 사용자 쿼리 처리 프로세스의 각 단계에 대한 이벤트 처리를 지원하는 완전한 이벤트 전송 및 수신 메커니즘을 성공적으로 생성했습니다.
 
-## 核心功能
+## 핵심 기능
 
-### ✅ 已实现的功能
+### ✅ 구현된 기능
 
-1. **事件总线 (EventBus)**
-   - `Emit(ctx, event)` - 发送事件
-   - `On(eventType, handler)` - 注册事件监听器
-   - `Off(eventType)` - 移除事件监听器
-   - `EmitAndWait(ctx, event)` - 发送事件并等待所有处理器完成
-   - 同步/异步两种模式
+1. **이벤트 버스 (EventBus)**
+   - `Emit(ctx, event)` - 이벤트 전송
+   - `On(eventType, handler)` - 이벤트 리스너 등록
+   - `Off(eventType)` - 이벤트 리스너 제거
+   - `EmitAndWait(ctx, event)` - 이벤트 전송 및 모든 핸들러 완료 대기
+   - 동기/비동기 두 가지 모드
 
-2. **事件类型**
-   - 查询处理事件（接收、验证、预处理、改写）
-   - 检索事件（开始、向量检索、关键词检索、实体检索、完成）
-   - 排序事件（开始、完成）
-   - 合并事件（开始、完成）
-   - 聊天生成事件（开始、完成、流式输出）
-   - 错误事件
+2. **이벤트 유형**
+   - 쿼리 처리 이벤트 (수신, 검증, 전처리, 재작성)
+   - 검색 이벤트 (시작, 벡터 검색, 키워드 검색, 엔티티 검색, 완료)
+   - 정렬 이벤트 (시작, 완료)
+   - 병합 이벤트 (시작, 완료)
+   - 채팅 생성 이벤트 (시작, 완료, 스트리밍 출력)
+   - 오류 이벤트
 
-3. **事件数据结构**
-   - `QueryData` - 查询数据
-   - `RetrievalData` - 检索数据
-   - `RerankData` - 排序数据
-   - `MergeData` - 合并数据
-   - `ChatData` - 聊天数据
-   - `ErrorData` - 错误数据
+3. **이벤트 데이터 구조**
+   - `QueryData` - 쿼리 데이터
+   - `RetrievalData` - 검색 데이터
+   - `RerankData` - 정렬 데이터
+   - `MergeData` - 병합 데이터
+   - `ChatData` - 채팅 데이터
+   - `ErrorData` - 오류 데이터
 
-4. **中间件支持**
-   - `WithLogging()` - 日志记录中间件
-   - `WithTiming()` - 计时中间件
-   - `WithRecovery()` - 错误恢复中间件
-   - `Chain()` - 中间件组合
+4. **미들웨어 지원**
+   - `WithLogging()` - 로깅 미들웨어
+   - `WithTiming()` - 타이밍 미들웨어
+   - `WithRecovery()` - 오류 복구 미들웨어
+   - `Chain()` - 미들웨어 조합
 
-5. **全局事件总线**
-   - 单例模式的全局事件总线
-   - 全局便捷函数（`On`, `Emit`, `EmitAndWait`等）
+5. **전역 이벤트 버스**
+   - 싱글톤 패턴의 전역 이벤트 버스
+   - 전역 편의 함수 (`On`, `Emit`, `EmitAndWait` 등)
 
-6. **示例和测试**
-   - 完整的单元测试
-   - 性能基准测试
-   - 完整的使用示例
-   - 实际场景演示
+6. **예제 및 테스트**
+   - 완전한 단위 테스트
+   - 성능 벤치마크 테스트
+   - 완전한 사용 예제
+   - 실제 시나리오 데모
 
-## 文件结构
+## 파일 구조
 
 ```
 internal/event/
-├── event.go                    # 核心事件总线实现
-├── event_data.go              # 事件数据结构定义
-├── middleware.go              # 中间件实现
-├── global.go                  # 全局事件总线
-├── integration_example.go     # 集成示例（监控、分析处理器）
-├── example_test.go            # 测试和示例
+├── event.go                    # 핵심 이벤트 버스 구현
+├── event_data.go              # 이벤트 데이터 구조 정의
+├── middleware.go              # 미들웨어 구현
+├── global.go                  # 전역 이벤트 버스
+├── integration_example.go     # 통합 예제 (모니터링, 분석 핸들러)
+├── example_test.go            # 테스트 및 예제
 ├── demo/
-│   └── main.go               # 完整的 RAG 流程演示
-├── README.md                 # 详细文档
-├── usage_example.md          # 使用示例文档
-└── SUMMARY.md                # 本文档
+│   └── main.go               # 완전한 RAG 프로세스 데모
+├── README.md                 # 상세 문서
+├── usage_example.md          # 사용 예제 문서
+└── SUMMARY.md                # 본 문서
 ```
 
-## 性能指标
+## 성능 지표
 
-- **事件发送性能**: ~9 纳秒/次 (基准测试)
-- **并发安全**: 使用 `sync.RWMutex` 保证线程安全
-- **内存开销**: 极低，只存储事件处理器函数引用
+- **이벤트 전송 성능**: ~9 나노초/회 (벤치마크 테스트)
+- **동시성 안전**: `sync.RWMutex`를 사용하여 스레드 안전성 보장
+- **메모리 오버헤드**: 매우 낮음, 이벤트 핸들러 함수 참조만 저장
 
-## 使用场景
+## 사용 시나리오
 
-### 1. 监控和指标收集
+### 1. 모니터링 및 지표 수집
 
 ```go
 bus.On(event.EventRetrievalComplete, func(ctx context.Context, e event.Event) error {
     data := e.Data.(event.RetrievalData)
-    // 发送到 Prometheus 或其他监控系统
+    // Prometheus 또는 기타 모니터링 시스템으로 전송
     metricsCollector.RecordRetrievalDuration(data.Duration)
     return nil
 })
 ```
 
-### 2. 日志记录
+### 2. 로깅
 
 ```go
 bus.On(event.EventQueryRewritten, func(ctx context.Context, e event.Event) error {
@@ -94,60 +94,60 @@ bus.On(event.EventQueryRewritten, func(ctx context.Context, e event.Event) error
 })
 ```
 
-### 3. 用户行为分析
+### 3. 사용자 행동 분석
 
 ```go
 bus.On(event.EventQueryReceived, func(ctx context.Context, e event.Event) error {
     data := e.Data.(event.QueryData)
-    // 发送到分析平台
+    // 분석 플랫폼으로 전송
     analytics.TrackQuery(data.UserID, data.OriginalQuery)
     return nil
 })
 ```
 
-### 4. 错误追踪
+### 4. 오류 추적
 
 ```go
 bus.On(event.EventError, func(ctx context.Context, e event.Event) error {
     data := e.Data.(event.ErrorData)
-    // 发送到错误追踪系统
+    // 오류 추적 시스템으로 전송
     sentry.CaptureException(data.Error)
     return nil
 })
 ```
 
-## 集成方式
+## 통합 방법
 
-### 步骤 1: 初始化事件系统
+### 1단계: 이벤트 시스템 초기화
 
-在应用启动时（如 `main.go` 或 `container.go`）：
+애플리케이션 시작 시 (예: `main.go` 또는 `container.go`):
 
 ```go
 import "github.com/Tencent/WeKnora/internal/event"
 
 func Initialize() {
-    // 获取全局事件总线
+    // 전역 이벤트 버스 가져오기
     bus := event.GetGlobalEventBus()
     
-    // 设置监控和分析
+    // 모니터링 및 분석 설정
     event.NewMonitoringHandler(bus)
     event.NewAnalyticsHandler(bus)
 }
 ```
 
-### 步骤 2: 在各个处理阶段发送事件
+### 2단계: 각 처리 단계에서 이벤트 전송
 
-在查询处理流程的各个插件中添加事件发送：
+쿼리 처리 프로세스의 각 플러그인에 이벤트 전송 추가:
 
 ```go
-// 在 search.go 中
+// search.go 에서
 event.Emit(ctx, event.NewEvent(event.EventRetrievalStart, event.RetrievalData{
     Query:           chatManage.ProcessedQuery,
     KnowledgeBaseID: chatManage.KnowledgeBaseID,
     TopK:            chatManage.EmbeddingTopK,
 }).WithSessionID(chatManage.SessionID))
 
-// 在 rerank.go 中
+// rerank.go 에서
 event.Emit(ctx, event.NewEvent(event.EventRerankComplete, event.RerankData{
     Query:       chatManage.ProcessedQuery,
     InputCount:  len(chatManage.SearchResult),
@@ -156,64 +156,64 @@ event.Emit(ctx, event.NewEvent(event.EventRerankComplete, event.RerankData{
 }).WithSessionID(chatManage.SessionID))
 ```
 
-### 步骤 3: 注册自定义事件处理器
+### 3단계: 사용자 정의 이벤트 핸들러 등록
 
-根据需要注册自定义处理器：
+필요에 따라 사용자 정의 핸들러 등록:
 
 ```go
 event.On(event.EventQueryRewritten, func(ctx context.Context, e event.Event) error {
-    // 自定义处理逻辑
+    // 사용자 정의 처리 로직
     return nil
 })
 ```
 
-## 优势
+## 장점
 
-1. **低耦合**: 事件发送者和监听者完全解耦，便于维护和扩展
-2. **高性能**: 极低的性能开销（~9纳秒/次）
-3. **灵活性**: 支持同步/异步、单个/多个监听器
-4. **可扩展**: 易于添加新的事件类型和处理器
-5. **类型安全**: 预定义的事件数据结构
-6. **中间件支持**: 便于添加横切关注点（日志、计时、错误处理等）
-7. **测试友好**: 易于在测试中验证事件行为
+1. **낮은 결합도**: 이벤트 전송자와 수신자가 완전히 분리되어 유지 관리 및 확장이 용이함
+2. **고성능**: 매우 낮은 성능 오버헤드 (~9나노초/회)
+3. **유연성**: 동기/비동기, 단일/다중 리스너 지원
+4. **확장성**: 새로운 이벤트 유형 및 핸들러 추가 용이
+5. **타입 안전성**: 사전 정의된 이벤트 데이터 구조
+6. **미들웨어 지원**: 횡단 관심사(로깅, 타이밍, 오류 처리 등) 추가 용이
+7. **테스트 친화적**: 테스트에서 이벤트 동작 검증 용이
 
-## 测试结果
+## 테스트 결과
 
-✅ 所有单元测试通过
-✅ 性能测试通过（~9纳秒/次）
-✅ 异步处理测试通过
-✅ 多处理器测试通过
-✅ 完整流程演示成功
+✅ 모든 단위 테스트 통과
+✅ 성능 테스트 통과 (~9나노초/회)
+✅ 비동기 처리 테스트 통과
+✅ 다중 처리기 테스트 통과
+✅ 전체 프로세스 데모 성공
 
-## 后续建议
+## 후속 제안
 
-### 可选的增强功能
+### 선택적 향상 기능
 
-1. **事件持久化**: 将关键事件保存到数据库或消息队列
-2. **事件重放**: 支持事件重放以进行调试或分析
-3. **事件过滤**: 支持更复杂的事件过滤和路由
-4. **优先级队列**: 支持事件优先级处理
-5. **分布式事件**: 通过消息队列支持跨服务事件
+1. **이벤트 지속성**: 주요 이벤트를 데이터베이스 또는 메시지 큐에 저장
+2. **이벤트 재생**: 디버깅 또는 분석을 위한 이벤트 재생 지원
+3. **이벤트 필터링**: 더 복잡한 이벤트 필터링 및 라우팅 지원
+4. **우선순위 큐**: 이벤트 우선순위 처리 지원
+5. **분산 이벤트**: 메시지 큐를 통한 서비스 간 이벤트 지원
 
-### 集成建议
+### 통합 제안
 
-1. **监控集成**: 集成 Prometheus 进行指标收集
-2. **日志集成**: 统一的结构化日志记录
-3. **追踪集成**: 与现有的 tracing 系统集成
-4. **告警集成**: 基于事件的告警机制
+1. **모니터링 통합**: Prometheus 통합을 통한 지표 수집
+2. **로그 통합**: 통일된 구조화된 로깅
+3. **추적 통합**: 기존 tracing 시스템과 통합
+4. **알람 통합**: 이벤트 기반 알람 메커니즘
 
-## 示例输出
+## 예제 출력
 
-运行 `go run ./internal/event/demo/main.go` 可以看到完整的 RAG 流程事件输出：
+`go run ./internal/event/demo/main.go`를 실행하면 전체 RAG 프로세스 이벤트 출력을 볼 수 있습니다:
 
 ```
 Step 1: Query Received
-[MONITOR] Query received - Session: session-xxx, Query: 什么是RAG技术？
+[MONITOR] Query received - Session: session-xxx, Query: RAG 기술이란 무엇입니까?
 [ANALYTICS] Query tracked - User: user-123, Session: session-xxx
 
 Step 2: Query Rewriting
 [MONITOR] Query rewrite started
-[MONITOR] Query rewritten - Original: 什么是RAG技术？, Rewritten: 检索增强生成技术...
+[MONITOR] Query rewritten - Original: RAG 기술이란 무엇입니까?, Rewritten: 검색 증강 생성 기술...
 [CUSTOM] Query Transformation: ...
 
 Step 3: Vector Retrieval
@@ -232,7 +232,6 @@ Step 5: Chat Completion
 [ANALYTICS] Chat metrics - Model: gpt-4, Tokens: 256
 ```
 
-## 总结
+## 요약
 
-事件系统已完全实现并经过测试验证，可以立即集成到 WeKnora 项目中，用于监控、日志记录、分析和调试查询处理流程的各个阶段。系统设计简洁、性能优异、易于使用和扩展。
-
+이벤트 시스템이 완전히 구현되고 테스트 검증되었으며, 쿼리 처리 프로세스의 각 단계를 모니터링, 로깅, 분석 및 디버깅하기 위해 WeKnora 프로젝트에 즉시 통합할 수 있습니다. 시스템 설계는 간결하고 성능이 우수하며 사용하기 쉽습니다.

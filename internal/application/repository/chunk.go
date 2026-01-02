@@ -27,8 +27,7 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
 	}
-	// Use Select("*") to ensure all fields including zero values (IsEnabled=false, Flags=0)
-	// are inserted, bypassing GORM's default value behavior for zero values
+	// Select("*")를 사용하여 GORM의 기본값 동작을 우회하고 IsEnabled=false, Flags=0과 같은 제로 값을 포함한 모든 필드를 삽입합니다.
 	return r.db.WithContext(ctx).Select("*").CreateInBatches(chunks, 100).Error
 }
 
@@ -92,7 +91,7 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 		db = db.Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?)",
 			tenantID, knowledgeID, chunkType, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)})
 		if tagID == types.UntaggedTagID {
-			// Special value to filter entries without a tag
+			// 태그가 없는 항목을 필터링하기 위한 특수 값
 			db = db.Where("tag_id = ''")
 		} else if tagID != "" {
 			db = db.Where("tag_id = ?", tagID)
@@ -100,42 +99,42 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 		if keyword != "" {
 			like := "%" + keyword + "%"
 
-			// Document type: search content only
+			// 문서 유형: 내용만 검색
 			if knowledgeType != types.KnowledgeTypeFAQ {
 				db = db.Where("content LIKE ?", like)
 				return db
 			}
 
-			// FAQ type: search based on searchField
-			// 根据数据库类型使用不同的 JSON 查询语法
+			// FAQ 유형: searchField에 기반하여 검색
+			// 데이터베이스 유형에 따라 다른 JSON 쿼리 구문 사용
 			isPostgres := db.Dialector.Name() == "postgres"
 
 			switch searchField {
 			case "standard_question":
-				// Search only in standard_question field of metadata
+				// 메타데이터의 standard_question 필드에서만 검색
 				if isPostgres {
 					db = db.Where("metadata->>'standard_question' ILIKE ?", like)
 				} else {
 					// MySQL: metadata->>'$.standard_question' (MySQL 5.7.13+)
-					// 也可以用 JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))
+					// JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question'))를 사용할 수도 있음
 					db = db.Where("metadata->>'$.standard_question' LIKE ?", like)
 				}
 			case "similar_questions":
-				// Search in similar_questions array of metadata
+				// 메타데이터의 similar_questions 배열에서 검색
 				if isPostgres {
 					db = db.Where("metadata->'similar_questions'::text ILIKE ?", like)
 				} else {
 					db = db.Where("JSON_EXTRACT(metadata, '$.similar_questions') LIKE ?", like)
 				}
 			case "answers":
-				// Search in answers array of metadata
+				// 메타데이터의 answers 배열에서 검색
 				if isPostgres {
 					db = db.Where("metadata->'answers'::text ILIKE ?", like)
 				} else {
 					db = db.Where("JSON_EXTRACT(metadata, '$.answers') LIKE ?", like)
 				}
 			default:
-				// Search in all fields (content and metadata)
+				// 모든 필드(내용 및 메타데이터)에서 검색
 				if isPostgres {
 					db = db.Where("(content ILIKE ? OR metadata::text ILIKE ?)", like, like)
 				} else {
@@ -148,24 +147,24 @@ func (r *chunkRepository) ListPagedChunksByKnowledgeID(
 
 	query := baseFilter(r.db.WithContext(ctx).Model(&types.Chunk{}))
 
-	// First query the total count
+	// 먼저 총 개수 쿼리
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// Then query the paginated data
+	// 그 다음 페이지 데이터 쿼리
 	dataQuery := baseFilter(r.db.WithContext(ctx))
 
-	// Determine sort order based on knowledge type
+	// 지식 유형에 따라 정렬 순서 결정
 	var orderClause string
 	if knowledgeType == types.KnowledgeTypeFAQ {
-		// FAQ: sort by updated_at
+		// FAQ: updated_at 기준 정렬
 		orderClause = "updated_at DESC"
 		if sortOrder == "asc" {
 			orderClause = "updated_at ASC"
 		}
 	} else {
-		// Document: sort by chunk_index
+		// 문서: chunk_index 기준 정렬
 		orderClause = "chunk_index ASC"
 		if sortOrder == "desc" {
 			orderClause = "chunk_index DESC"
@@ -420,7 +419,7 @@ func (r *chunkRepository) ListAllFAQChunksByKnowledgeID(
 	tenantID uint64,
 	knowledgeID string,
 ) ([]*types.Chunk, error) {
-	const batchSize = 1000 // 每批查询1000条
+	const batchSize = 1000 // 배치당 1000개 쿼리
 	var allChunks []*types.Chunk
 	offset := 0
 
@@ -435,14 +434,14 @@ func (r *chunkRepository) ListAllFAQChunksByKnowledgeID(
 			return nil, err
 		}
 
-		// 如果没有查询到数据，说明已经查询完毕
+		// 조회된 데이터가 없으면 완료
 		if len(batchChunks) == 0 {
 			break
 		}
 
 		allChunks = append(allChunks, batchChunks...)
 
-		// 如果返回的数据少于批次大小，说明已经是最后一批
+		// 반환된 데이터가 배치 크기보다 작으면 마지막 배치임
 		if len(batchChunks) < batchSize {
 			break
 		}
@@ -461,7 +460,7 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 	tenantID uint64,
 	kbID string,
 ) ([]*types.Chunk, error) {
-	const batchSize = 1000 // 每批查询1000条
+	const batchSize = 1000 // 배치당 1000개 쿼리
 	var allChunks []*types.Chunk
 	offset := 0
 
@@ -477,14 +476,14 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 			return nil, err
 		}
 
-		// 如果没有查询到数据，说明已经查询完毕
+		// 조회된 데이터가 없으면 완료
 		if len(batchChunks) == 0 {
 			break
 		}
 
 		allChunks = append(allChunks, batchChunks...)
 
-		// 如果返回的数据少于批次大小，说明已经是最后一批
+		// 반환된 데이터가 배치 크기보다 작으면 마지막 배치임
 		if len(batchChunks) < batchSize {
 			break
 		}
@@ -502,7 +501,7 @@ func (r *chunkRepository) ListAllFAQChunksForExport(
 	tenantID uint64,
 	knowledgeID string,
 ) ([]*types.Chunk, error) {
-	const batchSize = 1000 // 每批查询1000条
+	const batchSize = 1000 // 배치당 1000개 쿼리
 	var allChunks []*types.Chunk
 	offset := 0
 
@@ -519,14 +518,14 @@ func (r *chunkRepository) ListAllFAQChunksForExport(
 			return nil, err
 		}
 
-		// 如果没有查询到数据，说明已经查询完毕
+		// 조회된 데이터가 없으면 완료
 		if len(batchChunks) == 0 {
 			break
 		}
 
 		allChunks = append(allChunks, batchChunks...)
 
-		// 如果返回的数据少于批次大小，说明已经是最后一批
+		// 반환된 데이터가 배치 크기보다 작으면 마지막 배치임
 		if len(batchChunks) < batchSize {
 			break
 		}

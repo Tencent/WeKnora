@@ -7,22 +7,22 @@ import (
 )
 
 const (
-	// HunyuanBaseURL 腾讯混元 API BaseURL (OpenAI 兼容模式)
+	// HunyuanBaseURL 텐센트 훈위안 API BaseURL (OpenAI 호환 모드)
 	HunyuanBaseURL = "https://api.hunyuan.cloud.tencent.com/v1"
 )
 
-// HunyuanProvider 实现腾讯混元的 Provider 接口
+// HunyuanProvider 텐센트 훈위안의 Provider 인터페이스 구현
 type HunyuanProvider struct{}
 
 func init() {
 	Register(&HunyuanProvider{})
 }
 
-// Info 返回腾讯混元 provider 的元数据
+// Info 텐센트 훈위안 provider의 메타데이터 반환
 func (p *HunyuanProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderHunyuan,
-		DisplayName: "腾讯混元 Hunyuan",
+		DisplayName: "텐센트 훈위안 Hunyuan",
 		Description: "hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: HunyuanBaseURL,
@@ -36,7 +36,7 @@ func (p *HunyuanProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证腾讯混元 provider 配置
+// ValidateConfig 텐센트 훈위안 provider 구성 검증
 func (p *HunyuanProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for Hunyuan provider")

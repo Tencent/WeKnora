@@ -10,14 +10,14 @@ const (
 	JinaBaseURL = "https://api.jina.ai/v1"
 )
 
-// JinaProvider 实现 Jina AI 的 Provider 接口
+// JinaProvider Jina AI의 Provider 인터페이스 구현
 type JinaProvider struct{}
 
 func init() {
 	Register(&JinaProvider{})
 }
 
-// Info 返回 Jina AI provider 的元数据
+// Info Jina AI provider의 메타데이터 반환
 func (p *JinaProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderJina,
@@ -35,7 +35,7 @@ func (p *JinaProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证 Jina AI provider 配置
+// ValidateConfig Jina AI provider 구성 검증
 func (p *JinaProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for Jina AI provider")

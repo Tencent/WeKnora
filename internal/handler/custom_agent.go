@@ -12,19 +12,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CustomAgentHandler defines the HTTP handler for custom agent operations
+// CustomAgentHandler 사용자 정의 에이전트 작업을 위한 HTTP 핸들러 정의
 type CustomAgentHandler struct {
 	service interfaces.CustomAgentService
 }
 
-// NewCustomAgentHandler creates a new custom agent handler instance
+// NewCustomAgentHandler 새로운 사용자 정의 에이전트 핸들러 인스턴스 생성
 func NewCustomAgentHandler(service interfaces.CustomAgentService) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service: service,
 	}
 }
 
-// CreateAgentRequest defines the request body for creating an agent
+// CreateAgentRequest 에이전트 생성을 위한 요청 본문 정의
 type CreateAgentRequest struct {
 	Name        string                   `json:"name" binding:"required"`
 	Description string                   `json:"description"`
@@ -32,7 +32,7 @@ type CreateAgentRequest struct {
 	Config      types.CustomAgentConfig  `json:"config"`
 }
 
-// UpdateAgentRequest defines the request body for updating an agent
+// UpdateAgentRequest 에이전트 업데이트를 위한 요청 본문 정의
 type UpdateAgentRequest struct {
 	Name        string                   `json:"name"`
 	Description string                   `json:"description"`
@@ -41,14 +41,14 @@ type UpdateAgentRequest struct {
 }
 
 // CreateAgent godoc
-// @Summary      创建智能体
-// @Description  创建新的自定义智能体
-// @Tags         智能体
+// @Summary      에이전트 생성
+// @Description  새로운 사용자 정의 에이전트 생성
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Param        request  body      CreateAgentRequest  true  "智能体信息"
-// @Success      201      {object}  map[string]interface{}  "创建的智能体"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      CreateAgentRequest  true  "에이전트 정보"
+// @Success      201      {object}  map[string]interface{}  "생성된 에이전트"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents [post]
@@ -57,7 +57,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 
 	logger.Info(ctx, "Start creating custom agent")
 
-	// Parse request body
+	// 요청 본문 파싱
 	var req CreateAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -65,7 +65,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		return
 	}
 
-	// Build agent object
+	// 에이전트 객체 생성
 	agent := &types.CustomAgent{
 		Name:        req.Name,
 		Description: req.Description,
@@ -76,7 +76,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	logger.Infof(ctx, "Creating custom agent, name: %s, agent_mode: %s",
 		secutils.SanitizeForLog(req.Name), req.Config.AgentMode)
 
-	// Create agent using the service
+	// 서비스를 사용하여 에이전트 생성
 	createdAgent, err := h.service.CreateAgent(ctx, agent)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -97,22 +97,22 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 }
 
 // GetAgent godoc
-// @Summary      获取智能体详情
-// @Description  根据ID获取智能体详情
-// @Tags         智能体
+// @Summary      에이전트 상세 정보 조회
+// @Description  ID를 기반으로 에이전트 상세 정보 조회
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
-// @Success      200  {object}  map[string]interface{}  "智能体详情"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "智能体不存在"
+// @Param        id   path      string  true  "에이전트 ID"
+// @Success      200  {object}  map[string]interface{}  "에이전트 상세 정보"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404  {object}  errors.AppError         "에이전트를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/{id} [get]
 func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get agent ID from URL parameter
+	// URL 매개변수에서 에이전트 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
@@ -140,20 +140,20 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 }
 
 // ListAgents godoc
-// @Summary      获取智能体列表
-// @Description  获取当前租户的所有智能体（包括内置智能体）
-// @Tags         智能体
+// @Summary      에이전트 목록 조회
+// @Description  현재 테넌트의 모든 에이전트(내장 에이전트 포함) 조회
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "智能体列表"
-// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Success      200  {object}  map[string]interface{}  "에이전트 목록"
+// @Failure      500  {object}  errors.AppError         "서버 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents [get]
 func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get all agents for this tenant
+	// 현재 테넌트의 모든 에이전트 가져오기
 	agents, err := h.service.ListAgents(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -168,16 +168,16 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 }
 
 // UpdateAgent godoc
-// @Summary      更新智能体
-// @Description  更新智能体的名称、描述和配置
-// @Tags         智能体
+// @Summary      에이전트 업데이트
+// @Description  에이전트의 이름, 설명 및 구성 업데이트
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string              true  "智能体ID"
-// @Param        request  body      UpdateAgentRequest  true  "更新请求"
-// @Success      200      {object}  map[string]interface{}  "更新后的智能体"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
-// @Failure      403      {object}  errors.AppError         "无法修改内置智能体"
+// @Param        id       path      string              true  "에이전트 ID"
+// @Param        request  body      UpdateAgentRequest  true  "업데이트 요청"
+// @Success      200      {object}  map[string]interface{}  "업데이트된 에이전트"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      403      {object}  errors.AppError         "내장 에이전트는 수정할 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/{id} [put]
@@ -186,7 +186,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 
 	logger.Info(ctx, "Start updating custom agent")
 
-	// Get agent ID from URL parameter
+	// URL 매개변수에서 에이전트 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
@@ -194,7 +194,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	// Parse request body
+	// 요청 본문 파싱
 	var req UpdateAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -202,7 +202,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	// Build agent object
+	// 에이전트 객체 생성
 	agent := &types.CustomAgent{
 		ID:          id,
 		Name:        req.Name,
@@ -214,7 +214,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	logger.Infof(ctx, "Updating custom agent, ID: %s, name: %s",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
-	// Update the agent
+	// 에이전트 업데이트
 	updatedAgent, err := h.service.UpdateAgent(ctx, agent)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -241,16 +241,16 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 }
 
 // DeleteAgent godoc
-// @Summary      删除智能体
-// @Description  删除指定的智能体
-// @Tags         智能体
+// @Summary      에이전트 삭제
+// @Description  지정된 에이전트 삭제
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      403  {object}  errors.AppError         "无法删除内置智能体"
-// @Failure      404  {object}  errors.AppError         "智能体不存在"
+// @Param        id   path      string  true  "에이전트 ID"
+// @Success      200  {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      403  {object}  errors.AppError         "내장 에이전트는 삭제할 수 없음"
+// @Failure      404  {object}  errors.AppError         "에이전트를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/{id} [delete]
@@ -259,7 +259,7 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 
 	logger.Info(ctx, "Start deleting custom agent")
 
-	// Get agent ID from URL parameter
+	// URL 매개변수에서 에이전트 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
@@ -269,7 +269,7 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 
 	logger.Infof(ctx, "Deleting custom agent, ID: %s", secutils.SanitizeForLog(id))
 
-	// Delete the agent
+	// 에이전트 삭제
 	err := h.service.DeleteAgent(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -294,15 +294,15 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 }
 
 // CopyAgent godoc
-// @Summary      复制智能体
-// @Description  复制指定的智能体
-// @Tags         智能体
+// @Summary      에이전트 복사
+// @Description  지정된 에이전트 복사
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "智能体ID"
-// @Success      201  {object}  map[string]interface{}  "复制成功"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "智能体不存在"
+// @Param        id   path      string  true  "에이전트 ID"
+// @Success      201  {object}  map[string]interface{}  "복사 성공"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404  {object}  errors.AppError         "에이전트를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/{id}/copy [post]
@@ -311,7 +311,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 
 	logger.Info(ctx, "Start copying custom agent")
 
-	// Get agent ID from URL parameter
+	// URL 매개변수에서 에이전트 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Agent ID is empty")
@@ -321,7 +321,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 
 	logger.Infof(ctx, "Copying custom agent, ID: %s", secutils.SanitizeForLog(id))
 
-	// Copy the agent
+	// 에이전트 복사
 	copiedAgent, err := h.service.CopyAgent(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -345,17 +345,17 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 }
 
 // GetPlaceholders godoc
-// @Summary      获取占位符定义
-// @Description  获取所有可用的提示词占位符定义，按字段类型分组
-// @Tags         智能体
+// @Summary      플레이스홀더 정의 조회
+// @Description  필드 유형별로 그룹화된 모든 사용 가능한 프롬프트 플레이스홀더 정의 조회
+// @Tags         에이전트
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "占位符定义"
+// @Success      200  {object}  map[string]interface{}  "플레이스홀더 정의"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/placeholders [get]
 func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
-	// Return all placeholder definitions grouped by field type
+	// 필드 유형별로 그룹화된 모든 플레이스홀더 정의 반환
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{

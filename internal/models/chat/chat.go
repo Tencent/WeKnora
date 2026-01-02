@@ -24,25 +24,25 @@ type FunctionDef struct {
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-// ChatOptions 聊天选项
+// ChatOptions 채팅 옵션
 type ChatOptions struct {
-	Temperature         float64         `json:"temperature"`           // 温度参数
-	TopP                float64         `json:"top_p"`                 // Top P 参数
-	Seed                int             `json:"seed"`                  // 随机种子
-	MaxTokens           int             `json:"max_tokens"`            // 最大 token 数
-	MaxCompletionTokens int             `json:"max_completion_tokens"` // 最大完成 token 数
-	FrequencyPenalty    float64         `json:"frequency_penalty"`     // 频率惩罚
-	PresencePenalty     float64         `json:"presence_penalty"`      // 存在惩罚
-	Thinking            *bool           `json:"thinking"`              // 是否启用思考
-	Tools               []Tool          `json:"tools,omitempty"`       // 可用工具列表
-	ToolChoice          string          `json:"tool_choice,omitempty"` // "auto", "required", "none", or specific tool
-	Format              json.RawMessage `json:"format,omitempty"`      // 响应格式定义
+	Temperature         float64         `json:"temperature"`           // 온도 매개변수
+	TopP                float64         `json:"top_p"`                 // Top P 매개변수
+	Seed                int             `json:"seed"`                  // 난수 시드
+	MaxTokens           int             `json:"max_tokens"`            // 최대 토큰 수
+	MaxCompletionTokens int             `json:"max_completion_tokens"` // 최대 완성 토큰 수
+	FrequencyPenalty    float64         `json:"frequency_penalty"`     // 빈도 페널티
+	PresencePenalty     float64         `json:"presence_penalty"`      // 존재 페널티
+	Thinking            *bool           `json:"thinking"`              // 사고 활성화 여부
+	Tools               []Tool          `json:"tools,omitempty"`       // 사용 가능한 도구 목록
+	ToolChoice          string          `json:"tool_choice,omitempty"` // "auto", "required", "none" 또는 특정 도구
+	Format              json.RawMessage `json:"format,omitempty"`      // 응답 형식 정의
 }
 
-// Message 表示聊天消息
+// Message 채팅 메시지
 type Message struct {
-	Role       string     `json:"role"`                   // 角色：system, user, assistant, tool
-	Content    string     `json:"content"`                // 消息内容
+	Role       string     `json:"role"`                   // 역할: system, user, assistant, tool
+	Content    string     `json:"content"`                // 메시지 내용
 	Name       string     `json:"name,omitempty"`         // Function/tool name (for tool role)
 	ToolCallID string     `json:"tool_call_id,omitempty"` // Tool call ID (for tool role)
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // Tool calls (for assistant role)
@@ -61,18 +61,18 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"` // JSON string
 }
 
-// Chat 定义了聊天接口
+// Chat 채팅 인터페이스 정의
 type Chat interface {
-	// Chat 进行非流式聊天
+	// Chat 비스트리밍 채팅 수행
 	Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error)
 
-	// ChatStream 进行流式聊天
+	// ChatStream 스트리밍 채팅 수행
 	ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error)
 
-	// GetModelName 获取模型名称
+	// GetModelName 모델 이름 가져오기
 	GetModelName() string
 
-	// GetModelID 获取模型ID
+	// GetModelID 모델 ID 가져오기
 	GetModelID() string
 }
 
@@ -86,7 +86,7 @@ type ChatConfig struct {
 	Extra     map[string]any
 }
 
-// NewChat 创建聊天实例
+// NewChat 채팅 인스턴스 생성
 func NewChat(config *ChatConfig) (Chat, error) {
 	var chat Chat
 	var err error

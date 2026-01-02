@@ -16,7 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// qaRequestContext holds all the common data needed for QA requests
+// qaRequestContext QA 요청에 필요한 모든 공통 데이터를 보유합니다.
 type qaRequestContext struct {
 	ctx              context.Context
 	c                *gin.Context
@@ -33,45 +33,45 @@ type qaRequestContext struct {
 	mentionedItems   types.MentionedItems
 }
 
-// parseQARequest parses and validates a QA request, returns the request context
+// parseQARequest QA 요청을 파싱하고 검증하며, 요청 컨텍스트를 반환합니다.
 func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestContext, *CreateKnowledgeQARequest, error) {
 	ctx := logger.CloneContext(c.Request.Context())
 	logger.Infof(ctx, "[%s] Start processing request", logPrefix)
 
-	// Get session ID from URL parameter
+	// URL 매개변수에서 세션 ID 가져오기
 	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
 	if sessionID == "" {
 		logger.Error(ctx, "Session ID is empty")
 		return nil, nil, errors.NewBadRequestError(errors.ErrInvalidSessionID.Error())
 	}
 
-	// Parse request body
+	// 요청 본문 파싱
 	var request CreateKnowledgeQARequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
 		return nil, nil, errors.NewBadRequestError(err.Error())
 	}
 
-	// Validate query content
+	// 쿼리 내용 검증
 	if request.Query == "" {
 		logger.Error(ctx, "Query content is empty")
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
 	}
 
-	// Log request details
+	// 요청 세부 정보 로깅
 	if requestJSON, err := json.Marshal(request); err == nil {
 		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",
 			logPrefix, sessionID, secutils.SanitizeForLog(string(requestJSON)))
 	}
 
-	// Get session
+	// 세션 가져오기
 	session, err := h.sessionService.GetSession(ctx, sessionID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get session, session ID: %s, error: %v", sessionID, err)
 		return nil, nil, errors.NewNotFoundError("Session not found")
 	}
 
-	// Get custom agent if agent_id is provided
+	// agent_id가 제공된 경우 사용자 정의 에이전트 가져오기
 	var customAgent *types.CustomAgent
 	if request.AgentID != "" {
 		logger.Infof(ctx, "Fetching custom agent, agent ID: %s", secutils.SanitizeForLog(request.AgentID))
@@ -86,7 +86,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		}
 	}
 
-	// Build request context
+	// 요청 컨텍스트 구축
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
 		c:           c,
@@ -111,7 +111,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	return reqCtx, &request, nil
 }
 
-// sseStreamContext holds the context for SSE streaming
+// sseStreamContext SSE 스트리밍을 위한 컨텍스트를 보유합니다.
 type sseStreamContext struct {
 	eventBus         *event.EventBus
 	asyncCtx         context.Context
@@ -119,15 +119,15 @@ type sseStreamContext struct {
 	assistantMessage *types.Message
 }
 
-// setupSSEStream sets up the SSE streaming context
+// setupSSEStream SSE 스트리밍 컨텍스트를 설정합니다.
 func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *sseStreamContext {
-	// Set SSE headers
+	// SSE 헤더 설정
 	setSSEHeaders(reqCtx.c)
 
-	// Write initial agent_query event
+	// 초기 agent_query 이벤트 기록
 	h.writeAgentQueryEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID)
 
-	// Create EventBus and cancellable context
+	// EventBus 및 취소 가능한 컨텍스트 생성
 	eventBus := event.NewEventBus()
 	asyncCtx, cancel := context.WithCancel(logger.CloneContext(reqCtx.ctx))
 
@@ -138,16 +138,16 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 		assistantMessage: reqCtx.assistantMessage,
 	}
 
-	// Setup stop event handler
+	// 중지 이벤트 핸들러 설정
 	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.assistantMessage, cancel)
 
-	// Setup stream handler
+	// 스트림 핸들러 설정
 	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, reqCtx.assistantMessage, eventBus)
 
-	// Generate title if needed
+	// 필요한 경우 제목 생성
 	if generateTitle && reqCtx.session.Title == "" {
-		// Use the same model as the conversation for title generation
+		// 제목 생성에 대화와 동일한 모델 사용
 		modelID := ""
 		if reqCtx.customAgent != nil && reqCtx.customAgent.Config.ModelID != "" {
 			modelID = reqCtx.customAgent.Config.ModelID
@@ -160,14 +160,14 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 }
 
 // SearchKnowledge godoc
-// @Summary      知识搜索
-// @Description  在知识库中搜索（不使用LLM总结）
-// @Tags         问答
+// @Summary      지식 검색
+// @Description  지식베이스에서 검색 (LLM 요약 미사용)
+// @Tags         질의응답
 // @Accept       json
 // @Produce      json
-// @Param        request  body      SearchKnowledgeRequest  true  "搜索请求"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      SearchKnowledgeRequest  true  "검색 요청"
+// @Success      200      {object}  map[string]interface{}  "검색 결과"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/search [post]
@@ -175,7 +175,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	logger.Info(ctx, "Start processing knowledge search request")
 
-	// Parse request body
+	// 요청 본문 파싱
 	var request SearchKnowledgeRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
@@ -183,17 +183,17 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Validate request parameters
+	// 요청 매개변수 검증
 	if request.Query == "" {
 		logger.Error(ctx, "Query content is empty")
 		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
 		return
 	}
 
-	// Merge single knowledge_base_id into knowledge_base_ids for backward compatibility
+	// 하위 호환성을 위해 단일 knowledge_base_id를 knowledge_base_ids에 병합
 	knowledgeBaseIDs := request.KnowledgeBaseIDs
 	if request.KnowledgeBaseID != "" {
-		// Check if it's already in the list to avoid duplicates
+		// 중복 방지를 위해 이미 목록에 있는지 확인
 		found := false
 		for _, id := range knowledgeBaseIDs {
 			if id == request.KnowledgeBaseID {
@@ -220,7 +220,7 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 		secutils.SanitizeForLog(request.Query),
 	)
 
-	// Directly call knowledge retrieval service without LLM summarization
+	// LLM 요약 없이 지식 검색 서비스 직접 호출
 	searchResults, err := h.sessionService.SearchKnowledge(ctx, knowledgeBaseIDs, request.KnowledgeIDs, request.Query)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -236,53 +236,53 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 }
 
 // KnowledgeQA godoc
-// @Summary      知识问答
-// @Description  基于知识库的问答（使用LLM总结），支持SSE流式响应
-// @Tags         问答
+// @Summary      지식 질의응답
+// @Description  지식베이스 기반 질의응답 (LLM 요약 사용), SSE 스트리밍 응답 지원
+// @Tags         질의응답
 // @Accept       json
 // @Produce      text/event-stream
-// @Param        session_id  path      string                   true  "会话ID"
-// @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
-// @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
-// @Failure      400         {object}  errors.AppError          "请求参数错误"
+// @Param        session_id  path      string                   true  "세션 ID"
+// @Param        request     body      CreateKnowledgeQARequest true  "질의응답 요청"
+// @Success      200         {object}  map[string]interface{}   "질의응답 결과 (SSE 스트림)"
+// @Failure      400         {object}  errors.AppError          "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/knowledge-qa [post]
 func (h *Handler) KnowledgeQA(c *gin.Context) {
-	// Parse and validate request
+	// 요청 파싱 및 검증
 	reqCtx, request, err := h.parseQARequest(c, "KnowledgeQA")
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	// Execute normal mode QA, generate title unless disabled
+	// 일반 모드 QA 실행, 비활성화되지 않은 경우 제목 생성
 	h.executeNormalModeQA(reqCtx, !request.DisableTitle)
 }
 
 // AgentQA godoc
-// @Summary      Agent问答
-// @Description  基于Agent的智能问答，支持多轮对话和SSE流式响应
-// @Tags         问答
+// @Summary      에이전트 질의응답
+// @Description  에이전트 기반 지능형 질의응답, 멀티턴 대화 및 SSE 스트리밍 응답 지원
+// @Tags         질의응답
 // @Accept       json
 // @Produce      text/event-stream
-// @Param        session_id  path      string                   true  "会话ID"
-// @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
-// @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
-// @Failure      400         {object}  errors.AppError          "请求参数错误"
+// @Param        session_id  path      string                   true  "세션 ID"
+// @Param        request     body      CreateKnowledgeQARequest true  "질의응답 요청"
+// @Success      200         {object}  map[string]interface{}   "질의응답 결과 (SSE 스트림)"
+// @Failure      400         {object}  errors.AppError          "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /sessions/{session_id}/agent-qa [post]
 func (h *Handler) AgentQA(c *gin.Context) {
-	// Parse and validate request
+	// 요청 파싱 및 검증
 	reqCtx, request, err := h.parseQARequest(c, "AgentQA")
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	// Determine if agent mode should be enabled
-	// Priority: customAgent.IsAgentMode() > request.AgentEnabled
+	// 에이전트 모드 활성화 여부 결정
+	// 우선순위: customAgent.IsAgentMode() > request.AgentEnabled
 	agentModeEnabled := request.AgentEnabled
 	if reqCtx.customAgent != nil {
 		agentModeEnabled = reqCtx.customAgent.IsAgentMode()
@@ -290,28 +290,28 @@ func (h *Handler) AgentQA(c *gin.Context) {
 			agentModeEnabled, reqCtx.customAgent.Config.AgentMode)
 	}
 
-	// Route to appropriate handler based on agent mode
+	// 에이전트 모드에 따라 적절한 핸들러로 라우팅
 	if agentModeEnabled {
 		h.executeAgentModeQA(reqCtx)
 	} else {
 		logger.Infof(reqCtx.ctx, "Agent mode disabled, delegating to normal mode for session: %s", reqCtx.sessionID)
-		// Knowledge bases should be specified in request or from custom agent
+		// 지식베이스는 요청 또는 사용자 정의 에이전트에서 지정되어야 함
 		h.executeNormalModeQA(reqCtx, false)
 	}
 }
 
-// executeNormalModeQA executes the normal (KnowledgeQA) mode
+// executeNormalModeQA 일반 (KnowledgeQA) 모드 실행
 func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bool) {
 	ctx := reqCtx.ctx
 	sessionID := reqCtx.sessionID
 
-	// Create user message
+	// 사용자 메시지 생성
 	if err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems); err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	// Create assistant message
+	// 어시스턴트 메시지 생성
 	if _, err := h.createAssistantMessage(ctx, reqCtx.assistantMessage); err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -319,10 +319,10 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 
 	logger.Infof(ctx, "Using knowledge bases: %v", reqCtx.knowledgeBaseIDs)
 
-	// Setup SSE stream
+	// SSE 스트림 설정
 	streamCtx := h.setupSSEStream(reqCtx, generateTitle)
 
-	// Setup completion handler for normal mode
+	// 일반 모드에 대한 완료 핸들러 설정
 	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
 		if !ok {
@@ -342,7 +342,7 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 		return nil
 	})
 
-	// Execute KnowledgeQA asynchronously
+	// KnowledgeQA 비동기 실행
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -379,18 +379,18 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 		}
 	}()
 
-	// Handle SSE events (blocking)
+	// SSE 이벤트 처리 (블로킹)
 	shouldWaitForTitle := generateTitle && reqCtx.session.Title == ""
 	h.handleAgentEventsForSSE(ctx, reqCtx.c, sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, streamCtx.eventBus, shouldWaitForTitle)
 }
 
-// executeAgentModeQA executes the agent mode
+// executeAgentModeQA 에이전트 모드 실행
 func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 	ctx := reqCtx.ctx
 	sessionID := reqCtx.sessionID
 
-	// Emit agent query event
+	// 에이전트 쿼리 이벤트 방출
 	if err := event.Emit(ctx, event.Event{
 		Type:      event.EventAgentQuery,
 		SessionID: sessionID,
@@ -405,13 +405,13 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 		return
 	}
 
-	// Create user message
+	// 사용자 메시지 생성
 	if err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems); err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	// Create assistant message
+	// 어시스턴트 메시지 생성
 	assistantMessagePtr, err := h.createAssistantMessage(ctx, reqCtx.assistantMessage)
 	if err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
@@ -421,10 +421,10 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 
 	logger.Infof(ctx, "Calling agent QA service, session ID: %s", sessionID)
 
-	// Setup SSE stream (agent mode always generates title)
+	// SSE 스트림 설정 (에이전트 모드는 항상 제목 생성)
 	streamCtx := h.setupSSEStream(reqCtx, true)
 
-	// Execute AgentQA asynchronously
+	// AgentQA 비동기 실행
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -463,12 +463,12 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 		}
 	}()
 
-	// Handle SSE events (blocking)
+	// SSE 이벤트 처리 (블로킹)
 	h.handleAgentEventsForSSE(ctx, reqCtx.c, sessionID, reqCtx.assistantMessage.ID,
 		reqCtx.requestID, streamCtx.eventBus, reqCtx.session.Title == "")
 }
 
-// completeAssistantMessage marks an assistant message as complete and updates it
+// completeAssistantMessage 어시스턴트 메시지를 완료로 표시하고 업데이트
 func (h *Handler) completeAssistantMessage(ctx context.Context, assistantMessage *types.Message) {
 	assistantMessage.UpdatedAt = time.Now()
 	assistantMessage.IsCompleted = true

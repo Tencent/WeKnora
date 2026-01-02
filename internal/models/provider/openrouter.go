@@ -10,14 +10,14 @@ const (
 	OpenRouterBaseURL = "https://openrouter.ai/api/v1"
 )
 
-// OpenRouterProvider 实现 OpenRouter 的 Provider 接口
+// OpenRouterProvider OpenRouter의 Provider 인터페이스 구현
 type OpenRouterProvider struct{}
 
 func init() {
 	Register(&OpenRouterProvider{})
 }
 
-// Info 返回 OpenRouter provider 的元数据
+// Info OpenRouter provider의 메타데이터 반환
 func (p *OpenRouterProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderOpenRouter,
@@ -35,7 +35,7 @@ func (p *OpenRouterProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证 OpenRouter provider 配置
+// ValidateConfig OpenRouter provider 구성 검증
 func (p *OpenRouterProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for OpenRouter provider")

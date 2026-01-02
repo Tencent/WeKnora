@@ -116,7 +116,7 @@ func ParseLLMJsonResponse(content string, target interface{}) error {
 	return err
 }
 
-// CleanInvalidUTF8 移除字符串中的非法 UTF-8 字符和 \x00
+// CleanInvalidUTF8 문자열에서 잘못된 UTF-8 문자와 \x00을 제거합니다.
 func CleanInvalidUTF8(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -124,12 +124,12 @@ func CleanInvalidUTF8(s string) string {
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		if r == utf8.RuneError && size == 1 {
-			// 非法 UTF-8 字节，跳过
+			// 잘못된 UTF-8 바이트 건너뛰기
 			i++
 			continue
 		}
 		if r == 0 {
-			// NULL 字符 \x00，跳过
+			// NULL 문자 \x00 건너뛰기
 			i += size
 			continue
 		}

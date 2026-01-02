@@ -1,45 +1,45 @@
-### 如何集成新的向量数据库
+### 새로운 벡터 데이터베이스 통합 방법
 
-本文提供了向 WeKnora 项目添加新向量数据库支持的完整指南。通过实现标准化接口和遵循结构化流程，开发者可以高效地集成自定义向量数据库。
+이 문서는 WeKnora 프로젝트에 새로운 벡터 데이터베이스 지원을 추가하는 전체 가이드를 제공합니다. 표준화된 인터페이스를 구현하고 구조화된 프로세스를 따름으로써, 개발자는 사용자 정의 벡터 데이터베이스를 효율적으로 통합할 수 있습니다.
 
-### 集成流程
+### 통합 프로세스
 
-#### 1. 实现基础检索引擎接口
+#### 1. 기본 검색 엔진 인터페이스 구현
 
-首先需要实现 `interfaces` 包中的 `RetrieveEngine` 接口，定义检索引擎的核心能力：
+먼저 `interfaces` 패키지의 `RetrieveEngine` 인터페이스를 구현하여 검색 엔진의 핵심 기능을 정의해야 합니다:
 
 ```go
 type RetrieveEngine interface {
-    // 返回检索引擎的类型标识
+    // 검색 엔진의 유형 식별자를 반환
     EngineType() types.RetrieverEngineType
 
-    // 执行检索操作，返回匹配结果
+    // 검색 작업을 실행하고 일치하는 결과를 반환
     Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error)
 
-    // 返回该引擎支持的检索类型列表
+    // 이 엔진이 지원하는 검색 유형 목록을 반환
     Support() []types.RetrieverType
 }
 ```
 
-#### 2. 实现存储层接口
+#### 2. 저장소 계층 인터페이스 구현
 
-实现 `RetrieveEngineRepository` 接口，扩展基础检索引擎能力，添加索引管理功能：
+`RetrieveEngineRepository` 인터페이스를 구현하여 기본 검색 엔진 기능을 확장하고 인덱스 관리 기능을 추가합니다:
 
 ```go
 type RetrieveEngineRepository interface {
-    // 保存单个索引信息
+    // 단일 인덱스 정보 저장
     Save(ctx context.Context, indexInfo *types.IndexInfo, params map[string]any) error
     
-    // 批量保存多个索引信息
+    // 여러 인덱스 정보 일괄 저장
     BatchSave(ctx context.Context, indexInfoList []*types.IndexInfo, params map[string]any) error
     
-    // 估算索引存储所需空间
+    // 인덱스 저장에 필요한 공간 추정
     EstimateStorageSize(ctx context.Context, indexInfoList []*types.IndexInfo, params map[string]any) int64
     
-    // 通过分块ID列表删除索引
+    // 청크 ID 목록을 통해 인덱스 삭제
     DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int) error
     
-    // 复制索引数据，避免重新计算嵌入向量
+    // 인덱스 데이터를 복사하여 임베딩 벡터 재계산 방지
     CopyIndices(
         ctx context.Context,
         sourceKnowledgeBaseID string,
@@ -49,42 +49,42 @@ type RetrieveEngineRepository interface {
         dimension int,
     ) error
     
-    // 通过知识ID列表删除索引
+    // 지식 ID 목록을 통해 인덱스 삭제
     DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int) error
     
-    // 继承RetrieveEngine接口
+    // RetrieveEngine 인터페이스 상속
     RetrieveEngine
 }
 ```
 
-#### 3. 实现服务层接口
+#### 3. 서비스 계층 인터페이스 구현
 
-创建实现 `RetrieveEngineService` 接口的服务，负责处理索引创建和管理的业务逻辑：
+인덱스 생성 및 관리의 비즈니스 로직을 처리하는 `RetrieveEngineService` 인터페이스를 구현하는 서비스를 생성합니다:
 
 ```go
 type RetrieveEngineService interface {
-    // 创建单个索引
+    // 단일 인덱스 생성
     Index(ctx context.Context,
         embedder embedding.Embedder,
         indexInfo *types.IndexInfo,
         retrieverTypes []types.RetrieverType,
     ) error
 
-    // 批量创建索引
+    // 일괄 인덱스 생성
     BatchIndex(ctx context.Context,
         embedder embedding.Embedder,
         indexInfoList []*types.IndexInfo,
         retrieverTypes []types.RetrieverType,
     ) error
 
-    // 估算索引存储空间
+    // 인덱스 저장 공간 추정
     EstimateStorageSize(ctx context.Context,
         embedder embedding.Embedder,
         indexInfoList []*types.IndexInfo,
         retrieverTypes []types.RetrieverType,
     ) int64
     
-    // 复制索引数据
+    // 인덱스 데이터 복사
     CopyIndices(
         ctx context.Context,
         sourceKnowledgeBaseID string,
@@ -94,33 +94,33 @@ type RetrieveEngineService interface {
         dimension int,
     ) error
 
-    // 删除索引
+    // 인덱스 삭제
     DeleteByChunkIDList(ctx context.Context, indexIDList []string, dimension int) error
     DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, dimension int) error
 
-    // 继承RetrieveEngine接口
+    // RetrieveEngine 인터페이스 상속
     RetrieveEngine
 }
 ```
 
-#### 4. 添加环境变量配置
+#### 4. 환경 변수 구성 추가
 
-在环境配置中添加新数据库的必要连接参数：
+환경 구성에 새 데이터베이스의 필요한 연결 매개변수를 추가합니다:
 
 ```
-# 在RETRIEVE_DRIVER中添加新数据库驱动名称（多个驱动用逗号分隔）
+# RETRIEVE_DRIVER에 새 데이터베이스 드라이버 이름 추가 (여러 드라이버는 쉼표로 구분)
 RETRIEVE_DRIVER=postgres,elasticsearch_v8,your_database
 
-# 新数据库的连接参数
+# 새 데이터베이스의 연결 매개변수
 YOUR_DATABASE_ADDR=your_database_host:port
 YOUR_DATABASE_USERNAME=username
 YOUR_DATABASE_PASSWORD=password
-# 其他必要的连接参数...
+# 기타 필요한 연결 매개변수...
 ```
 
-#### 5. 注册检索引擎
+#### 5. 검색 엔진 등록
 
-在 `internal/container/container.go` 文件的 `initRetrieveEngineRegistry` 函数中添加新数据库的初始化与注册逻辑：
+`internal/container/container.go` 파일의 `initRetrieveEngineRegistry` 함수에 새 데이터베이스의 초기화 및 등록 로직을 추가합니다:
 
 ```go
 func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.RetrieveEngineRegistry, error) {
@@ -128,25 +128,25 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
     retrieveDriver := strings.Split(os.Getenv("RETRIEVE_DRIVER"), ",")
     log := logger.GetLogger(context.Background())
 
-    // 已有的PostgreSQL和Elasticsearch初始化代码...
+    // 기존 PostgreSQL 및 Elasticsearch 초기화 코드...
     
-    // 添加新向量数据库的初始化代码
+    // 새 벡터 데이터베이스 초기화 코드 추가
     if slices.Contains(retrieveDriver, "your_database") {
-        // 初始化数据库客户端
+        // 데이터베이스 클라이언트 초기화
         client, err := your_database.NewClient(your_database.Config{
             Addresses: []string{os.Getenv("YOUR_DATABASE_ADDR")},
             Username:  os.Getenv("YOUR_DATABASE_USERNAME"),
             Password:  os.Getenv("YOUR_DATABASE_PASSWORD"),
-            // 其他连接参数...
+            // 기타 연결 매개변수...
         })
         
         if err != nil {
             log.Errorf("Create your_database client failed: %v", err)
         } else {
-            // 创建检索引擎仓库
+            // 검색 엔진 리포지토리 생성
             yourDatabaseRepo := your_database.NewYourDatabaseRepository(client, cfg)
             
-            // 注册检索引擎
+            // 검색 엔진 등록
             if err := registry.Register(
                 retriever.NewKVHybridRetrieveEngine(
                     yourDatabaseRepo, types.YourDatabaseRetrieverEngineType,
@@ -163,28 +163,25 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 }
 ```
 
-#### 6. 定义检索引擎类型常量
+#### 6. 검색 엔진 유형 상수 정의
 
-在 `internal/types/retriever.go` 文件中添加新的检索引擎类型常量：
+`internal/types/retriever.go` 파일에 새로운 검색 엔진 유형 상수를 추가합니다:
 
 ```go
-// RetrieverEngineType 定义检索引擎类型
+// RetrieverEngineType 검색 엔진 유형 정의
 const (
     ElasticsearchRetrieverEngineType RetrieverEngineType = "elasticsearch"
     PostgresRetrieverEngineType      RetrieverEngineType = "postgres"
-    YourDatabaseRetrieverEngineType  RetrieverEngineType = "your_database" // 添加新数据库类型
+    YourDatabaseRetrieverEngineType  RetrieverEngineType = "your_database" // 새 데이터베이스 유형 추가
 )
 ```
 
-## 参考实现示例
+## 참고 구현 예시
 
-建议参考现有的 PostgreSQL 和 Elasticsearch 实现作为开发模板。这些实现位于以下目录：
+기존의 PostgreSQL 및 Elasticsearch 구현을 개발 템플릿으로 참고하는 것이 좋습니다. 이러한 구현은 다음 디렉터리에 위치합니다:
 
 - PostgreSQL: `internal/application/repository/retriever/postgres/`
 - ElasticsearchV7: `internal/application/repository/retriever/elasticsearch/v7/`
 - ElasticsearchV8: `internal/application/repository/retriever/elasticsearch/v8/`
 
-通过遵循以上步骤和参考现有实现，你可以成功集成新的向量数据库到 WeKnora 系统中，扩展其向量检索能力。
-
-
-
+위의 단계를 따르고 기존 구현을 참고하면, 새로운 벡터 데이터베이스를 WeKnora 시스템에 성공적으로 통합하여 벡터 검색 기능을 확장할 수 있습니다.

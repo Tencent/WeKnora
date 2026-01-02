@@ -13,30 +13,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ModelHandler handles HTTP requests for model-related operations
-// It implements the necessary methods to create, retrieve, update, and delete models
+// ModelHandler는 모델 관련 작업을 위한 HTTP 요청을 처리합니다.
+// 모델 생성, 조회, 업데이트, 삭제에 필요한 메서드를 구현합니다.
 type ModelHandler struct {
 	service interfaces.ModelService
 }
 
-// NewModelHandler creates a new instance of ModelHandler
-// It requires a model service implementation that handles business logic
-// Parameters:
-//   - service: An implementation of the ModelService interface
+// NewModelHandler는 ModelHandler의 새 인스턴스를 생성합니다.
+// 비즈니스 로직을 처리하는 모델 서비스 구현이 필요합니다.
+// 매개변수:
+//   - service: ModelService 인터페이스 구현체
 //
-// Returns a pointer to the newly created ModelHandler
+// 반환값: 새로 생성된 ModelHandler에 대한 포인터
 func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 	return &ModelHandler{service: service}
 }
 
-// hideSensitiveInfo hides sensitive information (APIKey, BaseURL) for builtin models
-// Returns a copy of the model with sensitive fields cleared if it's a builtin model
+// hideSensitiveInfo는 내장 모델의 민감한 정보(APIKey, BaseURL)를 숨깁니다.
+// 내장 모델인 경우 민감한 필드가 지워진 모델 복사본을 반환합니다.
 func hideSensitiveInfo(model *types.Model) *types.Model {
 	if !model.IsBuiltin {
 		return model
 	}
 
-	// Create a copy with sensitive information hidden
+	// 민감한 정보가 숨겨진 복사본 생성
 	return &types.Model{
 		ID:          model.ID,
 		TenantID:    model.TenantID,
@@ -45,10 +45,10 @@ func hideSensitiveInfo(model *types.Model) *types.Model {
 		Source:      model.Source,
 		Description: model.Description,
 		Parameters: types.ModelParameters{
-			// Hide APIKey and BaseURL for builtin models
+			// 내장 모델의 APIKey와 BaseURL 숨김
 			BaseURL: "",
 			APIKey:  "",
-			// Keep other parameters like embedding dimensions
+			// 임베딩 차원과 같은 다른 매개변수는 유지
 			EmbeddingParameters: model.Parameters.EmbeddingParameters,
 			ParameterSize:       model.Parameters.ParameterSize,
 		},
@@ -59,8 +59,8 @@ func hideSensitiveInfo(model *types.Model) *types.Model {
 	}
 }
 
-// CreateModelRequest defines the structure for model creation requests
-// Contains all fields required to create a new model in the system
+// CreateModelRequest는 모델 생성 요청을 위한 구조를 정의합니다.
+// 시스템에 새 모델을 생성하는 데 필요한 모든 필드를 포함합니다.
 type CreateModelRequest struct {
 	Name        string                `json:"name"        binding:"required"`
 	Type        types.ModelType       `json:"type"        binding:"required"`
@@ -70,14 +70,14 @@ type CreateModelRequest struct {
 }
 
 // CreateModel godoc
-// @Summary      创建模型
-// @Description  创建新的模型配置
-// @Tags         模型管理
+// @Summary      모델 생성
+// @Description  새 모델 구성 생성
+// @Tags         모델 관리
 // @Accept       json
 // @Produce      json
-// @Param        request  body      CreateModelRequest  true  "模型信息"
-// @Success      201      {object}  map[string]interface{}  "创建的模型"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      CreateModelRequest  true  "모델 정보"
+// @Success      201      {object}  map[string]interface{}  "생성된 모델"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models [post]
@@ -124,7 +124,7 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		secutils.SanitizeForLog(model.Name),
 	)
 
-	// Hide sensitive information for builtin models (though newly created models are unlikely to be builtin)
+	// 내장 모델에 대한 민감한 정보 숨김 (새로 생성된 모델이 내장 모델일 가능성은 낮음)
 	responseModel := hideSensitiveInfo(model)
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -134,14 +134,14 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 }
 
 // GetModel godoc
-// @Summary      获取模型详情
-// @Description  根据ID获取模型详情
-// @Tags         模型管理
+// @Summary      모델 상세 정보 조회
+// @Description  ID를 기반으로 모델 상세 정보 조회
+// @Tags         모델 관리
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "模型ID"
-// @Success      200  {object}  map[string]interface{}  "模型详情"
-// @Failure      404  {object}  errors.AppError         "模型不存在"
+// @Param        id   path      string  true  "모델 ID"
+// @Success      200  {object}  map[string]interface{}  "모델 상세 정보"
+// @Failure      404  {object}  errors.AppError         "모델을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models/{id} [get]
@@ -172,7 +172,7 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieved model successfully, ID: %s, Name: %s", model.ID, model.Name)
 
-	// Hide sensitive information for builtin models
+	// 내장 모델에 대한 민감한 정보 숨김
 	responseModel := hideSensitiveInfo(model)
 	if model.IsBuiltin {
 		logger.Infof(ctx, "Builtin model detected, hiding sensitive information for model: %s", model.ID)
@@ -185,13 +185,13 @@ func (h *ModelHandler) GetModel(c *gin.Context) {
 }
 
 // ListModels godoc
-// @Summary      获取模型列表
-// @Description  获取当前租户的所有模型
-// @Tags         模型管理
+// @Summary      모델 목록 조회
+// @Description  현재 테넌트의 모든 모델 조회
+// @Tags         모델 관리
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "模型列表"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Success      200  {object}  map[string]interface{}  "모델 목록"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models [get]
@@ -216,7 +216,7 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieved model list successfully, Tenant ID: %d, Total: %d models", tenantID, len(models))
 
-	// Hide sensitive information for builtin models in the list
+	// 목록에서 내장 모델에 대한 민감한 정보 숨김
 	responseModels := make([]*types.Model, len(models))
 	for i, model := range models {
 		responseModels[i] = hideSensitiveInfo(model)
@@ -231,8 +231,8 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 	})
 }
 
-// UpdateModelRequest defines the structure for model update requests
-// Contains fields that can be updated for an existing model
+// UpdateModelRequest는 모델 업데이트 요청을 위한 구조를 정의합니다.
+// 기존 모델에 대해 업데이트할 수 있는 필드를 포함합니다.
 type UpdateModelRequest struct {
 	Name        string                `json:"name"`
 	Description string                `json:"description"`
@@ -242,15 +242,15 @@ type UpdateModelRequest struct {
 }
 
 // UpdateModel godoc
-// @Summary      更新模型
-// @Description  更新模型配置信息
-// @Tags         模型管理
+// @Summary      모델 업데이트
+// @Description  모델 구성 정보 업데이트
+// @Tags         모델 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string              true  "模型ID"
-// @Param        request  body      UpdateModelRequest  true  "更新信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的模型"
-// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Param        id       path      string              true  "모델 ID"
+// @Param        request  body      UpdateModelRequest  true  "업데이트 정보"
+// @Success      200      {object}  map[string]interface{}  "업데이트된 모델"
+// @Failure      404      {object}  errors.AppError         "모델을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models/{id} [put]
@@ -286,12 +286,12 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		return
 	}
 
-	// Update model fields if they are provided in the request
+	// 요청에 제공된 경우 모델 필드 업데이트
 	if req.Name != "" {
 		model.Name = req.Name
 	}
 	model.Description = req.Description
-	// Check if any Parameters field is set (can't use struct comparison due to map field)
+	// Parameters 필드가 설정되었는지 확인 (맵 필드로 인해 구조체 비교 불가)
 	if req.Parameters.BaseURL != "" || req.Parameters.APIKey != "" || req.Parameters.Provider != "" {
 		model.Parameters = req.Parameters
 	}
@@ -307,7 +307,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 
 	logger.Infof(ctx, "Model updated successfully, ID: %s", id)
 
-	// Hide sensitive information for builtin models (though builtin models cannot be updated)
+	// 내장 모델에 대한 민감한 정보 숨김 (내장 모델은 업데이트할 수 없지만)
 	responseModel := hideSensitiveInfo(model)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -317,14 +317,14 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 }
 
 // DeleteModel godoc
-// @Summary      删除模型
-// @Description  删除指定的模型
-// @Tags         模型管理
+// @Summary      모델 삭제
+// @Description  지정된 모델 삭제
+// @Tags         모델 관리
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "模型ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Failure      404  {object}  errors.AppError         "模型不存在"
+// @Param        id   path      string  true  "모델 ID"
+// @Success      200  {object}  map[string]interface{}  "삭제 성공"
+// @Failure      404  {object}  errors.AppError         "모델을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models/{id} [delete]
@@ -359,16 +359,16 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	})
 }
 
-// ModelProviderDTO 模型厂商信息 DTO
+// ModelProviderDTO 모델 공급자 정보 DTO
 type ModelProviderDTO struct {
-	Value       string            `json:"value"`       // provider 标识符
-	Label       string            `json:"label"`       // 显示名称
-	Description string            `json:"description"` // 描述
-	DefaultURLs map[string]string `json:"defaultUrls"` // 按模型类型区分的默认 URL
-	ModelTypes  []string          `json:"modelTypes"`  // 支持的模型类型
+	Value       string            `json:"value"`       // provider 식별자
+	Label       string            `json:"label"`       // 표시 이름
+	Description string            `json:"description"` // 설명
+	DefaultURLs map[string]string `json:"defaultUrls"` // 모델 유형별 기본 URL
+	ModelTypes  []string          `json:"modelTypes"`  // 지원되는 모델 유형
 }
 
-// modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
+// modelTypeToFrontend 백엔드 ModelType을 프론트엔드 호환 문자열로 변환
 // KnowledgeQA -> chat, Embedding -> embedding, Rerank -> rerank, VLLM -> vllm
 func modelTypeToFrontend(mt types.ModelType) string {
 	switch mt {
@@ -386,13 +386,13 @@ func modelTypeToFrontend(mt types.ModelType) string {
 }
 
 // ListModelProviders godoc
-// @Summary      获取模型厂商列表
-// @Description  根据模型类型获取支持的厂商列表及配置信息
-// @Tags         模型管理
+// @Summary      모델 공급자 목록 조회
+// @Description  모델 유형에 따른 지원되는 공급자 목록 및 구성 정보 조회
+// @Tags         모델 관리
 // @Accept       json
 // @Produce      json
-// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm)"
-// @Success      200         {object}  map[string]interface{}  "厂商列表"
+// @Param        model_type  query     string  false  "모델 유형 (chat, embedding, rerank, vllm)"
+// @Success      200         {object}  map[string]interface{}  "공급자 목록"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /models/providers [get]
@@ -402,9 +402,9 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	modelType := c.Query("model_type")
 	logger.Infof(ctx, "Listing model providers for type: %s", secutils.SanitizeForLog(modelType))
 
-	// 将前端类型映射到后端类型
-	// 前端: chat, embedding, rerank, vllm
-	// 后端: KnowledgeQA, Embedding, Rerank, VLLM
+	// 프론트엔드 유형을 백엔드 유형으로 매핑
+	// 프론트엔드: chat, embedding, rerank, vllm
+	// 백엔드: KnowledgeQA, Embedding, Rerank, VLLM
 	var backendModelType types.ModelType
 	switch modelType {
 	case "chat":
@@ -421,25 +421,25 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 
 	var providers []provider.ProviderInfo
 	if modelType != "" {
-		// 按模型类型过滤
+		// 모델 유형별 필터링
 		providers = provider.ListByModelType(backendModelType)
 	} else {
-		// 返回所有 provider
+		// 모든 공급자 반환
 		providers = provider.List()
 	}
 
-	// 转换为 DTO
+	// DTO로 변환
 	result := make([]ModelProviderDTO, 0, len(providers))
 	for _, p := range providers {
-		// 转换 DefaultURLs map[types.ModelType]string -> map[string]string
-		// 使用前端兼容的 key (chat 而不是 KnowledgeQA)
+		// DefaultURLs map[types.ModelType]string -> map[string]string 변환
+		// 프론트엔드 호환 키 사용 (KnowledgeQA 대신 chat)
 		defaultURLs := make(map[string]string)
 		for mt, url := range p.DefaultURLs {
 			frontendType := modelTypeToFrontend(mt)
 			defaultURLs[frontendType] = url
 		}
 
-		// 转换 ModelTypes 为前端兼容格式
+		// ModelTypes를 프론트엔드 호환 형식으로 변환
 		modelTypes := make([]string, 0, len(p.ModelTypes))
 		for _, mt := range p.ModelTypes {
 			modelTypes = append(modelTypes, modelTypeToFrontend(mt))

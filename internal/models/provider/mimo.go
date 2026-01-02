@@ -7,22 +7,22 @@ import (
 )
 
 const (
-	// MimoBaseURL 小米 Mimo API BaseURL
+	// MimoBaseURL Xiaomi Mimo API BaseURL
 	MimoBaseURL = "https://api.xiaomimimo.com/v1"
 )
 
-// MimoProvider 实现小米 Mimo 的 Provider 接口
+// MimoProvider Xiaomi Mimo의 Provider 인터페이스 구현
 type MimoProvider struct{}
 
 func init() {
 	Register(&MimoProvider{})
 }
 
-// Info 返回小米 Mimo provider 的元数据
+// Info Xiaomi Mimo provider의 메타데이터 반환
 func (p *MimoProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderMimo,
-		DisplayName: "小米 MiMo",
+		DisplayName: "샤오미 MiMo",
 		Description: "mimo-v2-flash",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: MimoBaseURL,
@@ -34,7 +34,7 @@ func (p *MimoProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证小米 Mimo provider 配置
+// ValidateConfig Xiaomi Mimo provider 구성 검증
 func (p *MimoProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for Mimo provider")

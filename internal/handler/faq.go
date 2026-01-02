@@ -12,31 +12,31 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-// FAQHandler handles FAQ knowledge base operations.
+// FAQHandler FAQ 지식베이스 작업을 처리합니다.
 type FAQHandler struct {
 	knowledgeService interfaces.KnowledgeService
 }
 
-// NewFAQHandler creates a new FAQ handler
+// NewFAQHandler 새로운 FAQ 핸들러 생성
 func NewFAQHandler(knowledgeService interfaces.KnowledgeService) *FAQHandler {
 	return &FAQHandler{knowledgeService: knowledgeService}
 }
 
 // ListEntries godoc
-// @Summary      获取FAQ条目列表
-// @Description  获取知识库下的FAQ条目列表，支持分页和筛选
-// @Tags         FAQ管理
+// @Summary      FAQ 항목 목록 조회
+// @Description  지식베이스 하의 FAQ 항목 목록 조회, 페이징 및 필터링 지원
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id           path      string  true   "知识库ID"
-// @Param        page         query     int     false  "页码"
-// @Param        page_size    query     int     false  "每页数量"
-// @Param        tag_id       query     string  false  "标签ID筛选"
-// @Param        keyword      query     string  false  "关键词搜索"
-// @Param        search_field query     string  false  "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部"
-// @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"
-// @Success      200        {object}  map[string]interface{}  "FAQ列表"
-// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Param        id           path      string  true   "지식베이스 ID"
+// @Param        page         query     int     false  "페이지 번호"
+// @Param        page_size    query     int     false  "페이지당 항목 수"
+// @Param        tag_id       query     string  false  "태그 ID 필터"
+// @Param        keyword      query     string  false  "키워드 검색"
+// @Param        search_field query     string  false  "검색 필드: standard_question(표준 질문), similar_questions(유사 질문), answers(답변), 기본값은 전체 검색"
+// @Param        sort_order   query     string  false  "정렬 방식: asc(업데이트 시간 오름차순), 기본값은 업데이트 시간 내림차순"
+// @Success      200        {object}  map[string]interface{}  "FAQ 목록"
+// @Failure      400        {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries [get]
@@ -45,7 +45,7 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
-		c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid pagination parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -68,15 +68,15 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 }
 
 // UpsertEntries godoc
-// @Summary      批量更新/插入FAQ条目
-// @Description  异步批量更新或插入FAQ条目
-// @Tags         FAQ管理
+// @Summary      FAQ 항목 일괄 업데이트/삽입
+// @Description  FAQ 항목을 비동기로 일괄 업데이트하거나 삽입
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                    true  "知识库ID"
-// @Param        request  body      types.FAQBatchUpsertPayload  true  "批量操作请求"
-// @Success      200      {object}  map[string]interface{}    "任务ID"
-// @Failure      400      {object}  errors.AppError           "请求参数错误"
+// @Param        id       path      string                    true  "지식베이스 ID"
+// @Param        request  body      types.FAQBatchUpsertPayload  true  "일괄 작업 요청"
+// @Success      200      {object}  map[string]interface{}    "작업 ID"
+// @Failure      400      {object}  errors.AppError           "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries [post]
@@ -85,7 +85,7 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 	var req types.FAQBatchUpsertPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ upsert payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -105,15 +105,15 @@ func (h *FAQHandler) UpsertEntries(c *gin.Context) {
 }
 
 // CreateEntry godoc
-// @Summary      创建单个FAQ条目
-// @Description  同步创建单个FAQ条目
-// @Tags         FAQ管理
+// @Summary      단일 FAQ 항목 생성
+// @Description  단일 FAQ 항목 동기 생성
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                true  "知识库ID"
-// @Param        request  body      types.FAQEntryPayload true  "FAQ条目"
-// @Success      200      {object}  map[string]interface{}  "创建的FAQ条目"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string                true  "지식베이스 ID"
+// @Param        request  body      types.FAQEntryPayload true  "FAQ 항목"
+// @Success      200      {object}  map[string]interface{}  "생성된 FAQ 항목"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entry [post]
@@ -122,7 +122,7 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 	var req types.FAQEntryPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -140,16 +140,16 @@ func (h *FAQHandler) CreateEntry(c *gin.Context) {
 }
 
 // UpdateEntry godoc
-// @Summary      更新FAQ条目
-// @Description  更新指定的FAQ条目
-// @Tags         FAQ管理
+// @Summary      FAQ 항목 업데이트
+// @Description  지정된 FAQ 항목 업데이트
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id        path      string                true  "知识库ID"
-// @Param        entry_id  path      string                true  "FAQ条目ID"
-// @Param        request   body      types.FAQEntryPayload true  "FAQ条目"
-// @Success      200       {object}  map[string]interface{}  "更新成功"
-// @Failure      400       {object}  errors.AppError         "请求参数错误"
+// @Param        id        path      string                true  "지식베이스 ID"
+// @Param        entry_id  path      string                true  "FAQ 항목 ID"
+// @Param        request   body      types.FAQEntryPayload true  "FAQ 항목"
+// @Success      200       {object}  map[string]interface{}  "업데이트 성공"
+// @Failure      400       {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [put]
@@ -158,7 +158,7 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 	var req types.FAQEntryPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -175,15 +175,15 @@ func (h *FAQHandler) UpdateEntry(c *gin.Context) {
 }
 
 // UpdateEntryTagBatch godoc
-// @Summary      批量更新FAQ标签
-// @Description  批量更新FAQ条目的标签
-// @Tags         FAQ管理
+// @Summary      FAQ 태그 일괄 업데이트
+// @Description  FAQ 항목의 태그 일괄 업데이트
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object  true  "标签更新请求"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string  true  "지식베이스 ID"
+// @Param        request  body      object  true  "태그 업데이트 요청"
+// @Success      200      {object}  map[string]interface{}  "업데이트 성공"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/tags [put]
@@ -192,7 +192,7 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 	var req faqEntryTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry tag batch payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	if err := h.knowledgeService.UpdateFAQEntryTagBatch(ctx,
@@ -207,15 +207,15 @@ func (h *FAQHandler) UpdateEntryTagBatch(c *gin.Context) {
 }
 
 // UpdateEntryFieldsBatch godoc
-// @Summary      批量更新FAQ字段
-// @Description  批量更新FAQ条目的多个字段（is_enabled, is_recommended, tag_id）
-// @Tags         FAQ管理
+// @Summary      FAQ 필드 일괄 업데이트
+// @Description  FAQ 항목의 여러 필드 일괄 업데이트 (is_enabled, is_recommended, tag_id)
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                        true  "知识库ID"
-// @Param        request  body      types.FAQEntryFieldsBatchUpdate  true  "字段更新请求"
-// @Success      200      {object}  map[string]interface{}        "更新成功"
-// @Failure      400      {object}  errors.AppError               "请求参数错误"
+// @Param        id       path      string                        true  "지식베이스 ID"
+// @Param        request  body      types.FAQEntryFieldsBatchUpdate  true  "필드 업데이트 요청"
+// @Success      200      {object}  map[string]interface{}        "업데이트 성공"
+// @Failure      400      {object}  errors.AppError               "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/fields [put]
@@ -224,7 +224,7 @@ func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	var req types.FAQEntryFieldsBatchUpdate
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ entry fields batch payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	if err := h.knowledgeService.UpdateFAQEntryFieldsBatch(ctx,
@@ -238,26 +238,26 @@ func (h *FAQHandler) UpdateEntryFieldsBatch(c *gin.Context) {
 	})
 }
 
-// faqDeleteRequest is a request for deleting FAQ entries in batch
+// faqDeleteRequest FAQ 항목 일괄 삭제를 위한 요청
 type faqDeleteRequest struct {
 	IDs []string `json:"ids" binding:"required,min=1,dive,required"`
 }
 
-// faqEntryTagBatchRequest is a request for updating tags for FAQ entries in batch
+// faqEntryTagBatchRequest FAQ 항목 태그 일괄 업데이트를 위한 요청
 type faqEntryTagBatchRequest struct {
 	Updates map[string]*string `json:"updates" binding:"required,min=1"`
 }
 
 // DeleteEntries godoc
-// @Summary      批量删除FAQ条目
-// @Description  批量删除指定的FAQ条目
-// @Tags         FAQ管理
+// @Summary      FAQ 항목 일괄 삭제
+// @Description  지정된 FAQ 항목 일괄 삭제
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{ids=[]string}  true  "要删除的FAQ ID列表"
-// @Success      200      {object}  map[string]interface{}  "删除成功"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string  true  "지식베이스 ID"
+// @Param        request  body      object{ids=[]string}  true  "삭제할 FAQ ID 목록"
+// @Success      200      {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries [delete]
@@ -266,7 +266,7 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 	var req faqDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Failed to bind FAQ delete payload: %s", secutils.SanitizeForLog(err.Error()))
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 
@@ -284,15 +284,15 @@ func (h *FAQHandler) DeleteEntries(c *gin.Context) {
 }
 
 // SearchFAQ godoc
-// @Summary      搜索FAQ
-// @Description  使用混合搜索在FAQ中搜索，支持两级优先级标签召回：first_priority_tag_ids优先级最高，second_priority_tag_ids次之
-// @Tags         FAQ管理
+// @Summary      FAQ 검색
+// @Description  하이브리드 검색을 사용하여 FAQ 검색, 2단계 우선순위 태그 리콜 지원: first_priority_tag_ids가 가장 높은 우선순위, second_priority_tag_ids가 그 다음
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                true  "知识库ID"
-// @Param        request  body      types.FAQSearchRequest  true  "搜索请求"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string                true  "지식베이스 ID"
+// @Param        request  body      types.FAQSearchRequest  true  "검색 요청"
+// @Success      200      {object}  map[string]interface{}  "검색 결과"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/search [post]
@@ -301,7 +301,7 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 	var req types.FAQSearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind FAQ search payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
 	req.QueryText = secutils.SanitizeForLog(req.QueryText)
@@ -325,14 +325,14 @@ func (h *FAQHandler) SearchFAQ(c *gin.Context) {
 }
 
 // ExportEntries godoc
-// @Summary      导出FAQ条目
-// @Description  将所有FAQ条目导出为CSV文件
-// @Tags         FAQ管理
+// @Summary      FAQ 항목 내보내기
+// @Description  모든 FAQ 항목을 CSV 파일로 내보내기
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      text/csv
-// @Param        id   path      string  true  "知识库ID"
-// @Success      200  {file}    file    "CSV文件"
-// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Param        id   path      string  true  "지식베이스 ID"
+// @Success      200  {file}    file    "CSV 파일"
+// @Failure      400  {object}  errors.AppError  "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/export [get]
@@ -347,25 +347,25 @@ func (h *FAQHandler) ExportEntries(c *gin.Context) {
 		return
 	}
 
-	// Set response headers for CSV download
+	// CSV 다운로드를 위한 응답 헤더 설정
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", "attachment; filename=faq_export.csv")
-	// Add BOM for Excel compatibility with UTF-8
+	// UTF-8 호환성을 위한 BOM 추가
 	bom := []byte{0xEF, 0xBB, 0xBF}
 	c.Data(http.StatusOK, "text/csv; charset=utf-8", append(bom, csvData...))
 }
 
 // GetEntry godoc
-// @Summary      获取FAQ条目详情
-// @Description  根据ID获取单个FAQ条目的详情
-// @Tags         FAQ管理
+// @Summary      FAQ 항목 상세 정보 조회
+// @Description  ID를 기반으로 단일 FAQ 항목의 상세 정보 조회
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        id        path      string  true  "知识库ID"
-// @Param        entry_id  path      string  true  "FAQ条目ID"
-// @Success      200       {object}  map[string]interface{}  "FAQ条目详情"
-// @Failure      400       {object}  errors.AppError         "请求参数错误"
-// @Failure      404       {object}  errors.AppError         "条目不存在"
+// @Param        id        path      string  true  "지식베이스 ID"
+// @Param        entry_id  path      string  true  "FAQ 항목 ID"
+// @Success      200       {object}  map[string]interface{}  "FAQ 항목 상세 정보"
+// @Failure      400       {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404       {object}  errors.AppError         "항목을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/faq/entries/{entry_id} [get]
@@ -388,14 +388,14 @@ func (h *FAQHandler) GetEntry(c *gin.Context) {
 }
 
 // GetImportProgress godoc
-// @Summary      获取FAQ导入进度
-// @Description  获取FAQ导入任务的进度
-// @Tags         FAQ管理
+// @Summary      FAQ 가져오기 진행 상황 조회
+// @Description  FAQ 가져오기 작업의 진행 상황 조회
+// @Tags         FAQ 관리
 // @Accept       json
 // @Produce      json
-// @Param        task_id  path      string  true  "任务ID"
-// @Success      200      {object}  map[string]interface{}  "导入进度"
-// @Failure      404      {object}  errors.AppError         "任务不存在"
+// @Param        task_id  path      string  true  "작업 ID"
+// @Success      200      {object}  map[string]interface{}  "가져오기 진행 상황"
+// @Failure      404      {object}  errors.AppError         "작업을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /faq/import/progress/{task_id} [get]

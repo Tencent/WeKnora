@@ -11,33 +11,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// EvaluationHandler handles evaluation related HTTP requests
+// EvaluationHandler 평가 관련 HTTP 요청 처리
 type EvaluationHandler struct {
-	evaluationService interfaces.EvaluationService // Service for evaluation operations
+	evaluationService interfaces.EvaluationService // 평가 작업을 위한 서비스
 }
 
-// NewEvaluationHandler creates a new EvaluationHandler instance
+// NewEvaluationHandler 새로운 EvaluationHandler 인스턴스 생성
 func NewEvaluationHandler(evaluationService interfaces.EvaluationService) *EvaluationHandler {
 	return &EvaluationHandler{evaluationService: evaluationService}
 }
 
-// EvaluationRequest contains parameters for evaluation request
+// EvaluationRequest 평가 요청 매개변수 포함
 type EvaluationRequest struct {
-	DatasetID       string `json:"dataset_id"`        // ID of dataset to evaluate
-	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
-	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
-	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
+	DatasetID       string `json:"dataset_id"`        // 평가할 데이터셋 ID
+	KnowledgeBaseID string `json:"knowledge_base_id"` // 사용할 지식베이스 ID
+	ChatModelID     string `json:"chat_id"`           // 사용할 채팅 모델 ID
+	RerankModelID   string `json:"rerank_id"`         // 사용할 재순위 모델 ID
 }
 
 // Evaluation godoc
-// @Summary      执行评估
-// @Description  对知识库进行评估测试
-// @Tags         评估
+// @Summary      평가 실행
+// @Description  지식베이스에 대한 평가 테스트 수행
+// @Tags         평가
 // @Accept       json
 // @Produce      json
-// @Param        request  body      EvaluationRequest  true  "评估请求参数"
-// @Success      200      {object}  map[string]interface{}  "评估任务"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      EvaluationRequest  true  "평가 요청 매개변수"
+// @Success      200      {object}  map[string]interface{}  "평가 작업"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /evaluation/ [post]
@@ -87,20 +87,20 @@ func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 	})
 }
 
-// GetEvaluationRequest contains parameters for getting evaluation result
+// GetEvaluationRequest 평가 결과 조회를 위한 매개변수 포함
 type GetEvaluationRequest struct {
-	TaskID string `form:"task_id" binding:"required"` // ID of evaluation task
+	TaskID string `form:"task_id" binding:"required"` // 평가 작업 ID
 }
 
 // GetEvaluationResult godoc
-// @Summary      获取评估结果
-// @Description  根据任务ID获取评估结果
-// @Tags         评估
+// @Summary      평가 결과 조회
+// @Description  작업 ID에 따른 평가 결과 조회
+// @Tags         평가
 // @Accept       json
 // @Produce      json
-// @Param        task_id  query     string  true  "评估任务ID"
-// @Success      200      {object}  map[string]interface{}  "评估结果"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        task_id  query     string  true  "평가 작업 ID"
+// @Success      200      {object}  map[string]interface{}  "평가 결과"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /evaluation/ [get]

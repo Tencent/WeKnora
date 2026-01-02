@@ -12,33 +12,33 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-// TagHandler handles knowledge base tag operations.
+// TagHandler 지식베이스 태그 작업 처리
 type TagHandler struct {
 	tagService interfaces.KnowledgeTagService
 }
 
-// DeleteTagRequest represents the request body for deleting a tag
+// DeleteTagRequest 태그 삭제 요청 본문
 type DeleteTagRequest struct {
-	ExcludeIDs []string `json:"exclude_ids"` // Chunk IDs to exclude from deletion
+	ExcludeIDs []string `json:"exclude_ids"` // 삭제에서 제외할 Chunk ID
 }
 
-// NewTagHandler creates a new TagHandler.
+// NewTagHandler 새로운 TagHandler 생성
 func NewTagHandler(tagService interfaces.KnowledgeTagService) *TagHandler {
 	return &TagHandler{tagService: tagService}
 }
 
 // ListTags godoc
-// @Summary      获取标签列表
-// @Description  获取知识库下的所有标签及统计信息
-// @Tags         标签管理
+// @Summary      태그 목록 조회
+// @Description  지식베이스 아래의 모든 태그 및 통계 정보 조회
+// @Tags         태그 관리
 // @Accept       json
 // @Produce      json
-// @Param        id         path      string  true   "知识库ID"
-// @Param        page       query     int     false  "页码"
-// @Param        page_size  query     int     false  "每页数量"
-// @Param        keyword    query     string  false  "关键词搜索"
-// @Success      200        {object}  map[string]interface{}  "标签列表"
-// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Param        id         path      string  true   "지식베이스 ID"
+// @Param        page       query     int     false  "페이지 번호"
+// @Param        page_size  query     int     false  "페이지당 수량"
+// @Param        keyword    query     string  false  "키워드 검색"
+// @Success      200        {object}  map[string]interface{}  "태그 목록"
+// @Failure      400        {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags [get]
@@ -49,7 +49,7 @@ func (h *TagHandler) ListTags(c *gin.Context) {
 	var page types.Pagination
 	if err := c.ShouldBindQuery(&page); err != nil {
 		logger.Error(ctx, "Failed to bind pagination query", err)
-		c.Error(errors.NewBadRequestError("分页参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("페이지 매개변수가 유효하지 않습니다").WithDetails(err.Error()))
 		return
 	}
 
@@ -75,15 +75,15 @@ type createTagRequest struct {
 }
 
 // CreateTag godoc
-// @Summary      创建标签
-// @Description  在知识库下创建新标签
-// @Tags         标签管理
+// @Summary      태그 생성
+// @Description  지식베이스 아래에 새 태그 생성
+// @Tags         태그 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{name=string,color=string,sort_order=int}  true  "标签信息"
-// @Success      200      {object}  map[string]interface{}  "创建的标签"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string  true  "지식베이스 ID"
+// @Param        request  body      object{name=string,color=string,sort_order=int}  true  "태그 정보"
+// @Success      200      {object}  map[string]interface{}  "생성된 태그"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags [post]
@@ -94,7 +94,7 @@ func (h *TagHandler) CreateTag(c *gin.Context) {
 	var req createTagRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind create tag payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("요청 매개변수가 유효하지 않습니다").WithDetails(err.Error()))
 		return
 	}
 
@@ -121,16 +121,16 @@ type updateTagRequest struct {
 }
 
 // UpdateTag godoc
-// @Summary      更新标签
-// @Description  更新标签信息
-// @Tags         标签管理
+// @Summary      태그 업데이트
+// @Description  태그 정보 업데이트
+// @Tags         태그 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        tag_id   path      string  true  "标签ID"
-// @Param        request  body      object  true  "标签更新信息"
-// @Success      200      {object}  map[string]interface{}  "更新后的标签"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string  true  "지식베이스 ID"
+// @Param        tag_id   path      string  true  "태그 ID"
+// @Param        request  body      object  true  "태그 업데이트 정보"
+// @Success      200      {object}  map[string]interface{}  "업데이트된 태그"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags/{tag_id} [put]
@@ -141,7 +141,7 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 	var req updateTagRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to bind update tag payload", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("요청 매개변수가 유효하지 않습니다").WithDetails(err.Error()))
 		return
 	}
 
@@ -161,18 +161,18 @@ func (h *TagHandler) UpdateTag(c *gin.Context) {
 }
 
 // DeleteTag godoc
-// @Summary      删除标签
-// @Description  删除标签，可使用force=true强制删除被引用的标签，content_only=true仅删除标签下的内容而保留标签本身
-// @Tags         标签管理
+// @Summary      태그 삭제
+// @Description  태그 삭제, force=true를 사용하여 참조된 태그 강제 삭제 가능, content_only=true는 태그 아래의 내용만 삭제하고 태그 자체는 유지
+// @Tags         태그 관리
 // @Accept       json
 // @Produce      json
-// @Param        id            path      string              true   "知识库ID"
-// @Param        tag_id        path      string              true   "标签ID"
-// @Param        force         query     bool                false  "强制删除"
-// @Param        content_only  query     bool                false  "仅删除内容，保留标签"
-// @Param        body          body      DeleteTagRequest    false  "删除选项"
-// @Success      200           {object}  map[string]interface{}  "删除成功"
-// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Param        id            path      string              true   "지식베이스 ID"
+// @Param        tag_id        path      string              true   "태그 ID"
+// @Param        force         query     bool                false  "강제 삭제"
+// @Param        content_only  query     bool                false  "내용만 삭제, 태그 유지"
+// @Param        body          body      DeleteTagRequest    false  "삭제 옵션"
+// @Success      200           {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400           {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/tags/{tag_id} [delete]
@@ -184,7 +184,7 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 	contentOnly := c.Query("content_only") == "true"
 
 	var req DeleteTagRequest
-	// Ignore bind error since body is optional
+	// 본문은 선택 사항이므로 바인딩 오류 무시
 	_ = c.ShouldBindJSON(&req)
 
 	if err := h.tagService.DeleteTag(ctx, tagID, force, contentOnly, req.ExcludeIDs); err != nil {
@@ -200,5 +200,5 @@ func (h *TagHandler) DeleteTag(c *gin.Context) {
 	})
 }
 
-// NOTE: TagHandler currently exposes CRUD for tags and statistics.
-// Knowledge / Chunk tagging is handled via dedicated knowledge and FAQ APIs.
+// NOTE: TagHandler는 현재 태그 및 통계에 대한 CRUD를 노출합니다.
+// 지식/청크 태깅은 전용 지식 및 FAQ API를 통해 처리됩니다.

@@ -10,18 +10,18 @@ const (
 	SiliconFlowBaseURL = "https://api.siliconflow.cn/v1"
 )
 
-// SiliconFlowProvider 实现硅基流动的 Provider 接口
+// SiliconFlowProvider SiliconFlow의 Provider 인터페이스 구현
 type SiliconFlowProvider struct{}
 
 func init() {
 	Register(&SiliconFlowProvider{})
 }
 
-// Info 返回硅基流动 provider 的元数据
+// Info SiliconFlow provider의 메타데이터 반환
 func (p *SiliconFlowProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderSiliconFlow,
-		DisplayName: "硅基流动 SiliconFlow",
+		DisplayName: "SiliconFlow",
 		Description: "deepseek-ai/DeepSeek-V3.1, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: SiliconFlowBaseURL,
@@ -39,7 +39,7 @@ func (p *SiliconFlowProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证硅基流动 provider 配置
+// ValidateConfig SiliconFlow provider 구성 검증
 func (p *SiliconFlowProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for SiliconFlow provider")

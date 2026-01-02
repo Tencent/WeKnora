@@ -9,101 +9,101 @@ import (
 	"gorm.io/gorm"
 )
 
-// FallbackStrategy represents the fallback strategy type
+// FallbackStrategy 폴백 전략 유형을 나타냅니다.
 type FallbackStrategy string
 
 const (
-	FallbackStrategyFixed FallbackStrategy = "fixed" // Fixed response
-	FallbackStrategyModel FallbackStrategy = "model" // Model fallback response
+	FallbackStrategyFixed FallbackStrategy = "fixed" // 고정 응답
+	FallbackStrategyModel FallbackStrategy = "model" // 모델 폴백 응답
 )
 
-// SummaryConfig represents the summary configuration for a session
+// SummaryConfig 세션에 대한 요약 구성을 나타냅니다.
 type SummaryConfig struct {
-	// Max tokens
+	// 최대 토큰 수
 	MaxTokens int `json:"max_tokens"`
-	// Repeat penalty
+	// 반복 페널티
 	RepeatPenalty float64 `json:"repeat_penalty"`
 	// TopK
 	TopK int `json:"top_k"`
 	// TopP
 	TopP float64 `json:"top_p"`
-	// Frequency penalty
+	// 빈도 페널티
 	FrequencyPenalty float64 `json:"frequency_penalty"`
-	// Presence penalty
+	// 존재 페널티
 	PresencePenalty float64 `json:"presence_penalty"`
-	// Prompt
+	// 프롬프트
 	Prompt string `json:"prompt"`
-	// Context template
+	// 컨텍스트 템플릿
 	ContextTemplate string `json:"context_template"`
-	// No match prefix
+	// 불일치 접두사
 	NoMatchPrefix string `json:"no_match_prefix"`
-	// Temperature
+	// 온도
 	Temperature float64 `json:"temperature"`
-	// Seed
+	// 시드
 	Seed int `json:"seed"`
-	// Max completion tokens
+	// 최대 완료 토큰 수
 	MaxCompletionTokens int `json:"max_completion_tokens"`
-	// Thinking - whether to enable thinking mode
+	// 생각 모드 활성화 여부
 	Thinking *bool `json:"thinking"`
 }
 
-// ContextCompressionStrategy represents the strategy for context compression
+// ContextCompressionStrategy 컨텍스트 압축 전략을 나타냅니다.
 type ContextCompressionStrategy string
 
 const (
-	// ContextCompressionSlidingWindow keeps the most recent N messages
+	// ContextCompressionSlidingWindow 가장 최근 N개의 메시지를 유지합니다.
 	ContextCompressionSlidingWindow ContextCompressionStrategy = "sliding_window"
-	// ContextCompressionSmart uses LLM to summarize old messages
+	// ContextCompressionSmart LLM을 사용하여 오래된 메시지를 요약합니다.
 	ContextCompressionSmart ContextCompressionStrategy = "smart"
 )
 
-// ContextConfig configures LLM context management
-// This is separate from message storage and manages token limits
+// ContextConfig LLM 컨텍스트 관리를 구성합니다.
+// 이는 메시지 저장소와 별개이며 토큰 제한을 관리합니다.
 type ContextConfig struct {
-	// Maximum tokens allowed in LLM context
+	// LLM 컨텍스트에 허용되는 최대 토큰 수
 	MaxTokens int `json:"max_tokens"`
-	// Compression strategy: "sliding_window" or "smart"
+	// 압축 전략: "sliding_window" 또는 "smart"
 	CompressionStrategy ContextCompressionStrategy `json:"compression_strategy"`
-	// For sliding_window: number of messages to keep
-	// For smart: number of recent messages to keep uncompressed
+	// sliding_window의 경우: 유지할 메시지 수
+	// smart의 경우: 압축하지 않고 유지할 최근 메시지 수
 	RecentMessageCount int `json:"recent_message_count"`
-	// Summarize threshold: number of messages before summarization
+	// 요약 임계값: 요약 전 메시지 수
 	SummarizeThreshold int `json:"summarize_threshold"`
 }
 
-// Session represents the session
+// Session 세션을 나타냅니다.
 type Session struct {
 	// ID
 	ID string `json:"id"          gorm:"type:varchar(36);primaryKey"`
-	// Title
+	// 제목
 	Title string `json:"title"`
-	// Description
+	// 설명
 	Description string `json:"description"`
-	// Tenant ID
+	// 테넌트 ID
 	TenantID uint64 `json:"tenant_id"   gorm:"index"`
 
-	// // Strategy configuration
-	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
-	// MaxRounds         int                 `json:"max_rounds"`                           // 多轮保持轮数
-	// EnableRewrite     bool                `json:"enable_rewrite"`                       // 多轮改写开关
-	// FallbackStrategy  FallbackStrategy    `json:"fallback_strategy"`                    // 兜底策略
-	// FallbackResponse  string              `json:"fallback_response"`                    // 固定回复内容
-	// EmbeddingTopK     int                 `json:"embedding_top_k"`                      // 向量召回TopK
-	// KeywordThreshold  float64             `json:"keyword_threshold"`                    // 关键词召回阈值
-	// VectorThreshold   float64             `json:"vector_threshold"`                     // 向量召回阈值
-	// RerankModelID     string              `json:"rerank_model_id"`                      // 排序模型ID
-	// RerankTopK        int                 `json:"rerank_top_k"`                         // 排序TopK
-	// RerankThreshold   float64             `json:"rerank_threshold"`                     // 排序阈值
-	// SummaryModelID    string              `json:"summary_model_id"`                     // 总结模型ID
-	// SummaryParameters *SummaryConfig      `json:"summary_parameters" gorm:"type:json"`  // 总结模型参数
-	// AgentConfig       *SessionAgentConfig `json:"agent_config"       gorm:"type:jsonb"` // Agent 配置（会话级别，仅存储enabled和knowledge_bases）
-	// ContextConfig     *ContextConfig      `json:"context_config"     gorm:"type:jsonb"` // 上下文管理配置（可选）
+	// // 전략 구성
+	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 연결된 지식베이스 ID
+	// MaxRounds         int                 `json:"max_rounds"`                           // 다중 턴 유지 라운드 수
+	// EnableRewrite     bool                `json:"enable_rewrite"`                       // 다중 턴 재작성 스위치
+	// FallbackStrategy  FallbackStrategy    `json:"fallback_strategy"`                    // 폴백 전략
+	// FallbackResponse  string              `json:"fallback_response"`                    // 고정 응답 내용
+	// EmbeddingTopK     int                 `json:"embedding_top_k"`                      // 벡터 리콜 TopK
+	// KeywordThreshold  float64             `json:"keyword_threshold"`                    // 키워드 리콜 임계값
+	// VectorThreshold   float64             `json:"vector_threshold"`                     // 벡터 리콜 임계값
+	// RerankModelID     string              `json:"rerank_model_id"`                      // 정렬 모델 ID
+	// RerankTopK        int                 `json:"rerank_top_k"`                         // 정렬 TopK
+	// RerankThreshold   float64             `json:"rerank_threshold"`                     // 정렬 임계값
+	// SummaryModelID    string              `json:"summary_model_id"`                     // 요약 모델 ID
+	// SummaryParameters *SummaryConfig      `json:"summary_parameters" gorm:"type:json"`  // 요약 모델 매개변수
+	// AgentConfig       *SessionAgentConfig `json:"agent_config"       gorm:"type:jsonb"` // 에이전트 구성 (세션 수준, enabled 및 knowledge_bases만 저장)
+	// ContextConfig     *ContextConfig      `json:"context_config"     gorm:"type:jsonb"` // 컨텍스트 관리 구성 (선택 사항)
 
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 
-	// Association relationship, not stored in the database
+	// 연관 관계, 데이터베이스에 저장되지 않음
 	Messages []Message `json:"-" gorm:"foreignKey:SessionID"`
 }
 
@@ -112,15 +112,15 @@ func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
-// StringArray represents a list of strings
+// StringArray 문자열 목록을 나타냅니다.
 type StringArray []string
 
-// Value implements the driver.Valuer interface, used to convert StringArray to database value
+// Value StringArray를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c StringArray) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to StringArray
+// Scan 데이터베이스 값을 StringArray로 변환하는 sql.Scanner 인터페이스 구현
 func (c *StringArray) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -132,12 +132,12 @@ func (c *StringArray) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// Value implements the driver.Valuer interface, used to convert SummaryConfig to database value
+// Value SummaryConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c *SummaryConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to SummaryConfig
+// Scan 데이터베이스 값을 SummaryConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (c *SummaryConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -149,12 +149,12 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// Value implements the driver.Valuer interface, used to convert ContextConfig to database value
+// Value ContextConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c *ContextConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to ContextConfig
+// Scan 데이터베이스 값을 ContextConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (c *ContextConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil

@@ -14,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config 应用程序总配置
+// Config 애플리케이션 전체 구성
 type Config struct {
 	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
 	Server          *ServerConfig          `yaml:"server"           json:"server"`
@@ -37,7 +37,7 @@ type VectorDatabaseConfig struct {
 	Driver string `yaml:"driver" json:"driver"`
 }
 
-// ConversationConfig 对话服务配置
+// ConversationConfig 대화 서비스 구성
 type ConversationConfig struct {
 	MaxRounds                  int            `yaml:"max_rounds"                    json:"max_rounds"`
 	KeywordThreshold           float64        `yaml:"keyword_threshold"             json:"keyword_threshold"`
@@ -60,11 +60,11 @@ type ConversationConfig struct {
 	SimplifyQueryPromptUser    string         `yaml:"simplify_query_prompt_user"    json:"simplify_query_prompt_user"`
 	ExtractEntitiesPrompt      string         `yaml:"extract_entities_prompt"       json:"extract_entities_prompt"`
 	ExtractRelationshipsPrompt string         `yaml:"extract_relationships_prompt"  json:"extract_relationships_prompt"`
-	// GenerateQuestionsPrompt is used to generate questions for document chunks to improve recall
+	// GenerateQuestionsPrompt 문서 청크에 대한 질문을 생성하여 리콜을 향상시키는 데 사용됩니다.
 	GenerateQuestionsPrompt string `yaml:"generate_questions_prompt" json:"generate_questions_prompt"`
 }
 
-// SummaryConfig 摘要配置
+// SummaryConfig 요약 구성
 type SummaryConfig struct {
 	MaxTokens           int     `yaml:"max_tokens"            json:"max_tokens"`
 	RepeatPenalty       float64 `yaml:"repeat_penalty"        json:"repeat_penalty"`
@@ -81,7 +81,7 @@ type SummaryConfig struct {
 	Thinking            *bool   `yaml:"thinking"              json:"thinking"`
 }
 
-// ServerConfig 服务器配置
+// ServerConfig 서버 구성
 type ServerConfig struct {
 	Port            int           `yaml:"port"             json:"port"`
 	Host            string        `yaml:"host"             json:"host"`
@@ -89,7 +89,7 @@ type ServerConfig struct {
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" json:"shutdown_timeout" default:"30s"`
 }
 
-// KnowledgeBaseConfig 知识库配置
+// KnowledgeBaseConfig 지식베이스 구성
 type KnowledgeBaseConfig struct {
 	ChunkSize       int                    `yaml:"chunk_size"       json:"chunk_size"`
 	ChunkOverlap    int                    `yaml:"chunk_overlap"    json:"chunk_overlap"`
@@ -98,21 +98,21 @@ type KnowledgeBaseConfig struct {
 	ImageProcessing *ImageProcessingConfig `yaml:"image_processing" json:"image_processing"`
 }
 
-// ImageProcessingConfig 图像处理配置
+// ImageProcessingConfig 이미지 처리 구성
 type ImageProcessingConfig struct {
 	EnableMultimodal bool `yaml:"enable_multimodal" json:"enable_multimodal"`
 }
 
-// TenantConfig 租户配置
+// TenantConfig 테넌트 구성
 type TenantConfig struct {
 	DefaultSessionName        string `yaml:"default_session_name"        json:"default_session_name"`
 	DefaultSessionTitle       string `yaml:"default_session_title"       json:"default_session_title"`
 	DefaultSessionDescription string `yaml:"default_session_description" json:"default_session_description"`
-	// EnableCrossTenantAccess enables cross-tenant access for users with permission
+	// EnableCrossTenantAccess 권한이 있는 사용자에 대한 테넌트 간 액세스를 활성화합니다.
 	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access" json:"enable_cross_tenant_access"`
 }
 
-// PromptTemplate 提示词模板
+// PromptTemplate 프롬프트 템플릿
 type PromptTemplate struct {
 	ID               string `yaml:"id"                 json:"id"`
 	Name             string `yaml:"name"               json:"name"`
@@ -122,7 +122,7 @@ type PromptTemplate struct {
 	HasWebSearch     bool   `yaml:"has_web_search"     json:"has_web_search,omitempty"`
 }
 
-// PromptTemplatesConfig 提示词模板配置
+// PromptTemplatesConfig 프롬프트 템플릿 구성
 type PromptTemplatesConfig struct {
 	SystemPrompt    []PromptTemplate `yaml:"system_prompt"    json:"system_prompt"`
 	ContextTemplate []PromptTemplate `yaml:"context_template" json:"context_template"`
@@ -131,7 +131,7 @@ type PromptTemplatesConfig struct {
 	Fallback        []PromptTemplate `yaml:"fallback"         json:"fallback"`
 }
 
-// ModelConfig 模型配置
+// ModelConfig 모델 구성
 type ModelConfig struct {
 	Type       string                 `yaml:"type"       json:"type"`
 	Source     string                 `yaml:"source"     json:"source"`
@@ -139,23 +139,23 @@ type ModelConfig struct {
 	Parameters map[string]interface{} `yaml:"parameters" json:"parameters"`
 }
 
-// StreamManagerConfig 流管理器配置
+// StreamManagerConfig 스트림 관리자 구성
 type StreamManagerConfig struct {
-	Type           string        `yaml:"type"            json:"type"`            // 类型: "memory" 或 "redis"
-	Redis          RedisConfig   `yaml:"redis"           json:"redis"`           // Redis配置
-	CleanupTimeout time.Duration `yaml:"cleanup_timeout" json:"cleanup_timeout"` // 清理超时，单位秒
+	Type           string        `yaml:"type"            json:"type"`            // 유형: "memory" 또는 "redis"
+	Redis          RedisConfig   `yaml:"redis"           json:"redis"`           // Redis 구성
+	CleanupTimeout time.Duration `yaml:"cleanup_timeout" json:"cleanup_timeout"` // 정리 타임아웃(초)
 }
 
-// RedisConfig Redis配置
+// RedisConfig Redis 구성
 type RedisConfig struct {
-	Address  string        `yaml:"address"  json:"address"`  // Redis地址
-	Password string        `yaml:"password" json:"password"` // Redis密码
-	DB       int           `yaml:"db"       json:"db"`       // Redis数据库
-	Prefix   string        `yaml:"prefix"   json:"prefix"`   // 键前缀
-	TTL      time.Duration `yaml:"ttl"      json:"ttl"`      // 过期时间(小时)
+	Address  string        `yaml:"address"  json:"address"`  // Redis 주소
+	Password string        `yaml:"password" json:"password"` // Redis 비밀번호
+	DB       int           `yaml:"db"       json:"db"`       // Redis 데이터베이스
+	Prefix   string        `yaml:"prefix"   json:"prefix"`   // 키 접두사
+	TTL      time.Duration `yaml:"ttl"      json:"ttl"`      // 만료 시간(시간)
 }
 
-// ExtractManagerConfig 抽取管理器配置
+// ExtractManagerConfig 추출 관리자 구성
 type ExtractManagerConfig struct {
 	ExtractGraph  *types.PromptTemplateStructured `yaml:"extract_graph"  json:"extract_graph"`
 	ExtractEntity *types.PromptTemplateStructured `yaml:"extract_entity" json:"extract_entity"`
@@ -167,47 +167,47 @@ type FebriText struct {
 	WithNoTag string `yaml:"with_no_tag" json:"with_no_tag"`
 }
 
-// LoadConfig 从配置文件加载配置
+// LoadConfig 구성 파일에서 구성 로드
 func LoadConfig() (*Config, error) {
-	// 设置配置文件名和路径
-	viper.SetConfigName("config")         // 配置文件名称(不带扩展名)
-	viper.SetConfigType("yaml")           // 配置文件类型
-	viper.AddConfigPath(".")              // 当前目录
-	viper.AddConfigPath("./config")       // config子目录
-	viper.AddConfigPath("$HOME/.appname") // 用户目录
-	viper.AddConfigPath("/etc/appname/")  // etc目录
+	// 구성 파일 이름 및 경로 설정
+	viper.SetConfigName("config")         // 구성 파일 이름(확장자 제외)
+	viper.SetConfigType("yaml")           // 구성 파일 유형
+	viper.AddConfigPath(".")              // 현재 디렉터리
+	viper.AddConfigPath("./config")       // config 하위 디렉터리
+	viper.AddConfigPath("$HOME/.appname") // 사용자 디렉터리
+	viper.AddConfigPath("/etc/appname/")  // etc 디렉터리
 
-	// 启用环境变量替换
+	// 환경 변수 대체 활성화
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// 读取配置文件
+	// 구성 파일 읽기
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("error reading config file: %w", err)
 	}
 
-	// 替换配置中的环境变量引用
+	// 구성에서 환경 변수 참조 대체
 	configFileContent, err := os.ReadFile(viper.ConfigFileUsed())
 	if err != nil {
 		return nil, fmt.Errorf("error reading config file content: %w", err)
 	}
 
-	// 替换${ENV_VAR}格式的环境变量引用
+	// ${ENV_VAR} 형식의 환경 변수 참조 대체
 	re := regexp.MustCompile(`\${([^}]+)}`)
 	result := re.ReplaceAllStringFunc(string(configFileContent), func(match string) string {
-		// 提取环境变量名称（去掉${}部分）
+		// 환경 변수 이름 추출 (${} 부분 제거)
 		envVar := match[2 : len(match)-1]
-		// 获取环境变量值，如果不存在则保持原样
+		// 환경 변수 값 가져오기, 없으면 원래대로 유지
 		if value := os.Getenv(envVar); value != "" {
 			return value
 		}
 		return match
 	})
 
-	// 使用处理后的配置内容
+	// 처리된 구성 내용 사용
 	viper.ReadConfig(strings.NewReader(result))
 
-	// 解析配置到结构体
+	// 구성을 구조체로 파싱
 	var cfg Config
 	if err := viper.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
 		dc.TagName = "yaml"
@@ -216,12 +216,12 @@ func LoadConfig() (*Config, error) {
 	}
 	fmt.Printf("Using configuration file: %s\n", viper.ConfigFileUsed())
 
-	// 加载提示词模板（从目录或配置文件）
+	// 프롬프트 템플릿 로드 (디렉터리 또는 구성 파일에서)
 	configDir := filepath.Dir(viper.ConfigFileUsed())
 	promptTemplates, err := loadPromptTemplates(configDir)
 	if err != nil {
 		fmt.Printf("Warning: failed to load prompt templates from directory: %v\n", err)
-		// 如果目录加载失败，使用配置文件中的模板（如果有）
+		// 디렉터리 로드 실패 시 구성 파일의 템플릿 사용 (있는 경우)
 	} else if promptTemplates != nil {
 		cfg.PromptTemplates = promptTemplates
 	}
@@ -229,23 +229,23 @@ func LoadConfig() (*Config, error) {
 	return &cfg, nil
 }
 
-// promptTemplateFile 用于解析模板文件
+// promptTemplateFile 템플릿 파일 파싱용
 type promptTemplateFile struct {
 	Templates []PromptTemplate `yaml:"templates"`
 }
 
-// loadPromptTemplates 从目录加载提示词模板
+// loadPromptTemplates 디렉터리에서 프롬프트 템플릿 로드
 func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 	templatesDir := filepath.Join(configDir, "prompt_templates")
 
-	// 检查目录是否存在
+	// 디렉터리 존재 여부 확인
 	if _, err := os.Stat(templatesDir); os.IsNotExist(err) {
-		return nil, nil // 目录不存在，返回nil让调用者使用配置文件中的模板
+		return nil, nil // 디렉터리가 없으면 nil 반환하여 호출자가 구성 파일의 템플릿 사용
 	}
 
 	config := &PromptTemplatesConfig{}
 
-	// 定义模板文件映射
+	// 템플릿 파일 매핑 정의
 	templateFiles := map[string]*[]PromptTemplate{
 		"system_prompt.yaml":    &config.SystemPrompt,
 		"context_template.yaml": &config.ContextTemplate,
@@ -254,11 +254,11 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 		"fallback.yaml":         &config.Fallback,
 	}
 
-	// 加载每个模板文件
+	// 각 템플릿 파일 로드
 	for filename, target := range templateFiles {
 		filePath := filepath.Join(templatesDir, filename)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			continue // 文件不存在，跳过
+			continue // 파일이 없으면 건너뜀
 		}
 
 		data, err := os.ReadFile(filePath)
@@ -277,14 +277,14 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 	return config, nil
 }
 
-// WebSearchConfig represents the web search configuration
+// WebSearchConfig 웹 검색 구성
 type WebSearchConfig struct {
 	Providers []WebSearchProviderConfig `yaml:"providers" json:"providers"`
 	Default   WebSearchDefaultConfig    `yaml:"default"   json:"default"`
-	Timeout   int                       `yaml:"timeout"   json:"timeout"` // 超时时间（秒）
+	Timeout   int                       `yaml:"timeout"   json:"timeout"` // 타임아웃(초)
 }
 
-// WebSearchProviderConfig represents configuration for a web search provider
+// WebSearchProviderConfig 웹 검색 제공자 구성
 type WebSearchProviderConfig struct {
 	ID             string `yaml:"id"                    json:"id"`
 	Name           string `yaml:"name"                  json:"name"`
@@ -294,7 +294,7 @@ type WebSearchProviderConfig struct {
 	APIURL         string `yaml:"api_url,omitempty"     json:"api_url,omitempty"`
 }
 
-// WebSearchDefaultConfig represents the default web search configuration
+// WebSearchDefaultConfig 기본 웹 검색 구성
 type WebSearchDefaultConfig struct {
 	Provider          string   `yaml:"provider"           json:"provider"`
 	MaxResults        int      `yaml:"max_results"        json:"max_results"`

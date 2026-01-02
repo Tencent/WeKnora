@@ -71,20 +71,20 @@ func NewEmbedder(config Config) (Embedder, error) {
 		// Route to provider-specific embedders
 		switch providerName {
 		case provider.ProviderAliyun:
-			// 检查是否是多模态嵌入模型
-			// 多模态模型: tongyi-embedding-vision-*, multimodal-embedding-*
-			// tex-only模型: text-embedding-v1/v2/v3/v4 应该使用 OpenAI 兼容接口，否则响应格式不匹配、embedding 返回空数组
+			// 멀티모달 임베딩 모델인지 확인
+			// 멀티모달 모델: tongyi-embedding-vision-*, multimodal-embedding-*
+			// 텍스트 전용 모델: text-embedding-v1/v2/v3/v4는 OpenAI 호환 인터페이스를 사용해야 하며, 그렇지 않으면 응답 형식이 일치하지 않거나 embedding이 빈 배열을 반환합니다.
 			isMultimodalModel := strings.Contains(strings.ToLower(config.ModelName), "vision") ||
 				strings.Contains(strings.ToLower(config.ModelName), "multimodal")
 
 			if isMultimodalModel {
-				// 多模态模型需要使用DashScope专用 API 端点
-				// 如果用户填写了 OpenAI 兼容模式的 URL，自动修正为多模态 API 的baseURL
+				// 멀티모달 모델은 DashScope 전용 API 엔드포인트가 필요합니다.
+				// 사용자가 OpenAI 호환 모드 URL을 입력한 경우, 멀티모달 API의 baseURL로 자동 수정합니다.
 				baseURL := config.BaseURL
 				if baseURL == "" {
 					baseURL = "https://dashscope.aliyuncs.com"
 				} else if strings.Contains(baseURL, "/compatible-mode/") {
-					// 移除 compatible-mode 路径，AliyunEmbedder 会自动添加多模态端点
+					// compatible-mode 경로 제거, AliyunEmbedder가 자동으로 멀티모달 엔드포인트를 추가합니다.
 					baseURL = strings.Replace(baseURL, "/compatible-mode/v1", "", 1)
 					baseURL = strings.Replace(baseURL, "/compatible-mode", "", 1)
 				}

@@ -8,88 +8,88 @@ import (
 	"gorm.io/gorm"
 )
 
-// ChunkType 定义了不同类型的 Chunk
+// ChunkType 청크 유형 정의
 type ChunkType = string
 
 const (
-	// ChunkTypeText 表示普通的文本 Chunk
+	// ChunkTypeText 일반 텍스트 청크
 	ChunkTypeText ChunkType = "text"
-	// ChunkTypeImageOCR 表示图片 OCR 文本的 Chunk
+	// ChunkTypeImageOCR 이미지 OCR 텍스트 청크
 	ChunkTypeImageOCR ChunkType = "image_ocr"
-	// ChunkTypeImageCaption 表示图片描述的 Chunk
+	// ChunkTypeImageCaption 이미지 캡션 청크
 	ChunkTypeImageCaption ChunkType = "image_caption"
-	// ChunkTypeSummary 表示摘要类型的 Chunk
+	// ChunkTypeSummary 요약 유형 청크
 	ChunkTypeSummary = "summary"
-	// ChunkTypeEntity 表示实体类型的 Chunk
+	// ChunkTypeEntity 엔티티 유형 청크
 	ChunkTypeEntity ChunkType = "entity"
-	// ChunkTypeRelationship 表示关系类型的 Chunk
+	// ChunkTypeRelationship 관계 유형 청크
 	ChunkTypeRelationship ChunkType = "relationship"
-	// ChunkTypeFAQ 表示 FAQ 条目 Chunk
+	// ChunkTypeFAQ FAQ 항목 청크
 	ChunkTypeFAQ ChunkType = "faq"
-	// ChunkTypeWebSearch 表示 Web 搜索结果的 Chunk
+	// ChunkTypeWebSearch 웹 검색 결과 청크
 	ChunkTypeWebSearch ChunkType = "web_search"
-	// ChunkTypeTableSummary 表示数据表摘要的 Chunk
+	// ChunkTypeTableSummary 데이터 테이블 요약 청크
 	ChunkTypeTableSummary ChunkType = "table_summary"
-	// ChunkTypeTableColumn 表示数据表列描述的 Chunk
+	// ChunkTypeTableColumn 데이터 테이블 열 설명 청크
 	ChunkTypeTableColumn ChunkType = "table_column"
 )
 
-// ChunkStatus 定义了不同状态的 Chunk
+// ChunkStatus 청크 상태 정의
 type ChunkStatus int
 
 const (
 	ChunkStatusDefault ChunkStatus = 0
-	// ChunkStatusStored 表示已存储的 Chunk
+	// ChunkStatusStored 저장된 청크
 	ChunkStatusStored ChunkStatus = 1
-	// ChunkStatusIndexed 表示已索引的 Chunk
+	// ChunkStatusIndexed 인덱싱된 청크
 	ChunkStatusIndexed ChunkStatus = 2
 )
 
-// ChunkFlags 定义 Chunk 的标志位，用于管理多个布尔状态
+// ChunkFlags 여러 부울 상태를 관리하기 위한 청크 플래그 비트 정의
 type ChunkFlags int
 
 const (
-	// ChunkFlagRecommended 表示可推荐状态（1 << 0 = 1）
-	// 当设置此标志时，该 Chunk 可以被推荐给用户
+	// ChunkFlagRecommended 추천 가능 상태 (1 << 0 = 1)
+	// 이 플래그가 설정되면 해당 청크를 사용자에게 추천할 수 있습니다
 	ChunkFlagRecommended ChunkFlags = 1 << 0
-	// 未来可扩展更多标志位：
-	// ChunkFlagPinned ChunkFlags = 1 << 1  // 置顶
-	// ChunkFlagHot    ChunkFlags = 1 << 2  // 热门
+	// 향후 확장 가능한 플래그:
+	// ChunkFlagPinned ChunkFlags = 1 << 1  // 고정
+	// ChunkFlagHot    ChunkFlags = 1 << 2  // 인기
 )
 
-// HasFlag 检查是否设置了指定标志
+// HasFlag 지정된 플래그가 설정되어 있는지 확인
 func (f ChunkFlags) HasFlag(flag ChunkFlags) bool {
 	return f&flag != 0
 }
 
-// SetFlag 设置指定标志
+// SetFlag 지정된 플래그 설정
 func (f ChunkFlags) SetFlag(flag ChunkFlags) ChunkFlags {
 	return f | flag
 }
 
-// ClearFlag 清除指定标志
+// ClearFlag 지정된 플래그 해제
 func (f ChunkFlags) ClearFlag(flag ChunkFlags) ChunkFlags {
 	return f &^ flag
 }
 
-// ToggleFlag 切换指定标志
+// ToggleFlag 지정된 플래그 전환
 func (f ChunkFlags) ToggleFlag(flag ChunkFlags) ChunkFlags {
 	return f ^ flag
 }
 
-// ImageInfo 表示与 Chunk 关联的图片信息
+// ImageInfo 청크와 관련된 이미지 정보
 type ImageInfo struct {
-	// 图片URL（COS）
+	// 이미지 URL (COS)
 	URL string `json:"url"          gorm:"type:text"`
-	// 原始图片URL
+	// 원본 이미지 URL
 	OriginalURL string `json:"original_url" gorm:"type:text"`
-	// 图片在文本中的开始位置
+	// 텍스트 내 이미지 시작 위치
 	StartPos int `json:"start_pos"`
-	// 图片在文本中的结束位置
+	// 텍스트 내 이미지 종료 위치
 	EndPos int `json:"end_pos"`
-	// 图片描述
+	// 이미지 캡션
 	Caption string `json:"caption"`
-	// 图片OCR文本
+	// 이미지 OCR 텍스트
 	OCRText string `json:"ocr_text"`
 }
 
@@ -116,8 +116,8 @@ type Chunk struct {
 	ChunkIndex int `json:"chunk_index"`
 	// Whether the chunk is enabled, can be used to temporarily disable certain chunks
 	IsEnabled bool `json:"is_enabled"               gorm:"default:true"`
-	// Flags 存储多个布尔状态的位标志（如推荐状态等）
-	// 默认值为 ChunkFlagRecommended (1)，表示默认可推荐
+	// Flags 여러 부울 상태의 비트 플래그 저장 (추천 상태 등)
+	// 기본값은 ChunkFlagRecommended (1)로, 기본적으로 추천 가능함을 의미
 	Flags ChunkFlags `json:"flags"                    gorm:"default:1"`
 	// Status of the chunk
 	Status int `json:"status"                   gorm:"default:0"`
@@ -129,19 +129,19 @@ type Chunk struct {
 	PreChunkID string `json:"pre_chunk_id"`
 	// Next chunk ID
 	NextChunkID string `json:"next_chunk_id"`
-	// Chunk 类型，用于区分不同类型的 Chunk
+	// Chunk 유형, 다른 유형의 Chunk를 구분하기 위함
 	ChunkType ChunkType `json:"chunk_type"               gorm:"type:varchar(20);default:'text'"`
-	// 父 Chunk ID，用于关联图片 Chunk 和原始文本 Chunk
+	// 상위 Chunk ID, 이미지 Chunk와 원본 텍스트 Chunk 연결에 사용
 	ParentChunkID string `json:"parent_chunk_id"          gorm:"type:varchar(36);index"`
-	// 关系 Chunk ID，用于关联关系 Chunk 和原始文本 Chunk
+	// 관계 Chunk ID, 관계 Chunk와 원본 텍스트 Chunk 연결에 사용
 	RelationChunks JSON `json:"relation_chunks"          gorm:"type:json"`
-	// 间接关系 Chunk ID，用于关联间接关系 Chunk 和原始文本 Chunk
+	// 간접 관계 Chunk ID, 간접 관계 Chunk와 원본 텍스트 Chunk 연결에 사용
 	IndirectRelationChunks JSON `json:"indirect_relation_chunks" gorm:"type:json"`
-	// Metadata 存储 chunk 级别的扩展信息，例如 FAQ 元数据
+	// Metadata 청크 수준의 확장 정보 저장 (예: FAQ 메타데이터)
 	Metadata JSON `json:"metadata"                 gorm:"type:json"`
-	// ContentHash 存储内容的 hash 值，用于快速匹配（主要用于 FAQ）
+	// ContentHash 빠른 매칭을 위한 내용 해시 값 저장 (주로 FAQ에 사용)
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
-	// 图片信息，存储为 JSON
+	// 이미지 정보, JSON으로 저장
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`

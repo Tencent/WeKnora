@@ -12,14 +12,14 @@ import (
 	ollamaapi "github.com/ollama/ollama/api"
 )
 
-// OllamaChat 实现了基于 Ollama 的聊天
+// OllamaChat Ollama 기반 채팅 구현
 type OllamaChat struct {
 	modelName     string
 	modelID       string
 	ollamaService *ollama.OllamaService
 }
 
-// NewOllamaChat 创建 Ollama 聊天实例
+// NewOllamaChat Ollama 채팅 인스턴스 생성
 func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*OllamaChat, error) {
 	return &OllamaChat{
 		modelName:     config.ModelName,
@@ -28,7 +28,7 @@ func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*Ol
 	}, nil
 }
 
-// convertMessages 转换消息格式为Ollama API格式
+// convertMessages 메시지 형식을 Ollama API 형식으로 변환
 func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 	ollamaMessages := make([]ollamaapi.Message, 0, len(messages))
 	for _, msg := range messages {
@@ -45,12 +45,12 @@ func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 	return ollamaMessages
 }
 
-// buildChatRequest 构建聊天请求参数
+// buildChatRequest 채팅 요청 매개변수 구성
 func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isStream bool) *ollamaapi.ChatRequest {
-	// 设置流式标志
+	// 스트림 플래그 설정
 	streamFlag := isStream
 
-	// 构建请求参数
+	// 요청 매개변수 구성
 	chatReq := &ollamaapi.ChatRequest{
 		Model:    c.modelName,
 		Messages: c.convertMessages(messages),
@@ -58,7 +58,7 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		Options:  make(map[string]interface{}),
 	}
 
-	// 添加可选参数
+	// 선택적 매개변수 추가
 	if opts != nil {
 		if opts.Temperature > 0 {
 			chatReq.Options["temperature"] = opts.Temperature
@@ -85,29 +85,29 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 	return chatReq
 }
 
-// Chat 进行非流式聊天
+// Chat 비스트리밍 채팅 수행
 func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	// 确保模型可用
+	// 모델 가용성 확인
 	if err := c.ensureModelAvailable(ctx); err != nil {
 		return nil, err
 	}
 
-	// 构建请求参数
+	// 요청 매개변수 구성
 	chatReq := c.buildChatRequest(messages, opts, false)
 
-	// 记录请求日志
-	logger.GetLogger(ctx).Infof("发送聊天请求到模型 %s", c.modelName)
+	// 요청 로그 기록
+	logger.GetLogger(ctx).Infof("모델 %s에 채팅 요청 전송", c.modelName)
 
 	var responseContent string
 	var toolCalls []types.LLMToolCall
 	var promptTokens, completionTokens int
 
-	// 使用 Ollama 客户端发送请求
+	// Ollama 클라이언트를 사용하여 요청 전송
 	err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 		responseContent = resp.Message.Content
 		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
 
-		// 获取token计数
+		// 토큰 수 가져오기
 		if resp.EvalCount > 0 {
 			promptTokens = resp.PromptEvalCount
 			completionTokens = resp.EvalCount - promptTokens
@@ -116,10 +116,10 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("聊天请求失败: %w", err)
+		return nil, fmt.Errorf("채팅 요청 실패: %w", err)
 	}
 
-	// 构建响应
+	// 응답 구성
 	return &types.ChatResponse{
 		Content:   responseContent,
 		ToolCalls: toolCalls,
@@ -135,27 +135,27 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 	}, nil
 }
 
-// ChatStream 进行流式聊天
+// ChatStream 스트리밍 채팅 수행
 func (c *OllamaChat) ChatStream(
 	ctx context.Context,
 	messages []Message,
 	opts *ChatOptions,
 ) (<-chan types.StreamResponse, error) {
-	// 确保模型可用
+	// 모델 가용성 확인
 	if err := c.ensureModelAvailable(ctx); err != nil {
 		return nil, err
 	}
 
-	// 构建请求参数
+	// 요청 매개변수 구성
 	chatReq := c.buildChatRequest(messages, opts, true)
 
-	// 记录请求日志
-	logger.GetLogger(ctx).Infof("发送流式聊天请求到模型 %s", c.modelName)
+	// 요청 로그 기록
+	logger.GetLogger(ctx).Infof("모델 %s에 스트리밍 채팅 요청 전송", c.modelName)
 
-	// 创建流式响应通道
+	// 스트리밍 응답 채널 생성
 	streamChan := make(chan types.StreamResponse)
 
-	// 启动goroutine处理流式响应
+	// 고루틴을 시작하여 스트리밍 응답 처리
 	go func() {
 		defer close(streamChan)
 
@@ -186,8 +186,8 @@ func (c *OllamaChat) ChatStream(
 			return nil
 		})
 		if err != nil {
-			logger.GetLogger(ctx).Errorf("流式聊天请求失败: %v", err)
-			// 发送错误响应
+			logger.GetLogger(ctx).Errorf("스트리밍 채팅 요청 실패: %v", err)
+			// 오류 응답 전송
 			streamChan <- types.StreamResponse{
 				ResponseType: types.ResponseTypeError,
 				Content:      err.Error(),
@@ -199,23 +199,23 @@ func (c *OllamaChat) ChatStream(
 	return streamChan, nil
 }
 
-// 确保模型可用
+// 모델 가용성 확인
 func (c *OllamaChat) ensureModelAvailable(ctx context.Context) error {
-	logger.GetLogger(ctx).Infof("确保模型 %s 可用", c.modelName)
+	logger.GetLogger(ctx).Infof("모델 %s 가용성 확인", c.modelName)
 	return c.ollamaService.EnsureModelAvailable(ctx, c.modelName)
 }
 
-// GetModelName 获取模型名称
+// GetModelName 모델 이름 가져오기
 func (c *OllamaChat) GetModelName() string {
 	return c.modelName
 }
 
-// GetModelID 获取模型ID
+// GetModelID 모델 ID 가져오기
 func (c *OllamaChat) GetModelID() string {
 	return c.modelID
 }
 
-// toolFrom 将本模块的 Tool 转换为 Ollama 的 Tool
+// toolFrom 이 모듈의 Tool을 Ollama의 Tool로 변환
 func (c *OllamaChat) toolFrom(tools []Tool) ollamaapi.Tools {
 	if len(tools) == 0 {
 		return nil
@@ -238,7 +238,7 @@ func (c *OllamaChat) toolFrom(tools []Tool) ollamaapi.Tools {
 	return ollamaTools
 }
 
-// toolTo 将 Ollama 的 Tool 转换为本模块的 Tool
+// toolTo Ollama의 Tool을 이 모듈의 Tool로 변환
 func (c *OllamaChat) toolTo(ollamaTools ollamaapi.Tools) []Tool {
 	if len(ollamaTools) == 0 {
 		return nil
@@ -258,7 +258,7 @@ func (c *OllamaChat) toolTo(ollamaTools ollamaapi.Tools) []Tool {
 	return tools
 }
 
-// toolCallFrom 将本模块的 ToolCall 转换为 Ollama 的 ToolCall
+// toolCallFrom 이 모듈의 ToolCall을 Ollama의 ToolCall로 변환
 func (c *OllamaChat) toolCallFrom(toolCalls []ToolCall) []ollamaapi.ToolCall {
 	if len(toolCalls) == 0 {
 		return nil
@@ -280,7 +280,7 @@ func (c *OllamaChat) toolCallFrom(toolCalls []ToolCall) []ollamaapi.ToolCall {
 	return ollamaToolCalls
 }
 
-// toolCallTo 将 Ollama 的 ToolCall 转换为本模块的 ToolCall
+// toolCallTo Ollama의 ToolCall을 이 모듈의 ToolCall로 변환
 func (c *OllamaChat) toolCallTo(ollamaToolCalls []ollamaapi.ToolCall) []types.LLMToolCall {
 	if len(ollamaToolCalls) == 0 {
 		return nil

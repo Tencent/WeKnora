@@ -33,58 +33,58 @@ var (
 	// Common placeholders
 	PlaceholderQuery = PromptPlaceholder{
 		Name:        "query",
-		Label:       "用户问题",
-		Description: "用户当前的问题或查询内容",
+		Label:       "사용자 질문",
+		Description: "사용자의 현재 질문 또는 쿼리 내용",
 	}
 
 	PlaceholderContexts = PromptPlaceholder{
 		Name:        "contexts",
-		Label:       "检索内容",
-		Description: "从知识库检索到的相关内容列表",
+		Label:       "검색 내용",
+		Description: "지식베이스에서 검색된 관련 내용 목록",
 	}
 
 	PlaceholderCurrentTime = PromptPlaceholder{
 		Name:        "current_time",
-		Label:       "当前时间",
-		Description: "当前系统时间（格式：2006-01-02 15:04:05）",
+		Label:       "현재 시간",
+		Description: "현재 시스템 시간 (형식: 2006-01-02 15:04:05)",
 	}
 
 	PlaceholderCurrentWeek = PromptPlaceholder{
 		Name:        "current_week",
-		Label:       "当前星期",
-		Description: "当前星期几（如：星期一、Monday）",
+		Label:       "현재 요일",
+		Description: "현재 요일 (예: 월요일, Monday)",
 	}
 
 	// Rewrite prompt placeholders
 	PlaceholderConversation = PromptPlaceholder{
 		Name:        "conversation",
-		Label:       "历史对话",
-		Description: "格式化的历史对话内容，用于多轮对话改写",
+		Label:       "대화 기록",
+		Description: "다중 턴 대화 재작성을 위한 포맷된 대화 기록 내용",
 	}
 
 	PlaceholderYesterday = PromptPlaceholder{
 		Name:        "yesterday",
-		Label:       "昨天日期",
-		Description: "昨天的日期（格式：2006-01-02）",
+		Label:       "어제 날짜",
+		Description: "어제 날짜 (형식: 2006-01-02)",
 	}
 
 	PlaceholderAnswer = PromptPlaceholder{
 		Name:        "answer",
-		Label:       "助手回答",
-		Description: "助手的回答内容（用于对话历史格式化）",
+		Label:       "어시스턴트 답변",
+		Description: "어시스턴트의 답변 내용 (대화 기록 포맷팅에 사용)",
 	}
 
 	// Agent mode specific placeholders
 	PlaceholderKnowledgeBases = PromptPlaceholder{
 		Name:        "knowledge_bases",
-		Label:       "知识库列表",
-		Description: "自动格式化的知识库列表，包含名称、描述、文档数量等信息",
+		Label:       "지식베이스 목록",
+		Description: "이름, 설명, 문서 수 등의 정보가 포함된 자동 포맷된 지식베이스 목록",
 	}
 
 	PlaceholderWebSearchStatus = PromptPlaceholder{
 		Name:        "web_search_status",
-		Label:       "网络搜索状态",
-		Description: "网络搜索工具是否启用的状态（Enabled 或 Disabled）",
+		Label:       "웹 검색 상태",
+		Description: "웹 검색 도구 활성화 여부 상태 (Enabled 또는 Disabled)",
 	}
 )
 

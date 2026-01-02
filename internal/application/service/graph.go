@@ -21,58 +21,58 @@ import (
 )
 
 const (
-	// DefaultLLMTemperature Use low temperature for more deterministic results
+	// DefaultLLMTemperature 더 결정적인 결과를 위해 낮은 온도 사용
 	DefaultLLMTemperature = 0.1
 
-	// PMIWeight Proportion of PMI in calculating relationship weight
+	// PMIWeight 관계 가중치 계산 시 PMI의 비율
 	PMIWeight = 0.6
 
-	// StrengthWeight Proportion of relationship strength in calculating relationship weight
+	// StrengthWeight 관계 가중치 계산 시 관계 강도의 비율
 	StrengthWeight = 0.4
 
-	// IndirectRelationWeightDecay Decay coefficient for indirect relationship weights
+	// IndirectRelationWeightDecay 간접 관계 가중치에 대한 감쇠 계수
 	IndirectRelationWeightDecay = 0.5
 
-	// MaxConcurrentEntityExtractions Maximum concurrency for entity extraction
+	// MaxConcurrentEntityExtractions 엔티티 추출 최대 동시성
 	MaxConcurrentEntityExtractions = 4
 
-	// MaxConcurrentRelationExtractions Maximum concurrency for relationship extraction
+	// MaxConcurrentRelationExtractions 관계 추출 최대 동시성
 	MaxConcurrentRelationExtractions = 4
 
-	// DefaultRelationBatchSize Default batch size for relationship extraction
+	// DefaultRelationBatchSize 관계 추출 기본 배치 크기
 	DefaultRelationBatchSize = 5
 
-	// MinEntitiesForRelation Minimum number of entities required for relationship extraction
+	// MinEntitiesForRelation 관계 추출에 필요한 최소 엔티티 수
 	MinEntitiesForRelation = 2
 
-	// MinWeightValue Minimum weight value to avoid division by zero
+	// MinWeightValue 0으로 나누기를 피하기 위한 최소 가중치 값
 	MinWeightValue = 1.0
 
-	// WeightScaleFactor Weight scaling factor to normalize weights to 1-10 range
+	// WeightScaleFactor 가중치를 1-10 범위로 정규화하기 위한 배율
 	WeightScaleFactor = 9.0
 )
 
-// ChunkRelation represents a relationship between two Chunks
+// ChunkRelation 두 Chunk 간의 관계를 나타냄
 type ChunkRelation struct {
-	// Weight relationship weight, calculated based on PMI and strength
+	// Weight 관계 가중치, PMI와 강도를 기반으로 계산됨
 	Weight float64
 
-	// Degree total degree of related entities
+	// Degree 관련 엔티티의 총 차수
 	Degree int
 }
 
-// graphBuilder implements knowledge graph construction functionality
+// graphBuilder 지식 그래프 구축 기능 구현
 type graphBuilder struct {
 	config           *config.Config
-	entityMap        map[string]*types.Entity       // Entities indexed by ID
-	entityMapByTitle map[string]*types.Entity       // Entities indexed by title
-	relationshipMap  map[string]*types.Relationship // Relationship mapping
+	entityMap        map[string]*types.Entity       // ID로 인덱싱된 엔티티
+	entityMapByTitle map[string]*types.Entity       // 제목으로 인덱싱된 엔티티
+	relationshipMap  map[string]*types.Relationship // 관계 매핑
 	chatModel        chat.Chat
-	chunkGraph       map[string]map[string]*ChunkRelation // Document chunk relationship graph
-	mutex            sync.RWMutex                         // Mutex for concurrent operations
+	chunkGraph       map[string]map[string]*ChunkRelation // 문서 청크 관계 그래프
+	mutex            sync.RWMutex                         // 동시 작업을 위한 뮤텍스
 }
 
-// NewGraphBuilder creates a new graph builder
+// NewGraphBuilder 새로운 그래프 빌더 생성
 func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuilder {
 	logger.Info(context.Background(), "Creating new graph builder")
 	return &graphBuilder{
@@ -85,8 +85,8 @@ func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuil
 	}
 }
 
-// extractEntities extracts entities from text chunks
-// It uses LLM to analyze text content and identify relevant entities
+// extractEntities 텍스트 청크에서 엔티티 추출
+// LLM을 사용하여 텍스트 내용을 분석하고 관련 엔티티를 식별합니다
 func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) ([]*types.Entity, error) {
 	log := logger.GetLogger(ctx)
 	log.Infof("Extracting entities from chunk: %s", chunk.ID)
@@ -96,7 +96,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		return []*types.Entity{}, nil
 	}
 
-	// Create prompt for entity extraction
+	// 엔티티 추출을 위한 프롬프트 생성
 	thinking := false
 	messages := []chat.Message{
 		{
@@ -109,7 +109,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		},
 	}
 
-	// Call LLM to extract entities
+	// LLM 호출하여 엔티티 추출
 	log.Debug("Calling LLM to extract entities")
 	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
 		Temperature: DefaultLLMTemperature,
@@ -120,7 +120,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		return nil, fmt.Errorf("LLM entity extraction failed: %w", err)
 	}
 
-	// Parse JSON response
+	// JSON 응답 파싱
 	var extractedEntities []*types.Entity
 	if err := common.ParseLLMJsonResponse(resp.Content, &extractedEntities); err != nil {
 		log.WithError(err).Errorf("Failed to parse entity extraction response, rsp content: %s", resp.Content)
@@ -128,7 +128,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	}
 	log.Infof("Extracted %d entities from chunk", len(extractedEntities))
 
-	// Print detailed entity information in a clear format
+	// 명확한 형식으로 상세 엔티티 정보 출력
 	log.Info("=========== EXTRACTED ENTITIES ===========")
 	for i, entity := range extractedEntities {
 		if entity == nil {
@@ -140,7 +140,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 
 	var entities []*types.Entity
 
-	// Process entities and update entityMap
+	// 엔티티 처리 및 entityMap 업데이트
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -153,7 +153,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 			continue
 		}
 		if existEntity, exists := b.entityMapByTitle[entity.Title]; !exists {
-			// This is a new entity
+			// 새로운 엔티티임
 			entity.ID = uuid.New().String()
 			entity.ChunkIDs = []string{chunk.ID}
 			entity.Frequency = 1
@@ -166,7 +166,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 				log.Warnf("existEntity is nil, skip update")
 				continue
 			}
-			// Entity already exists, update its ChunkIDs
+			// 이미 존재하는 엔티티, ChunkIDs 업데이트
 			if !slices.Contains(existEntity.ChunkIDs, chunk.ID) {
 				existEntity.ChunkIDs = append(existEntity.ChunkIDs, chunk.ID)
 				log.Debugf("Updated existing entity: %s with chunk: %s", entity.Title, chunk.ID)
@@ -180,8 +180,8 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	return entities, nil
 }
 
-// extractRelationships extracts relationships between entities
-// It analyzes semantic connections between multiple entities and establishes relationships
+// extractRelationships 엔티티 간의 관계 추출
+// 여러 엔티티 간의 의미적 연결을 분석하고 관계를 수립합니다
 func (b *graphBuilder) extractRelationships(ctx context.Context,
 	chunks []*types.Chunk, entities []*types.Entity,
 ) error {
@@ -193,21 +193,21 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		return nil
 	}
 
-	// Serialize entities to build prompt
+	// 프롬프트 작성을 위해 엔티티 직렬화
 	entitiesJSON, err := json.Marshal(entities)
 	if err != nil {
 		log.WithError(err).Error("Failed to serialize entities to JSON")
 		return fmt.Errorf("failed to serialize entities: %w", err)
 	}
 
-	// Merge chunk contents
+	// 청크 내용 병합
 	content := b.mergeChunkContents(chunks)
 	if content == "" {
 		log.Warn("No content to extract relationships from")
 		return nil
 	}
 
-	// Create relationship extraction prompt
+	// 관계 추출 프롬프트 생성
 	thinking := false
 	messages := []chat.Message{
 		{
@@ -220,7 +220,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		},
 	}
 
-	// Call LLM to extract relationships
+	// LLM 호출하여 관계 추출
 	log.Debug("Calling LLM to extract relationships")
 	resp, err := b.chatModel.Chat(ctx, messages, &chat.ChatOptions{
 		Temperature: DefaultLLMTemperature,
@@ -231,7 +231,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 		return fmt.Errorf("LLM relationship extraction failed: %w", err)
 	}
 
-	// Parse JSON response
+	// JSON 응답 파싱
 	var extractedRelationships []*types.Relationship
 	if err := common.ParseLLMJsonResponse(resp.Content, &extractedRelationships); err != nil {
 		log.WithError(err).Error("Failed to parse relationship extraction response")
@@ -239,7 +239,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 	}
 	log.Infof("Extracted %d relationships", len(extractedRelationships))
 
-	// Print detailed relationship information in a clear format
+	// 명확한 형식으로 상세 관계 정보 출력
 	log.Info("========= EXTRACTED RELATIONSHIPS =========")
 	for i, rel := range extractedRelationships {
 		if rel == nil {
@@ -250,7 +250,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 	}
 	log.Info("===========================================")
 
-	// Process relationships and update relationshipMap
+	// 관계 처리 및 relationshipMap 업데이트
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -267,7 +267,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 			continue
 		}
 		if existingRel, exists := b.relationshipMap[key]; !exists {
-			// This is a new relationship
+			// 새로운 관계임
 			relationship.ID = uuid.New().String()
 			relationship.ChunkIDs = relationChunkIDs
 			b.relationshipMap[key] = relationship
@@ -275,7 +275,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 			log.Debugf("New relationship added: %s -> %s (ID: %s)",
 				relationship.Source, relationship.Target, relationship.ID)
 		} else {
-			// This relationship already exists, update its properties
+			// 이미 존재하는 관계, 속성 업데이트
 			if existingRel == nil {
 				log.Warnf("existingRel is nil, skip update")
 				continue
@@ -287,7 +287,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 					chunkIDsAdded++
 				}
 			}
-			// Update strength, considering weighted average of existing strength and new relationship strength
+			// 강도 업데이트, 기존 강도와 새 관계 강도의 가중 평균 고려
 			if len(existingRel.ChunkIDs) > 0 {
 				existingRel.Strength = (existingRel.Strength*len(existingRel.ChunkIDs) + relationship.Strength) /
 					(len(existingRel.ChunkIDs) + 1)
@@ -306,11 +306,11 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 	return nil
 }
 
-// findRelationChunkIDs finds common document chunk IDs between two entities
+// findRelationChunkIDs 두 엔티티 간의 공통 문서 청크 ID 찾기
 func (b *graphBuilder) findRelationChunkIDs(source, target string, entities []*types.Entity) []string {
 	relationChunkIDs := make(map[string]struct{})
 
-	// Collect all document chunk IDs for source and target entities
+	// 소스 및 타겟 엔티티에 대한 모든 문서 청크 ID 수집
 	for _, entity := range entities {
 		if entity == nil {
 			continue
@@ -326,7 +326,7 @@ func (b *graphBuilder) findRelationChunkIDs(source, target string, entities []*t
 		return []string{}
 	}
 
-	// Convert map keys to slice
+	// 맵 키를 슬라이스로 변환
 	result := make([]string, 0, len(relationChunkIDs))
 	for chunkID := range relationChunkIDs {
 		result = append(result, chunkID)
@@ -334,8 +334,8 @@ func (b *graphBuilder) findRelationChunkIDs(source, target string, entities []*t
 	return result
 }
 
-// mergeChunkContents merges content from multiple document chunks
-// It accounts for overlapping portions between chunks to ensure coherent content
+// mergeChunkContents 여러 문서 청크의 내용 병합
+// 일관된 내용을 보장하기 위해 청크 간의 중복 부분을 고려합니다
 func (b *graphBuilder) mergeChunkContents(chunks []*types.Chunk) string {
 	if len(chunks) == 0 {
 		return ""
@@ -345,15 +345,15 @@ func (b *graphBuilder) mergeChunkContents(chunks []*types.Chunk) string {
 	preChunk := chunks[0]
 
 	for i := 1; i < len(chunks); i++ {
-		// Only add non-overlapping content parts
+		// 중복되지 않는 내용 부분만 추가
 		if preChunk.EndAt > chunks[i].StartAt {
-			// Calculate overlap starting position
+			// 중복 시작 위치 계산
 			startPos := preChunk.EndAt - chunks[i].StartAt
 			if startPos >= 0 && startPos < len([]rune(chunks[i].Content)) {
 				chunkContents = chunkContents + string([]rune(chunks[i].Content)[startPos:])
 			}
 		} else {
-			// If there's no overlap between chunks, add all content
+			// 청크 간 중복이 없는 경우 모든 내용 추가
 			chunkContents = chunkContents + chunks[i].Content
 		}
 		preChunk = chunks[i]
@@ -362,20 +362,20 @@ func (b *graphBuilder) mergeChunkContents(chunks []*types.Chunk) string {
 	return chunkContents
 }
 
-// BuildGraph constructs the knowledge graph
-// It serves as the main entry point for the graph building process, coordinating all components
+// BuildGraph 지식 그래프 구축
+// 그래프 구축 프로세스의 주요 진입점 역할을 하며 모든 구성 요소를 조정합니다
 func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) error {
 	log := logger.GetLogger(ctx)
 	log.Infof("Building knowledge graph from %d chunks", len(chunks))
 	startTime := time.Now()
 
-	// Concurrently extract entities from each document chunk
+	// 각 문서 청크에서 동시에 엔티티 추출
 	chunkEntities := make([][]*types.Entity, len(chunks))
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(MaxConcurrentEntityExtractions) // Limit concurrency
+	g.SetLimit(MaxConcurrentEntityExtractions) // 동시성 제한
 
 	for i, chunk := range chunks {
-		i, chunk := i, chunk // Create local variables to avoid closure issues
+		i, chunk := i, chunk // 클로저 문제 방지를 위한 로컬 변수 생성
 		g.Go(func() error {
 			log.Debugf("Processing chunk %d/%d (ID: %s)", i+1, len(chunks), chunk.ID)
 			entities, err := b.extractEntities(gctx, chunk)
@@ -388,13 +388,13 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 		})
 	}
 
-	// Wait for all entity extractions to complete
+	// 모든 엔티티 추출이 완료될 때까지 대기
 	if err := g.Wait(); err != nil {
 		log.WithError(err).Error("Entity extraction failed")
 		return fmt.Errorf("entity extraction process failed: %w", err)
 	}
 
-	// Count total extracted entities
+	// 총 추출된 엔티티 수 계산
 	totalEntityCount := 0
 	for _, entities := range chunkEntities {
 		totalEntityCount += len(entities)
@@ -402,11 +402,11 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 	log.Infof("Successfully extracted %d total entities across %d chunks",
 		totalEntityCount, len(chunks))
 
-	// Process relationships in batches concurrently
+	// 배치를 통해 동시에 관계 처리
 	relationChunkSize := DefaultRelationBatchSize
 	log.Infof("Processing relationships concurrently in batches of %d chunks", relationChunkSize)
 
-	// prepare relationship extraction batches
+	// 관계 추출 배치 준비
 	var relationBatches []struct {
 		batchChunks         []*types.Chunk
 		relationUseEntities []*types.Entity
@@ -420,7 +420,7 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 			end = len(chunkEntities)
 		}
 
-		// Merge all entities in this batch
+		// 이 배치의 모든 엔티티 병합
 		relationUseEntities := make([]*types.Entity, 0)
 		for j := start; j < end; j++ {
 			if j < len(chunkEntities) {
@@ -444,9 +444,9 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 		})
 	}
 
-	// extract relationships concurrently
+	// 동시에 관계 추출
 	relG, relGctx := errgroup.WithContext(ctx)
-	relG.SetLimit(MaxConcurrentRelationExtractions) // use dedicated relationship extraction concurrency limit
+	relG.SetLimit(MaxConcurrentRelationExtractions) // 전용 관계 추출 동시성 제한 사용
 
 	for _, batch := range relationBatches {
 		relG.Go(func() error {
@@ -455,32 +455,32 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 			if err != nil {
 				log.WithError(err).Errorf("Failed to extract relationships for batch %d", batch.batchIndex+1)
 			}
-			return nil // continue to process other batches even if the current batch fails
+			return nil // 현재 배치가 실패하더라도 다른 배치 계속 처리
 		})
 	}
 
-	// wait for all relationship extractions to complete
+	// 모든 관계 추출이 완료될 때까지 대기
 	if err := relG.Wait(); err != nil {
 		log.WithError(err).Error("Some relationship extraction tasks failed")
-		// but we continue to process the next steps because some relationship extractions are still useful
+		// 그러나 일부 관계 추출은 여전히 유용하므로 다음 단계 처리를 계속합니다.
 	}
 
-	// Calculate relationship weights
+	// 관계 가중치 계산
 	log.Info("Calculating weights for relationships")
 	b.calculateWeights(ctx)
 
-	// Calculate entity degrees
+	// 엔티티 차수 계산
 	log.Info("Calculating degrees for entities")
 	b.calculateDegrees(ctx)
 
-	// Build Chunk graph
+	// Chunk 그래프 구축
 	log.Info("Building chunk relationship graph")
 	b.buildChunkGraph(ctx)
 
 	log.Infof("Graph building completed in %.2f seconds: %d entities, %d relationships",
 		time.Since(startTime).Seconds(), len(b.entityMap), len(b.relationshipMap))
 
-	// generate knowledge graph visualization diagram
+	// 지식 그래프 시각화 다이어그램 생성
 	mermaidDiagram := b.generateKnowledgeGraphDiagram(ctx)
 	log.Info("Knowledge graph visualization diagram:")
 	log.Info(mermaidDiagram)
@@ -488,13 +488,13 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 	return nil
 }
 
-// calculateWeights calculates relationship weights
-// It uses Point Mutual Information (PMI) and strength values to calculate relationship weights
+// calculateWeights 관계 가중치 계산
+// PMI(Point Mutual Information)와 강도 값을 사용하여 관계 가중치를 계산합니다
 func (b *graphBuilder) calculateWeights(ctx context.Context) {
 	log := logger.GetLogger(ctx)
 	log.Info("Calculating relationship weights using PMI and strength")
 
-	// Calculate total entity occurrences
+	// 총 엔티티 발생 횟수 계산
 	totalEntityOccurrences := 0
 	entityFrequency := make(map[string]int)
 
@@ -507,7 +507,7 @@ func (b *graphBuilder) calculateWeights(ctx context.Context) {
 		totalEntityOccurrences += frequency
 	}
 
-	// Calculate total relationship occurrences
+	// 총 관계 발생 횟수 계산
 	totalRelOccurrences := 0
 	for _, rel := range b.relationshipMap {
 		if rel == nil {
@@ -516,17 +516,17 @@ func (b *graphBuilder) calculateWeights(ctx context.Context) {
 		totalRelOccurrences += len(rel.ChunkIDs)
 	}
 
-	// Skip calculation if insufficient data
+	// 데이터가 부족하면 계산 건너뛰기
 	if totalEntityOccurrences == 0 || totalRelOccurrences == 0 {
 		log.Warn("Insufficient data for weight calculation")
 		return
 	}
 
-	// Track maximum PMI and Strength values for normalization
+	// 정규화를 위해 최대 PMI 및 강도 값 추적
 	maxPMI := 0.0
-	maxStrength := MinWeightValue // Avoid division by zero
+	maxStrength := MinWeightValue // 0으로 나누기 방지
 
-	// First calculate PMI and find maximum values
+	// 먼저 PMI를 계산하고 최대값 찾기
 	pmiValues := make(map[string]float64)
 	for _, rel := range b.relationshipMap {
 		if rel == nil {
@@ -541,7 +541,7 @@ func (b *graphBuilder) calculateWeights(ctx context.Context) {
 			targetProbability := float64(targetFreq) / float64(totalEntityOccurrences)
 			relProbability := float64(relFreq) / float64(totalRelOccurrences)
 
-			// PMI calculation: log(P(x,y) / (P(x) * P(y)))
+			// PMI 계산: log(P(x,y) / (P(x) * P(y)))
 			pmi := math.Max(math.Log2(relProbability/(sourceProbability*targetProbability)), 0)
 			pmiValues[rel.ID] = pmi
 
@@ -550,17 +550,17 @@ func (b *graphBuilder) calculateWeights(ctx context.Context) {
 			}
 		}
 
-		// Record maximum Strength value
+		// 최대 강도 값 기록
 		if float64(rel.Strength) > maxStrength {
 			maxStrength = float64(rel.Strength)
 		}
 	}
 
-	// Combine PMI and Strength to calculate final weights
+	// PMI와 강도를 결합하여 최종 가중치 계산
 	for _, rel := range b.relationshipMap {
 		pmi := pmiValues[rel.ID]
 
-		// Normalize PMI and Strength (0-1 range)
+		// PMI 및 강도 정규화 (0-1 범위)
 		normalizedPMI := 0.0
 		if maxPMI > 0 {
 			normalizedPMI = pmi / maxPMI
@@ -568,10 +568,10 @@ func (b *graphBuilder) calculateWeights(ctx context.Context) {
 
 		normalizedStrength := float64(rel.Strength) / maxStrength
 
-		// Combine PMI and Strength using configured weights
+		// 구성된 가중치를 사용하여 PMI와 강도 결합
 		combinedWeight := normalizedPMI*PMIWeight + normalizedStrength*StrengthWeight
 
-		// Scale weight to 1-10 range
+		// 가중치를 1-10 범위로 스케일링
 		scaledWeight := 1.0 + WeightScaleFactor*combinedWeight
 
 		rel.Weight = scaledWeight
@@ -580,13 +580,13 @@ func (b *graphBuilder) calculateWeights(ctx context.Context) {
 	log.Infof("Weight calculation completed for %d relationships", len(b.relationshipMap))
 }
 
-// calculateDegrees calculates entity degrees
-// Degree represents the number of connections an entity has with other entities, a key metric in graph structures
+// calculateDegrees 엔티티 차수 계산
+// 차수는 엔티티가 다른 엔티티와 연결된 수를 나타내며, 그래프 구조의 핵심 지표입니다
 func (b *graphBuilder) calculateDegrees(ctx context.Context) {
 	log := logger.GetLogger(ctx)
 	log.Info("Calculating entity degrees")
 
-	// Calculate in-degree and out-degree for each entity
+	// 각 엔티티의 진입 차수 및 진출 차수 계산
 	inDegree := make(map[string]int)
 	outDegree := make(map[string]int)
 
@@ -595,7 +595,7 @@ func (b *graphBuilder) calculateDegrees(ctx context.Context) {
 		inDegree[rel.Target]++
 	}
 
-	// Set degree for each entity
+	// 각 엔티티의 차수 설정
 	for _, entity := range b.entityMap {
 		if entity == nil {
 			continue
@@ -603,7 +603,7 @@ func (b *graphBuilder) calculateDegrees(ctx context.Context) {
 		entity.Degree = inDegree[entity.Title] + outDegree[entity.Title]
 	}
 
-	// Set combined degree for relationships
+	// 관계의 결합 차수 설정
 	for _, rel := range b.relationshipMap {
 		if rel == nil {
 			continue
@@ -619,18 +619,18 @@ func (b *graphBuilder) calculateDegrees(ctx context.Context) {
 	log.Info("Entity degree calculation completed")
 }
 
-// buildChunkGraph builds relationship graph between Chunks
-// It creates a network of relationships between document chunks based on entity relationships
+// buildChunkGraph Chunk 간의 관계 그래프 구축
+// 엔티티 관계를 기반으로 문서 청크 간의 관계 네트워크를 생성합니다
 func (b *graphBuilder) buildChunkGraph(ctx context.Context) {
 	log := logger.GetLogger(ctx)
 	log.Info("Building chunk relationship graph")
 
-	// Create document chunk relationship graph based on entity relationships
+	// 엔티티 관계를 기반으로 문서 청크 관계 그래프 생성
 	for _, rel := range b.relationshipMap {
 		if rel == nil {
 			continue
 		}
-		// Ensure source and target entities exist for the relationship
+		// 관계의 소스 및 타겟 엔티티가 존재하는지 확인
 		sourceEntity := b.entityMapByTitle[rel.Source]
 		targetEntity := b.entityMapByTitle[rel.Target]
 
@@ -639,7 +639,7 @@ func (b *graphBuilder) buildChunkGraph(ctx context.Context) {
 			continue
 		}
 
-		// Build Chunk graph - connect all related document chunks
+		// Chunk 그래프 구축 - 관련된 모든 문서 청크 연결
 		for _, sourceChunkID := range sourceEntity.ChunkIDs {
 			if _, exists := b.chunkGraph[sourceChunkID]; !exists {
 				b.chunkGraph[sourceChunkID] = make(map[string]*ChunkRelation)
@@ -664,7 +664,7 @@ func (b *graphBuilder) buildChunkGraph(ctx context.Context) {
 	log.Infof("Chunk graph built with %d nodes", len(b.chunkGraph))
 }
 
-// GetAllEntities returns all entities
+// GetAllEntities 모든 엔티티 반환
 func (b *graphBuilder) GetAllEntities() []*types.Entity {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
@@ -676,7 +676,7 @@ func (b *graphBuilder) GetAllEntities() []*types.Entity {
 	return entities
 }
 
-// GetAllRelationships returns all relationships
+// GetAllRelationships 모든 관계 반환
 func (b *graphBuilder) GetAllRelationships() []*types.Relationship {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
@@ -688,8 +688,8 @@ func (b *graphBuilder) GetAllRelationships() []*types.Relationship {
 	return relationships
 }
 
-// GetRelationChunks retrieves document chunks directly related to the given chunkID
-// It returns a list of related document chunk IDs sorted by weight and degree
+// GetRelationChunks 주어진 chunkID와 직접 관련된 문서 청크 검색
+// 가중치와 차수로 정렬된 관련 문서 청크 ID 목록을 반환합니다
 func (b *graphBuilder) GetRelationChunks(chunkID string, topK int) []string {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
@@ -697,14 +697,14 @@ func (b *graphBuilder) GetRelationChunks(chunkID string, topK int) []string {
 	log := logger.GetLogger(context.Background())
 	log.Debugf("Getting related chunks for %s (topK=%d)", chunkID, topK)
 
-	// Create weighted chunk structure for sorting
+	// 정렬을 위한 가중치 청크 구조체 생성
 	type weightedChunk struct {
 		id     string
 		weight float64
 		degree int
 	}
 
-	// Collect related chunks with their weights and degrees
+	// 가중치와 차수를 포함하여 관련 청크 수집
 	weightedChunks := make([]weightedChunk, 0)
 	for relationChunkID, relation := range b.chunkGraph[chunkID] {
 		if relation == nil {
@@ -717,18 +717,18 @@ func (b *graphBuilder) GetRelationChunks(chunkID string, topK int) []string {
 		})
 	}
 
-	// Sort by weight and degree in descending order
+	// 가중치와 차수로 내림차순 정렬
 	slices.SortFunc(weightedChunks, func(a, b weightedChunk) int {
-		// Sort by weight first
+		// 가중치로 먼저 정렬
 		if a.weight > b.weight {
-			return -1 // Descending order
+			return -1 // 내림차순
 		} else if a.weight < b.weight {
 			return 1
 		}
 
-		// If weights are equal, sort by degree
+		// 가중치가 같으면 차수로 정렬
 		if a.degree > b.degree {
-			return -1 // Descending order
+			return -1 // 내림차순
 		} else if a.degree < b.degree {
 			return 1
 		}
@@ -736,13 +736,13 @@ func (b *graphBuilder) GetRelationChunks(chunkID string, topK int) []string {
 		return 0
 	})
 
-	// Take top K results
+	// 상위 K개 결과 가져오기
 	resultCount := len(weightedChunks)
 	if topK > 0 && topK < resultCount {
 		resultCount = topK
 	}
 
-	// Extract chunk IDs
+	// 청크 ID 추출
 	chunks := make([]string, 0, resultCount)
 	for i := 0; i < resultCount; i++ {
 		chunks = append(chunks, weightedChunks[i].id)
@@ -753,8 +753,8 @@ func (b *graphBuilder) GetRelationChunks(chunkID string, topK int) []string {
 	return chunks
 }
 
-// GetIndirectRelationChunks retrieves document chunks indirectly related to the given chunkID
-// It returns document chunk IDs found through second-degree connections
+// GetIndirectRelationChunks 주어진 chunkID와 간접적으로 관련된 문서 청크 검색
+// 2차 연결을 통해 발견된 문서 청크 ID를 반환합니다
 func (b *graphBuilder) GetIndirectRelationChunks(chunkID string, topK int) []string {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
@@ -762,46 +762,45 @@ func (b *graphBuilder) GetIndirectRelationChunks(chunkID string, topK int) []str
 	log := logger.GetLogger(context.Background())
 	log.Debugf("Getting indirectly related chunks for %s (topK=%d)", chunkID, topK)
 
-	// Create weighted chunk structure for sorting
+	// 정렬을 위한 가중치 청크 구조체 생성
 	type weightedChunk struct {
 		id     string
 		weight float64
 		degree int
 	}
 
-	// Get directly related chunks (first-degree connections)
+	// 직접 관련된 청크 가져오기 (1차 연결)
 	directChunks := make(map[string]struct{})
-	directChunks[chunkID] = struct{}{} // Add original chunkID
+	directChunks[chunkID] = struct{}{} // 원본 chunkID 추가
 	for directChunkID := range b.chunkGraph[chunkID] {
 		directChunks[directChunkID] = struct{}{}
 	}
 	log.Debugf("Found %d directly related chunks to exclude", len(directChunks))
 
-	// Use map to deduplicate and store second-degree connections
+	// 중복 제거 및 2차 연결 저장을 위한 맵 사용
 	indirectChunkMap := make(map[string]*ChunkRelation)
 
-	// Get first-degree connections
+	// 1차 연결 가져오기
 	for directChunkID, directRelation := range b.chunkGraph[chunkID] {
 		if directRelation == nil {
 			continue
 		}
-		// Get second-degree connections
+		// 2차 연결 가져오기
 		for indirectChunkID, indirectRelation := range b.chunkGraph[directChunkID] {
 			if indirectRelation == nil {
 				continue
 			}
-			// Skip self and all direct connections
+			// 자기 자신과 모든 직접 연결 건너뛰기
 			if _, isDirect := directChunks[indirectChunkID]; isDirect {
 				continue
 			}
 
-			// Weight decay: second-degree relationship weight is the product of two direct relationship weights
-			// multiplied by decay coefficient
+			// 가중치 감쇠: 2차 관계 가중치는 두 직접 관계 가중치의 곱에 감쇠 계수를 곱한 값
 			combinedWeight := directRelation.Weight * indirectRelation.Weight * IndirectRelationWeightDecay
-			// Degree calculation: take the maximum degree from the two path segments
+			// 차수 계산: 두 경로 세그먼트에서 최대 차수 사용
 			combinedDegree := max(directRelation.Degree, indirectRelation.Degree)
 
-			// If already exists, take the higher weight
+			// 이미 존재하면 더 높은 가중치 선택
 			if existingRel, exists := indirectChunkMap[indirectChunkID]; !exists ||
 				combinedWeight > existingRel.Weight {
 				indirectChunkMap[indirectChunkID] = &ChunkRelation{
@@ -812,7 +811,7 @@ func (b *graphBuilder) GetIndirectRelationChunks(chunkID string, topK int) []str
 		}
 	}
 
-	// Convert to sortable slice
+	// 정렬 가능한 슬라이스로 변환
 	weightedChunks := make([]weightedChunk, 0, len(indirectChunkMap))
 	for id, relation := range indirectChunkMap {
 		if relation == nil {
@@ -825,18 +824,18 @@ func (b *graphBuilder) GetIndirectRelationChunks(chunkID string, topK int) []str
 		})
 	}
 
-	// Sort by weight and degree in descending order
+	// 가중치와 차수로 내림차순 정렬
 	slices.SortFunc(weightedChunks, func(a, b weightedChunk) int {
-		// Sort by weight first
+		// 가중치로 먼저 정렬
 		if a.weight > b.weight {
-			return -1 // Descending order
+			return -1 // 내림차순
 		} else if a.weight < b.weight {
 			return 1
 		}
 
-		// If weights are equal, sort by degree
+		// 가중치가 같으면 차수로 정렬
 		if a.degree > b.degree {
-			return -1 // Descending order
+			return -1 // 내림차순
 		} else if a.degree < b.degree {
 			return 1
 		}
@@ -844,13 +843,13 @@ func (b *graphBuilder) GetIndirectRelationChunks(chunkID string, topK int) []str
 		return 0
 	})
 
-	// Take top K results
+	// 상위 K개 결과 가져오기
 	resultCount := len(weightedChunks)
 	if topK > 0 && topK < resultCount {
 		resultCount = topK
 	}
 
-	// Extract chunk IDs
+	// 청크 ID 추출
 	chunks := make([]string, 0, resultCount)
 	for i := 0; i < resultCount; i++ {
 		chunks = append(chunks, weightedChunks[i].id)
@@ -861,12 +860,12 @@ func (b *graphBuilder) GetIndirectRelationChunks(chunkID string, topK int) []str
 	return chunks
 }
 
-// getEntityByTitle retrieves an entity by its title
+// getEntityByTitle 제목으로 엔티티 검색
 func (b *graphBuilder) getEntityByTitle(title string) *types.Entity {
 	return b.entityMapByTitle[title]
 }
 
-// dfs depth-first search to find connected components
+// dfs 연결된 컴포넌트를 찾기 위한 깊이 우선 탐색
 func dfs(entityTitle string,
 	adjacencyList map[string]map[string]*types.Relationship,
 	visited map[string]bool, component *[]string,
@@ -874,14 +873,14 @@ func dfs(entityTitle string,
 	visited[entityTitle] = true
 	*component = append(*component, entityTitle)
 
-	// traverse all relationships of the current entity
+	// 현재 엔티티의 모든 관계 순회
 	for targetEntity := range adjacencyList[entityTitle] {
 		if !visited[targetEntity] {
 			dfs(targetEntity, adjacencyList, visited, component)
 		}
 	}
 
-	// check reverse relationships (check if other entities point to the current entity)
+	// 역방향 관계 확인 (다른 엔티티가 현재 엔티티를 가리키는지 확인)
 	for source, targets := range adjacencyList {
 		for target := range targets {
 			if target == entityTitle && !visited[source] {
@@ -891,20 +890,20 @@ func dfs(entityTitle string,
 	}
 }
 
-// generateKnowledgeGraphDiagram generate Mermaid diagram for knowledge graph
+// generateKnowledgeGraphDiagram 지식 그래프 시각화를 위한 Mermaid 다이어그램 생성
 func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string {
 	log := logger.GetLogger(ctx)
 	log.Info("Generating knowledge graph visualization diagram...")
 
 	var sb strings.Builder
 
-	// Mermaid diagram header
+	// Mermaid 다이어그램 헤더
 	sb.WriteString("```mermaid\ngraph TD\n")
 	sb.WriteString("  %% entity style definition\n")
 	sb.WriteString("  classDef entity fill:#f9f,stroke:#333,stroke-width:1px;\n")
 	sb.WriteString("  classDef highFreq fill:#bbf,stroke:#333,stroke-width:2px;\n\n")
 
-	// get all entities and sort by frequency
+	// 모든 엔티티 가져오기 및 빈도로 정렬
 	entities := b.GetAllEntities()
 	slices.SortFunc(entities, func(a, b *types.Entity) int {
 		if a.Frequency > b.Frequency {
@@ -915,7 +914,7 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		return 0
 	})
 
-	// get relationships and sort by weight
+	// 모든 관계 가져오기 및 가중치로 정렬
 	relationships := b.GetAllRelationships()
 	slices.SortFunc(relationships, func(a, b *types.Relationship) int {
 		if a.Weight > b.Weight {
@@ -926,20 +925,20 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		return 0
 	})
 
-	// create entity ID mapping
-	entityMap := make(map[string]string) // store entity title to node ID mapping
+	// 엔티티 ID 매핑 생성
+	entityMap := make(map[string]string) // 엔티티 제목을 노드 ID로 매핑 저장
 	for i, entity := range entities {
 		nodeID := fmt.Sprintf("E%d", i)
 		entityMap[entity.Title] = nodeID
 	}
 
-	// create adjacency list to represent graph structure
+	// 그래프 구조를 나타내기 위한 인접 리스트 생성
 	adjacencyList := make(map[string]map[string]*types.Relationship)
 	for _, entity := range entities {
 		adjacencyList[entity.Title] = make(map[string]*types.Relationship)
 	}
 
-	// fill adjacency list
+	// 인접 리스트 채우기
 	for _, rel := range relationships {
 		if _, sourceExists := entityMap[rel.Source]; sourceExists {
 			if _, targetExists := entityMap[rel.Target]; targetExists {
@@ -948,9 +947,9 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		}
 	}
 
-	// use DFS to find connected components (subgraphs)
+	// DFS를 사용하여 연결된 컴포넌트(서브그래프) 찾기
 	visited := make(map[string]bool)
-	subgraphs := make([][]string, 0) // store entity titles in each subgraph
+	subgraphs := make([][]string, 0) // 각 서브그래프의 엔티티 제목 저장
 
 	for _, entity := range entities {
 		if !visited[entity.Title] {
@@ -962,17 +961,17 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		}
 	}
 
-	// generate Mermaid subgraphs
+	// Mermaid 서브그래프 생성
 	subgraphCount := 0
 	for _, component := range subgraphs {
-		// check if this component has relationships
+		// 이 컴포넌트가 관계를 가지고 있는지 확인
 		hasRelations := false
 		nodeCount := len(component)
 
-		// if there is only 1 node, check if it has relationships
+		// 노드가 1개만 있는 경우, 관계가 있는지 확인
 		if nodeCount == 1 {
 			entityTitle := component[0]
-			// check if this entity appears as source or target in any relationship
+			// 이 엔티티가 어떤 관계의 소스 또는 타겟으로 나타나는지 확인
 			for _, rel := range relationships {
 				if rel.Source == entityTitle || rel.Target == entityTitle {
 					hasRelations = true
@@ -980,41 +979,41 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 				}
 			}
 
-			// if there is only 1 node and no relationships, skip this subgraph
+			// 노드가 1개뿐이고 관계가 없으면 이 서브그래프 건너뛰기
 			if !hasRelations {
 				continue
 			}
 		} else if nodeCount > 1 {
-			// a subgraph with more than 1 node must have relationships
+			// 노드가 1개 이상인 서브그래프는 관계가 있어야 함
 			hasRelations = true
 		}
 
-		// only draw if there are multiple entities or at least one relationship in the subgraph
+		// 서브그래프에 여러 엔티티가 있거나 적어도 하나의 관계가 있는 경우에만 그리기
 		if hasRelations {
 			subgraphCount++
-			sb.WriteString(fmt.Sprintf("\n  subgraph 子图%d\n", subgraphCount))
+			sb.WriteString(fmt.Sprintf("\n  subgraph 서브그래프%d\n", subgraphCount))
 
-			// add all entities in this subgraph
+			// 이 서브그래프의 모든 엔티티 추가
 			entitiesInComponent := make(map[string]bool)
 			for _, entityTitle := range component {
 				nodeID := entityMap[entityTitle]
 				entitiesInComponent[entityTitle] = true
 
-				// add node definition for each entity
+				// 각 엔티티에 대한 노드 정의 추가
 				entity := b.entityMapByTitle[entityTitle]
 				if entity != nil {
 					sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", nodeID, entityTitle))
 				}
 			}
 
-			// add relationships in this subgraph
+			// 이 서브그래프의 관계 추가
 			for _, rel := range relationships {
 				if entitiesInComponent[rel.Source] && entitiesInComponent[rel.Target] {
 					sourceID := entityMap[rel.Source]
 					targetID := entityMap[rel.Target]
 
 					linkStyle := "-->"
-					// adjust link style based on relationship strength
+					// 관계 강도에 따라 링크 스타일 조정
 					if rel.Strength > 7 {
 						linkStyle = "==>"
 					}
@@ -1024,10 +1023,10 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 				}
 			}
 
-			// subgraph ends
+			// 서브그래프 종료
 			sb.WriteString("  end\n")
 
-			// apply style class
+			// 스타일 클래스 적용
 			for _, entityTitle := range component {
 				nodeID := entityMap[entityTitle]
 				entity := b.entityMapByTitle[entityTitle]
@@ -1042,7 +1041,7 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		}
 	}
 
-	// close Mermaid diagram
+	// Mermaid 다이어그램 닫기
 	sb.WriteString("```\n")
 
 	log.Infof("Knowledge graph visualization diagram generated with %d subgraphs", subgraphCount)

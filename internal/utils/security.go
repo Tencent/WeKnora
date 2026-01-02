@@ -8,9 +8,9 @@ import (
 	"unicode/utf8"
 )
 
-// XSS 防护相关正则表达式
+// XSS 방어 관련 정규 표현식
 var (
-	// 匹配潜在的 XSS 攻击模式
+	// 잠재적인 XSS 공격 패턴 매칭
 	xssPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`),
 		regexp.MustCompile(`(?i)<iframe[^>]*>.*?</iframe>`),
@@ -31,30 +31,30 @@ var (
 	}
 )
 
-// SanitizeHTML 清理 HTML 内容，防止 XSS 攻击
+// SanitizeHTML HTML 내용을 정리하여 XSS 공격 방지
 func SanitizeHTML(input string) string {
 	if input == "" {
 		return ""
 	}
 
-	// 检查输入长度
+	// 입력 길이 확인
 	if len(input) > 10000 {
 		input = input[:10000]
 	}
 
-	// 检查是否包含潜在的 XSS 攻击
+	// 잠재적인 XSS 공격 확인
 	for _, pattern := range xssPatterns {
 		if pattern.MatchString(input) {
-			// 如果包含恶意内容，进行 HTML 转义
+			// 악성 내용이 포함된 경우 HTML 이스케이프 처리
 			return html.EscapeString(input)
 		}
 	}
 
-	// 如果内容相对安全，返回原内容
+	// 내용이 비교적 안전한 경우 원래 내용 반환
 	return input
 }
 
-// EscapeHTML 转义 HTML 特殊字符
+// EscapeHTML HTML 특수 문자 이스케이프
 func EscapeHTML(input string) string {
 	if input == "" {
 		return ""
@@ -62,25 +62,25 @@ func EscapeHTML(input string) string {
 	return html.EscapeString(input)
 }
 
-// ValidateInput 验证用户输入
+// ValidateInput 사용자 입력 검증
 func ValidateInput(input string) (string, bool) {
 	if input == "" {
 		return "", true
 	}
 
-	// 检查是否包含控制字符
+	// 제어 문자 포함 여부 확인
 	for _, r := range input {
 		if r < 32 && r != 9 && r != 10 && r != 13 {
 			return "", false
 		}
 	}
 
-	// 检查 UTF-8 有效性
+	// UTF-8 유효성 확인
 	if !utf8.ValidString(input) {
 		return "", false
 	}
 
-	// 检查是否包含潜在的 XSS 攻击
+	// 잠재적인 XSS 공격 확인
 	for _, pattern := range xssPatterns {
 		if pattern.MatchString(input) {
 			return "", false
@@ -90,24 +90,24 @@ func ValidateInput(input string) (string, bool) {
 	return strings.TrimSpace(input), true
 }
 
-// IsValidURL 验证 URL 是否安全
+// IsValidURL URL이 안전한지 검증
 func IsValidURL(url string) bool {
 	if url == "" {
 		return false
 	}
 
-	// 检查长度
+	// 길이 확인
 	if len(url) > 2048 {
 		return false
 	}
 
-	// 检查协议
+	// 프로토콜 확인
 	if !strings.HasPrefix(strings.ToLower(url), "http://") &&
 		!strings.HasPrefix(strings.ToLower(url), "https://") {
 		return false
 	}
 
-	// 检查是否包含恶意内容
+	// 악성 내용 포함 여부 확인
 	for _, pattern := range xssPatterns {
 		if pattern.MatchString(url) {
 			return false
@@ -117,13 +117,13 @@ func IsValidURL(url string) bool {
 	return true
 }
 
-// IsValidImageURL 验证图片 URL 是否安全
+// IsValidImageURL 이미지 URL이 안전한지 검증
 func IsValidImageURL(url string) bool {
 	if !IsValidURL(url) {
 		return false
 	}
 
-	// 检查是否为图片文件
+	// 이미지 파일인지 확인
 	imageExtensions := []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".ico"}
 	lowerURL := strings.ToLower(url)
 
@@ -136,13 +136,13 @@ func IsValidImageURL(url string) bool {
 	return false
 }
 
-// CleanMarkdown 清理 Markdown 内容
+// CleanMarkdown 마크다운 내용 정리
 func CleanMarkdown(input string) string {
 	if input == "" {
 		return ""
 	}
 
-	// 移除潜在的恶意脚本
+	// 잠재적인 악성 스크립트 제거
 	cleaned := input
 	for _, pattern := range xssPatterns {
 		cleaned = pattern.ReplaceAllString(cleaned, "")
@@ -151,40 +151,40 @@ func CleanMarkdown(input string) string {
 	return cleaned
 }
 
-// SanitizeForDisplay 为显示清理内容
+// SanitizeForDisplay 표시를 위해 내용 정리
 func SanitizeForDisplay(input string) string {
 	if input == "" {
 		return ""
 	}
 
-	// 首先清理 Markdown
+	// 먼저 마크다운 정리
 	cleaned := CleanMarkdown(input)
 
-	// 然后进行 HTML 转义
+	// 그 다음 HTML 이스케이프 처리
 	escaped := html.EscapeString(cleaned)
 
 	return escaped
 }
 
-// SanitizeForLog 清理日志输入,防止日志注入攻击
-// 日志注入攻击是指攻击者通过在输入中插入换行符和其他控制字符,
-// 伪造日志条目,可能导致日志分析工具误判或隐藏恶意活动
+// SanitizeForLog 로그 입력을 정리하여 로그 주입 공격 방지
+// 로그 주입 공격은 공격자가 입력에 줄 바꿈 및 기타 제어 문자를 삽입하여
+// 로그 항목을 위조하는 것으로, 로그 분석 도구의 오판이나 악성 활동 은폐를 유발할 수 있음
 func SanitizeForLog(input string) string {
 	if input == "" {
 		return ""
 	}
 
-	// 替换换行符(LF, CR, CRLF)为空格,防止日志注入
+	// 줄 바꿈(LF, CR, CRLF)을 공백으로 대체하여 로그 주입 방지
 	sanitized := strings.ReplaceAll(input, "\n", " ")
 	sanitized = strings.ReplaceAll(sanitized, "\r", " ")
 
-	// 替换制表符为空格
+	// 탭을 공백으로 대체
 	sanitized = strings.ReplaceAll(sanitized, "\t", " ")
 
-	// 移除其他控制字符(ASCII 0-31,除了空格已处理的)
+	// 기타 제어 문자 제거(ASCII 0-31, 공백은 이미 처리됨)
 	var builder strings.Builder
 	for _, r := range sanitized {
-		// 保留可打印字符和常用Unicode字符
+		// 인쇄 가능한 문자와 일반적인 유니코드 문자 유지
 		if r >= 32 || r == ' ' {
 			builder.WriteRune(r)
 		}
@@ -195,7 +195,7 @@ func SanitizeForLog(input string) string {
 	return sanitized
 }
 
-// SanitizeForLogArray 清理日志输入数组,防止日志注入攻击
+// SanitizeForLogArray 로그 입력 배열을 정리하여 로그 주입 공격 방지
 func SanitizeForLogArray(input []string) []string {
 	if len(input) == 0 {
 		return []string{}

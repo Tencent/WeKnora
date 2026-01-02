@@ -17,14 +17,14 @@ import (
 	"github.com/hibiken/asynq"
 )
 
-// KnowledgeBaseHandler defines the HTTP handler for knowledge base operations
+// KnowledgeBaseHandler 지식베이스 작업을 위한 HTTP 핸들러 정의
 type KnowledgeBaseHandler struct {
 	service          interfaces.KnowledgeBaseService
 	knowledgeService interfaces.KnowledgeService
 	asynqClient      *asynq.Client
 }
 
-// NewKnowledgeBaseHandler creates a new knowledge base handler instance
+// NewKnowledgeBaseHandler 새로운 지식베이스 핸들러 인스턴스 생성
 func NewKnowledgeBaseHandler(
 	service interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
@@ -38,15 +38,15 @@ func NewKnowledgeBaseHandler(
 }
 
 // HybridSearch godoc
-// @Summary      混合搜索
-// @Description  在知识库中执行向量和关键词混合搜索
-// @Tags         知识库
+// @Summary      하이브리드 검색
+// @Description  지식베이스에서 벡터 및 키워드 하이브리드 검색 수행
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string             true  "知识库ID"
-// @Param        request  body      types.SearchParams true  "搜索参数"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string             true  "지식베이스 ID"
+// @Param        request  body      types.SearchParams true  "검색 매개변수"
+// @Success      200      {object}  map[string]interface{}  "검색 결과"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/hybrid-search [get]
@@ -55,7 +55,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 
 	logger.Info(ctx, "Start hybrid search")
 
-	// Validate knowledge base ID
+	// 지식베이스 ID 검증
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -63,7 +63,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	// Parse request body
+	// 요청 본문 파싱
 	var req types.SearchParams
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -74,7 +74,7 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText))
 
-	// Execute hybrid search with default search parameters
+	// 기본 검색 매개변수로 하이브리드 검색 실행
 	results, err := h.service.HybridSearch(ctx, id, req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -91,14 +91,14 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 }
 
 // CreateKnowledgeBase godoc
-// @Summary      创建知识库
-// @Description  创建新的知识库
-// @Tags         知识库
+// @Summary      지식베이스 생성
+// @Description  새로운 지식베이스 생성
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        request  body      types.KnowledgeBase  true  "知识库信息"
-// @Success      201      {object}  map[string]interface{}  "创建的知识库"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      types.KnowledgeBase  true  "지식베이스 정보"
+// @Success      201      {object}  map[string]interface{}  "생성된 지식베이스"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases [post]
@@ -107,7 +107,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 
 	logger.Info(ctx, "Start creating knowledge base")
 
-	// Parse request body
+	// 요청 본문 파싱
 	var req types.KnowledgeBase
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -121,7 +121,7 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Creating knowledge base, name: %s", secutils.SanitizeForLog(req.Name))
-	// Create knowledge base using the service
+	// 서비스를 사용하여 지식베이스 생성
 	kb, err := h.service.CreateKnowledgeBase(ctx, &req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -137,33 +137,33 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	})
 }
 
-// validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base
-// Returns the knowledge base, knowledge base ID, and any errors encountered
+// validateAndGetKnowledgeBase 요청 매개변수 검증 및 지식베이스 조회
+// 지식베이스, 지식베이스 ID 및 발생한 오류 반환
 func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*types.KnowledgeBase, string, error) {
 	ctx := c.Request.Context()
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
 		return nil, "", errors.NewUnauthorizedError("Unauthorized")
 	}
 
-	// Get knowledge base ID from URL parameter
+	// URL 매개변수에서 지식베이스 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
 	}
 
-	// Verify tenant has permission to access this knowledge base
+	// 테넌트가 이 지식베이스에 액세스할 수 있는 권한이 있는지 확인
 	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, id, errors.NewInternalServerError(err.Error())
 	}
 
-	// Verify tenant ownership
+	// 테넌트 소유권 확인
 	if kb.TenantID != tenantID.(uint64) {
 		logger.Warnf(
 			ctx,
@@ -178,20 +178,20 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 }
 
 // GetKnowledgeBase godoc
-// @Summary      获取知识库详情
-// @Description  根据ID获取知识库详情
-// @Tags         知识库
+// @Summary      지식베이스 상세 정보 조회
+// @Description  ID를 기반으로 지식베이스 상세 정보 조회
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识库ID"
-// @Success      200  {object}  map[string]interface{}  "知识库详情"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "知识库不存在"
+// @Param        id   path      string  true  "지식베이스 ID"
+// @Success      200  {object}  map[string]interface{}  "지식베이스 상세 정보"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404  {object}  errors.AppError         "지식베이스를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [get]
 func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
-	// Validate and get the knowledge base
+	// 지식베이스 검증 및 가져오기
 	kb, _, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
@@ -204,20 +204,20 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 }
 
 // ListKnowledgeBases godoc
-// @Summary      获取知识库列表
-// @Description  获取当前租户的所有知识库
-// @Tags         知识库
+// @Summary      지식베이스 목록 조회
+// @Description  현재 테넌트의 모든 지식베이스 조회
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "知识库列表"
-// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Success      200  {object}  map[string]interface{}  "지식베이스 목록"
+// @Failure      500  {object}  errors.AppError         "서버 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases [get]
 func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get all knowledge bases for this tenant
+	// 이 테넌트의 모든 지식베이스 가져오기
 	kbs, err := h.service.ListKnowledgeBases(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -231,7 +231,7 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 	})
 }
 
-// UpdateKnowledgeBaseRequest defines the request body structure for updating a knowledge base
+// UpdateKnowledgeBaseRequest 지식베이스 업데이트를 위한 요청 본문 구조 정의
 type UpdateKnowledgeBaseRequest struct {
 	Name        string                     `json:"name"        binding:"required"`
 	Description string                     `json:"description"`
@@ -239,15 +239,15 @@ type UpdateKnowledgeBaseRequest struct {
 }
 
 // UpdateKnowledgeBase godoc
-// @Summary      更新知识库
-// @Description  更新知识库的名称、描述和配置
-// @Tags         知识库
+// @Summary      지식베이스 업데이트
+// @Description  지식베이스의 이름, 설명 및 구성 업데이트
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                     true  "知识库ID"
-// @Param        request  body      UpdateKnowledgeBaseRequest true  "更新请求"
-// @Success      200      {object}  map[string]interface{}     "更新后的知识库"
-// @Failure      400      {object}  errors.AppError            "请求参数错误"
+// @Param        id       path      string                     true  "지식베이스 ID"
+// @Param        request  body      UpdateKnowledgeBaseRequest true  "업데이트 요청"
+// @Success      200      {object}  map[string]interface{}     "업데이트된 지식베이스"
+// @Failure      400      {object}  errors.AppError            "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [put]
@@ -255,14 +255,14 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating knowledge base")
 
-	// Validate and get the knowledge base
+	// 지식베이스 검증 및 가져오기
 	_, id, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	// Parse request body
+	// 요청 본문 파싱
 	var req UpdateKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -273,7 +273,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
-	// Update the knowledge base
+	// 지식베이스 업데이트
 	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -290,14 +290,14 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 }
 
 // DeleteKnowledgeBase godoc
-// @Summary      删除知识库
-// @Description  删除指定的知识库及其所有内容
-// @Tags         知识库
+// @Summary      지식베이스 삭제
+// @Description  지정된 지식베이스 및 모든 내용 삭제
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识库ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Param        id   path      string  true  "지식베이스 ID"
+// @Success      200  {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [delete]
@@ -305,7 +305,7 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start deleting knowledge base")
 
-	// Validate and get the knowledge base
+	// 지식베이스 검증 및 가져오기
 	kb, id, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
@@ -315,7 +315,7 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 	logger.Infof(ctx, "Deleting knowledge base, ID: %s, name: %s",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(kb.Name))
 
-	// Delete the knowledge base
+	// 지식베이스 삭제
 	if err := h.service.DeleteKnowledgeBase(ctx, id); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -335,7 +335,7 @@ type CopyKnowledgeBaseRequest struct {
 	TargetID string `json:"target_id"`
 }
 
-// CopyKnowledgeBaseResponse defines the response for copy knowledge base
+// CopyKnowledgeBaseResponse 지식베이스 복사 응답 정의
 type CopyKnowledgeBaseResponse struct {
 	TaskID   string `json:"task_id"`
 	SourceID string `json:"source_id"`
@@ -344,14 +344,14 @@ type CopyKnowledgeBaseResponse struct {
 }
 
 // CopyKnowledgeBase godoc
-// @Summary      复制知识库
-// @Description  将一个知识库的内容复制到另一个知识库（异步任务）
-// @Tags         知识库
+// @Summary      지식베이스 복사
+// @Description  지식베이스의 내용을 다른 지식베이스로 복사 (비동기 작업)
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        request  body      CopyKnowledgeBaseRequest   true  "复制请求"
-// @Success      200      {object}  map[string]interface{}     "任务ID"
-// @Failure      400      {object}  errors.AppError            "请求参数错误"
+// @Param        request  body      CopyKnowledgeBaseRequest   true  "복사 요청"
+// @Success      200      {object}  map[string]interface{}     "작업 ID"
+// @Failure      400      {object}  errors.AppError            "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/copy [post]
@@ -364,7 +364,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
@@ -372,10 +372,10 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	// Generate task ID
+	// 작업 ID 생성
 	taskID := uuid.New().String()
 
-	// Create KB clone payload
+	// KB 복제 페이로드 생성
 	payload := types.KBClonePayload{
 		TenantID: tenantID.(uint64),
 		TaskID:   taskID,
@@ -390,7 +390,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	// Enqueue KB clone task to Asynq
+	// KB 복제 작업을 Asynq에 등록
 	task := asynq.NewTask(types.TypeKBClone, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 	info, err := h.asynqClient.Enqueue(task)
 	if err != nil {
@@ -402,7 +402,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	logger.Infof(ctx, "KB clone task enqueued: %s, asynq task ID: %s, source: %s, target: %s",
 		taskID, info.ID, secutils.SanitizeForLog(req.SourceID), secutils.SanitizeForLog(req.TargetID))
 
-	// Save initial progress to Redis so frontend can query immediately
+	// 프론트엔드에서 즉시 조회할 수 있도록 Redis에 초기 진행 상황 저장
 	initialProgress := &types.KBCloneProgress{
 		TaskID:    taskID,
 		SourceID:  req.SourceID,
@@ -415,7 +415,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 	}
 	if err := h.knowledgeService.SaveKBCloneProgress(ctx, initialProgress); err != nil {
 		logger.Warnf(ctx, "Failed to save initial KB clone progress: %v", err)
-		// Don't fail the request, task is already enqueued
+		// 요청을 실패 처리하지 않음, 작업은 이미 대기열에 추가됨
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -430,14 +430,14 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 }
 
 // GetKBCloneProgress godoc
-// @Summary      获取知识库复制进度
-// @Description  获取知识库复制任务的进度
-// @Tags         知识库
+// @Summary      지식베이스 복사 진행 상황 조회
+// @Description  지식베이스 복사 작업의 진행 상황 조회
+// @Tags         지식베이스
 // @Accept       json
 // @Produce      json
-// @Param        task_id  path      string  true  "任务ID"
-// @Success      200      {object}  map[string]interface{}  "进度信息"
-// @Failure      404      {object}  errors.AppError         "任务不存在"
+// @Param        task_id  path      string  true  "작업 ID"
+// @Success      200      {object}  map[string]interface{}  "진행 정보"
+// @Failure      404      {object}  errors.AppError         "작업을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/copy/progress/{task_id} [get]
@@ -464,7 +464,7 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 	})
 }
 
-// validateExtractConfig validates the graph configuration parameters
+// validateExtractConfig 그래프 구성 매개변수 검증
 func validateExtractConfig(config *types.ExtractConfig) error {
 	logger.Errorf(context.Background(), "Validating extract configuration: %+v", config)
 	if config == nil {
@@ -474,12 +474,12 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		*config = types.ExtractConfig{Enabled: false}
 		return nil
 	}
-	// Validate text field
+	// 텍스트 필드 검증
 	if config.Text == "" {
 		return errors.NewBadRequestError("text cannot be empty")
 	}
 
-	// Validate tags field
+	// 태그 필드 검증
 	if len(config.Tags) == 0 {
 		return errors.NewBadRequestError("tags cannot be empty")
 	}
@@ -489,7 +489,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		}
 	}
 
-	// Validate nodes
+	// 노드 검증
 	if len(config.Nodes) == 0 {
 		return errors.NewBadRequestError("nodes cannot be empty")
 	}
@@ -498,7 +498,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		if node.Name == "" {
 			return errors.NewBadRequestError("node name cannot be empty at index " + strconv.Itoa(i))
 		}
-		// Check for duplicate node names
+		// 중복 노드 이름 확인
 		if nodeNames[node.Name] {
 			return errors.NewBadRequestError("duplicate node name: " + node.Name)
 		}
@@ -508,7 +508,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 	if len(config.Relations) == 0 {
 		return errors.NewBadRequestError("relations cannot be empty")
 	}
-	// Validate relations
+	// 관계 검증
 	for i, relation := range config.Relations {
 		if relation.Node1 == "" {
 			return errors.NewBadRequestError("relation node1 cannot be empty at index " + strconv.Itoa(i))
@@ -519,7 +519,7 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 		if relation.Type == "" {
 			return errors.NewBadRequestError("relation type cannot be empty at index " + strconv.Itoa(i))
 		}
-		// Check if referenced nodes exist
+		// 참조된 노드가 존재하는지 확인
 		if !nodeNames[relation.Node1] {
 			return errors.NewBadRequestError("relation references non-existent node1: " + relation.Node1)
 		}

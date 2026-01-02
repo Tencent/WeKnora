@@ -79,7 +79,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			})
 			continue
 		}
-		// 合并Content和ImageInfo的文本内容
+		// Content와 ImageInfo의 텍스트 내용을 병합합니다.
 		passage := getEnrichedPassage(ctx, result)
 		passages = append(passages, passage)
 		candidatesToRerank = append(candidatesToRerank, result)
@@ -383,12 +383,12 @@ func applyMMR(
 	return selected
 }
 
-// getEnrichedPassage 合并Content、ImageInfo和GeneratedQuestions的文本内容
+// getEnrichedPassage Content, ImageInfo 및 GeneratedQuestions의 텍스트 내용을 병합합니다.
 func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	combinedText := result.Content
 	var enrichments []string
 
-	// 解析ImageInfo
+	// ImageInfo 파싱
 	if result.ImageInfo != "" {
 		var imageInfos []types.ImageInfo
 		err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos)
@@ -397,19 +397,19 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 				"error": err.Error(),
 			})
 		} else {
-			// 提取所有图片的描述和OCR文本
+			// 모든 이미지의 설명 및 OCR 텍스트 추출
 			for _, img := range imageInfos {
 				if img.Caption != "" {
-					enrichments = append(enrichments, fmt.Sprintf("图片描述: %s", img.Caption))
+					enrichments = append(enrichments, fmt.Sprintf("이미지 설명: %s", img.Caption))
 				}
 				if img.OCRText != "" {
-					enrichments = append(enrichments, fmt.Sprintf("图片文本: %s", img.OCRText))
+					enrichments = append(enrichments, fmt.Sprintf("이미지 텍스트: %s", img.OCRText))
 				}
 			}
 		}
 	}
 
-	// 解析ChunkMetadata中的GeneratedQuestions
+	// ChunkMetadata의 GeneratedQuestions 파싱
 	if len(result.ChunkMetadata) > 0 {
 		var docMeta types.DocumentChunkMetadata
 		err := json.Unmarshal(result.ChunkMetadata, &docMeta)
@@ -418,7 +418,7 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 				"error": err.Error(),
 			})
 		} else if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
-			enrichments = append(enrichments, fmt.Sprintf("相关问题: %s", strings.Join(questionStrings, "; ")))
+			enrichments = append(enrichments, fmt.Sprintf("관련 질문: %s", strings.Join(questionStrings, "; ")))
 		}
 	}
 
@@ -426,7 +426,7 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 		return combinedText
 	}
 
-	// 组合内容和增强信息
+	// 내용과 강화된 정보 결합
 	if combinedText != "" {
 		combinedText += "\n\n"
 	}

@@ -54,7 +54,7 @@ func (s *knowledgeTagService) ListTags(
 	keyword string,
 ) (*types.PageResult, error) {
 	if kbID == "" {
-		return nil, werrors.NewBadRequestError("知识库ID不能为空")
+		return nil, werrors.NewBadRequestError("지식베이스 ID는 비워둘 수 없습니다")
 	}
 	if page == nil {
 		page = &types.Pagination{}
@@ -104,7 +104,7 @@ func (s *knowledgeTagService) CreateTag(
 ) (*types.KnowledgeTag, error) {
 	name = strings.TrimSpace(name)
 	if kbID == "" || name == "" {
-		return nil, werrors.NewBadRequestError("知识库ID和标签名称不能为空")
+		return nil, werrors.NewBadRequestError("지식베이스 ID와 태그 이름은 비워둘 수 없습니다")
 	}
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -114,7 +114,7 @@ func (s *knowledgeTagService) CreateTag(
 	// Check if tag with same name already exists
 	existingTag, err := s.repo.GetByName(ctx, kb.TenantID, kbID, name)
 	if err == nil && existingTag != nil {
-		return nil, werrors.NewConflictError("标签名称已存在")
+		return nil, werrors.NewConflictError("태그 이름이 이미 존재합니다")
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -146,7 +146,7 @@ func (s *knowledgeTagService) UpdateTag(
 	sortOrder *int,
 ) (*types.KnowledgeTag, error) {
 	if id == "" {
-		return nil, werrors.NewBadRequestError("标签ID不能为空")
+		return nil, werrors.NewBadRequestError("태그 ID는 비워둘 수 없습니다")
 	}
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
@@ -157,7 +157,7 @@ func (s *knowledgeTagService) UpdateTag(
 	if name != nil {
 		newName := strings.TrimSpace(*name)
 		if newName == "" {
-			return nil, werrors.NewBadRequestError("标签名称不能为空")
+			return nil, werrors.NewBadRequestError("태그 이름은 비워둘 수 없습니다")
 		}
 		tag.Name = newName
 	}
@@ -178,7 +178,7 @@ func (s *knowledgeTagService) UpdateTag(
 // When contentOnly=true, only deletes the content under the tag but keeps the tag itself.
 func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bool, contentOnly bool, excludeIDs []string) error {
 	if id == "" {
-		return werrors.NewBadRequestError("标签ID不能为空")
+		return werrors.NewBadRequestError("태그 ID는 비워둘 수 없습니다")
 	}
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
@@ -206,7 +206,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 		deletedIDs, err := s.chunkRepo.DeleteChunksByTagID(ctx, tenantID, tag.KnowledgeBaseID, tag.ID, excludeIDs)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to delete chunks by tag ID %s: %v", tag.ID, err)
-			return werrors.NewInternalServerError("删除标签下的数据失败")
+			return werrors.NewInternalServerError("태그 아래의 데이터 삭제 실패")
 		}
 
 		// Enqueue async index deletion task for the deleted chunks
@@ -229,7 +229,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	}
 
 	if !force && (kCount > 0 || cCount > 0) {
-		return werrors.NewBadRequestError("标签仍有知识或FAQ条目引用，无法删除")
+		return werrors.NewBadRequestError("태그에 지식 또는 FAQ 항목이 참조되고 있어 삭제할 수 없습니다")
 	}
 	// When force=true, delete all chunks under this tag first
 	if force && cCount > 0 {
@@ -325,7 +325,7 @@ func (s *knowledgeTagService) ProcessIndexDelete(ctx context.Context, t *asynq.T
 func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID string, name string) (*types.KnowledgeTag, error) {
 	name = strings.TrimSpace(name)
 	if kbID == "" || name == "" {
-		return nil, werrors.NewBadRequestError("知识库ID和标签名称不能为空")
+		return nil, werrors.NewBadRequestError("지식베이스 ID와 태그 이름은 비워둘 수 없습니다")
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
@@ -335,17 +335,17 @@ func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID st
 
 	tenantID := kb.TenantID
 
-	// 先尝试查找现有标签
+	// 먼저 기존 태그 찾기 시도
 	tag, err := s.repo.GetByName(ctx, tenantID, kbID, name)
 	if err == nil {
 		return tag, nil
 	}
 
-	// 如果不是 not found 错误，直接返回
+	// 찾을 수 없음 오류가 아니면 반환
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
-	// 创建新标签
+	// 새 태그 생성
 	return s.CreateTag(ctx, kbID, name, "", 0)
 }

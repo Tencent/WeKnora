@@ -8,13 +8,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// 流管理器类型
+// 스트림 관리자 유형
 const (
 	TypeMemory = "memory"
 	TypeRedis  = "redis"
 )
 
-// NewStreamManager 创建流管理器
+// NewStreamManager 스트림 관리자 생성
 func NewStreamManager() (interfaces.StreamManager, error) {
 	switch os.Getenv("STREAM_MANAGER_TYPE") {
 	case TypeRedis:
@@ -22,7 +22,7 @@ func NewStreamManager() (interfaces.StreamManager, error) {
 		if err != nil {
 			db = 0
 		}
-		ttl := time.Hour // 默认1小时
+		ttl := time.Hour // 기본 1시간
 		return NewRedisStreamManager(
 			os.Getenv("REDIS_ADDR"),
 			os.Getenv("REDIS_PASSWORD"),

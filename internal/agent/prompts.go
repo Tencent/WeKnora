@@ -8,7 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// formatFileSize formats file size in human-readable format
+// formatFileSize 파일 크기를 사람이 읽을 수 있는 형식으로 포맷
 func formatFileSize(size int64) string {
 	const (
 		KB = 1024
@@ -26,7 +26,7 @@ func formatFileSize(size int64) string {
 	return fmt.Sprintf("%.2f GB", float64(size)/GB)
 }
 
-// formatDocSummary cleans and truncates document summaries for table display
+// formatDocSummary 표 표시를 위해 문서 요약 정리 및 자르기
 func formatDocSummary(summary string, maxLen int) string {
 	cleaned := strings.TrimSpace(summary)
 	if cleaned == "" {
@@ -43,7 +43,7 @@ func formatDocSummary(summary string, maxLen int) string {
 	return strings.TrimSpace(string(runes[:maxLen])) + "..."
 }
 
-// RecentDocInfo contains brief information about a recently added document
+// RecentDocInfo 최근 추가된 문서에 대한 간략한 정보
 type RecentDocInfo struct {
 	ChunkID             string
 	KnowledgeBaseID     string
@@ -53,44 +53,44 @@ type RecentDocInfo struct {
 	FileName            string
 	FileSize            int64
 	Type                string
-	CreatedAt           string // Formatted time string
+	CreatedAt           string // 포맷된 시간 문자열
 	FAQStandardQuestion string
 	FAQSimilarQuestions []string
 	FAQAnswers          []string
 }
 
-// SelectedDocumentInfo contains summary information about a user-selected document (via @ mention)
-// Only metadata is included; content will be fetched via tools when needed
+// SelectedDocumentInfo 사용자가 선택한 문서에 대한 요약 정보 (@ 멘션 통해)
+// 메타데이터만 포함되며, 내용은 필요할 때 도구를 통해 가져옵니다
 type SelectedDocumentInfo struct {
-	KnowledgeID     string // Knowledge ID
-	KnowledgeBaseID string // Knowledge base ID
-	Title           string // Document title
-	FileName        string // Original file name
-	FileType        string // File type (pdf, docx, etc.)
+	KnowledgeID     string // 지식 ID
+	KnowledgeBaseID string // 지식베이스 ID
+	Title           string // 문서 제목
+	FileName        string // 원본 파일 이름
+	FileType        string // 파일 유형 (pdf, docx 등)
 }
 
-// KnowledgeBaseInfo contains essential information about a knowledge base for agent prompt
+// KnowledgeBaseInfo 에이전트 프롬프트를 위한 지식베이스 필수 정보
 type KnowledgeBaseInfo struct {
 	ID          string
 	Name        string
-	Type        string // Knowledge base type: "document" or "faq"
+	Type        string // 지식베이스 유형: "document" 또는 "faq"
 	Description string
 	DocCount    int
-	RecentDocs  []RecentDocInfo // Recently added documents (up to 10)
+	RecentDocs  []RecentDocInfo // 최근 추가된 문서 (최대 10개)
 }
 
-// PlaceholderDefinition defines a placeholder exposed to UI/configuration
-// Deprecated: Use types.PromptPlaceholder instead
+// PlaceholderDefinition UI/구성에 노출되는 플레이스홀더 정의
+// Deprecated: types.PromptPlaceholder를 대신 사용하세요
 type PlaceholderDefinition struct {
 	Name        string `json:"name"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
 }
 
-// AvailablePlaceholders lists all supported prompt placeholders for UI hints
-// This returns agent mode specific placeholders
+// AvailablePlaceholders UI 힌트를 위한 지원되는 모든 프롬프트 플레이스홀더 나열
+// 에이전트 모드 전용 플레이스홀더 반환
 func AvailablePlaceholders() []PlaceholderDefinition {
-	// Use centralized placeholder definitions from types package
+	// types 패키지의 중앙 집중식 플레이스홀더 정의 사용
 	placeholders := types.PlaceholdersByField(types.PromptFieldAgentSystemPrompt)
 	result := make([]PlaceholderDefinition, len(placeholders))
 	for i, p := range placeholders {
@@ -103,7 +103,7 @@ func AvailablePlaceholders() []PlaceholderDefinition {
 	return result
 }
 
-// formatKnowledgeBaseList formats knowledge base information for the prompt
+// formatKnowledgeBaseList 프롬프트에 사용할 지식베이스 정보 포맷
 func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	if len(kbInfos) == 0 {
 		return "None"
@@ -113,13 +113,13 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	builder.WriteString("\nThe following knowledge bases have been selected by the user for this conversation. ")
 	builder.WriteString("You should search within these knowledge bases to find relevant information.\n\n")
 	for i, kb := range kbInfos {
-		// Display knowledge base name and ID
+		// 지식베이스 이름 및 ID 표시
 		builder.WriteString(fmt.Sprintf("%d. **%s** (knowledge_base_id: `%s`)\n", i+1, kb.Name, kb.ID))
 
-		// Display knowledge base type
+		// 지식베이스 유형 표시
 		kbType := kb.Type
 		if kbType == "" {
-			kbType = "document" // Default type
+			kbType = "document" // 기본 유형
 		}
 		builder.WriteString(fmt.Sprintf("   - Type: %s\n", kbType))
 
@@ -128,16 +128,16 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 		}
 		builder.WriteString(fmt.Sprintf("   - Document count: %d\n", kb.DocCount))
 
-		// Display recent documents if available
-		// For FAQ type knowledge bases, adjust the display format
+		// 사용 가능한 경우 최근 문서 표시
+		// FAQ 유형 지식베이스의 경우 표시 형식 조정
 		if len(kb.RecentDocs) > 0 {
 			if kbType == "faq" {
-				// FAQ knowledge base: show Q&A pairs in a more compact format
+				// FAQ 지식베이스: Q&A 쌍을 더 간결한 형식으로 표시
 				builder.WriteString("   - Recent FAQ entries:\n\n")
 				builder.WriteString("     | # | Question  | Answers | Chunk ID | Knowledge ID | Created At |\n")
 				builder.WriteString("     |---|-------------------|---------|----------|--------------|------------|\n")
 				for j, doc := range kb.RecentDocs {
-					if j >= 10 { // Limit to 10 documents
+					if j >= 10 { // 최대 10개 문서로 제한
 						break
 					}
 					question := doc.FAQStandardQuestion
@@ -152,19 +152,19 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 						j+1, question, answers, doc.ChunkID, doc.KnowledgeID, doc.CreatedAt))
 				}
 			} else {
-				// Document knowledge base: show documents in standard format
+				// 문서 지식베이스: 표준 형식으로 문서 표시
 				builder.WriteString("   - Recently added documents:\n\n")
 				builder.WriteString("     | # | Document Name | Type | Created At | Knowledge ID | File Size | Summary |\n")
 				builder.WriteString("     |---|---------------|------|------------|--------------|----------|---------|\n")
 				for j, doc := range kb.RecentDocs {
-					if j >= 10 { // Limit to 10 documents
+					if j >= 10 { // 최대 10개 문서로 제한
 						break
 					}
 					docName := doc.Title
 					if docName == "" {
 						docName = doc.FileName
 					}
-					// Format file size
+					// 파일 크기 포맷
 					fileSize := formatFileSize(doc.FileSize)
 					summary := formatDocSummary(doc.Description, 120)
 					builder.WriteString(fmt.Sprintf("     | %d | %s | %s | %s | `%s` | %s | %s |\n",
@@ -178,13 +178,13 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	return builder.String()
 }
 
-// renderPromptPlaceholders renders placeholders in the prompt template
-// Supported placeholders:
-//   - {{knowledge_bases}} - Replaced with formatted knowledge base list
+// renderPromptPlaceholders 프롬프트 템플릿의 플레이스홀더 렌더링
+// 지원되는 플레이스홀더:
+//   - {{knowledge_bases}} - 포맷된 지식베이스 목록으로 대체
 func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseInfo) string {
 	result := template
 
-	// Replace {{knowledge_bases}} placeholder
+	// {{knowledge_bases}} 플레이스홀더 대체
 	if strings.Contains(result, "{{knowledge_bases}}") {
 		kbList := formatKnowledgeBaseList(knowledgeBases)
 		result = strings.ReplaceAll(result, "{{knowledge_bases}}", kbList)
@@ -193,7 +193,7 @@ func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseIn
 	return result
 }
 
-// formatSelectedDocuments formats selected documents for the prompt (summary only, no content)
+// formatSelectedDocuments 선택된 문서를 프롬프트용으로 포맷 (요약만, 내용 없음)
 func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
 	if len(docs) == 0 {
 		return ""
@@ -225,11 +225,11 @@ func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
 	return builder.String()
 }
 
-// renderPromptPlaceholdersWithStatus renders placeholders including web search status
-// Supported placeholders:
+// renderPromptPlaceholdersWithStatus 웹 검색 상태를 포함하여 플레이스홀더 렌더링
+// 지원되는 플레이스홀더:
 //   - {{knowledge_bases}}
-//   - {{web_search_status}} -> "Enabled" or "Disabled"
-//   - {{current_time}} -> current time string
+//   - {{web_search_status}} -> "Enabled" 또는 "Disabled"
+//   - {{current_time}} -> 현재 시간 문자열
 func renderPromptPlaceholdersWithStatus(
 	template string,
 	knowledgeBases []*KnowledgeBaseInfo,
@@ -250,8 +250,8 @@ func renderPromptPlaceholdersWithStatus(
 	return result
 }
 
-// BuildSystemPromptWithKB builds the progressive RAG system prompt with knowledge bases
-// Deprecated: Use BuildSystemPrompt instead
+// BuildSystemPromptWithKB 지식베이스가 있는 점진적 RAG 시스템 프롬프트 빌드
+// Deprecated: BuildSystemPrompt를 대신 사용하세요
 func BuildSystemPromptWithWeb(
 	knowledgeBases []*KnowledgeBaseInfo,
 	systemPromptTemplate ...string,
@@ -266,8 +266,8 @@ func BuildSystemPromptWithWeb(
 	return renderPromptPlaceholdersWithStatus(template, knowledgeBases, true, currentTime)
 }
 
-// BuildSystemPromptWithoutWeb builds the progressive RAG system prompt without web search
-// Deprecated: Use BuildSystemPrompt instead
+// BuildSystemPromptWithoutWeb 웹 검색이 없는 점진적 RAG 시스템 프롬프트 빌드
+// Deprecated: BuildSystemPrompt를 대신 사용하세요
 func BuildSystemPromptWithoutWeb(
 	knowledgeBases []*KnowledgeBaseInfo,
 	systemPromptTemplate ...string,
@@ -282,7 +282,7 @@ func BuildSystemPromptWithoutWeb(
 	return renderPromptPlaceholdersWithStatus(template, knowledgeBases, false, currentTime)
 }
 
-// BuildPureAgentSystemPrompt builds the system prompt for Pure Agent mode (no KBs)
+// BuildPureAgentSystemPrompt Pure Agent 모드(KB 없음)를 위한 시스템 프롬프트 빌드
 func BuildPureAgentSystemPrompt(
 	webSearchEnabled bool,
 	systemPromptTemplate ...string,
@@ -294,12 +294,12 @@ func BuildPureAgentSystemPrompt(
 		template = PureAgentSystemPrompt
 	}
 	currentTime := time.Now().Format(time.RFC3339)
-	// Pass empty KB list
+	// 빈 KB 목록 전달
 	return renderPromptPlaceholdersWithStatus(template, []*KnowledgeBaseInfo{}, webSearchEnabled, currentTime)
 }
 
-// BuildSystemPrompt builds the progressive RAG system prompt
-// This is the main function to use - it uses a unified template with dynamic web search status
+// BuildSystemPrompt 점진적 RAG 시스템 프롬프트 빌드
+// 이것이 주로 사용해야 할 함수입니다 - {{web_search_status}} 플레이스홀더를 통해 동적으로 적응하는 통합 템플릿을 사용합니다
 func BuildSystemPrompt(
 	knowledgeBases []*KnowledgeBaseInfo,
 	webSearchEnabled bool,
@@ -309,7 +309,7 @@ func BuildSystemPrompt(
 	var basePrompt string
 	var template string
 
-	// Determine template to use
+	// 사용할 템플릿 결정
 	if len(systemPromptTemplate) > 0 && systemPromptTemplate[0] != "" {
 		template = systemPromptTemplate[0]
 	} else if len(knowledgeBases) == 0 {
@@ -321,7 +321,7 @@ func BuildSystemPrompt(
 	currentTime := time.Now().Format(time.RFC3339)
 	basePrompt = renderPromptPlaceholdersWithStatus(template, knowledgeBases, webSearchEnabled, currentTime)
 
-	// Append selected documents section if any
+	// 선택된 문서 섹션이 있으면 추가
 	if len(selectedDocs) > 0 {
 		basePrompt += formatSelectedDocuments(selectedDocs)
 	}
@@ -329,7 +329,7 @@ func BuildSystemPrompt(
 	return basePrompt
 }
 
-// PureAgentSystemPrompt is the system prompt for Pure Agent mode (no Knowledge Bases)
+// PureAgentSystemPrompt는 Pure Agent 모드(지식베이스 없음)를 위한 시스템 프롬프트입니다
 var PureAgentSystemPrompt = `### Role
 You are WeKnora, an intelligent assistant powered by ReAct. You operate in a Pure Agent mode without attached Knowledge Bases.
 
@@ -352,8 +352,8 @@ Current Time: {{current_time}}
 Web Search: {{web_search_status}}
 `
 
-// ProgressiveRAGSystemPrompt is the unified progressive RAG system prompt template
-// This template dynamically adapts based on web search status via {{web_search_status}} placeholder
+// ProgressiveRAGSystemPrompt는 통합 점진적 RAG 시스템 프롬프트 템플릿입니다
+// 이 템플릿은 {{web_search_status}} 플레이스홀더를 통해 웹 검색 상태에 따라 동적으로 적응합니다
 var ProgressiveRAGSystemPrompt = `### Role
 You are WeKnora, an intelligent retrieval assistant powered by Progressive Agentic RAG. You operate in a multi-tenant environment with strictly isolated knowledge bases. Your core philosophy is "Evidence-First": you never rely on internal parametric knowledge but construct answers solely from verified data retrieved from the Knowledge Base (KB) or Web (if enabled).
 
@@ -431,10 +431,10 @@ Web Search: {{web_search_status}}
 {{knowledge_bases}}
 `
 
-// ProgressiveRAGSystemPromptWithWeb is deprecated, use ProgressiveRAGSystemPrompt instead
-// Kept for backward compatibility
+// ProgressiveRAGSystemPromptWithWeb은 더 이상 사용되지 않으며, ProgressiveRAGSystemPrompt를 대신 사용하세요
+// 하위 호환성을 위해 유지됨
 var ProgressiveRAGSystemPromptWithWeb = ProgressiveRAGSystemPrompt
 
-// ProgressiveRAGSystemPromptWithoutWeb is deprecated, use ProgressiveRAGSystemPrompt instead
-// Kept for backward compatibility
+// ProgressiveRAGSystemPromptWithoutWeb은 더 이상 사용되지 않으며, ProgressiveRAGSystemPrompt를 대신 사용하세요
+// 하위 호환성을 위해 유지됨
 var ProgressiveRAGSystemPromptWithoutWeb = ProgressiveRAGSystemPrompt

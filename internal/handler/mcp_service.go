@@ -11,12 +11,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// MCPServiceHandler handles MCP service related HTTP requests
+// MCPServiceHandler MCP 서비스 관련 HTTP 요청 처리
 type MCPServiceHandler struct {
 	mcpServiceService interfaces.MCPServiceService
 }
 
-// NewMCPServiceHandler creates a new MCP service handler
+// NewMCPServiceHandler 새로운 MCP 서비스 핸들러 생성
 func NewMCPServiceHandler(mcpServiceService interfaces.MCPServiceService) *MCPServiceHandler {
 	return &MCPServiceHandler{
 		mcpServiceService: mcpServiceService,
@@ -24,14 +24,14 @@ func NewMCPServiceHandler(mcpServiceService interfaces.MCPServiceService) *MCPSe
 }
 
 // CreateMCPService godoc
-// @Summary      创建MCP服务
-// @Description  创建新的MCP服务配置
-// @Tags         MCP服务
+// @Summary      MCP 서비스 생성
+// @Description  새로운 MCP 서비스 구성 생성
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        request  body      types.MCPService  true  "MCP服务配置"
-// @Success      200      {object}  map[string]interface{}  "创建的MCP服务"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      types.MCPService  true  "MCP 서비스 구성"
+// @Success      200      {object}  map[string]interface{}  "생성된 MCP 서비스"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services [post]
@@ -66,13 +66,13 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 }
 
 // ListMCPServices godoc
-// @Summary      获取MCP服务列表
-// @Description  获取当前租户的所有MCP服务
-// @Tags         MCP服务
+// @Summary      MCP 서비스 목록 조회
+// @Description  현재 테넌트의 모든 MCP 서비스 조회
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "MCP服务列表"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Success      200  {object}  map[string]interface{}  "MCP 서비스 목록"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services [get]
@@ -100,14 +100,14 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 }
 
 // GetMCPService godoc
-// @Summary      获取MCP服务详情
-// @Description  根据ID获取MCP服务详情
-// @Tags         MCP服务
+// @Summary      MCP 서비스 상세 조회
+// @Description  ID로 MCP 서비스 상세 정보 조회
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "MCP服务详情"
-// @Failure      404  {object}  errors.AppError         "服务不存在"
+// @Param        id   path      string  true  "MCP 서비스 ID"
+// @Success      200  {object}  map[string]interface{}  "MCP 서비스 상세 정보"
+// @Failure      404  {object}  errors.AppError         "서비스를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id} [get]
@@ -136,15 +136,15 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 }
 
 // UpdateMCPService godoc
-// @Summary      更新MCP服务
-// @Description  更新MCP服务配置
-// @Tags         MCP服务
+// @Summary      MCP 서비스 업데이트
+// @Description  MCP 서비스 구성 업데이트
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "MCP服务ID"
-// @Param        request  body      object  true  "更新字段"
-// @Success      200      {object}  map[string]interface{}  "更新后的MCP服务"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string  true  "MCP 서비스 ID"
+// @Param        request  body      object  true  "업데이트 필드"
+// @Success      200      {object}  map[string]interface{}  "업데이트된 MCP 서비스"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id} [put]
@@ -159,7 +159,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		return
 	}
 
-	// Use map to handle partial updates, including false values
+	// 맵을 사용하여 false 값을 포함한 부분 업데이트 처리
 	var updateData map[string]interface{}
 	if err := c.ShouldBindJSON(&updateData); err != nil {
 		logger.Error(ctx, "Failed to parse MCP service update request", err)
@@ -167,15 +167,15 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		return
 	}
 
-	// Convert map to MCPService struct for validation and processing
+	// 검증 및 처리를 위해 맵을 MCPService 구조체로 변환
 	var service types.MCPService
 	service.ID = serviceID
 	service.TenantID = tenantID
 
-	// Track which fields are being updated
+	// 업데이트 중인 필드 추적
 	updateFields := make(map[string]bool)
 
-	// Map the update data to service struct
+	// 업데이트 데이터를 서비스 구조체에 매핑
 	if name, ok := updateData["name"].(string); ok {
 		service.Name = name
 		updateFields["name"] = true
@@ -198,7 +198,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	if url, ok := updateData["url"].(string); ok && url != "" {
 		service.URL = &url
 	} else if _, exists := updateData["url"]; exists {
-		// Explicitly set to nil if provided as null/empty
+		// null/empty로 제공된 경우 명시적으로 nil로 설정
 		service.URL = nil
 	}
 	if stdioConfig, ok := updateData["stdio_config"].(map[string]interface{}); ok {
@@ -268,14 +268,14 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 }
 
 // DeleteMCPService godoc
-// @Summary      删除MCP服务
-// @Description  删除指定的MCP服务
-// @Tags         MCP服务
+// @Summary      MCP 서비스 삭제
+// @Description  지정된 MCP 서비스 삭제
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Param        id   path      string  true  "MCP 서비스 ID"
+// @Success      200  {object}  map[string]interface{}  "삭제 성공"
+// @Failure      500  {object}  errors.AppError         "서버 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id} [delete]
@@ -304,14 +304,14 @@ func (h *MCPServiceHandler) DeleteMCPService(c *gin.Context) {
 }
 
 // TestMCPService godoc
-// @Summary      测试MCP服务连接
-// @Description  测试MCP服务是否可以正常连接
-// @Tags         MCP服务
+// @Summary      MCP 서비스 연결 테스트
+// @Description  MCP 서비스가 정상적으로 연결되는지 테스트
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "测试结果"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Param        id   path      string  true  "MCP 서비스 ID"
+// @Success      200  {object}  map[string]interface{}  "테스트 결과"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/test [post]
@@ -349,14 +349,14 @@ func (h *MCPServiceHandler) TestMCPService(c *gin.Context) {
 }
 
 // GetMCPServiceTools godoc
-// @Summary      获取MCP服务工具列表
-// @Description  获取MCP服务提供的工具列表
-// @Tags         MCP服务
+// @Summary      MCP 서비스 도구 목록 조회
+// @Description  MCP 서비스에서 제공하는 도구 목록 조회
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "工具列表"
-// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Param        id   path      string  true  "MCP 서비스 ID"
+// @Success      200  {object}  map[string]interface{}  "도구 목록"
+// @Failure      500  {object}  errors.AppError         "서버 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/tools [get]
@@ -385,14 +385,14 @@ func (h *MCPServiceHandler) GetMCPServiceTools(c *gin.Context) {
 }
 
 // GetMCPServiceResources godoc
-// @Summary      获取MCP服务资源列表
-// @Description  获取MCP服务提供的资源列表
-// @Tags         MCP服务
+// @Summary      MCP 서비스 리소스 목록 조회
+// @Description  MCP 서비스에서 제공하는 리소스 목록 조회
+// @Tags         MCP 서비스
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "MCP服务ID"
-// @Success      200  {object}  map[string]interface{}  "资源列表"
-// @Failure      500  {object}  errors.AppError         "服务器错误"
+// @Param        id   path      string  true  "MCP 서비스 ID"
+// @Success      200  {object}  map[string]interface{}  "리소스 목록"
+// @Failure      500  {object}  errors.AppError         "서버 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services/{id}/resources [get]

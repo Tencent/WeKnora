@@ -9,39 +9,39 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// ProviderName 模型服务商名称
+// ProviderName 모델 서비스 공급자 이름
 type ProviderName string
 
 const (
 	// OpenAI
 	ProviderOpenAI ProviderName = "openai"
-	// 阿里云 DashScope
+	// Aliyun DashScope
 	ProviderAliyun ProviderName = "aliyun"
-	// 智谱AI (GLM 系列)
+	// Zhipu AI (GLM 시리즈)
 	ProviderZhipu ProviderName = "zhipu"
 	// OpenRouter
 	ProviderOpenRouter ProviderName = "openrouter"
-	// 硅基流动
+	// SiliconFlow
 	ProviderSiliconFlow ProviderName = "siliconflow"
 	// Jina AI (Embedding and Rerank)
 	ProviderJina ProviderName = "jina"
-	// Generic 兼容OpenAI (自定义部署)
+	// Generic OpenAI 호환 (사용자 정의 배포)
 	ProviderGeneric ProviderName = "generic"
 	// DeepSeek
 	ProviderDeepSeek ProviderName = "deepseek"
 	// Google Gemini
 	ProviderGemini ProviderName = "gemini"
-	// 火山引擎 Ark
+	// Volcengine Ark
 	ProviderVolcengine ProviderName = "volcengine"
-	// 腾讯混元
+	// Tencent Hunyuan
 	ProviderHunyuan ProviderName = "hunyuan"
 	// MiniMax
 	ProviderMiniMax ProviderName = "minimax"
-	// 小米 Mimo
+	// Xiaomi Mimo
 	ProviderMimo ProviderName = "mimo"
 )
 
-// AllProviders 返回所有注册的提供者名称
+// AllProviders 등록된 모든 공급자 이름을 반환합니다
 func AllProviders() []ProviderName {
 	return []ProviderName{
 		ProviderGeneric,
@@ -60,30 +60,30 @@ func AllProviders() []ProviderName {
 	}
 }
 
-// ProviderInfo 包含提供者的元数据
+// ProviderInfo 공급자 메타데이터 포함
 type ProviderInfo struct {
-	Name         ProviderName               // 提供者标识
-	DisplayName  string                     // 可读名称
-	Description  string                     // 提供者描述
-	DefaultURLs  map[types.ModelType]string // 按模型类型区分的默认 BaseURL
-	ModelTypes   []types.ModelType          // 支持的模型类型
-	RequiresAuth bool                       // 是否需要 API key
-	ExtraFields  []ExtraFieldConfig         // 额外配置字段
+	Name         ProviderName               // 공급자 식별자
+	DisplayName  string                     // 표시 이름
+	Description  string                     // 공급자 설명
+	DefaultURLs  map[types.ModelType]string // 모델 유형별 기본 BaseURL
+	ModelTypes   []types.ModelType          // 지원되는 모델 유형
+	RequiresAuth bool                       // API 키 필요 여부
+	ExtraFields  []ExtraFieldConfig         // 추가 구성 필드
 }
 
-// GetDefaultURL 获取指定模型类型的默认 URL
+// GetDefaultURL 지정된 모델 유형의 기본 URL 가져오기
 func (p ProviderInfo) GetDefaultURL(modelType types.ModelType) string {
 	if url, ok := p.DefaultURLs[modelType]; ok {
 		return url
 	}
-	// 回退到 Chat URL
+	// Chat URL로 대체
 	if url, ok := p.DefaultURLs[types.ModelTypeKnowledgeQA]; ok {
 		return url
 	}
 	return ""
 }
 
-// ExtraFieldConfig 定义提供者的额外配置字段
+// ExtraFieldConfig 공급자의 추가 구성 필드 정의
 type ExtraFieldConfig struct {
 	Key         string `json:"key"`
 	Label       string `json:"label"`
@@ -97,7 +97,7 @@ type ExtraFieldConfig struct {
 	} `json:"options,omitempty"`
 }
 
-// Config 表示模型提供者的配置
+// Config 모델 공급자 구성
 type Config struct {
 	Provider  ProviderName   `json:"provider"`
 	BaseURL   string         `json:"base_url"`
@@ -108,27 +108,27 @@ type Config struct {
 }
 
 type Provider interface {
-	// Info 返回服务商的元数据
+	// Info 서비스 공급자의 메타데이터 반환
 	Info() ProviderInfo
 
-	// ValidateConfig 验证服务商的配置
+	// ValidateConfig 서비스 공급자 구성 검증
 	ValidateConfig(config *Config) error
 }
 
-// registry 存储所有注册的提供者
+// registry 등록된 모든 공급자 저장
 var (
 	registryMu sync.RWMutex
 	registry   = make(map[ProviderName]Provider)
 )
 
-// Register 添加一个提供者到全局注册表
+// Register 전역 레지스트리에 공급자 추가
 func Register(p Provider) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	registry[p.Info().Name] = p
 }
 
-// Get 通过名称从注册表中获取提供者
+// Get 이름을 통해 레지스트리에서 공급자 가져오기
 func Get(name ProviderName) (Provider, bool) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -136,18 +136,18 @@ func Get(name ProviderName) (Provider, bool) {
 	return p, ok
 }
 
-// GetOrDefault 通过名称从注册表中获取提供者，如果未找到则返回默认提供者
+// GetOrDefault 이름을 통해 레지스트리에서 공급자를 가져오고, 없으면 기본 공급자 반환
 func GetOrDefault(name ProviderName) Provider {
 	p, ok := Get(name)
 	if ok {
 		return p
 	}
-	// 如果未找到则返回默认提供者
+	// 찾지 못하면 기본 공급자 반환
 	p, _ = Get(ProviderGeneric)
 	return p
 }
 
-// List 返回所有注册的提供者（按 AllProviders 定义的顺序）
+// List 등록된 모든 공급자 반환 (AllProviders 정의 순서대로)
 func List() []ProviderInfo {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -161,7 +161,7 @@ func List() []ProviderInfo {
 	return result
 }
 
-// ListByModelType 返回所有支持指定模型类型的提供者（按 AllProviders 定义的顺序）
+// ListByModelType 지정된 모델 유형을 지원하는 모든 공급자 반환 (AllProviders 정의 순서대로)
 func ListByModelType(modelType types.ModelType) []ProviderInfo {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
@@ -181,7 +181,7 @@ func ListByModelType(modelType types.ModelType) []ProviderInfo {
 	return result
 }
 
-// DetectProvider 通过 BaseURL 检测服务商
+// DetectProvider BaseURL을 통해 서비스 공급자 감지
 func DetectProvider(baseURL string) ProviderName {
 	switch {
 	case containsAny(baseURL, "dashscope.aliyuncs.com"):

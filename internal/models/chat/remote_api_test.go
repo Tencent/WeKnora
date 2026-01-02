@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能
+// TestRemoteAPIChat Remote API Chat의 모든 기능 종합 테스트
 func TestRemoteAPIChat(t *testing.T) {
-	// 获取环境变量
+	// 환경 변수 가져오기
 	deepseekAPIKey := os.Getenv("DEEPSEEK_API_KEY")
 	aliyunAPIKey := os.Getenv("ALIYUN_API_KEY")
 
-	// 定义测试配置
+	// 테스트 구성 정의
 	testConfigs := []struct {
 		name    string
 		apiKey  string
@@ -74,7 +74,7 @@ func TestRemoteAPIChat(t *testing.T) {
 		},
 	}
 
-	// 测试消息
+	// 테스트 메시지
 	testMessages := []Message{
 		{
 			Role:    "user",
@@ -82,31 +82,31 @@ func TestRemoteAPIChat(t *testing.T) {
 		},
 	}
 
-	// 测试选项
+	// 테스트 옵션
 	testOptions := &ChatOptions{
 		Temperature: 0.7,
 		MaxTokens:   100,
 	}
 
-	// 创建上下文
+	// 컨텍스트 생성
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// 遍历所有配置进行测试
+	// 모든 구성 반복 테스트
 	for _, tc := range testConfigs {
 		t.Run(tc.name, func(t *testing.T) {
-			// 检查 API Key
+			// API Key 확인
 			if tc.apiKey == "" {
 				t.Skip(tc.skipMsg)
 			}
 
-			// 创建聊天实例
+			// 채팅 인스턴스 생성
 			chat, err := NewRemoteAPIChat(tc.config)
 			require.NoError(t, err)
 			assert.Equal(t, tc.config.ModelName, chat.GetModelName())
 			assert.Equal(t, tc.config.ModelID, chat.GetModelID())
 
-			// 测试基本聊天功能
+			// 기본 채팅 기능 테스트
 			t.Run("Basic Chat", func(t *testing.T) {
 				response, err := chat.Chat(ctx, testMessages, testOptions)
 				require.NoError(t, err)

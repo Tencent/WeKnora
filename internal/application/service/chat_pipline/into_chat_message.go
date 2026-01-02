@@ -65,37 +65,37 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		})
 	}
 
-	// 验证用户查询的安全性
+	// 사용자 입력 검증
 	safeQuery, isValid := utils.ValidateInput(chatManage.Query)
 	if !isValid {
 		pipelineWarn(ctx, "IntoChatMessage", "invalid_query", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
-		return ErrTemplateExecute.WithError(fmt.Errorf("用户查询包含非法内容"))
+		return ErrTemplateExecute.WithError(fmt.Errorf("사용자 쿼리에 잘못된 내용이 포함되어 있습니다"))
 	}
 
 	// Prepare weekday names
-	weekdayName := []string{"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"}
+	weekdayName := []string{"일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"}
 
 	var contextsBuilder strings.Builder
 
 	// Build contexts string based on FAQ priority strategy
 	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
 		// Build structured context with FAQ prioritization
-		contextsBuilder.WriteString("### 资料来源 1：标准问答库 (FAQ)\n")
-		contextsBuilder.WriteString("【高置信度 - 请优先参考】\n")
+		contextsBuilder.WriteString("### 출처 1: 표준 질문 및 답변 (FAQ)\n")
+		contextsBuilder.WriteString("【높은 신뢰도 - 우선 참조】\n")
 		for i, result := range faqResults {
 			passage := getEnrichedPassageForChat(ctx, result)
 			if hasHighConfidenceFAQ && i == 0 {
-				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] ⭐ 精准匹配: %s\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] ⭐ 정확한 일치: %s\n", i+1, passage))
 			} else {
 				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] %s\n", i+1, passage))
 			}
 		}
 
 		if len(docResults) > 0 {
-			contextsBuilder.WriteString("\n### 资料来源 2：参考文档\n")
-			contextsBuilder.WriteString("【补充资料 - 仅在FAQ无法解答时参考】\n")
+			contextsBuilder.WriteString("\n### 출처 2: 참조 문서\n")
+			contextsBuilder.WriteString("【보충 자료 - FAQ로 답변할 수 없는 경우에만 참조】\n")
 			for i, result := range docResults {
 				passage := getEnrichedPassageForChat(ctx, result)
 				contextsBuilder.WriteString(fmt.Sprintf("[DOC-%d] %s\n", i+1, passage))
@@ -132,28 +132,28 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	return next()
 }
 
-// getEnrichedPassageForChat 合并Content和ImageInfo的文本内容，为聊天消息准备
+// getEnrichedPassageForChat 채팅 메시지 준비를 위해 Content와 ImageInfo의 텍스트 내용 병합
 func getEnrichedPassageForChat(ctx context.Context, result *types.SearchResult) string {
-	// 如果没有图片信息，直接返回内容
+	// 이미지 정보가 없으면 내용을 직접 반환
 	if result.Content == "" && result.ImageInfo == "" {
 		return ""
 	}
 
-	// 如果只有内容，没有图片信息
+	// 내용만 있고 이미지 정보가 없는 경우
 	if result.ImageInfo == "" {
 		return result.Content
 	}
 
-	// 处理图片信息并与内容合并
+	// 이미지 정보를 처리하고 내용과 병합
 	return enrichContentWithImageInfo(ctx, result.Content, result.ImageInfo)
 }
 
-// 正则表达式用于匹配Markdown图片链接
+// 마크다운 이미지 링크를 매칭하는 정규 표현식
 var markdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 
-// enrichContentWithImageInfo 将图片信息与文本内容合并
+// enrichContentWithImageInfo 이미지 정보를 텍스트 내용과 병합
 func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJSON string) string {
-	// 解析ImageInfo
+	// ImageInfo 파싱
 	var imageInfos []types.ImageInfo
 	err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos)
 	if err != nil {
@@ -167,70 +167,70 @@ func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJS
 		return content
 	}
 
-	// 创建图片URL到信息的映射
+	// 이미지 URL에서 정보로의 매핑 생성
 	imageInfoMap := make(map[string]*types.ImageInfo)
 	for i := range imageInfos {
 		if imageInfos[i].URL != "" {
 			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
 		}
-		// 同时检查原始URL
+		// 원본 URL도 확인
 		if imageInfos[i].OriginalURL != "" {
 			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
 		}
 	}
 
-	// 查找内容中的所有Markdown图片链接
+	// 내용에서 모든 마크다운 이미지 링크 찾기
 	matches := markdownImageRegex.FindAllStringSubmatch(content, -1)
 
-	// 用于存储已处理的图片URL
+	// 처리된 이미지 URL 저장용
 	processedURLs := make(map[string]bool)
 
 	pipelineInfo(ctx, "IntoChatMessage", "image_markdown_links", map[string]interface{}{
 		"match_count": len(matches),
 	})
 
-	// 替换每个图片链接，添加描述和OCR文本
+	// 각 이미지 링크를 대체하고 설명 및 OCR 텍스트 추가
 	for _, match := range matches {
 		if len(match) < 3 {
 			continue
 		}
 
-		// 提取图片URL，忽略alt文本
+		// 이미지 URL 추출, alt 텍스트 무시
 		imgURL := match[2]
 
-		// 标记该URL已处理
+		// 해당 URL이 처리되었음을 표시
 		processedURLs[imgURL] = true
 
-		// 查找匹配的图片信息
+		// 일치하는 이미지 정보 찾기
 		imgInfo, found := imageInfoMap[imgURL]
 
-		// 如果找到匹配的图片信息，添加描述和OCR文本
+		// 일치하는 이미지 정보를 찾으면 설명 및 OCR 텍스트 추가
 		if found && imgInfo != nil {
 			replacement := match[0] + "\n"
 			if imgInfo.Caption != "" {
-				replacement += fmt.Sprintf("图片描述: %s\n", imgInfo.Caption)
+				replacement += fmt.Sprintf("이미지 설명: %s\n", imgInfo.Caption)
 			}
 			if imgInfo.OCRText != "" {
-				replacement += fmt.Sprintf("图片文本: %s\n", imgInfo.OCRText)
+				replacement += fmt.Sprintf("이미지 텍스트: %s\n", imgInfo.OCRText)
 			}
 			content = strings.Replace(content, match[0], replacement, 1)
 		}
 	}
 
-	// 处理未在内容中找到但存在于ImageInfo中的图片
+	// 내용에서 찾을 수 없지만 ImageInfo에 존재하는 이미지 처리
 	var additionalImageTexts []string
 	for _, imgInfo := range imageInfos {
-		// 如果图片URL已经处理过，跳过
+		// 이미지 URL이 이미 처리된 경우 건너뜀
 		if processedURLs[imgInfo.URL] || processedURLs[imgInfo.OriginalURL] {
 			continue
 		}
 
 		var imgTexts []string
 		if imgInfo.Caption != "" {
-			imgTexts = append(imgTexts, fmt.Sprintf("图片 %s 的描述信息: %s", imgInfo.URL, imgInfo.Caption))
+			imgTexts = append(imgTexts, fmt.Sprintf("이미지 %s 의 설명 정보: %s", imgInfo.URL, imgInfo.Caption))
 		}
 		if imgInfo.OCRText != "" {
-			imgTexts = append(imgTexts, fmt.Sprintf("图片 %s 的文本: %s", imgInfo.URL, imgInfo.OCRText))
+			imgTexts = append(imgTexts, fmt.Sprintf("이미지 %s 의 텍스트: %s", imgInfo.URL, imgInfo.OCRText))
 		}
 
 		if len(imgTexts) > 0 {
@@ -238,12 +238,12 @@ func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJS
 		}
 	}
 
-	// 如果有额外的图片信息，添加到内容末尾
+	// 추가 이미지 정보가 있는 경우 내용 끝에 추가
 	if len(additionalImageTexts) > 0 {
 		if content != "" {
 			content += "\n\n"
 		}
-		content += "附加图片信息:\n" + strings.Join(additionalImageTexts, "\n")
+		content += "추가 이미지 정보:\n" + strings.Join(additionalImageTexts, "\n")
 	}
 
 	pipelineInfo(ctx, "IntoChatMessage", "image_enrich_summary", map[string]interface{}{

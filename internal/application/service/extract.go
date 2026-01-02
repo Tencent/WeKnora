@@ -22,61 +22,61 @@ import (
 )
 
 const (
-	// tableDescriptionPromptTemplate 表格描述生成的 prompt 模板
-	tableDescriptionPromptTemplate = `你是一个数据分析专家。请根据以下表格的结构信息和数据样本，生成一段简洁的表格元数据描述（200-300字）。
+	// tableDescriptionPromptTemplate 테이블 설명 생성 프롬프트 템플릿
+	tableDescriptionPromptTemplate = `당신은 데이터 분석 전문가입니다. 다음 테이블 구조 정보와 데이터 샘플을 바탕으로 간결한 테이블 메타데이터 설명을 작성해 주세요(200-300자).
 
-表名: %s
-
-%s
-
-%s
-
-请从以下维度描述这个表格：
-1. **数据主题**：这个表格记录的是什么类型的数据？（如：用户信息、销售记录、日志数据等）
-2. **核心字段**：列出3-5个最重要的字段及其含义
-3. **数据规模**：总行数和列数
-4. **业务场景**：这个表格可能用于什么业务分析或应用场景？
-5. **关键特征**：数据有什么显著特点？（如：包含地理位置、有分类标签、存在层级关系等）
-
-**重要提示**：
-- 不要输出具体的数据值或样本内容
-- 使用概括性的描述，让用户能快速判断这个表格是否包含他们需要的信息
-- 用简洁专业的语言，便于检索和理解`
-
-	// columnDescriptionsPromptTemplate 列描述生成的 prompt 模板
-	columnDescriptionsPromptTemplate = `你是一个数据分析专家。请根据以下表格的结构信息和数据样本，为每一列生成结构化的描述信息。
-
-表名: %s
+테이블명: %s
 
 %s
 
 %s
 
-请为每一列生成详细的描述，包含以下信息：
-1. **字段含义**：这一列存储的是什么信息？（如：用户ID、订单金额、创建时间等）
-2. **数据类型**：数据的类型和格式（如：整数、字符串、日期时间、布尔值等）
-3. **业务用途**：这个字段在业务中的作用（如：用于用户识别、金额计算、时间排序等）
-4. **数据特征**：数据的显著特点（如：唯一标识、可为空、有枚举值、有单位等）
+다음 차원에서 이 테이블을 설명해 주세요:
+1. **데이터 주제**: 이 테이블은 어떤 유형의 데이터를 기록합니까? (예: 사용자 정보, 판매 기록, 로그 데이터 등)
+2. **핵심 필드**: 가장 중요한 3-5개의 필드와 그 의미를 나열해 주세요.
+3. **데이터 규모**: 총 행 수와 열 수
+4. **비즈니스 시나리오**: 이 테이블은 어떤 비즈니스 분석이나 응용 시나리오에 사용될 수 있습니까?
+5. **주요 특징**: 데이터의 두드러진 특징은 무엇입니까? (예: 지리적 위치 포함, 분류 태그 있음, 계층 구조 존재 등)
 
-请按以下格式输出（每列一个段落）：
+**중요 팁**:
+- 구체적인 데이터 값이나 샘플 내용을 출력하지 마세요.
+- 사용자가 필요한 정보가 포함되어 있는지 빠르게 판단할 수 있도록 개괄적인 설명을 사용하세요.
+- 검색과 이해가 쉽도록 간결하고 전문적인 언어를 사용하세요.`
 
-**列名1** (数据类型)
-- 字段含义：xxx
-- 业务用途：xxx
-- 数据特征：xxx
+	// columnDescriptionsPromptTemplate 열 설명 생성 프롬프트 템플릿
+	columnDescriptionsPromptTemplate = `당신은 데이터 분석 전문가입니다. 다음 테이블 구조 정보와 데이터 샘플을 바탕으로 각 열에 대한 구조화된 설명 정보를 생성해 주세요.
 
-**列名2** (数据类型)
-- 字段含义：xxx
-- 业务用途：xxx
-- 数据特征：xxx
+테이블명: %s
 
-**重要提示**：
-- 不要输出具体的数据值，只描述字段的元信息
-- 使用清晰的业务术语，便于用户理解和搜索
-- 如果从样本数据中能推断出枚举值范围，可以概括说明（如：状态字段包含待处理/进行中/已完成等状态）`
+%s
+
+%s
+
+각 열에 대해 다음 정보를 포함하는 자세한 설명을 생성해 주세요:
+1. **필드 의미**: 이 열은 어떤 정보를 저장합니까? (예: 사용자 ID, 주문 금액, 생성 시간 등)
+2. **데이터 유형**: 데이터의 유형과 형식 (예: 정수, 문자열, 날짜/시간, 불리언 등)
+3. **비즈니스 용도**: 비즈니스에서 이 필드의 역할 (예: 사용자 식별, 금액 계산, 시간 정렬 등)
+4. **데이터 특징**: 데이터의 두드러진 특징 (예: 고유 식별자, null 허용, 열거형 값 있음, 단위 있음 등)
+
+다음 형식에 따라 출력해 주세요(열당 하나의 단락):
+
+**열 이름 1** (데이터 유형)
+- 필드 의미: xxx
+- 비즈니스 용도: xxx
+- 데이터 특징: xxx
+
+**열 이름 2** (데이터 유형)
+- 필드 의미: xxx
+- 비즈니스 용도: xxx
+- 데이터 특징: xxx
+
+**중요 팁**:
+- 구체적인 데이터 값을 출력하지 말고 필드의 메타 정보만 설명하세요.
+- 사용자가 이해하고 검색하기 쉽도록 명확한 비즈니스 용어를 사용하세요.
+- 샘플 데이터에서 열거형 값 범위를 추론할 수 있는 경우 요약하여 설명할 수 있습니다(예: 상태 필드에는 대기 중/진행 중/완료 등 상태 포함).`
 )
 
-// NewChunkExtractTask creates a new chunk extract task
+// NewChunkExtractTask 새로운 청크 추출 작업 생성
 func NewChunkExtractTask(
 	ctx context.Context,
 	client *asynq.Client,
@@ -106,7 +106,7 @@ func NewChunkExtractTask(
 	return nil
 }
 
-// NewTableExtractTask creates a new table extract task
+// NewTableExtractTask 새로운 테이블 추출 작업 생성
 func NewDataTableSummaryTask(
 	ctx context.Context,
 	client *asynq.Client,
@@ -135,7 +135,7 @@ func NewDataTableSummaryTask(
 	return nil
 }
 
-// ChunkExtractService is a service for extracting chunks
+// ChunkExtractService 청크 추출 서비스
 type ChunkExtractService struct {
 	template          *types.PromptTemplateStructured
 	modelService      interfaces.ModelService
@@ -144,7 +144,7 @@ type ChunkExtractService struct {
 	graphEngine       interfaces.RetrieveGraphRepository
 }
 
-// NewChunkExtractService creates a new chunk extract service
+// NewChunkExtractService 새로운 청크 추출 서비스 생성
 func NewChunkExtractService(
 	config *config.Config,
 	modelService interfaces.ModelService,
@@ -165,7 +165,7 @@ func NewChunkExtractService(
 	}
 }
 
-// Handle handles the chunk extraction task
+// Handle 청크 추출 작업 처리
 func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	var p types.ExtractChunkPayload
 	if err := json.Unmarshal(t.Payload(), &p); err != nil {
@@ -233,7 +233,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
-// DataTableExtractPayload represents the table extract task payload
+// DataTableExtractPayload 테이블 추출 작업 페이로드
 type DataTableSummaryPayload struct {
 	TenantID       uint64 `json:"tenant_id"`
 	KnowledgeID    string `json:"knowledge_id"`
@@ -241,7 +241,7 @@ type DataTableSummaryPayload struct {
 	EmbeddingModel string `json:"embedding_model"`
 }
 
-// DataTableSummaryService is a service for extracting tables
+// DataTableSummaryService 테이블 추출 서비스
 type DataTableSummaryService struct {
 	modelService     interfaces.ModelService
 	knowledgeService interfaces.KnowledgeService
@@ -251,7 +251,7 @@ type DataTableSummaryService struct {
 	sqlDB            *sql.DB
 }
 
-// NewDataTableSummaryService creates a new DataTableSummaryService
+// NewDataTableSummaryService 새로운 DataTableSummaryService 생성
 func NewDataTableSummaryService(
 	modelService interfaces.ModelService,
 	knowledgeService interfaces.KnowledgeService,
@@ -270,10 +270,10 @@ func NewDataTableSummaryService(
 	}
 }
 
-// Handle implements the TaskHandler interface for table extraction
-// 整体流程：初始化 -> 准备资源 -> 加载数据 -> 生成摘要 -> 创建索引
+// Handle 테이블 추출을 위한 TaskHandler 인터페이스 구현
+// 전체 흐름: 초기화 -> 리소스 준비 -> 데이터 로드 -> 요약 생성 -> 인덱스 생성
 func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) error {
-	// 1. 解析任务并初始化上下文
+	// 1. 작업 파싱 및 컨텍스트 초기화
 	var payload DataTableSummaryPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal table extract task payload: %v", err)
@@ -286,19 +286,19 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 
 	logger.Infof(ctx, "Processing table extraction for knowledge: %s", payload.KnowledgeID)
 
-	// 2. 准备所有必需的资源（知识、模型、引擎等）
+	// 2. 모든 필수 리소스 준비 (지식, 모델, 엔진 등)
 	resources, err := s.prepareResources(ctx, payload)
 	if err != nil {
 		return err
 	}
 
-	// 3. 加载表格数据并生成摘要
+	// 3. 테이블 데이터 로드 및 요약 생성
 	chunks, err := s.processTableData(ctx, resources)
 	if err != nil {
 		return err
 	}
 
-	// 4. 索引到向量数据库
+	// 4. 벡터 데이터베이스에 인덱싱
 	if err := s.indexToVectorDB(ctx, chunks, resources.retrieveEngine, resources.embeddingModel); err != nil {
 		s.cleanupOnFailure(ctx, resources, chunks, err)
 		return err
@@ -308,7 +308,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	return nil
 }
 
-// extractionResources 封装提取过程所需的所有资源
+// extractionResources 추출 과정에 필요한 모든 리소스 캡슐화
 type extractionResources struct {
 	knowledge      *types.Knowledge
 	chatModel      chat.Chat
@@ -316,45 +316,45 @@ type extractionResources struct {
 	retrieveEngine *retriever.CompositeRetrieveEngine
 }
 
-// prepareResources 准备提取所需的所有资源
-// 思路：集中加载所有依赖，统一错误处理，避免分散的资源获取逻辑
+// prepareResources 추출에 필요한 모든 리소스 준비
+// 아이디어: 모든 의존성을 중앙 집중식으로 로드하고 오류 처리를 통합하여 분산된 리소스 가져오기 로직 방지
 func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload DataTableSummaryPayload) (*extractionResources, error) {
-	// 获取并验证知识文件
+	// 지식 파일 가져오기 및 검증
 	knowledge, err := s.knowledgeService.GetKnowledgeByID(ctx, payload.KnowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get knowledge: %v", err)
 		return nil, err
 	}
 
-	// 验证文件类型
+	// 파일 유형 검증
 	fileType := strings.ToLower(knowledge.FileType)
 	if fileType != "csv" && fileType != "xlsx" && fileType != "xls" {
 		logger.Warnf(ctx, "knowledge %s is not a CSV or Excel file, skipping table summary", payload.KnowledgeID)
 		return nil, fmt.Errorf("unsupported file type: %s", fileType)
 	}
 
-	// 获取租户信息
+	// 테넌트 정보 가져오기
 	tenantInfo, err := s.tenantService.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant: %v", err)
 		return nil, err
 	}
 
-	// 获取聊天模型（用于生成摘要）
+	// 채팅 모델 가져오기 (요약 생성용)
 	chatModel, err := s.modelService.GetChatModel(ctx, payload.SummaryModel)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get chat model: %v", err)
 		return nil, err
 	}
 
-	// 获取嵌入模型（用于向量化）
+	// 임베딩 모델 가져오기 (벡터화용)
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, payload.EmbeddingModel)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get embedding model: %v", err)
 		return nil, err
 	}
 
-	// 获取检索引擎
+	// 검색 엔진 가져오기
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		logger.Errorf(ctx, "failed to get retrieve engine: %v", err)
@@ -369,15 +369,15 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 	}, nil
 }
 
-// processTableData 处理表格数据：加载 -> 分析 -> 生成摘要 -> 创建chunks
-// 思路：将数据处理的核心流程集中在一起，保持逻辑连贯性
+// processTableData 테이블 데이터 처리: 로드 -> 분석 -> 요약 생성 -> 청크 생성
+// 아이디어: 데이터 처리의 핵심 흐름을 한곳에 집중시켜 논리적 일관성 유지
 func (s *DataTableSummaryService) processTableData(ctx context.Context, resources *extractionResources) ([]*types.Chunk, error) {
-	// 创建DuckDB会话并加载数据
+	// DuckDB 세션 생성 및 데이터 로드
 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
 	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, s.sqlDB, sessionID)
 	defer duckdbTool.Cleanup(ctx)
 
-	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
+	// knowledge.ID를 테이블 이름으로 사용하여 파일 유형에 따라 데이터 자동 로드
 	tableSchema, err := duckdbTool.LoadFromKnowledge(ctx, resources.knowledge)
 	if err != nil {
 		logger.Errorf(ctx, "failed to load data into DuckDB: %v", err)
@@ -386,7 +386,7 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 
 	logger.Infof(ctx, "Loaded table %s with %d columns and %d rows", tableSchema.TableName, len(tableSchema.Columns), tableSchema.RowCount)
 
-	// 获取样本数据用于生成摘要
+	// 요약 생성을 위한 샘플 데이터 가져오기
 	input := tools.DataAnalysisInput{
 		KnowledgeID: resources.knowledge.ID,
 		Sql:         fmt.Sprintf("SELECT * FROM \"%s\" LIMIT 10", tableSchema.TableName),
@@ -402,11 +402,11 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 		return nil, err
 	}
 
-	// 构建共用的schema和样本数据描述
+	// 공통 스키마 및 샘플 데이터 설명 구성
 	schemaDesc := tableSchema.Description()
 	sampleDesc := s.buildSampleDataDescription(sampleResult, 10)
 
-	// 使用AI生成表格摘要和列描述
+	// AI를 사용하여 테이블 요약 및 열 설명 생성
 	tableDescription, err := s.generateTableDescription(ctx, resources.chatModel, tableSchema.TableName, schemaDesc, sampleDesc)
 	if err != nil {
 		logger.Errorf(ctx, "failed to generate table description: %v", err)
@@ -421,17 +421,17 @@ func (s *DataTableSummaryService) processTableData(ctx context.Context, resource
 	}
 	logger.Debugf(ctx, "column describe of knowledge %s: %s", resources.knowledge.ID, columnDescription)
 
-	// 构建chunks：一个表格摘要chunk + 多个列描述chunks
+	// 청크 구성: 하나의 테이블 요약 청크 + 여러 열 설명 청크
 	chunks := s.buildChunks(resources, tableDescription, columnDescription)
 	return chunks, nil
 }
 
-// buildChunks 构建chunk对象
-// tableDescription和columnDescriptions分别生成一个chunk
+// buildChunks 청크 객체 생성
+// tableDescription 및 columnDescriptions는 각각 하나의 청크를 생성합니다.
 func (s *DataTableSummaryService) buildChunks(resources *extractionResources, tableDescription string, columnDescription string) []*types.Chunk {
 	chunks := make([]*types.Chunk, 0, 2)
 
-	// 表格摘要chunk
+	// 테이블 요약 청크
 	summaryChunk := &types.Chunk{
 		ID:              uuid.New().String(),
 		TenantID:        resources.knowledge.TenantID,
@@ -445,7 +445,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 	}
 	chunks = append(chunks, summaryChunk)
 
-	// 列描述chunk（所有列的描述合并为一个chunk）
+	// 열 설명 청크 (모든 열 설명이 하나의 청크로 병합됨)
 	columnChunk := &types.Chunk{
 		ID:              uuid.New().String(),
 		TenantID:        resources.knowledge.TenantID,
@@ -466,15 +466,15 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 	return chunks
 }
 
-// indexToVectorDB 将chunks索引到向量数据库
-// 思路：批量构建索引信息，统一索引，更新状态
+// indexToVectorDB 청크를 벡터 데이터베이스에 인덱싱
+// 아이디어: 인덱스 정보를 일괄 구성하고, 통합 인덱싱 후 상태 업데이트
 func (s *DataTableSummaryService) indexToVectorDB(
 	ctx context.Context,
 	chunks []*types.Chunk,
 	engine *retriever.CompositeRetrieveEngine,
 	embedder embedding.Embedder,
 ) error {
-	// 构建索引信息列表
+	// 인덱스 정보 목록 구성
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
 	for _, chunk := range chunks {
 		indexInfoList = append(indexInfoList, &types.IndexInfo{
@@ -487,20 +487,20 @@ func (s *DataTableSummaryService) indexToVectorDB(
 		})
 	}
 
-	// 保存到数据库
+	// 데이터베이스에 저장
 	if err := s.chunkService.CreateChunks(ctx, chunks); err != nil {
 		logger.Errorf(ctx, "failed to create chunks: %v", err)
 		return err
 	}
 	logger.Infof(ctx, "Created %d chunks for data table", len(chunks))
 
-	// 批量索引
+	// 일괄 인덱싱
 	if err := engine.BatchIndex(ctx, embedder, indexInfoList); err != nil {
 		logger.Errorf(ctx, "failed to index chunks: %v", err)
 		return err
 	}
 
-	// 更新chunk状态为已索引
+	// 청크 상태를 인덱싱됨으로 업데이트
 	for _, chunk := range chunks {
 		chunk.Status = int(types.ChunkStatusIndexed)
 	}
@@ -512,12 +512,12 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	return nil
 }
 
-// cleanupOnFailure 索引失败时的清理工作
-// 思路：删除已创建的chunk和对应的向量索引，避免脏数据残留
+// cleanupOnFailure 인덱싱 실패 시 정리 작업
+// 아이디어: 더티 데이터 잔류를 방지하기 위해 생성된 청크 및 해당 벡터 인덱스 삭제
 func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resources *extractionResources, chunks []*types.Chunk, indexErr error) {
 	logger.Warnf(ctx, "Starting cleanup due to failure: %v", indexErr)
 
-	// 1. 更新知识状态为失败
+	// 1. 지식 상태를 실패로 업데이트
 	resources.knowledge.ParseStatus = types.ParseStatusFailed
 	resources.knowledge.ErrorMessage = indexErr.Error()
 	if err := s.knowledgeService.UpdateKnowledge(ctx, resources.knowledge); err != nil {
@@ -526,13 +526,13 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 		logger.Infof(ctx, "Updated knowledge %s status to failed", resources.knowledge.ID)
 	}
 
-	// 提取chunk IDs
+	// 청크 ID 추출
 	chunkIDs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
 		chunkIDs = append(chunkIDs, chunk.ID)
 	}
 
-	// 删除已创建的chunks
+	// 생성된 청크 삭제
 	if len(chunkIDs) > 0 {
 		if err := s.chunkService.DeleteChunks(ctx, chunkIDs); err != nil {
 			logger.Errorf(ctx, "Failed to delete chunks: %v", err)
@@ -541,7 +541,7 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 		}
 	}
 
-	// 删除对应的向量索引
+	// 해당 벡터 인덱스 삭제
 	if len(chunkIDs) > 0 {
 		if err := resources.retrieveEngine.DeleteBySourceIDList(
 			ctx, chunkIDs, resources.embeddingModel.GetDimensions(), types.KnowledgeBaseTypeDocument,
@@ -555,7 +555,7 @@ func (s *DataTableSummaryService) cleanupOnFailure(ctx context.Context, resource
 	logger.Infof(ctx, "Cleanup completed")
 }
 
-// generateTableDescription generates a summary description for the entire table
+// generateTableDescription 테이블 전체에 대한 요약 설명 생성
 func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
 	prompt := fmt.Sprintf(tableDescriptionPromptTemplate, tableName, schemaDesc, sampleDesc)
 	// logger.Debugf(ctx, "generateTableDescription prompt: %s", prompt)
@@ -572,16 +572,16 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 		return "", fmt.Errorf("failed to generate table description: %w", err)
 	}
 
-	return fmt.Sprintf("# 表格摘要\n\n表名: %s\n\n%s", tableName, response.Content), nil
+	return fmt.Sprintf("# 테이블 요약\n\n테이블명: %s\n\n%s", tableName, response.Content), nil
 }
 
-// generateColumnDescriptions generates descriptions for each column in batch
+// generateColumnDescriptions 각 열에 대한 설명을 일괄 생성
 func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context, chatModel chat.Chat, tableName, schemaDesc, sampleDesc string) (string, error) {
-	// Build batch prompt for all columns
+	// 모든 열에 대한 일괄 프롬프트 구성
 	prompt := fmt.Sprintf(columnDescriptionsPromptTemplate, tableName, schemaDesc, sampleDesc)
 	// logger.Debugf(ctx, "generateColumnDescriptions prompt: %s", prompt)
 
-	// Call LLM once for all columns
+	// 모든 열에 대해 LLM 한 번 호출
 	thinking := false
 	response, err := chatModel.Chat(ctx, []chat.Message{
 		{Role: "user", Content: prompt},
@@ -594,13 +594,13 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 		return "", fmt.Errorf("failed to generate column descriptions: %w", err)
 	}
 
-	return fmt.Sprintf("# 表格列信息\n\n表名: %s\n\n%s", tableName, response.Content), nil
+	return fmt.Sprintf("# 테이블 열 정보\n\n테이블명: %s\n\n%s", tableName, response.Content), nil
 }
 
-// buildSampleDataDescription builds a formatted sample data description
+// buildSampleDataDescription 형식이 지정된 샘플 데이터 설명 생성
 func (s *DataTableSummaryService) buildSampleDataDescription(sampleData *types.ToolResult, maxRows int) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("前%d行数据示例:\n", maxRows))
+	builder.WriteString(fmt.Sprintf("상위 %d행 데이터 예시:\n", maxRows))
 
 	rows, ok := sampleData.Data["rows"].([]map[string]interface{})
 	if !ok {

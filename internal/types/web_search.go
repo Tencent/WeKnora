@@ -6,27 +6,27 @@ import (
 	"time"
 )
 
-// WebSearchConfig represents the web search configuration for a tenant
+// WebSearchConfig 테넌트의 웹 검색 구성을 나타냅니다
 type WebSearchConfig struct {
-	Provider          string   `json:"provider"`           // 搜索引擎提供商ID
-	APIKey            string   `json:"api_key"`            // API密钥（如果需要）
-	MaxResults        int      `json:"max_results"`        // 最大搜索结果数
-	IncludeDate       bool     `json:"include_date"`       // 是否包含日期
-	CompressionMethod string   `json:"compression_method"` // 压缩方法：none, summary, extract, rag
-	Blacklist         []string `json:"blacklist"`          // 黑名单规则列表
-	// RAG压缩相关配置
-	EmbeddingModelID   string `json:"embedding_model_id,omitempty"`  // 嵌入模型ID（用于RAG压缩）
-	EmbeddingDimension int    `json:"embedding_dimension,omitempty"` // 嵌入维度（用于RAG压缩）
-	RerankModelID      string `json:"rerank_model_id,omitempty"`     // 重排模型ID（用于RAG压缩）
-	DocumentFragments  int    `json:"document_fragments,omitempty"`  // 文档片段数量（用于RAG压缩）
+	Provider          string   `json:"provider"`           // 검색 엔진 공급자 ID
+	APIKey            string   `json:"api_key"`            // API 키 (필요한 경우)
+	MaxResults        int      `json:"max_results"`        // 최대 검색 결과 수
+	IncludeDate       bool     `json:"include_date"`       // 날짜 포함 여부
+	CompressionMethod string   `json:"compression_method"` // 압축 방법: none, summary, extract, rag
+	Blacklist         []string `json:"blacklist"`          // 블랙리스트 규칙 목록
+	// RAG 압축 관련 구성
+	EmbeddingModelID   string `json:"embedding_model_id,omitempty"`  // 임베딩 모델 ID (RAG 압축용)
+	EmbeddingDimension int    `json:"embedding_dimension,omitempty"` // 임베딩 차원 (RAG 압축용)
+	RerankModelID      string `json:"rerank_model_id,omitempty"`     // 재순위 모델 ID (RAG 압축용)
+	DocumentFragments  int    `json:"document_fragments,omitempty"`  // 문서 조각 수 (RAG 압축용)
 }
 
-// Value implements driver.Valuer interface for WebSearchConfig
+// Value WebSearchConfig를 데이터베이스 값으로 변환하는 driver.Valuer 인터페이스 구현
 func (c WebSearchConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements sql.Scanner interface for WebSearchConfig
+// Scan 데이터베이스 값을 WebSearchConfig로 변환하는 sql.Scanner 인터페이스 구현
 func (c *WebSearchConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -38,22 +38,22 @@ func (c *WebSearchConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// WebSearchResult represents a single web search result
+// WebSearchResult 단일 웹 검색 결과를 나타냅니다
 type WebSearchResult struct {
-	Title       string     `json:"title"`                  // 搜索结果标题
-	URL         string     `json:"url"`                    // 结果URL
-	Snippet     string     `json:"snippet"`                // 摘要片段
-	Content     string     `json:"content"`                // 完整内容（可选，需要额外抓取）
-	Source      string     `json:"source"`                 // 来源（如：duckduckgo等）
-	PublishedAt *time.Time `json:"published_at,omitempty"` // 发布时间（如果有）
+	Title       string     `json:"title"`                  // 검색 결과 제목
+	URL         string     `json:"url"`                    // 결과 URL
+	Snippet     string     `json:"snippet"`                // 요약 스니펫
+	Content     string     `json:"content"`                // 전체 내용 (선택 사항, 추가 크롤링 필요)
+	Source      string     `json:"source"`                 // 소스 (예: duckduckgo 등)
+	PublishedAt *time.Time `json:"published_at,omitempty"` // 게시 시간 (있는 경우)
 }
 
-// WebSearchProviderInfo represents information about a web search provider
+// WebSearchProviderInfo 웹 검색 공급자에 대한 정보를 나타냅니다
 type WebSearchProviderInfo struct {
-	ID             string `json:"id"`                // 提供商ID
-	Name           string `json:"name"`              // 提供商名称
-	Free           bool   `json:"free"`              // 是否免费
-	RequiresAPIKey bool   `json:"requires_api_key"`  // 是否需要API密钥
-	Description    string `json:"description"`       // 描述
-	APIURL         string `json:"api_url,omitempty"` // API地址（可选）
+	ID             string `json:"id"`                // 공급자 ID
+	Name           string `json:"name"`              // 공급자 이름
+	Free           bool   `json:"free"`              // 무료 여부
+	RequiresAPIKey bool   `json:"requires_api_key"`  // API 키 필요 여부
+	Description    string `json:"description"`       // 설명
+	APIURL         string `json:"api_url,omitempty"` // API 주소 (선택 사항)
 }

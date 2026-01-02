@@ -2,40 +2,40 @@ package types
 
 const (
 	TypeChunkExtract       = "chunk:extract"
-	TypeDocumentProcess    = "document:process"    // 文档处理任务
-	TypeFAQImport          = "faq:import"          // FAQ导入任务
-	TypeQuestionGeneration = "question:generation" // 问题生成任务
-	TypeSummaryGeneration  = "summary:generation"  // 摘要生成任务
-	TypeKBClone            = "kb:clone"            // 知识库复制任务
-	TypeIndexDelete        = "index:delete"        // 索引删除任务
-	TypeKBDelete           = "kb:delete"           // 知识库删除任务
-	TypeDataTableSummary   = "datatable:summary"   // 表格摘要任务
+	TypeDocumentProcess    = "document:process"    // 문서 처리 작업
+	TypeFAQImport          = "faq:import"          // FAQ 가져오기 작업
+	TypeQuestionGeneration = "question:generation" // 질문 생성 작업
+	TypeSummaryGeneration  = "summary:generation"  // 요약 생성 작업
+	TypeKBClone            = "kb:clone"            // 지식베이스 복사 작업
+	TypeIndexDelete        = "index:delete"        // 인덱스 삭제 작업
+	TypeKBDelete           = "kb:delete"           // 지식베이스 삭제 작업
+	TypeDataTableSummary   = "datatable:summary"   // 데이터 테이블 요약 작업
 )
 
-// ExtractChunkPayload represents the extract chunk task payload
+// ExtractChunkPayload 청크 추출 작업 페이로드를 나타냅니다.
 type ExtractChunkPayload struct {
 	TenantID uint64 `json:"tenant_id"`
 	ChunkID  string `json:"chunk_id"`
 	ModelID  string `json:"model_id"`
 }
 
-// DocumentProcessPayload represents the document process task payload
+// DocumentProcessPayload 문서 처리 작업 페이로드를 나타냅니다.
 type DocumentProcessPayload struct {
 	RequestId                string   `json:"request_id"`
 	TenantID                 uint64   `json:"tenant_id"`
 	KnowledgeID              string   `json:"knowledge_id"`
 	KnowledgeBaseID          string   `json:"knowledge_base_id"`
-	FilePath                 string   `json:"file_path,omitempty"` // 文件路径（文件导入时使用）
-	FileName                 string   `json:"file_name,omitempty"` // 文件名（文件导入时使用）
-	FileType                 string   `json:"file_type,omitempty"` // 文件类型（文件导入时使用）
-	URL                      string   `json:"url,omitempty"`       // URL（URL导入时使用）
-	Passages                 []string `json:"passages,omitempty"`  // 文本段落（文本导入时使用）
+	FilePath                 string   `json:"file_path,omitempty"` // 파일 경로 (파일 가져오기 시 사용)
+	FileName                 string   `json:"file_name,omitempty"` // 파일 이름 (파일 가져오기 시 사용)
+	FileType                 string   `json:"file_type,omitempty"` // 파일 유형 (파일 가져오기 시 사용)
+	URL                      string   `json:"url,omitempty"`       // URL (URL 가져오기 시 사용)
+	Passages                 []string `json:"passages,omitempty"`  // 텍스트 구절 (텍스트 가져오기 시 사용)
 	EnableMultimodel         bool     `json:"enable_multimodel"`
-	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
-	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
+	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 질문 생성 활성화 여부
+	QuestionCount            int      `json:"question_count,omitempty"`   // 청크당 생성할 질문 수
 }
 
-// FAQImportPayload represents the FAQ import task payload
+// FAQImportPayload FAQ 가져오기 작업 페이로드를 나타냅니다.
 type FAQImportPayload struct {
 	TenantID    uint64            `json:"tenant_id"`
 	TaskID      string            `json:"task_id"`
@@ -45,7 +45,7 @@ type FAQImportPayload struct {
 	Mode        string            `json:"mode"`
 }
 
-// QuestionGenerationPayload represents the question generation task payload
+// QuestionGenerationPayload 질문 생성 작업 페이로드를 나타냅니다.
 type QuestionGenerationPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
@@ -53,14 +53,14 @@ type QuestionGenerationPayload struct {
 	QuestionCount   int    `json:"question_count"`
 }
 
-// SummaryGenerationPayload represents the summary generation task payload
+// SummaryGenerationPayload 요약 생성 작업 페이로드를 나타냅니다.
 type SummaryGenerationPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 }
 
-// KBClonePayload represents the knowledge base clone task payload
+// KBClonePayload 지식베이스 복사 작업 페이로드를 나타냅니다.
 type KBClonePayload struct {
 	TenantID uint64 `json:"tenant_id"`
 	TaskID   string `json:"task_id"`
@@ -68,7 +68,7 @@ type KBClonePayload struct {
 	TargetID string `json:"target_id"`
 }
 
-// IndexDeletePayload represents the index delete task payload
+// IndexDeletePayload 인덱스 삭제 작업 페이로드를 나타냅니다.
 type IndexDeletePayload struct {
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
@@ -78,14 +78,14 @@ type IndexDeletePayload struct {
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 }
 
-// KBDeletePayload represents the knowledge base delete task payload
+// KBDeletePayload 지식베이스 삭제 작업 페이로드를 나타냅니다.
 type KBDeletePayload struct {
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 }
 
-// KBCloneTaskStatus represents the status of a knowledge base clone task
+// KBCloneTaskStatus 지식베이스 복사 작업의 상태를 나타냅니다.
 type KBCloneTaskStatus string
 
 const (
@@ -95,30 +95,30 @@ const (
 	KBCloneStatusFailed     KBCloneTaskStatus = "failed"
 )
 
-// KBCloneProgress represents the progress of a knowledge base clone task
+// KBCloneProgress 지식베이스 복사 작업의 진행 상황을 나타냅니다.
 type KBCloneProgress struct {
 	TaskID    string            `json:"task_id"`
 	SourceID  string            `json:"source_id"`
 	TargetID  string            `json:"target_id"`
 	Status    KBCloneTaskStatus `json:"status"`
 	Progress  int               `json:"progress"`   // 0-100
-	Total     int               `json:"total"`      // 总知识数
-	Processed int               `json:"processed"`  // 已处理数
-	Message   string            `json:"message"`    // 状态消息
-	Error     string            `json:"error"`      // 错误信息
-	CreatedAt int64             `json:"created_at"` // 任务创建时间
-	UpdatedAt int64             `json:"updated_at"` // 最后更新时间
+	Total     int               `json:"total"`      // 총 지식 수
+	Processed int               `json:"processed"`  // 처리된 수
+	Message   string            `json:"message"`    // 상태 메시지
+	Error     string            `json:"error"`      // 오류 메시지
+	CreatedAt int64             `json:"created_at"` // 작업 생성 시간
+	UpdatedAt int64             `json:"updated_at"` // 마지막 업데이트 시간
 }
 
-// ChunkContext represents chunk content with surrounding context
+// ChunkContext 주변 문맥을 포함한 청크 내용을 나타냅니다.
 type ChunkContext struct {
 	ChunkID     string `json:"chunk_id"`
 	Content     string `json:"content"`
-	PrevContent string `json:"prev_content,omitempty"` // Previous chunk content for context
-	NextContent string `json:"next_content,omitempty"` // Next chunk content for context
+	PrevContent string `json:"prev_content,omitempty"` // 문맥을 위한 이전 청크 내용
+	NextContent string `json:"next_content,omitempty"` // 문맥을 위한 다음 청크 내용
 }
 
-// PromptTemplateStructured represents the prompt template structured
+// PromptTemplateStructured 구조화된 프롬프트 템플릿을 나타냅니다.
 type PromptTemplateStructured struct {
 	Description string      `json:"description"`
 	Tags        []string    `json:"tags"`
@@ -131,7 +131,7 @@ type GraphNode struct {
 	Attributes []string `json:"attributes,omitempty"`
 }
 
-// GraphRelation represents the relation of the graph
+// GraphRelation 그래프의 관계를 나타냅니다.
 type GraphRelation struct {
 	Node1 string `json:"node1,omitempty"`
 	Node2 string `json:"node2,omitempty"`
@@ -144,13 +144,13 @@ type GraphData struct {
 	Relation []*GraphRelation `json:"relation,omitempty"`
 }
 
-// NameSpace represents the name space of the knowledge base and knowledge
+// NameSpace 지식베이스 및 지식의 네임스페이스를 나타냅니다.
 type NameSpace struct {
 	KnowledgeBase string `json:"knowledge_base"`
 	Knowledge     string `json:"knowledge"`
 }
 
-// Labels returns the labels of the name space
+// Labels 네임스페이스의 레이블을 반환합니다.
 func (n NameSpace) Labels() []string {
 	res := make([]string, 0)
 	if n.KnowledgeBase != "" {

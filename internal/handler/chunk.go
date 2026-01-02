@@ -12,26 +12,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// ChunkHandler defines HTTP handlers for chunk operations
+// ChunkHandler 청크 작업을 위한 HTTP 핸들러 정의
 type ChunkHandler struct {
 	service interfaces.ChunkService
 }
 
-// NewChunkHandler creates a new chunk handler
+// NewChunkHandler 새로운 청크 핸들러 생성
 func NewChunkHandler(service interfaces.ChunkService) *ChunkHandler {
 	return &ChunkHandler{service: service}
 }
 
 // GetChunkByIDOnly godoc
-// @Summary      通过ID获取分块
-// @Description  仅通过分块ID获取分块详情（不需要knowledge_id）
-// @Tags         分块管理
+// @Summary      ID로 청크 조회
+// @Description  청크 ID로만 청크 상세 정보 조회 (knowledge_id 필요 없음)
+// @Tags         청크 관리
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "分块ID"
-// @Success      200  {object}  map[string]interface{}  "分块详情"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "分块不存在"
+// @Param        id   path      string  true  "청크 ID"
+// @Success      200  {object}  map[string]interface{}  "청크 상세 정보"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404  {object}  errors.AppError         "청크를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /chunks/by-id/{id} [get]
@@ -46,7 +46,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 		return
 	}
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
@@ -56,7 +56,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieving chunk by ID, chunk ID: %s, tenant ID: %d", chunkID, tenantID)
 
-	// Get chunk by ID
+	// ID로 청크 가져오기
 	chunk, err := h.service.GetChunkByID(ctx, chunkID)
 	if err != nil {
 		if err == service.ErrChunkNotFound {
@@ -69,7 +69,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 		return
 	}
 
-	// Validate tenant ID
+	// 테넌트 ID 검증
 	if chunk.TenantID != tenantID.(uint64) {
 		logger.Warnf(
 			ctx,
@@ -80,7 +80,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 		return
 	}
 
-	// 对 chunk 内容进行安全清理
+	// 청크 내용에 대한 보안 정리
 	if chunk.Content != "" {
 		chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
 	}
@@ -92,16 +92,16 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 }
 
 // ListKnowledgeChunks godoc
-// @Summary      获取知识分块列表
-// @Description  获取指定知识下的所有分块列表，支持分页
-// @Tags         分块管理
+// @Summary      지식 청크 목록 조회
+// @Description  지정된 지식 하의 모든 청크 목록 조회, 페이징 지원
+// @Tags         청크 관리
 // @Accept       json
 // @Produce      json
-// @Param        knowledge_id  path      string  true   "知识ID"
-// @Param        page          query     int     false  "页码"  default(1)
-// @Param        page_size     query     int     false  "每页数量"  default(10)
-// @Success      200           {object}  map[string]interface{}  "分块列表"
-// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Param        knowledge_id  path      string  true   "지식 ID"
+// @Param        page          query     int     false  "페이지 번호"  default(1)
+// @Param        page_size     query     int     false  "페이지당 항목 수"  default(10)
+// @Success      200           {object}  map[string]interface{}  "청크 목록"
+// @Failure      400           {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id} [get]
@@ -116,7 +116,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters
+	// 페이징 매개변수 파싱
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Errorf(ctx, "Failed to parse pagination parameters: %s", secutils.SanitizeForLog(err.Error()))
@@ -135,7 +135,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 
 	chunkType := []types.ChunkType{types.ChunkTypeText}
 
-	// Use pagination for query
+	// 쿼리에 페이징 사용
 	result, err := h.service.ListPagedChunksByKnowledgeID(ctx, knowledgeID, &pagination, chunkType)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -143,7 +143,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		return
 	}
 
-	// 对 chunk 内容进行安全清理
+	// 청크 내용에 대한 보안 정리
 	for _, chunk := range result.Data.([]*types.Chunk) {
 		if chunk.Content != "" {
 			chunk.Content = secutils.SanitizeForDisplay(chunk.Content)
@@ -159,7 +159,7 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	})
 }
 
-// UpdateChunkRequest defines the request structure for updating a chunk
+// UpdateChunkRequest 청크 업데이트를 위한 요청 구조 정의
 type UpdateChunkRequest struct {
 	Content    string    `json:"content"`
 	Embedding  []float32 `json:"embedding"`
@@ -170,26 +170,26 @@ type UpdateChunkRequest struct {
 	ImageInfo  string    `json:"image_info"`
 }
 
-// validateAndGetChunk validates request parameters and retrieves the chunk
-// Returns chunk information, knowledge ID, and error
+// validateAndGetChunk 요청 매개변수 검증 및 청크 조회
+// 청크 정보, 지식 ID, 오류 반환
 func (h *ChunkHandler) validateAndGetChunk(c *gin.Context) (*types.Chunk, string, error) {
 	ctx := c.Request.Context()
 
-	// Validate knowledge ID
+	// 지식 ID 검증
 	knowledgeID := secutils.SanitizeForLog(c.Param("knowledge_id"))
 	if knowledgeID == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
 		return nil, "", errors.NewBadRequestError("Knowledge ID cannot be empty")
 	}
 
-	// Validate chunk ID
+	// 청크 ID 검증
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Chunk ID is empty")
 		return nil, knowledgeID, errors.NewBadRequestError("Chunk ID cannot be empty")
 	}
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
@@ -198,7 +198,7 @@ func (h *ChunkHandler) validateAndGetChunk(c *gin.Context) (*types.Chunk, string
 
 	logger.Infof(ctx, "Retrieving knowledge chunk information, knowledge ID: %s, chunk ID: %s", knowledgeID, id)
 
-	// Get existing chunk
+	// 기존 청크 가져오기
 	chunk, err := h.service.GetChunkByID(ctx, id)
 	if err != nil {
 		if err == service.ErrChunkNotFound {
@@ -209,7 +209,7 @@ func (h *ChunkHandler) validateAndGetChunk(c *gin.Context) (*types.Chunk, string
 		return nil, knowledgeID, errors.NewInternalServerError(err.Error())
 	}
 
-	// Validate tenant ID
+	// 테넌트 ID 검증
 	if chunk.TenantID != tenantID.(uint64) || chunk.KnowledgeID != knowledgeID {
 		logger.Warnf(
 			ctx,
@@ -226,17 +226,17 @@ func (h *ChunkHandler) validateAndGetChunk(c *gin.Context) (*types.Chunk, string
 }
 
 // UpdateChunk godoc
-// @Summary      更新分块
-// @Description  更新指定分块的内容和属性
-// @Tags         分块管理
+// @Summary      청크 업데이트
+// @Description  지정된 청크의 내용 및 속성 업데이트
+// @Tags         청크 관리
 // @Accept       json
 // @Produce      json
-// @Param        knowledge_id  path      string              true  "知识ID"
-// @Param        id            path      string              true  "分块ID"
-// @Param        request       body      UpdateChunkRequest  true  "更新请求"
-// @Success      200           {object}  map[string]interface{}  "更新后的分块"
-// @Failure      400           {object}  errors.AppError         "请求参数错误"
-// @Failure      404           {object}  errors.AppError         "分块不存在"
+// @Param        knowledge_id  path      string              true  "지식 ID"
+// @Param        id            path      string              true  "청크 ID"
+// @Param        request       body      UpdateChunkRequest  true  "업데이트 요청"
+// @Success      200           {object}  map[string]interface{}  "업데이트된 청크"
+// @Failure      400           {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404           {object}  errors.AppError         "청크를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id}/{id} [put]
@@ -244,7 +244,7 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating knowledge chunk")
 
-	// Validate parameters and get chunk
+	// 매개변수 검증 및 청크 가져오기
 	chunk, knowledgeID, err := h.validateAndGetChunk(c)
 	if err != nil {
 		c.Error(err)
@@ -257,7 +257,7 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 		return
 	}
 
-	// Update chunk properties
+	// 청크 속성 업데이트
 	if req.Content != "" {
 		chunk.Content = req.Content
 	}
@@ -279,16 +279,16 @@ func (h *ChunkHandler) UpdateChunk(c *gin.Context) {
 }
 
 // DeleteChunk godoc
-// @Summary      删除分块
-// @Description  删除指定的分块
-// @Tags         分块管理
+// @Summary      청크 삭제
+// @Description  지정된 청크 삭제
+// @Tags         청크 관리
 // @Accept       json
 // @Produce      json
-// @Param        knowledge_id  path      string  true  "知识ID"
-// @Param        id            path      string  true  "分块ID"
-// @Success      200           {object}  map[string]interface{}  "删除成功"
-// @Failure      400           {object}  errors.AppError         "请求参数错误"
-// @Failure      404           {object}  errors.AppError         "分块不存在"
+// @Param        knowledge_id  path      string  true  "지식 ID"
+// @Param        id            path      string  true  "청크 ID"
+// @Success      200           {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400           {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404           {object}  errors.AppError         "청크를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id}/{id} [delete]
@@ -296,7 +296,7 @@ func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start deleting knowledge chunk")
 
-	// Validate parameters and get chunk
+	// 매개변수 검증 및 청크 가져오기
 	chunk, _, err := h.validateAndGetChunk(c)
 	if err != nil {
 		c.Error(err)
@@ -316,14 +316,14 @@ func (h *ChunkHandler) DeleteChunk(c *gin.Context) {
 }
 
 // DeleteChunksByKnowledgeID godoc
-// @Summary      删除知识下所有分块
-// @Description  删除指定知识下的所有分块
-// @Tags         分块管理
+// @Summary      지식 하의 모든 청크 삭제
+// @Description  지정된 지식 하의 모든 청크 삭제
+// @Tags         청크 관리
 // @Accept       json
 // @Produce      json
-// @Param        knowledge_id  path      string  true  "知识ID"
-// @Success      200           {object}  map[string]interface{}  "删除成功"
-// @Failure      400           {object}  errors.AppError         "请求参数错误"
+// @Param        knowledge_id  path      string  true  "지식 ID"
+// @Success      200           {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400           {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /chunks/{knowledge_id} [delete]
@@ -338,7 +338,7 @@ func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
 		return
 	}
 
-	// Delete all chunks under the knowledge
+	// 지식 하의 모든 청크 삭제
 	err := h.service.DeleteChunksByKnowledgeID(ctx, knowledgeID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -353,16 +353,16 @@ func (h *ChunkHandler) DeleteChunksByKnowledgeID(c *gin.Context) {
 }
 
 // DeleteGeneratedQuestion godoc
-// @Summary      删除生成的问题
-// @Description  删除分块中生成的问题
-// @Tags         分块管理
+// @Summary      생성된 질문 삭제
+// @Description  청크에서 생성된 질문 삭제
+// @Tags         청크 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                       true  "分块ID"
-// @Param        request  body      object{question_id=string}   true  "问题ID"
-// @Success      200      {object}  map[string]interface{}       "删除成功"
-// @Failure      400      {object}  errors.AppError              "请求参数错误"
-// @Failure      404      {object}  errors.AppError              "分块不存在"
+// @Param        id       path      string                       true  "청크 ID"
+// @Param        request  body      object{question_id=string}   true  "질문 ID"
+// @Success      200      {object}  map[string]interface{}       "삭제 성공"
+// @Failure      400      {object}  errors.AppError              "요청 매개변수 오류"
+// @Failure      404      {object}  errors.AppError              "청크를 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /chunks/by-id/{id}/questions [delete]
@@ -386,7 +386,7 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 		return
 	}
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
@@ -394,7 +394,7 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 		return
 	}
 
-	// Verify chunk exists and belongs to tenant
+	// 청크가 존재하고 테넌트에 속하는지 확인
 	chunk, err := h.service.GetChunkByID(ctx, chunkID)
 	if err != nil {
 		if err == service.ErrChunkNotFound {
@@ -413,7 +413,7 @@ func (h *ChunkHandler) DeleteGeneratedQuestion(c *gin.Context) {
 		return
 	}
 
-	// Delete the generated question by ID
+	// ID로 생성된 질문 삭제
 	if err := h.service.DeleteGeneratedQuestion(ctx, chunkID, req.QuestionID); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewBadRequestError(err.Error()))

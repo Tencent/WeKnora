@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	ErrTenantNotFound         = errors.New("tenant not found")
-	ErrTenantHasKnowledgeBase = errors.New("tenant has associated knowledge bases")
+	ErrTenantNotFound         = errors.New("테넌트를 찾을 수 없습니다")
+	ErrTenantHasKnowledgeBase = errors.New("테넌트에 연결된 지식베이스가 있습니다")
 )
 
 // tenantRepository implements tenant repository interface
@@ -104,13 +104,13 @@ func (r *tenantRepository) DeleteTenant(ctx context.Context, id uint64) error {
 func (r *tenantRepository) AdjustStorageUsed(ctx context.Context, tenantID uint64, delta int64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var tenant types.Tenant
-		// 使用悲观锁确保并发安全
+		// 동시성 안전을 위해 비관적 잠금 사용
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&tenant, tenantID).Error; err != nil {
 			return err
 		}
 
 		tenant.StorageUsed += delta
-		// 保存更新并验证业务规则
+		// 업데이트 저장 및 비즈니스 규칙 검증
 		if tenant.StorageUsed < 0 {
 			logger.Error(ctx, "tenant storage used is negative %s: %d", tenant.ID, tenant.StorageUsed)
 			tenant.StorageUsed = 0

@@ -16,13 +16,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// KnowledgeHandler processes HTTP requests related to knowledge resources
+// KnowledgeHandler 지식 리소스 관련 HTTP 요청 처리
 type KnowledgeHandler struct {
 	kgService interfaces.KnowledgeService
 	kbService interfaces.KnowledgeBaseService
 }
 
-// NewKnowledgeHandler creates a new knowledge handler instance
+// NewKnowledgeHandler 새로운 KnowledgeHandler 인스턴스 생성
 func NewKnowledgeHandler(
 	kgService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
@@ -30,26 +30,26 @@ func NewKnowledgeHandler(
 	return &KnowledgeHandler{kgService: kgService, kbService: kbService}
 }
 
-// validateKnowledgeBaseAccess validates access permissions to a knowledge base
-// Returns the knowledge base, the knowledge base ID, and any errors encountered
+// validateKnowledgeBaseAccess 지식베이스에 대한 접근 권한을 확인합니다.
+// 지식베이스 객체, 지식베이스 ID, 그리고 오류 발생 시 오류를 반환합니다.
 func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.KnowledgeBase, string, error) {
 	ctx := c.Request.Context()
 
-	// Get knowledge base ID from URL path parameter
+	// URL 경로 매개변수에서 지식베이스 ID 가져오기
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 	if kbID == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
 		return nil, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
 	}
 
-	// Get knowledge base details
+	// 지식베이스 상세 정보 가져오기
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		return nil, kbID, errors.NewInternalServerError(err.Error())
 	}
 
-	// Verify tenant permissions
+	// 테넌트 권한 확인
 	if kb.TenantID != c.GetUint64(types.TenantIDContextKey.String()) {
 		logger.Warnf(
 			ctx,
@@ -64,8 +64,8 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.K
 	return kb, kbID, nil
 }
 
-// handleDuplicateKnowledgeError handles cases where duplicate knowledge is detected
-// Returns true if the error was a duplicate error and was handled, false otherwise
+// handleDuplicateKnowledgeError 중복된 지식이 감지된 경우를 처리합니다.
+// 중복 오류가 감지되어 처리된 경우 true를 반환하고, 그렇지 않으면 false를 반환합니다.
 func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	err error, knowledge *types.Knowledge, duplicateType string,
 ) bool {
@@ -75,7 +75,7 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 		c.JSON(http.StatusConflict, gin.H{
 			"success": false,
 			"message": dupErr.Error(),
-			"data":    knowledge, // knowledge contains the existing document
+			"data":    knowledge, // knowledge에는 기존 문서 정보가 포함됨
 			"code":    fmt.Sprintf("duplicate_%s", duplicateType),
 		})
 		return true
@@ -84,19 +84,19 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 }
 
 // CreateKnowledgeFromFile godoc
-// @Summary      从文件创建知识
-// @Description  上传文件并创建知识条目
-// @Tags         知识管理
+// @Summary      파일에서 지식 생성
+// @Description  파일을 업로드하고 지식 항목 생성
+// @Tags         지식 관리
 // @Accept       multipart/form-data
 // @Produce      json
-// @Param        id                path      string  true   "知识库ID"
-// @Param        file              formData  file    true   "上传的文件"
-// @Param        fileName          formData  string  false  "自定义文件名"
-// @Param        metadata          formData  string  false  "元数据JSON"
-// @Param        enable_multimodel formData  bool    false  "启用多模态处理"
-// @Success      200               {object}  map[string]interface{}  "创建的知识"
-// @Failure      400               {object}  errors.AppError         "请求参数错误"
-// @Failure      409               {object}  map[string]interface{}  "文件重复"
+// @Param        id                path      string  true   "지식베이스 ID"
+// @Param        file              formData  file    true   "업로드할 파일"
+// @Param        fileName          formData  string  false  "사용자 지정 파일명"
+// @Param        metadata          formData  string  false  "메타데이터 JSON"
+// @Param        enable_multimodel formData  bool    false  "멀티모달 처리 활성화"
+// @Success      200               {object}  map[string]interface{}  "생성된 지식"
+// @Failure      400               {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      409               {object}  map[string]interface{}  "파일 중복"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/file [post]
@@ -104,14 +104,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating knowledge from file")
 
-	// Validate access to the knowledge base
+	// 지식베이스 접근 권한 확인
 	_, kbID, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	// Get the uploaded file
+	// 업로드된 파일 가져오기
 	file, err := c.FormFile("file")
 	if err != nil {
 		logger.Error(ctx, "File upload failed", err)
@@ -119,15 +119,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (configurable via MAX_FILE_SIZE_MB)
+	// 파일 크기 확인 (MAX_FILE_SIZE_MB를 통해 구성 가능)
 	maxSize := secutils.GetMaxFileSize()
 	if file.Size > maxSize {
 		logger.Error(ctx, "File size too large")
-		c.Error(errors.NewBadRequestError(fmt.Sprintf("文件大小不能超过%dMB", secutils.GetMaxFileSizeMB())))
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("파일 크기는 %dMB를 초과할 수 없습니다", secutils.GetMaxFileSizeMB())))
 		return
 	}
 
-	// Get custom filename if provided (for folder uploads with path)
+	// 사용자 지정 파일명 가져오기 (폴더 업로드 시 경로 포함)
 	customFileName := c.PostForm("fileName")
 	customFileName = secutils.SanitizeForLog(customFileName)
 	displayFileName := file.Filename
@@ -140,7 +140,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	logger.Infof(ctx, "File upload successful, filename: %s, size: %.2f KB", displayFileName, float64(file.Size)/1024)
 	logger.Infof(ctx, "Creating knowledge, knowledge base ID: %s, filename: %s", kbID, displayFileName)
 
-	// Parse metadata if provided
+	// 메타데이터 파싱 (제공된 경우)
 	var metadata map[string]string
 	metadataStr := c.PostForm("metadata")
 	if metadataStr != "" {
@@ -164,9 +164,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 		enableMultimodel = &parseBool
 	}
 
-	// Create knowledge entry from the file
+	// 파일에서 지식 항목 생성
 	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName)
-	// Check for duplicate knowledge error
+	// 중복 지식 오류 확인
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file") {
 			return
@@ -193,16 +193,16 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 }
 
 // CreateKnowledgeFromURL godoc
-// @Summary      从URL创建知识
-// @Description  从指定URL抓取内容并创建知识条目
-// @Tags         知识管理
+// @Summary      URL에서 지식 생성
+// @Description  지정된 URL에서 내용을 가져와 지식 항목 생성
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,enable_multimodel=bool,title=string}  true  "URL请求"
-// @Success      201      {object}  map[string]interface{}  "创建的知识"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
-// @Failure      409      {object}  map[string]interface{}  "URL重复"
+// @Param        id       path      string  true  "지식베이스 ID"
+// @Param        request  body      object{url=string,enable_multimodel=bool,title=string}  true  "URL 요청"
+// @Success      201      {object}  map[string]interface{}  "생성된 지식"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      409      {object}  map[string]interface{}  "URL 중복"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/url [post]
@@ -210,14 +210,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating knowledge from URL")
 
-	// Validate access to the knowledge base
+	// 지식베이스 접근 권한 확인
 	_, kbID, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	// Parse URL from request body
+	// 요청 본문에서 URL 파싱
 	var req struct {
 		URL              string `json:"url" binding:"required"`
 		EnableMultimodel *bool  `json:"enable_multimodel"`
@@ -237,9 +237,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		secutils.SanitizeForLog(req.URL),
 	)
 
-	// Create knowledge entry from the URL
+	// URL에서 지식 항목 생성
 	knowledge, err := h.kgService.CreateKnowledgeFromURL(ctx, kbID, req.URL, req.EnableMultimodel, req.Title)
-	// Check for duplicate knowledge error
+	// 중복 지식 오류 확인
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
 			return
@@ -262,15 +262,15 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 }
 
 // CreateManualKnowledge godoc
-// @Summary      手工创建知识
-// @Description  手工录入Markdown格式的知识内容
-// @Tags         知识管理
+// @Summary      수동 지식 생성
+// @Description  Markdown 형식의 지식 내용을 수동으로 입력하여 생성
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                       true  "知识库ID"
-// @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
-// @Success      200      {object}  map[string]interface{}       "创建的知识"
-// @Failure      400      {object}  errors.AppError              "请求参数错误"
+// @Param        id       path      string                       true  "지식베이스 ID"
+// @Param        request  body      types.ManualKnowledgePayload true  "수동 지식 내용"
+// @Success      200      {object}  map[string]interface{}       "생성된 지식"
+// @Failure      400      {object}  errors.AppError              "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge/manual [post]
@@ -313,15 +313,15 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 }
 
 // GetKnowledge godoc
-// @Summary      获取知识详情
-// @Description  根据ID获取知识条目详情
-// @Tags         知识管理
+// @Summary      지식 상세 조회
+// @Description  ID로 지식 항목 상세 정보 조회
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识ID"
-// @Success      200  {object}  map[string]interface{}  "知识详情"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "知识不存在"
+// @Param        id   path      string  true  "지식 ID"
+// @Success      200  {object}  map[string]interface{}  "지식 상세"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
+// @Failure      404  {object}  errors.AppError         "지식을 찾을 수 없음"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/{id} [get]
@@ -330,7 +330,7 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 
 	logger.Info(ctx, "Start retrieving knowledge")
 
-	// Get knowledge ID from URL path parameter
+	// URL 경로 매개변수에서 지식 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -359,19 +359,19 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 }
 
 // ListKnowledge godoc
-// @Summary      获取知识列表
-// @Description  获取知识库下的知识列表，支持分页和筛选
-// @Tags         知识管理
+// @Summary      지식 목록 조회
+// @Description  지식베이스 내의 지식 목록 조회, 페이징 및 필터링 지원
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id         path      string  true   "知识库ID"
-// @Param        page       query     int     false  "页码"
-// @Param        page_size  query     int     false  "每页数量"
-// @Param        tag_id     query     string  false  "标签ID筛选"
-// @Param        keyword    query     string  false  "关键词搜索"
-// @Param        file_type  query     string  false  "文件类型筛选"
-// @Success      200        {object}  map[string]interface{}  "知识列表"
-// @Failure      400        {object}  errors.AppError         "请求参数错误"
+// @Param        id         path      string  true   "지식베이스 ID"
+// @Param        page       query     int     false  "페이지 번호"
+// @Param        page_size  query     int     false  "페이지당 수량"
+// @Param        tag_id     query     string  false  "태그 ID 필터링"
+// @Param        keyword    query     string  false  "키워드 검색"
+// @Param        file_type  query     string  false  "파일 유형 필터링"
+// @Success      200        {object}  map[string]interface{}  "지식 목록"
+// @Failure      400        {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id}/knowledge [get]
@@ -380,7 +380,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Info(ctx, "Start retrieving knowledge list")
 
-	// Get knowledge base ID from URL path parameter
+	// URL 경로 매개변수에서 지식베이스 ID 가져오기
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 	if kbID == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -388,7 +388,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		return
 	}
 
-	// Parse pagination parameters from query string
+	// 쿼리 문자열에서 페이징 매개변수 파싱
 	var pagination types.Pagination
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Error(ctx, "Failed to parse pagination parameters", err)
@@ -411,7 +411,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 		pagination.PageSize,
 	)
 
-	// Retrieve paginated knowledge entries
+	// 페이징된 지식 항목 검색
 	result, err := h.kgService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbID, &pagination, tagID, keyword, fileType)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -435,14 +435,14 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 }
 
 // DeleteKnowledge godoc
-// @Summary      删除知识
-// @Description  根据ID删除知识条目
-// @Tags         知识管理
+// @Summary      지식 삭제
+// @Description  ID로 지식 항목 삭제
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Param        id   path      string  true  "지식 ID"
+// @Success      200  {object}  map[string]interface{}  "삭제 성공"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/{id} [delete]
@@ -451,7 +451,7 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 
 	logger.Info(ctx, "Start deleting knowledge")
 
-	// Get knowledge ID from URL path parameter
+	// URL 경로 매개변수에서 지식 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -475,14 +475,14 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 }
 
 // DownloadKnowledgeFile godoc
-// @Summary      下载知识文件
-// @Description  下载知识条目关联的原始文件
-// @Tags         知识管理
+// @Summary      지식 파일 다운로드
+// @Description  지식 항목에 연결된 원본 파일 다운로드
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      application/octet-stream
-// @Param        id   path      string  true  "知识ID"
-// @Success      200  {file}    file    "文件内容"
-// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Param        id   path      string  true  "지식 ID"
+// @Success      200  {file}    file    "파일 내용"
+// @Failure      400  {object}  errors.AppError  "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/{id}/download [get]
@@ -491,7 +491,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 	logger.Info(ctx, "Start downloading knowledge file")
 
-	// Get knowledge ID from URL path parameter
+	// URL 경로 매개변수에서 지식 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -501,7 +501,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 	logger.Infof(ctx, "Retrieving knowledge file, ID: %s", secutils.SanitizeForLog(id))
 
-	// Get file content and filename
+	// 파일 내용 및 파일명 가져오기
 	file, filename, err := h.kgService.GetKnowledgeFile(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -517,7 +517,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		secutils.SanitizeForLog(filename),
 	)
 
-	// Set response headers for file download
+	// 파일 다운로드를 위한 응답 헤더 설정
 	c.Header("Content-Description", "File Transfer")
 	c.Header("Content-Transfer-Encoding", "binary")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
@@ -526,7 +526,7 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	c.Header("Cache-Control", "must-revalidate")
 	c.Header("Pragma", "public")
 
-	// Stream file content to response
+	// 파일 내용을 응답으로 스트리밍
 	c.Stream(func(w io.Writer) bool {
 		if _, err := io.Copy(w, file); err != nil {
 			logger.Errorf(ctx, "Failed to send file: %v", err)
@@ -537,27 +537,27 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	})
 }
 
-// GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval
+// GetKnowledgeBatchRequest 지식 일괄 검색을 위한 매개변수 정의
 type GetKnowledgeBatchRequest struct {
-	IDs []string `form:"ids" binding:"required"` // List of knowledge IDs
+	IDs []string `form:"ids" binding:"required"` // 지식 ID 목록
 }
 
 // GetKnowledgeBatch godoc
-// @Summary      批量获取知识
-// @Description  根据ID列表批量获取知识条目
-// @Tags         知识管理
+// @Summary      지식 일괄 가져오기
+// @Description  ID 목록을 기반으로 지식 항목 일괄 가져오기
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        ids  query     []string  true  "知识ID列表"
-// @Success      200  {object}  map[string]interface{}  "知识列表"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Param        ids  query     []string  true  "지식 ID 목록"
+// @Success      200  {object}  map[string]interface{}  "지식 목록"
+// @Failure      400  {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/batch [get]
 func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get tenant ID from context
+	// 컨텍스트에서 테넌트 ID 가져오기
 	tenantID, ok := c.Get(types.TenantIDContextKey.String())
 	if !ok {
 		logger.Error(ctx, "Failed to get tenant ID")
@@ -565,7 +565,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		return
 	}
 
-	// Parse request parameters from query string
+	// 쿼리 문자열에서 요청 매개변수 파싱
 	var req GetKnowledgeBatchRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -579,7 +579,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		tenantID, len(req.IDs),
 	)
 
-	// Retrieve knowledge entries in batch
+	// 지식 항목 일괄 검색
 	knowledges, err := h.kgService.GetKnowledgeBatch(ctx, tenantID.(uint64), req.IDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -593,7 +593,7 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		len(req.IDs), len(knowledges),
 	)
 
-	// Return results
+	// 결과 반환
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledges,
@@ -601,21 +601,21 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 }
 
 // UpdateKnowledge godoc
-// @Summary      更新知识
-// @Description  更新知识条目信息
-// @Tags         知识管理
+// @Summary      지식 업데이트
+// @Description  지식 항목 정보 업데이트
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string          true  "知识ID"
-// @Param        request  body      types.Knowledge true  "知识信息"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        id       path      string          true  "지식 ID"
+// @Param        request  body      types.Knowledge true  "지식 정보"
+// @Success      200      {object}  map[string]interface{}  "업데이트 성공"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/{id} [put]
 func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
-	// Get knowledge ID from URL path parameter
+	// URL 경로 매개변수에서 지식 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -644,15 +644,15 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 }
 
 // UpdateManualKnowledge godoc
-// @Summary      更新手工知识
-// @Description  更新手工录入的Markdown知识内容
-// @Tags         知识管理
+// @Summary      수동 지식 업데이트
+// @Description  수동으로 입력된 Markdown 지식 내용 업데이트
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id       path      string                       true  "知识ID"
-// @Param        request  body      types.ManualKnowledgePayload true  "手工知识内容"
-// @Success      200      {object}  map[string]interface{}       "更新后的知识"
-// @Failure      400      {object}  errors.AppError              "请求参数错误"
+// @Param        id       path      string                       true  "지식 ID"
+// @Param        request  body      types.ManualKnowledgePayload true  "수동 지식 내용"
+// @Success      200      {object}  map[string]interface{}       "업데이트된 지식"
+// @Failure      400      {object}  errors.AppError              "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/manual/{id} [put]
@@ -699,14 +699,14 @@ type knowledgeTagBatchRequest struct {
 }
 
 // UpdateKnowledgeTagBatch godoc
-// @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签
-// @Tags         知识管理
+// @Summary      지식 태그 일괄 업데이트
+// @Description  지식 항목의 태그를 일괄 업데이트
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "标签更新请求"
-// @Success      200      {object}  map[string]interface{}  "更新成功"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Param        request  body      object  true  "태그 업데이트 요청"
+// @Success      200      {object}  map[string]interface{}  "업데이트 성공"
+// @Failure      400      {object}  errors.AppError         "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/tags [put]
@@ -715,7 +715,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	var req knowledgeTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse knowledge tag batch request", err)
-		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("요청 매개변수가 유효하지 않습니다").WithDetails(err.Error()))
 		return
 	}
 	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, req.Updates); err != nil {
@@ -729,16 +729,16 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 }
 
 // UpdateImageInfo godoc
-// @Summary      更新图像信息
-// @Description  更新知识分块的图像信息
-// @Tags         知识管理
+// @Summary      이미지 정보 업데이트
+// @Description  지식 청크의 이미지 정보 업데이트
+// @Tags         지식 관리
 // @Accept       json
 // @Produce      json
-// @Param        id        path      string  true  "知识ID"
-// @Param        chunk_id  path      string  true  "分块ID"
-// @Param        request   body      object{image_info=string}  true  "图像信息"
-// @Success      200       {object}  map[string]interface{}     "更新成功"
-// @Failure      400       {object}  errors.AppError            "请求参数错误"
+// @Param        id        path      string  true  "지식 ID"
+// @Param        chunk_id  path      string  true  "청크 ID"
+// @Param        request   body      object{image_info=string}  true  "이미지 정보"
+// @Success      200       {object}  map[string]interface{}     "업데이트 성공"
+// @Failure      400       {object}  errors.AppError            "요청 매개변수 오류"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/image/{id}/{chunk_id} [put]
@@ -746,7 +746,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating image info")
 
-	// Get knowledge ID from URL path parameter
+	// URL 경로 매개변수에서 지식 ID 가져오기
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -770,7 +770,7 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 		return
 	}
 
-	// Update chunk properties
+	// 청크 속성 업데이트
 	logger.Infof(ctx, "Updating knowledge chunk, knowledge ID: %s, chunk ID: %s", id, chunkID)
 	err := h.kgService.UpdateImageInfo(ctx, id, chunkID, secutils.SanitizeForLog(request.ImageInfo))
 	if err != nil {
@@ -787,17 +787,17 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 }
 
 // SearchKnowledge godoc
-// @Summary      Search knowledge
-// @Description  Search knowledge files by keyword across all knowledge bases
-// @Tags         Knowledge
+// @Summary      지식 검색
+// @Description  모든 지식베이스에서 키워드로 지식 파일 검색
+// @Tags         지식
 // @Accept       json
 // @Produce      json
-// @Param        keyword     query     string  false "Keyword to search"
-// @Param        offset      query     int     false "Offset for pagination"
-// @Param        limit       query     int     false "Limit for pagination (default 20)"
-// @Param        file_types  query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
-// @Success      200         {object}  map[string]interface{}     "Search results"
-// @Failure      400         {object}  errors.AppError            "Invalid request"
+// @Param        keyword     query     string  false "검색할 키워드"
+// @Param        offset      query     int     false "페이징 오프셋"
+// @Param        limit       query     int     false "페이징 제한 (기본값 20)"
+// @Param        file_types  query     string  false "필터링할 쉼표로 구분된 파일 확장자 (예: csv,xlsx)"
+// @Success      200         {object}  map[string]interface{}     "검색 결과"
+// @Failure      400         {object}  errors.AppError            "잘못된 요청"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/search [get]
@@ -807,7 +807,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
-	// Parse file_types parameter (comma-separated)
+	// file_types 매개변수 파싱 (쉼표로 구분됨)
 	var fileTypes []string
 	if fileTypesStr := c.Query("file_types"); fileTypesStr != "" {
 		for _, ft := range strings.Split(fileTypesStr, ",") {
@@ -818,7 +818,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	// Retrieve knowledge entries (empty keyword returns recent files)
+	// 지식 항목 검색 (키워드가 비어 있으면 최신 파일 반환)
 	knowledges, hasMore, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)

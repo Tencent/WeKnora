@@ -10,104 +10,103 @@ import (
 )
 
 const (
-	// KnowledgeTypeManual represents the manual knowledge type
+	// KnowledgeTypeManual 수동 지식 유형을 나타냅니다
 	KnowledgeTypeManual = "manual"
-	// KnowledgeTypeFAQ represents the FAQ knowledge type
+	// KnowledgeTypeFAQ FAQ 지식 유형을 나타냅니다
 	KnowledgeTypeFAQ = "faq"
 )
 
-// Knowledge parse status constants
+// 지식 파싱 상태 상수
 const (
-	// ParseStatusPending indicates the knowledge is waiting to be processed
+	// ParseStatusPending 지식이 처리 대기 중임을 나타냅니다
 	ParseStatusPending = "pending"
-	// ParseStatusProcessing indicates the knowledge is being processed
+	// ParseStatusProcessing 지식이 처리 중임을 나타냅니다
 	ParseStatusProcessing = "processing"
-	// ParseStatusCompleted indicates the knowledge has been processed successfully
+	// ParseStatusCompleted 지식이 성공적으로 처리되었음을 나타냅니다
 	ParseStatusCompleted = "completed"
-	// ParseStatusFailed indicates the knowledge processing failed
+	// ParseStatusFailed 지식 처리가 실패했음을 나타냅니다
 	ParseStatusFailed = "failed"
-	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
+	// ParseStatusDeleting 지식이 삭제 중임을 나타냅니다 (비동기 작업 충돌 방지에 사용)
 	ParseStatusDeleting = "deleting"
 )
 
-// Summary status constants for async summary generation
+// 비동기 요약 생성을 위한 요약 상태 상수
 const (
-	// SummaryStatusNone indicates no summary task is needed
+	// SummaryStatusNone 요약 작업이 필요 없음을 나타냅니다
 	SummaryStatusNone = "none"
-	// SummaryStatusPending indicates the summary task is waiting to be processed
+	// SummaryStatusPending 요약 작업이 처리 대기 중임을 나타냅니다
 	SummaryStatusPending = "pending"
-	// SummaryStatusProcessing indicates the summary is being generated
+	// SummaryStatusProcessing 요약이 생성 중임을 나타냅니다
 	SummaryStatusProcessing = "processing"
-	// SummaryStatusCompleted indicates the summary has been generated successfully
+	// SummaryStatusCompleted 요약이 성공적으로 생성되었음을 나타냅니다
 	SummaryStatusCompleted = "completed"
-	// SummaryStatusFailed indicates the summary generation failed
+	// SummaryStatusFailed 요약 생성이 실패했음을 나타냅니다
 	SummaryStatusFailed = "failed"
 )
 
-// ManualKnowledgeFormat represents the format of the manual knowledge
+// ManualKnowledgeFormat 수동 지식의 형식을 나타냅니다
 const (
 	ManualKnowledgeFormatMarkdown = "markdown"
 	ManualKnowledgeStatusDraft    = "draft"
 	ManualKnowledgeStatusPublish  = "publish"
 )
 
-// Knowledge represents a knowledge entity in the system.
-// It contains metadata about the knowledge source, its processing status,
-// and references to the physical file if applicable.
+// Knowledge 시스템의 지식 엔티티를 나타냅니다.
+// 지식 소스, 처리 상태 및 해당되는 경우 실제 파일에 대한 참조에 대한 메타데이터를 포함합니다.
 type Knowledge struct {
-	// Unique identifier of the knowledge
+	// 지식의 고유 식별자
 	ID string `json:"id"                 gorm:"type:varchar(36);primaryKey"`
-	// Tenant ID
+	// 테넌트 ID
 	TenantID uint64 `json:"tenant_id"`
-	// ID of the knowledge base
+	// 지식베이스 ID
 	KnowledgeBaseID string `json:"knowledge_base_id"`
-	// Optional tag ID for categorization within a knowledge base
+	// 지식베이스 내 분류를 위한 선택적 태그 ID
 	TagID string `json:"tag_id"             gorm:"type:varchar(36);index"`
-	// Type of the knowledge
+	// 지식 유형
 	Type string `json:"type"`
-	// Title of the knowledge
+	// 지식 제목
 	Title string `json:"title"`
-	// Description of the knowledge
+	// 지식 설명
 	Description string `json:"description"`
-	// Source of the knowledge
+	// 지식 소스
 	Source string `json:"source"`
-	// Parse status of the knowledge
+	// 지식 파싱 상태
 	ParseStatus string `json:"parse_status"`
-	// Summary status for async summary generation
+	// 비동기 요약 생성을 위한 요약 상태
 	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
-	// Enable status of the knowledge
+	// 지식 활성화 상태
 	EnableStatus string `json:"enable_status"`
-	// ID of the embedding model
+	// 임베딩 모델 ID
 	EmbeddingModelID string `json:"embedding_model_id"`
-	// File name of the knowledge
+	// 지식 파일 이름
 	FileName string `json:"file_name"`
-	// File type of the knowledge
+	// 지식 파일 유형
 	FileType string `json:"file_type"`
-	// File size of the knowledge
+	// 지식 파일 크기
 	FileSize int64 `json:"file_size"`
-	// File hash of the knowledge
+	// 지식 파일 해시
 	FileHash string `json:"file_hash"`
-	// File path of the knowledge
+	// 지식 파일 경로
 	FilePath string `json:"file_path"`
-	// Storage size of the knowledge
+	// 지식 저장소 크기
 	StorageSize int64 `json:"storage_size"`
-	// Metadata of the knowledge
+	// 지식 메타데이터
 	Metadata JSON `json:"metadata"           gorm:"type:json"`
-	// Creation time of the knowledge
+	// 지식 생성 시간
 	CreatedAt time.Time `json:"created_at"`
-	// Last updated time of the knowledge
+	// 지식 마지막 업데이트 시간
 	UpdatedAt time.Time `json:"updated_at"`
-	// Processed time of the knowledge
+	// 지식 처리 시간
 	ProcessedAt *time.Time `json:"processed_at"`
-	// Error message of the knowledge
+	// 지식 오류 메시지
 	ErrorMessage string `json:"error_message"`
-	// Deletion time of the knowledge
+	// 지식 삭제 시간
 	DeletedAt gorm.DeletedAt `json:"deleted_at"         gorm:"index"`
-	// Knowledge base name (not stored in database, populated on query)
+	// 지식베이스 이름 (데이터베이스에 저장되지 않음, 쿼리 시 채워짐)
 	KnowledgeBaseName string `json:"knowledge_base_name" gorm:"-"`
 }
 
-// GetMetadata returns the metadata as a map[string]string.
+// GetMetadata 메타데이터를 map[string]string으로 반환합니다.
 func (k *Knowledge) GetMetadata() map[string]string {
 	metadata := make(map[string]string)
 	metadataMap, err := k.Metadata.Map()
@@ -120,7 +119,7 @@ func (k *Knowledge) GetMetadata() map[string]string {
 	return metadata
 }
 
-// BeforeCreate hook generates a UUID for new Knowledge entities before they are created.
+// BeforeCreate 훅은 생성되기 전에 새 Knowledge 엔티티에 대한 UUID를 생성합니다.
 func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
 	if k.ID == "" {
 		k.ID = uuid.New().String()
@@ -128,7 +127,7 @@ func (k *Knowledge) BeforeCreate(tx *gorm.DB) (err error) {
 	return nil
 }
 
-// ManualKnowledgeMetadata stores metadata for manual Markdown knowledge content.
+// ManualKnowledgeMetadata 수동 마크다운 지식 콘텐츠에 대한 메타데이터를 저장합니다.
 type ManualKnowledgeMetadata struct {
 	Content   string `json:"content"`
 	Format    string `json:"format"`
@@ -137,14 +136,14 @@ type ManualKnowledgeMetadata struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// ManualKnowledgePayload represents the payload for manual knowledge operations.
+// ManualKnowledgePayload 수동 지식 작업을 위한 페이로드를 나타냅니다.
 type ManualKnowledgePayload struct {
 	Title   string `json:"title"`
 	Content string `json:"content"`
 	Status  string `json:"status"`
 }
 
-// NewManualKnowledgeMetadata creates a new ManualKnowledgeMetadata instance.
+// NewManualKnowledgeMetadata 새로운 ManualKnowledgeMetadata 인스턴스를 생성합니다.
 func NewManualKnowledgeMetadata(content, status string, version int) *ManualKnowledgeMetadata {
 	if version <= 0 {
 		version = 1
@@ -158,7 +157,7 @@ func NewManualKnowledgeMetadata(content, status string, version int) *ManualKnow
 	}
 }
 
-// ToJSON converts the metadata to JSON type.
+// ToJSON 메타데이터를 JSON 타입으로 변환합니다.
 func (m *ManualKnowledgeMetadata) ToJSON() (JSON, error) {
 	if m == nil {
 		return nil, nil
@@ -182,7 +181,7 @@ func (m *ManualKnowledgeMetadata) ToJSON() (JSON, error) {
 	return JSON(bytes), nil
 }
 
-// ManualMetadata parses and returns manual knowledge metadata.
+// ManualMetadata 수동 지식 메타데이터를 파싱하여 반환합니다.
 func (k *Knowledge) ManualMetadata() (*ManualKnowledgeMetadata, error) {
 	if len(k.Metadata) == 0 {
 		return nil, nil
@@ -200,7 +199,7 @@ func (k *Knowledge) ManualMetadata() (*ManualKnowledgeMetadata, error) {
 	return &metadata, nil
 }
 
-// SetManualMetadata sets manual knowledge metadata onto the knowledge instance.
+// SetManualMetadata 지식 인스턴스에 수동 지식 메타데이터를 설정합니다.
 func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	if meta == nil {
 		k.Metadata = nil
@@ -214,12 +213,12 @@ func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	return nil
 }
 
-// IsManual returns true if the knowledge item is manual Markdown knowledge.
+// IsManual 지식 항목이 수동 마크다운 지식인지 여부를 반환합니다.
 func (k *Knowledge) IsManual() bool {
 	return k != nil && k.Type == KnowledgeTypeManual
 }
 
-// EnsureManualDefaults sets default values for manual knowledge entries.
+// EnsureManualDefaults 수동 지식 항목에 대한 기본값을 설정합니다.
 func (k *Knowledge) EnsureManualDefaults() {
 	if k == nil {
 		return
@@ -235,21 +234,21 @@ func (k *Knowledge) EnsureManualDefaults() {
 	}
 }
 
-// IsDraft returns whether the payload should be saved as draft.
+// IsDraft 페이로드를 초안으로 저장해야 하는지 여부를 반환합니다.
 func (p ManualKnowledgePayload) IsDraft() bool {
 	return p.Status == "" || p.Status == ManualKnowledgeStatusDraft
 }
 
-// KnowledgeCheckParams defines parameters used to check if knowledge already exists.
+// KnowledgeCheckParams 지식이 이미 존재하는지 확인하는 데 사용되는 매개변수를 정의합니다.
 type KnowledgeCheckParams struct {
-	// File parameters
+	// 파일 매개변수
 	FileName string
 	FileSize int64
 	FileHash string
-	// URL parameters
+	// URL 매개변수
 	URL string
-	// Text passage parameters
+	// 텍스트 구절 매개변수
 	Passages []string
-	// Knowledge type
+	// 지식 유형
 	Type string
 }

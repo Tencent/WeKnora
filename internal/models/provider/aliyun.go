@@ -8,24 +8,24 @@ import (
 )
 
 const (
-	// AliyunChatBaseURL 阿里云 DashScope Chat/Embedding 的默认 BaseURL
+	// AliyunChatBaseURL 알리 클라우드 DashScope Chat/Embedding의 기본 BaseURL
 	AliyunChatBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-	// AliyunRerankBaseURL 阿里云 DashScope Rerank 的默认 BaseURL
+	// AliyunRerankBaseURL 알리 클라우드 DashScope Rerank의 기본 BaseURL
 	AliyunRerankBaseURL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 )
 
-// AliyunProvider 实现阿里云 DashScope 的 Provider 接口
+// AliyunProvider 알리 클라우드 DashScope의 Provider 인터페이스 구현
 type AliyunProvider struct{}
 
 func init() {
 	Register(&AliyunProvider{})
 }
 
-// Info 返回阿里云 provider 的元数据
+// Info 알리 클라우드 provider의 메타데이터 반환
 func (p *AliyunProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderAliyun,
-		DisplayName: "阿里云 DashScope",
+		DisplayName: "알리 클라우드 DashScope",
 		Description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: AliyunChatBaseURL,
@@ -43,7 +43,7 @@ func (p *AliyunProvider) Info() ProviderInfo {
 	}
 }
 
-// ValidateConfig 验证阿里云 provider 配置
+// ValidateConfig 알리 클라우드 provider 구성 검증
 func (p *AliyunProvider) ValidateConfig(config *Config) error {
 	if config.APIKey == "" {
 		return fmt.Errorf("API key is required for Aliyun DashScope")
@@ -54,14 +54,14 @@ func (p *AliyunProvider) ValidateConfig(config *Config) error {
 	return nil
 }
 
-// IsQwen3Model 检查模型名是否为 Qwen3 模型
-// Qwen3 模型需要特殊处理 enable_thinking 参数
+// IsQwen3Model 모델명이 Qwen3 모델인지 확인
+// Qwen3 모델은 enable_thinking 매개변수를 특별히 처리해야 함
 func IsQwen3Model(modelName string) bool {
 	return strings.HasPrefix(modelName, "qwen3-")
 }
 
-// IsDeepSeekModel 检查模型名是否为 DeepSeek 模型
-// DeepSeek 模型不支持 tool_choice 参数
+// IsDeepSeekModel 모델명이 DeepSeek 모델인지 확인
+// DeepSeek 모델은 tool_choice 매개변수를 지원하지 않음
 func IsDeepSeekModel(modelName string) bool {
 	return strings.Contains(strings.ToLower(modelName), "deepseek")
 }

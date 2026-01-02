@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// FAQChunkMetadata 定义 FAQ 条目在 Chunk.Metadata 中的结构
+// FAQChunkMetadata Chunk.Metadata 내의 FAQ 항목 구조를 정의합니다.
 type FAQChunkMetadata struct {
 	StandardQuestion  string         `json:"standard_question"`
 	SimilarQuestions  []string       `json:"similar_questions,omitempty"`
@@ -20,21 +20,21 @@ type FAQChunkMetadata struct {
 	Source            string         `json:"source,omitempty"`
 }
 
-// GeneratedQuestion 表示AI生成的单个问题
+// GeneratedQuestion AI에 의해 생성된 단일 질문을 나타냅니다.
 type GeneratedQuestion struct {
-	ID       string `json:"id"`       // 唯一标识，用于构造 source_id
-	Question string `json:"question"` // 问题内容
+	ID       string `json:"id"`       // source_id 구성에 사용되는 고유 식별자
+	Question string `json:"question"` // 질문 내용
 }
 
-// DocumentChunkMetadata 定义文档 Chunk 的元数据结构
-// 用于存储AI生成的问题等增强信息
+// DocumentChunkMetadata 문서 청크의 메타데이터 구조를 정의합니다.
+// AI 생성 질문과 같은 향상된 정보를 저장하는 데 사용됩니다.
 type DocumentChunkMetadata struct {
-	// GeneratedQuestions 存储AI为该Chunk生成的相关问题
-	// 这些问题会被独立索引以提高召回率
+	// GeneratedQuestions AI가 이 청크에 대해 생성한 관련 질문을 저장합니다.
+	// 이러한 질문은 재현율을 높이기 위해 독립적으로 인덱싱됩니다.
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
 }
 
-// GetQuestionStrings 返回问题内容字符串列表（兼容旧代码）
+// GetQuestionStrings 질문 내용 문자열 목록을 반환합니다 (이전 코드 호환성).
 func (m *DocumentChunkMetadata) GetQuestionStrings() []string {
 	if m == nil || len(m.GeneratedQuestions) == 0 {
 		return nil
@@ -46,7 +46,7 @@ func (m *DocumentChunkMetadata) GetQuestionStrings() []string {
 	return result
 }
 
-// DocumentMetadata 解析 Chunk 中的文档元数据
+// DocumentMetadata 청크에서 문서 메타데이터를 파싱합니다.
 func (c *Chunk) DocumentMetadata() (*DocumentChunkMetadata, error) {
 	if c == nil || len(c.Metadata) == 0 {
 		return nil, nil
@@ -58,7 +58,7 @@ func (c *Chunk) DocumentMetadata() (*DocumentChunkMetadata, error) {
 	return &meta, nil
 }
 
-// SetDocumentMetadata 设置 Chunk 的文档元数据
+// SetDocumentMetadata 청크의 문서 메타데이터를 설정합니다.
 func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 	if c == nil {
 		return nil
@@ -75,7 +75,7 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 	return nil
 }
 
-// Normalize 清理空白与重复项
+// Normalize 공백 및 중복 항목을 정리합니다.
 func (m *FAQChunkMetadata) Normalize() {
 	if m == nil {
 		return
@@ -89,7 +89,7 @@ func (m *FAQChunkMetadata) Normalize() {
 	}
 }
 
-// FAQMetadata 解析 Chunk 中的 FAQ 元数据
+// FAQMetadata 청크에서 FAQ 메타데이터를 파싱합니다.
 func (c *Chunk) FAQMetadata() (*FAQChunkMetadata, error) {
 	if c == nil || len(c.Metadata) == 0 {
 		return nil, nil
@@ -102,7 +102,7 @@ func (c *Chunk) FAQMetadata() (*FAQChunkMetadata, error) {
 	return &meta, nil
 }
 
-// SetFAQMetadata 设置 Chunk 的 FAQ 元数据
+// SetFAQMetadata 청크의 FAQ 메타데이터를 설정합니다.
 func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 	if c == nil {
 		return nil
@@ -118,24 +118,24 @@ func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 		return err
 	}
 	c.Metadata = JSON(bytes)
-	// 计算并设置 ContentHash
+	// ContentHash 계산 및 설정
 	c.ContentHash = CalculateFAQContentHash(meta)
 	return nil
 }
 
-// CalculateFAQContentHash 计算 FAQ 内容的 hash 值
-// hash 基于：标准问 + 相似问（排序后）+ 反例（排序后）+ 答案（排序后）
-// 用于快速匹配和去重
+// CalculateFAQContentHash FAQ 내용의 해시 값을 계산합니다.
+// 해시 기준: 표준 질문 + 유사 질문(정렬됨) + 부정 질문(정렬됨) + 답변(정렬됨)
+// 빠른 매칭 및 중복 제거에 사용됩니다.
 func CalculateFAQContentHash(meta *FAQChunkMetadata) string {
 	if meta == nil {
 		return ""
 	}
 
-	// 创建副本并标准化
+	// 복사본 생성 및 정규화
 	normalized := *meta
 	normalized.Normalize()
 
-	// 对数组进行排序（确保相同内容产生相同 hash）
+	// 배열 정렬 (동일한 내용이 동일한 해시를 생성하도록 함)
 	similarQuestions := make([]string, len(normalized.SimilarQuestions))
 	copy(similarQuestions, normalized.SimilarQuestions)
 	sort.Strings(similarQuestions)
@@ -148,7 +148,7 @@ func CalculateFAQContentHash(meta *FAQChunkMetadata) string {
 	copy(answers, normalized.Answers)
 	sort.Strings(answers)
 
-	// 构建用于 hash 的字符串：标准问 + 相似问 + 反例 + 答案
+	// 해시 문자열 생성: 표준 질문 + 유사 질문 + 부정 질문 + 답변
 	var builder strings.Builder
 	builder.WriteString(normalized.StandardQuestion)
 	builder.WriteString("|")
@@ -158,22 +158,22 @@ func CalculateFAQContentHash(meta *FAQChunkMetadata) string {
 	builder.WriteString("|")
 	builder.WriteString(strings.Join(answers, ","))
 
-	// 计算 SHA256 hash
+	// SHA256 해시 계산
 	hash := sha256.Sum256([]byte(builder.String()))
 	return hex.EncodeToString(hash[:])
 }
 
-// AnswerStrategy 定义答案返回策略
+// AnswerStrategy 답변 반환 전략을 정의합니다.
 type AnswerStrategy string
 
 const (
-	// AnswerStrategyAll 返回所有答案
+	// AnswerStrategyAll 모든 답변 반환
 	AnswerStrategyAll AnswerStrategy = "all"
-	// AnswerStrategyRandom 随机返回一个答案
+	// AnswerStrategyRandom 무작위로 하나의 답변 반환
 	AnswerStrategyRandom AnswerStrategy = "random"
 )
 
-// FAQEntry 表示返回给前端的 FAQ 条目
+// FAQEntry 프론트엔드에 반환되는 FAQ 항목을 나타냅니다.
 type FAQEntry struct {
 	ID                string         `json:"id"`
 	ChunkID           string         `json:"chunk_id"`
@@ -196,7 +196,7 @@ type FAQEntry struct {
 	ChunkType         ChunkType      `json:"chunk_type"`
 }
 
-// FAQEntryPayload 用于创建/更新 FAQ 条目的 payload
+// FAQEntryPayload FAQ 항목 생성/업데이트를 위한 페이로드
 type FAQEntryPayload struct {
 	StandardQuestion  string          `json:"standard_question"    binding:"required"`
 	SimilarQuestions  []string        `json:"similar_questions"`
@@ -214,84 +214,84 @@ const (
 	FAQBatchModeReplace = "replace"
 )
 
-// FAQBatchUpsertPayload 批量导入 FAQ 条目
+// FAQBatchUpsertPayload FAQ 항목 일괄 가져오기
 type FAQBatchUpsertPayload struct {
 	Entries     []FAQEntryPayload `json:"entries"      binding:"required"`
 	Mode        string            `json:"mode"         binding:"oneof=append replace"`
 	KnowledgeID string            `json:"knowledge_id"`
 }
 
-// FAQSearchRequest FAQ检索请求参数
+// FAQSearchRequest FAQ 검색 요청 매개변수
 type FAQSearchRequest struct {
 	QueryText            string   `json:"query_text"             binding:"required"`
 	VectorThreshold      float64  `json:"vector_threshold"`
 	MatchCount           int      `json:"match_count"`
-	FirstPriorityTagIDs  []string `json:"first_priority_tag_ids"`  // 第一优先级标签ID列表，限定命中范围，优先级最高
-	SecondPriorityTagIDs []string `json:"second_priority_tag_ids"` // 第二优先级标签ID列表，限定命中范围，优先级低于第一优先级
+	FirstPriorityTagIDs  []string `json:"first_priority_tag_ids"`  // 1순위 태그 ID 목록, 검색 범위 제한, 가장 높은 우선순위
+	SecondPriorityTagIDs []string `json:"second_priority_tag_ids"` // 2순위 태그 ID 목록, 검색 범위 제한, 1순위보다 낮은 우선순위
 }
 
-// UntaggedTagID is the special tag ID representing uncategorized entries
+// UntaggedTagID 분류되지 않은 항목을 나타내는 특수 태그 ID
 const UntaggedTagID = "__untagged__"
 
-// FAQEntryFieldsUpdate 单个FAQ条目的字段更新
+// FAQEntryFieldsUpdate 단일 FAQ 항목의 필드 업데이트
 type FAQEntryFieldsUpdate struct {
 	IsEnabled     *bool   `json:"is_enabled,omitempty"`
 	IsRecommended *bool   `json:"is_recommended,omitempty"`
 	TagID         *string `json:"tag_id,omitempty"`
-	// 后续可扩展更多字段
+	// 향후 더 많은 필드 확장 가능
 }
 
-// FAQEntryFieldsBatchUpdate 批量更新FAQ条目字段的请求
-// 支持两种模式：
-// 1. 按条目ID更新：使用 ByID 字段
-// 2. 按Tag更新：使用 ByTag 字段，将该Tag下所有条目应用相同的更新
+// FAQEntryFieldsBatchUpdate FAQ 항목 필드 일괄 업데이트 요청
+// 두 가지 모드 지원:
+// 1. ID별 업데이트: ByID 필드 사용
+// 2. 태그별 업데이트: ByTag 필드 사용, 해당 태그의 모든 항목에 동일한 업데이트 적용
 type FAQEntryFieldsBatchUpdate struct {
-	// ByID 按条目ID更新，key为条目ID
+	// ByID 항목 ID별 업데이트, 키는 항목 ID
 	ByID map[string]FAQEntryFieldsUpdate `json:"by_id,omitempty"`
-	// ByTag 按Tag批量更新，key为TagID（__untagged__表示未分类）
+	// ByTag 태그별 일괄 업데이트, 키는 TagID (__untagged__는 미분류)
 	ByTag map[string]FAQEntryFieldsUpdate `json:"by_tag,omitempty"`
-	// ExcludeIDs 在ByTag操作中需要排除的ID列表
+	// ExcludeIDs ByTag 작업에서 제외할 ID 목록
 	ExcludeIDs []string `json:"exclude_ids,omitempty"`
 }
 
-// FAQImportTaskStatus 导入任务状态
+// FAQImportTaskStatus 가져오기 작업 상태
 type FAQImportTaskStatus string
 
 const (
-	// FAQImportStatusPending represents the pending status of the FAQ import task
+	// FAQImportStatusPending FAQ 가져오기 작업의 대기 상태를 나타냅니다
 	FAQImportStatusPending FAQImportTaskStatus = "pending"
-	// FAQImportStatusProcessing represents the processing status of the FAQ import task
+	// FAQImportStatusProcessing FAQ 가져오기 작업의 처리 중 상태를 나타냅니다
 	FAQImportStatusProcessing FAQImportTaskStatus = "processing"
-	// FAQImportStatusCompleted represents the completed status of the FAQ import task
+	// FAQImportStatusCompleted FAQ 가져오기 작업의 완료 상태를 나타냅니다
 	FAQImportStatusCompleted FAQImportTaskStatus = "completed"
-	// FAQImportStatusFailed represents the failed status of the FAQ import task
+	// FAQImportStatusFailed FAQ 가져오기 작업의 실패 상태를 나타냅니다
 	FAQImportStatusFailed FAQImportTaskStatus = "failed"
 )
 
-// FAQImportProgress represents the progress of an FAQ import task stored in Redis
+// FAQImportProgress Redis에 저장된 FAQ 가져오기 작업의 진행 상황을 나타냅니다
 type FAQImportProgress struct {
-	TaskID      string              `json:"task_id"`       // UUID for the import task
-	KBID        string              `json:"kb_id"`         // Knowledge Base ID
-	KnowledgeID string              `json:"knowledge_id"`  // FAQ Knowledge ID
-	Status      FAQImportTaskStatus `json:"status"`        // Task status
-	Progress    int                 `json:"progress"`      // 0-100 percentage
-	Total       int                 `json:"total"`         // Total entries to import
-	Processed   int                 `json:"processed"`     // Entries processed so far
-	Message     string              `json:"message"`       // Status message
-	Error       string              `json:"error"`         // Error message if failed
-	CreatedAt   int64               `json:"created_at"`    // Task creation timestamp
-	UpdatedAt   int64               `json:"updated_at"`    // Last update timestamp
+	TaskID      string              `json:"task_id"`       // 가져오기 작업을 위한 UUID
+	KBID        string              `json:"kb_id"`         // 지식베이스 ID
+	KnowledgeID string              `json:"knowledge_id"`  // FAQ 지식 ID
+	Status      FAQImportTaskStatus `json:"status"`        // 작업 상태
+	Progress    int                 `json:"progress"`      // 0-100 퍼센트
+	Total       int                 `json:"total"`         // 가져올 총 항목 수
+	Processed   int                 `json:"processed"`     // 현재까지 처리된 항목 수
+	Message     string              `json:"message"`       // 상태 메시지
+	Error       string              `json:"error"`         // 실패 시 오류 메시지
+	CreatedAt   int64               `json:"created_at"`    // 작업 생성 타임스탬프
+	UpdatedAt   int64               `json:"updated_at"`    // 마지막 업데이트 타임스탬프
 }
 
-// FAQImportMetadata 存储在Knowledge.Metadata中的FAQ导入任务信息
-// Deprecated: Use FAQImportProgress with Redis storage instead
+// FAQImportMetadata Knowledge.Metadata에 저장된 FAQ 가져오기 작업 정보
+// Deprecated: Redis 저장소를 사용하는 FAQImportProgress를 대신 사용하세요
 type FAQImportMetadata struct {
 	ImportProgress  int `json:"import_progress"` // 0-100
 	ImportTotal     int `json:"import_total"`
 	ImportProcessed int `json:"import_processed"`
 }
 
-// ToJSON converts the metadata to JSON type.
+// ToJSON 메타데이터를 JSON 타입으로 변환합니다.
 func (m *FAQImportMetadata) ToJSON() (JSON, error) {
 	if m == nil {
 		return nil, nil
@@ -303,7 +303,7 @@ func (m *FAQImportMetadata) ToJSON() (JSON, error) {
 	return JSON(bytes), nil
 }
 
-// ParseFAQImportMetadata parses FAQ import metadata from Knowledge.
+// ParseFAQImportMetadata Knowledge에서 FAQ 가져오기 메타데이터를 파싱합니다.
 func ParseFAQImportMetadata(k *Knowledge) (*FAQImportMetadata, error) {
 	if k == nil || len(k.Metadata) == 0 {
 		return nil, nil

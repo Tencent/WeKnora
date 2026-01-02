@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// AliyunMultimodalEmbeddingEndpoint 阿里云 DashScope 多模态 Embedding API 端点
+	// AliyunMultimodalEmbeddingEndpoint 알리 클라우드 DashScope 멀티모달 Embedding API 엔드포인트
 	AliyunMultimodalEmbeddingEndpoint = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 )
 
