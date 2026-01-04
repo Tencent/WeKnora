@@ -48,4 +48,10 @@ type KnowledgeTagRepository interface {
 		kbID string,
 		tagID string,
 	) (knowledgeCount int64, chunkCount int64, err error)
+	// CountUntaggedReferences returns number of knowledges and chunks without a tag.
+	CountUntaggedReferences(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+	) (knowledgeCount int64, chunkCount int64, err error)
 }

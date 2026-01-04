@@ -135,3 +135,24 @@ func (r *knowledgeTagRepository) CountReferences(
 	}
 	return
 }
+
+// CountUntaggedReferences returns the number of knowledges and chunks without a tag
+func (r *knowledgeTagRepository) CountUntaggedReferences(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+) (knowledgeCount int64, chunkCount int64, err error) {
+	if err = r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND (tag_id = '' OR tag_id IS NULL)", tenantID, kbID).
+		Count(&knowledgeCount).Error; err != nil {
+		return
+	}
+	if err = r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND (tag_id = '' OR tag_id IS NULL)", tenantID, kbID).
+		Count(&chunkCount).Error; err != nil {
+		return
+	}
+	return
+}

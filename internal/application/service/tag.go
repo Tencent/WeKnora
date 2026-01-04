@@ -72,7 +72,29 @@ func (s *knowledgeTagService) ListTags(
 		return nil, err
 	}
 
-	results := make([]*types.KnowledgeTagWithStats, 0, len(tags))
+	results := make([]*types.KnowledgeTagWithStats, 0, len(tags)+1)
+
+	// Add untagged pseudo-tag at the beginning (only on first page and when no keyword filter)
+	if page.Page <= 1 && keyword == "" {
+		untaggedKCount, untaggedCCount, err := s.repo.CountUntaggedReferences(ctx, tenantID, kbID)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"kb_id": kbID,
+			})
+			return nil, err
+		}
+		results = append(results, &types.KnowledgeTagWithStats{
+			KnowledgeTag: types.KnowledgeTag{
+				ID:              types.UntaggedTagID,
+				TenantID:        tenantID,
+				KnowledgeBaseID: kbID,
+				Name:            "未分类",
+			},
+			KnowledgeCount: untaggedKCount,
+			ChunkCount:     untaggedCCount,
+		})
+	}
+
 	for _, tag := range tags {
 		if tag == nil {
 			continue
@@ -91,6 +113,12 @@ func (s *knowledgeTagService) ListTags(
 			ChunkCount:     cCount,
 		})
 	}
+
+	// Adjust total to include the untagged pseudo-tag
+	if keyword == "" {
+		total++
+	}
+
 	return types.NewPageResult(total, page, results), nil
 }
 
