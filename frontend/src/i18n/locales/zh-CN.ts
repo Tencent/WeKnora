@@ -1670,8 +1670,6 @@ export default {
     normalModeDesc: "基于知识库的 RAG 问答",
     agentModeDesc: "多步思考，深度分析",
     agentNotReadyTooltip: "Agent 未就绪，请先在设置中完成配置",
-    agentNotReadyDetail:
-      "Agent 未就绪，需要配置以下内容：{reasons}",
     agentMissingAllowedTools: "允许的工具",
     agentMissingSummaryModel: "对话模型（Summary Model）",
     agentMissingRerankModel: "重排模型（Rerank Model）",
