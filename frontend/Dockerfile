@@ -7,10 +7,6 @@ WORKDIR /app
 ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV VITE_IS_DOCKER=true
 
-# 文件大小限制(MB)，通过构建参数传入
-ARG MAX_FILE_SIZE_MB=50
-ENV VITE_MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB}
-
 # 复制依赖文件
 COPY package*.json ./
 COPY packages/xlsx-0.20.2.tgz ./packages/xlsx-0.20.2.tgz
@@ -34,11 +30,14 @@ COPY --from=build-stage /app/dist /usr/share/nginx/html
 # 复制nginx配置模板文件
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 
+# 复制启动脚本
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # 设置默认环境变量（MB）
 ENV MAX_FILE_SIZE_MB=50
 
 # 暴露端口
 EXPOSE 80
 
-# 启动时将 MAX_FILE_SIZE_MB 转换为带单位的 MAX_FILE_SIZE，然后替换到 nginx 配置
-CMD ["/bin/sh", "-c", "export MAX_FILE_SIZE=${MAX_FILE_SIZE_MB}M && envsubst '${MAX_FILE_SIZE}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"] 
+ENTRYPOINT ["/docker-entrypoint.sh"] 
