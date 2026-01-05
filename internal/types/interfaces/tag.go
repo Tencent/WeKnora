@@ -54,4 +54,6 @@ type KnowledgeTagRepository interface {
 		tenantID uint64,
 		kbID string,
 	) (knowledgeCount int64, chunkCount int64, err error)
+	// DeleteUnusedTags deletes tags that are not referenced by any knowledge or chunk.
+	DeleteUnusedTags(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 }

@@ -3067,6 +3067,14 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 				return fmt.Errorf("failed to delete chunk vectors: %w", err)
 			}
 			logger.Infof(ctx, "FAQ import task %s: deleted %d chunks (including updates)", taskID, len(chunksToDelete))
+
+			// 清理不再被引用的Tag
+			deletedTags, err := s.tagRepo.DeleteUnusedTags(ctx, tenantID, kb.ID)
+			if err != nil {
+				logger.Warnf(ctx, "FAQ import task %s: failed to cleanup unused tags: %v", taskID, err)
+			} else if deletedTags > 0 {
+				logger.Infof(ctx, "FAQ import task %s: cleaned up %d unused tags", taskID, deletedTags)
+			}
 		}
 	} else {
 		// Append模式：查询已存在的条目，跳过未变化的

@@ -156,3 +156,15 @@ func (r *knowledgeTagRepository) CountUntaggedReferences(
 	}
 	return
 }
+
+// DeleteUnusedTags deletes tags that are not referenced by any knowledge or chunk.
+// Returns the number of deleted tags.
+func (r *knowledgeTagRepository) DeleteUnusedTags(ctx context.Context, tenantID uint64, kbID string) (int64, error) {
+	// Delete tags that have no references in both knowledges and chunks tables
+	result := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("id NOT IN (SELECT DISTINCT tag_id FROM knowledges WHERE tenant_id = ? AND knowledge_base_id = ? AND tag_id IS NOT NULL AND tag_id != '')", tenantID, kbID).
+		Where("id NOT IN (SELECT DISTINCT tag_id FROM chunks WHERE tenant_id = ? AND knowledge_base_id = ? AND tag_id IS NOT NULL AND tag_id != '')", tenantID, kbID).
+		Delete(&types.KnowledgeTag{})
+	return result.RowsAffected, result.Error
+}
