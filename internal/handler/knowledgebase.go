@@ -331,6 +331,7 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 }
 
 type CopyKnowledgeBaseRequest struct {
+	TaskID   string `json:"task_id"`
 	SourceID string `json:"source_id" binding:"required"`
 	TargetID string `json:"target_id"`
 }
@@ -372,8 +373,11 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	// Generate task ID
-	taskID := uuid.New().String()
+	// Generate task ID if not provided
+	taskID := req.TaskID
+	if taskID == "" {
+		taskID = uuid.New().String()
+	}
 
 	// Create KB clone payload
 	payload := types.KBClonePayload{

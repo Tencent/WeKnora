@@ -136,6 +136,7 @@ type HybridSearchResponse struct {
 }
 
 type CopyKnowledgeBaseRequest struct {
+	TaskID   string `json:"task_id,omitempty"`
 	SourceID string `json:"source_id"`
 	TargetID string `json:"target_id"`
 }
