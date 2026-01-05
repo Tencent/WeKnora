@@ -61,10 +61,14 @@ import (
 // Returns:
 //   - Configured container with all application dependencies registered
 func BuildContainer(container *dig.Container) *dig.Container {
+	ctx := context.Background()
+	logger.Debugf(ctx, "[Container] Starting container initialization...")
+
 	// Register resource cleaner for proper cleanup of resources
 	must(container.Provide(NewResourceCleaner, dig.As(new(interfaces.ResourceCleaner))))
 
 	// Core infrastructure configuration
+	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
 	must(container.Provide(initTracer))
 	must(container.Provide(initDatabase))
@@ -77,16 +81,21 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(registerPoolCleanup))
 
 	// Initialize retrieval engine registry for search capabilities
+	logger.Debugf(ctx, "[Container] Registering retrieval engine registry...")
 	must(container.Provide(initRetrieveEngineRegistry))
 
 	// External service clients
+	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
 	must(container.Provide(stream.NewStreamManager))
+	logger.Debugf(ctx, "[Container] Initializing DuckDB...")
 	must(container.Provide(NewDuckDB))
+	logger.Debugf(ctx, "[Container] DuckDB registered")
 
 	// Data repositories layer
+	logger.Debugf(ctx, "[Container] Registering repositories...")
 	must(container.Provide(repository.NewTenantRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
@@ -103,9 +112,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewWebSearchStateService))
 
 	// MCP manager for managing MCP client connections
+	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
 
 	// Business service layer
+	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
 	must(container.Provide(service.NewKnowledgeBaseService))
 	must(container.Provide(service.NewKnowledgeService))
@@ -126,21 +137,26 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewCustomAgentService))
 
 	// Web search service (needed by AgentService)
+	logger.Debugf(ctx, "[Container] Registering web search service...")
 	must(container.Provide(service.NewWebSearchService))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
+	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
 	// SessionService is created after AgentService and passes itself to AgentService.CreateAgentEngine when needed
+	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
 
+	logger.Debugf(ctx, "[Container] Registering asynq client and server...")
 	must(container.Provide(router.NewAsyncqClient))
 	must(container.Provide(router.NewAsynqServer))
 
 	// Chat pipeline components for processing chat requests
+	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
 	must(container.Provide(chatpipline.NewEventManager))
 	must(container.Invoke(chatpipline.NewPluginTracing))
 	must(container.Invoke(chatpipline.NewPluginSearch))
@@ -157,8 +173,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipline.NewPluginExtractEntity))
 	must(container.Invoke(chatpipline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipline.NewPluginSearchParallel))
+	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer
+	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
 	must(container.Provide(handler.NewTenantHandler))
 	must(container.Provide(handler.NewKnowledgeBaseHandler))
 	must(container.Provide(handler.NewKnowledgeHandler))
@@ -175,11 +193,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewWebSearchHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
+	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Router configuration
+	logger.Debugf(ctx, "[Container] Registering router and starting asynq server...")
 	must(container.Provide(router.NewRouter))
 	must(container.Invoke(router.RunAsynqServer))
 
+	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
 }
 
@@ -614,18 +635,32 @@ func NewDuckDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
-	ctx := context.Background()
-	// Install and load the spatial extension which includes Excel support
-	// Note: DuckDB doesn't have native Excel support, we need to use a workaround
-	// Option 1: Install spatial extension (if available)
+
+	// Install and load the spatial extension with timeout to avoid blocking startup
+	// The extension installation may download from network which can be slow or hang
+	installTimeout := 30 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), installTimeout)
+	defer cancel()
+
+	// Try to install spatial extension (may already be installed or network unavailable)
 	installSQL := "INSTALL spatial;"
 	if _, err := sqlDB.ExecContext(ctx, installSQL); err != nil {
-		logger.Warnf(ctx, "[DuckDB] Failed to install spatial extension (may already be installed): %v", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			logger.Warnf(context.Background(), "[DuckDB] Spatial extension installation timed out after %v, skipping", installTimeout)
+		} else {
+			logger.Warnf(context.Background(), "[DuckDB] Failed to install spatial extension (may already be installed): %v", err)
+		}
 	}
 
+	// Try to load spatial extension
 	loadSQL := "LOAD spatial;"
 	if _, err := sqlDB.ExecContext(ctx, loadSQL); err != nil {
-		logger.Warnf(ctx, "[DuckDB] Failed to load spatial extension: %v", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			logger.Warnf(context.Background(), "[DuckDB] Spatial extension loading timed out, skipping")
+		} else {
+			logger.Warnf(context.Background(), "[DuckDB] Failed to load spatial extension: %v", err)
+		}
 	}
+
 	return sqlDB, nil
 }

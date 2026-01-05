@@ -91,14 +91,10 @@ const tagMap = computed<Record<string, any>>(() => {
   return map;
 });
 const sidebarCategoryCount = computed(() => tagList.value.length);
-// Filter out the untagged pseudo-tag from regular tags
-const regularTags = computed(() => tagList.value.filter((tag) => tag.id !== UNTAGGED_TAG_ID));
-// Get the untagged pseudo-tag from the list
-const untaggedTag = computed(() => tagList.value.find((tag) => tag.id === UNTAGGED_TAG_ID));
 const filteredTags = computed(() => {
   const query = tagSearchQuery.value.trim().toLowerCase();
-  if (!query) return regularTags.value;
-  return regularTags.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
+  if (!query) return tagList.value;
+  return tagList.value.filter((tag) => (tag.name || '').toLowerCase().includes(query));
 });
 
 const editingTagInputRefs = new Map<string, TagInputInstance | null>();
@@ -1003,18 +999,6 @@ async function createNewSession(value: string): Promise<void> {
           </div>
           <t-loading :loading="tagLoading" size="small">
             <div class="tag-list">
-              <div
-                v-if="untaggedTag"
-                class="tag-list-item"
-                :class="{ active: selectedTagId === UNTAGGED_TAG_ID }"
-                @click="handleUntaggedClick"
-              >
-                <div class="tag-list-left">
-                  <t-icon name="folder" size="18px" />
-                  <span>{{ $t('knowledgeBase.untagged') || '未分类' }}</span>
-                </div>
-                <span class="tag-count">{{ untaggedTag.knowledge_count || 0 }}</span>
-              </div>
               <div v-if="creatingTag" class="tag-list-item tag-editing" @click.stop>
                 <div class="tag-list-left">
                   <t-icon name="folder" size="18px" />
@@ -1058,12 +1042,16 @@ async function createNewSession(value: string): Promise<void> {
                   v-for="tag in filteredTags"
                   :key="tag.id"
                   class="tag-list-item"
-                  :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id }"
-                  @click="handleTagRowClick(tag.id)"
+                  :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id && tag.id !== UNTAGGED_TAG_ID }"
+                  @click="tag.id === UNTAGGED_TAG_ID ? handleUntaggedClick() : handleTagRowClick(tag.id)"
                 >
                   <div class="tag-list-left">
                     <t-icon name="folder" size="18px" />
-                    <template v-if="editingTagId === tag.id">
+                    <!-- Untagged pseudo-tag: show translated name, no editing -->
+                    <template v-if="tag.id === UNTAGGED_TAG_ID">
+                      <span class="tag-name">{{ $t('knowledgeBase.untagged') || '未分类' }}</span>
+                    </template>
+                    <template v-else-if="editingTagId === tag.id">
                       <div class="tag-edit-input" @click.stop>
                         <t-input
                           :ref="setEditingTagInputRefByTag(tag.id)"
@@ -1081,46 +1069,54 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                   <div class="tag-list-right">
                     <span class="tag-count">{{ tag.knowledge_count || 0 }}</span>
-                    <div v-if="editingTagId === tag.id" class="tag-inline-actions" @click.stop>
-                      <t-button
-                        variant="text"
-                        theme="default"
-                        size="small"
-                        class="tag-action-btn confirm"
-                        :loading="editingTagSubmitting"
-                        @click.stop="submitEditTag"
-                      >
-                        <t-icon name="check" size="16px" />
-                      </t-button>
-                      <t-button
-                        variant="text"
-                        theme="default"
-                        size="small"
-                        class="tag-action-btn cancel"
-                        @click.stop="cancelEditTag"
-                      >
-                        <t-icon name="close" size="16px" />
-                      </t-button>
-                    </div>
-                    <div v-else class="tag-more" @click.stop>
-                      <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
-                        <div class="tag-more-btn">
-                          <t-icon name="more" size="14px" />
-                        </div>
-                        <template #content>
-                          <div class="tag-menu">
-                            <div class="tag-menu-item" @click="startEditTag(tag)">
-                              <t-icon class="menu-icon" name="edit" />
-                              <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
-                            </div>
-                            <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
-                              <t-icon class="menu-icon" name="delete" />
-                              <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
-                            </div>
+                    <!-- Untagged pseudo-tag: no edit/delete actions -->
+                    <template v-if="tag.id === UNTAGGED_TAG_ID">
+                      <!-- Empty placeholder for alignment -->
+                    </template>
+                    <template v-else-if="editingTagId === tag.id">
+                      <div class="tag-inline-actions" @click.stop>
+                        <t-button
+                          variant="text"
+                          theme="default"
+                          size="small"
+                          class="tag-action-btn confirm"
+                          :loading="editingTagSubmitting"
+                          @click.stop="submitEditTag"
+                        >
+                          <t-icon name="check" size="16px" />
+                        </t-button>
+                        <t-button
+                          variant="text"
+                          theme="default"
+                          size="small"
+                          class="tag-action-btn cancel"
+                          @click.stop="cancelEditTag"
+                        >
+                          <t-icon name="close" size="16px" />
+                        </t-button>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="tag-more" @click.stop>
+                        <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
+                          <div class="tag-more-btn">
+                            <t-icon name="more" size="14px" />
                           </div>
-                        </template>
-                      </t-popup>
-                    </div>
+                          <template #content>
+                            <div class="tag-menu">
+                              <div class="tag-menu-item" @click="startEditTag(tag)">
+                                <t-icon class="menu-icon" name="edit" />
+                                <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
+                              </div>
+                              <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
+                                <t-icon class="menu-icon" name="delete" />
+                                <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
+                              </div>
+                            </div>
+                          </template>
+                        </t-popup>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </template>

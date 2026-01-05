@@ -140,22 +140,6 @@
           </div>
           <t-loading :loading="tagLoading" size="small">
             <div ref="tagListRef" class="faq-tag-list" @scroll="handleTagListScroll">
-              <div
-                class="faq-tag-item"
-                :class="{ active: selectedTagId === UNTAGGED_FILTER }"
-                @click="handleUntaggedClick"
-              >
-                <div class="faq-tag-left">
-                  <t-icon name="folder" size="18px" />
-                  <span>{{ $t('knowledgeBase.untagged') }}</span>
-                </div>
-                <div class="faq-tag-right">
-                  <span class="faq-tag-count">{{ untaggedFAQCount }}</span>
-                  <!-- Placeholder for alignment with other tags that have more menu -->
-                  <div class="tag-more-placeholder"></div>
-                </div>
-              </div>
-
               <div v-if="creatingTag" class="faq-tag-item tag-editing" @click.stop>
                 <div class="faq-tag-left">
                   <t-icon name="folder" size="18px" />
@@ -199,12 +183,16 @@
                   v-for="tag in filteredTags"
                   :key="tag.id"
                   class="faq-tag-item"
-                  :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id }"
-                  @click="handleTagRowClick(tag.id)"
+                  :class="{ active: selectedTagId === tag.id, editing: editingTagId === tag.id && tag.id !== UNTAGGED_FILTER }"
+                  @click="tag.id === UNTAGGED_FILTER ? handleUntaggedClick() : handleTagRowClick(tag.id)"
                 >
                   <div class="faq-tag-left">
                     <t-icon name="folder" size="18px" />
-                    <template v-if="editingTagId === tag.id">
+                    <!-- Untagged pseudo-tag: show translated name, no editing -->
+                    <template v-if="tag.id === UNTAGGED_FILTER">
+                      <span class="tag-name">{{ $t('knowledgeBase.untagged') }}</span>
+                    </template>
+                    <template v-else-if="editingTagId === tag.id">
                       <div class="tag-edit-input" @click.stop>
                         <t-input
                           :ref="setEditingTagInputRefByTag(tag.id)"
@@ -222,46 +210,54 @@
                   </div>
                   <div class="faq-tag-right">
                     <span class="faq-tag-count">{{ tag.chunk_count || 0 }}</span>
-                    <div v-if="editingTagId === tag.id" class="tag-inline-actions" @click.stop>
-                      <t-button
-                        variant="text"
-                        theme="default"
-                        size="small"
-                        class="tag-action-btn confirm"
-                        :loading="editingTagSubmitting"
-                        @click.stop="submitEditTag"
-                      >
-                        <t-icon name="check" size="16px" />
-                      </t-button>
-                      <t-button
-                        variant="text"
-                        theme="default"
-                        size="small"
-                        class="tag-action-btn cancel"
-                        @click.stop="cancelEditTag"
-                      >
-                        <t-icon name="close" size="16px" />
-                      </t-button>
-                    </div>
-                    <div v-else class="tag-more" @click.stop>
-                      <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
-                        <div class="tag-more-btn">
-                          <t-icon name="more" size="14px" />
-                        </div>
-                        <template #content>
-                          <div class="tag-menu">
-                            <div class="tag-menu-item" @click="startEditTag(tag)">
-                              <t-icon class="menu-icon" name="edit" />
-                              <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
-                            </div>
-                            <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
-                              <t-icon class="menu-icon" name="delete" />
-                              <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
-                            </div>
+                    <!-- Untagged pseudo-tag: no edit/delete actions, just a placeholder -->
+                    <template v-if="tag.id === UNTAGGED_FILTER">
+                      <div class="tag-more-placeholder"></div>
+                    </template>
+                    <template v-else-if="editingTagId === tag.id">
+                      <div class="tag-inline-actions" @click.stop>
+                        <t-button
+                          variant="text"
+                          theme="default"
+                          size="small"
+                          class="tag-action-btn confirm"
+                          :loading="editingTagSubmitting"
+                          @click.stop="submitEditTag"
+                        >
+                          <t-icon name="check" size="16px" />
+                        </t-button>
+                        <t-button
+                          variant="text"
+                          theme="default"
+                          size="small"
+                          class="tag-action-btn cancel"
+                          @click.stop="cancelEditTag"
+                        >
+                          <t-icon name="close" size="16px" />
+                        </t-button>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="tag-more" @click.stop>
+                        <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
+                          <div class="tag-more-btn">
+                            <t-icon name="more" size="14px" />
                           </div>
-                        </template>
-                      </t-popup>
-                    </div>
+                          <template #content>
+                            <div class="tag-menu">
+                              <div class="tag-menu-item" @click="startEditTag(tag)">
+                                <t-icon class="menu-icon" name="edit" />
+                                <span>{{ $t('knowledgeBase.tagEditAction') }}</span>
+                              </div>
+                              <div class="tag-menu-item danger" @click="confirmDeleteTag(tag)">
+                                <t-icon class="menu-icon" name="delete" />
+                                <span>{{ $t('knowledgeBase.tagDeleteAction') }}</span>
+                              </div>
+                            </div>
+                          </template>
+                        </t-popup>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </template>
@@ -1218,10 +1214,6 @@ const newTagName = ref('')
 const editingTagId = ref<string | null>(null)
 const editingTagName = ref('')
 const editingTagSubmitting = ref(false)
-const tagDropdownOptions = computed(() => [
-  { content: t('knowledgeBase.untagged') || '未分类', value: '' },
-  ...tagList.value.map((tag: any) => ({ content: tag.name, value: tag.id })),
-])
 const tagMap = computed<Record<string, any>>(() => {
   const map: Record<string, any> = {}
   tagList.value.forEach((tag) => {
@@ -1229,17 +1221,17 @@ const tagMap = computed<Record<string, any>>(() => {
   })
   return map
 })
+// Filter out the __untagged__ pseudo-tag for tag select options (when assigning tags)
+const regularTags = computed(() => tagList.value.filter((tag) => tag.id !== UNTAGGED_FILTER))
+const tagDropdownOptions = computed(() => [
+  { content: t('knowledgeBase.untagged') || '未分类', value: '' },
+  ...regularTags.value.map((tag: any) => ({ content: tag.name, value: tag.id })),
+])
 const tagSelectOptions = computed(() => [
   { label: t('knowledgeBase.untagged') || '未分类', value: '' },
-  ...tagList.value.map((tag: any) => ({ label: tag.name, value: tag.id })),
+  ...regularTags.value.map((tag: any) => ({ label: tag.name, value: tag.id })),
 ])
-const sidebarCategoryCount = computed(() => tagList.value.length + 1)
-const assignedFAQCount = computed(() =>
-  tagList.value.reduce((sum, tag) => sum + (tag.chunk_count || 0), 0),
-)
-const untaggedFAQCount = computed(() =>
-  Math.max(overallFAQTotal.value - assignedFAQCount.value, 0),
-)
+const sidebarCategoryCount = computed(() => tagList.value.length)
 const filteredTags = computed(() => {
   const query = tagSearchQuery.value.trim().toLowerCase()
   if (!query) {
