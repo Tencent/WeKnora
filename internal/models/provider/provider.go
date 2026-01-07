@@ -39,6 +39,8 @@ const (
 	ProviderMiniMax ProviderName = "minimax"
 	// 小米 Mimo
 	ProviderMimo ProviderName = "mimo"
+	// GPUStack (私有化部署)
+	ProviderGPUStack ProviderName = "gpustack"
 )
 
 // AllProviders 返回所有注册的提供者名称
@@ -57,6 +59,7 @@ func AllProviders() []ProviderName {
 		ProviderOpenRouter,
 		ProviderJina,
 		ProviderMimo,
+		ProviderGPUStack,
 	}
 }
 
@@ -208,6 +211,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderMiniMax
 	case containsAny(baseURL, "xiaomimimo.com"):
 		return ProviderMimo
+	case containsAny(baseURL, "gpustack"):
+		return ProviderGPUStack
 	default:
 		return ProviderGeneric
 	}

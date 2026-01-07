@@ -1207,6 +1207,34 @@ export default {
           label: "Jina AI",
           description: "专注于 Embedding 和 Rerank",
         },
+        volcengine: {
+          label: "火山引擎",
+          description: "doubao-1-5-pro-32k, doubao-embedding-vision 等",
+        },
+        deepseek: {
+          label: "DeepSeek",
+          description: "deepseek-chat, deepseek-reasoner 等",
+        },
+        hunyuan: {
+          label: "腾讯混元",
+          description: "hunyuan-pro, hunyuan-standard, hunyuan-embedding 等",
+        },
+        minimax: {
+          label: "MiniMax",
+          description: "MiniMax-M2.1, MiniMax-M2.1-lightning 等",
+        },
+        mimo: {
+          label: "小米 MiMo",
+          description: "mimo-v2-flash",
+        },
+        gemini: {
+          label: "Google Gemini",
+          description: "gemini-3-flash-preview, gemini-2.5-pro 等",
+        },
+        gpustack: {
+          label: "GPUStack",
+          description: "私有化 GPU 集群部署平台，OpenAI 兼容 API",
+        },
       },
     },
   },

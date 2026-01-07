@@ -1696,6 +1696,10 @@ export default {
           label: 'Google Gemini',
           description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.',
         },
+        gpustack: {
+          label: 'GPUStack',
+          description: 'Self-hosted GPU cluster platform, OpenAI-compatible API',
+        },
       },
     }
   },
