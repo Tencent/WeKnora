@@ -8,9 +8,9 @@ import (
 
 const (
 	// GPUStackBaseURL GPUStack API BaseURL (OpenAI 兼容模式)
-	GPUStackBaseURL          = "http://your_gpustack_server_url/v1-openai"
-	GPUStackEmbeddingBaseURL = "http://your_gpustack_server_url/v1-openai/embeddings"
-	GPUStackRerankBaseURL    = "http://your_gpustack_server_url/v1/rerank"
+	GPUStackBaseURL = "http://your_gpustack_server_url/v1-openai"
+	// GPUStackRerankBaseURL GPUStack Rerank API 虽然兼容OpenAI，但路径不同 (/v1/rerank 而非 /v1-openai/rerank)
+	GPUStackRerankBaseURL = "http://your_gpustack_server_url/v1"
 )
 
 // GPUStackProvider 实现 GPUStack 的 Provider 接口
@@ -28,7 +28,7 @@ func (p *GPUStackProvider) Info() ProviderInfo {
 		Description: "Choose your deployed model on GPUStack",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: GPUStackBaseURL,
-			types.ModelTypeEmbedding:   GPUStackEmbeddingBaseURL,
+			types.ModelTypeEmbedding:   GPUStackBaseURL,
 			types.ModelTypeRerank:      GPUStackRerankBaseURL,
 			types.ModelTypeVLLM:        GPUStackBaseURL,
 		},

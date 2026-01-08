@@ -904,7 +904,7 @@ export default {
           description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.',
         },
         zhipu: {
-          label: 'Zhipu AI',
+          label: 'Zhipu BigModel',
           description: 'glm-4.7, embedding-3, rerank, etc.',
         },
         openrouter: {
@@ -912,7 +912,7 @@ export default {
           description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.',
         },
         generic: {
-          label: 'Пользовательский API',
+          label: 'Пользовательский (OpenAI-совместимый)',
           description: 'Generic API endpoint',
         },
         siliconflow: {
@@ -920,7 +920,7 @@ export default {
           description: 'deepseek-ai/DeepSeek-V3.1, etc.',
         },
         jina: {
-          label: 'Jina AI',
+          label: 'Jina',
           description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.',
         },
         volcengine: {
@@ -949,7 +949,27 @@ export default {
         },
         gpustack: {
           label: 'GPUStack',
-          description: 'Приватная платформа GPU-кластеров, OpenAI-совместимый API',
+          description: 'Choose your deployed model on GPUStack',
+        },
+        modelscope: {
+          label: 'ModelScope',
+          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.',
+        },
+        qiniu: {
+          label: 'Qiniu Cloud',
+          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.',
+        },
+        moonshot: {
+          label: 'Moonshot',
+          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.',
+        },
+        qianfan: {
+          label: 'Baidu Qianfan',
+          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.',
+        },
+        longcat: {
+          label: 'LongCat AI',
+          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.',
         },
       },
     }

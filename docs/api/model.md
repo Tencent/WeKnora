@@ -17,21 +17,27 @@ WeKnora 支持多种主流 AI 模型服务商，在创建模型时可通过 `pro
 
 ### 支持的服务商列表
 
-| 服务商标识     | 名称               | 支持的模型类型                  |
-| -------------- | ------------------ | ------------------------------- |
-| `generic`      | 自定义API OpenAI 兼容   | Chat, Embedding, Rerank, VLLM   |
-| `aliyun`       | 阿里云 DashScope   | Chat, Embedding, Rerank, VLLM   |
-| `zhipu`        | 智谱 AI            | Chat, Embedding, Rerank, VLLM   |
-| `volcengine`   | 火山引擎           | Chat, Embedding, VLLM           |
-| `hunyuan`      | 腾讯混元           | Chat, Embedding, VLLM           |
-| `deepseek`     | DeepSeek           | Chat                            |
-| `minimax`      | MiniMax            | Chat, Embedding, VLLM           |
-| `mimo`         | 小米 Mimo          | Chat                            |
-| `siliconflow`  | 硅基流动           | Chat, Embedding, Rerank         |
-| `jina`         | Jina AI            | Embedding, Rerank               |
-| `openrouter`   | OpenRouter         | Chat                            |
-| `openai`       | OpenAI             | Chat, Embedding, VLLM           |
-| `gemini`       | Google Gemini      | Chat, Embedding, VLLM           |
+| 服务商标识     | 名称                         | 支持的模型类型                  |
+| -------------- | ---------------------------- | ------------------------------- |
+| `generic`      | 自定义 (OpenAI兼容接口)  | Chat, Embedding, Rerank, VLLM   |
+| `openai`       | OpenAI                       | Chat, Embedding, Rerank, VLLM   |
+| `aliyun`       | 阿里云 DashScope             | Chat, Embedding, Rerank, VLLM   |
+| `zhipu`        | 智谱 BigModel                | Chat, Embedding, Rerank, VLLM   |
+| `volcengine`   | 火山引擎 Volcengine          | Chat, Embedding, VLLM           |
+| `hunyuan`      | 腾讯混元 Hunyuan             | Chat, Embedding                 |
+| `deepseek`     | DeepSeek                     | Chat                            |
+| `minimax`      | MiniMax                      | Chat                            |
+| `mimo`         | 小米 MiMo                    | Chat                            |
+| `siliconflow`  | 硅基流动 SiliconFlow         | Chat, Embedding, Rerank, VLLM   |
+| `jina`         | Jina                         | Embedding, Rerank               |
+| `openrouter`   | OpenRouter                   | Chat, VLLM                      |
+| `gemini`       | Google Gemini                | Chat                            |
+| `modelscope`   | 魔搭 ModelScope              | Chat, Embedding, VLLM           |
+| `moonshot`     | 月之暗面 Moonshot            | Chat, VLLM                      |
+| `qianfan`      | 百度千帆 Baidu Cloud         | Chat, Embedding, Rerank, VLLM   |
+| `qiniu`        | 七牛云 Qiniu                 | Chat                            |
+| `longcat`      | LongCat AI                   | Chat                            |
+| `gpustack`     | GPUStack                     | Chat, Embedding, Rerank, VLLM   |
 
 ## GET `/models/providers` - 获取模型服务商列表
 
@@ -64,7 +70,7 @@ curl --location 'http://localhost:8080/api/v1/models/providers?model_type=embedd
         {
             "value": "aliyun",
             "label": "阿里云 DashScope",
-            "description": "阿里云百炼大模型服务",
+            "description": "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.",
             "defaultUrls": {
                 "chat": "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "embedding": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -74,13 +80,14 @@ curl --location 'http://localhost:8080/api/v1/models/providers?model_type=embedd
         },
         {
             "value": "zhipu",
-            "label": "智谱 AI",
-            "description": "智谱清言大模型",
+            "label": "智谱 BigModel",
+            "description": "glm-4.7, embedding-3, rerank, etc.",
             "defaultUrls": {
                 "chat": "https://open.bigmodel.cn/api/paas/v4",
-                "embedding": "https://open.bigmodel.cn/api/paas/v4/embeddings"
+                "embedding": "https://open.bigmodel.cn/api/paas/v4/embeddings",
+                "rerank": "https://open.bigmodel.cn/api/paas/v4/rerank"
             },
-            "modelTypes": ["chat", "embedding", "vllm"]
+            "modelTypes": ["chat", "embedding", "rerank", "vllm"]
         }
     ]
 }

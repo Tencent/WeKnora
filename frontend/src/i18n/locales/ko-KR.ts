@@ -983,6 +983,87 @@ export default {
         baseUrlEmpty: "Base URL은 비워둘 수 없습니다",
         baseUrlInvalid: "Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요",
       },
+      // Provider related translations
+      providerLabel: "제공업체",
+      providerPlaceholder: "모델 제공업체 선택",
+      providers: {
+        openai: {
+          label: "OpenAI",
+          description: "gpt-5.2, gpt-5-mini 등",
+        },
+        aliyun: {
+          label: "Aliyun DashScope",
+          description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank 등",
+        },
+        zhipu: {
+          label: "Zhipu BigModel",
+          description: "glm-4.7, embedding-3, rerank, etc.",
+        },
+        openrouter: {
+          label: "OpenRouter",
+          description: "openai/gpt-5.2-chat, google/gemini-3-flash-preview 등",
+        },
+        generic: {
+          label: "사용자 정의 (OpenAI 호환)",
+          description: "Generic API endpoint",
+        },
+        siliconflow: {
+          label: "SiliconFlow",
+          description: "deepseek-ai/DeepSeek-V3.1 등",
+        },
+        jina: {
+          label: "Jina",
+          description: "jina-clip-v1, jina-embeddings-v2-base-zh, etc.",
+        },
+        volcengine: {
+          label: "Volcengine",
+          description: "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615 등",
+        },
+        deepseek: {
+          label: "DeepSeek",
+          description: "deepseek-chat, deepseek-reasoner 등",
+        },
+        hunyuan: {
+          label: "Hunyuan",
+          description: "hunyuan-pro, hunyuan-standard, hunyuan-embedding 등",
+        },
+        minimax: {
+          label: "MiniMax",
+          description: "MiniMax-M2.1, MiniMax-M2.1-lightning 등",
+        },
+        mimo: {
+          label: "MiMo",
+          description: "mimo-v2-flash",
+        },
+        gemini: {
+          label: "Google Gemini",
+          description: "gemini-3-flash-preview, gemini-2.5-pro 등",
+        },
+        gpustack: {
+          label: "GPUStack",
+          description: "Choose your deployed model on GPUStack",
+        },
+        modelscope: {
+          label: "ModelScope",
+          description: "Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.",
+        },
+        qiniu: {
+          label: "Qiniu Cloud",
+          description: "deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.",
+        },
+        moonshot: {
+          label: "Moonshot",
+          description: "kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.",
+        },
+        qianfan: {
+          label: "Baidu Qianfan",
+          description: "ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.",
+        },
+        longcat: {
+          label: "LongCat AI",
+          description: "LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.",
+        },
+      },
     },
   },
   language: {
@@ -1155,9 +1236,9 @@ export default {
     messages: {
       deleted: "삭제됨",
       deleteFailed: "삭제 실패",
-    file: "파일",
-    knowledgeBase: "지식베이스",
-    noResult: "결과 없음",
+      file: "파일",
+      knowledgeBase: "지식베이스",
+      noResult: "결과 없음",
     },
     features: {
       knowledgeGraph: "지식 그래프 활성화됨",

@@ -24,7 +24,7 @@
 - 模型参数（parameters）：包括 base_url、api_key、provider 等
 - 租户ID（tenant_id）：建议使用小于10000的租户ID，避免冲突
 
-**支持的服务商（provider）**：`generic`（自定义）、`openai`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`deepseek`、`minimax`、`mimo`、`siliconflow`、`jina`、`openrouter`、`gemini`
+**支持的服务商（provider）**：`generic`（自定义）、`openai`、`aliyun`、`zhipu`、`volcengine`、`hunyuan`、`deepseek`、`minimax`、`mimo`、`siliconflow`、`jina`、`openrouter`、`gemini`、`modelscope`、`moonshot`、`qianfan`、`qiniu`、`longcat`、`gpustack`
 
 ### 2. 执行 SQL 插入语句
 
