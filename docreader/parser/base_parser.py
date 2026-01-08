@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import io
+import ipaddress
 import logging
 import os
 import re
 import time
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 from PIL import Image
@@ -29,6 +31,60 @@ class BaseParser(ABC):
     # Class variable for shared OCR engine instance
     _ocr_engine = None
     _ocr_engine_failed = False
+
+    @staticmethod
+    def _is_safe_url(url: str) -> bool:
+        """Validate URL to prevent SSRF attacks
+        
+        Args:
+            url: URL to validate
+            
+        Returns:
+            True if URL is safe to fetch, False otherwise
+        """
+        try:
+            parsed_url = urlparse(url)
+            
+            # Only allow http and https schemes
+            if parsed_url.scheme not in ['http', 'https']:
+                logger.warning(f"Rejected URL with invalid scheme: {parsed_url.scheme}")
+                return False
+            
+            # Extract hostname
+            hostname = parsed_url.hostname
+            if not hostname:
+                logger.warning("No hostname found in URL")
+                return False
+            
+            # Try to parse as IP address
+            try:
+                ip = ipaddress.ip_address(hostname)
+                # Reject private, loopback, link-local, multicast addresses
+                if (ip.is_private or ip.is_loopback or 
+                    ip.is_link_local or ip.is_multicast or
+                    ip.is_reserved):
+                    logger.warning(f"Rejected URL with restricted IP: {ip}")
+                    return False
+            except ValueError:
+                # Not an IP address, validate hostname
+                # Reject localhost and common internal hostnames
+                hostname_lower = hostname.lower()
+                restricted_hostnames = [
+                    'localhost',
+                    '127.0.0.1',
+                    '::1',
+                    'metadata.google.internal',
+                    'metadata.tencentyun.com',
+                    '169.254.169.254',  # AWS metadata endpoint
+                ]
+                if hostname_lower in restricted_hostnames or hostname_lower.endswith('.local'):
+                    logger.warning(f"Rejected URL with restricted hostname: {hostname}")
+                    return False
+            
+            return True
+        except Exception as e:
+            logger.warning(f"Error validating URL: {str(e)}")
+            return False
 
     @classmethod
     def get_ocr_engine(cls, backend_type="paddle", **kwargs):
@@ -681,6 +737,11 @@ class BaseParser(ABC):
             if is_storage_url:
                 logger.info(f"Image already on COS: {img_url}, no need to re-upload")
                 try:
+                    # Validate URL to prevent SSRF attacks
+                    if not self._is_safe_url(img_url):
+                        logger.error(f"URL failed validation check: {img_url}")
+                        return img_url, img_url, None
+                    
                     # Still need to get image object for OCR processing
                     # Get proxy settings from environment variables
                     http_proxy = os.environ.get("EXTERNAL_HTTP_PROXY")
@@ -727,6 +788,11 @@ class BaseParser(ABC):
 
             # Normal remote URL download handling
             else:
+                # Validate URL to prevent SSRF attacks
+                if not self._is_safe_url(img_url):
+                    logger.error(f"URL failed validation check: {img_url}")
+                    return img_url, img_url, None
+                
                 # Get proxy settings from environment variables
                 http_proxy = os.environ.get("EXTERNAL_HTTP_PROXY")
                 https_proxy = os.environ.get("EXTERNAL_HTTPS_PROXY")
