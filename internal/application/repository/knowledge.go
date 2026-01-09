@@ -12,6 +12,9 @@ import (
 
 var ErrKnowledgeNotFound = errors.New("knowledge not found")
 
+// omitFieldsOnUpdate defines fields to omit when updating knowledge
+var omitFieldsOnUpdate = []string{"DeletedAt"}
+
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
 	db *gorm.DB
@@ -134,7 +137,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 
 // UpdateKnowledge updates knowledge
 func (r *knowledgeRepository) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	err := r.db.WithContext(ctx).Save(knowledge).Error
+	err := r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledge).Error
 	return err
 }
 
@@ -143,7 +146,7 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 	if len(knowledgeList) == 0 {
 		return nil
 	}
-	return r.db.Debug().WithContext(ctx).Save(knowledgeList).Error
+	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
 }
 
 // DeleteKnowledge deletes knowledge
