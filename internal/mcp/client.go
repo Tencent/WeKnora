@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -56,6 +59,31 @@ type mcpGoClient struct {
 	client      *client.Client
 	connected   bool
 	initialized bool
+}
+
+// validateURLScheme validates that authentication endpoints use HTTPS
+func validateURLScheme(serviceURL string, hasBasicAuth bool, hasTokenAuth bool) error {
+	if !hasBasicAuth && !hasTokenAuth {
+		// No authentication, no HTTPS requirement
+		return nil
+	}
+
+	if serviceURL == "" {
+		return fmt.Errorf("URL is required")
+	}
+
+	// Parse the URL
+	parsedURL, err := url.Parse(serviceURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	// Enforce HTTPS for authenticated endpoints
+	if parsedURL.Scheme != "https" {
+		return fmt.Errorf("HTTPS is required for authenticated connections, got %s scheme", parsedURL.Scheme)
+	}
+
+	return nil
 }
 
 // NewMCPClient creates a new MCP client based on the transport type
