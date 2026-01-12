@@ -101,24 +101,24 @@ WeKnora employs a modern modular design to build a complete document understandi
 
 ## 🧩 Feature Matrix
 
-| Module | Support | Description |
-|---------|---------|------|
-| Agent Mode | ✅ ReACT Agent Mode | Support for using built-in tools to retrieve knowledge bases, MCP tools, and web search, with cross-knowledge base retrieval and multiple iterations |
-| Knowledge Base Types | ✅ FAQ / Document | Support for creating FAQ and document knowledge base types, with folder import, URL import, tag management, and online entry |
-| Document Formats | ✅ PDF / Word / Txt / Markdown / Images (with OCR / Caption) | Support for structured and unstructured documents with text extraction from images |
-| Model Management | ✅ Centralized configuration, built-in model sharing | Centralized model configuration with model selection in knowledge base settings, support for multi-tenant shared built-in models |
-| Embedding Models | ✅ Local models, BGE / GTE APIs, etc. | Customizable embedding models, compatible with local deployment and cloud vector generation APIs |
-| Vector DB Integration | ✅ PostgreSQL (pgvector), Elasticsearch | Support for mainstream vector index backends, flexible switching for different retrieval scenarios |
-| Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG | Support for sparse/dense recall and knowledge graph-enhanced retrieval with customizable retrieve-rerank-generate pipelines |
-| LLM Integration | ✅ Support for Qwen, DeepSeek, etc., with thinking/non-thinking mode switching | Compatible with local models (e.g., via Ollama) or external API services with flexible inference configuration |
+| Module | Support                                                                        | Description                                                                                                                                                        |
+|---------|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Agent Mode | ✅ ReACT Agent Mode                                                             | Support for using built-in tools to retrieve knowledge bases, MCP tools, and web search, with cross-knowledge base retrieval and multiple iterations               |
+| Knowledge Base Types | ✅ FAQ / Document                                                               | Support for creating FAQ and document knowledge base types, with folder import, URL import, tag management, and online entry                                       |
+| Document Formats | ✅ PDF / Word / Txt / Markdown / Images (with OCR / Caption)                    | Support for structured and unstructured documents with text extraction from images                                                                                 |
+| Model Management | ✅ Centralized configuration, built-in model sharing                            | Centralized model configuration with model selection in knowledge base settings, support for multi-tenant shared built-in models                                   |
+| Embedding Models | ✅ Local models, BGE / GTE APIs, etc.                                           | Customizable embedding models, compatible with local deployment and cloud vector generation APIs                                                                   |
+| Vector DB Integration | ✅ PostgreSQL (pgvector), Elasticsearch                                         | Support for mainstream vector index backends, flexible switching for different retrieval scenarios                                                                 |
+| Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG                                            | Support for sparse/dense recall and knowledge graph-enhanced retrieval with customizable retrieve-rerank-generate pipelines                                        |
+| LLM Integration | ✅ Support for Qwen, DeepSeek, etc., with thinking/non-thinking mode switching  | Compatible with local models (e.g., via Ollama) or external API services with flexible inference configuration                                                     |
 | Conversation Strategy | ✅ Agent models, normal mode models, retrieval thresholds, Prompt configuration | Support for configuring Agent models, normal mode models, retrieval thresholds, online Prompt configuration, precise control over multi-turn conversation behavior |
-| Web Search | ✅ Extensible search engines, DuckDuckGo | Support for extensible web search engines with built-in DuckDuckGo search engine |
-| MCP Tools | ✅ uvx, npx launchers, Stdio/HTTP Streamable/SSE | Support for extending Agent capabilities through MCP, with built-in uvx and npx launchers, supporting three transport methods |
-| QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates | Support for complex semantic modeling, instruction control and chain-of-thought Q&A with configurable prompts and context windows |
-| E2E Testing | ✅ Retrieval+generation process visualization and metric evaluation | End-to-end testing tools for evaluating recall hit rates, answer coverage, BLEU/ROUGE and other metrics |
-| Deployment Modes | ✅ Support for local deployment / Docker images | Meets private, offline deployment and flexible operation requirements, with fast development mode support |
-| User Interfaces | ✅ Web UI + RESTful API | Interactive interface and standard API endpoints, with Agent mode/normal mode switching and tool call process display |
-| Task Management | ✅ MQ async tasks, automatic database migration | MQ-based async task state maintenance, support for automatic database schema and data migration during version upgrades |
+| Web Search | ✅ Extensible search engines, DuckDuckGo / Google                               | Support for extensible web search engines with built-in DuckDuckGo search engine                                                                                   |
+| MCP Tools | ✅ uvx, npx launchers, Stdio/HTTP Streamable/SSE                                | Support for extending Agent capabilities through MCP, with built-in uvx and npx launchers, supporting three transport methods                                      |
+| QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates                         | Support for complex semantic modeling, instruction control and chain-of-thought Q&A with configurable prompts and context windows                                  |
+| E2E Testing | ✅ Retrieval+generation process visualization and metric evaluation             | End-to-end testing tools for evaluating recall hit rates, answer coverage, BLEU/ROUGE and other metrics                                                            |
+| Deployment Modes | ✅ Support for local deployment / Docker images                                 | Meets private, offline deployment and flexible operation requirements, with fast development mode support                                                          |
+| User Interfaces | ✅ Web UI + RESTful API                                                         | Interactive interface and standard API endpoints, with Agent mode/normal mode switching and tool call process display                                              |
+| Task Management | ✅ MQ async tasks, automatic database migration                                 | MQ-based async task state maintenance, support for automatic database schema and data migration during version upgrades                                            |
 
 ## 🚀 Getting Started
 

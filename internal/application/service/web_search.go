@@ -304,6 +304,8 @@ func NewWebSearchService(cfg *config.Config) (interfaces.WebSearchService, error
 		switch providerConfig.ID {
 		case "duckduckgo":
 			provider, err = web_search.NewDuckDuckGoProvider(providerConfig)
+		case "google":
+			provider, err = web_search.NewGoogleProvider(providerConfig)
 		default:
 			return nil, fmt.Errorf("unknown web search provider: %s", providerConfig.ID)
 		}
