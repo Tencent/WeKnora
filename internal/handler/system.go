@@ -102,7 +102,7 @@ func (h *SystemHandler) getKeywordIndexEngine() string {
 	keywordEngines := []string{}
 	for _, driver := range drivers {
 		driver = strings.TrimSpace(driver)
-		if driver == "postgres" || driver == "elasticsearch_v7" || driver == "elasticsearch_v8" {
+		if driver == "postgres" || driver == "elasticsearch_v7" || driver == "elasticsearch_v8" || driver == "qdrant" {
 			keywordEngines = append(keywordEngines, driver)
 		}
 	}
@@ -131,7 +131,7 @@ func (h *SystemHandler) getVectorStoreEngine() string {
 	vectorEngines := []string{}
 	for _, driver := range drivers {
 		driver = strings.TrimSpace(driver)
-		if driver == "postgres" || driver == "elasticsearch_v8" {
+		if driver == "postgres" || driver == "elasticsearch_v8" || driver == "qdrant" {
 			vectorEngines = append(vectorEngines, driver)
 		}
 	}
