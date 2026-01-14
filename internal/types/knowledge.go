@@ -142,6 +142,7 @@ type ManualKnowledgePayload struct {
 	Title   string `json:"title"`
 	Content string `json:"content"`
 	Status  string `json:"status"`
+	TagID   string `json:"tag_id"`
 }
 
 // NewManualKnowledgeMetadata creates a new ManualKnowledgeMetadata instance.

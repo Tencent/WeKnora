@@ -220,6 +220,8 @@ const loadTags = async (kbIdValue: string, reset = false) => {
 
 const handleTagFilterChange = (value: string) => {
   selectedTagId.value = value;
+  // 同步更新 store 中的 selectedTagId，供 menu.vue 上传时使用
+  uiStore.setSelectedTagId(value);
   page = 1;
   loadKnowledgeFiles(kbId.value);
 };
@@ -657,9 +659,12 @@ const handleDocumentUpload = async (event: Event) => {
   let failCount = 0;
   const totalCount = validFiles.length;
 
+  // 获取当前选中的分类ID（如果不是"未分类"则传递）
+  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+
   for (const file of validFiles) {
     try {
-      const responseData: any = await uploadKnowledgeFile(kbId.value, { file });
+      const responseData: any = await uploadKnowledgeFile(kbId.value, { file, tag_id: tagIdToUpload });
       const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
       if (isSuccess) {
         successCount++;
@@ -763,7 +768,9 @@ const handleURLImportConfirm = async () => {
 
   urlImporting.value = true;
   try {
-    const responseData: any = await createKnowledgeFromURL(kbId.value, { url });
+    // 获取当前选中的分类ID
+    const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+    const responseData: any = await createKnowledgeFromURL(kbId.value, { url, tag_id: tagIdToUpload });
     window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
       detail: { kbId: kbId.value }
     }));

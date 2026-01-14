@@ -579,7 +579,7 @@ const handleSave = async (targetStatus: ManualStatus) => {
   saving.value = true
   savingAction.value = targetStatus
   try {
-    const payload = {
+    const payload: { title: string; content: string; status: string; tag_id?: string } = {
       title: form.title.trim(),
       content: form.content,
       status: targetStatus,
@@ -591,6 +591,11 @@ const handleSave = async (targetStatus: ManualStatus) => {
     if (mode.value === 'edit' && knowledgeId.value) {
       response = await updateManualKnowledge(knowledgeId.value, payload)
     } else {
+      // 创建新知识时，从 store 获取当前选中的分类ID
+      const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
+      if (tagIdToUpload) {
+        payload.tag_id = tagIdToUpload
+      }
       response = await createManualKnowledge(form.kbId, payload)
       knowledgeID = response?.data?.id || knowledgeID
       kbId = form.kbId

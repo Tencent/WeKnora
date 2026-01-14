@@ -10,6 +10,7 @@ import {
   getKnowledgeDetailsCon,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
+import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 
 const usemenuStore = knowledgeStore();
@@ -110,7 +111,11 @@ export default function (knowledgeBaseId?: string) {
       return;
     }
     
-    uploadKnowledgeFile(currentKbId, { file })
+    // 获取当前选中的分类ID
+    const uiStore = useUIStore();
+    const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined;
+    
+    uploadKnowledgeFile(currentKbId, { file, tag_id: tagIdToUpload })
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info("上传成功！");

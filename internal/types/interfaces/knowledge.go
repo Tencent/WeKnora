@@ -12,6 +12,7 @@ import (
 // KnowledgeService defines the interface for knowledge services.
 type KnowledgeService interface {
 	// CreateKnowledgeFromFile creates knowledge from a file.
+	// tagID is optional - when provided, the file will be assigned to the specified tag/category.
 	CreateKnowledgeFromFile(
 		ctx context.Context,
 		kbID string,
@@ -19,14 +20,17 @@ type KnowledgeService interface {
 		metadata map[string]string,
 		enableMultimodel *bool,
 		customFileName string,
+		tagID string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
+	// tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
 	CreateKnowledgeFromURL(
 		ctx context.Context,
 		kbID string,
 		url string,
 		enableMultimodel *bool,
 		title string,
+		tagID string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string) (*types.Knowledge, error)

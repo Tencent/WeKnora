@@ -823,9 +823,11 @@ const handleDocFileChange = async (event: Event) => {
         }))
 
         try {
+            // 获取当前选中的分类ID
+            const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
             await uploadKnowledgeFile(
                 kbId, 
-                { file },
+                { file, tag_id: tagIdToUpload },
                 (progressEvent: any) => {
                     if (progressEvent.total) {
                         progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
@@ -1067,9 +1069,11 @@ const handleDocFolderChange = async (event: Event) => {
         }))
 
         try {
+            // 获取当前选中的分类ID
+            const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
             await uploadKnowledgeFile(
                 kbId,
-                { file, fileName },
+                { file, fileName, tag_id: tagIdToUpload },
                 (progressEvent: any) => {
                     if (progressEvent?.total) {
                         progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)

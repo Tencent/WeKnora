@@ -142,7 +142,7 @@ func (s *knowledgeService) isKnowledgeDeleting(ctx context.Context, tenantID uin
 
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
-	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -261,6 +261,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	knowledge := &types.Knowledge{
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
+		TagID:            tagID, // 设置分类ID，用于知识分类管理
 		Type:             "file",
 		Title:            safeFilename,
 		FileName:         safeFilename,
@@ -358,8 +359,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 }
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL source
+// tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, url string, enableMultimodel *bool, title string,
+	kbID string, url string, enableMultimodel *bool, title string, tagID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, url)
@@ -426,6 +428,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
+		TagID:            tagID, // 设置分类ID，用于知识分类管理
 	}
 
 	// Save knowledge record
@@ -557,6 +560,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		EmbeddingModelID: kb.EmbeddingModelID,
 		FileName:         fileName,
 		FileType:         types.KnowledgeTypeManual,
+		TagID:            payload.TagID, // 设置分类ID，用于知识分类管理
 	}
 	if err := knowledge.SetManualMetadata(meta); err != nil {
 		logger.Errorf(ctx, "Failed to set manual metadata: %v", err)

@@ -7,6 +7,8 @@ export const useUIStore = defineStore('ui', {
     kbEditorMode: 'create' as 'create' | 'edit',
     currentKBId: null as string | null,
     kbEditorType: 'document' as 'document' | 'faq',
+    // 当前选中的分类ID，用于文件上传时传递
+    selectedTagId: '__untagged__' as string,
     kbEditorInitialSection: null as string | null,
     settingsInitialSection: null as string | null,
     settingsInitialSubSection: null as string | null,
@@ -101,6 +103,11 @@ export const useUIStore = defineStore('ui', {
         }
       }
       this.manualEditorOnSuccess = null
+    },
+
+    // 设置当前选中的分类ID
+    setSelectedTagId(tagId: string) {
+      this.selectedTagId = tagId
     }
   }
 })
