@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -470,7 +469,6 @@ func (h *KnowledgeBaseHandler) GetKBCloneProgress(c *gin.Context) {
 
 // validateExtractConfig validates the graph configuration parameters
 func validateExtractConfig(config *types.ExtractConfig) error {
-	logger.Errorf(context.Background(), "Validating extract configuration: %+v", config)
 	if config == nil {
 		return nil
 	}

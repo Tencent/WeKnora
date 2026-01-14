@@ -57,7 +57,15 @@ class FirstParser(BaseParser):
         """
         for p in self._parsers:
             logger.info(f"FirstParser: using parser {p.__class__.__name__}")
-            document = p.parse_into_text(content)
+            try:
+                document = p.parse_into_text(content)
+            except Exception:
+                logger.exception(
+                    "FirstParser: parser %s raised exception; trying next parser",
+                    p.__class__.__name__,
+                )
+                continue
+
             if document.is_valid():
                 logger.info(f"FirstParser: parser {p.__class__.__name__} succeeded")
                 return document
