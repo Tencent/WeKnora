@@ -75,9 +75,9 @@ class TextSplitter(BaseModel, Generic[T]):
             # link - Markdown link syntax [text](url)
             r"\[.*?\]\(.*?\)",
             # table header - Markdown table header with separator line
-            r"(?:\|[^|\n]*)+\|[\r\n]+\s*(?:\|\s*:?-{3,}:?\s*)+\|[\r\n]+",
+            r"[ ]*(?:\|[^|\n]*)+\|[\r\n]+\s*(?:\|\s*:?-{3,}:?\s*)+\|[\r\n]+",
             # table body - Markdown table rows
-            r"(?:\|[^|\n]*)+\|[\r\n]+",
+            r"[ ]*(?:\|[^|\n]*)+\|[\r\n]+",
             # code header - Code block start with language identifier
             r"```(?:\w+)[\r\n]+[^\r\n]*",
         ],
@@ -137,6 +137,10 @@ class TextSplitter(BaseModel, Generic[T]):
 
         # Step 4: Merge splits into final chunks with overlap
         chunks = self._merge(splits)
+
+        # Step 5: Validate chunks and test restoration
+        # self._validate_chunks(chunks, text)
+
         return chunks
 
     def _split(self, text: str) -> List[str]:
@@ -250,9 +254,16 @@ class TextSplitter(BaseModel, Generic[T]):
                     cur_len > self.chunk_overlap
                     or cur_len + split_len + cur_headers_len > self.chunk_size
                 ):
-                    # Remove the first element to reduce overlap
+                    # Remove the first element to reduce overlap.
+                    # If the first element is a prepended header (start==end), also remove it.
                     first_chunk = cur_chunk.pop(0)
                     cur_len -= self.len_function(first_chunk[2])
+
+                    # If we just popped a real content piece, there may be a header right after it
+                    # (depending on previous iterations). Pop it only if it is actually a header.
+                    if cur_chunk and first_chunk[0] == first_chunk[1]:
+                        first_chunk = cur_chunk.pop(0)
+                        cur_len -= self.len_function(first_chunk[2])
 
                 # Prepend headers to new chunk if:
                 # 1. Headers exist
@@ -264,10 +275,8 @@ class TextSplitter(BaseModel, Generic[T]):
                     and cur_headers not in split
                 ):
                     next_start = cur_chunk[0][0] if cur_chunk else cur_start
-                    header_start = max(0, next_start - cur_headers_len)
-                    header_end = cur_end
 
-                    cur_chunk.insert(0, (header_start, header_end, cur_headers))
+                    cur_chunk.insert(0, (next_start, next_start, cur_headers))
                     cur_len += cur_headers_len
 
             # Add current split to the chunk
@@ -397,6 +406,154 @@ class TextSplitter(BaseModel, Generic[T]):
             start = end
         return res
 
+    def _validate_chunks(
+        self, chunks: List[Tuple[int, int, str]], original_text: str
+    ) -> None:
+        """Validate chunks order and test text restoration.
+
+        This method performs two validations:
+        1. Checks if chunk start positions are in ascending order
+        2. Tests if the original text can be restored from chunks
+
+        If validation fails, saves debug information to /tmp/chunk_error_<timestamp>.md
+
+        Args:
+            chunks: List of tuples (start_pos, end_pos, chunk_text) to validate
+            original_text: The original text that was split
+        """
+        import datetime
+
+        errors = []
+
+        # Validation 1: Check if start positions are in ascending order
+        for i in range(1, len(chunks)):
+            prev_start = chunks[i - 1][0]
+            curr_start = chunks[i][0]
+            if curr_start < prev_start:
+                error_msg = (
+                    f"Chunk order error: chunk[{i}] start position ({curr_start}) "
+                    f"is less than chunk[{i - 1}] start position ({prev_start})"
+                )
+                errors.append(error_msg)
+                logger.error(error_msg)
+
+        # Validation 2: Test text restoration
+        try:
+            restored_text = self.restore_text(chunks)
+            if restored_text != original_text:
+                error_msg = (
+                    f"Restoration failed: restored text differs from original. "
+                    f"Original length: {len(original_text)}, "
+                    f"Restored length: {len(restored_text)}"
+                )
+                errors.append(error_msg)
+                logger.error(error_msg)
+
+                # Find first difference position
+                min_len = min(len(original_text), len(restored_text))
+                diff_pos = -1
+                for i in range(min_len):
+                    if original_text[i] != restored_text[i]:
+                        diff_pos = i
+                        break
+
+                if diff_pos >= 0:
+                    context_start = max(0, diff_pos - 50)
+                    context_end = min(len(original_text), diff_pos + 50)
+                    errors.append(
+                        f"First difference at position {diff_pos}:\n"
+                        f"Original: {repr(original_text[context_start:context_end])}\n"
+                        f"Restored: {repr(restored_text[context_start:context_end])}"
+                    )
+                elif len(original_text) != len(restored_text):
+                    errors.append(
+                        f"Texts match up to position {min_len}, but lengths differ"
+                    )
+        except Exception as e:
+            error_msg = f"Restoration exception: {str(e)}"
+            errors.append(error_msg)
+            logger.error(error_msg)
+
+        # If there are errors, save debug information to file
+        if errors:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            error_file = f"/tmp/chunk_error_{timestamp}.md"
+
+            with open(error_file, "w", encoding="utf-8") as f:
+                f.write("# Chunk Validation Error Report\n\n")
+                f.write(f"Timestamp: {timestamp}\n\n")
+
+                f.write("## Errors\n\n")
+                for error in errors:
+                    f.write(f"- {error}\n\n")
+
+                f.write("\n## Original Text\n\n")
+                f.write(f"Length: {len(original_text)}\n\n")
+                f.write("```\n")
+                f.write(original_text)
+                f.write("\n```\n\n")
+
+                f.write("\n## Chunks Information\n\n")
+                f.write(f"Total chunks: {len(chunks)}\n\n")
+                for i, (start, end, chunk_text) in enumerate(chunks):
+                    f.write(f"### Chunk {i}\n\n")
+                    f.write(f"- Position: [{start}:{end}]\n")
+                    f.write(f"- Length: {len(chunk_text)}\n")
+                    f.write(f"- Content:\n\n```\n{chunk_text}\n```\n\n")
+
+                try:
+                    restored_text = self.restore_text(chunks)
+                    f.write("\n## Restored Text\n\n")
+                    f.write(f"Length: {len(restored_text)}\n\n")
+                    f.write("```\n")
+                    f.write(restored_text)
+                    f.write("\n```\n")
+                except Exception as e:
+                    f.write("\n## Restoration Failed\n\n")
+                    f.write(f"Error: {str(e)}\n")
+
+            logger.error(f"Validation errors saved to: {error_file}")
+
+    def restore_text(self, chunks: List[Tuple[int, int, str]]) -> str:
+        """Restore original text from chunks with overlap handling.
+
+        This method reconstructs the original text from chunks that may contain:
+        - Overlapping content between consecutive chunks
+        - Prepended headers that were added during merging (headers have start==end position)
+
+        The algorithm:
+        1. Sort chunks by their start position (and end position as tiebreaker)
+        2. Track the maximum end position seen so far
+        3. For each chunk, extract only the new content (after max_end_pos)
+        4. Concatenate all new content pieces
+
+        Args:
+            chunks: List of tuples (start_pos, end_pos, chunk_text) from split_text()
+
+        Returns:
+            The restored original text
+
+        Example:
+            >>> splitter = TextSplitter(chunk_size=10, chunk_overlap=3)
+            >>> chunks = splitter.split_text("Hello World!")
+            >>> restored = splitter.restore_text(chunks)
+            >>> assert restored == "Hello World!"
+        """
+        if not chunks:
+            return ""
+
+        # Sort chunks by start position, then by end position
+        sorted_chunks = sorted(chunks, key=lambda x: (x[1], x[0]))
+
+        result_parts = []
+        last_end = 0
+
+        for start_pos, end_pos, chunk_text in sorted_chunks:
+            result_parts.append(chunk_text[last_end - end_pos :])
+            last_end = end_pos
+
+        return "".join(result_parts)
+
 
 if __name__ == "__main__":
     s = """
@@ -415,7 +572,11 @@ if __name__ == "__main__":
 
 """
 
-    sp = TextSplitter(chunk_size=200, chunk_overlap=2)
+    sp = TextSplitter(
+        chunk_size=200,
+        chunk_overlap=10,
+        separators=["\n\n", "\n", "。", "？", "！", "，", "；", "："],
+    )
     ck = sp.split_text(s)
     for c in ck:
         print("------", len(c))

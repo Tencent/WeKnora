@@ -101,8 +101,9 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 				}
 				// Merge overlapping chunks
 				if chunks[i].EndAt > lastChunk.EndAt {
-					lastChunk.Content = lastChunk.Content +
-						string([]rune(chunks[i].Content)[lastChunk.EndAt-chunks[i].StartAt:])
+					content := string([]rune(chunks[i].Content))
+					offset := len(content) - (chunks[i].EndAt - lastChunk.EndAt)
+					lastChunk.Content = lastChunk.Content + content[offset:]
 					lastChunk.EndAt = chunks[i].EndAt
 					lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
 
