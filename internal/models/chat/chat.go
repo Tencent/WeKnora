@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -87,14 +86,12 @@ type ChatConfig struct {
 }
 
 // NewChat 创建聊天实例
-func NewChat(config *ChatConfig) (Chat, error) {
+func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, error) {
 	var chat Chat
 	var err error
 	switch strings.ToLower(string(config.Source)) {
 	case string(types.ModelSourceLocal):
-		runtime.GetContainer().Invoke(func(ollamaService *ollama.OllamaService) {
-			chat, err = NewOllamaChat(config, ollamaService)
-		})
+		chat, err = NewOllamaChat(config, ollamaService)
 		if err != nil {
 			return nil, err
 		}
