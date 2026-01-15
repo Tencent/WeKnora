@@ -866,7 +866,11 @@ const getDoc = (page: number) => {
 
 const delCardConfirm = () => {
   delDialog.value = false;
-  delKnowledge(knowledgeIndex.value, knowledge.value);
+  delKnowledge(knowledgeIndex.value, knowledge.value, () => {
+    // 删除成功后刷新文档列表和分类数量
+    loadKnowledgeFiles(kbId.value);
+    loadTags(kbId.value);
+  });
 };
 
 // 处理知识库编辑成功后的回调

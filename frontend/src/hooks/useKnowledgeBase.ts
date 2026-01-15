@@ -63,20 +63,27 @@ export default function (knowledgeBaseId?: string) {
       })
       .catch(() => {});
   };
-  const delKnowledge = (index: number, item: any) => {
+  const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
     cardList.value[index].isMore = false;
     moreIndex.value = -1;
-    delKnowledgeDetails(item.id)
+    return delKnowledgeDetails(item.id)
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info("知识删除成功！");
-          getKnowled();
+          if (onSuccess) {
+            onSuccess();
+          } else {
+            getKnowled();
+          }
+          return true;
         } else {
           MessagePlugin.error("知识删除失败！");
+          return false;
         }
       })
       .catch(() => {
         MessagePlugin.error("知识删除失败！");
+        return false;
       });
   };
   const openMore = (index: number) => {
