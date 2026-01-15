@@ -35,34 +35,38 @@ class BaseParser(ABC):
     @staticmethod
     def _is_safe_url(url: str) -> bool:
         """Validate URL to prevent SSRF attacks
-        
+
         Args:
             url: URL to validate
-            
+
         Returns:
             True if URL is safe to fetch, False otherwise
         """
         try:
             parsed_url = urlparse(url)
-            
+
             # Only allow http and https schemes
-            if parsed_url.scheme not in ['http', 'https']:
+            if parsed_url.scheme not in ["http", "https"]:
                 logger.warning(f"Rejected URL with invalid scheme: {parsed_url.scheme}")
                 return False
-            
+
             # Extract hostname
             hostname = parsed_url.hostname
             if not hostname:
                 logger.warning("No hostname found in URL")
                 return False
-            
+
             # Try to parse as IP address
             try:
                 ip = ipaddress.ip_address(hostname)
                 # Reject private, loopback, link-local, multicast addresses
-                if (ip.is_private or ip.is_loopback or 
-                    ip.is_link_local or ip.is_multicast or
-                    ip.is_reserved):
+                if (
+                    ip.is_private
+                    or ip.is_loopback
+                    or ip.is_link_local
+                    or ip.is_multicast
+                    or ip.is_reserved
+                ):
                     logger.warning(f"Rejected URL with restricted IP: {ip}")
                     return False
             except ValueError:
@@ -70,17 +74,19 @@ class BaseParser(ABC):
                 # Reject localhost and common internal hostnames
                 hostname_lower = hostname.lower()
                 restricted_hostnames = [
-                    'localhost',
-                    '127.0.0.1',
-                    '::1',
-                    'metadata.google.internal',
-                    'metadata.tencentyun.com',
-                    '169.254.169.254',  # AWS metadata endpoint
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                    "metadata.google.internal",
+                    "metadata.tencentyun.com",
+                    "169.254.169.254",  # AWS metadata endpoint
                 ]
-                if hostname_lower in restricted_hostnames or hostname_lower.endswith('.local'):
+                if hostname_lower in restricted_hostnames or hostname_lower.endswith(
+                    ".local"
+                ):
                     logger.warning(f"Rejected URL with restricted hostname: {hostname}")
                     return False
-            
+
             return True
         except Exception as e:
             logger.warning(f"Error validating URL: {str(e)}")
@@ -121,7 +127,7 @@ class BaseParser(ABC):
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
         separators: list[str] = ["\n\n", "\n", "。"],
-        ocr_backend: str = "paddle",
+        ocr_backend: str = "no_ocr",
         ocr_config: dict = {},
         max_image_size: int = 1920,  # Maximum image size
         max_concurrent_tasks: int = 5,  # Max concurrent tasks
@@ -151,7 +157,7 @@ class BaseParser(ABC):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.separators = separators
-        self.ocr_backend = os.getenv("OCR_BACKEND", ocr_backend)
+        self.ocr_backend = ocr_backend
         self.ocr_config = ocr_config
         self.max_image_size = max_image_size
         self.max_concurrent_tasks = max_concurrent_tasks
@@ -161,13 +167,14 @@ class BaseParser(ABC):
             self.chunking_config.storage_config if self.chunking_config else None
         )
 
-        logger.info(f"Initializing parser for file: {file_name}, type: {file_type}")
         logger.info(
-            f"Parser config: chunk_size={chunk_size}, "
+            f"Initializing parser for file={file_name}, type={file_type}, "
+            f"parser config: chunk_size={chunk_size}, "
             f"overlap={chunk_overlap}, "
             f"multimodal={enable_multimodal}, "
+            f"max_chunks={max_chunks}, "
             f"ocr_backend={ocr_backend}, "
-            f"max_chunks={max_chunks}"
+            f"max_concurrent_tasks={max_concurrent_tasks}"
         )
         # Only initialize Caption service if multimodal is enabled
         vlm_config = self.chunking_config.vlm_config if self.chunking_config else None
@@ -305,13 +312,8 @@ class BaseParser(ABC):
             logger.warning("No image data to process")
             return []
 
-        # Set max concurrency, reduce concurrency to avoid resource contention
-        max_concurrency = min(
-            self.max_concurrent_tasks, 1
-        )  # Reduce concurrency to prevent excessive memory usage
-
         # Use semaphore to limit concurrency
-        semaphore = asyncio.Semaphore(max_concurrency)
+        semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
 
         # Store results to avoid overall failure due to task failure
         results = []
@@ -741,7 +743,7 @@ class BaseParser(ABC):
                     if not self._is_safe_url(img_url):
                         logger.error(f"URL failed validation check: {img_url}")
                         return img_url, img_url, None
-                    
+
                     # Still need to get image object for OCR processing
                     # Get proxy settings from environment variables
                     http_proxy = os.environ.get("EXTERNAL_HTTP_PROXY")
@@ -792,7 +794,7 @@ class BaseParser(ABC):
                 if not self._is_safe_url(img_url):
                     logger.error(f"URL failed validation check: {img_url}")
                     return img_url, img_url, None
-                
+
                 # Get proxy settings from environment variables
                 http_proxy = os.environ.get("EXTERNAL_HTTP_PROXY")
                 https_proxy = os.environ.get("EXTERNAL_HTTPS_PROXY")
@@ -952,10 +954,8 @@ class BaseParser(ABC):
 
         # Create and run all Chunk concurrent processing tasks
         async def process_all_chunks():
-            # Set max concurrency, reduce concurrency to avoid resource contention
-            max_concurrency = min(self.max_concurrent_tasks, 1)  # Reduce concurrency
             # Use semaphore to limit concurrency
-            semaphore = asyncio.Semaphore(max_concurrency)
+            semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
 
             async def process_with_limit(chunk, idx, total):
                 """Use semaphore to control concurrent processing of Chunks"""

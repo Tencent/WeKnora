@@ -148,6 +148,8 @@ services:
       - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
       # File size limit (in MB)
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - IMAGE_MAX_CONCURRENT=${IMAGE_MAX_CONCURRENT:-1}
+      - OCR_BACKEND=${OCR_BACKEND:-paddle}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
       interval: 30s
