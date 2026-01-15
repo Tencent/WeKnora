@@ -63,14 +63,21 @@ export default function (knowledgeBaseId?: string) {
       })
       .catch(() => {});
   };
-  const delKnowledge = (index: number, item: any) => {
+  const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
     cardList.value[index].isMore = false;
     moreIndex.value = -1;
     delKnowledgeDetails(item.id)
       .then((result: any) => {
         if (result.success) {
           MessagePlugin.info("知识删除成功！");
-          getKnowled();
+          // 获取当前知识库ID
+          let currentKbId: string | undefined = (route.params as any)?.kbId as string;
+          if (!currentKbId) currentKbId = knowledgeBaseId;
+          // 刷新文档列表时保持当前分类筛选（包括 __untagged__ 表示未分类）
+          const uiStore = useUIStore();
+          getKnowled({ page: 1, page_size: 35, tag_id: uiStore.selectedTagId || undefined }, currentKbId);
+          // 执行成功回调（如刷新分类数量）
+          onSuccess?.();
         } else {
           MessagePlugin.error("知识删除失败！");
         }

@@ -866,7 +866,10 @@ const getDoc = (page: number) => {
 
 const delCardConfirm = () => {
   delDialog.value = false;
-  delKnowledge(knowledgeIndex.value, knowledge.value);
+  // 传递成功回调，用于刷新分类数量
+  delKnowledge(knowledgeIndex.value, knowledge.value, () => {
+    loadTags(kbId.value);
+  });
 };
 
 // 处理知识库编辑成功后的回调
