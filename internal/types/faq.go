@@ -359,9 +359,6 @@ type FAQImportResult struct {
 	// 失败详情URL（失败条目较多时提供下载链接）
 	FailedEntriesURL string `json:"failed_entries_url,omitempty"` // 失败条目CSV下载URL
 
-	// 成功条目简单信息
-	SuccessEntries []FAQSuccessEntry `json:"success_entries,omitempty"` // 成功导入的条目简单信息
-
 	// 显示控制
 	DisplayStatus string `json:"display_status"` // 显示状态：open 或 close
 

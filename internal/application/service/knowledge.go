@@ -3030,11 +3030,6 @@ func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
 		importResult.FailedEntriesURL = progress.FailedEntriesURL
 	}
 
-	// 设置成功条目信息
-	if len(progress.SuccessEntries) > 0 {
-		importResult.SuccessEntries = progress.SuccessEntries
-	}
-
 	// 设置导入结果到Knowledge的metadata中
 	if err := knowledge.SetLastFAQImportResult(importResult); err != nil {
 		return fmt.Errorf("failed to set FAQ import result: %w", err)
