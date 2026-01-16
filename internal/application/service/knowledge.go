@@ -6765,6 +6765,17 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 			logger.Infof(ctx, "Deleted FAQ entries file from object storage: %s", payload.EntriesURL)
 		}
 	}
+
+	// 更新最终状态
+	progress.Status = types.FAQImportStatusCompleted
+	progress.Progress = 100
+	progress.Processed = originalTotalEntries
+	progress.SuccessCount = originalTotalEntries - progress.FailedCount
+	if payload.DryRun {
+		progress.Message = fmt.Sprintf("验证完成: 成功 %d 条, 失败 %d 条", progress.SuccessCount, progress.FailedCount)
+	} else {
+		progress.Message = fmt.Sprintf("导入完成: 成功 %d 条, 失败 %d 条", progress.SuccessCount, progress.FailedCount)
+	}
 	progress.UpdatedAt = time.Now().Unix()
 
 	// 如果有失败条目，生成 CSV 文件
