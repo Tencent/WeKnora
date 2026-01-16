@@ -2919,12 +2919,6 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	}
 	logger.Infof(ctx, "Enqueued FAQ import task: id=%s queue=%s task_id=%s dry_run=%v", info.ID, info.Queue, taskID, payload.DryRun)
 
-	// 设置 running key 标记任务正在进行
-	if err := s.setRunningFAQImportTaskID(ctx, kbID, taskID); err != nil {
-		logger.Errorf(ctx, "Failed to set running FAQ import task ID: %v", err)
-		// 这个错误不影响任务执行，只是会影响重复提交检查
-	}
-
 	return taskID, nil
 }
 
@@ -3092,6 +3086,7 @@ func (s *knowledgeService) executeFAQDryRunValidation(ctx context.Context,
 }
 
 // validateEntriesForAppendModeWithProgress 验证 Append 模式下的条目（带进度更新）
+// 注意：验证阶段不更新 Processed，只有实际导入时才更新
 func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.Context,
 	tenantID uint64, kbID string, entries []types.FAQEntryPayload, progress *types.FAQImportProgress,
 ) []int {
@@ -3129,7 +3124,6 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 		if err := validateFAQEntryPayloadBasic(&entry); err != nil {
 			progress.FailedCount++
 			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, err.Error(), &entry))
-			progress.Processed++
 			continue
 		}
 
@@ -3139,7 +3133,6 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 		if existingQuestions[standardQ] {
 			progress.FailedCount++
 			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, "标准问与知识库中已有问题重复", &entry))
-			progress.Processed++
 			continue
 		}
 
@@ -3147,7 +3140,6 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 		if firstIdx, exists := batchQuestions[standardQ]; exists {
 			progress.FailedCount++
 			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("标准问与批次内第 %d 条重复", firstIdx+1), &entry))
-			progress.Processed++
 			continue
 		}
 
@@ -3172,7 +3164,6 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 			}
 		}
 		if hasDuplicate {
-			progress.Processed++
 			continue
 		}
 
@@ -3187,11 +3178,10 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 
 		// 记录通过验证的条目索引
 		validIndices = append(validIndices, i)
-		progress.Processed++
 
-		// 定期更新进度
-		if progress.Processed%100 == 0 {
-			progress.Progress = progress.Processed * 80 / progress.Total // 前80%用于基本验证
+		// 定期更新进度消息（验证阶段不更新 Processed）
+		if (i+1)%100 == 0 {
+			progress.Message = fmt.Sprintf("正在验证条目 %d/%d...", i+1, len(entries))
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
 				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
@@ -3203,6 +3193,7 @@ func (s *knowledgeService) validateEntriesForAppendModeWithProgress(ctx context.
 }
 
 // validateEntriesForReplaceModeWithProgress 验证 Replace 模式下的条目（带进度更新）
+// 注意：验证阶段不更新 Processed，只有实际导入时才更新
 func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context.Context,
 	entries []types.FAQEntryPayload, progress *types.FAQImportProgress,
 ) []int {
@@ -3216,7 +3207,6 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 		if err := validateFAQEntryPayloadBasic(&entry); err != nil {
 			progress.FailedCount++
 			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, err.Error(), &entry))
-			progress.Processed++
 			continue
 		}
 
@@ -3226,7 +3216,6 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 		if firstIdx, exists := batchQuestions[standardQ]; exists {
 			progress.FailedCount++
 			progress.FailedEntries = append(progress.FailedEntries, buildFAQFailedEntry(i, fmt.Sprintf("标准问与批次内第 %d 条重复", firstIdx+1), &entry))
-			progress.Processed++
 			continue
 		}
 
@@ -3245,7 +3234,6 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			}
 		}
 		if hasDuplicate {
-			progress.Processed++
 			continue
 		}
 
@@ -3260,11 +3248,10 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 
 		// 记录通过验证的条目索引
 		validIndices = append(validIndices, i)
-		progress.Processed++
 
-		// 定期更新进度
-		if progress.Processed%100 == 0 {
-			progress.Progress = progress.Processed * 80 / progress.Total // 前80%用于基本验证
+		// 定期更新进度消息（验证阶段不更新 Processed）
+		if (i+1)%100 == 0 {
+			progress.Message = fmt.Sprintf("正在验证条目 %d/%d...", i+1, len(entries))
 			progress.UpdatedAt = time.Now().Unix()
 			if err := s.saveFAQImportProgress(ctx, progress); err != nil {
 				logger.Warnf(ctx, "Failed to update FAQ dry run progress: %v", err)
