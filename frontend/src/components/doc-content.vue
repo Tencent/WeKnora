@@ -34,6 +34,7 @@ const mergedContent = ref<string>('');
 /**
  * 根据 start_at 和 end_at 字段合并有 overlap 的 chunks
  * 返回合并后的完整文档内容
+ * 实现逻辑与后端 Go 代码保持一致
  */
 const mergeChunks = (chunks: any[]): string => {
   if (!chunks || chunks.length === 0) return '';
@@ -45,51 +46,54 @@ const mergeChunks = (chunks: any[]): string => {
     return startA - startB;
   });
   
-  // 使用字符位置进行精确合并
-  const segments: { start: number; end: number; content: string }[] = [];
+  // 初始化合并结果，第一个 chunk 直接加入
+  const mergedChunks: Array<{
+    content: string;
+    start_at: number;
+    end_at: number;
+  }> = [{
+    content: sortedChunks[0].content || '',
+    start_at: sortedChunks[0].start_at ?? 0,
+    end_at: sortedChunks[0].end_at ?? 0
+  }];
   
-  for (const chunk of sortedChunks) {
-    const start = chunk.start_at ?? 0;
-    const end = chunk.end_at ?? (start + (chunk.content?.length || 0));
-    const content = chunk.content || '';
+  // 从第二个 chunk 开始遍历
+  for (let i = 1; i < sortedChunks.length; i++) {
+    const currentChunk = sortedChunks[i];
+    const lastChunk = mergedChunks[mergedChunks.length - 1];
     
-    if (segments.length === 0) {
-      segments.push({ start, end, content });
+    const currentStartAt = currentChunk.start_at ?? 0;
+    const currentEndAt = currentChunk.end_at ?? 0;
+    const currentContent = currentChunk.content || '';
+    
+    // 如果当前 chunk 的起始位置在最后一个 chunk 的结束位置之后，直接添加
+    if (currentStartAt > lastChunk.end_at) {
+      mergedChunks.push({
+        content: currentContent,
+        start_at: currentStartAt,
+        end_at: currentEndAt
+      });
       continue;
     }
     
-    const lastSegment = segments[segments.length - 1];
-    
-    // 检查是否有重叠
-    if (start <= lastSegment.end) {
-      // 有重叠，需要合并
-      const overlapStart = start;
-      const overlapEnd = Math.min(end, lastSegment.end);
-      const overlapLength = overlapEnd - overlapStart;
+    // 合并重叠的 chunks
+    if (currentEndAt > lastChunk.end_at) {
+      // 将内容转换为字符数组以正确处理多字节字符
+      const contentRunes = Array.from(currentContent);
+      const contentLength = contentRunes.length;
       
-      if (overlapLength > 0 && end > lastSegment.end) {
-        // 计算需要追加的新内容（去除重叠部分）
-        const newContentStart = overlapLength;
-        const newContent = content.slice(newContentStart);
-        lastSegment.content += newContent;
-        lastSegment.end = end;
-      } else if (end > lastSegment.end) {
-        // 完全包含当前 chunk 的情况
-        lastSegment.end = end;
-      }
-    } else {
-      // 无重叠，检查是否有间隙
-      if (start > lastSegment.end) {
-        // 有间隙，添加分隔符
-        lastSegment.content += '\n\n---\n\n';
-      }
-      // 添加新段落
-      segments.push({ start, end, content });
+      // 计算偏移量：内容长度 - (当前结束位置 - 上一个结束位置)
+      const offset = contentLength - (currentEndAt - lastChunk.end_at);
+      
+      // 拼接非重叠部分
+      const newContent = contentRunes.slice(offset).join('');
+      lastChunk.content = lastChunk.content + newContent;
+      lastChunk.end_at = currentEndAt;
     }
   }
   
-  // 合并所有段落
-  return segments.map(s => s.content).join('\n\n');
+  // 合并所有段落，用双换行符连接
+  return mergedChunks.map(chunk => chunk.content).join('\n\n');
 };
 
 onMounted(() => {
