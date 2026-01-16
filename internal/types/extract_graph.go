@@ -2,15 +2,15 @@ package types
 
 const (
 	TypeChunkExtract        = "chunk:extract"
-	TypeDocumentProcess     = "document:process"     // 文档处理任务
-	TypeFAQImport           = "faq:import"           // FAQ导入任务（包含dry run模式）
-	TypeQuestionGeneration  = "question:generation"  // 问题生成任务
-	TypeSummaryGeneration   = "summary:generation"   // 摘要生成任务
-	TypeKBClone             = "kb:clone"             // 知识库复制任务
-	TypeIndexDelete         = "index:delete"         // 索引删除任务
-	TypeKBDelete            = "kb:delete"            // 知识库删除任务
+	TypeDocumentProcess     = "document:process"      // 文档处理任务
+	TypeFAQImport           = "faq:import"            // FAQ导入任务（包含dry run模式）
+	TypeQuestionGeneration  = "question:generation"   // 问题生成任务
+	TypeSummaryGeneration   = "summary:generation"    // 摘要生成任务
+	TypeKBClone             = "kb:clone"              // 知识库复制任务
+	TypeIndexDelete         = "index:delete"          // 索引删除任务
+	TypeKBDelete            = "kb:delete"             // 知识库删除任务
 	TypeKnowledgeListDelete = "knowledge:list_delete" // 批量删除知识任务
-	TypeDataTableSummary    = "datatable:summary"    // 表格摘要任务
+	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -42,9 +42,12 @@ type FAQImportPayload struct {
 	TaskID      string            `json:"task_id"`
 	KBID        string            `json:"kb_id"`
 	KnowledgeID string            `json:"knowledge_id,omitempty"` // 仅非 dry run 模式需要
-	Entries     []FAQEntryPayload `json:"entries"`
+	Entries     []FAQEntryPayload `json:"entries,omitempty"`      // 小数据量时直接存储在 payload 中
+	EntriesURL  string            `json:"entries_url,omitempty"`  // 大数据量时存储到对象存储，这里存储 URL
+	EntryCount  int               `json:"entry_count,omitempty"`  // 条目总数（使用 EntriesURL 时需要）
 	Mode        string            `json:"mode"`
-	DryRun      bool              `json:"dry_run"` // dry run 模式只验证不导入
+	DryRun      bool              `json:"dry_run"`     // dry run 模式只验证不导入
+	EnqueuedAt  int64             `json:"enqueued_at"` // 任务入队时间戳，用于区分同一 TaskID 的不同次提交
 }
 
 // QuestionGenerationPayload represents the question generation task payload

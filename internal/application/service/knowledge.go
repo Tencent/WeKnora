@@ -2785,6 +2785,9 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	}
 	knowledgeID = faqKnowledge.ID
 
+	// 记录任务入队时间
+	enqueuedAt := time.Now().Unix()
+
 	// 设置 KB 的运行中任务 ID
 	if err := s.setRunningFAQImportTaskID(ctx, kbID, taskID); err != nil {
 		logger.Errorf(ctx, "Failed to set running FAQ import task ID: %v", err)
@@ -2818,14 +2821,49 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 
 	// Enqueue FAQ import task to Asynq
 	logger.Info(ctx, "Enqueuing FAQ import task to Asynq")
+
+	// 构建任务 payload
 	taskPayload := types.FAQImportPayload{
 		TenantID:    tenantID,
 		TaskID:      taskID,
 		KBID:        kbID,
 		KnowledgeID: knowledgeID,
-		Entries:     payload.Entries,
 		Mode:        payload.Mode,
 		DryRun:      payload.DryRun,
+		EnqueuedAt:  enqueuedAt,
+	}
+
+	// 阈值：超过 200 条或序列化后超过 50KB 时使用对象存储
+	const (
+		entryCountThreshold  = 200
+		payloadSizeThreshold = 50 * 1024 // 50KB
+	)
+
+	entryCount := len(payload.Entries)
+	if entryCount > entryCountThreshold {
+		// 数据量较大，上传到对象存储
+		entriesData, err := json.Marshal(payload.Entries)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal FAQ entries: %v", err)
+			return "", fmt.Errorf("failed to marshal entries: %w", err)
+		}
+
+		logger.Infof(ctx, "FAQ entries size: %d bytes, uploading to object storage", len(entriesData))
+
+		// 上传到私有桶（主桶），任务处理完成后清理
+		fileName := fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt)
+		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
+			return "", fmt.Errorf("failed to upload entries: %w", err)
+		}
+
+		logger.Infof(ctx, "FAQ entries uploaded to: %s", entriesURL)
+		taskPayload.EntriesURL = entriesURL
+		taskPayload.EntryCount = entryCount
+	} else {
+		// 数据量较小，直接存储在 payload 中
+		taskPayload.Entries = payload.Entries
 	}
 
 	payloadBytes, err := json.Marshal(taskPayload)
@@ -2834,7 +2872,43 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		return "", fmt.Errorf("failed to marshal task payload: %w", err)
 	}
 
-	task := asynq.NewTask(types.TypeFAQImport, payloadBytes, asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(5))
+	// 再次检查 payload 大小
+	if len(payloadBytes) > payloadSizeThreshold && taskPayload.EntriesURL == "" {
+		// payload 太大但还没上传，现在上传
+		entriesData, _ := json.Marshal(payload.Entries)
+		fileName := fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt)
+		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
+			return "", fmt.Errorf("failed to upload entries: %w", err)
+		}
+
+		logger.Infof(ctx, "FAQ entries uploaded to (size exceeded): %s", entriesURL)
+		taskPayload.Entries = nil
+		taskPayload.EntriesURL = entriesURL
+		taskPayload.EntryCount = entryCount
+
+		payloadBytes, _ = json.Marshal(taskPayload)
+	}
+
+	logger.Infof(ctx, "FAQ import task payload size: %d bytes", len(payloadBytes))
+
+	maxRetry := 5
+	if payload.DryRun {
+		maxRetry = 3 // dry run 重试次数少一些
+	}
+
+	// 使用 taskID:enqueuedAt 作为 asynq 的唯一任务标识
+	// 这样同一个用户 TaskID 的不同次提交不会冲突
+	asynqTaskID := fmt.Sprintf("%s:%d", taskID, enqueuedAt)
+
+	task := asynq.NewTask(
+		types.TypeFAQImport,
+		payloadBytes,
+		asynq.TaskID(asynqTaskID),
+		asynq.Queue("default"),
+		asynq.MaxRetry(maxRetry),
+	)
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue FAQ import task: %v", err)
@@ -5320,18 +5394,57 @@ func (s *knowledgeService) updateFAQImportProgressStatus(
 	return s.saveFAQImportProgress(ctx, existingProgress)
 }
 
-// getRunningFAQImportTaskID checks if there's a running FAQ import task for the given KB
-// Returns the task ID if found, empty string otherwise
-func (s *knowledgeService) getRunningFAQImportTaskID(ctx context.Context, kbID string) (string, error) {
+// cleanupFAQEntriesFileOnFinalFailure 在任务最终失败时清理对象存储中的 entries 文件
+// 只有当 retryCount >= maxRetry 时才执行清理，否则重试时还需要使用这个文件
+func (s *knowledgeService) cleanupFAQEntriesFileOnFinalFailure(ctx context.Context, entriesURL string, retryCount, maxRetry int) {
+	if entriesURL == "" || retryCount < maxRetry {
+		return
+	}
+	if err := s.fileSvc.DeleteFile(ctx, entriesURL); err != nil {
+		logger.Warnf(ctx, "Failed to delete FAQ entries file from object storage on final failure: %v", err)
+	} else {
+		logger.Infof(ctx, "Deleted FAQ entries file from object storage on final failure: %s", entriesURL)
+	}
+}
+
+// runningFAQImportInfo stores the task ID and enqueued timestamp for uniquely identifying a task instance
+type runningFAQImportInfo struct {
+	TaskID     string `json:"task_id"`
+	EnqueuedAt int64  `json:"enqueued_at"`
+}
+
+// getRunningFAQImportInfo checks if there's a running FAQ import task for the given KB
+// Returns the task info if found, nil otherwise
+func (s *knowledgeService) getRunningFAQImportInfo(ctx context.Context, kbID string) (*runningFAQImportInfo, error) {
 	key := getFAQImportRunningKey(kbID)
-	taskID, err := s.redisClient.Get(ctx, key).Result()
+	data, err := s.redisClient.Get(ctx, key).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
-			return "", nil
+			return nil, nil
 		}
-		return "", fmt.Errorf("failed to get running FAQ import task: %w", err)
+		return nil, fmt.Errorf("failed to get running FAQ import task: %w", err)
 	}
-	return taskID, nil
+
+	// Try to parse as JSON first (new format)
+	var info runningFAQImportInfo
+	if err := json.Unmarshal([]byte(data), &info); err != nil {
+		// Fallback: old format was just taskID string
+		return &runningFAQImportInfo{TaskID: data, EnqueuedAt: 0}, nil
+	}
+	return &info, nil
+}
+
+// getRunningFAQImportTaskID checks if there's a running FAQ import task for the given KB
+// Returns the task ID if found, empty string otherwise (for backward compatibility)
+func (s *knowledgeService) getRunningFAQImportTaskID(ctx context.Context, kbID string) (string, error) {
+	info, err := s.getRunningFAQImportInfo(ctx, kbID)
+	if err != nil {
+		return "", err
+	}
+	if info == nil {
+		return "", nil
+	}
+	return info.TaskID, nil
 }
 
 // setRunningFAQImportTaskID sets the running task ID for a KB
@@ -6431,6 +6544,32 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 
+	// 如果 entries 存储在对象存储中，先下载
+	if payload.EntriesURL != "" && len(payload.Entries) == 0 {
+		logger.Infof(ctx, "Downloading FAQ entries from object storage: %s", payload.EntriesURL)
+		reader, err := s.fileSvc.GetFile(ctx, payload.EntriesURL)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to download FAQ entries from object storage: %v", err)
+			return fmt.Errorf("failed to download entries: %w", err)
+		}
+		defer reader.Close()
+
+		entriesData, err := io.ReadAll(reader)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to read FAQ entries data: %v", err)
+			return fmt.Errorf("failed to read entries data: %w", err)
+		}
+
+		var entries []types.FAQEntryPayload
+		if err := json.Unmarshal(entriesData, &entries); err != nil {
+			logger.Errorf(ctx, "Failed to unmarshal FAQ entries: %v", err)
+			return fmt.Errorf("failed to unmarshal entries: %w", err)
+		}
+
+		payload.Entries = entries
+		logger.Infof(ctx, "Downloaded %d FAQ entries from object storage", len(entries))
+	}
+
 	logger.Infof(ctx, "Processing FAQ import task: task_id=%s, kb_id=%s, total_entries=%d, dry_run=%v, retry=%d/%d",
 		payload.TaskID, payload.KBID, len(payload.Entries), payload.DryRun, retryCount, maxRetry)
 
@@ -6525,6 +6664,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
+		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
 		return fmt.Errorf("failed to get knowledge base: %w", err)
 	}
 
@@ -6553,6 +6693,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
+		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
 		return fmt.Errorf("failed to delete unindexed chunks: %w", err)
 	}
 	if len(chunksDeleted) > 0 {
@@ -6601,6 +6742,7 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
 			}
 		}
+		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
 		return fmt.Errorf("FAQ import failed: %w", err)
 	}
 
@@ -6615,6 +6757,15 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 // finalizeFAQValidation 完成 FAQ 验证/导入任务，生成失败条目 CSV（如果有）
 func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *types.FAQImportPayload,
 	progress *types.FAQImportProgress, originalTotalEntries int) error {
+	// 清理对象存储中的 entries 文件（如果有）
+	if payload.EntriesURL != "" {
+		if err := s.fileSvc.DeleteFile(ctx, payload.EntriesURL); err != nil {
+			logger.Warnf(ctx, "Failed to delete FAQ entries file from object storage: %v", err)
+		} else {
+			logger.Infof(ctx, "Deleted FAQ entries file from object storage: %s", payload.EntriesURL)
+		}
+	}
+
 	// 更新最终状态
 	progress.Status = types.FAQImportStatusCompleted
 	progress.Progress = 100
