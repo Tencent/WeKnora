@@ -7,7 +7,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -51,15 +50,13 @@ type Config struct {
 }
 
 // NewEmbedder creates an embedder based on the configuration
-func NewEmbedder(config Config) (Embedder, error) {
+func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
 	var embedder Embedder
 	var err error
 	switch strings.ToLower(string(config.Source)) {
 	case string(types.ModelSourceLocal):
-		runtime.GetContainer().Invoke(func(pooler EmbedderPooler, ollamaService *ollama.OllamaService) {
-			embedder, err = NewOllamaEmbedder(config.BaseURL,
-				config.ModelName, config.TruncatePromptTokens, config.Dimensions, config.ModelID, pooler, ollamaService)
-		})
+		embedder, err = NewOllamaEmbedder(config.BaseURL,
+			config.ModelName, config.TruncatePromptTokens, config.Dimensions, config.ModelID, pooler, ollamaService)
 		return embedder, err
 	case string(types.ModelSourceRemote):
 		// Detect or use configured provider for routing
@@ -88,66 +85,56 @@ func NewEmbedder(config Config) (Embedder, error) {
 					baseURL = strings.Replace(baseURL, "/compatible-mode/v1", "", 1)
 					baseURL = strings.Replace(baseURL, "/compatible-mode", "", 1)
 				}
-				runtime.GetContainer().Invoke(func(pooler EmbedderPooler) {
-					embedder, err = NewAliyunEmbedder(config.APIKey,
-						baseURL,
-						config.ModelName,
-						config.TruncatePromptTokens,
-						config.Dimensions,
-						config.ModelID,
-						pooler)
-				})
+				embedder, err = NewAliyunEmbedder(config.APIKey,
+					baseURL,
+					config.ModelName,
+					config.TruncatePromptTokens,
+					config.Dimensions,
+					config.ModelID,
+					pooler)
 			} else {
 				baseURL := config.BaseURL
 				if baseURL == "" || !strings.Contains(baseURL, "/compatible-mode/") {
 					baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 				}
-				runtime.GetContainer().Invoke(func(pooler EmbedderPooler) {
-					embedder, err = NewOpenAIEmbedder(config.APIKey,
-						baseURL,
-						config.ModelName,
-						config.TruncatePromptTokens,
-						config.Dimensions,
-						config.ModelID,
-						pooler)
-				})
+				embedder, err = NewOpenAIEmbedder(config.APIKey,
+					baseURL,
+					config.ModelName,
+					config.TruncatePromptTokens,
+					config.Dimensions,
+					config.ModelID,
+					pooler)
 			}
 			return embedder, err
 		case provider.ProviderVolcengine:
 			// Volcengine Ark uses multimodal embedding API
-			runtime.GetContainer().Invoke(func(pooler EmbedderPooler) {
-				embedder, err = NewVolcengineEmbedder(config.APIKey,
-					config.BaseURL,
-					config.ModelName,
-					config.TruncatePromptTokens,
-					config.Dimensions,
-					config.ModelID,
-					pooler)
-			})
+			embedder, err = NewVolcengineEmbedder(config.APIKey,
+				config.BaseURL,
+				config.ModelName,
+				config.TruncatePromptTokens,
+				config.Dimensions,
+				config.ModelID,
+				pooler)
 			return embedder, err
 		case provider.ProviderJina:
 			// Jina AI uses different API format (truncate instead of truncate_prompt_tokens)
-			runtime.GetContainer().Invoke(func(pooler EmbedderPooler) {
-				embedder, err = NewJinaEmbedder(config.APIKey,
-					config.BaseURL,
-					config.ModelName,
-					config.TruncatePromptTokens,
-					config.Dimensions,
-					config.ModelID,
-					pooler)
-			})
+			embedder, err = NewJinaEmbedder(config.APIKey,
+				config.BaseURL,
+				config.ModelName,
+				config.TruncatePromptTokens,
+				config.Dimensions,
+				config.ModelID,
+				pooler)
 			return embedder, err
 		default:
 			// Use OpenAI-compatible embedder for other providers
-			runtime.GetContainer().Invoke(func(pooler EmbedderPooler) {
-				embedder, err = NewOpenAIEmbedder(config.APIKey,
-					config.BaseURL,
-					config.ModelName,
-					config.TruncatePromptTokens,
-					config.Dimensions,
-					config.ModelID,
-					pooler)
-			})
+			embedder, err = NewOpenAIEmbedder(config.APIKey,
+				config.BaseURL,
+				config.ModelName,
+				config.TruncatePromptTokens,
+				config.Dimensions,
+				config.ModelID,
+				pooler)
 			return embedder, err
 		}
 	default:

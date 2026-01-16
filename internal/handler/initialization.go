@@ -58,6 +58,7 @@ type InitializationHandler struct {
 	knowledgeService interfaces.KnowledgeService
 	ollamaService    *ollama.OllamaService
 	docReaderClient  *client.Client
+	pooler           embedding.EmbedderPooler
 }
 
 // NewInitializationHandler 创建初始化处理器
@@ -70,6 +71,7 @@ func NewInitializationHandler(
 	knowledgeService interfaces.KnowledgeService,
 	ollamaService *ollama.OllamaService,
 	docReaderClient *client.Client,
+	pooler embedding.EmbedderPooler,
 ) *InitializationHandler {
 	return &InitializationHandler{
 		config:           config,
@@ -80,6 +82,7 @@ func NewInitializationHandler(
 		knowledgeService: knowledgeService,
 		ollamaService:    ollamaService,
 		docReaderClient:  docReaderClient,
+		pooler:           pooler,
 	}
 }
 
@@ -1544,7 +1547,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		Provider:             req.Provider,
 	}
 
-	emb, err := embedding.NewEmbedder(cfg)
+	emb, err := embedding.NewEmbedder(cfg, h.pooler, h.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
 		c.JSON(http.StatusOK, gin.H{
@@ -1588,7 +1591,7 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	}
 
 	// 创建聊天实例
-	chatInstance, err := chat.NewChat(chatConfig)
+	chatInstance, err := chat.NewChat(chatConfig, h.ollamaService)
 	if err != nil {
 		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
@@ -2087,7 +2090,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 		BaseURL:   llm.BaseUrl,
 		ModelName: llm.ModelName,
 		Source:    types.ModelSource(llm.Source),
-	})
+	}, h.ollamaService)
 	if err != nil {
 		logger.Error(ctx, "初始化模型服务失败", err)
 		return nil, err
@@ -2169,7 +2172,7 @@ func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, ll
 		BaseURL:   llm.BaseUrl,
 		ModelName: llm.ModelName,
 		Source:    types.ModelSource(llm.Source),
-	})
+	}, h.ollamaService)
 	if err != nil {
 		logger.Error(ctx, "初始化模型服务失败", err)
 		return "", err

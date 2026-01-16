@@ -20,13 +20,15 @@ var ErrModelNotFound = errors.New("model not found")
 type modelService struct {
 	repo          interfaces.ModelRepository
 	ollamaService *ollama.OllamaService
+	pooler        embedding.EmbedderPooler
 }
 
 // NewModelService creates a new model service instance
-func NewModelService(repo interfaces.ModelRepository, ollamaService *ollama.OllamaService) interfaces.ModelService {
+func NewModelService(repo interfaces.ModelRepository, ollamaService *ollama.OllamaService, pooler embedding.EmbedderPooler) interfaces.ModelService {
 	return &modelService{
 		repo:          repo,
 		ollamaService: ollamaService,
+		pooler:        pooler,
 	}
 }
 
@@ -253,7 +255,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
-	})
+	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -335,7 +337,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		BaseURL:   model.Parameters.BaseURL,
 		ModelName: model.Name,
 		Source:    model.Source,
-	})
+	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
