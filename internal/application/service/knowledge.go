@@ -6785,18 +6785,21 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 		}
 	}
 
-	// 如果不是 dry run 模式，保存导入结果统计到数据库，并清理未使用的 tag
+	// 如果不是 dry run 模式，保存导入结果统计到数据库
 	if !payload.DryRun {
 		if err := s.saveFAQImportResultToDatabase(ctx, payload, progress, originalTotalEntries); err != nil {
 			logger.Warnf(ctx, "Failed to save FAQ import result to database: %v", err)
 		}
 
-		// 清理不再被引用的 Tag（无论是 append 还是 replace 模式都需要）
-		deletedTags, err := s.tagRepo.DeleteUnusedTags(ctx, payload.TenantID, payload.KBID)
-		if err != nil {
-			logger.Warnf(ctx, "FAQ import task %s: failed to cleanup unused tags: %v", payload.TaskID, err)
-		} else if deletedTags > 0 {
-			logger.Infof(ctx, "FAQ import task %s: cleaned up %d unused tags after import", payload.TaskID, deletedTags)
+		// 只有 replace 模式才清理未使用的 Tag
+		// append 模式不应删除用户预先创建的空标签
+		if payload.Mode == types.FAQBatchModeReplace {
+			deletedTags, err := s.tagRepo.DeleteUnusedTags(ctx, payload.TenantID, payload.KBID)
+			if err != nil {
+				logger.Warnf(ctx, "FAQ import task %s: failed to cleanup unused tags: %v", payload.TaskID, err)
+			} else if deletedTags > 0 {
+				logger.Infof(ctx, "FAQ import task %s: cleaned up %d unused tags after replace import", payload.TaskID, deletedTags)
+			}
 		}
 	}
 
