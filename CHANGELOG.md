@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.10] - 2026-01-16
+
+### 🚀 New Features
+- **NEW**: Support for deleting document type tags
+- **NEW**: Google provider for web search
+- **NEW**: Added multiple mainstream model providers including GPUStack
+- **NEW**: AgentQA request field support
+- **NEW**: FAQ batch import dry run functionality
+- **NEW**: Support tenant ID and keyword simultaneous search
+- **NEW**: FAQ import result persistence display
+- **NEW**: SeqID auto-increment tag support
+- **NEW**: Support adding similar questions to FAQ entries
+- **NEW**: FAQ import success entry details display
+- **NEW**: Enhanced task ID generator replacing UUID
+
+### ⚡ Improvements
+- **IMPROVED**: Chunk merge/split logic with validation
+- **IMPROVED**: FAQ index update and deletion performance optimization
+- **IMPROVED**: Batch indexing with concurrent save optimization
+- **IMPROVED**: Retriever engine checks and mapping exposure refactored
+- **IMPROVED**: FAQ import and validation logic merged
+- **IMPROVED**: Error handling and unused code removal
+
+### 🐛 Bug Fixes
+- **FIXED**: Disabled stdio transport to prevent command injection risks
+- **FIXED**: FAQ update duplicate check logic
+- **FIXED**: Migration script table name spelling error
+- **FIXED**: Unused tag cleanup ignoring soft-deleted records
+- **FIXED**: FAQ import tag cleanup logic
+- **FIXED**: FAQ entry tag change not updating issue
+- **FIXED**: Ensure "Uncategorized" tag appears first
+- **FIXED**: Potential crash from slice out of bounds
+- **FIXED**: Tag deletion using correct ID field
+- **FIXED**: FAQ tag filtering using seq_id instead of id type issue
+- **FIXED**: Critical vulnerability V-001 resolved
+- **FIXED**: Added EncodingFormat parameter for ModelScope embedding models
+- **FIXED**: Secure command execution with sandbox for doc_parser
+
+
+## [0.2.9] - 2026-01-10
+
+### 🚀 New Features
+- **NEW**: Batch tag name supplement in search results
+- **NEW**: Return updated data when updating FAQ entries
+- **NEW**: Convert uncategorized FAQ entries to "Uncategorized" tag
+
 ## [0.2.8] - 2025-12-31
 
 ### 🚀 New Features
@@ -509,6 +555,9 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.2.10]: https://github.com/Tencent/WeKnora/tree/v0.2.10
+[0.2.9]: https://github.com/Tencent/WeKnora/tree/v0.2.9
+[0.2.8]: https://github.com/Tencent/WeKnora/tree/v0.2.8
 [0.2.7]: https://github.com/Tencent/WeKnora/tree/v0.2.7
 [0.2.6]: https://github.com/Tencent/WeKnora/tree/v0.2.6
 [0.2.5]: https://github.com/Tencent/WeKnora/tree/v0.2.5
