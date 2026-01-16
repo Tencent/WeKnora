@@ -1,11 +1,11 @@
 import logging
-import os
 import re
 from typing import Dict
 
 import markdownify
 import requests
 
+from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
@@ -18,19 +18,19 @@ logger = logging.getLogger(__name__)
 class StdMinerUParser(BaseParser):
     """
     Standard MinerU Parser for document parsing.
-    
+
     This parser uses MinerU API to parse documents (especially PDFs) into markdown format,
     with support for tables, formulas, and images extraction.
     """
+
     def __init__(
         self,
         enable_markdownify: bool = True,
-        mineru_endpoint: str = "",
         **kwargs,
     ):
         """
         Initialize MinerU parser.
-        
+
         Args:
             enable_markdownify: Whether to convert HTML tables to markdown format
             mineru_endpoint: MinerU API endpoint URL
@@ -38,7 +38,7 @@ class StdMinerUParser(BaseParser):
         """
         super().__init__(**kwargs)
         # Get MinerU endpoint from environment variable or parameter
-        self.minerU = os.getenv("MINERU_ENDPOINT", mineru_endpoint)
+        self.minerU = CONFIG.mineru_endpoint
         self.enable_markdownify = enable_markdownify
         # Helper for processing markdown images
         self.image_helper = MarkdownImageUtil()
@@ -50,10 +50,10 @@ class StdMinerUParser(BaseParser):
     def ping(self, timeout: int = 5) -> bool:
         """
         Check if MinerU API is available.
-        
+
         Args:
             timeout: Request timeout in seconds
-            
+
         Returns:
             True if API is available, False otherwise
         """
@@ -69,10 +69,10 @@ class StdMinerUParser(BaseParser):
     def parse_into_text(self, content: bytes) -> Document:
         """
         Parse document content into text using MinerU API.
-        
+
         Args:
             content: Raw document content in bytes
-            
+
         Returns:
             Document object containing parsed text and images
         """
@@ -165,24 +165,27 @@ class StdMinerUParser(BaseParser):
 class MinerUParser(PipelineParser):
     """
     MinerU Parser with pipeline processing.
-    
-    This parser combines StdMinerUParser for document parsing and 
+
+    This parser combines StdMinerUParser for document parsing and
     MarkdownTableFormatter for table formatting in a pipeline.
     """
+
     _parser_cls = (StdMinerUParser, MarkdownTableFormatter)
 
 
 if __name__ == "__main__":
+    import os
+
     # Example usage for testing
     logging.basicConfig(level=logging.DEBUG)
 
     # Configure your file path and MinerU endpoint
     your_file = "/path/to/your/file.pdf"
-    your_mineru = "http://host.docker.internal:9987"
-    
+    os.environ["MINERU_ENDPOINT"] = "http://host.docker.internal:9987"
+
     # Create parser instance
-    parser = MinerUParser(mineru_endpoint=your_mineru)
-    
+    parser = MinerUParser()
+
     # Parse PDF file
     with open(your_file, "rb") as f:
         content = f.read()

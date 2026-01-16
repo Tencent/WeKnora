@@ -13,10 +13,11 @@ from urllib.parse import urlparse
 import requests
 from PIL import Image
 
+from docreader.config import CONFIG
 from docreader.models.document import Chunk, Document
 from docreader.models.read_config import ChunkingConfig
+from docreader.ocr import OCREngine
 from docreader.parser.caption import Caption
-from docreader.parser.ocr_engine import OCREngine
 from docreader.parser.storage import create_storage
 from docreader.splitter.splitter import TextSplitter
 from docreader.utils import endecode
@@ -243,7 +244,7 @@ class BaseParser(ABC):
         return image
 
     async def process_image_async(self, image: Image.Image, image_url: str):
-        """Asynchronously process image: first perform OCR, then get caption
+        """Asynchronously process image: perform OCR only (caption is generated asynchronously by Go backend)
 
         Args:
             image: Image object (PIL.Image or numpy array)
@@ -252,10 +253,12 @@ class BaseParser(ABC):
         Returns:
             tuple: (ocr_text, caption, image_url)
             - ocr_text: OCR extracted text
-            - caption: Image description (if OCR has text) or empty string
+            - caption: Always empty string (caption generation moved to async task in Go backend)
             - image_url: Image URL (if provided)
         """
-        logger.info("Starting asynchronous image processing (OCR + optional caption)")
+        logger.info(
+            "Starting asynchronous image processing (OCR only, caption deferred to async task)"
+        )
 
         # Resize image
         resized_image = self._resize_image_if_needed(image)
@@ -744,13 +747,11 @@ class BaseParser(ABC):
                         return img_url, img_url, None
                     # Still need to get image object for OCR processing
                     # Get proxy settings from environment variables
-                    http_proxy = os.environ.get("EXTERNAL_HTTP_PROXY")
-                    https_proxy = os.environ.get("EXTERNAL_HTTPS_PROXY")
                     proxies = {}
-                    if http_proxy:
-                        proxies["http"] = http_proxy
-                    if https_proxy:
-                        proxies["https"] = https_proxy
+                    if CONFIG.external_http_proxy:
+                        proxies["http"] = CONFIG.external_http_proxy
+                    if CONFIG.external_https_proxy:
+                        proxies["https"] = CONFIG.external_https_proxy
 
                     response = requests.get(img_url, timeout=5, proxies=proxies)
                     if response.status_code == 200:
@@ -793,13 +794,11 @@ class BaseParser(ABC):
                     logger.error(f"URL failed validation check: {img_url}")
                     return img_url, img_url, None
                 # Get proxy settings from environment variables
-                http_proxy = os.environ.get("EXTERNAL_HTTP_PROXY")
-                https_proxy = os.environ.get("EXTERNAL_HTTPS_PROXY")
                 proxies = {}
-                if http_proxy:
-                    proxies["http"] = http_proxy
-                if https_proxy:
-                    proxies["https"] = https_proxy
+                if CONFIG.external_http_proxy:
+                    proxies["http"] = CONFIG.external_http_proxy
+                if CONFIG.external_https_proxy:
+                    proxies["https"] = CONFIG.external_https_proxy
 
                 logger.info(f"Downloading image {img_url}, using proxy: {proxies}")
                 response = requests.get(img_url, timeout=5, proxies=proxies)

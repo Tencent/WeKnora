@@ -11,9 +11,10 @@ import grpc
 from grpc_health.v1 import health_pb2_grpc
 from grpc_health.v1.health import HealthServicer
 
+from docreader import config
+from docreader.config import CONFIG
 from docreader.models.read_config import ChunkingConfig
 from docreader.parser import Parser
-from docreader.parser.ocr_engine import OCREngine
 from docreader.proto import docreader_pb2_grpc
 from docreader.proto.docreader_pb2 import (
     Chunk,
@@ -22,6 +23,7 @@ from docreader.proto.docreader_pb2 import (
     ReadFromFileRequest,
     ReadFromURLRequest,
     ReadResponse,
+    StorageProvider,
 )
 from docreader.utils.request import init_logging_request_id, request_id_context
 
@@ -58,23 +60,6 @@ logger.info("Initializing server logging")
 init_logging_request_id()
 
 
-def get_max_message_length() -> int:
-    """Get max gRPC message length from environment variable.
-    Default is 50MB, can be configured via MAX_FILE_SIZE_MB.
-    """
-    try:
-        size_mb = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
-        if size_mb > 0:
-            return size_mb * 1024 * 1024
-    except ValueError:
-        pass
-    return 50 * 1024 * 1024  # default 50MB
-
-
-# Set max message size (default 50MB, configurable via MAX_FILE_SIZE_MB)
-MAX_MESSAGE_LENGTH = get_max_message_length()
-
-
 parser = Parser()
 
 
@@ -104,7 +89,7 @@ def create_chunking_config(read_config: ReadConfig):
     # Extract storage config
     sc = read_config.storage_config
     storage_config = {
-        "provider": "minio" if sc.provider == 2 else "cos",
+        "provider": StorageProvider.Name(sc.provider),
         "region": sc.region,
         "bucket_name": sc.bucket_name,
         "access_key_id": sc.access_key_id,
@@ -121,9 +106,10 @@ def create_chunking_config(read_config: ReadConfig):
     vlm_config = {
         "model_name": read_config.vlm_config.model_name,
         "base_url": read_config.vlm_config.base_url,
-        "api_key": read_config.vlm_config.api_key or "",
+        "api_key": read_config.vlm_config.api_key,
         "interface_type": read_config.vlm_config.interface_type or "openai",
     }
+
     logger.info(
         f"Using VLM config: model={vlm_config['model_name']}, "
         f"base_url={vlm_config['base_url']}, "
@@ -287,29 +273,16 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
         return proto_chunk
 
 
-def init_ocr_engine(ocr_backend: Optional[str] = None, **kwargs):
-    """Initialize OCR engine"""
-    backend_type = ocr_backend or os.getenv("OCR_BACKEND", "paddle")
-    logger.info(f"Initializing OCR engine with backend: {backend_type}")
-    OCREngine.get_instance(backend_type=backend_type, **kwargs)
-
-
 def main():
-    init_ocr_engine()
-
-    # Set max number of worker threads
-    max_workers = int(os.environ.get("GRPC_MAX_WORKERS", "4"))
-    logger.info(f"Starting DocReader service with {max_workers} worker threads")
-
-    # Get port number
-    port = os.environ.get("GRPC_PORT", "50051")
+    # Print effective env/config at startup
+    config.print_config()
 
     # Create server
     server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=max_workers),
+        futures.ThreadPoolExecutor(max_workers=CONFIG.grpc_max_workers),
         options=[
-            ("grpc.max_send_message_length", MAX_MESSAGE_LENGTH),
-            ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
+            ("grpc.max_send_message_length", CONFIG.grpc_max_file_size_mb),
+            ("grpc.max_receive_message_length", CONFIG.grpc_max_file_size_mb),
         ],
     )
 
@@ -321,12 +294,12 @@ def main():
     health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
 
     # Set listen address
-    server.add_insecure_port(f"[::]:{port}")
+    server.add_insecure_port(f"[::]:{CONFIG.grpc_port}")
 
     # Start service
     server.start()
 
-    logger.info(f"Server started on port {port}")
+    logger.info(f"Server started on port {CONFIG.grpc_port}")
     logger.info("Server is ready to accept connections")
 
     try:

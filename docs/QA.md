@@ -57,7 +57,7 @@ INIT_RERANK_MODEL_API_KEY=your_rerank_model_api_key
 
 2. 查看主服务日志，是否有`ERROR`日志输出
 
-## 4. 多模态功能显示无效的图片链接？
+## 4. 没有图片或者显示无效的图片链接？
 
 当使用多模态功能时，如果遇到图片无法显示或显示无效链接的问题，请按照以下步骤排查：
 
@@ -95,48 +95,32 @@ docker-compose --profile full up -d
 
 **重要提示**：如果你需要从其他设备或容器访问图片，`localhost` 可能无法正常工作，需要将其替换为本机的实际 IP 地址：
 
-### 5. 验证配置
 
-完成以上配置后，重启相关服务：
+## 5. 平台兼容性说明
 
-```bash
-docker-compose restart docreader app
-```
+**重要提示**：`OCR_BACKEND=paddle` 模式在部分平台上可能无法正常运行。如果遇到 PaddleOCR 启动失败的问题，请选择以下解决方案
 
-然后查看文档解析模块日志，确认 OCR 和 Caption 是否正确解析：
+### 方案一：关闭 OCR 识别
 
-```bash
-docker-compose logs -f docreader
-```
+在 `docker-compose.yml` 文件的 `docreader` 服务中删除 `OCR_BACKEND` 配置，然后重启 docreader 服务
 
+**注意**：设置为 `no_ocr` 后，文档解析将不会使用 OCR 功能，这可能会影响图片和扫描文档的文字识别效果。
 
-## 5. docreader 服务无法启动？
+### 方案二：使用外部 OCR 模型（推荐）
 
-如果 docreader 服务启动失败，日志中出现类似以下信息：
-
-```
-2026-01-12 xx:xx:xx.xxx [no-req-id] INFO __main__ | Initializing OCR engine with backend: paddle
-Initializing server logging
-```
-
-这通常是因为 PaddleOCR 启动失败导致的。
-
-### 解决方案
-
-在 `docker-compose.yml` 文件的 `docreader` 服务中，已经配置了 `OCR_BACKEND` 环境变量：
+如果需要 OCR 功能，可以使用外部的视觉语言模型（VLM）来替代 PaddleOCR。在 `docker-compose.yml` 文件的 `docreader` 服务中配置：
 
 ```yaml
 environment:
-  - OCR_BACKEND=${OCR_BACKEND:-no_ocr}
+  - OCR_BACKEND=vlm
+  - OCR_API_BASE_URL=${OCR_API_BASE_URL:-}
+  - OCR_API_KEY=${OCR_API_KEY:-}
+  - OCR_MODEL=${OCR_MODEL:-}
 ```
 
-然后重启 docreader 服务：
+然后重启 docreader 服务
 
-```bash
-docker-compose restart docreader
-```
-
-**注意**：设置为 `no_ocr` 后，文档解析将不会使用 OCR 功能，这可能会影响图片和扫描文档的文字识别效果。
+**优势**：使用外部 OCR 模型可以获得更好的识别效果，且不受平台限制。
 
 ## 6. 如何使用数据分析功能？
 
