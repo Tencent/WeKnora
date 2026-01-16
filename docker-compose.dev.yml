@@ -100,28 +100,11 @@ services:
     ports:
       - "${DOCREADER_PORT:-50051}:50051"
     environment:
-      - COS_SECRET_ID=${COS_SECRET_ID:-}
-      - COS_SECRET_KEY=${COS_SECRET_KEY:-}
-      - COS_REGION=${COS_REGION:-}
-      - COS_BUCKET_NAME=${COS_BUCKET_NAME:-}
-      - COS_APP_ID=${COS_APP_ID:-}
-      - COS_PATH_PREFIX=${COS_PATH_PREFIX:-}
-      - COS_ENABLE_OLD_DOMAIN=${COS_ENABLE_OLD_DOMAIN:-}
-      - VLM_MODEL_BASE_URL=${VLM_MODEL_BASE_URL:-}
-      - VLM_MODEL_NAME=${VLM_MODEL_NAME:-}
-      - VLM_MODEL_API_KEY=${VLM_MODEL_API_KEY:-}
+      - MINIO_ENDPOINT=minio:9000
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - MINIO_PUBLIC_ENDPOINT=http://localhost:${MINIO_PORT:-9000}
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
-      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
-      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-}
-      - MINIO_USE_SSL=${MINIO_USE_SSL:-}
-      - WEB_PROXY=${WEB_PROXY:-}
-      # File size limit (in MB)
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
-      - IMAGE_MAX_CONCURRENT=${IMAGE_MAX_CONCURRENT:-1}
-      - OCR_BACKEND=${OCR_BACKEND:-paddle}
+      - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
       interval: 30s

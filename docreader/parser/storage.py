@@ -10,6 +10,7 @@ from typing import Dict
 from minio import Minio
 from qcloud_cos import CosConfig, CosS3Client
 
+from docreader.config import CONFIG
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
@@ -73,16 +74,14 @@ class CosStorage(Storage):
                 prefix = cos_config.get("path_prefix", "")
             else:
                 # Get COS configuration from environment variables
-                secret_id = os.getenv("COS_SECRET_ID")
-                secret_key = os.getenv("COS_SECRET_KEY")
-                region = os.getenv("COS_REGION")
-                bucket_name = os.getenv("COS_BUCKET_NAME")
-                appid = os.getenv("COS_APP_ID")
-                prefix = os.getenv("COS_PATH_PREFIX")
+                secret_id = CONFIG.cos_secret_id
+                secret_key = CONFIG.cos_secret_key
+                region = CONFIG.cos_region
+                bucket_name = CONFIG.cos_bucket_name
+                appid = CONFIG.cos_app_id
+                prefix = CONFIG.cos_path_prefix
 
-            enable_old_domain = (
-                os.getenv("COS_ENABLE_OLD_DOMAIN", "true").lower() == "true"
-            )
+            enable_old_domain = CONFIG.cos_enable_old_domain
 
             if not all([secret_id, secret_key, region, bucket_name, appid]):
                 logger.error(
@@ -220,27 +219,27 @@ class MinioStorage(Storage):
             access_key = (
                 self.storage_config.get("access_key_id")
                 if self.storage_config and self.storage_config.get("access_key_id")
-                else os.getenv("MINIO_ACCESS_KEY_ID")
+                else CONFIG.minio_access_key_id
             )
             secret_key = (
                 self.storage_config.get("secret_access_key")
                 if self.storage_config and self.storage_config.get("secret_access_key")
-                else os.getenv("MINIO_SECRET_ACCESS_KEY")
+                else CONFIG.minio_secret_access_key
             )
             bucket_name = (
                 self.storage_config.get("bucket_name")
                 if self.storage_config and self.storage_config.get("bucket_name")
-                else os.getenv("MINIO_BUCKET_NAME", "")
+                else CONFIG.minio_bucket_name
             )
             path_prefix_raw = (
                 self.storage_config.get("path_prefix")
                 if self.storage_config and self.storage_config.get("path_prefix")
-                else os.getenv("MINIO_PATH_PREFIX", "")
+                else CONFIG.minio_path_prefix
             )
             path_prefix = path_prefix_raw.strip().strip("/") if path_prefix_raw else ""
 
-            endpoint = os.getenv("MINIO_ENDPOINT", "")
-            use_ssl = os.getenv("MINIO_USE_SSL", "false").lower() == "true"
+            endpoint = CONFIG.minio_endpoint
+            use_ssl = CONFIG.minio_use_ssl
 
             if not all([endpoint, access_key, secret_key, bucket_name]):
                 logger.error(
@@ -283,7 +282,7 @@ class MinioStorage(Storage):
         If MINIO_PUBLIC_ENDPOINT is provided, use it; otherwise fallback to endpoint.
         """
         # 1. Use public endpoint if provided
-        endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT")
+        endpoint = CONFIG.minio_public_endpoint
         if endpoint:
             return f"{endpoint}/{self.bucket_name}/{object_key}"
 
@@ -381,9 +380,7 @@ class LocalStorage(Storage):
 
     def __init__(self, storage_config: Dict[str, str] = {}):
         self.storage_config = storage_config
-        base_dir = storage_config.get(
-            "base_dir", os.getenv("LOCAL_STORAGE_BASE_DIR", "")
-        )
+        base_dir = storage_config.get("base_dir", CONFIG.local_storage_base_dir)
         self.image_dir = os.path.join(base_dir, "images")
         os.makedirs(self.image_dir, exist_ok=True)
 
@@ -410,6 +407,20 @@ class Base64Storage(Storage):
         return f"data:image/{file_ext};base64,{endecode.decode_image(content)}"
 
 
+class DummyStorage(Storage):
+    """Dummy storage implementation.
+
+    It is used in tests or in environments where object storage is disabled.
+    All upload methods return empty string.
+    """
+
+    def upload_file(self, file_path: str) -> str:
+        return ""
+
+    def upload_bytes(self, content: bytes, file_ext: str = ".png") -> str:
+        return ""
+
+
 def create_storage(storage_config: Dict[str, str] | None = None) -> Storage:
     """Create a storage instance based on configuration or environment variables
 
@@ -419,7 +430,7 @@ def create_storage(storage_config: Dict[str, str] | None = None) -> Storage:
     Returns:
         Storage instance
     """
-    storage_type = os.getenv("STORAGE_TYPE", "cos").lower()
+    storage_type = CONFIG.storage_type
     if storage_config:
         storage_type = str(storage_config.get("provider", storage_type)).lower()
     logger.info(f"Creating {storage_type} storage instance")
@@ -432,5 +443,4 @@ def create_storage(storage_config: Dict[str, str] | None = None) -> Storage:
         return LocalStorage(storage_config or {})
     elif storage_type == "base64":
         return Base64Storage()
-
-    raise ValueError(f"Invalid storage type: {storage_type}")
+    return DummyStorage()

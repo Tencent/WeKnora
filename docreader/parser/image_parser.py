@@ -36,6 +36,10 @@ class ImageParser(BaseParser):
         image_url = self.storage.upload_bytes(content, file_ext=ext)
         logger.info(f"Successfully uploaded image, URL: {image_url[:50]}...")
 
+        if not image_url:
+            logger.warning(f"Failed to upload image: {self.file_name}")
+            return Document(content=f"{self.file_name}", images={})
+
         # Generate markdown text
         text = f"![{self.file_name}]({image_url})"
         images = {image_url: base64.b64encode(content).decode()}

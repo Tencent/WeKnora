@@ -1,7 +1,7 @@
 import logging
-import os
 from typing import Dict, Type
 
+from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.models.read_config import ChunkingConfig
 from docreader.parser.base_parser import BaseParser
@@ -111,8 +111,8 @@ class Parser:
             enable_multimodal=config.enable_multimodal,  # Enable image/multimodal processing
             max_image_size=1920,  # Limit image size to 1920px for performance
             chunking_config=config,  # Pass the entire chunking config for advanced options
-            max_concurrent_tasks=int(os.getenv("IMAGE_MAX_CONCURRENT", "1")),
-            ocr_backend=os.getenv("OCR_BACKEND", "paddle"),
+            max_concurrent_tasks=CONFIG.image_max_concurrent,
+            ocr_backend=CONFIG.ocr_backend,
         )
 
         logger.info(f"Starting to parse file content, size: {len(content)} bytes")
@@ -158,8 +158,8 @@ class Parser:
             enable_multimodal=config.enable_multimodal,  # Enable image/multimodal processing
             max_image_size=1920,  # Limit image size to 1920px for performance
             chunking_config=config,  # Pass the entire chunking config
-            max_concurrent_tasks=int(os.getenv("IMAGE_MAX_CONCURRENT", "1")),
-            ocr_backend=os.getenv("OCR_BACKEND", "paddle"),
+            max_concurrent_tasks=CONFIG.image_max_concurrent,
+            ocr_backend=CONFIG.ocr_backend,
         )
 
         logger.info("Starting to parse URL content")

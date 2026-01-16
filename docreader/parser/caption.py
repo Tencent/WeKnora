@@ -1,12 +1,13 @@
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
 
 import ollama
 import requests
+
+from docreader.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -197,15 +198,10 @@ class Caption:
             self.interface_type = vlm_config.get("interface_type", "openai").lower()
         else:
             # Fall back to environment variables if config not provided
-            base_url = os.getenv("VLM_MODEL_BASE_URL")
-            model_name = os.getenv("VLM_MODEL_NAME")
-            if not base_url or not model_name:
-                logger.error("VLM_MODEL_BASE_URL or VLM_MODEL_NAME is not set")
-                return
-            self.completion_url = base_url + "/chat/completions"
-            self.model = model_name
-            self.api_key = os.getenv("VLM_MODEL_API_KEY", "")
-            self.interface_type = os.getenv("VLM_INTERFACE_TYPE", "openai").lower()
+            self.completion_url = CONFIG.vlm_model_base_url + "/chat/completions"
+            self.model = CONFIG.vlm_model_name
+            self.api_key = CONFIG.vlm_model_api_key
+            self.interface_type = CONFIG.vlm_interface_type
 
         # Validate interface type - must be either "ollama" or "openai"
         if self.interface_type not in ["ollama", "openai"]:
@@ -259,7 +255,9 @@ class Caption:
                 model=self.model,
                 prompt="简单凝炼的描述图片的主要内容",
                 images=[image_base64],  # Pass base64 encoded image data
-                options={"temperature": 0.1},  # Low temperature for more deterministic output
+                options={
+                    "temperature": 0.1
+                },  # Low temperature for more deterministic output
                 stream=False,
             )
 

@@ -3,40 +3,14 @@ import logging
 import os
 import platform
 import subprocess
-from abc import ABC, abstractmethod
-from typing import Dict, Union
+from typing import Union
 
 import numpy as np
-from openai import OpenAI
 from PIL import Image
 
-from docreader.utils import endecode
+from docreader.ocr.base import OCRBackend
 
 logger = logging.getLogger(__name__)
-
-
-class OCRBackend(ABC):
-    """Base class for OCR backends"""
-
-    @abstractmethod
-    def predict(self, image: Union[str, bytes, Image.Image]) -> str:
-        """Extract text from an image
-
-        Args:
-            image: Image file path, bytes, or PIL Image object
-
-        Returns:
-            Extracted text
-        """
-        pass
-
-
-class DummyOCRBackend(OCRBackend):
-    """Dummy OCR backend implementation"""
-
-    def predict(self, image: Union[str, bytes, Image.Image]) -> str:
-        logger.warning("Dummy OCR backend is used")
-        return ""
 
 
 class PaddleOCRBackend(OCRBackend):
@@ -199,136 +173,3 @@ class PaddleOCRBackend(OCRBackend):
         except Exception as e:
             logger.error(f"OCR recognition error: {str(e)}")
             return ""
-
-
-class NanonetsOCRBackend(OCRBackend):
-    """Nanonets OCR backend implementation using OpenAI API format"""
-
-    def __init__(self):
-        """Initialize Nanonets OCR backend
-
-        Args:
-            api_key: API key for OpenAI API
-            base_url: Base URL for OpenAI API
-            model: Model name
-        """
-        # Load configuration from environment variables
-        base_url = os.getenv("OCR_API_BASE_URL", "http://localhost:8000/v1")
-        api_key = os.getenv("OCR_API_KEY", "123")
-        timeout = 30
-        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-
-        self.model = os.getenv("OCR_MODEL", "nanonets/Nanonets-OCR-s")
-        logger.info(f"Nanonets OCR engine initialized with model: {self.model}")
-        self.temperature = 0.0
-        self.max_tokens = 15000
-        # Prompt for OCR text extraction with specific formatting requirements
-        self.prompt = """## 任务说明
-
-请从上传的文档中提取文字内容，严格按自然阅读顺序（从上到下，从左到右）输出，并遵循以下格式规范。
-
-### 1. **文本处理**
-
-* 按正常阅读顺序提取文字，语句流畅自然。
-
-### 2. **表格**
-
-* 所有表格统一转换为 **Markdown 表格格式**。
-* 内容保持清晰、对齐整齐，便于阅读。
-
-### 3. **公式**
-
-* 所有公式转换为 **LaTeX 格式**，使用 `$$公式$$` 包裹。
-
-### 4. **图片**
-
-* 忽略图片信息
-
-### 5. **链接**
-
-* 不要猜测或补全不确定的链接地址。
-"""
-
-    def predict(self, image: Union[str, bytes, Image.Image]) -> str:
-        """Extract text from an image using Nanonets OCR
-
-        Args:
-            image: Image file path, bytes, or PIL Image object
-
-        Returns:
-            Extracted text
-        """
-        if self.client is None:
-            logger.error("Nanonets OCR client not initialized")
-            return ""
-
-        try:
-            # Encode image to base64 format for API transmission
-            img_base64 = endecode.decode_image(image)
-            if not img_base64:
-                return ""
-
-            # Call Nanonets OCR API using OpenAI-compatible format
-            logger.info(f"Calling Nanonets OCR API with model: {self.model}")
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{img_base64}"
-                                },
-                            },
-                            {
-                                "type": "text",
-                                "text": self.prompt,
-                            },
-                        ],
-                    }
-                ],
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            logger.error(f"Nanonets OCR prediction error: {str(e)}")
-            return ""
-
-
-class OCREngine:
-    """OCR Engine factory class for managing different OCR backend instances"""
-
-    # Singleton pattern: cache instances for each backend type
-    _instance: Dict[str, OCRBackend] = {}
-
-    @classmethod
-    def get_instance(cls, backend_type: str) -> OCRBackend:
-        """Get OCR engine instance using factory pattern
-
-        Args:
-            backend_type: OCR backend type, one of: "paddle", "nanonets"
-            **kwargs: Additional arguments for the backend
-
-        Returns:
-            OCR engine instance or None if initialization fails
-        """
-        backend_type = backend_type.lower()
-        # Return cached instance if already initialized
-        if cls._instance.get(backend_type):
-            return cls._instance[backend_type]
-
-        logger.info(f"Initializing OCR engine with backend: {backend_type}")
-
-        if backend_type == "paddle":
-            cls._instance[backend_type] = PaddleOCRBackend()
-
-        elif backend_type == "nanonets":
-            cls._instance[backend_type] = NanonetsOCRBackend()
-
-        else:
-            cls._instance[backend_type] = DummyOCRBackend()
-
-        return cls._instance[backend_type]

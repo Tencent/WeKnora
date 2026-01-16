@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import textract
 
+from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.docx2_parser import Docx2Parser
 from docreader.utils.tempfile import TempDirContext, TempFileContext
@@ -24,7 +25,7 @@ class SandboxExecutor:
         """
         # Get proxy from parameter, environment variable, or use default blocking proxy
         # Use 'or None' to convert empty string to None, then apply default value
-        self.proxy = proxy or os.environ.get("WEB_PROXY") or "http://128.0.0.1:1"
+        self.proxy = proxy or CONFIG.external_https_proxy or "http://128.0.0.1:1"
         self.default_timeout = default_timeout
 
     def execute_in_sandbox(self, cmd: List[str]) -> tuple:

@@ -1,10 +1,10 @@
 import asyncio
 import logging
-import os
 
 from playwright.async_api import async_playwright
 from trafilatura import extract
 
+from docreader.config import CONFIG
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
@@ -30,8 +30,8 @@ class StdWebParser(BaseParser):
             **kwargs: Additional arguments passed to BaseParser
         """
         self.title = title
-        # Get proxy configuration from environment variable if available
-        self.proxy = os.environ.get("WEB_PROXY", "")
+        # Get proxy configuration from config if available
+        self.proxy = CONFIG.external_https_proxy
         super().__init__(file_name=title, **kwargs)
         logger.info(f"Initialized WebParser with title: {title}")
 
