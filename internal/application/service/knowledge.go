@@ -6572,6 +6572,10 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	originalTotalEntries := len(payload.Entries)
 
 	// 初始化进度
+	// 检查是否已有验证结果（用于重试时跳过验证）
+	// 注意：必须在保存新 progress 之前查询，否则会被覆盖
+	existingProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
+
 	progress := &types.FAQImportProgress{
 		TaskID:         payload.TaskID,
 		KBID:           payload.KBID,
@@ -6593,8 +6597,6 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 		logger.Warnf(ctx, "Failed to save initial FAQ import progress: %v", err)
 	}
 
-	// 检查是否已有验证结果（用于重试时跳过验证）
-	existingProgress, _ := s.GetFAQImportProgress(ctx, payload.TaskID)
 	var validEntryIndices []int
 	if existingProgress != nil && len(existingProgress.ValidEntryIndices) > 0 {
 		// 重试时直接使用之前的验证结果
