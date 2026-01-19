@@ -2788,9 +2788,12 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	// 记录任务入队时间
 	enqueuedAt := time.Now().Unix()
 
-	// 设置 KB 的运行中任务 ID
-	if err := s.setRunningFAQImportTaskID(ctx, kbID, taskID); err != nil {
-		logger.Errorf(ctx, "Failed to set running FAQ import task ID: %v", err)
+	// 设置 KB 的运行中任务信息
+	if err := s.setRunningFAQImportInfo(ctx, kbID, &runningFAQImportInfo{
+		TaskID:     taskID,
+		EnqueuedAt: enqueuedAt,
+	}); err != nil {
+		logger.Errorf(ctx, "Failed to set running FAQ import task info: %v", err)
 		// 不影响任务执行，继续
 	}
 
@@ -5442,10 +5445,14 @@ func (s *knowledgeService) getRunningFAQImportTaskID(ctx context.Context, kbID s
 	return info.TaskID, nil
 }
 
-// setRunningFAQImportTaskID sets the running task ID for a KB
-func (s *knowledgeService) setRunningFAQImportTaskID(ctx context.Context, kbID, taskID string) error {
+// setRunningFAQImportInfo sets the running task info for a KB
+func (s *knowledgeService) setRunningFAQImportInfo(ctx context.Context, kbID string, info *runningFAQImportInfo) error {
 	key := getFAQImportRunningKey(kbID)
-	return s.redisClient.Set(ctx, key, taskID, faqImportProgressTTL).Err()
+	data, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("failed to marshal running info: %w", err)
+	}
+	return s.redisClient.Set(ctx, key, data, faqImportProgressTTL).Err()
 }
 
 // clearRunningFAQImportTaskID clears the running task ID for a KB
