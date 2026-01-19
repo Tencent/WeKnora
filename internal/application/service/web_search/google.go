@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
 
-	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -22,8 +22,13 @@ type GoogleProvider struct {
 }
 
 // NewGoogleProvider creates a new Google provider
-func NewGoogleProvider(cfg config.WebSearchProviderConfig) (interfaces.WebSearchProvider, error) {
-	u, err := url.Parse(cfg.APIURL)
+func NewGoogleProvider() (interfaces.WebSearchProvider, error) {
+	apiURL := os.Getenv("GOOGLE_SEARCH_API_URL")
+	if apiURL == "" {
+		return nil, fmt.Errorf("GOOGLE_SEARCH_API_URL environment variable is not set")
+	}
+
+	u, err := url.Parse(apiURL)
 	if err != nil {
 		return nil, err
 	}
@@ -46,8 +51,19 @@ func NewGoogleProvider(cfg config.WebSearchProviderConfig) (interfaces.WebSearch
 		srv:      srv,
 		apiKey:   apiKey,
 		engineID: engineID,
-		baseURL:  cfg.APIURL,
+		baseURL:  apiURL,
 	}, nil
+}
+
+// GoogleProviderInfo returns the provider info for registration
+func GoogleProviderInfo() types.WebSearchProviderInfo {
+	return types.WebSearchProviderInfo{
+		ID:             "google",
+		Name:           "Google",
+		Free:           false,
+		RequiresAPIKey: true,
+		Description:    "Google Custom Search API",
+	}
 }
 
 // Name returns the provider name

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -24,12 +23,23 @@ type DuckDuckGoProvider struct {
 }
 
 // NewDuckDuckGoProvider creates a new DuckDuckGo provider
-func NewDuckDuckGoProvider(_ config.WebSearchProviderConfig) (interfaces.WebSearchProvider, error) {
+func NewDuckDuckGoProvider() (interfaces.WebSearchProvider, error) {
 	return &DuckDuckGoProvider{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}, nil
+}
+
+// DuckDuckGoProviderInfo returns the provider info for registration
+func DuckDuckGoProviderInfo() types.WebSearchProviderInfo {
+	return types.WebSearchProviderInfo{
+		ID:             "duckduckgo",
+		Name:           "DuckDuckGo",
+		Free:           true,
+		RequiresAPIKey: false,
+		Description:    "DuckDuckGo Search API",
+	}
 }
 
 // Name returns the provider name

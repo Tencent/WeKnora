@@ -577,27 +577,6 @@ extract:
     with_no_tag: |
       请随机生成一段文本，内容请自由发挥，字数在 [50-200] 之间。 
 
-# WebSearch 配置
-web_search:
-  # 可用搜索引擎列表
-  providers:
-    - id: "duckduckgo"
-      name: "DuckDuckGo"
-      free: true
-      requires_api_key: false
-      description: "DuckDuckGo API"
-
-  
-  # 默认配置
-  default:
-    provider: "duckduckgo"
-    max_results: 5
-    include_date: true
-    compression_method: "none"
-    blacklist: []
-  
-  # 全局超时设置
-  timeout: 10
 
 # 租户配置
 tenant:

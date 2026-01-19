@@ -18,7 +18,7 @@ import (
 // WebSearchService provides web search functionality
 type WebSearchService struct {
 	providers map[string]interfaces.WebSearchProvider
-	config    *config.WebSearchConfig
+	timeout   int
 }
 
 // CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base.
@@ -259,7 +259,7 @@ func (s *WebSearchService) Search(
 	}
 
 	// Set timeout
-	timeout := time.Duration(s.config.Timeout) * time.Second
+	timeout := time.Duration(s.timeout) * time.Second
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
@@ -286,37 +286,26 @@ func (s *WebSearchService) Search(
 }
 
 // NewWebSearchService creates a new web search service
-func NewWebSearchService(cfg *config.Config) (interfaces.WebSearchService, error) {
-	if cfg.WebSearch == nil {
-		return nil, fmt.Errorf("web search config is not available")
+func NewWebSearchService(cfg *config.Config, registry *web_search.Registry) (interfaces.WebSearchService, error) {
+	timeout := 10 // default timeout
+	if cfg.WebSearch != nil && cfg.WebSearch.Timeout > 0 {
+		timeout = cfg.WebSearch.Timeout
 	}
 
-	service := &WebSearchService{
-		providers: make(map[string]interfaces.WebSearchProvider),
-		config:    cfg.WebSearch,
+	// Create all registered providers
+	providers, err := registry.CreateAllProviders()
+	if err != nil {
+		return nil, err
 	}
 
-	// Initialize providers based on config
-	for _, providerConfig := range cfg.WebSearch.Providers {
-		var provider interfaces.WebSearchProvider
-		var err error
-
-		switch providerConfig.ID {
-		case "duckduckgo":
-			provider, err = web_search.NewDuckDuckGoProvider(providerConfig)
-		case "google":
-			provider, err = web_search.NewGoogleProvider(providerConfig)
-		default:
-			return nil, fmt.Errorf("unknown web search provider: %s", providerConfig.ID)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize provider %s: %v", providerConfig.ID, err)
-		}
-		service.providers[providerConfig.ID] = provider
-		logger.Infof(context.Background(), "Initialized web search provider: %s", providerConfig.ID)
+	for id := range providers {
+		logger.Infof(context.Background(), "Initialized web search provider: %s", id)
 	}
 
-	return service, nil
+	return &WebSearchService{
+		providers: providers,
+		timeout:   timeout,
+	}, nil
 }
 
 // filterBlacklist filters results based on blacklist rules
