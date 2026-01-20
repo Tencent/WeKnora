@@ -6713,15 +6713,24 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	// 如果已经处理了一部分有效条目，从该位置继续
 	entriesToImport := validEntries
+	importMode := payload.Mode
 	if processedCount > 0 && processedCount < len(validEntries) {
 		entriesToImport = validEntries[processedCount:]
+		// 重试场景下，如果之前已经处理了一部分数据，需要切换到 Append 模式
+		// 因为 Replace 模式的删除操作在第一次运行时已经执行过了
+		// 如果继续使用 Replace 模式，calculateReplaceOperations 会将之前成功导入的数据标记为删除
+		// 导致数据丢失
+		if payload.Mode == types.FAQBatchModeReplace {
+			importMode = types.FAQBatchModeAppend
+			logger.Infof(ctx, "Switching to Append mode for retry, original mode was Replace")
+		}
 		logger.Infof(ctx, "Continuing FAQ import from entry %d, remaining: %d entries", processedCount, len(entriesToImport))
 	}
 
 	// 构建FAQBatchUpsertPayload（使用验证通过的有效条目）
 	faqPayload := &types.FAQBatchUpsertPayload{
 		Entries: entriesToImport,
-		Mode:    payload.Mode,
+		Mode:    importMode,
 	}
 
 	// 执行FAQ导入（传入已处理的偏移量，用于进度计算）
@@ -6755,17 +6764,6 @@ func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *t
 		} else {
 			logger.Infof(ctx, "Deleted FAQ entries file from object storage: %s", payload.EntriesURL)
 		}
-	}
-
-	// 更新最终状态
-	progress.Status = types.FAQImportStatusCompleted
-	progress.Progress = 100
-	progress.Processed = originalTotalEntries
-	progress.SuccessCount = originalTotalEntries - progress.FailedCount
-	if payload.DryRun {
-		progress.Message = fmt.Sprintf("验证完成: 成功 %d 条, 失败 %d 条", progress.SuccessCount, progress.FailedCount)
-	} else {
-		progress.Message = fmt.Sprintf("导入完成: 成功 %d 条, 失败 %d 条", progress.SuccessCount, progress.FailedCount)
 	}
 	progress.UpdatedAt = time.Now().Unix()
 
