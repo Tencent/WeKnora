@@ -96,14 +96,14 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 }
 
 // sendCompletionEvent sends a final completion event to the client
+// NOTE: This is now a no-op because:
+// 1. The 'complete' event from handleComplete already signals stream completion
+// 2. Sending an extra empty 'answer' event with done:true causes frontend issues
+//    (multiple done events can confuse state management)
+// The frontend should use 'complete' response_type to detect stream completion
 func sendCompletionEvent(c *gin.Context, requestID string) {
-	c.SSEvent("message", &types.StreamResponse{
-		ID:           requestID,
-		ResponseType: types.ResponseTypeAnswer,
-		Content:      "",
-		Done:         true,
-	})
-	c.Writer.Flush()
+	// Intentionally empty - completion is signaled by the 'complete' event
+	// which is already sent before this function is called
 }
 
 // createAgentQueryEvent creates a standard agent query event

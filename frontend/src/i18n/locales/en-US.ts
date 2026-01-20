@@ -312,6 +312,7 @@ export default {
       availablePlaceholders: 'Available Placeholders',
       placeholderHint: 'Type {{ to trigger autocomplete',
       temperature: 'Temperature',
+      thinking: 'Thinking Mode',
       welcomeMessage: 'Welcome Message',
       welcomeMessagePlaceholder: 'Message displayed when this agent is selected',
       suggestedPrompts: 'Suggested Prompts',

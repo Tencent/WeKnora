@@ -323,6 +323,10 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 	streamCtx := h.setupSSEStream(reqCtx, generateTitle)
 
 	// Setup completion handler for normal mode
+	// Note: Thinking content is now embedded in answer stream with <think> tags
+	// by chat_completion_stream.go, so we don't need separate thinking event handling
+	var completionHandled bool // Prevent duplicate completion handling
+
 	streamCtx.eventBus.On(event.EventAgentFinalAnswer, func(ctx context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
 		if !ok {
@@ -330,14 +334,22 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 		}
 		streamCtx.assistantMessage.Content += data.Content
 		if data.Done {
+			// Prevent duplicate completion handling
+			if completionHandled {
+				return nil
+			}
+			completionHandled = true
+
 			logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
+			// Content already contains <think>...</think> tags from chat_completion_stream.go
 			h.completeAssistantMessage(streamCtx.asyncCtx, streamCtx.assistantMessage)
+			// Emit EventAgentComplete - this will trigger handleComplete which sends the SSE complete event
+			// Note: Don't cancel context here, let the SSE handler close naturally after receiving the complete event
 			streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 				Type:      event.EventAgentComplete,
 				SessionID: sessionID,
 				Data:      event.AgentCompleteData{FinalAnswer: streamCtx.assistantMessage.Content},
 			})
-			streamCtx.cancel()
 		}
 		return nil
 	})

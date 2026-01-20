@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -13,23 +14,22 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// RemoteAPIChat 实现了基于的聊天
+// RemoteAPIChat 实现了基于 OpenAI 兼容 API 的聊天
+// 这是一个通用实现，不包含任何 provider 特定的逻辑
 type RemoteAPIChat struct {
 	modelName string
 	client    *openai.Client
 	modelID   string
 	baseURL   string
 	apiKey    string
-	provider  provider.ProviderName // Provider identifier for routing
+	provider  provider.ProviderName
+
+	// requestCustomizer 允许子类自定义请求
+	// 返回自定义请求体（如果为 nil 则使用标准请求）和是否需要使用原始 HTTP 请求
+	requestCustomizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (customReq any, useRawHTTP bool)
 }
 
-// QwenChatCompletionRequest 用于 qwen 模型的自定义请求结构体
-type QwenChatCompletionRequest struct {
-	openai.ChatCompletionRequest
-	EnableThinking *bool `json:"enable_thinking,omitempty"` // qwen 模型专用字段
-}
-
-// NewRemoteAPIChat 调用远程API 聊天实例
+// NewRemoteAPIChat 创建远程 API 聊天实例
 func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	apiKey := chatConfig.APIKey
 	config := openai.DefaultConfig(apiKey)
@@ -37,7 +37,6 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		config.BaseURL = baseURL
 	}
 
-	// Detect or use configured provider
 	providerName := provider.ProviderName(chatConfig.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(chatConfig.BaseURL)
@@ -53,20 +52,23 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	}, nil
 }
 
-// convertMessages 转换消息格式为OpenAI格式
-func (c *RemoteAPIChat) convertMessages(messages []Message) []openai.ChatCompletionMessage {
+// SetRequestCustomizer 设置请求自定义器
+func (c *RemoteAPIChat) SetRequestCustomizer(customizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool)) {
+	c.requestCustomizer = customizer
+}
+
+// ConvertMessages 转换消息格式为 OpenAI 格式（导出供子类使用）
+func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatCompletionMessage {
 	openaiMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, msg := range messages {
 		openaiMsg := openai.ChatCompletionMessage{
 			Role: msg.Role,
 		}
 
-		// 处理内容：对于 assistant 角色，内容可能为空（当有 tool_calls 时）
 		if msg.Content != "" {
 			openaiMsg.Content = msg.Content
 		}
 
-		// 处理 tool calls（assistant 角色）
 		if len(msg.ToolCalls) > 0 {
 			openaiMsg.ToolCalls = make([]openai.ToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
@@ -82,7 +84,6 @@ func (c *RemoteAPIChat) convertMessages(messages []Message) []openai.ChatComplet
 			}
 		}
 
-		// 处理 tool 角色消息（工具返回结果）
 		if msg.Role == "tool" {
 			openaiMsg.ToolCallID = msg.ToolCallID
 			openaiMsg.Name = msg.Name
@@ -93,44 +94,14 @@ func (c *RemoteAPIChat) convertMessages(messages []Message) []openai.ChatComplet
 	return openaiMessages
 }
 
-// isQwenModel 检查是否为 qwen 模型
-func (c *RemoteAPIChat) isAliyunQwen3Model() bool {
-	return c.provider == provider.ProviderAliyun && provider.IsQwen3Model(c.modelName)
-}
-
-// isDeepSeekModel 检查是否为 DeepSeek 模型
-func (c *RemoteAPIChat) isDeepSeekModel() bool {
-	return provider.IsDeepSeekModel(c.modelName)
-}
-
-// buildQwenChatCompletionRequest 构建 qwen 模型的聊天请求参数
-func (c *RemoteAPIChat) buildQwenChatCompletionRequest(messages []Message,
-	opts *ChatOptions, isStream bool,
-) QwenChatCompletionRequest {
-	req := QwenChatCompletionRequest{
-		ChatCompletionRequest: c.buildChatCompletionRequest(messages, opts, isStream),
-	}
-
-	// 对于 qwen 模型，在非流式调用中强制设置 enable_thinking: false
-	if !isStream {
-		enableThinking := false
-		req.EnableThinking = &enableThinking
-	}
-	return req
-}
-
-// buildChatCompletionRequest 构建聊天请求参数
-func (c *RemoteAPIChat) buildChatCompletionRequest(messages []Message,
-	opts *ChatOptions, isStream bool,
-) openai.ChatCompletionRequest {
+// BuildChatCompletionRequest 构建标准聊天请求参数（导出供子类使用）
+func (c *RemoteAPIChat) BuildChatCompletionRequest(messages []Message, opts *ChatOptions, isStream bool) openai.ChatCompletionRequest {
 	req := openai.ChatCompletionRequest{
 		Model:    c.modelName,
-		Messages: c.convertMessages(messages),
+		Messages: c.ConvertMessages(messages),
 		Stream:   isStream,
 	}
-	thinking := false
 
-	// 添加可选参数
 	if opts != nil {
 		if opts.Temperature > 0 {
 			req.Temperature = float32(opts.Temperature)
@@ -150,11 +121,8 @@ func (c *RemoteAPIChat) buildChatCompletionRequest(messages []Message,
 		if opts.PresencePenalty > 0 {
 			req.PresencePenalty = float32(opts.PresencePenalty)
 		}
-		if opts.Thinking != nil {
-			thinking = *opts.Thinking
-		}
 
-		// 处理 Tools（函数定义）
+		// 处理 Tools
 		if len(opts.Tools) > 0 {
 			req.Tools = make([]openai.Tool, 0, len(opts.Tools))
 			for _, tool := range opts.Tools {
@@ -166,39 +134,24 @@ func (c *RemoteAPIChat) buildChatCompletionRequest(messages []Message,
 						Description: tool.Function.Description,
 					},
 				}
-				// 转换 Parameters (map[string]interface{} -> JSON Schema)
 				if tool.Function.Parameters != nil {
-					// Parameters 已经是 JSON Schema 格式的 map，直接使用
 					openaiTool.Function.Parameters = tool.Function.Parameters
 				}
 				req.Tools = append(req.Tools, openaiTool)
 			}
 		}
 
-		// 处理 ToolChoice
-		// ToolChoice 可以是字符串或 ToolChoice 对象
-		// 对于 "auto", "none", "required" 直接使用字符串
-		// 对于特定工具名称，使用 ToolChoice 对象
-		// 注意：某些模型（如 DeepSeek）不支持 tool_choice，需要跳过设置
+		// 处理 ToolChoice（标准实现）
 		if opts.ToolChoice != "" {
-			// DeepSeek 模型不支持 tool_choice，跳过设置（默认行为会自动使用工具）
-			if c.isDeepSeekModel() {
-				// 对于 DeepSeek，不设置 tool_choice，让 API 使用默认行为
-				// 如果有 tools，DeepSeek 会自动使用
-				logger.Infof(context.Background(), "deepseek model, skip tool_choice")
-			} else {
-				switch opts.ToolChoice {
-				case "none", "required", "auto":
-					// 直接使用字符串
-					req.ToolChoice = opts.ToolChoice
-				default:
-					// 特定工具名称，使用 ToolChoice 对象
-					req.ToolChoice = openai.ToolChoice{
-						Type: "function",
-						Function: openai.ToolFunction{
-							Name: opts.ToolChoice,
-						},
-					}
+			switch opts.ToolChoice {
+			case "none", "required", "auto":
+				req.ToolChoice = opts.ToolChoice
+			default:
+				req.ToolChoice = openai.ToolChoice{
+					Type: "function",
+					Function: openai.ToolFunction{
+						Name: opts.ToolChoice,
+					},
 				}
 			}
 		}
@@ -211,50 +164,80 @@ func (c *RemoteAPIChat) buildChatCompletionRequest(messages []Message,
 		}
 	}
 
-	// ChatTemplateKwargs is only supported by custom backends like vLLM.
-	// Official APIs (OpenAI, Aliyun, Zhipu, etc.) do not support this parameter
-	// and will return 400 Bad Request if it's included.
-	if c.provider == provider.ProviderGeneric {
-		req.ChatTemplateKwargs = map[string]interface{}{
-			"enable_thinking": thinking,
-		}
-	}
-
-	// Log LLM request for debugging
-	if jsonData, err := json.MarshalIndent(req, "", "  "); err == nil {
-		logger.Infof(context.Background(), "[LLM Request] model=%s, stream=%v, request:\n%s", c.modelName, isStream, string(jsonData))
-	}
-
-	// Log tools/functions separately for clarity
-	if len(req.Tools) > 0 {
-		toolNames := make([]string, 0, len(req.Tools))
-		for _, tool := range req.Tools {
-			toolNames = append(toolNames, tool.Function.Name)
-		}
-		logger.Infof(context.Background(), "[LLM Request] tools_count=%d, tool_names=%v", len(req.Tools), toolNames)
-	}
-
 	return req
+}
+
+// logRequest 记录请求日志
+func (c *RemoteAPIChat) logRequest(ctx context.Context, req any, isStream bool) {
+	if jsonData, err := json.MarshalIndent(req, "", "  "); err == nil {
+		logger.Infof(ctx, "[LLM Request] model=%s, stream=%v, request:\n%s", c.modelName, isStream, string(jsonData))
+	}
 }
 
 // Chat 进行非流式聊天
 func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *ChatOptions) (*types.ChatResponse, error) {
-	// 如果是 qwen 模型，使用自定义请求
-	if c.isAliyunQwen3Model() {
-		return c.chatWithQwen(ctx, messages, opts)
+	req := c.BuildChatCompletionRequest(messages, opts, false)
+
+	// 检查是否需要自定义请求
+	if c.requestCustomizer != nil {
+		customReq, useRawHTTP := c.requestCustomizer(&req, opts, false)
+		if useRawHTTP && customReq != nil {
+			return c.chatWithRawHTTP(ctx, customReq)
+		}
 	}
 
-	// 构建请求参数
-	req := c.buildChatCompletionRequest(messages, opts, false)
+	c.logRequest(ctx, req, false)
 
-	// 发送请求
 	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("create chat completion: %w", err)
 	}
 
+	return c.parseCompletionResponse(&resp)
+}
+
+// chatWithRawHTTP 使用原始 HTTP 请求进行聊天（供自定义请求使用）
+func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, customReq any) (*types.ChatResponse, error) {
+	jsonData, err := json.Marshal(customReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	logger.Infof(ctx, "[LLM Request] model=%s, raw HTTP request:\n%s", c.modelName, string(jsonData))
+
+	endpoint := c.baseURL + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var chatResp openai.ChatCompletionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return c.parseCompletionResponse(&chatResp)
+}
+
+// parseCompletionResponse 解析非流式响应
+func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionResponse) (*types.ChatResponse, error) {
 	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from OpenAI")
+		return nil, fmt.Errorf("no response from API")
 	}
 
 	choice := resp.Choices[0]
@@ -272,91 +255,6 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 		},
 	}
 
-	// 转换 Tool Calls
-	if len(choice.Message.ToolCalls) > 0 {
-		response.ToolCalls = make([]types.LLMToolCall, 0, len(choice.Message.ToolCalls))
-		for _, tc := range choice.Message.ToolCalls {
-			response.ToolCalls = append(response.ToolCalls, types.LLMToolCall{
-				ID:   tc.ID,
-				Type: string(tc.Type),
-				Function: types.FunctionCall{
-					Name:      tc.Function.Name,
-					Arguments: tc.Function.Arguments,
-				},
-			})
-		}
-	}
-
-	return response, nil
-}
-
-// chatWithQwen 使用自定义请求处理 qwen 模型
-func (c *RemoteAPIChat) chatWithQwen(
-	ctx context.Context,
-	messages []Message,
-	opts *ChatOptions,
-) (*types.ChatResponse, error) {
-	// 构建 qwen 请求参数
-	req := c.buildQwenChatCompletionRequest(messages, opts, false)
-
-	// 序列化请求
-	jsonData, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	// 构建 URL
-	endpoint := c.baseURL + "/chat/completions"
-
-	// 创建 HTTP 请求
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	// 设置请求头
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	// 发送请求
-	client := &http.Client{}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 检查响应状态
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status: %d", resp.StatusCode)
-	}
-
-	// 解析响应
-	var chatResp openai.ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no response from API")
-	}
-
-	choice := chatResp.Choices[0]
-	response := &types.ChatResponse{
-		Content:      choice.Message.Content,
-		FinishReason: string(choice.FinishReason),
-		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		}{
-			PromptTokens:     chatResp.Usage.PromptTokens,
-			CompletionTokens: chatResp.Usage.CompletionTokens,
-			TotalTokens:      chatResp.Usage.TotalTokens,
-		},
-	}
-
-	// 转换 Tool Calls
 	if len(choice.Message.ToolCalls) > 0 {
 		response.ToolCalls = make([]types.LLMToolCall, 0, len(choice.Message.ToolCalls))
 		for _, tc := range choice.Message.ToolCalls {
@@ -375,160 +273,293 @@ func (c *RemoteAPIChat) chatWithQwen(
 }
 
 // ChatStream 进行流式聊天
-func (c *RemoteAPIChat) ChatStream(ctx context.Context,
-	messages []Message, opts *ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	// 构建请求参数
-	req := c.buildChatCompletionRequest(messages, opts, true)
+func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	req := c.BuildChatCompletionRequest(messages, opts, true)
 
-	// 创建流式响应通道
+	// 检查是否需要自定义请求
+	if c.requestCustomizer != nil {
+		customReq, useRawHTTP := c.requestCustomizer(&req, opts, true)
+		if useRawHTTP && customReq != nil {
+			return c.chatStreamWithRawHTTP(ctx, customReq)
+		}
+	}
+
+	c.logRequest(ctx, req, true)
+
 	streamChan := make(chan types.StreamResponse)
 
-	// 启动流式请求
 	stream, err := c.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
 		close(streamChan)
 		return nil, fmt.Errorf("create chat completion stream: %w", err)
 	}
 
-	// 在后台处理流式响应
-	go func() {
-		defer close(streamChan)
-		defer stream.Close()
-
-		toolCallMap := make(map[int]*types.LLMToolCall)
-		lastFunctionName := make(map[int]string)
-		nameNotified := make(map[int]bool)
-
-		buildOrderedToolCalls := func() []types.LLMToolCall {
-			if len(toolCallMap) == 0 {
-				return nil
-			}
-			result := make([]types.LLMToolCall, 0, len(toolCallMap))
-			for i := 0; i < len(toolCallMap); i++ {
-				if tc, ok := toolCallMap[i]; ok && tc != nil {
-					result = append(result, *tc)
-				}
-			}
-			if len(result) == 0 {
-				return nil
-			}
-			return result
-		}
-
-		for {
-			response, err := stream.Recv()
-			if err != nil {
-				// Check if it's a normal end of stream (io.EOF)
-				if err.Error() == "EOF" {
-					// Normal end of stream, send final response with collected tool calls
-					streamChan <- types.StreamResponse{
-						ResponseType: types.ResponseTypeAnswer,
-						Content:      "",
-						Done:         true,
-						ToolCalls:    buildOrderedToolCalls(),
-					}
-				} else {
-					// Actual error, send error response
-					streamChan <- types.StreamResponse{
-						ResponseType: types.ResponseTypeError,
-						Content:      err.Error(),
-						Done:         true,
-					}
-				}
-				return
-			}
-
-			if len(response.Choices) > 0 {
-				delta := response.Choices[0].Delta
-				isDone := string(response.Choices[0].FinishReason) != ""
-
-				// 收集 tool calls（流式响应中 tool calls 可能分多次返回）
-				if len(delta.ToolCalls) > 0 {
-					for _, tc := range delta.ToolCalls {
-						// 检查是否已经存在该 tool call（通过 index）
-						var toolCallIndex int
-						if tc.Index != nil {
-							toolCallIndex = *tc.Index
-						}
-						toolCallEntry, exists := toolCallMap[toolCallIndex]
-						if !exists || toolCallEntry == nil {
-							toolCallEntry = &types.LLMToolCall{
-								Type: string(tc.Type),
-								Function: types.FunctionCall{
-									Name:      "",
-									Arguments: "",
-								},
-							}
-							toolCallMap[toolCallIndex] = toolCallEntry
-						}
-
-						// 更新 ID、类型
-						if tc.ID != "" {
-							toolCallEntry.ID = tc.ID
-						}
-						if tc.Type != "" {
-							toolCallEntry.Type = string(tc.Type)
-						}
-
-						// 累积函数名称（可能分多次返回）
-						if tc.Function.Name != "" {
-							toolCallEntry.Function.Name += tc.Function.Name
-						}
-
-						// 累积参数（可能为部分 JSON）
-						argsUpdated := false
-						if tc.Function.Arguments != "" {
-							toolCallEntry.Function.Arguments += tc.Function.Arguments
-							argsUpdated = true
-						}
-
-						currName := toolCallEntry.Function.Name
-						if currName != "" &&
-							currName == lastFunctionName[toolCallIndex] &&
-							argsUpdated &&
-							!nameNotified[toolCallIndex] &&
-							toolCallEntry.ID != "" {
-							streamChan <- types.StreamResponse{
-								ResponseType: types.ResponseTypeToolCall,
-								Content:      "",
-								Done:         false,
-								Data: map[string]interface{}{
-									"tool_name":    currName,
-									"tool_call_id": toolCallEntry.ID,
-								},
-							}
-							nameNotified[toolCallIndex] = true
-						}
-
-						lastFunctionName[toolCallIndex] = currName
-					}
-				}
-
-				// 发送内容块
-				if delta.Content != "" {
-					streamChan <- types.StreamResponse{
-						ResponseType: types.ResponseTypeAnswer,
-						Content:      delta.Content,
-						Done:         isDone,
-						ToolCalls:    buildOrderedToolCalls(),
-					}
-				}
-
-				// 如果是最后一次响应，确保发送包含所有 tool calls 的响应
-				if isDone && len(toolCallMap) > 0 {
-					streamChan <- types.StreamResponse{
-						ResponseType: types.ResponseTypeAnswer,
-						Content:      "",
-						Done:         true,
-						ToolCalls:    buildOrderedToolCalls(),
-					}
-				}
-			}
-		}
-	}()
+	go c.processStream(ctx, stream, streamChan)
 
 	return streamChan, nil
+}
+
+// chatStreamWithRawHTTP 使用原始 HTTP 请求进行流式聊天
+func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, customReq any) (<-chan types.StreamResponse, error) {
+	jsonData, err := json.Marshal(customReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	logger.Infof(ctx, "[LLM Stream] model=%s, raw HTTP request:\n%s", c.modelName, string(jsonData))
+
+	endpoint := c.baseURL + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	streamChan := make(chan types.StreamResponse)
+
+	go c.processRawHTTPStream(ctx, resp, streamChan)
+
+	return streamChan, nil
+}
+
+// processStream 处理 OpenAI SDK 流式响应
+func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCompletionStream, streamChan chan types.StreamResponse) {
+	defer close(streamChan)
+	defer stream.Close()
+
+	state := newStreamState()
+
+	for {
+		response, err := stream.Recv()
+		if err != nil {
+			if err.Error() == "EOF" {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      "",
+					Done:         true,
+					ToolCalls:    state.buildOrderedToolCalls(),
+				}
+			} else {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeError,
+					Content:      err.Error(),
+					Done:         true,
+				}
+			}
+			return
+		}
+
+		if len(response.Choices) > 0 {
+			c.processStreamDelta(ctx, &response.Choices[0], state, streamChan)
+		}
+	}
+}
+
+// processRawHTTPStream 处理原始 HTTP 流式响应
+func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Response, streamChan chan types.StreamResponse) {
+	defer close(streamChan)
+	defer resp.Body.Close()
+
+	state := newStreamState()
+	reader := NewSSEReader(resp.Body)
+
+	for {
+		event, err := reader.ReadEvent()
+		if err != nil {
+			if err.Error() != "EOF" {
+				logger.Errorf(ctx, "Stream read error: %v", err)
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeError,
+					Content:      err.Error(),
+					Done:         true,
+				}
+			}
+			return
+		}
+
+		if event == nil {
+			continue
+		}
+
+		if event.Done {
+			streamChan <- types.StreamResponse{
+				ResponseType: types.ResponseTypeAnswer,
+				Content:      "",
+				Done:         true,
+				ToolCalls:    state.buildOrderedToolCalls(),
+			}
+			return
+		}
+
+		if event.Data == nil {
+			continue
+		}
+
+		var streamResp openai.ChatCompletionStreamResponse
+		if err := json.Unmarshal(event.Data, &streamResp); err != nil {
+			logger.Errorf(ctx, "Failed to parse stream response: %v", err)
+			continue
+		}
+
+		if len(streamResp.Choices) > 0 {
+			c.processStreamDelta(ctx, &streamResp.Choices[0], state, streamChan)
+		}
+	}
+}
+
+// streamState 流式处理状态
+type streamState struct {
+	toolCallMap      map[int]*types.LLMToolCall
+	lastFunctionName map[int]string
+	nameNotified     map[int]bool
+	hasThinking      bool
+}
+
+func newStreamState() *streamState {
+	return &streamState{
+		toolCallMap:      make(map[int]*types.LLMToolCall),
+		lastFunctionName: make(map[int]string),
+		nameNotified:     make(map[int]bool),
+		hasThinking:      false,
+	}
+}
+
+func (s *streamState) buildOrderedToolCalls() []types.LLMToolCall {
+	if len(s.toolCallMap) == 0 {
+		return nil
+	}
+	result := make([]types.LLMToolCall, 0, len(s.toolCallMap))
+	for i := 0; i < len(s.toolCallMap); i++ {
+		if tc, ok := s.toolCallMap[i]; ok && tc != nil {
+			result = append(result, *tc)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// processStreamDelta 处理流式响应的单个 delta
+func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.ChatCompletionStreamChoice, state *streamState, streamChan chan types.StreamResponse) {
+	delta := choice.Delta
+	isDone := string(choice.FinishReason) != ""
+
+	// 处理 tool calls
+	if len(delta.ToolCalls) > 0 {
+		c.processToolCallsDelta(delta.ToolCalls, state, streamChan)
+	}
+
+	// 发送思考内容（ReasoningContent，支持 DeepSeek 等模型）
+	if delta.ReasoningContent != "" {
+		state.hasThinking = true
+		streamChan <- types.StreamResponse{
+			ResponseType: types.ResponseTypeThinking,
+			Content:      delta.ReasoningContent,
+			Done:         false,
+		}
+	}
+
+	// 发送回答内容
+	if delta.Content != "" {
+		// If we had thinking content and this is the first answer chunk,
+		// send a thinking done event first
+		if state.hasThinking {
+			streamChan <- types.StreamResponse{
+				ResponseType: types.ResponseTypeThinking,
+				Content:      "",
+				Done:         true,
+			}
+			state.hasThinking = false // Only send once
+		}
+		streamChan <- types.StreamResponse{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      delta.Content,
+			Done:         isDone,
+			ToolCalls:    state.buildOrderedToolCalls(),
+		}
+	}
+
+	if isDone && len(state.toolCallMap) > 0 {
+		streamChan <- types.StreamResponse{
+			ResponseType: types.ResponseTypeAnswer,
+			Content:      "",
+			Done:         true,
+			ToolCalls:    state.buildOrderedToolCalls(),
+		}
+	}
+}
+
+// processToolCallsDelta 处理 tool calls 的增量更新
+func (c *RemoteAPIChat) processToolCallsDelta(toolCalls []openai.ToolCall, state *streamState, streamChan chan types.StreamResponse) {
+	for _, tc := range toolCalls {
+		var toolCallIndex int
+		if tc.Index != nil {
+			toolCallIndex = *tc.Index
+		}
+		toolCallEntry, exists := state.toolCallMap[toolCallIndex]
+		if !exists || toolCallEntry == nil {
+			toolCallEntry = &types.LLMToolCall{
+				Type: string(tc.Type),
+				Function: types.FunctionCall{
+					Name:      "",
+					Arguments: "",
+				},
+			}
+			state.toolCallMap[toolCallIndex] = toolCallEntry
+		}
+
+		if tc.ID != "" {
+			toolCallEntry.ID = tc.ID
+		}
+		if tc.Type != "" {
+			toolCallEntry.Type = string(tc.Type)
+		}
+		if tc.Function.Name != "" {
+			toolCallEntry.Function.Name += tc.Function.Name
+		}
+
+		argsUpdated := false
+		if tc.Function.Arguments != "" {
+			toolCallEntry.Function.Arguments += tc.Function.Arguments
+			argsUpdated = true
+		}
+
+		currName := toolCallEntry.Function.Name
+		if currName != "" &&
+			currName == state.lastFunctionName[toolCallIndex] &&
+			argsUpdated &&
+			!state.nameNotified[toolCallIndex] &&
+			toolCallEntry.ID != "" {
+			streamChan <- types.StreamResponse{
+				ResponseType: types.ResponseTypeToolCall,
+				Content:      "",
+				Done:         false,
+				Data: map[string]interface{}{
+					"tool_name":    currName,
+					"tool_call_id": toolCallEntry.ID,
+				},
+			}
+			state.nameNotified[toolCallIndex] = true
+		}
+
+		state.lastFunctionName[toolCallIndex] = currName
+	}
 }
 
 // GetModelName 获取模型名称
@@ -539,4 +570,19 @@ func (c *RemoteAPIChat) GetModelName() string {
 // GetModelID 获取模型ID
 func (c *RemoteAPIChat) GetModelID() string {
 	return c.modelID
+}
+
+// GetProvider 获取 provider 名称
+func (c *RemoteAPIChat) GetProvider() provider.ProviderName {
+	return c.provider
+}
+
+// GetBaseURL 获取 baseURL
+func (c *RemoteAPIChat) GetBaseURL() string {
+	return c.baseURL
+}
+
+// GetAPIKey 获取 apiKey
+func (c *RemoteAPIChat) GetAPIKey() string {
+	return c.apiKey
 }

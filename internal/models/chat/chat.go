@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -87,18 +88,41 @@ type ChatConfig struct {
 
 // NewChat 创建聊天实例
 func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, error) {
-	var chat Chat
-	var err error
 	switch strings.ToLower(string(config.Source)) {
 	case string(types.ModelSourceLocal):
-		chat, err = NewOllamaChat(config, ollamaService)
-		if err != nil {
-			return nil, err
-		}
-		return chat, nil
+		return NewOllamaChat(config, ollamaService)
 	case string(types.ModelSourceRemote):
-		return NewRemoteAPIChat(config)
+		return NewRemoteChat(config)
 	default:
 		return nil, fmt.Errorf("unsupported chat model source: %s", config.Source)
+	}
+}
+
+// NewRemoteChat 根据 provider 创建远程聊天实例
+func NewRemoteChat(config *ChatConfig) (Chat, error) {
+	providerName := provider.ProviderName(config.Provider)
+	if providerName == "" {
+		providerName = provider.DetectProvider(config.BaseURL)
+	}
+
+	switch providerName {
+	case provider.ProviderLKEAP:
+		// LKEAP 有特殊的 thinking 参数格式
+		return NewLKEAPChat(config)
+	case provider.ProviderAliyun:
+		// 检查是否为 Qwen3 模型（需要特殊处理 enable_thinking）
+		if provider.IsQwen3Model(config.ModelName) {
+			return NewQwenChat(config)
+		}
+		return NewRemoteAPIChat(config)
+	case provider.ProviderDeepSeek:
+		// DeepSeek 不支持 tool_choice
+		return NewDeepSeekChat(config)
+	case provider.ProviderGeneric:
+		// Generic provider (如 vLLM) 使用 ChatTemplateKwargs
+		return NewGenericChat(config)
+	default:
+		// 其他 provider 使用标准 OpenAI 兼容实现
+		return NewRemoteAPIChat(config)
 	}
 }

@@ -24,16 +24,9 @@
         </div>
         <!-- 非 Agent 模式下才显示传统的 markdown 渲染 -->
         <div ref="parentMd" v-if="!session.hideContent && !session.isAgentMode">
-            <!-- 消息正在总结中则渲染加载动画  -->
-            <div v-if="session.thinking" class="thinking-loading">
-                <div class="loading-typing">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-            </div>
             <!-- 直接渲染完整内容，避免切分导致的问题，样式与 thinking 一致 -->
-            <div class="content-wrapper">
+            <!-- 只有当有实际内容时才显示包围框 -->
+            <div class="content-wrapper" v-if="hasActualContent">
                 <div class="ai-markdown-template markdown-content">
                     <div v-for="(token, index) in markdownTokens" :key="index" v-html="renderToken(token)"></div>
                 </div>
@@ -134,6 +127,12 @@ const markdownTokens = computed(() => {
     
     // 使用 marked.lexer 分词
     return marked.lexer(safeMarkdown);
+});
+
+// 计算属性：判断是否有实际内容（非空且不只是空白）
+const hasActualContent = computed(() => {
+    const text = props.content || props.session?.content || '';
+    return text && text.trim().length > 0;
 });
 
 // 渲染单个 token 为 HTML
@@ -428,8 +427,7 @@ onBeforeUnmount(() => {
 }
 
 .thinking-loading {
-    margin-left: 16px;
-    margin-bottom: 8px;
+    padding: 8px 0;
 }
 
 .loading-typing {

@@ -243,12 +243,21 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
                 item.thinkContent = "";
                 item.content = item.content;
                 item.showThink = false;
+                item.thinking = false;
             } else if (item.content.includes('<\/think>')) {
+                // 历史消息中包含完整的 <think>...</think> 标签，说明 thinking 已完成
                 const arr = item.content.trim().split('<\/think>');
                 item.showThink = true;
+                item.thinking = false;  // 关键：标记 thinking 已完成，使 deepThink 默认折叠
                 item.thinkContent = arr[0].trim().replace('<think>', '');
                 let index = item.content.trim().lastIndexOf('<\/think>')
                 item.content = item.content.substring(index + 8);
+            } else if (item.content.includes('<think>')) {
+                // 内容包含 <think> 但没有 </think>，说明 thinking 还在进行中（不太可能出现在历史消息中）
+                item.showThink = true;
+                item.thinking = true;
+                item.thinkContent = item.content.replace('<think>', '').trim();
+                item.content = '';
             }
         }
         
@@ -408,16 +417,55 @@ onChunk((data) => {
     }
     
     // 判断是否是 Agent 模式的响应
-    const isAgentResponse = data.response_type === 'thinking' || 
-                           data.response_type === 'tool_call' || 
-                           data.response_type === 'tool_result' ||
-                           data.response_type === 'references' ||
-                           data.response_type === 'answer' ||
-                           data.response_type === 'reflection' ||
-                           data.response_type === 'stop';
+    // 注意：'answer', 'complete', 'references' 类型可能在两种模式下都存在
+    // 只有 'thinking', 'tool_call', 'tool_result', 'reflection' 是 Agent 专有的
+    const isAgentOnlyResponse = data.response_type === 'thinking' || 
+                               data.response_type === 'tool_call' || 
+                               data.response_type === 'tool_result' ||
+                               data.response_type === 'reflection';
+    
+    // 检查当前消息是否已经是 Agent 模式
+    const lastMessage = messagesList[messagesList.length - 1];
+    const isCurrentlyAgentMode = lastMessage?.isAgentMode === true;
+    
+    // 如果是 Agent 专有的响应类型，或者当前消息已经是 Agent 模式，则走 Agent 处理
+    const shouldHandleAsAgent = isAgentOnlyResponse || isCurrentlyAgentMode;
+    
+    // 处理 references 事件 - 在两种模式下都需要处理，但不改变模式
+    if (data.response_type === 'references') {
+        // 如果当前是 Agent 模式，走 Agent 处理
+        if (isCurrentlyAgentMode) {
+            handleAgentChunk(data);
+            return;
+        }
+        // 非 Agent 模式：将 references 保存到消息中供 botmsg 使用
+        let existingMessage = messagesList.findLast((item) => item.request_id === data.id || item.id === data.id);
+        
+        // 如果消息还不存在，先创建一个空的 assistant 消息
+        if (!existingMessage) {
+            existingMessage = {
+                id: data.id,
+                request_id: data.id,
+                role: 'assistant',
+                content: '',
+                showThink: false,
+                thinkContent: '',
+                thinking: false,
+                is_completed: false,
+                knowledge_references: []
+            };
+            messagesList.push(existingMessage);
+            loading.value = false; // 消息已创建，关闭 loading
+            scrollToBottom();
+        }
+        
+        existingMessage.knowledge_references = data.knowledge_references || data.data?.references || [];
+        console.log('[References] Saved to message, count:', existingMessage.knowledge_references.length);
+        return;
+    }
     
     // Agent 模式处理（包括 stop 事件）
-    if (isAgentResponse || messagesList[messagesList.length - 1]?.isAgentMode) {
+    if (shouldHandleAsAgent) {
         // 在 handleAgentChunk 中处理 loading 状态
         handleAgentChunk(data);
         
@@ -432,7 +480,23 @@ onChunk((data) => {
         return;
     }
     
-    // 原有的知识库 QA 处理逻辑
+    // 原有的知识库 QA 处理逻辑（非 Agent 模式）
+    // answer 内容中可能包含 <think>...</think> 标签
+    
+    // 检查消息是否已经完成，如果已完成则忽略后续的完成事件（防止空内容覆盖）
+    const existingMessage = messagesList.findLast((item) => {
+        if (item.request_id === data.id) {
+            return true
+        }
+        return item.id === data.id;
+    });
+    
+    // 如果消息已完成且当前事件是完成事件（done=true 且无内容），直接忽略
+    if (existingMessage?.is_completed && data.done && !data.content) {
+        console.log('[Non-Agent] Ignoring duplicate completion event for completed message');
+        return;
+    }
+    
     fullContent.value += data.content;
     let obj = { ...data, content: '', role: 'assistant', showThink: false, is_completed: false };
 
@@ -451,13 +515,6 @@ onChunk((data) => {
         obj.content = fullContent.value;
     }
     
-    // 检查是否已有消息，如果没有则说明这是第一次，关闭 loading
-    const existingMessage = messagesList.findLast((item) => {
-        if (item.request_id === obj.id) {
-            return true
-        }
-        return item.id === obj.id;
-    });
     if (!existingMessage) {
         loading.value = false; // 消息即将创建，关闭 loading
     }
@@ -704,8 +761,20 @@ const handleAgentChunk = (data) => {
         case 'answer':
             // 最终答案
             message.thinking = false;
-            message.content = (message.content || '') + (data.content || '');
-            fullContent.value += data.content || '';
+            
+            console.log('[Answer Event] Received:', {
+                has_content: !!data.content,
+                content_length: data.content?.length || 0,
+                done: data.done,
+                current_message_content_length: message.content?.length || 0
+            });
+            
+            // 只有当有实际内容时才追加，避免空内容覆盖
+            if (data.content) {
+                message.content = (message.content || '') + data.content;
+                fullContent.value += data.content;
+                console.log('[Answer] Content appended, new length:', message.content.length);
+            }
             
             // Add or update answer event in agentEventStream
             if (!message.agentEventStream) message.agentEventStream = [];
@@ -718,13 +787,19 @@ const handleAgentChunk = (data) => {
                     done: false
                 };
                 message.agentEventStream.push(answerEvent);
+                console.log('[Answer] Created new answer event in stream');
             }
             
-            answerEvent.content = message.content;
-            answerEvent.done = data.done;
+            // 只有当有实际内容时才更新 answerEvent.content
+            if (data.content) {
+                answerEvent.content = message.content;
+                console.log('[Answer] answerEvent.content updated, length:', answerEvent.content.length);
+            }
             
-            if (data.done) {
-                console.log('[Agent] Answer done, content length:', message.content?.length || 0);
+            // 只在第一次收到 done:true 时标记完成，忽略后续重复的完成事件
+            if (data.done && !answerEvent.done) {
+                answerEvent.done = true;
+                console.log('[Agent] Answer done, content length:', message.content?.length || 0, 'answerEvent.content length:', answerEvent.content?.length || 0);
                 
                 // 完成 - 关闭所有状态
                 loading.value = false;
@@ -735,7 +810,17 @@ const handleAgentChunk = (data) => {
                 
                 // 标题生成已改为异步事件推送，不再需要在这里手动调用
                 // 如果标题还未生成，前端会通过 SSE 事件接收
+            } else if (data.done && answerEvent.done) {
+                console.log('[Answer] Ignoring duplicate done event, current content preserved:', answerEvent.content?.length || 0);
             }
+            break;
+            
+        case 'complete':
+            // 整个流式响应完成事件 - 确保状态正确关闭
+            console.log('[Agent] Complete event received');
+            loading.value = false;
+            isReplying.value = false;
+            // 不清空 message.content，保持已有内容
             break;
             
         case 'stop':

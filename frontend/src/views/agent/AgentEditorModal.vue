@@ -307,6 +307,17 @@
                         <t-input-number v-model="formData.config.max_completion_tokens" :min="100" :max="100000" :step="100" theme="column" />
                       </div>
                     </div>
+
+                    <!-- 思考模式 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.thinking') || '思考模式' }}</label>
+                        <p class="desc">启用模型的扩展思考能力（需要模型支持）</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="thinkingEnabled" />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1173,6 +1184,7 @@ const defaultFormData = {
     rerank_model_id: '',
     temperature: 0.7,
     max_completion_tokens: 2048,
+    thinking: false, // 默认禁用思考模式
     // Agent模式设置
     max_iterations: 10,
     allowed_tools: [] as string[],
@@ -1222,6 +1234,12 @@ const agentMode = computed({
 });
 
 const isAgentMode = computed(() => agentMode.value === 'smart-reasoning');
+
+// 思考模式计算属性（直接绑定 boolean）
+const thinkingEnabled = computed({
+  get: () => formData.value.config.thinking === true,
+  set: (val: boolean) => { formData.value.config.thinking = val; }
+});
 
 // 是否为内置智能体
 const isBuiltinAgent = computed(() => {

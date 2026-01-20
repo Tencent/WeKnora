@@ -29,6 +29,8 @@ type AgentConfig struct {
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")
+	// Whether to enable thinking mode (for models that support extended thinking)
+	Thinking *bool `json:"thinking"`
 }
 
 // SessionAgentConfig represents session-level agent configuration

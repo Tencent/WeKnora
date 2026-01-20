@@ -842,6 +842,7 @@ export default {
       availablePlaceholders: "可用占位符",
       placeholderHint: "输入 {'{{'} 触发自动补全",
       temperature: "温度",
+      thinking: "思考模式",
       welcomeMessage: "欢迎消息",
       welcomeMessagePlaceholder: "选择该智能体时显示的欢迎消息",
       suggestedPrompts: "推荐问题",

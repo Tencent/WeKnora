@@ -99,9 +99,13 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	})
 
 	// Start goroutine to consume channel and emit events directly
+	// For non-agent mode, thinking content is embedded in answer stream with <think> tags
+	// This ensures consistent display between streaming and history loading
 	go func() {
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		var finalContent string
+		var thinkingStarted bool
+		var thinkingEnded bool
 
 		for response := range responseChan {
 			// Handle error responses from the stream
@@ -122,8 +126,53 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				continue
 			}
 
+			// For non-agent mode: embed thinking content with <think> tags in answer stream
+			// This ensures the frontend uses deepThink.vue component consistently
+			if response.ResponseType == types.ResponseTypeThinking {
+				content := response.Content
+				// Add <think> tag at the beginning of thinking content
+				if !thinkingStarted {
+					content = "<think>" + content
+					thinkingStarted = true
+				}
+				// Add </think> tag at the end of thinking content
+				if response.Done && !thinkingEnded {
+					content = content + "</think>"
+					thinkingEnded = true
+				}
+				finalContent += content
+				if err := eventBus.Emit(ctx, types.Event{
+					ID:        answerID,
+					Type:      types.EventType(event.EventAgentFinalAnswer),
+					SessionID: chatManage.SessionID,
+					Data: event.AgentFinalAnswerData{
+						Content: content,
+						Done:    false, // Thinking is not the final answer
+					},
+				}); err != nil {
+					logger.Errorf(ctx, "Failed to emit thinking as answer event: %v", err)
+				}
+				continue
+			}
+
 			// Emit event for each answer chunk
 			if response.ResponseType == types.ResponseTypeAnswer {
+				// If we had thinking but it wasn't explicitly ended, close the think tag
+				if thinkingStarted && !thinkingEnded {
+					thinkingEnded = true
+					finalContent += "</think>"
+					if err := eventBus.Emit(ctx, types.Event{
+						ID:        answerID,
+						Type:      types.EventType(event.EventAgentFinalAnswer),
+						SessionID: chatManage.SessionID,
+						Data: event.AgentFinalAnswerData{
+							Content: "</think>",
+							Done:    false,
+						},
+					}); err != nil {
+						logger.Errorf(ctx, "Failed to emit think close tag: %v", err)
+					}
+				}
 				finalContent += response.Content
 				if err := eventBus.Emit(ctx, types.Event{
 					ID:        answerID,

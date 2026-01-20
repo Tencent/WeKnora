@@ -487,6 +487,12 @@ func (s *sessionService) KnowledgeQA(
 			summaryConfig.MaxCompletionTokens = customAgent.Config.MaxCompletionTokens
 			logger.Infof(ctx, "Using custom agent's max_completion_tokens: %d", customAgent.Config.MaxCompletionTokens)
 		}
+		// Override thinking mode from agent config
+		// Agent-level thinking setting takes full control (no global fallback)
+		summaryConfig.Thinking = customAgent.Config.Thinking
+		if customAgent.Config.Thinking != nil {
+			logger.Infof(ctx, "Using custom agent's thinking: %v", *customAgent.Config.Thinking)
+		}
 		// Override retrieval strategy settings
 		if customAgent.Config.EmbeddingTopK > 0 {
 			embeddingTopK = customAgent.Config.EmbeddingTopK
@@ -1104,6 +1110,7 @@ func (s *sessionService) AgentQA(
 		HistoryTurns:        customAgent.Config.HistoryTurns,
 		MCPSelectionMode:    customAgent.Config.MCPSelectionMode,
 		MCPServices:         customAgent.Config.MCPServices,
+		Thinking:            customAgent.Config.Thinking,
 	}
 
 	// Resolve knowledge bases: request-level @ mentions take priority over agent config

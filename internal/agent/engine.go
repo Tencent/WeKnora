@@ -688,12 +688,13 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	iteration int,
 	sessionID string,
 ) (*types.ChatResponse, error) {
-	logger.Infof(ctx, "[Agent][Thinking][Iteration-%d] Starting thinking stream with temperature=%.2f, tools=%d",
-		iteration+1, e.config.Temperature, len(tools))
+	logger.Infof(ctx, "[Agent][Thinking][Iteration-%d] Starting thinking stream with temperature=%.2f, tools=%d, thinking=%v",
+		iteration+1, e.config.Temperature, len(tools), e.config.Thinking)
 
 	opts := &chat.ChatOptions{
 		Temperature: e.config.Temperature,
 		Tools:       tools,
+		Thinking:    e.config.Thinking,
 	}
 	logger.Debug(context.Background(), "[Agent] streamLLM opts tool_choice=auto temperature=", e.config.Temperature)
 
@@ -832,7 +833,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	fullAnswer, _, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{Temperature: e.config.Temperature},
+		&chat.ChatOptions{Temperature: e.config.Temperature, Thinking: e.config.Thinking},
 		func(chunk *types.StreamResponse, fullContent string) {
 			if chunk.Content != "" {
 				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))

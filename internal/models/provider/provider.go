@@ -51,6 +51,8 @@ const (
 	ProviderQiniu ProviderName = "qiniu"
 	// 美团 LongCat AI
 	ProviderLongCat ProviderName = "longcat"
+	// 腾讯云 LKEAP (知识引擎原子能力)
+	ProviderLKEAP ProviderName = "lkeap"
 )
 
 // AllProviders 返回所有注册的提供者名称
@@ -74,6 +76,7 @@ func AllProviders() []ProviderName {
 		ProviderJina,
 		ProviderMimo,
 		ProviderLongCat,
+		ProviderLKEAP,
 		ProviderGPUStack,
 	}
 }
@@ -238,6 +241,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderQianfan
 	case containsAny(baseURL, "longcat.chat"):
 		return ProviderLongCat
+	case containsAny(baseURL, "lkeap.cloud.tencent.com", "api.lkeap"):
+		return ProviderLKEAP
 	default:
 		return ProviderGeneric
 	}
