@@ -161,6 +161,64 @@ func (r *knowledgeTagRepository) CountReferences(
 	return
 }
 
+// tagCountResult is used to scan the result of batch count queries
+type tagCountResult struct {
+	TagID string `gorm:"column:tag_id"`
+	Count int64  `gorm:"column:count"`
+}
+
+// BatchCountReferences returns the number of knowledges and chunks for multiple tags in a single query.
+func (r *knowledgeTagRepository) BatchCountReferences(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	tagIDs []string,
+) (map[string]types.TagReferenceCounts, error) {
+	result := make(map[string]types.TagReferenceCounts)
+	if len(tagIDs) == 0 {
+		return result, nil
+	}
+
+	// Initialize result with zero counts for all tagIDs
+	for _, tagID := range tagIDs {
+		result[tagID] = types.TagReferenceCounts{}
+	}
+
+	// Count knowledge references in a single query
+	var knowledgeCounts []tagCountResult
+	if err := r.db.WithContext(ctx).
+		Model(&types.Knowledge{}).
+		Select("tag_id, COUNT(*) as count").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN (?)", tenantID, kbID, tagIDs).
+		Group("tag_id").
+		Find(&knowledgeCounts).Error; err != nil {
+		return nil, err
+	}
+	for _, kc := range knowledgeCounts {
+		counts := result[kc.TagID]
+		counts.KnowledgeCount = kc.Count
+		result[kc.TagID] = counts
+	}
+
+	// Count chunk references in a single query
+	var chunkCounts []tagCountResult
+	if err := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Select("tag_id, COUNT(*) as count").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND tag_id IN (?)", tenantID, kbID, tagIDs).
+		Group("tag_id").
+		Find(&chunkCounts).Error; err != nil {
+		return nil, err
+	}
+	for _, cc := range chunkCounts {
+		counts := result[cc.TagID]
+		counts.ChunkCount = cc.Count
+		result[cc.TagID] = counts
+	}
+
+	return result, nil
+}
+
 // DeleteUnusedTags deletes tags that are not referenced by any knowledge or chunk.
 // Returns the number of deleted tags.
 func (r *knowledgeTagRepository) DeleteUnusedTags(ctx context.Context, tenantID uint64, kbID string) (int64, error) {

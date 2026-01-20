@@ -32,3 +32,9 @@ type KnowledgeTagWithStats struct {
 	KnowledgeCount int64 `json:"knowledge_count"`
 	ChunkCount     int64 `json:"chunk_count"`
 }
+
+// TagReferenceCounts holds the reference counts for a tag.
+type TagReferenceCounts struct {
+	KnowledgeCount int64
+	ChunkCount     int64
+}

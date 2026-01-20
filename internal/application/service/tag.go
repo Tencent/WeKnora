@@ -75,24 +75,37 @@ func (s *knowledgeTagService) ListTags(
 		return nil, err
 	}
 
-	results := make([]*types.KnowledgeTagWithStats, 0, len(tags))
+	if len(tags) == 0 {
+		return types.NewPageResult(total, page, []*types.KnowledgeTagWithStats{}), nil
+	}
 
+	// Collect all tag IDs for batch query
+	tagIDs := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if tag != nil {
+			tagIDs = append(tagIDs, tag.ID)
+		}
+	}
+
+	// Batch query all reference counts in 2 SQL queries instead of 2*N
+	countsMap, err := s.repo.BatchCountReferences(ctx, tenantID, kbID, tagIDs)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"kb_id": kbID,
+		})
+		return nil, err
+	}
+
+	results := make([]*types.KnowledgeTagWithStats, 0, len(tags))
 	for _, tag := range tags {
 		if tag == nil {
 			continue
 		}
-		kCount, cCount, err := s.repo.CountReferences(ctx, tenantID, kbID, tag.ID)
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{
-				"kb_id":  kbID,
-				"tag_id": tag.ID,
-			})
-			return nil, err
-		}
+		counts := countsMap[tag.ID]
 		results = append(results, &types.KnowledgeTagWithStats{
 			KnowledgeTag:   *tag,
-			KnowledgeCount: kCount,
-			ChunkCount:     cCount,
+			KnowledgeCount: counts.KnowledgeCount,
+			ChunkCount:     counts.ChunkCount,
 		})
 	}
 

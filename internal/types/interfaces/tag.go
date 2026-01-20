@@ -52,6 +52,14 @@ type KnowledgeTagRepository interface {
 		kbID string,
 		tagID string,
 	) (knowledgeCount int64, chunkCount int64, err error)
+	// BatchCountReferences returns number of knowledges and chunks for multiple tags in a single query.
+	// Returns a map of tagID -> {knowledgeCount, chunkCount}
+	BatchCountReferences(
+		ctx context.Context,
+		tenantID uint64,
+		kbID string,
+		tagIDs []string,
+	) (map[string]types.TagReferenceCounts, error)
 	// DeleteUnusedTags deletes tags that are not referenced by any knowledge or chunk.
 	DeleteUnusedTags(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 }
