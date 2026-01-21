@@ -419,7 +419,7 @@ func (s *userService) RevokeToken(ctx context.Context, tokenString string) error
 
 // GetCurrentUser gets current user from context
 func (s *userService) GetCurrentUser(ctx context.Context) (*types.User, error) {
-	user, ok := ctx.Value("user").(*types.User)
+	user, ok := ctx.Value(types.UserContextKey).(*types.User)
 	if !ok {
 		return nil, errors.New("user not found in context")
 	}

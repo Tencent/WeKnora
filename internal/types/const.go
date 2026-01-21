@@ -12,6 +12,8 @@ const (
 	RequestIDContextKey ContextKey = "RequestID"
 	// LoggerContextKey is the context key for logger
 	LoggerContextKey ContextKey = "Logger"
+	// UserContextKey is the context key for user information
+	UserContextKey ContextKey = "User"
 )
 
 // String returns the string representation of the context key

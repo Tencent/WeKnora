@@ -130,14 +130,14 @@ func Auth(
 				// 存储用户和租户信息到上下文
 				c.Set(types.TenantIDContextKey.String(), targetTenantID)
 				c.Set(types.TenantInfoContextKey.String(), tenant)
-				c.Set("user", user)
+				c.Set(types.UserContextKey.String(), user)
 				c.Request = c.Request.WithContext(
 					context.WithValue(
 						context.WithValue(
 							context.WithValue(c.Request.Context(), types.TenantIDContextKey, targetTenantID),
 							types.TenantInfoContextKey, tenant,
 						),
-						"user", user,
+						types.UserContextKey, user,
 					),
 				)
 				c.Next()
