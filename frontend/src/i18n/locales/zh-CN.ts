@@ -1561,6 +1561,7 @@ export default {
       noResults: "未找到匹配的 FAQ 条目",
       score: "相似度",
       matchType: "匹配类型",
+      matchedQuestion: "命中问题",
       matchTypeEmbedding: "向量匹配",
       matchTypeKeywords: "关键词匹配",
       similarityThresholdLabel: "相似度阈值",

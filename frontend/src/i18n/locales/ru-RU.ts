@@ -1123,6 +1123,7 @@ export default {
       noResults: 'Совпадающих записей FAQ не найдено',
       score: 'Сходство',
       matchType: 'Тип совпадения',
+      matchedQuestion: 'Совпавший вопрос',
       matchTypeEmbedding: 'Векторное совпадение',
       matchTypeKeywords: 'Совпадение ключевых слов',
       similarityThresholdLabel: 'Порог сходства',

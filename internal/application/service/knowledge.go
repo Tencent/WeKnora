@@ -4937,16 +4937,18 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 		return []*types.FAQEntry{}, nil
 	}
 
-	// Extract chunk IDs and build score/match type maps
+	// Extract chunk IDs and build score/match type/matched content maps
 	chunkIDs := make([]string, 0, len(searchResults))
 	chunkScores := make(map[string]float64)
 	chunkMatchTypes := make(map[string]types.MatchType)
+	chunkMatchedContents := make(map[string]string)
 	for _, result := range searchResults {
 		// SearchResult.ID is the chunk ID
 		chunkID := result.ID
 		chunkIDs = append(chunkIDs, chunkID)
 		chunkScores[chunkID] = result.Score
 		chunkMatchTypes[chunkID] = result.MatchType
+		chunkMatchedContents[chunkID] = result.MatchedContent
 	}
 
 	// Batch fetch chunks
@@ -5001,6 +5003,11 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 		}
 		if matchType, ok := chunkMatchTypes[chunk.ID]; ok {
 			entry.MatchType = matchType
+		}
+
+		// Set MatchedQuestion from search result's matched content
+		if matchedContent, ok := chunkMatchedContents[chunk.ID]; ok && matchedContent != "" {
+			entry.MatchedQuestion = matchedContent
 		}
 
 		entries = append(entries, entry)

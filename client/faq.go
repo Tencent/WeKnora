@@ -31,6 +31,9 @@ type FAQEntry struct {
 	Score             float64   `json:"score,omitempty"`
 	MatchType         string    `json:"match_type,omitempty"`
 	ChunkType         string    `json:"chunk_type"`
+	// MatchedQuestion is the actual question text that was matched in FAQ search
+	// Could be the standard question or one of the similar questions
+	MatchedQuestion string `json:"matched_question,omitempty"`
 }
 
 // FAQEntryPayload is used to create or update a FAQ entry.

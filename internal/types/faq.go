@@ -194,6 +194,9 @@ type FAQEntry struct {
 	Score             float64        `json:"score,omitempty"`
 	MatchType         MatchType      `json:"match_type,omitempty"`
 	ChunkType         ChunkType      `json:"chunk_type"`
+	// MatchedQuestion is the actual question text that was matched in FAQ search
+	// Could be the standard question or one of the similar questions
+	MatchedQuestion string `json:"matched_question,omitempty"`
 }
 
 // FAQEntryPayload 用于创建/更新 FAQ 条目的 payload

@@ -1160,6 +1160,7 @@ export default {
       noResults: 'No matching FAQ entries found',
       score: 'Similarity',
       matchType: 'Match Type',
+      matchedQuestion: 'Matched',
       matchTypeEmbedding: 'Vector Match',
       matchTypeKeywords: 'Keyword Match',
       similarityThresholdLabel: 'Similarity Threshold',

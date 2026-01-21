@@ -1366,6 +1366,7 @@ export default {
       noResults: "일치하는 FAQ 항목을 찾을 수 없습니다",
       score: "유사도",
       matchType: "매칭 유형",
+      matchedQuestion: "일치된 질문",
       matchTypeEmbedding: "벡터 매칭",
       matchTypeKeywords: "키워드 매칭",
       similarityThresholdLabel: "유사도 임계값",

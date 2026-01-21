@@ -1091,13 +1091,19 @@
             >
               <div class="result-header" @click="toggleResult(result)">
                 <div class="result-question-wrapper">
-                  <div class="result-question">
-                    <span class="result-index">{{ index + 1 }}.</span>
-                    {{ result.standard_question }}
+                  <div class="result-main">
+                    <div class="result-question">
+                      <span class="result-index">{{ index + 1 }}.</span>
+                      {{ result.standard_question }}
+                    </div>
+                    <div v-if="result.matched_question && result.matched_question !== result.standard_question" class="matched-question">
+                      <span class="matched-label">{{ $t('knowledgeEditor.faq.matchedQuestion') }}:</span>
+                      <span class="matched-text">{{ result.matched_question }}</span>
+                    </div>
                   </div>
                   <div class="result-meta">
                     <t-tag size="small" variant="light-outline" class="score-tag">
-                      {{ $t('knowledgeEditor.faq.score') }}: {{ (result.score || 0).toFixed(3) }}
+                      {{ (result.score || 0).toFixed(3) }}
                     </t-tag>
                   </div>
                   <t-icon 
@@ -1195,6 +1201,7 @@ interface FAQEntry {
   showMore?: boolean
   score?: number
   match_type?: string
+  matched_question?: string
   expanded?: boolean
   similarCollapsed?: boolean
   negativeCollapsed?: boolean
@@ -5791,14 +5798,20 @@ watch(() => entries.value.map(e => ({
 
 .result-question-wrapper {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
 }
 
-.result-question {
+.result-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.result-question {
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 600;
@@ -5813,6 +5826,29 @@ watch(() => entries.value.map(e => ({
     flex-shrink: 0;
     color: #07C05F;
     font-weight: 600;
+  }
+}
+
+.matched-question {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.5;
+
+  .matched-label {
+    flex-shrink: 0;
+    color: #E37318;
+    font-weight: 500;
+  }
+
+  .matched-text {
+    color: #92400E;
+    background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
+    padding: 1px 6px;
+    border-radius: 4px;
+    word-break: break-word;
   }
 }
 

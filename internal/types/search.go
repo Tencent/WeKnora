@@ -87,6 +87,10 @@ type SearchResult struct {
 
 	// ChunkMetadata stores chunk-level metadata (e.g., generated questions)
 	ChunkMetadata JSON `json:"chunk_metadata,omitempty"`
+
+	// MatchedContent is the actual content that was matched in vector search
+	// For FAQ: this is the matched question text (standard or similar question)
+	MatchedContent string `json:"matched_content,omitempty"`
 }
 
 // SearchParams represents the search parameters

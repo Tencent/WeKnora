@@ -998,6 +998,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	var chunkIDs []string
 	chunkScores := make(map[string]float64)
 	chunkMatchTypes := make(map[string]types.MatchType)
+	chunkMatchedContents := make(map[string]string)
 	processedKnowledgeIDs := make(map[string]bool)
 
 	// Collect all knowledge and chunk IDs
@@ -1010,6 +1011,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		chunkIDs = append(chunkIDs, chunk.ChunkID)
 		chunkScores[chunk.ChunkID] = chunk.Score
 		chunkMatchTypes[chunk.ChunkID] = chunk.MatchType
+		chunkMatchedContents[chunk.ChunkID] = chunk.Content
 	}
 
 	// Batch fetch knowledge data
@@ -1110,7 +1112,8 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		score := chunkScores[chunk.ID]
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := chunkMatchTypes[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType))
+			matchedContent := chunkMatchedContents[chunk.ID]
+			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)
@@ -1136,7 +1139,8 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 				logger.Warnf(ctx, "Unkonwn match type for chunk: %s", chunkID)
 				continue
 			}
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType))
+			matchedContent := chunkMatchedContents[chunkID]
+			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
 		}
 	}
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
@@ -1166,6 +1170,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	knowledge *types.Knowledge,
 	score float64,
 	matchType types.MatchType,
+	matchedContent string,
 ) *types.SearchResult {
 	return &types.SearchResult{
 		ID:                chunk.ID,
@@ -1185,6 +1190,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		KnowledgeFilename: knowledge.FileName,
 		KnowledgeSource:   knowledge.Source,
 		ChunkMetadata:     chunk.Metadata,
+		MatchedContent:    matchedContent,
 	}
 }
 
