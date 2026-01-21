@@ -117,6 +117,21 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}, fmt.Errorf("modification queries are not allowed")
 	}
 
+	// Validate SQL with comprehensive security checks
+	// IMPORTANT: Must enable validateSelectStmt to block RangeFunction attacks
+	_, validation := utils.ValidateSQL(input.Sql,
+		utils.WithAllowedTables(schema.TableName),
+		utils.WithSingleStatement(),      // Block multiple statements
+		utils.WithNoDangerousFunctions(), // Block dangerous functions
+	)
+	if !validation.Valid {
+		logger.Warnf(ctx, "[Tool][DataAnalysis] SQL validation failed for session %s: %v", t.sessionID, validation.Errors)
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("SQL validation failed: %v", validation.Errors),
+		}, fmt.Errorf("SQL validation failed: %v", validation.Errors)
+	}
+
 	logger.Infof(ctx, "[Tool][DataAnalysis] Received SQL query for session %s: %s", t.sessionID, input.Sql)
 	// Execute single query and get results
 	results, err := t.executeSingleQuery(ctx, input.Sql)
