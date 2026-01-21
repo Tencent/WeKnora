@@ -243,6 +243,12 @@ func (t *WebFetchTool) validateParams(p webFetchParams) error {
 	if !strings.HasPrefix(p.URL, "http://") && !strings.HasPrefix(p.URL, "https://") {
 		return fmt.Errorf("invalid URL format")
 	}
+
+	// SSRF protection: validate URL is safe to fetch
+	if safe, reason := utils.IsSSRFSafeURL(p.URL); !safe {
+		return fmt.Errorf("URL rejected for security reasons: %s", reason)
+	}
+
 	return nil
 }
 

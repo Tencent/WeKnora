@@ -381,6 +381,12 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, ErrInvalidURL
 	}
 
+	// SSRF protection: validate URL is safe to fetch
+	if safe, reason := secutils.IsSSRFSafeURL(url); !safe {
+		logger.Errorf(ctx, "URL rejected for SSRF protection: %s, reason: %s", url, reason)
+		return nil, ErrInvalidURL
+	}
+
 	// Check if URL already exists in the knowledge base
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if URL exists, tenant ID: %d", tenantID)

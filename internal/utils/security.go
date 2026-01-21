@@ -3,6 +3,8 @@ package utils
 import (
 	"fmt"
 	"html"
+	"net"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -115,6 +117,260 @@ func IsValidURL(url string) bool {
 	}
 
 	return true
+}
+
+// restrictedHostnames contains hostnames that are blocked for SSRF prevention
+var restrictedHostnames = []string{
+	"localhost",
+	"127.0.0.1",
+	"::1",
+	"0.0.0.0",
+	"metadata.google.internal",
+	"metadata.tencentyun.com",
+	"metadata.aws.internal",
+	"169.254.169.254", // AWS/GCP/Azure metadata endpoint
+	"100.100.100.200", // Alibaba Cloud metadata
+}
+
+// restrictedHostSuffixes contains hostname suffixes that are blocked
+var restrictedHostSuffixes = []string{
+	".local",
+	".localhost",
+	".internal",
+	".corp",
+	".lan",
+	".home",
+	".localdomain",
+}
+
+// restrictedIPv4Ranges contains CIDR ranges that should be blocked
+// These are additional ranges not covered by Go's IsPrivate(), IsLoopback(), etc.
+var restrictedIPv4Ranges = []*net.IPNet{
+	// 100.64.0.0/10 - Carrier-grade NAT (RFC 6598)
+	mustParseCIDR("100.64.0.0/10"),
+	// 198.18.0.0/15 - Network device benchmark testing (RFC 2544)
+	mustParseCIDR("198.18.0.0/15"),
+	// 198.51.100.0/24 - TEST-NET-2 for documentation (RFC 5737)
+	mustParseCIDR("198.51.100.0/24"),
+	// 203.0.113.0/24 - TEST-NET-3 for documentation (RFC 5737)
+	mustParseCIDR("203.0.113.0/24"),
+	// 192.0.0.0/24 - IETF Protocol Assignments (RFC 6890)
+	mustParseCIDR("192.0.0.0/24"),
+	// 192.0.2.0/24 - TEST-NET-1 for documentation (RFC 5737)
+	mustParseCIDR("192.0.2.0/24"),
+	// 0.0.0.0/8 - "This" network (RFC 1122)
+	mustParseCIDR("0.0.0.0/8"),
+	// 240.0.0.0/4 - Reserved for future use (RFC 1112)
+	mustParseCIDR("240.0.0.0/4"),
+	// 255.255.255.255/32 - Limited broadcast
+	mustParseCIDR("255.255.255.255/32"),
+}
+
+// mustParseCIDR parses a CIDR string and panics on error
+func mustParseCIDR(s string) *net.IPNet {
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(fmt.Sprintf("invalid CIDR: %s", s))
+	}
+	return ipNet
+}
+
+// isRestrictedIP checks if an IP address falls within any restricted range
+func isRestrictedIP(ip net.IP) (bool, string) {
+	// Check Go's built-in methods first
+	if ip.IsPrivate() {
+		return true, "private IP address"
+	}
+	if ip.IsLoopback() {
+		return true, "loopback address"
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true, "link-local address"
+	}
+	if ip.IsMulticast() {
+		return true, "multicast address"
+	}
+	if ip.IsUnspecified() {
+		return true, "unspecified address"
+	}
+
+	// Check IPv4-specific restricted ranges
+	if ip4 := ip.To4(); ip4 != nil {
+		for _, cidr := range restrictedIPv4Ranges {
+			if cidr.Contains(ip4) {
+				return true, fmt.Sprintf("restricted range %s", cidr.String())
+			}
+		}
+	}
+
+	// Check IPv6-specific restrictions
+	if ip.To4() == nil && len(ip) == 16 {
+		// Site-local (deprecated but still blocked): fec0::/10
+		if ip[0] == 0xfe && (ip[1]&0xc0) == 0xc0 {
+			return true, "site-local IPv6 address"
+		}
+		// Unique local address (ULA): fc00::/7 (already covered by IsPrivate for Go 1.17+)
+		if (ip[0] & 0xfe) == 0xfc {
+			return true, "unique local IPv6 address"
+		}
+		// IPv4-mapped IPv6 addresses: ::ffff:x.x.x.x
+		if isZeros(ip[0:10]) && ip[10] == 0xff && ip[11] == 0xff {
+			mappedIP := ip[12:16]
+			if restricted, reason := isRestrictedIP(net.IP(mappedIP)); restricted {
+				return true, fmt.Sprintf("IPv4-mapped %s", reason)
+			}
+		}
+	}
+
+	return false, ""
+}
+
+// isZeros checks if a byte slice is all zeros
+func isZeros(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// ipLikePatterns contains regex patterns for detecting IP-like hostnames
+// These catch various IP address obfuscation techniques
+var ipLikePatterns = []*regexp.Regexp{
+	// Standard IPv4: 192.168.1.1
+	regexp.MustCompile(`^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`),
+	// Decimal IP: 3232235777 (equivalent to 192.168.1.1)
+	regexp.MustCompile(`^\d{8,10}$`),
+	// Octal IP: 0300.0250.0001.0001 or 0177.0.0.1
+	regexp.MustCompile(`^0[0-7]+\.`),
+	// Hex IP: 0xC0.0xA8.0x01.0x01 or 0x7f.0.0.1
+	regexp.MustCompile(`(?i)^0x[0-9a-f]+\.`),
+	// Mixed formats with hex: 0xC0A80101
+	regexp.MustCompile(`(?i)^0x[0-9a-f]{6,8}$`),
+	// IPv6 patterns
+	regexp.MustCompile(`(?i)^[0-9a-f:]+::[0-9a-f:]*$`),
+	regexp.MustCompile(`(?i)^[0-9a-f]{1,4}(:[0-9a-f]{1,4}){7}$`),
+	// IPv4-mapped IPv6: ::ffff:192.168.1.1
+	regexp.MustCompile(`(?i)^::ffff:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$`),
+	// Bracketed IPv6: [::1]
+	regexp.MustCompile(`(?i)^\[[0-9a-f:]+\]$`),
+}
+
+// isIPLikeHostname checks if a hostname looks like an IP address in any format
+// This catches obfuscation attempts like octal, hex, decimal, etc.
+func isIPLikeHostname(hostname string) bool {
+	for _, pattern := range ipLikePatterns {
+		if pattern.MatchString(hostname) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsSSRFSafeURL validates a URL to prevent SSRF attacks
+// It checks for:
+// - Valid http/https protocol
+// - Private IP addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x)
+// - Loopback addresses (127.x.x.x, ::1)
+// - Link-local addresses (169.254.x.x, fe80::)
+// - Cloud metadata endpoints
+// - Reserved hostnames (localhost, *.local, etc.)
+func IsSSRFSafeURL(rawURL string) (bool, string) {
+	if rawURL == "" {
+		return false, "URL is empty"
+	}
+
+	// Check URL length
+	if len(rawURL) > 2048 {
+		return false, "URL exceeds maximum length"
+	}
+
+	// Parse URL
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false, fmt.Sprintf("invalid URL format: %v", err)
+	}
+
+	// Only allow http and https
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false, fmt.Sprintf("invalid scheme: %s (only http/https allowed)", scheme)
+	}
+
+	// Extract hostname
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return false, "URL has no hostname"
+	}
+	hostnameLower := strings.ToLower(hostname)
+
+	// Check against restricted hostnames
+	for _, restricted := range restrictedHostnames {
+		if hostnameLower == restricted {
+			return false, fmt.Sprintf("hostname %s is restricted", hostname)
+		}
+	}
+
+	// Check against restricted hostname suffixes
+	for _, suffix := range restrictedHostSuffixes {
+		if strings.HasSuffix(hostnameLower, suffix) {
+			return false, fmt.Sprintf("hostname suffix %s is restricted", suffix)
+		}
+	}
+
+	// STRICT MODE: Completely block IP addresses in URLs
+	// This prevents all IP-based SSRF attacks including edge cases and bypasses
+	ip := net.ParseIP(hostname)
+	if ip != nil {
+		return false, "direct IP address access is not allowed, use domain name instead"
+	}
+
+	// Also check for IP addresses in various formats that ParseIP might not catch
+	// e.g., octal (0177.0.0.1), hex (0x7f.0.0.1), decimal (2130706433)
+	if isIPLikeHostname(hostname) {
+		return false, "IP-like hostname format is not allowed"
+	}
+
+	// Perform DNS resolution to check the resolved IP
+	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
+	ips, err := net.LookupIP(hostname)
+	if err == nil {
+		for _, resolvedIP := range ips {
+			if restricted, reason := isRestrictedIP(resolvedIP); restricted {
+				return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
+			}
+		}
+	}
+	// If DNS resolution fails, we allow the URL (the actual request will fail anyway)
+	// This prevents blocking legitimate URLs when DNS is temporarily unavailable
+
+	// Check for suspicious port numbers
+	port := parsed.Port()
+	if port != "" {
+		// Block common internal service ports
+		blockedPorts := map[string]bool{
+			"22":    true, // SSH
+			"23":    true, // Telnet
+			"25":    true, // SMTP
+			"445":   true, // SMB
+			"3389":  true, // RDP
+			"5432":  true, // PostgreSQL
+			"3306":  true, // MySQL
+			"6379":  true, // Redis
+			"27017": true, // MongoDB
+			"9200":  true, // Elasticsearch
+			"2379":  true, // etcd
+			"2380":  true, // etcd
+			"8500":  true, // Consul
+			"4001":  true, // etcd (old)
+		}
+		if blockedPorts[port] {
+			return false, fmt.Sprintf("port %s is blocked for security reasons", port)
+		}
+	}
+
+	return true, ""
 }
 
 // IsValidImageURL 验证图片 URL 是否安全
