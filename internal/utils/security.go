@@ -128,8 +128,6 @@ var restrictedHostnames = []string{
 	"metadata.google.internal",
 	"metadata.tencentyun.com",
 	"metadata.aws.internal",
-	"169.254.169.254", // AWS/GCP/Azure metadata endpoint
-	"100.100.100.200", // Alibaba Cloud metadata
 }
 
 // restrictedHostSuffixes contains hostname suffixes that are blocked
