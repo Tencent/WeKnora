@@ -781,8 +781,10 @@ func (v *SQLSecurityValidator) injectTenantConditions(sql string, tablesInQuery 
 	// Check if WHERE clause exists
 	wherePattern := regexp.MustCompile(`(?i)\bWHERE\b`)
 	if wherePattern.MatchString(sql) {
-		// Add to existing WHERE clause
-		return wherePattern.ReplaceAllString(sql, fmt.Sprintf("WHERE %s AND ", tenantFilter))
+		// Add tenant filter and wrap existing conditions in parentheses to prevent OR injection
+		// This ensures: WHERE tenant_filter AND (original_conditions)
+		// Instead of: WHERE tenant_filter AND original_conditions OR malicious_condition
+		return wherePattern.ReplaceAllString(sql, fmt.Sprintf("WHERE %s AND (", tenantFilter)) + ")"
 	}
 
 	// Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
