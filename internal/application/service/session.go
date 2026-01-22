@@ -203,6 +203,11 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 	}
 
+	// Cleanup conversation context stored in Redis for this session
+	if err := s.sessionStorage.Delete(ctx, id); err != nil {
+		logger.Warnf(ctx, "Failed to cleanup conversation context for session %s: %v", id, err)
+	}
+
 	// Delete session from repository
 	err := s.sessionRepo.Delete(ctx, tenantID, id)
 	if err != nil {
