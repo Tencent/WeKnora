@@ -10,7 +10,7 @@ const (
 	// ZhipuChatBaseURL 智谱 AI Chat 的默认 BaseURL
 	ZhipuChatBaseURL = "https://open.bigmodel.cn/api/paas/v4"
 	// ZhipuEmbeddingBaseURL 智谱 AI Embedding 的默认 BaseURL
-	ZhipuEmbeddingBaseURL = "https://open.bigmodel.cn/api/paas/v4/embeddings"
+	ZhipuEmbeddingBaseURL = "https://open.bigmodel.cn/api/paas/v4"
 	// ZhipuRerankBaseURL 智谱 AI Rerank 的默认 BaseURL
 	ZhipuRerankBaseURL = "https://open.bigmodel.cn/api/paas/v4/rerank"
 )
