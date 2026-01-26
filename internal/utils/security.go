@@ -1,12 +1,15 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -128,6 +131,15 @@ var restrictedHostnames = []string{
 	"metadata.google.internal",
 	"metadata.tencentyun.com",
 	"metadata.aws.internal",
+	// Docker-specific internal hostnames
+	"host.docker.internal",
+	"gateway.docker.internal",
+	"kubernetes.docker.internal",
+	// Kubernetes internal hostnames
+	"kubernetes",
+	"kubernetes.default",
+	"kubernetes.default.svc",
+	"kubernetes.default.svc.cluster.local",
 }
 
 // restrictedHostSuffixes contains hostname suffixes that are blocked
@@ -139,6 +151,9 @@ var restrictedHostSuffixes = []string{
 	".lan",
 	".home",
 	".localdomain",
+	// Kubernetes internal suffixes
+	".svc.cluster.local",
+	".pod.cluster.local",
 }
 
 // restrictedIPv4Ranges contains CIDR ranges that should be blocked
@@ -162,6 +177,12 @@ var restrictedIPv4Ranges = []*net.IPNet{
 	mustParseCIDR("240.0.0.0/4"),
 	// 255.255.255.255/32 - Limited broadcast
 	mustParseCIDR("255.255.255.255/32"),
+	// Docker bridge network (default range)
+	mustParseCIDR("172.17.0.0/16"),
+	// Docker user-defined bridge networks (commonly used range)
+	mustParseCIDR("172.18.0.0/16"),
+	mustParseCIDR("172.19.0.0/16"),
+	mustParseCIDR("172.20.0.0/16"),
 }
 
 // mustParseCIDR parses a CIDR string and panics on error
@@ -621,4 +642,100 @@ func ValidateStdioConfig(command string, args []string, envVars map[string]strin
 	}
 
 	return nil
+}
+
+// SSRFSafeHTTPClientConfig contains configuration for the SSRF-safe HTTP client
+type SSRFSafeHTTPClientConfig struct {
+	Timeout             time.Duration
+	MaxRedirects        int
+	DisableKeepAlives   bool
+	DisableCompression  bool
+}
+
+// DefaultSSRFSafeHTTPClientConfig returns the default configuration
+func DefaultSSRFSafeHTTPClientConfig() SSRFSafeHTTPClientConfig {
+	return SSRFSafeHTTPClientConfig{
+		Timeout:            30 * time.Second,
+		MaxRedirects:       10,
+		DisableKeepAlives:  false,
+		DisableCompression: false,
+	}
+}
+
+// ErrSSRFRedirectBlocked is returned when a redirect target is blocked due to SSRF protection
+var ErrSSRFRedirectBlocked = fmt.Errorf("redirect blocked: target URL failed SSRF validation")
+
+// NewSSRFSafeHTTPClient creates an HTTP client that validates redirect targets against SSRF protections.
+// This prevents SSRF attacks via HTTP redirects where an attacker's server redirects to internal services.
+func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
+	transport := &http.Transport{
+		DisableKeepAlives:  config.DisableKeepAlives,
+		DisableCompression: config.DisableCompression,
+		// Dial with SSRF protection - validates resolved IPs before connecting
+		DialContext: ssrfSafeDialContext,
+	}
+
+	return &http.Client{
+		Timeout:   config.Timeout,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Check redirect count
+			if len(via) >= config.MaxRedirects {
+				return fmt.Errorf("stopped after %d redirects", config.MaxRedirects)
+			}
+
+			// Validate the redirect target URL for SSRF
+			redirectURL := req.URL.String()
+			if safe, reason := IsSSRFSafeURL(redirectURL); !safe {
+				return fmt.Errorf("%w: %s", ErrSSRFRedirectBlocked, reason)
+			}
+
+			return nil
+		},
+	}
+}
+
+// ssrfSafeDialContext is a custom dial function that validates the resolved IP addresses
+// before establishing a connection. This provides an additional layer of SSRF protection
+// against DNS rebinding attacks during the connection phase.
+func ssrfSafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// Parse host and port
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid address %s: %w", addr, err)
+	}
+
+	// Check if the host is a restricted hostname
+	hostLower := strings.ToLower(host)
+	for _, restricted := range restrictedHostnames {
+		if hostLower == restricted {
+			return nil, fmt.Errorf("connection blocked: hostname %s is restricted", host)
+		}
+	}
+	for _, suffix := range restrictedHostSuffixes {
+		if strings.HasSuffix(hostLower, suffix) {
+			return nil, fmt.Errorf("connection blocked: hostname suffix %s is restricted", suffix)
+		}
+	}
+
+	// Resolve the hostname to IP addresses
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+	}
+
+	// Validate all resolved IPs
+	for _, ipAddr := range ips {
+		if restricted, reason := isRestrictedIP(ipAddr.IP); restricted {
+			return nil, fmt.Errorf("connection blocked: %s resolves to restricted IP %s (%s)", host, ipAddr.IP.String(), reason)
+		}
+	}
+
+	// If we get here, all IPs are safe. Connect using the standard dialer.
+	// We dial the original address so that proper connection routing happens.
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	return dialer.DialContext(ctx, network, addr)
 }

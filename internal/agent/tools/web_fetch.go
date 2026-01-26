@@ -74,11 +74,13 @@ type WebFetchTool struct {
 
 // NewWebFetchTool creates a new web_fetch tool instance
 func NewWebFetchTool(chatModel chat.Chat) *WebFetchTool {
+	// Use SSRF-safe HTTP client to prevent redirect-based SSRF attacks
+	ssrfConfig := utils.DefaultSSRFSafeHTTPClientConfig()
+	ssrfConfig.Timeout = webFetchTimeout
+
 	return &WebFetchTool{
-		BaseTool: webFetchTool,
-		client: &http.Client{
-			Timeout: webFetchTimeout,
-		},
+		BaseTool:  webFetchTool,
+		client:    utils.NewSSRFSafeHTTPClient(ssrfConfig),
 		chatModel: chatModel,
 	}
 }
