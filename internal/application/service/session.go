@@ -418,10 +418,21 @@ func (s *sessionService) KnowledgeQA(
 
 	// Use custom agent's knowledge bases only if request didn't specify any
 	// When user explicitly @mentions a knowledge base or document, only search those
-	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 {
-		knowledgeBaseIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)
-	} else {
+	// If RetrieveKBOnlyWhenMentioned is enabled and no @ mentions, don't use KB at all
+	hasExplicitMention := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	if customAgent != nil {
+		logger.Infof(ctx, "KB resolution (quick-answer): hasExplicitMention=%v, RetrieveKBOnlyWhenMentioned=%v, KBSelectionMode=%s",
+			hasExplicitMention, customAgent.Config.RetrieveKBOnlyWhenMentioned, customAgent.Config.KBSelectionMode)
+	}
+	if hasExplicitMention {
 		logger.Infof(ctx, "Using request-specified targets (ignoring agent config): kbs=%v, docs=%v", knowledgeBaseIDs, knowledgeIDs)
+	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
+		// User didn't mention any KB/file, and the setting requires explicit mention
+		knowledgeBaseIDs = nil
+		knowledgeIDs = nil
+		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
+	} else {
+		knowledgeBaseIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)
 	}
 
 	// Determine chat model ID: prioritize request's summaryModelID, then Remote models
@@ -1106,20 +1117,25 @@ func (s *sessionService) AgentQA(
 	// Create runtime AgentConfig from customAgent
 	// Note: tenantInfo.AgentConfig is deprecated, all config comes from customAgent now
 	agentConfig := &types.AgentConfig{
-		MaxIterations:       customAgent.Config.MaxIterations,
-		ReflectionEnabled:   customAgent.Config.ReflectionEnabled,
-		Temperature:         customAgent.Config.Temperature,
-		WebSearchEnabled:    customAgent.Config.WebSearchEnabled,
-		WebSearchMaxResults: customAgent.Config.WebSearchMaxResults,
-		MultiTurnEnabled:    customAgent.Config.MultiTurnEnabled,
-		HistoryTurns:        customAgent.Config.HistoryTurns,
-		MCPSelectionMode:    customAgent.Config.MCPSelectionMode,
-		MCPServices:         customAgent.Config.MCPServices,
-		Thinking:            customAgent.Config.Thinking,
+		MaxIterations:               customAgent.Config.MaxIterations,
+		ReflectionEnabled:           customAgent.Config.ReflectionEnabled,
+		Temperature:                 customAgent.Config.Temperature,
+		WebSearchEnabled:            customAgent.Config.WebSearchEnabled,
+		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
+		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
+		HistoryTurns:                customAgent.Config.HistoryTurns,
+		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
+		MCPServices:                 customAgent.Config.MCPServices,
+		Thinking:                    customAgent.Config.Thinking,
+		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 	}
 
 	// Resolve knowledge bases: request-level @ mentions take priority over agent config
-	if len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0 {
+	// If RetrieveKBOnlyWhenMentioned is enabled and no @ mentions, don't use KB at all
+	hasExplicitMention := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	logger.Infof(ctx, "KB resolution: hasExplicitMention=%v, RetrieveKBOnlyWhenMentioned=%v, KBSelectionMode=%s",
+		hasExplicitMention, agentConfig.RetrieveKBOnlyWhenMentioned, customAgent.Config.KBSelectionMode)
+	if hasExplicitMention {
 		// User explicitly specified via @ mention
 		if len(knowledgeBaseIDs) > 0 {
 			agentConfig.KnowledgeBases = knowledgeBaseIDs
@@ -1129,6 +1145,11 @@ func (s *sessionService) AgentQA(
 			agentConfig.KnowledgeIDs = knowledgeIDs
 			logger.Infof(ctx, "Using request-specified knowledge IDs: %v", knowledgeIDs)
 		}
+	} else if agentConfig.RetrieveKBOnlyWhenMentioned {
+		// User didn't mention any KB/file, and the setting requires explicit mention
+		agentConfig.KnowledgeBases = nil
+		agentConfig.KnowledgeIDs = nil
+		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
 	} else {
 		// Use agent's configured knowledge bases based on KBSelectionMode
 		agentConfig.KnowledgeBases = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)

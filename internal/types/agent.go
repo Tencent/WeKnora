@@ -31,6 +31,8 @@ type AgentConfig struct {
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
+	RetrieveKBOnlyWhenMentioned bool `json:"retrieve_kb_only_when_mentioned"`
 }
 
 // SessionAgentConfig represents session-level agent configuration

@@ -327,6 +327,8 @@ export default {
       noKnowledgeBase: 'No Knowledge Base',
       noKnowledgeBaseDesc: 'Pure model conversation, no knowledge retrieval',
       selectKnowledgeBases: 'Select Knowledge Bases',
+      retrieveKBOnlyWhenMentioned: 'Retrieve Only When Mentioned',
+      retrieveKBOnlyWhenMentionedDesc: 'Off: auto-retrieve configured KBs; On: retrieve only when user @ mentions',
       rerankModel: 'ReRank Model',
       rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',
       rerankModelPlaceholder: 'Select ReRank Model',

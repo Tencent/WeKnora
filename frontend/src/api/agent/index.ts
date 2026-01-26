@@ -25,6 +25,10 @@ export interface CustomAgentConfig {
   // 知识库选择模式：all=全部知识库, selected=指定知识库, none=不使用知识库
   kb_selection_mode?: 'all' | 'selected' | 'none';
   knowledge_bases?: string[];
+  // 是否仅在显式 @ 提及时检索知识库（默认: false）
+  // true: 只有用户通过 @ 明确提及知识库/文档时才检索
+  // false: 根据 kb_selection_mode 自动检索知识库
+  retrieve_kb_only_when_mentioned?: boolean;
 
   // ===== 文件类型限制 =====
   // 支持的文件类型（如 ["csv", "xlsx", "xls"]）

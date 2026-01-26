@@ -99,6 +99,10 @@ type CustomAgentConfig struct {
 	KBSelectionMode string `yaml:"kb_selection_mode" json:"kb_selection_mode"`
 	// Associated knowledge base IDs (only used when KBSelectionMode is "selected")
 	KnowledgeBases []string `yaml:"knowledge_bases" json:"knowledge_bases"`
+	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
+	// When true, knowledge base retrieval only happens if user explicitly mentions KB/files with @
+	// When false, knowledge base retrieval happens according to KBSelectionMode
+	RetrieveKBOnlyWhenMentioned bool `yaml:"retrieve_kb_only_when_mentioned" json:"retrieve_kb_only_when_mentioned"`
 
 	// ===== File Type Restriction Settings =====
 	// Supported file types for this agent (e.g., ["csv", "xlsx", "xls"])
@@ -245,13 +249,14 @@ func GetBuiltinQuickAnswerAgent(tenantID uint64) *CustomAgent {
 {{contexts}}
 
 用户问题：{{query}}`,
-			Temperature:         0.7,
-			MaxCompletionTokens: 2048,
-			WebSearchEnabled:    true,
-			WebSearchMaxResults: 5,
-			MultiTurnEnabled:    true,
-			HistoryTurns:        5,
-			KBSelectionMode:     "all",
+			Temperature:                 0.7,
+			MaxCompletionTokens:         2048,
+			WebSearchEnabled:            true,
+			WebSearchMaxResults:         5,
+			MultiTurnEnabled:            true,
+			HistoryTurns:                5,
+			KBSelectionMode:             "all",
+			RetrieveKBOnlyWhenMentioned: false, // Default: retrieve KB based on KBSelectionMode
 			// FAQ strategy
 			FAQPriorityEnabled:       true,
 			FAQDirectAnswerThreshold: 0.9,
@@ -279,18 +284,19 @@ func GetBuiltinSmartReasoningAgent(tenantID uint64) *CustomAgent {
 		IsBuiltin:   true,
 		TenantID:    tenantID,
 		Config: CustomAgentConfig{
-			AgentMode:           AgentModeSmartReasoning,
-			SystemPrompt:        "",
-			Temperature:         0.7,
-			MaxCompletionTokens: 2048,
-			MaxIterations:       50,
-			KBSelectionMode:     "all",
-			AllowedTools:        []string{"thinking", "todo_write", "knowledge_search", "grep_chunks", "list_knowledge_chunks", "query_knowledge_graph", "get_document_info"},
-			WebSearchEnabled:    true,
-			WebSearchMaxResults: 5,
-			ReflectionEnabled:   false,
-			MultiTurnEnabled:    true,
-			HistoryTurns:        5,
+			AgentMode:                   AgentModeSmartReasoning,
+			SystemPrompt:                "",
+			Temperature:                 0.7,
+			MaxCompletionTokens:         2048,
+			MaxIterations:               50,
+			KBSelectionMode:             "all",
+			RetrieveKBOnlyWhenMentioned: false, // Default: retrieve KB based on KBSelectionMode
+			AllowedTools:                []string{"thinking", "todo_write", "knowledge_search", "grep_chunks", "list_knowledge_chunks", "query_knowledge_graph", "get_document_info"},
+			WebSearchEnabled:            true,
+			WebSearchMaxResults:         5,
+			ReflectionEnabled:           false,
+			MultiTurnEnabled:            true,
+			HistoryTurns:                5,
 			// FAQ strategy
 			FAQPriorityEnabled:       true,
 			FAQDirectAnswerThreshold: 0.9,
@@ -316,7 +322,7 @@ func GetBuiltinDataAnalystAgent(tenantID uint64) *CustomAgent {
 		IsBuiltin:   true,
 		TenantID:    tenantID,
 		Config: CustomAgentConfig{
-			AgentMode:           AgentModeSmartReasoning,
+			AgentMode:    AgentModeSmartReasoning,
 			SystemPrompt: `### Role
 You are WeKnora Data Analyst, an intelligent data analysis assistant powered by DuckDB. You specialize in analyzing structured data from CSV and Excel files using SQL queries.
 
@@ -353,10 +359,11 @@ Help users explore, analyze, and derive insights from their tabular data through
 
 Current Time: {{current_time}}
 `,
-			Temperature:         0.3, // Lower temperature for precise SQL generation
-			MaxCompletionTokens: 4096,
-			MaxIterations:       30,
-			KBSelectionMode:     "all",
+			Temperature:                 0.3, // Lower temperature for precise SQL generation
+			MaxCompletionTokens:         4096,
+			MaxIterations:               30,
+			KBSelectionMode:             "all",
+			RetrieveKBOnlyWhenMentioned: false, // Default: retrieve KB based on KBSelectionMode
 			// Only support CSV and Excel files for data analysis
 			// Use standard values (xlsx), backend will auto-include xls via alias
 			SupportedFileTypes: []string{"csv", "xlsx"},

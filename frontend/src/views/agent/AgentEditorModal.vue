@@ -652,6 +652,17 @@
                       </div>
                     </div>
 
+                    <!-- 仅在提及时检索知识库（当配置了知识库时显示） -->
+                    <div v-if="hasKnowledgeBase" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.retrieveKBOnlyWhenMentioned') || '仅在 @ 提及时检索' }}</label>
+                        <p class="desc">{{ $t('agent.editor.retrieveKBOnlyWhenMentionedDesc') || '开启后，只有用户明确 @ 提及知识库或文档时才会进行检索' }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.retrieve_kb_only_when_mentioned" />
+                      </div>
+                    </div>
+
                     <!-- ReRank 模型（当配置了知识库时显示） -->
                     <div v-if="needsRerankModel" class="setting-row">
                       <div class="setting-info">
