@@ -145,7 +145,7 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:v0.18.9-pg17
+    image: paradedb/paradedb:v0.21.4-pg17
     container_name: WeKnora-postgres
     environment:
       - POSTGRES_USER=${DB_USER}
