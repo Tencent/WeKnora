@@ -27,6 +27,9 @@ let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
 
+// 用于跟踪拖拽进入/离开的计数器，解决子元素触发 dragleave 的问题
+let dragCounter = 0;
+
 // 获取当前知识库ID
 const getCurrentKbId = (): string | null => {
     return (route.params as any)?.kbId as string || null
@@ -60,6 +63,7 @@ const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
     event.preventDefault();
+    dragCounter++;
     if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'all';
     }
@@ -71,11 +75,19 @@ const handleGlobalDragOver = (event: DragEvent) => {
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
     }
-    ismask.value = true;
+}
+
+const handleGlobalDragLeave = (event: DragEvent) => {
+    event.preventDefault();
+    dragCounter--;
+    if (dragCounter === 0) {
+        ismask.value = false;
+    }
 }
 
 const handleGlobalDrop = async (event: DragEvent) => {
     event.preventDefault();
+    dragCounter = 0;
     ismask.value = false;
     
     const DataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
@@ -104,6 +116,7 @@ const handleGlobalDrop = async (event: DragEvent) => {
 onMounted(() => {
     document.addEventListener('dragenter', handleGlobalDragEnter, true);
     document.addEventListener('dragover', handleGlobalDragOver, true);
+    document.addEventListener('dragleave', handleGlobalDragLeave, true);
     document.addEventListener('drop', handleGlobalDrop, true);
 });
 
@@ -111,7 +124,9 @@ onMounted(() => {
 onUnmounted(() => {
     document.removeEventListener('dragenter', handleGlobalDragEnter, true);
     document.removeEventListener('dragover', handleGlobalDragOver, true);
+    document.removeEventListener('dragleave', handleGlobalDragLeave, true);
     document.removeEventListener('drop', handleGlobalDrop, true);
+    dragCounter = 0;
 });
 </script>
 <style lang="less">
