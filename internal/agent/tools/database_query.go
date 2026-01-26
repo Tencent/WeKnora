@@ -19,7 +19,7 @@ var databaseQueryTool = BaseTool{
 ## Security Features
 - Automatic tenant_id injection: All queries are automatically filtered by the logged-in user's tenant_id
 - Read-only queries: Only SELECT statements are allowed
-- Safe tables: Only allow queries on authorized tables
+- Safe tables: Only allow queries on authorized tables (knowledge_bases, knowledges, chunks)
 
 ## Available Tables and Columns
 

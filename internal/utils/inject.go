@@ -559,11 +559,11 @@ func WithTenantIsolation(tenantID uint64, tables ...string) SQLValidationOption 
 		v.tablesWithTenantID = make(map[string]bool)
 		if len(tables) == 0 {
 			// Default tables with tenant_id
+			// SECURITY: All tables with tenant_id column must be listed here
+			// to ensure proper tenant isolation and prevent cross-tenant data access
 			v.tablesWithTenantID = map[string]bool{
-				"tenants":         true,
 				"knowledge_bases": true,
 				"knowledges":      true,
-				"sessions":        true,
 				"chunks":          true,
 			}
 		} else {
@@ -590,15 +590,13 @@ func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 		WithTenantIsolation(tenantID)(v)
 
 		// Default allowed tables
+		// SECURITY: Only tables with tenant_id column should be listed here
+		// Tables without tenant_id (messages, embeddings) are excluded to prevent
+		// cross-tenant data access vulnerabilities (CVE: Broken Access Control)
 		WithAllowedTables(
-			"tenants",
 			"knowledge_bases",
 			"knowledges",
-			"sessions",
-			"messages",
 			"chunks",
-			"embeddings",
-			"models",
 		)(v)
 	}
 }
