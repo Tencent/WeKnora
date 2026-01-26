@@ -1089,6 +1089,9 @@ func (v *sqlValidator) validateFromItem(node *pg_query.Node, tables map[string]s
 }
 
 // validateNode recursively validates AST nodes
+// SECURITY: This function uses a COMPREHENSIVE approach to validate ALL node types.
+// Any node type that contains child expressions MUST be handled to prevent bypass attacks.
+// The principle is: if we don't know how to validate a node type, we REJECT it.
 func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationResult) error {
 	if node == nil {
 		return nil
@@ -1211,6 +1214,368 @@ func (v *sqlValidator) validateNode(node *pg_query.Node, result *SQLValidationRe
 		}
 	}
 
+	// ============================================================
+	// SECURITY FIX: Comprehensive handling of ALL expression types
+	// that can contain child nodes (potential bypass vectors)
+	// ============================================================
+
+	// ArrayExpr (ARRAY[...] expressions)
+	// Attack: SELECT ARRAY[pg_read_file('/etc/passwd')] FROM table
+	if ae := node.GetAArrayExpr(); ae != nil {
+		for _, elem := range ae.Elements {
+			if err := v.validateNode(elem, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// RowExpr (ROW(...) expressions)
+	// Attack: SELECT ROW(pg_read_file('/etc/passwd')) FROM table
+	if re := node.GetRowExpr(); re != nil {
+		for _, arg := range re.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// MinMaxExpr (GREATEST/LEAST expressions)
+	if mm := node.GetMinMaxExpr(); mm != nil {
+		for _, arg := range mm.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// NullIfExpr (NULLIF expressions)
+	if ni := node.GetNullIfExpr(); ni != nil {
+		for _, arg := range ni.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// ScalarArrayOpExpr (IN, ANY, ALL with arrays)
+	if sao := node.GetScalarArrayOpExpr(); sao != nil {
+		for _, arg := range sao.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// ArrayCoerceExpr
+	if ace := node.GetArrayCoerceExpr(); ace != nil {
+		if err := v.validateNode(ace.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// CoerceViaIO (type coercion via I/O)
+	if cvi := node.GetCoerceViaIo(); cvi != nil {
+		if err := v.validateNode(cvi.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// CollateExpr (COLLATE expressions)
+	if ce := node.GetCollateExpr(); ce != nil {
+		if err := v.validateNode(ce.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// SubLink (subqueries) - validate child expressions even if subqueries are allowed
+	if sl := node.GetSubLink(); sl != nil {
+		if err := v.validateNode(sl.Testexpr, result); err != nil {
+			return err
+		}
+	}
+
+	// OpExpr (operator expressions)
+	if oe := node.GetOpExpr(); oe != nil {
+		for _, arg := range oe.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// DistinctExpr (IS DISTINCT FROM)
+	if de := node.GetDistinctExpr(); de != nil {
+		for _, arg := range de.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// XmlExpr (XML expressions)
+	if xe := node.GetXmlExpr(); xe != nil {
+		for _, arg := range xe.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		for _, arg := range xe.NamedArgs {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// JsonConstructorExpr
+	if jce := node.GetJsonConstructorExpr(); jce != nil {
+		for _, arg := range jce.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// ============================================================
+	// Additional expression types that need recursive validation
+	// ============================================================
+
+	// FuncExpr (different from FuncCall - internal function representation)
+	if fe := node.GetFuncExpr(); fe != nil {
+		for _, arg := range fe.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Aggref (aggregate function reference)
+	if ag := node.GetAggref(); ag != nil {
+		for _, arg := range ag.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		for _, arg := range ag.Aggdirectargs {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		if ag.Aggfilter != nil {
+			if err := v.validateNode(ag.Aggfilter, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// WindowFunc
+	if wf := node.GetWindowFunc(); wf != nil {
+		for _, arg := range wf.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		if wf.Aggfilter != nil {
+			if err := v.validateNode(wf.Aggfilter, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// SubscriptingRef (array subscripting like arr[1])
+	if sr := node.GetSubscriptingRef(); sr != nil {
+		for _, idx := range sr.Refupperindexpr {
+			if err := v.validateNode(idx, result); err != nil {
+				return err
+			}
+		}
+		for _, idx := range sr.Reflowerindexpr {
+			if err := v.validateNode(idx, result); err != nil {
+				return err
+			}
+		}
+		if err := v.validateNode(sr.Refexpr, result); err != nil {
+			return err
+		}
+		if err := v.validateNode(sr.Refassgnexpr, result); err != nil {
+			return err
+		}
+	}
+
+	// NamedArgExpr (named arguments in function calls)
+	if nae := node.GetNamedArgExpr(); nae != nil {
+		if err := v.validateNode(nae.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// FieldSelect (field selection from composite type)
+	if fs := node.GetFieldSelect(); fs != nil {
+		if err := v.validateNode(fs.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// FieldStore
+	if fs := node.GetFieldStore(); fs != nil {
+		if err := v.validateNode(fs.Arg, result); err != nil {
+			return err
+		}
+		for _, newval := range fs.Newvals {
+			if err := v.validateNode(newval, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// RelabelType (type relabeling)
+	if rt := node.GetRelabelType(); rt != nil {
+		if err := v.validateNode(rt.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// ConvertRowtypeExpr
+	if cre := node.GetConvertRowtypeExpr(); cre != nil {
+		if err := v.validateNode(cre.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// RowCompareExpr
+	if rce := node.GetRowCompareExpr(); rce != nil {
+		for _, arg := range rce.Largs {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+		for _, arg := range rce.Rargs {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// CoerceToDomain
+	if ctd := node.GetCoerceToDomain(); ctd != nil {
+		if err := v.validateNode(ctd.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// BooleanTest (IS TRUE, IS FALSE, etc.)
+	if bt := node.GetBooleanTest(); bt != nil {
+		if err := v.validateNode(bt.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// AIndices (array indices)
+	if ai := node.GetAIndices(); ai != nil {
+		if err := v.validateNode(ai.Lidx, result); err != nil {
+			return err
+		}
+		if err := v.validateNode(ai.Uidx, result); err != nil {
+			return err
+		}
+	}
+
+	// AIndirection (array/field indirection)
+	if aind := node.GetAIndirection(); aind != nil {
+		if err := v.validateNode(aind.Arg, result); err != nil {
+			return err
+		}
+		for _, ind := range aind.Indirection {
+			if err := v.validateNode(ind, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// CollateClause
+	if cc := node.GetCollateClause(); cc != nil {
+		if err := v.validateNode(cc.Arg, result); err != nil {
+			return err
+		}
+	}
+
+	// GroupingFunc
+	if gf := node.GetGroupingFunc(); gf != nil {
+		for _, arg := range gf.Args {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// JsonValueExpr
+	if jve := node.GetJsonValueExpr(); jve != nil {
+		if err := v.validateNode(jve.RawExpr, result); err != nil {
+			return err
+		}
+		if err := v.validateNode(jve.FormattedExpr, result); err != nil {
+			return err
+		}
+	}
+
+	// JsonExpr
+	if je := node.GetJsonExpr(); je != nil {
+		if err := v.validateNode(je.FormattedExpr, result); err != nil {
+			return err
+		}
+		if err := v.validateNode(je.PathSpec, result); err != nil {
+			return err
+		}
+		for _, arg := range je.PassingValues {
+			if err := v.validateNode(arg, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	// JsonIsPredicate
+	if jip := node.GetJsonIsPredicate(); jip != nil {
+		if err := v.validateNode(jip.Expr, result); err != nil {
+			return err
+		}
+	}
+
+	// XmlSerialize
+	if xs := node.GetXmlSerialize(); xs != nil {
+		if err := v.validateNode(xs.Expr, result); err != nil {
+			return err
+		}
+	}
+
+	// WindowDef
+	if wd := node.GetWindowDef(); wd != nil {
+		for _, part := range wd.PartitionClause {
+			if err := v.validateNode(part, result); err != nil {
+				return err
+			}
+		}
+		for _, order := range wd.OrderClause {
+			if err := v.validateNode(order, result); err != nil {
+				return err
+			}
+		}
+		if err := v.validateNode(wd.StartOffset, result); err != nil {
+			return err
+		}
+		if err := v.validateNode(wd.EndOffset, result); err != nil {
+			return err
+		}
+	}
+
+	// SubPlan - BLOCK: This is an internal representation, should not appear in user queries
+	if node.GetSubPlan() != nil {
+		return fmt.Errorf("SubPlan nodes are not allowed")
+	}
+
+	// AlternativeSubPlan - BLOCK
+	if node.GetAlternativeSubPlan() != nil {
+		return fmt.Errorf("AlternativeSubPlan nodes are not allowed")
+	}
+
 	return nil
 }
 
@@ -1238,7 +1603,12 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 	// Block dangerous function prefixes
 	if v.checkDangerousFuncs {
 		dangerousPrefixes := []string{
-			"pg_", "lo_", "dblink", "file_", "copy_",
+			"pg_",     // All pg_* functions (pg_read_file, pg_reload_conf, pg_stat_*, etc.)
+			"lo_",     // Large object functions (lo_import, lo_export, lo_from_bytea, lo_put, etc.)
+			"dblink",  // Database link functions
+			"file_",   // File functions
+			"copy_",   // Copy functions
+			"binary_", // Binary functions
 		}
 		for _, prefix := range dangerousPrefixes {
 			if strings.HasPrefix(funcName, prefix) {
@@ -1246,14 +1616,85 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 			}
 		}
 
-		// Block specific dangerous functions
+		// Block specific dangerous functions - comprehensive list for RCE prevention
 		dangerousFunctions := map[string]bool{
+			// Configuration and settings
 			"current_setting": true,
 			"set_config":      true,
-			"query_to_xml":    true,
-			"xpath":           true,
-			"xmlparse":        true,
-			"txid_current":    true,
+
+			// XML/XPath functions (XXE risks)
+			"query_to_xml":       true,
+			"xpath":              true,
+			"xmlparse":           true,
+			"xmlroot":            true,
+			"xmlelement":         true,
+			"xmlforest":          true,
+			"xmlconcat":          true,
+			"xmlagg":             true,
+			"xmlpi":              true,
+			"xmlcomment":         true,
+			"xmlexists":          true,
+			"xml_is_well_formed": true,
+			"xpath_exists":       true,
+			"table_to_xml":       true,
+			"cursor_to_xml":      true,
+			"database_to_xml":    true,
+			"schema_to_xml":      true,
+
+			// Transaction and system info
+			"txid_current":          true,
+			"txid_current_snapshot": true,
+			"txid_snapshot_xmin":    true,
+			"txid_snapshot_xmax":    true,
+
+			// Encoding functions (used in attack payloads)
+			"encode": true,
+			"decode": true,
+
+			// Extension management
+			"create_extension": true,
+
+			// Copy operations
+			"copy":        true,
+			"copy_to":     true,
+			"copy_from":   true,
+			"pg_copy_to":  true,
+			"pg_dump":     true,
+			"pg_dumpall":  true,
+			"pg_restore":  true,
+			"pg_basebackup": true,
+
+			// Process and system functions
+			"pg_terminate_backend": true,
+			"pg_cancel_backend":    true,
+			"pg_rotate_logfile":    true,
+
+			// Advisory locks (can be abused for DoS)
+			"pg_advisory_lock":           true,
+			"pg_advisory_unlock":         true,
+			"pg_advisory_lock_shared":    true,
+			"pg_advisory_unlock_shared":  true,
+			"pg_try_advisory_lock":       true,
+			"pg_try_advisory_lock_shared": true,
+
+			// Backup and replication
+			"pg_start_backup":  true,
+			"pg_stop_backup":   true,
+			"pg_switch_wal":    true,
+			"pg_create_restore_point": true,
+
+			// Foreign data wrappers
+			"postgres_fdw_handler": true,
+			"file_fdw_handler":     true,
+
+			// Procedural languages (code execution)
+			"plpgsql_call_handler": true,
+			"plpython_call_handler": true,
+			"plperl_call_handler": true,
+
+			// System catalog modification
+			"pg_catalog":  true,
+			"information_schema": true,
 		}
 		if dangerousFunctions[funcName] {
 			return fmt.Errorf("function '%s' is not allowed", funcName)
