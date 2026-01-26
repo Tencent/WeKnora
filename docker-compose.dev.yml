@@ -2,7 +2,7 @@
 services:
   # 只启动依赖的基础设施服务
   postgres:
-    image: paradedb/paradedb:v0.18.9-pg17
+    image: paradedb/paradedb:v0.21.4-pg17
     container_name: WeKnora-postgres-dev
     ports:
       - "${DB_PORT:-5432}:5432"

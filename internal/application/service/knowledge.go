@@ -6389,7 +6389,16 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// 处理不同类型的导入：文件、URL、文本段落
 	var chunks []*proto.Chunk
 	if payload.URL != "" {
-		// URL导入
+		// URL导入 - 再次进行 SSRF 验证（防止 DNS 重绑定攻击）
+		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
+			logger.Errorf(ctx, "URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.URL, reason)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = "URL is not allowed for security reasons"
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+
 		urlResp, err := s.docReaderClient.ReadFromURL(ctx, &proto.ReadFromURLRequest{
 			Url:   payload.URL,
 			Title: knowledge.Title,

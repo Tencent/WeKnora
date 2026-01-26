@@ -354,15 +354,21 @@ func IsSSRFSafeURL(rawURL string) (bool, string) {
 	// Perform DNS resolution to check the resolved IP
 	// This prevents DNS rebinding attacks where a domain resolves to internal IPs
 	ips, err := net.LookupIP(hostname)
-	if err == nil {
-		for _, resolvedIP := range ips {
-			if restricted, reason := isRestrictedIP(resolvedIP); restricted {
-				return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
-			}
+	if err != nil {
+		// DNS resolution failed - reject the URL for security
+		// This prevents attacks where:
+		// 1. The domain is only resolvable within internal network (intranet domains)
+		// 2. Different DNS servers between validation and actual request
+		// 3. Attacker-controlled DNS that selectively responds
+		return false, fmt.Sprintf("DNS resolution failed for hostname %s: cannot verify if it resolves to safe IP", hostname)
+	}
+
+	// Check if any resolved IP is restricted
+	for _, resolvedIP := range ips {
+		if restricted, reason := isRestrictedIP(resolvedIP); restricted {
+			return false, fmt.Sprintf("hostname %s resolves to restricted IP %s: %s", hostname, resolvedIP.String(), reason)
 		}
 	}
-	// If DNS resolution fails, we allow the URL (the actual request will fail anyway)
-	// This prevents blocking legitimate URLs when DNS is temporarily unavailable
 
 	// Check for suspicious port numbers
 	port := parsed.Port()
