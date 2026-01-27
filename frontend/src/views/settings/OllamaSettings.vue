@@ -52,7 +52,9 @@
               :loading="testing"
               @click="testConnection"
             >
-              <t-icon name="refresh" />
+              <template #icon>
+                <t-icon name="refresh" />
+              </template>
               {{ $t('ollamaSettings.status.retest') }}
             </t-button>
           </div>
@@ -141,7 +143,10 @@
           :loading="loadingModels"
           @click="refreshModels"
         >
-          <t-icon name="refresh" />{{ $t('common.refresh') }}
+          <template #icon>
+            <t-icon name="refresh" />
+          </template>
+          {{ $t('common.refresh') }}
         </t-button>
       </div>
       
