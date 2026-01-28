@@ -238,7 +238,8 @@ class Caption:
         """Call Ollama API for image captioning using base64 encoded image data."""
 
         # Extract host URL by removing the chat completions endpoint
-        host = self.completion_url.replace("/v1/chat/completions", "")
+        # Handle both "/v1/chat/completions" and "/chat/completions" patterns
+        host = self.completion_url.replace("/v1/chat/completions", "").replace("/chat/completions", "")
 
         # Initialize Ollama client with host and timeout
         client = ollama.Client(
