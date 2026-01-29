@@ -683,7 +683,7 @@ class BaseParser(ABC):
         Returns:
             List of image information
         """
-        logger.info(f"Extracting image information from Chunk #{chunk.seq}")
+        logger.info(f"Extracting image information from Chunk #{chunk.seq + 1}")
         text = chunk.content
 
         # Regex to extract image information from text,
@@ -692,7 +692,7 @@ class BaseParser(ABC):
 
         # Extract image information
         img_matches = list(re.finditer(img_pattern, text))
-        logger.info(f"Chunk #{chunk.seq} found {len(img_matches)} images")
+        logger.info(f"Chunk #{chunk.seq + 1} found {len(img_matches)} images")
 
         images_info = []
         for match_idx, match in enumerate(img_matches):
@@ -711,9 +711,9 @@ class BaseParser(ABC):
             images_info.append(image_info)
 
             logger.info(
-                f"Image in Chunk #{chunk.seq} {match_idx + 1}: URL={img_url[:50]}..."
+                f"Image in Chunk #{chunk.seq + 1} {match_idx + 1}: URL={img_url[:50]}..."
                 if len(img_url) > 50
-                else f"Image in Chunk #{chunk.seq} {match_idx + 1}: URL={img_url}"
+                else f"Image in Chunk #{chunk.seq + 1} {match_idx + 1}: URL={img_url}"
             )
 
         return images_info
