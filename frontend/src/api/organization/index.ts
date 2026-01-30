@@ -11,6 +11,7 @@ export interface Organization {
   invite_code_expires_at?: string | null
   invite_code_validity_days?: number
   require_approval?: boolean
+  searchable?: boolean
   member_count?: number
   share_count?: number
   pending_join_request_count?: number
@@ -82,6 +83,18 @@ export interface OrganizationPreview {
   created_at: string
 }
 
+/** Searchable (discoverable) organization item for join flow */
+export interface SearchableOrganizationItem {
+  id: string
+  name: string
+  description: string
+  avatar?: string
+  member_count: number
+  share_count: number
+  is_already_member: boolean
+  require_approval: boolean
+}
+
 // Request types
 export interface CreateOrganizationRequest {
   name: string
@@ -95,6 +108,7 @@ export interface UpdateOrganizationRequest {
   description?: string
   avatar?: string
   require_approval?: boolean
+  searchable?: boolean
   invite_code_validity_days?: number // 0=never, 1, 7, 30
 }
 
@@ -281,6 +295,48 @@ export async function previewOrganization(inviteCode: string): Promise<ApiRespon
     return response as unknown as ApiResponse<OrganizationPreview>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to preview organization' }
+  }
+}
+
+/**
+ * Search searchable (discoverable) organizations
+ */
+export async function searchSearchableOrganizations(
+  q: string = '',
+  limit: number = 20
+): Promise<ApiResponse<{ data: SearchableOrganizationItem[]; total: number }>> {
+  try {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    params.set('limit', String(limit))
+    const response = await get(`/api/v1/organizations/search?${params.toString()}`)
+    const res = response as unknown as { success: boolean; data?: SearchableOrganizationItem[]; total?: number; message?: string }
+    return {
+      success: res.success,
+      data: res.success ? { data: res.data || [], total: res.total ?? 0 } : undefined,
+      message: res.message,
+    }
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to search organizations' }
+  }
+}
+
+/**
+ * Join a searchable organization by ID (no invite code)
+ */
+export async function joinOrganizationById(
+  organizationId: string,
+  message?: string,
+  role?: 'admin' | 'editor' | 'viewer'
+): Promise<ApiResponse<Organization>> {
+  try {
+    const body: { organization_id: string; message?: string; role?: string } = { organization_id: organizationId }
+    if (message) body.message = message
+    if (role) body.role = role
+    const response = await post('/api/v1/organizations/join-by-id', body)
+    return response as unknown as ApiResponse<Organization>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to join organization' }
   }
 }
 

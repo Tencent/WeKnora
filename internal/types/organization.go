@@ -58,6 +58,8 @@ type Organization struct {
 	InviteCodeValidityDays int `json:"invite_code_validity_days" gorm:"default:7"`
 	// Whether joining requires admin approval
 	RequireApproval bool `json:"require_approval" gorm:"default:false"`
+	// Whether the space is open for search (discoverable; non-members can search and join by org ID)
+	Searchable bool `json:"searchable" gorm:"default:false"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time
@@ -224,6 +226,7 @@ type UpdateOrganizationRequest struct {
 	Description            *string `json:"description" binding:"omitempty,max=1000"`
 	Avatar                 *string `json:"avatar" binding:"omitempty,max=512"` // optional avatar URL
 	RequireApproval        *bool   `json:"require_approval"`
+	Searchable             *bool   `json:"searchable"` // open for search so others can discover and join
 	InviteCodeValidityDays *int    `json:"invite_code_validity_days"` // 0=never, 1, 7, 30
 }
 
@@ -291,6 +294,7 @@ type OrganizationResponse struct {
 	InviteCodeExpiresAt     *time.Time `json:"invite_code_expires_at,omitempty"`
 	InviteCodeValidityDays  int        `json:"invite_code_validity_days"`
 	RequireApproval         bool       `json:"require_approval"`
+	Searchable              bool       `json:"searchable"`
 	MemberCount             int        `json:"member_count"`
 	ShareCount              int        `json:"share_count"`                // 共享到该组织的知识库数量
 	PendingJoinRequestCount int        `json:"pending_join_request_count"` // 待审批加入申请数（仅管理员可见）
@@ -337,6 +341,31 @@ type KnowledgeBaseShareResponse struct {
 type ListOrganizationsResponse struct {
 	Organizations []OrganizationResponse `json:"organizations"`
 	Total         int64                  `json:"total"`
+}
+
+// SearchableOrganizationItem is a searchable org item for discovery (no invite code)
+type SearchableOrganizationItem struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Description       string `json:"description"`
+	Avatar            string `json:"avatar,omitempty"`
+	MemberCount       int    `json:"member_count"`
+	ShareCount        int    `json:"share_count"`
+	IsAlreadyMember   bool   `json:"is_already_member"`
+	RequireApproval   bool   `json:"require_approval"`
+}
+
+// ListSearchableOrganizationsResponse is the response for searching discoverable organizations
+type ListSearchableOrganizationsResponse struct {
+	Organizations []SearchableOrganizationItem `json:"organizations"`
+	Total         int64                         `json:"total"`
+}
+
+// JoinByOrganizationIDRequest is used to join a searchable organization by ID (no invite code)
+type JoinByOrganizationIDRequest struct {
+	OrganizationID string        `json:"organization_id" binding:"required"`
+	Message        string        `json:"message" binding:"max=500"`         // Optional message for join request
+	Role           OrgMemberRole `json:"role"`                               // Optional: requested role (admin/editor/viewer); default viewer
 }
 
 // JoinRequestResponse represents a join request in API responses

@@ -222,46 +222,142 @@
               </button>
             </div>
 
-            <!-- 步骤1：输入邀请码（从菜单打开时） -->
+            <!-- 步骤1：输入邀请码 或 搜索空间 -->
             <div v-if="!invitePreviewLoading && !invitePreviewData" class="invite-preview-body invite-preview-input">
-              <template v-if="!invitePreviewError">
-                <p class="invite-preview-input-desc">{{ $t('organization.invite.inputDesc') }}</p>
-                <div class="invite-preview-input-wrap">
-                  <t-input
-                    v-model="joinInputCode"
-                    :placeholder="$t('organization.inviteCodePlaceholder')"
-                    size="medium"
-                    :maxlength="32"
-                    clearable
-                    @keyup.enter="doPreviewFromInput"
-                  />
+              <div class="join-modal-tabs">
+                <div
+                  :class="['join-tab', { active: joinStep === 'invite' }]"
+                  @click="joinStep = 'invite'"
+                >
+                  {{ $t('organization.join.byInviteCode') }}
                 </div>
-                <p class="invite-preview-input-tip">{{ $t('organization.editor.inviteCodeTip') }}</p>
-              </template>
-              <!-- 错误状态（预览失败后） -->
-              <template v-else>
-                <div class="invite-preview-error-inline">
-                  <t-icon name="error-circle" size="20px" />
-                  <span>{{ invitePreviewError }}</span>
+                <div
+                  :class="['join-tab', { active: joinStep === 'search' }]"
+                  @click="joinStep = 'search'; doSearchSearchable()"
+                >
+                  {{ $t('organization.join.searchSpaces') }}
                 </div>
-                <div class="invite-preview-input-wrap">
-                  <t-input
-                    v-model="joinInputCode"
-                    :placeholder="$t('organization.inviteCodePlaceholder')"
-                    size="medium"
-                    :maxlength="32"
-                    clearable
-                    @keyup.enter="doPreviewFromInput"
-                  />
+              </div>
+
+              <!-- Tab 内容容器 - 平滑高度过渡 -->
+              <div ref="tabContentWrapperRef" class="join-tab-content-wrapper">
+                <!-- 输入邀请码 -->
+                <div v-if="joinStep === 'invite'" class="join-tab-content">
+                  <template v-if="!invitePreviewError">
+                    <p class="invite-preview-input-desc">{{ $t('organization.invite.inputDesc') }}</p>
+                    <div class="invite-preview-input-wrap">
+                      <t-input
+                        v-model="joinInputCode"
+                        :placeholder="$t('organization.inviteCodePlaceholder')"
+                        size="medium"
+                        :maxlength="32"
+                        clearable
+                        @keyup.enter="doPreviewFromInput"
+                      />
+                    </div>
+                    <p class="invite-preview-input-tip">{{ $t('organization.editor.inviteCodeTip') }}</p>
+                  </template>
+                  <template v-else>
+                    <div class="invite-preview-error-inline">
+                      <t-icon name="error-circle" size="20px" />
+                      <span>{{ invitePreviewError }}</span>
+                    </div>
+                    <div class="invite-preview-input-wrap">
+                      <t-input
+                        v-model="joinInputCode"
+                        :placeholder="$t('organization.inviteCodePlaceholder')"
+                        size="medium"
+                        :maxlength="32"
+                        clearable
+                        @keyup.enter="doPreviewFromInput"
+                      />
+                    </div>
+                  </template>
+                  <div class="invite-preview-footer invite-preview-footer-single">
+                    <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
+                      {{ $t('common.cancel') }}
+                    </t-button>
+                    <t-button theme="primary" size="medium" :loading="invitePreviewLoading" @click="doPreviewFromInput">
+                      {{ $t('organization.invite.previewAction') }}
+                    </t-button>
+                  </div>
                 </div>
-              </template>
-              <div class="invite-preview-footer invite-preview-footer-single">
-                <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
-                  {{ $t('common.cancel') }}
-                </t-button>
-                <t-button theme="primary" size="medium" :loading="invitePreviewLoading" @click="doPreviewFromInput">
-                  {{ $t('organization.invite.previewAction') }}
-                </t-button>
+
+                <!-- 搜索可加入空间 -->
+                <div v-else-if="joinStep === 'search'" class="join-tab-content">
+                  <p class="invite-preview-input-desc">{{ $t('organization.join.searchSpacesDesc') }}</p>
+                  <div class="invite-preview-input-wrap search-input-wrap">
+                    <t-input
+                      v-model="searchQuery"
+                      :placeholder="$t('organization.join.searchSpacesPlaceholder')"
+                      size="medium"
+                      clearable
+                      @input="doSearchSearchableDebounced"
+                      @keyup.enter="doSearchSearchable"
+                    >
+                      <template #prefix-icon>
+                        <t-icon name="search" />
+                      </template>
+                    </t-input>
+                  </div>
+                  <div class="searchable-list-wrap">
+                    <t-loading :loading="searchLoading">
+                      <div v-if="searchableList.length === 0 && !searchLoading" class="searchable-empty">
+                        {{ searchQuery ? $t('organization.join.noSearchResult') : $t('organization.join.noSearchableSpaces') }}
+                      </div>
+                      <div v-else class="searchable-list">
+                        <div
+                          v-for="org in searchableList"
+                          :key="org.id"
+                          class="searchable-item"
+                          :class="{ 'is-already-member': org.is_already_member }"
+                          @click="!org.is_already_member && previewSearchableOrg(org)"
+                        >
+                          <div class="searchable-item-left">
+                            <div class="searchable-item-avatar">
+                              <SpaceAvatar :name="org.name" size="small" />
+                            </div>
+                            <div class="searchable-item-info">
+                              <span class="searchable-item-name">{{ org.name }}</span>
+                              <span class="searchable-item-desc">{{ org.description || $t('organization.noDescription') }}</span>
+                              <div class="searchable-item-badges">
+                                <span class="badge">{{ org.member_count }} {{ $t('organization.invite.members') }}</span>
+                                <span class="badge">{{ org.share_count }} {{ $t('organization.invite.knowledgeBases') }}</span>
+                                <t-tag v-if="org.require_approval" size="small" theme="warning" class="approval-tag">
+                                  {{ $t('organization.invite.needApproval') }}
+                                </t-tag>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="searchable-item-action" @click.stop>
+                            <t-button
+                              v-if="org.is_already_member"
+                              theme="default"
+                              variant="outline"
+                              size="small"
+                              @click="viewSearchableOrg(org)"
+                            >
+                              {{ $t('organization.invite.viewOrganization') }}
+                            </t-button>
+                            <t-button
+                              v-else
+                              theme="primary"
+                              size="small"
+                              @click="previewSearchableOrg(org)"
+                            >
+                              {{ $t('organization.invite.previewAction') }}
+                            </t-button>
+                          </div>
+                        </div>
+                      </div>
+                    </t-loading>
+                  </div>
+                  <div class="invite-preview-footer invite-preview-footer-single">
+                    <t-button theme="default" variant="outline" size="medium" @click="closeInvitePreview">
+                      {{ $t('common.cancel') }}
+                    </t-button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -273,65 +369,51 @@
 
             <!-- 步骤2：预览内容 -->
             <template v-else-if="invitePreviewData">
-              <div class="invite-preview-body">
-                <div class="invite-preview-section">
-                  <div class="invite-preview-org">
-                    <div class="invite-preview-org-icon">
-                      <SpaceAvatar :name="invitePreviewData.name" size="large" />
-                    </div>
-                    <div class="invite-preview-org-info">
-                      <h2 class="invite-preview-org-name">{{ invitePreviewData.name }}</h2>
-                      <p class="invite-preview-org-desc">{{ invitePreviewData.description || $t('organization.noDescription') }}</p>
-                    </div>
+              <div class="invite-preview-body invite-preview-body-preview">
+                <!-- 空间信息 -->
+                <div class="invite-preview-org">
+                  <div class="invite-preview-org-icon">
+                    <SpaceAvatar :name="invitePreviewData.name" size="large" />
                   </div>
+                  <div class="invite-preview-org-info">
+                    <h2 class="invite-preview-org-name">{{ invitePreviewData.name }}</h2>
+                    <p class="invite-preview-org-desc">{{ invitePreviewData.description || $t('organization.noDescription') }}</p>
+                  </div>
+                </div>
 
-                  <div class="invite-preview-section-header">
-                    <h3 class="invite-preview-section-title">{{ $t('organization.invite.previewInfo') }}</h3>
+                <!-- 统计信息 -->
+                <div class="invite-preview-stats">
+                  <div class="invite-preview-stat">
+                    <t-icon name="user" class="invite-preview-stat-icon" />
+                    <span class="invite-preview-stat-value">{{ invitePreviewData.member_count }}</span>
+                    <span class="invite-preview-stat-label">{{ $t('organization.invite.members') }}</span>
                   </div>
-                  <div class="invite-preview-stats">
-                    <div class="invite-preview-stat">
-                      <div class="invite-preview-stat-icon">
-                        <t-icon name="user" size="18px" />
-                      </div>
-                      <div class="invite-preview-stat-content">
-                        <span class="invite-preview-stat-value">{{ invitePreviewData.member_count }}</span>
-                        <span class="invite-preview-stat-label">{{ $t('organization.invite.members') }}</span>
-                      </div>
-                    </div>
-                    <div class="invite-preview-stat">
-                      <div class="invite-preview-stat-icon">
-                        <t-icon name="folder" size="18px" />
-                      </div>
-                      <div class="invite-preview-stat-content">
-                        <span class="invite-preview-stat-value">{{ invitePreviewData.share_count }}</span>
-                        <span class="invite-preview-stat-label">{{ $t('organization.invite.knowledgeBases') }}</span>
-                      </div>
-                    </div>
+                  <div class="invite-preview-stat">
+                    <t-icon name="folder" class="invite-preview-stat-icon" />
+                    <span class="invite-preview-stat-value">{{ invitePreviewData.share_count }}</span>
+                    <span class="invite-preview-stat-label">{{ $t('organization.invite.knowledgeBases') }}</span>
                   </div>
+                </div>
 
-                  <!-- 加入方式：需要审核 / 无需审核；无需审核时展示默认权限 -->
-                  <div v-if="!invitePreviewData.is_already_member" class="invite-preview-approval-row">
+                <!-- 加入方式与状态 -->
+                <div v-if="!invitePreviewData.is_already_member" class="invite-preview-join-section">
+                  <div class="invite-preview-approval-row">
                     <span class="invite-preview-approval-label">{{ $t('organization.invite.approvalLabel') }}</span>
-                    <span :class="['invite-preview-approval-value', invitePreviewData.require_approval ? 'need-approval' : 'no-approval']">
+                    <span :class="['invite-preview-approval-badge', invitePreviewData.require_approval ? 'need-approval' : 'no-approval']">
                       {{ invitePreviewData.require_approval ? $t('organization.invite.needApproval') : $t('organization.invite.noApproval') }}
                     </span>
                   </div>
-                  <div v-if="!invitePreviewData.is_already_member && !invitePreviewData.require_approval" class="invite-preview-tip invite-preview-tip-info">
+                  <div v-if="!invitePreviewData.require_approval" class="invite-preview-tip invite-preview-tip-info">
                     <t-icon name="info-circle" size="16px" />
                     <span>{{ $t('organization.invite.defaultRoleAfterJoin', { role: $t('organization.role.viewer') }) }}</span>
                   </div>
-
-                  <div v-if="invitePreviewData.is_already_member" class="invite-preview-tip invite-preview-tip-success">
-                    <t-icon name="check-circle" size="16px" />
-                    <span>{{ $t('organization.invite.alreadyMember') }}</span>
-                  </div>
-                  <div v-else-if="invitePreviewData.require_approval" class="invite-preview-apply-options">
+                  <template v-else>
                     <div class="invite-preview-tip invite-preview-tip-warning">
                       <t-icon name="info-circle" size="16px" />
                       <span>{{ $t('organization.invite.requireApprovalTip') }}</span>
                     </div>
-                    <div class="invite-preview-role-row">
-                      <span class="invite-preview-role-label">{{ $t('organization.invite.requestRole') }}</span>
+                    <div class="invite-preview-form-group">
+                      <label class="invite-preview-form-label">{{ $t('organization.invite.requestRole') }}</label>
                       <t-select
                         v-model="inviteRequestRole"
                         class="invite-preview-role-select"
@@ -340,7 +422,8 @@
                         :options="orgRoleOptions"
                       />
                     </div>
-                    <div class="invite-preview-message-row">
+                    <div class="invite-preview-form-group">
+                      <label class="invite-preview-form-label">{{ $t('organization.invite.applicationNote') }}</label>
                       <t-textarea
                         v-model="inviteRequestMessage"
                         class="invite-preview-message-input"
@@ -350,6 +433,13 @@
                         :autosize="{ minRows: 2, maxRows: 4 }"
                       />
                     </div>
+                  </template>
+                </div>
+
+                <div v-if="invitePreviewData.is_already_member" class="invite-preview-status-section">
+                  <div class="invite-preview-tip invite-preview-tip-success">
+                    <t-icon name="check-circle" size="18px" />
+                    <span>{{ $t('organization.invite.alreadyMember') }}</span>
                   </div>
                 </div>
               </div>
@@ -371,7 +461,7 @@
                   v-else
                   theme="primary"
                   size="medium"
-                  @click="closeInvitePreview"
+                  @click="viewOrganizationFromPreview"
                 >
                   {{ $t('organization.invite.viewOrganization') }}
                 </t-button>
@@ -385,12 +475,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useOrganizationStore } from '@/stores/organization'
-import type { Organization, OrganizationPreview } from '@/api/organization'
-import { previewOrganization, joinOrganization, submitJoinRequest } from '@/api/organization'
+import type { Organization, OrganizationPreview, SearchableOrganizationItem } from '@/api/organization'
+import { previewOrganization, joinOrganization, submitJoinRequest, searchSearchableOrganizations, joinOrganizationById } from '@/api/organization'
 import { useI18n } from 'vue-i18n'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
@@ -431,6 +521,58 @@ const joinInputCode = ref('') // 从菜单打开时输入的邀请码
 const invitePreviewData = ref<OrganizationPreview | null>(null)
 const invitePreviewError = ref('')
 
+// 加入方式：邀请码 / 搜索空间
+const joinStep = ref<'invite' | 'search'>('invite')
+const searchQuery = ref('')
+const searchableList = ref<SearchableOrganizationItem[]>([])
+const searchLoading = ref(false)
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// Tab 内容容器 ref，用于高度过渡
+const tabContentWrapperRef = ref<HTMLElement | null>(null)
+
+// 更新容器高度的辅助函数
+const updateTabContentHeight = () => {
+  if (!tabContentWrapperRef.value) return
+  
+  // 先移除固定高度，获取自然高度
+  tabContentWrapperRef.value.style.height = 'auto'
+  const naturalHeight = tabContentWrapperRef.value.scrollHeight
+  
+  // 设置固定高度以触发过渡
+  tabContentWrapperRef.value.style.height = `${naturalHeight}px`
+}
+
+// 监听 joinStep 变化，动态调整容器高度以实现平滑过渡
+watch(joinStep, () => {
+  if (!tabContentWrapperRef.value) return
+  
+  // 先设置当前高度
+  const currentHeight = tabContentWrapperRef.value.scrollHeight
+  tabContentWrapperRef.value.style.height = `${currentHeight}px`
+  
+  // 等待下一帧，让新内容渲染
+  requestAnimationFrame(() => {
+    updateTabContentHeight()
+    
+    // 过渡完成后，移除固定高度，让容器自适应
+    setTimeout(() => {
+      if (tabContentWrapperRef.value) {
+        tabContentWrapperRef.value.style.height = 'auto'
+      }
+    }, 300) // 与 CSS transition 时长一致
+  })
+}, { flush: 'post' })
+
+// 监听搜索列表变化，更新高度
+watch([searchableList, searchLoading], () => {
+  if (joinStep.value === 'search') {
+    nextTick(() => {
+      updateTabContentHeight()
+    })
+  }
+})
+
 // 监听菜单快捷操作事件
 const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'join' }>) => {
   if (event.detail?.type === 'create') {
@@ -445,6 +587,9 @@ const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'j
     invitePreviewData.value = null
     invitePreviewError.value = ''
     invitePreviewLoading.value = false
+    joinStep.value = 'invite'
+    searchQuery.value = ''
+    searchableList.value = []
     showInvitePreview.value = true
   }
 }) as EventListener
@@ -521,6 +666,9 @@ function handleJoinOrganization() {
   invitePreviewData.value = null
   invitePreviewError.value = ''
   invitePreviewLoading.value = false
+  joinStep.value = 'invite'
+  searchQuery.value = ''
+  searchableList.value = []
   showInvitePreview.value = true
 }
 
@@ -608,14 +756,23 @@ async function handleInvitePreview(code: string) {
   }
 }
 
-// 确认加入组织（区分直接加入 vs 需要审核）
+// 确认加入组织（区分直接加入 vs 需要审核，支持邀请码和搜索两种方式）
 async function confirmJoinOrganization() {
-  if (!inviteCode.value || invitePreviewData.value?.is_already_member) return
+  if (!invitePreviewData.value || invitePreviewData.value.is_already_member) return
+  
+  // 如果是通过搜索加入的（没有邀请码），使用搜索加入逻辑
+  if (!inviteCode.value && invitePreviewData.value.id) {
+    await joinBySearchOrg()
+    return
+  }
+  
+  // 原有逻辑：通过邀请码加入
+  if (!inviteCode.value) return
   
   inviteJoining.value = true
   try {
     // 需要审核的情况：提交申请（带申请角色与可选说明）
-    if (invitePreviewData.value?.require_approval) {
+    if (invitePreviewData.value.require_approval) {
       const result = await submitJoinRequest({
         invite_code: inviteCode.value,
         message: inviteRequestMessage.value?.trim() || undefined,
@@ -672,9 +829,107 @@ function closeInvitePreview() {
   joinInputCode.value = ''
   invitePreviewData.value = null
   invitePreviewError.value = ''
+  joinStep.value = 'invite'
+  searchQuery.value = ''
+  searchableList.value = []
   inviteRequestRole.value = 'viewer'
   inviteRequestMessage.value = ''
   router.replace({ path: route.path, query: {} })
+}
+
+// 搜索可加入空间
+async function doSearchSearchable() {
+  searchLoading.value = true
+  try {
+    const res = await searchSearchableOrganizations(searchQuery.value.trim(), 20)
+    if (res.success && res.data) {
+      searchableList.value = res.data.data || []
+    } else {
+      searchableList.value = []
+    }
+  } catch (e) {
+    searchableList.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+function doSearchSearchableDebounced() {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => doSearchSearchable(), 300)
+}
+
+// 预览搜索到的空间（转换为预览格式）
+function previewSearchableOrg(org: SearchableOrganizationItem) {
+  // 将 SearchableOrganizationItem 转换为 OrganizationPreview 格式
+  invitePreviewData.value = {
+    id: org.id,
+    name: org.name,
+    description: org.description,
+    avatar: org.avatar,
+    member_count: org.member_count,
+    share_count: org.share_count,
+    is_already_member: org.is_already_member,
+    require_approval: org.require_approval,
+    created_at: '', // 搜索列表中没有创建时间，使用空字符串
+  }
+  // 清空邀请码，因为这是通过搜索加入的
+  inviteCode.value = ''
+}
+
+// 查看搜索到的空间（已是成员时，打开空间设置）
+function viewSearchableOrg(org: SearchableOrganizationItem) {
+  // 关闭加入弹框
+  closeInvitePreview()
+  // 打开空间设置弹框
+  settingsOrgId.value = org.id
+  settingsMode.value = 'edit'
+  showSettingsModal.value = true
+}
+
+// 从预览弹框中查看空间（已是成员时）
+function viewOrganizationFromPreview() {
+  if (!invitePreviewData.value) return
+  // 关闭加入弹框
+  closeInvitePreview()
+  // 打开空间设置弹框
+  settingsOrgId.value = invitePreviewData.value.id
+  settingsMode.value = 'edit'
+  showSettingsModal.value = true
+}
+
+// 从搜索列表加入空间（通过空间 ID，无需邀请码）- 在预览确认后调用
+async function joinBySearchOrg() {
+  if (!invitePreviewData.value || invitePreviewData.value.is_already_member) return
+  
+  inviteJoining.value = true
+  try {
+    // 如果需要审核，传递角色和消息；否则直接加入
+    const message = invitePreviewData.value.require_approval ? inviteRequestMessage.value?.trim() || undefined : undefined
+    const role = invitePreviewData.value.require_approval ? inviteRequestRole.value : undefined
+    const result = await joinOrganizationById(invitePreviewData.value.id, message, role)
+    if (result.success) {
+      if (invitePreviewData.value.require_approval) {
+        MessagePlugin.success(t('organization.invite.requestSubmitted'))
+      } else {
+        MessagePlugin.success(t('organization.invite.joinSuccess'))
+        orgStore.fetchOrganizations()
+      }
+      showInvitePreview.value = false
+      invitePreviewData.value = null
+      searchableList.value = []
+      searchQuery.value = ''
+      joinStep.value = 'invite'
+      inviteRequestRole.value = 'viewer'
+      inviteRequestMessage.value = ''
+    } else {
+      MessagePlugin.error(result.message || t('organization.invite.joinFailed'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('organization.invite.joinFailed'))
+  } finally {
+    inviteJoining.value = false
+  }
 }
 
 // Lifecycle
@@ -1322,19 +1577,16 @@ onUnmounted(() => {
   }
 }
 
-// 邀请预览弹框（与设置弹框风格一致）
+// 邀请预览弹框 - 参考 FAQ 导入弹窗风格，更紧凑
 .invite-preview-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
+  z-index: 2000;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
-  padding: 24px;
+  padding: 20px;
   backdrop-filter: blur(4px);
 }
 
@@ -1343,72 +1595,275 @@ onUnmounted(() => {
   width: 100%;
   max-width: 480px;
   max-height: 90vh;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.15);
 }
 
 .invite-preview-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 28px 16px;
-  border-bottom: 1px solid #e5e6eb;
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid #e5e5e5;
   flex-shrink: 0;
 }
 
 .invite-preview-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #1f2937;
   margin: 0;
   font-family: "PingFang SC";
-  line-height: 1.3;
+  font-size: 16px;
+  font-weight: 600;
+  color: #000000e6;
 }
 
 .invite-preview-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
   width: 32px;
   height: 32px;
+  border: none;
+  background: #f5f5f5;
+  border-radius: 6px;
+  cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  background: transparent;
-  color: #86909c;
-  cursor: pointer;
-  border-radius: 6px;
-  flex-shrink: 0;
-  transition: color 0.2s, background 0.2s;
+  color: #666;
+  transition: all 0.2s ease;
+  z-index: 10;
 
   &:hover {
-    color: #1f2937;
-    background: #f2f3f5;
+    background: #e5e5e5;
+    color: #000;
   }
 }
 
 .invite-preview-body {
-  padding: 32px 28px 24px;
+  flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px;
+  min-height: 0;
+  max-height: calc(90vh - 140px);
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #f5f5f5;
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #d0d0d0;
+    border-radius: 3px;
+    transition: background 0.2s;
+
+    &:hover {
+      background: #07C05F;
+    }
+  }
+}
+
+.join-modal-tabs {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e5e5e5;
+
+  .join-tab {
+    padding: 8px 0;
+    cursor: pointer;
+    color: #00000099;
+    font-size: 14px;
+    font-weight: 400;
+    user-select: none;
+    position: relative;
+    transition: color 0.2s ease;
+    font-family: "PingFang SC";
+
+    &:hover {
+      color: #000000e6;
+    }
+
+    &.active {
+      color: #07c05f;
+      font-weight: 500;
+
+      &::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: #07c05f;
+        border-radius: 1px;
+      }
+    }
+  }
+}
+
+// Tab 内容容器 - 平滑高度过渡
+.join-tab-content-wrapper {
+  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.join-tab-content {
+  width: 100%;
+}
+
+.search-input-wrap {
+  margin-bottom: 12px;
+}
+
+.searchable-list-wrap {
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  background: #fafafa;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #f5f5f5;
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: #d0d0d0;
+    border-radius: 3px;
+    transition: background 0.2s;
+
+    &:hover {
+      background: #07C05F;
+    }
+  }
+}
+
+.searchable-empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: #00000066;
+  font-size: 14px;
+  font-family: "PingFang SC";
+}
+
+.searchable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+
+  .searchable-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e5e5;
+    background: #fff;
+    transition: background 0.2s;
+    cursor: pointer;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    &:hover:not(.is-already-member) {
+      background: #f5f5f5;
+    }
+
+    &.is-already-member {
+      cursor: default;
+      opacity: 0.6;
+    }
+
+    .searchable-item-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .searchable-item-avatar {
+      flex-shrink: 0;
+    }
+
+    .searchable-item-info {
+      flex: 1;
+      min-width: 0;
+
+      .searchable-item-name {
+        display: block;
+        font-size: 14px;
+        font-weight: 500;
+        color: #000000e6;
+        margin-bottom: 4px;
+        font-family: "PingFang SC";
+      }
+
+      .searchable-item-desc {
+        display: block;
+        font-size: 13px;
+        color: #00000066;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-bottom: 8px;
+        font-family: "PingFang SC";
+      }
+
+      .searchable-item-badges {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+
+        .badge {
+          font-size: 12px;
+          color: #00000066;
+          font-family: "PingFang SC";
+        }
+
+        .approval-tag {
+          flex-shrink: 0;
+        }
+      }
+    }
+
+    .searchable-item-action {
+      flex-shrink: 0;
+    }
+  }
 }
 
 .invite-preview-input {
   .invite-preview-input-desc {
     font-size: 14px;
-    color: #4e5969;
-    margin: 0 0 20px;
+    color: #333333;
+    margin: 0 0 16px;
     line-height: 1.5;
     font-family: "PingFang SC";
   }
   .invite-preview-input-wrap {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
   .invite-preview-input-tip {
     font-size: 12px;
-    color: #86909c;
-    margin: 0 0 24px;
+    color: #00000066;
+    margin: 0 0 20px;
     line-height: 1.4;
     font-family: "PingFang SC";
   }
@@ -1416,23 +1871,16 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #e34d59;
+    color: #FA5151;
     font-size: 13px;
     margin-bottom: 16px;
     font-family: "PingFang SC";
   }
   .invite-preview-footer-single {
-    margin: 24px 0 0;
+    margin: 20px 0 0;
     padding: 0;
     border-top: none;
     background: transparent;
-
-    :deep(.t-button) {
-      font-size: 14px;
-      font-family: "PingFang SC";
-      min-height: 32px;
-      padding: 0 16px;
-    }
   }
 }
 
@@ -1480,230 +1928,189 @@ onUnmounted(() => {
   }
 }
 
-.invite-preview-section {
-  .invite-preview-org {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    margin-bottom: 24px;
-    padding-bottom: 24px;
-    border-bottom: 1px solid #e5e6eb;
-  }
+// 预览内容区域 - 紧凑布局
+.invite-preview-org {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
 
-  .invite-preview-org-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
+.invite-preview-org-icon {
+  flex-shrink: 0;
+}
 
-  .invite-preview-org-info {
-    flex: 1;
-    min-width: 0;
-  }
+.invite-preview-org-info {
+  flex: 1;
+  min-width: 0;
+}
 
-  .invite-preview-org-name {
-    font-size: 20px;
-    font-weight: 600;
-    color: #1f2937;
-    margin: 0 0 6px;
-    font-family: "PingFang SC";
-    line-height: 1.3;
-  }
+.invite-preview-org-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #000000e6;
+  margin: 0 0 6px;
+  font-family: "PingFang SC";
+  line-height: 1.3;
+}
 
-  .invite-preview-org-desc {
-    font-size: 14px;
-    color: #86909c;
-    margin: 0;
-    line-height: 1.5;
-    font-family: "PingFang SC";
-  }
+.invite-preview-org-desc {
+  font-size: 14px;
+  color: #00000066;
+  margin: 0;
+  line-height: 1.5;
+  font-family: "PingFang SC";
+}
 
-  .invite-preview-section-header {
-    margin-bottom: 12px;
-  }
+.invite-preview-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #e5e5e5;
+}
 
-  .invite-preview-section-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: #1f2937;
-    margin: 0;
-    font-family: "PingFang SC";
-  }
-
-  .invite-preview-stats {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-
-  .invite-preview-stat {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 16px;
-    background: #f7f8fa;
-    border-radius: 10px;
-    border: 1px solid #e5e6eb;
-  }
+.invite-preview-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #333333;
+  font-family: "PingFang SC";
 
   .invite-preview-stat-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    background: rgba(7, 192, 95, 0.1);
     color: #07c05f;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .invite-preview-stat-content {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    font-size: 16px;
   }
 
   .invite-preview-stat-value {
-    font-size: 18px;
     font-weight: 600;
-    color: #1f2937;
-    font-family: "PingFang SC";
-    line-height: 1.2;
+    color: #000000e6;
   }
 
   .invite-preview-stat-label {
+    color: #00000066;
+    font-weight: 400;
+  }
+}
+
+.invite-preview-join-section,
+.invite-preview-status-section {
+  margin-top: 20px;
+}
+
+.invite-preview-approval-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-family: "PingFang SC";
+
+  .invite-preview-approval-label {
+    color: #333333;
+    flex-shrink: 0;
+    font-weight: 500;
+  }
+
+  .invite-preview-approval-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
     font-size: 12px;
-    color: #86909c;
-    font-family: "PingFang SC";
-  }
+    font-weight: 500;
 
-  .invite-preview-tip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 14px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-family: "PingFang SC";
-
-    .t-icon {
-      flex-shrink: 0;
-    }
-  }
-
-  .invite-preview-tip-success {
-    background: rgba(7, 192, 95, 0.08);
-    color: #07c05f;
-  }
-
-  .invite-preview-tip-warning {
-    background: rgba(250, 173, 20, 0.08);
-    color: #d48806;
-  }
-
-  .invite-preview-tip-info {
-    background: rgba(0, 112, 240, 0.08);
-    color: #0052d9;
-  }
-
-  .invite-preview-approval-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
-    font-size: 14px;
-    font-family: "PingFang SC";
-
-    .invite-preview-approval-label {
-      color: #4e5969;
-      flex-shrink: 0;
+    &.need-approval {
+      background: rgba(250, 173, 20, 0.12);
+      color: #d48806;
     }
 
-    .invite-preview-approval-value {
-      font-weight: 500;
-
-      &.need-approval {
-        color: #d48806;
-      }
-
-      &.no-approval {
-        color: #07c05f;
-      }
+    &.no-approval {
+      background: rgba(7, 192, 95, 0.12);
+      color: #07c05f;
     }
   }
 }
 
-.invite-preview-apply-options {
+.invite-preview-tip {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 12px;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: "PingFang SC";
+  margin-bottom: 16px;
 
-  .invite-preview-role-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .t-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+}
 
-    .invite-preview-role-label {
-      flex-shrink: 0;
-      font-size: 14px;
-      color: #4e5969;
-    }
-    .invite-preview-role-select {
-      min-width: 140px;
-    }
+.invite-preview-tip-success {
+  background: rgba(7, 192, 95, 0.08);
+  color: #07c05f;
+}
+
+.invite-preview-tip-warning {
+  background: rgba(250, 173, 20, 0.08);
+  color: #d48806;
+}
+
+.invite-preview-tip-info {
+  background: rgba(0, 112, 240, 0.06);
+  color: #0052d9;
+}
+
+.invite-preview-form-group {
+  margin-bottom: 20px;
+
+  &:last-child {
+    margin-bottom: 0;
   }
-  .invite-preview-message-row {
-    .invite-preview-message-input {
-      width: 100%;
-    }
-  }
+}
+
+.invite-preview-form-label {
+  display: block;
+  margin-bottom: 8px;
+  font-family: "PingFang SC";
+  font-size: 14px;
+  font-weight: 500;
+  color: #333333;
+  letter-spacing: -0.2px;
+}
+
+.invite-preview-role-select {
+  width: 100%;
+  max-width: 180px;
+}
+
+.invite-preview-message-input {
+  width: 100%;
 }
 
 .invite-preview-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e5e5e5;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 16px 28px 24px;
-  border-top: 1px solid #e5e6eb;
-  background: #fff;
+  gap: 12px;
   flex-shrink: 0;
-
-  :deep(.t-button) {
-    font-size: 14px;
-    font-family: "PingFang SC";
-    min-height: 32px;
-    padding: 0 16px;
-  }
-
-  .t-button--theme-primary {
-    background-color: #07c05f;
-    border-color: #07c05f;
-
-    &:hover {
-      background-color: #05a550;
-      border-color: #05a550;
-    }
-  }
 }
 
 .modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.2s ease;
+  transition: all 0.3s ease;
 }
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
-}
-.modal-enter-active .invite-preview-modal,
-.modal-leave-active .invite-preview-modal {
-  transition: transform 0.2s ease;
-}
-.modal-enter-from .invite-preview-modal,
-.modal-leave-to .invite-preview-modal {
-  transform: scale(0.96);
+
+  .invite-preview-modal {
+    transform: scale(0.95);
+  }
 }
 </style>

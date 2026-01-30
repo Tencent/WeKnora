@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -514,6 +515,90 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	})
 }
 
+// SearchOrganizations returns searchable (discoverable) organizations
+// @Summary      搜索可加入的空间
+// @Description  搜索已开放可被搜索的空间，用于发现并加入
+// @Tags         组织管理
+// @Produce      json
+// @Param        q      query  string  false  "搜索关键词（空间名称或描述）"
+// @Param        limit  query  int     false  "返回数量限制" default(20)
+// @Success      200    {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /organizations/search [get]
+func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	query := c.Query("q")
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	resp, err := h.orgService.SearchSearchableOrganizations(ctx, userID.(string), query, limit)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to search organizations: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to search organizations"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    resp.Organizations,
+		"total":   resp.Total,
+	})
+}
+
+// JoinByOrganizationID joins a searchable organization by ID (no invite code)
+// @Summary      通过空间 ID 加入（可搜索空间）
+// @Description  加入已开放可被搜索的空间，无需邀请码
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.JoinByOrganizationIDRequest  true  "空间 ID"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      403      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/join-by-id [post]
+func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	var req types.JoinByOrganizationIDRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	// Validate requested role if provided
+	requestedRole := req.Role
+	if requestedRole != "" && !requestedRole.IsValid() {
+		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		return
+	}
+	org, err := h.orgService.JoinByOrganizationID(ctx, req.OrganizationID, userID.(string), tenantID.(uint64), req.Message, requestedRole)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to join organization by ID: %v", err)
+		if errors.Is(err, service.ErrOrgNotFound) {
+			c.Error(apperrors.NewNotFoundError("Organization not found or not open for search"))
+			return
+		}
+		if errors.Is(err, service.ErrOrgPermissionDenied) {
+			c.Error(apperrors.NewForbiddenError("Organization not open for search"))
+			return
+		}
+		if errors.Is(err, service.ErrInvalidRole) {
+			c.Error(apperrors.NewValidationError("Invalid role"))
+			return
+		}
+		c.Error(apperrors.NewInternalServerError("Failed to join organization"))
+		return
+	}
+	logger.Infof(ctx, "User %s joined organization %s by ID", secutils.SanitizeForLog(userID.(string)), org.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+	})
+}
+
 // RequestRoleUpgrade submits a request to upgrade role in an organization
 // @Summary      申请权限升级
 // @Description  现有成员申请更高权限
@@ -1007,6 +1092,7 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 		OwnerID:                org.OwnerID,
 		IsOwner:                org.OwnerID == currentUserID,
 		RequireApproval:        org.RequireApproval,
+		Searchable:             org.Searchable,
 		InviteCodeValidityDays: org.InviteCodeValidityDays,
 		CreatedAt:              org.CreatedAt,
 		UpdatedAt:              org.UpdatedAt,

@@ -170,6 +170,9 @@ func (s *organizationService) UpdateOrganization(ctx context.Context, id string,
 	if req.RequireApproval != nil {
 		org.RequireApproval = *req.RequireApproval
 	}
+	if req.Searchable != nil {
+		org.Searchable = *req.Searchable
+	}
 	if req.InviteCodeValidityDays != nil {
 		if !ValidInviteCodeValidityDays[*req.InviteCodeValidityDays] {
 			return nil, ErrInvalidValidityDays
@@ -182,6 +185,85 @@ func (s *organizationService) UpdateOrganization(ctx context.Context, id string,
 		return nil, err
 	}
 
+	return org, nil
+}
+
+// SearchSearchableOrganizations returns searchable (discoverable) organizations for the current user
+func (s *organizationService) SearchSearchableOrganizations(ctx context.Context, userID string, query string, limit int) (*types.ListSearchableOrganizationsResponse, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	orgs, err := s.orgRepo.ListSearchable(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	memberCounts := make(map[string]int64)
+	shareCounts := make(map[string]int64)
+	memberOrgIDs := make(map[string]bool)
+	for _, org := range orgs {
+		if mc, err := s.orgRepo.CountMembers(ctx, org.ID); err == nil {
+			memberCounts[org.ID] = mc
+		}
+		shares, _ := s.shareRepo.ListByOrganization(ctx, org.ID)
+		shareCounts[org.ID] = int64(len(shares))
+		_, err := s.orgRepo.GetMember(ctx, org.ID, userID)
+		memberOrgIDs[org.ID] = (err == nil)
+	}
+	items := make([]types.SearchableOrganizationItem, 0, len(orgs))
+	for _, org := range orgs {
+		items = append(items, types.SearchableOrganizationItem{
+			ID:               org.ID,
+			Name:             org.Name,
+			Description:      org.Description,
+			Avatar:           org.Avatar,
+			MemberCount:      int(memberCounts[org.ID]),
+			ShareCount:       int(shareCounts[org.ID]),
+			IsAlreadyMember:  memberOrgIDs[org.ID],
+			RequireApproval:   org.RequireApproval,
+		})
+	}
+	return &types.ListSearchableOrganizationsResponse{
+		Organizations: items,
+		Total:         int64(len(items)),
+	}, nil
+}
+
+// JoinByOrganizationID joins a searchable organization by ID (no invite code required)
+func (s *organizationService) JoinByOrganizationID(ctx context.Context, orgID string, userID string, tenantID uint64, message string, requestedRole types.OrgMemberRole) (*types.Organization, error) {
+	org, err := s.orgRepo.GetByID(ctx, orgID)
+	if err != nil {
+		if errors.Is(err, repository.ErrOrganizationNotFound) {
+			return nil, ErrOrgNotFound
+		}
+		return nil, err
+	}
+	if !org.Searchable {
+		return nil, ErrOrgPermissionDenied // or a dedicated "org not discoverable" error
+	}
+	_, err = s.orgRepo.GetMember(ctx, orgID, userID)
+	if err == nil {
+		return org, nil // already member
+	}
+	// Validate requested role if provided
+	if requestedRole != "" && !requestedRole.IsValid() {
+		return nil, ErrInvalidRole
+	}
+	// Default to viewer if not specified
+	if requestedRole == "" {
+		requestedRole = types.OrgRoleViewer
+	}
+	if org.RequireApproval {
+		_, err = s.SubmitJoinRequest(ctx, orgID, userID, tenantID, message, requestedRole)
+		if err != nil {
+			return nil, err
+		}
+		return org, nil
+	}
+	// Direct join using invite code flow logic (add member)
+	_, err = s.JoinByInviteCode(ctx, org.InviteCode, userID, tenantID)
+	if err != nil {
+		return nil, err
+	}
 	return org, nil
 }
 

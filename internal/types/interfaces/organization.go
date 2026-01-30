@@ -27,6 +27,9 @@ type OrganizationService interface {
 	// Invite Code
 	GenerateInviteCode(ctx context.Context, orgID string, userID string) (string, error)
 	JoinByInviteCode(ctx context.Context, inviteCode string, userID string, tenantID uint64) (*types.Organization, error)
+	// Searchable organizations (discovery)
+	SearchSearchableOrganizations(ctx context.Context, userID string, query string, limit int) (*types.ListSearchableOrganizationsResponse, error)
+	JoinByOrganizationID(ctx context.Context, orgID string, userID string, tenantID uint64, message string, requestedRole types.OrgMemberRole) (*types.Organization, error)
 
 	// Join Requests (for organizations that require approval)
 	SubmitJoinRequest(ctx context.Context, orgID string, userID string, tenantID uint64, message string, requestedRole types.OrgMemberRole) (*types.OrganizationJoinRequest, error)
@@ -50,6 +53,7 @@ type OrganizationRepository interface {
 	GetByID(ctx context.Context, id string) (*types.Organization, error)
 	GetByInviteCode(ctx context.Context, inviteCode string) (*types.Organization, error)
 	ListByUserID(ctx context.Context, userID string) ([]*types.Organization, error)
+	ListSearchable(ctx context.Context, query string, limit int) ([]*types.Organization, error)
 	Update(ctx context.Context, org *types.Organization) error
 	Delete(ctx context.Context, id string) error
 

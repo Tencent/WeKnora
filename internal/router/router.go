@@ -468,6 +468,10 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.POST("/join", orgHandler.JoinByInviteCode)
 		// Submit join request (for organizations that require approval)
 		orgs.POST("/join-request", orgHandler.SubmitJoinRequest)
+		// Search searchable (discoverable) organizations
+		orgs.GET("/search", orgHandler.SearchOrganizations)
+		// Join searchable organization by ID (no invite code)
+		orgs.POST("/join-by-id", orgHandler.JoinByOrganizationID)
 		// Get organization by ID
 		orgs.GET("/:id", orgHandler.GetOrganization)
 		// Update organization

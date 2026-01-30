@@ -162,6 +162,23 @@
                               <span class="approval-desc">{{ $t('organization.settings.requireApprovalDesc') }}</span>
                             </div>
                           </div>
+                          
+                          <div class="invite-divider"></div>
+                          
+                          <!-- 开放可被搜索 -->
+                          <div class="invite-method">
+                            <div class="invite-method-header">
+                              <t-icon name="search" class="invite-icon" />
+                              <span class="invite-method-title">{{ $t('organization.settings.searchable') }}</span>
+                            </div>
+                            <div class="approval-toggle">
+                              <t-switch 
+                                v-model="formData.searchable" 
+                                @change="handleSearchableToggle"
+                              />
+                              <span class="approval-desc">{{ $t('organization.settings.searchableDesc') }}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -655,6 +672,7 @@ const formData = ref({
   name: '',
   description: '',
   require_approval: false,
+  searchable: false,
   invite_code_validity_days: 7 as number
 })
 
@@ -780,6 +798,7 @@ const fetchOrgDetail = async () => {
         name: res.data.name,
         description: res.data.description || '',
         require_approval: res.data.require_approval || false,
+        searchable: res.data.searchable || false,
         invite_code_validity_days: typeof validity === 'number' ? validity : 7
       }
       inviteCode.value = res.data.invite_code || ''
@@ -929,6 +948,7 @@ const handleSave = async () => {
         name: formData.value.name.trim(),
         description: formData.value.description.trim(),
         require_approval: formData.value.require_approval,
+        searchable: formData.value.searchable,
         invite_code_validity_days: formData.value.invite_code_validity_days
       })
       if (res.success) {
@@ -1139,6 +1159,25 @@ const handleApprovalToggle = async (value: boolean) => {
   }
 }
 
+// 切换开放可被搜索时立即保存
+const handleSearchableToggle = async (value: boolean) => {
+  if (!props.orgId) return
+  try {
+    const res = await updateOrganization(props.orgId, {
+      searchable: value
+    })
+    if (res.success) {
+      MessagePlugin.success(t('common.saveSuccess'))
+    } else {
+      formData.value.searchable = !value
+      MessagePlugin.error(res.message || t('common.saveFailed'))
+    }
+  } catch (error: any) {
+    formData.value.searchable = !value
+    MessagePlugin.error(error?.message || t('common.saveFailed'))
+  }
+}
+
 const handleShareClick = (share: KnowledgeBaseShare) => {
   handleClose()
   router.push(`/platform/knowledge-bases/${share.knowledge_base_id}`)
@@ -1194,7 +1233,7 @@ watch(() => props.visible, (newVal) => {
     joinRequests.value = []
     if (props.mode === 'create') {
       // 创建模式：重置表单
-      formData.value = { name: '', description: '', require_approval: false, invite_code_validity_days: 7 }
+      formData.value = { name: '', description: '', require_approval: false, searchable: false, invite_code_validity_days: 7 }
       orgInfo.value = null
       members.value = []
       sharedKnowledgeBases.value = []

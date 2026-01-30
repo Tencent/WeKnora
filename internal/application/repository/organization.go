@@ -77,10 +77,28 @@ func (r *organizationRepository) ListByUserID(ctx context.Context, userID string
 	return orgs, nil
 }
 
+// ListSearchable lists organizations that are searchable (open for discovery), optionally filtered by name/description
+func (r *organizationRepository) ListSearchable(ctx context.Context, query string, limit int) ([]*types.Organization, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var orgs []*types.Organization
+	q := r.db.WithContext(ctx).Where("searchable = ?", true)
+	if query != "" {
+		pattern := "%" + query + "%"
+		q = q.Where("name ILIKE ? OR description ILIKE ?", pattern, pattern)
+	}
+	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
+	if err != nil {
+		return nil, err
+	}
+	return orgs, nil
+}
+
 // Update updates an organization (Select ensures zero values like invite_code_validity_days=0 are persisted)
 func (r *organizationRepository) Update(ctx context.Context, org *types.Organization) error {
 	return r.db.WithContext(ctx).Model(&types.Organization{}).Where("id = ?", org.ID).
-		Select("name", "description", "require_approval", "invite_code_validity_days", "updated_at").
+		Select("name", "description", "require_approval", "searchable", "invite_code_validity_days", "updated_at").
 		Updates(org).Error
 }
 
