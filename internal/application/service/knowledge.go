@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 	"regexp"
 	"runtime"
 	"slices"
@@ -6253,13 +6254,30 @@ func (s *knowledgeService) getVLMProtoConfig(ctx context.Context, kb *types.Know
 	}
 
 	interfaceType := model.Parameters.InterfaceType
+	baseURL := model.Parameters.BaseURL
+
+	// 本地模型（Ollama）：如果 BaseURL 为空，从环境变量获取
+	if model.Source == types.ModelSourceLocal && baseURL == "" {
+		baseURL = os.Getenv("OLLAMA_BASE_URL")
+		if baseURL == "" {
+			baseURL = "http://localhost:11434"
+			logger.GetLogger(ctx).Warn("OLLAMA_BASE_URL not set, using default http://localhost:11434 for VLM")
+			//return nil, fmt.Errorf("OLLAMA_BASE_URL environment variable is required for local VLM model %s", model.Name)
+		}
+		interfaceType = "ollama"
+		logger.GetLogger(ctx).WithField("model_id", model.ID).
+			WithField("model_name", model.Name).
+			WithField("base_url", baseURL).
+			Info("Using OLLAMA_BASE_URL for local VLM model")
+	}
+
 	if interfaceType == "" {
 		interfaceType = "openai"
 	}
 
 	return &proto.VLMConfig{
 		ModelName:     model.Name,
-		BaseUrl:       model.Parameters.BaseURL,
+		BaseUrl:       baseURL,
 		ApiKey:        model.Parameters.APIKey,
 		InterfaceType: interfaceType,
 	}, nil
