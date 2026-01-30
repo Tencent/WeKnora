@@ -1078,19 +1078,9 @@ export default {
     menu: {
       viewDetails: 'View Details',
     },
-    detail: {
-      sourceOrg: 'Source Space',
-      role: 'My Permission',
-      sharedAt: 'Shared At',
-    },
     messages: {
       deleted: 'Knowledge base deleted',
       deleteFailed: 'Failed to delete knowledge base'
-    },
-    features: {
-      knowledgeGraph: 'Knowledge Graph Enabled',
-      multimodal: 'Multimodal Enabled',
-      questionGeneration: 'Question Generation Enabled'
     },
     detail: {
       title: 'Shared Knowledge Base',

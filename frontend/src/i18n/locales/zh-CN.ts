@@ -1500,11 +1500,6 @@ export default {
       knowledgeBase: "知识库",
       noResult: "无结果",
     },
-    features: {
-      knowledgeGraph: "已启用知识图谱",
-      multimodal: "已启用多模态",
-      questionGeneration: "已启用问题生成",
-    },
     processing: "正在处理导入任务",
     processingDocuments: "正在处理 {count} 个文档",
     stats: {
