@@ -2373,9 +2373,12 @@ export default {
       byInviteCode: 'Enter invite code',
       searchSpaces: 'Search spaces',
       searchSpacesDesc: 'Browse or search spaces that are open for discovery; join without an invite code',
-      searchSpacesPlaceholder: 'Search by space name or description',
+      searchSpacesPlaceholder: 'Search by space name, description or space ID',
+      spaceId: 'Space ID',
       noSearchResult: 'No matching spaces',
       noSearchableSpaces: 'No discoverable spaces yet, or try a search',
+      membersWithLimit: '{current}/{limit} members',
+      memberLimitReached: 'Full',
     },
     invite: {
       loading: 'Loading...',

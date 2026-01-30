@@ -352,12 +352,13 @@ type ListOrganizationsResponse struct {
 type SearchableOrganizationItem struct {
 	ID               string `json:"id"`
 	Name             string `json:"name"`
-	Description       string `json:"description"`
-	Avatar            string `json:"avatar,omitempty"`
-	MemberCount       int    `json:"member_count"`
-	ShareCount        int    `json:"share_count"`
-	IsAlreadyMember   bool   `json:"is_already_member"`
-	RequireApproval   bool   `json:"require_approval"`
+	Description      string `json:"description"`
+	Avatar           string `json:"avatar,omitempty"`
+	MemberCount      int    `json:"member_count"`
+	MemberLimit      int    `json:"member_limit"` // 0 = unlimited
+	ShareCount       int    `json:"share_count"`
+	IsAlreadyMember  bool   `json:"is_already_member"`
+	RequireApproval  bool   `json:"require_approval"`
 }
 
 // ListSearchableOrganizationsResponse is the response for searching discoverable organizations

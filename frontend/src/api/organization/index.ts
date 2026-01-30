@@ -92,6 +92,7 @@ export interface SearchableOrganizationItem {
   description: string
   avatar?: string
   member_count: number
+  member_limit: number // 0 = unlimited
   share_count: number
   is_already_member: boolean
   require_approval: boolean

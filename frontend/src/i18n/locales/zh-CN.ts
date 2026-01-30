@@ -2378,9 +2378,12 @@ export default {
       byInviteCode: "输入邀请码",
       searchSpaces: "搜索空间",
       searchSpacesDesc: "浏览或搜索已开放可被搜索的空间，无需邀请码即可加入",
-      searchSpacesPlaceholder: "按空间名称或描述搜索",
+      searchSpacesPlaceholder: "按空间名称、描述或空间ID搜索",
+      spaceId: "空间ID",
       noSearchResult: "未找到匹配的空间",
       noSearchableSpaces: "暂无开放可被搜索的空间，或输入关键词搜索",
+      membersWithLimit: "{current}/{limit} 成员",
+      memberLimitReached: "成员已满",
     },
     invite: {
       loading: "加载中...",

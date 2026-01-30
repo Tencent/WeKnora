@@ -77,7 +77,7 @@ func (r *organizationRepository) ListByUserID(ctx context.Context, userID string
 	return orgs, nil
 }
 
-// ListSearchable lists organizations that are searchable (open for discovery), optionally filtered by name/description
+// ListSearchable lists organizations that are searchable (open for discovery), optionally filtered by name/description/ID
 func (r *organizationRepository) ListSearchable(ctx context.Context, query string, limit int) ([]*types.Organization, error) {
 	if limit <= 0 {
 		limit = 20
@@ -86,7 +86,8 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 	q := r.db.WithContext(ctx).Where("searchable = ?", true)
 	if query != "" {
 		pattern := "%" + query + "%"
-		q = q.Where("name ILIKE ? OR description ILIKE ?", pattern, pattern)
+		// 支持按名称、描述或空间 ID 搜索，便于区分同名空间
+		q = q.Where("name ILIKE ? OR description ILIKE ? OR id::text ILIKE ?", pattern, pattern, pattern)
 	}
 	err := q.Order("created_at DESC").Limit(limit).Find(&orgs).Error
 	if err != nil {

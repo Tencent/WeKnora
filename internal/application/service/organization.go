@@ -245,9 +245,10 @@ func (s *organizationService) SearchSearchableOrganizations(ctx context.Context,
 			Description:      org.Description,
 			Avatar:           org.Avatar,
 			MemberCount:      int(memberCounts[org.ID]),
+			MemberLimit:      org.MemberLimit,
 			ShareCount:       int(shareCounts[org.ID]),
 			IsAlreadyMember:  memberOrgIDs[org.ID],
-			RequireApproval:   org.RequireApproval,
+			RequireApproval:  org.RequireApproval,
 		})
 	}
 	return &types.ListSearchableOrganizationsResponse{
