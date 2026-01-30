@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,50 +19,156 @@ import (
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
-	kgService interfaces.KnowledgeService
-	kbService interfaces.KnowledgeBaseService
+	kgService      interfaces.KnowledgeService
+	kbService      interfaces.KnowledgeBaseService
+	kbShareService interfaces.KBShareService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
 func NewKnowledgeHandler(
 	kgService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
+	kbShareService interfaces.KBShareService,
 ) *KnowledgeHandler {
-	return &KnowledgeHandler{kgService: kgService, kbService: kbService}
+	return &KnowledgeHandler{
+		kgService:      kgService,
+		kbService:      kbService,
+		kbShareService: kbShareService,
+	}
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
-// Returns the knowledge base, the knowledge base ID, and any errors encountered
-func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.KnowledgeBase, string, error) {
+// Returns the knowledge base, the knowledge base ID, effective tenant ID, permission level, and any errors encountered
+// For owned KBs, effectiveTenantID is the caller's tenant ID
+// For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
+func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
 	ctx := c.Request.Context()
+
+	// Get tenant ID from context
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		logger.Error(ctx, "Failed to get tenant ID")
+		return nil, "", 0, "", errors.NewUnauthorizedError("Unauthorized")
+	}
+
+	// Get user ID from context (needed for shared KB permission check)
+	userID, userExists := c.Get(types.UserIDContextKey.String())
 
 	// Get knowledge base ID from URL path parameter
 	kbID := secutils.SanitizeForLog(c.Param("id"))
 	if kbID == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
-		return nil, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
+		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
 	}
 
 	// Get knowledge base details
 	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		return nil, kbID, errors.NewInternalServerError(err.Error())
+		return nil, kbID, 0, "", errors.NewInternalServerError(err.Error())
 	}
 
-	// Verify tenant permissions
-	if kb.TenantID != c.GetUint64(types.TenantIDContextKey.String()) {
-		logger.Warnf(
-			ctx,
-			"Permission denied to access this knowledge base, tenant ID mismatch, "+
-				"requested tenant ID: %d, knowledge base tenant ID: %d",
-			c.GetUint64(types.TenantIDContextKey.String()),
-			kb.TenantID,
-		)
-		return nil, kbID, errors.NewForbiddenError("Permission denied to access this knowledge base")
+	// Check 1: Verify tenant ownership (owner has full access)
+	if kb.TenantID == tenantID {
+		return kb, kbID, tenantID, types.OrgRoleAdmin, nil
 	}
 
-	return kb, kbID, nil
+	// Check 2: If not owner, check organization shared access
+	if userExists && h.kbShareService != nil {
+		// Check if user has shared access through organization
+		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
+		if permErr == nil && isShared {
+			// User has shared access, get the source tenant ID for queries
+			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
+			if srcErr == nil {
+				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
+					userID.(string), kbID, permission, sourceTenantID)
+				return kb, kbID, sourceTenantID, permission, nil
+			}
+		}
+	}
+
+	// No permission: not owner and no shared access
+	logger.Warnf(
+		ctx,
+		"Permission denied to access this knowledge base, tenant ID mismatch, "+
+			"requested tenant ID: %d, knowledge base tenant ID: %d",
+		tenantID,
+		kb.TenantID,
+	)
+	return nil, kbID, 0, "", errors.NewForbiddenError("Permission denied to access this knowledge base")
+}
+
+// validateKnowledgeBaseAccessWithKBID validates access to the given knowledge base ID (e.g. from query or body).
+// Returns the knowledge base, kbID, effective tenant ID, permission, and error.
+func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, kbID string) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
+	ctx := c.Request.Context()
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		logger.Error(ctx, "Failed to get tenant ID")
+		return nil, "", 0, "", errors.NewUnauthorizedError("Unauthorized")
+	}
+	userID, userExists := c.Get(types.UserIDContextKey.String())
+	kbID = secutils.SanitizeForLog(kbID)
+	if kbID == "" {
+		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
+	}
+	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		return nil, kbID, 0, "", errors.NewInternalServerError(err.Error())
+	}
+	if kb.TenantID == tenantID {
+		return kb, kbID, tenantID, types.OrgRoleAdmin, nil
+	}
+	if userExists && h.kbShareService != nil {
+		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
+		if permErr == nil && isShared {
+			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
+			if srcErr == nil {
+				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
+					userID.(string), kbID, permission, sourceTenantID)
+				return kb, kbID, sourceTenantID, permission, nil
+			}
+		}
+	}
+	logger.Warnf(ctx, "Permission denied to access KB %s, tenant ID: %d, KB tenant: %d", kbID, tenantID, kb.TenantID)
+	return nil, kbID, 0, "", errors.NewForbiddenError("Permission denied to access this knowledge base")
+}
+
+// resolveKnowledgeAndValidateKBAccess resolves knowledge by ID and validates KB access (owner or shared with required permission).
+// Returns the knowledge, context with effectiveTenantID set for downstream service calls, and error.
+func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, knowledgeID string, requiredPermission types.OrgMemberRole) (*types.Knowledge, context.Context, error) {
+	ctx := c.Request.Context()
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		return nil, ctx, errors.NewUnauthorizedError("Unauthorized")
+	}
+	userID, userExists := c.Get(types.UserIDContextKey.String())
+
+	knowledge, err := h.kgService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	if err != nil {
+		return nil, ctx, errors.NewNotFoundError("Knowledge not found")
+	}
+
+	// Owner: knowledge belongs to caller's tenant
+	if knowledge.TenantID == tenantID {
+		return knowledge, context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
+	}
+
+	// Shared KB: check organization permission
+	if !userExists || h.kbShareService == nil {
+		return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+	}
+	permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
+	if permErr != nil || !isShared {
+		return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+	}
+	if !permission.HasPermission(requiredPermission) {
+		return nil, ctx, errors.NewForbiddenError("Insufficient permission for this operation")
+	}
+	effectiveTenantID := knowledge.TenantID
+	return knowledge, context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID), nil
 }
 
 // handleDuplicateKnowledgeError handles cases where duplicate knowledge is detected
@@ -104,10 +211,17 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating knowledge from file")
 
-	// Validate access to the knowledge base
-	_, kbID, err := h.validateKnowledgeBaseAccess(c)
+	// Validate access to the knowledge base (only owner or admin/editor can create)
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// Check write permission
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
 
@@ -217,10 +331,17 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating knowledge from URL")
 
-	// Validate access to the knowledge base
-	_, kbID, err := h.validateKnowledgeBaseAccess(c)
+	// Validate access to the knowledge base (only owner or admin/editor can create)
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// Check write permission
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
 
@@ -286,9 +407,17 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start creating manual knowledge")
 
-	_, kbID, err := h.validateKnowledgeBaseAccess(c)
+	// Validate access to the knowledge base (only owner or admin/editor can create)
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// Check write permission
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
 		return
 	}
 
@@ -338,7 +467,6 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 
 	logger.Info(ctx, "Start retrieving knowledge")
 
-	// Get knowledge ID from URL path parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -346,20 +474,15 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Retrieving knowledge, ID: %s", secutils.SanitizeForLog(id))
-	knowledge, err := h.kgService.GetKnowledgeByID(ctx, id)
+	// Resolve knowledge and validate KB access (at least viewer)
+	knowledge, _, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
 	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(err)
 		return
 	}
 
-	logger.Infof(
-		ctx,
-		"Knowledge retrieved successfully, ID: %s, title: %s",
-		secutils.SanitizeForLog(knowledge.ID),
-		secutils.SanitizeForLog(knowledge.Title),
-	)
+	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, title: %s",
+		secutils.SanitizeForLog(knowledge.ID), secutils.SanitizeForLog(knowledge.Title))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledge,
@@ -388,13 +511,15 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Info(ctx, "Start retrieving knowledge list")
 
-	// Get knowledge base ID from URL path parameter
-	kbID := secutils.SanitizeForLog(c.Param("id"))
-	if kbID == "" {
-		logger.Error(ctx, "Knowledge base ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge base ID cannot be empty"))
+	// Validate access to the knowledge base (read access - any permission level)
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		c.Error(err)
 		return
 	}
+
+	// Update context with effective tenant ID for shared KB access
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
 	// Parse pagination parameters from query string
 	var pagination types.Pagination
@@ -410,13 +535,14 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 
 	logger.Infof(
 		ctx,
-		"Retrieving knowledge list under knowledge base, knowledge base ID: %s, tag_id: %s, keyword: %s, file_type: %s, page: %d, page size: %d",
+		"Retrieving knowledge list under knowledge base, knowledge base ID: %s, tag_id: %s, keyword: %s, file_type: %s, page: %d, page size: %d, effectiveTenantID: %d",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(tagID),
 		secutils.SanitizeForLog(keyword),
 		secutils.SanitizeForLog(fileType),
 		pagination.Page,
 		pagination.PageSize,
+		effectiveTenantID,
 	)
 
 	// Retrieve paginated knowledge entries
@@ -459,7 +585,6 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 
 	logger.Info(ctx, "Start deleting knowledge")
 
-	// Get knowledge ID from URL path parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -467,8 +592,13 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 		return
 	}
 
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
 	logger.Infof(ctx, "Deleting knowledge, ID: %s", secutils.SanitizeForLog(id))
-	err := h.kgService.DeleteKnowledge(ctx, id)
+	err = h.kgService.DeleteKnowledge(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -499,7 +629,6 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 	logger.Info(ctx, "Start downloading knowledge file")
 
-	// Get knowledge ID from URL path parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -507,10 +636,14 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 		return
 	}
 
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
 	logger.Infof(ctx, "Retrieving knowledge file, ID: %s", secutils.SanitizeForLog(id))
 
-	// Get file content and filename
-	file, filename, err := h.kgService.GetKnowledgeFile(ctx, id)
+	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))
@@ -547,33 +680,34 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 // GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval
 type GetKnowledgeBatchRequest struct {
-	IDs []string `form:"ids" binding:"required"` // List of knowledge IDs
+	IDs  []string `form:"ids" binding:"required"` // List of knowledge IDs
+	KBID string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
 }
 
 // GetKnowledgeBatch godoc
 // @Summary      批量获取知识
-// @Description  根据ID列表批量获取知识条目
+// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        ids  query     []string  true  "知识ID列表"
-// @Success      200  {object}  map[string]interface{}  "知识列表"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Param        ids    query     []string  true   "知识ID列表"
+// @Param        kb_id  query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
+// @Success      200    {object}  map[string]interface{}  "知识列表"
+// @Failure      400    {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/batch [get]
 func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	// Get tenant ID from context
 	tenantID, ok := c.Get(types.TenantIDContextKey.String())
 	if !ok {
 		logger.Error(ctx, "Failed to get tenant ID")
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
+	effectiveTenantID := tenantID.(uint64)
 
-	// Parse request parameters from query string
 	var req GetKnowledgeBatchRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -581,27 +715,41 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(
-		ctx,
-		"Batch retrieving knowledge, tenant ID: %d, number of knowledge IDs: %d",
-		tenantID, len(req.IDs),
-	)
+	var knowledges []*types.Knowledge
+	var err error
 
-	// Retrieve knowledge entries in batch
-	knowledges, err := h.kgService.GetKnowledgeBatch(ctx, tenantID.(uint64), req.IDs)
+	// Optional kb_id: validate KB access and use effective tenant for shared KB
+	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
+		_, _, effID, _, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		effectiveTenantID = effID
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+		logger.Infof(ctx, "Batch retrieving knowledge with kb_id, effective tenant ID: %d, IDs count: %d",
+			effectiveTenantID, len(req.IDs))
+
+		knowledges, err = h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, req.IDs)
+	} else {
+		// No kb_id provided: use GetKnowledgeBatchWithSharedAccess to support cross-tenant shared files
+		// This is needed when page is refreshed and frontend doesn't have kb_id mapping
+		logger.Infof(ctx, "Batch retrieving knowledge without kb_id (using shared access), tenant ID: %d, IDs count: %d",
+			effectiveTenantID, len(req.IDs))
+
+		knowledges, err = h.kgService.GetKnowledgeBatchWithSharedAccess(ctx, effectiveTenantID, req.IDs)
+	}
+
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError("Failed to retrieve knowledge list").WithDetails(err.Error()))
 		return
 	}
 
-	logger.Infof(
-		ctx,
-		"Batch knowledge retrieval successful, requested count: %d, returned count: %d",
-		len(req.IDs), len(knowledges),
-	)
+	logger.Infof(ctx, "Batch knowledge retrieval successful, requested count: %d, returned count: %d",
+		len(req.IDs), len(knowledges))
 
-	// Return results
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    knowledges,
@@ -623,11 +771,17 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 // @Router       /knowledge/{id} [put]
 func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
-	// Get knowledge ID from URL path parameter
+
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
 		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -637,8 +791,9 @@ func (h *KnowledgeHandler) UpdateKnowledge(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
+	knowledge.ID = id
 
-	if err := h.kgService.UpdateKnowledge(ctx, &knowledge); err != nil {
+	if err := h.kgService.UpdateKnowledge(effCtx, &knowledge); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
@@ -675,6 +830,12 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 		return
 	}
 
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
 	var req types.ManualKnowledgePayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse manual knowledge update request", err)
@@ -682,7 +843,7 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 		return
 	}
 
-	knowledge, err := h.kgService.UpdateManualKnowledge(ctx, id, &req)
+	knowledge, err := h.kgService.UpdateManualKnowledge(effCtx, id, &req)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			c.Error(appErr)
@@ -704,15 +865,16 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 
 type knowledgeTagBatchRequest struct {
 	Updates map[string]*string `json:"updates" binding:"required,min=1"`
+	KBID    string             `json:"kb_id"` // Optional: scope to this KB (validates editor access and uses effective tenant for shared KB)
 }
 
 // UpdateKnowledgeTagBatch godoc
 // @Summary      批量更新知识标签
-// @Description  批量更新知识条目的标签
+// @Description  批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        request  body      object  true  "标签更新请求"
+// @Param        request  body      object  true  "标签更新请求（updates 必填，kb_id 可选）"
 // @Success      200      {object}  map[string]interface{}  "更新成功"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -720,11 +882,48 @@ type knowledgeTagBatchRequest struct {
 // @Router       /knowledge/tags [put]
 func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	ctx := c.Request.Context()
+
+	// Ensure tenant ID is in context (service reads it; may be missing if request context was not set by auth)
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+
 	var req knowledgeTagBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse knowledge tag batch request", err)
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
+	}
+	// Resolve effective tenant: explicit kb_id, or infer from first knowledge ID (for shared KB when frontend doesn't send kb_id)
+	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
+		_, _, effID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
+		if err != nil {
+			c.Error(err)
+			return
+		}
+		if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+			c.Error(errors.NewForbiddenError("No permission to update knowledge tags"))
+			return
+		}
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, effID)
+	} else if len(req.Updates) > 0 {
+		// No kb_id: infer from first knowledge ID so shared-KB updates work without client sending kb_id
+		var firstKnowledgeID string
+		for id := range req.Updates {
+			firstKnowledgeID = id
+			break
+		}
+		if firstKnowledgeID != "" {
+			_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstKnowledgeID, types.OrgRoleEditor)
+			if err != nil {
+				c.Error(err)
+				return
+			}
+			ctx = effCtx
+		}
 	}
 	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, req.Updates); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -754,7 +953,6 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start updating image info")
 
-	// Get knowledge ID from URL path parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
@@ -768,6 +966,12 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 		return
 	}
 
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
 	var request struct {
 		ImageInfo string `json:"image_info"`
 	}
@@ -778,9 +982,8 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 		return
 	}
 
-	// Update chunk properties
 	logger.Infof(ctx, "Updating knowledge chunk, knowledge ID: %s, chunk ID: %s", id, chunkID)
-	err := h.kgService.UpdateImageInfo(ctx, id, chunkID, secutils.SanitizeForLog(request.ImageInfo))
+	err = h.kgService.UpdateImageInfo(effCtx, id, chunkID, secutils.SanitizeForLog(request.ImageInfo))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -811,6 +1014,9 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 // @Router       /knowledge/search [get]
 func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
+	if userID, ok := c.Get(types.UserIDContextKey.String()); ok {
+		ctx = context.WithValue(ctx, types.UserIDContextKey, userID)
+	}
 	keyword := c.Query("keyword")
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
@@ -826,7 +1032,7 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	// Retrieve knowledge entries (empty keyword returns recent files)
+	// Retrieve knowledge entries (own + shared KBs; empty keyword returns recent files)
 	knowledges, hasMore, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)

@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge } from '@/api/knowledge-base';
 import { stopSession } from '@/api/chat';
+import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
@@ -21,6 +22,7 @@ const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
+const orgStore = useOrganizationStore();
 const { t } = useI18n();
 
 let query = ref("");
@@ -143,7 +145,9 @@ const isModelLockedByAgent = computed(() => {
 // Mention related state
 const showMention = ref(false);
 const mentionQuery = ref("");
-const mentionItems = ref<Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string }>>([]);
+const mentionItems = ref<Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string; orgName?: string; kbId?: string }>>([]);
+/** 文件 ID -> 知识库 ID（用于批量查询时传 kb_id，支持共享知识库下的文档） */
+const fileIdToKbId = ref<Record<string, string>>({});
 const mentionActiveIndex = ref(0);
 const mentionStyle = ref<Record<string, string>>({});
 const textareaRef = ref<any>(null); // Ref to t-textarea component
@@ -180,8 +184,22 @@ const isWebSearchConfigured = ref(false);
 const knowledgeBases = ref<Array<{ id: string; name: string; type?: 'document' | 'faq'; knowledge_count?: number; chunk_count?: number }>>([]);
 const fileList = ref<Array<{ id: string; name: string }>>([]);
 
+// 选中的知识库：包含自己的 + 别人共享的（用于展示已选列表）
 const selectedKbs = computed(() => {
-  return knowledgeBases.value.filter(kb => selectedKbIds.value.includes(kb.id));
+  const own = knowledgeBases.value.filter(kb => selectedKbIds.value.includes(kb.id));
+  const sharedList = orgStore.sharedKnowledgeBases || [];
+  const sharedMapped = sharedList
+    .filter((s: any) => s.knowledge_base != null && selectedKbIds.value.includes(s.knowledge_base.id))
+    .map((s: any) => ({
+      id: s.knowledge_base.id,
+      name: s.knowledge_base.name,
+      type: s.knowledge_base.type || 'document',
+      knowledge_count: s.knowledge_base.knowledge_count,
+      chunk_count: s.knowledge_base.chunk_count
+    }));
+  const ownIds = new Set(own.map(kb => kb.id));
+  const sharedOnly = sharedMapped.filter((kb: any) => !ownIds.has(kb.id));
+  return [...own, ...sharedOnly];
 });
 
 const selectedFiles = computed(() => {
@@ -276,23 +294,30 @@ const inputPlaceholder = computed(() => {
   }
 });
 
-// 加载知识库列表
+// 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
 const loadKnowledgeBases = async () => {
   try {
     const response: any = await listKnowledgeBases();
     if (response.data && Array.isArray(response.data)) {
-      const validKbs = response.data.filter((kb: any) => 
+      const validKbs = response.data.filter((kb: any) =>
         kb.embedding_model_id && kb.embedding_model_id !== '' &&
         kb.summary_model_id && kb.summary_model_id !== ''
       );
       knowledgeBases.value = validKbs;
-      
-      // 清理无效的知识库ID（已删除或不存在于有效知识库列表中的）
+
+      // 拉取共享知识库（供 @ 提及与清理选中项时识别）
+      await orgStore.fetchSharedKnowledgeBases().catch(() => {});
+
+      // 清理无效的知识库ID：只移除既不在自己列表也不在共享列表中的 ID（保留共享 KB 的选中状态）
       const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
+      const sharedKbIds = new Set(
+        (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
+      );
       const currentSelectedIds = settingsStore.settings.selectedKnowledgeBases || [];
-      const validSelectedIds = currentSelectedIds.filter((id: string) => validKbIds.has(id));
-      
-      // 如果有无效的ID，更新store
+      const validSelectedIds = currentSelectedIds.filter(
+        (id: string) => validKbIds.has(id) || sharedKbIds.has(id)
+      );
+
       if (validSelectedIds.length !== currentSelectedIds.length) {
         settingsStore.selectKnowledgeBases(validSelectedIds);
       }
@@ -305,18 +330,42 @@ const loadKnowledgeBases = async () => {
 const loadFiles = async () => {
   const ids = selectedFileIds.value;
   if (ids.length === 0) return;
-  
-  // Filter out files we already have info for
+
   const missingIds = ids.filter((id: string) => !fileList.value.find(f => f.id === id));
   if (missingIds.length === 0) return;
 
   try {
-    const query = new URLSearchParams();
-    missingIds.forEach((id: string) => query.append('ids', id));
-    const res: any = await batchQueryKnowledge(query.toString());
-    if (res.data) {
-      const newFiles = res.data.map((f: any) => ({ id: f.id, name: f.title || f.file_name }));
-      fileList.value = [...fileList.value, ...newFiles];
+    // 按 kb_id 分组：共享知识库下的文档需带 kb_id 才能正确查询
+    const byKbId = new Map<string, string[]>();
+    const noKbId: string[] = [];
+    missingIds.forEach((id: string) => {
+      const kbId = fileIdToKbId.value[id];
+      if (kbId) {
+        if (!byKbId.has(kbId)) byKbId.set(kbId, []);
+        byKbId.get(kbId)!.push(id);
+      } else {
+        noKbId.push(id);
+      }
+    });
+
+    const allNewFiles: Array<{ id: string; name: string }> = [];
+    const runBatch = async (batchIds: string[], kbId?: string) => {
+      const query = new URLSearchParams();
+      batchIds.forEach((id: string) => query.append('ids', id));
+      const res: any = await batchQueryKnowledge(query.toString(), kbId);
+      if (res.data && Array.isArray(res.data)) {
+        res.data.forEach((f: any) => allNewFiles.push({ id: f.id, name: f.title || f.file_name }));
+      }
+    };
+
+    for (const [kbId, batchIds] of byKbId) {
+      await runBatch(batchIds, kbId);
+    }
+    if (noKbId.length > 0) {
+      await runBatch(noKbId);
+    }
+    if (allNewFiles.length > 0) {
+      fileList.value = [...fileList.value, ...allNewFiles];
     }
   } catch (e) {
     console.error("Failed to load files", e);
@@ -583,36 +632,54 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionOffset.value = 0;
   }
   
-  // 根据智能体的 kb_selection_mode 过滤知识库
+  // 根据智能体的 kb_selection_mode 过滤知识库；合并「自己的」+「共享的」知识库
   let kbItems: any[] = [];
   if (!append) {
-    // 获取可选的知识库列表
-    let availableKbs = knowledgeBases.value;
-    
+    // 自己的知识库（需有 embedding/summary 模型）
+    let availableKbs = [...knowledgeBases.value];
+    // 共享的知识库（有权限的），映射为与 knowledgeBases 同结构便于合并
+    const sharedList = orgStore.sharedKnowledgeBases || [];
+    const sharedKbsForMention = sharedList
+      .filter((s: any) => s.knowledge_base != null)
+      .map((s: any) => ({
+        id: s.knowledge_base.id,
+        name: s.knowledge_base.name,
+        type: s.knowledge_base.type || 'document',
+        knowledge_count: s.knowledge_base.knowledge_count,
+        chunk_count: s.knowledge_base.chunk_count,
+        org_name: s.org_name || ''
+      }));
+    // 去重：若某 KB 既在自己列表又在共享列表，只保留一份（自己的优先）
+    const ownIds = new Set(availableKbs.map((kb: any) => kb.id));
+    sharedKbsForMention.forEach((kb: any) => {
+      if (!ownIds.has(kb.id)) {
+        availableKbs.push(kb);
+        ownIds.add(kb.id);
+      }
+    });
+
     // 如果智能体有配置，根据 kb_selection_mode 过滤
     if (hasAgentConfig.value) {
       const kbMode = agentKBSelectionMode.value;
       if (kbMode === 'none') {
-        // 不使用知识库，不显示任何知识库
         availableKbs = [];
       } else if (kbMode === 'selected') {
-        // 仅显示智能体配置的知识库
         const configuredKbIds = agentKnowledgeBases.value;
-        availableKbs = knowledgeBases.value.filter(kb => configuredKbIds.includes(kb.id));
+        availableKbs = availableKbs.filter((kb: any) => configuredKbIds.includes(kb.id));
       }
-      // kbMode === 'all' 时显示全部知识库
     }
-    
+
     // 按查询过滤
-    const kbs = availableKbs.filter(kb => 
-      !q || kb.name.toLowerCase().includes(q.toLowerCase())
+    const kbs = availableKbs.filter((kb: any) =>
+      !q || (kb.name && kb.name.toLowerCase().includes(q.toLowerCase()))
     );
-    kbItems = kbs.map(kb => ({ 
-      id: kb.id, 
-      name: kb.name, 
-      type: 'kb' as const, 
+    kbItems = kbs.map((kb: any) => ({
+      id: kb.id,
+      name: kb.name,
+      type: 'kb' as const,
       kbType: kb.type || 'document',
-      count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0)
+      count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
+      orgName: kb.org_name || undefined
     }));
   }
   
@@ -637,11 +704,12 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           files = files.filter((f: any) => configuredKbIds.includes(f.knowledge_base_id));
         }
         
-        fileItems = files.map((f: any) => ({ 
-          id: f.id, 
-          name: f.title || f.file_name, 
+        fileItems = files.map((f: any) => ({
+          id: f.id,
+          name: f.title || f.file_name,
           type: 'file' as const,
-          kbName: f.knowledge_base_name || ''
+          kbName: f.knowledge_base_name || '',
+          kbId: f.knowledge_base_id || undefined
         }));
       }
       mentionHasMore.value = res.has_more || false;
@@ -868,9 +936,12 @@ const onMentionSelect = (item: any) => {
       settingsStore.addKnowledgeBase(item.id);
   } else if (item.type === 'file') {
       settingsStore.addFile(item.id);
+      if (item.kbId) {
+        fileIdToKbId.value[item.id] = item.kbId;
+      }
       // Add to local cache immediately
       if (!fileList.value.find(f => f.id === item.id)) {
-        fileList.value.push(item);
+        fileList.value.push({ id: item.id, name: item.name });
       }
   }
   
@@ -911,6 +982,7 @@ const onMentionSelect = (item: any) => {
 
 const removeFile = (id: string) => {
   settingsStore.removeFile(id);
+  delete fileIdToKbId.value[id];
 };
 
 const toggleModelSelector = () => {

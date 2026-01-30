@@ -43,6 +43,7 @@ type sessionService struct {
 	knowledgeService     interfaces.KnowledgeService      // Service for knowledge operations
 	chunkService         interfaces.ChunkService          // Service for chunk operations
 	webSearchStateRepo   interfaces.WebSearchStateService // Service for web search state
+	kbShareService       interfaces.KBShareService        // Service for KB sharing operations
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -58,6 +59,7 @@ func NewSessionService(cfg *config.Config,
 	agentService interfaces.AgentService,
 	sessionStorage llmcontext.ContextStorage,
 	webSearchStateRepo interfaces.WebSearchStateService,
+	kbShareService interfaces.KBShareService,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                  cfg,
@@ -72,6 +74,7 @@ func NewSessionService(cfg *config.Config,
 		agentService:         agentService,
 		sessionStorage:       sessionStorage,
 		webSearchStateRepo:   webSearchStateRepo,
+		kbShareService:       kbShareService,
 	}
 }
 
@@ -301,7 +304,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 		chat.Message{Role: "system", Content: s.cfg.Conversation.GenerateSessionTitlePrompt},
 	)
 	chatMessages = append(chatMessages,
-		chat.Message{Role: "user", Content: message.Content + " /no_think"},
+		chat.Message{Role: "user", Content: message.Content},
 	)
 
 	// Call model to generate title
@@ -729,10 +732,10 @@ func (s *sessionService) selectChatModelID(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 ) (string, error) {
-	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs
+	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
 		} else {
@@ -818,16 +821,38 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 
 	switch customAgent.Config.KBSelectionMode {
 	case "all":
+		// Get own knowledge bases
 		allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list all knowledge bases: %v", err)
-			return nil
 		}
+		kbIDSet := make(map[string]bool)
 		kbIDs := make([]string, 0, len(allKBs))
 		for _, kb := range allKBs {
 			kbIDs = append(kbIDs, kb.ID)
+			kbIDSet[kb.ID] = true
 		}
-		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases", len(kbIDs))
+
+		// Also include shared knowledge bases the user has access to
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+		userIDVal := ctx.Value(types.UserIDContextKey)
+		if userIDVal != nil {
+			if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
+				sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+				if err != nil {
+					logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
+				} else {
+					for _, info := range sharedList {
+						if info != nil && info.KnowledgeBase != nil && !kbIDSet[info.KnowledgeBase.ID] {
+							kbIDs = append(kbIDs, info.KnowledgeBase.ID)
+							kbIDSet[info.KnowledgeBase.ID] = true
+						}
+					}
+				}
+			}
+		}
+
+		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
 		return kbIDs
 	case "selected":
 		logger.Infof(ctx, "KBSelectionMode=selected: using %d configured knowledge bases", len(customAgent.Config.KnowledgeBases))
@@ -901,7 +926,7 @@ func (s *sessionService) configureSkillsFromAgent(
 // buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs
 // This is called once at the request entry point to avoid repeated queries later in the pipeline
 // Logic:
-//   - For each knowledgeBaseID: create a SearchTargetTypeKnowledgeBase target
+//   - For each knowledgeBaseID: create a SearchTargetTypeKnowledgeBase target with correct TenantID
 //   - For each knowledgeID: find its knowledgeBaseID, if the KB is already in the list, skip (covered by full KB search)
 //     otherwise create a SearchTargetTypeKnowledge target grouped by KB
 func (s *sessionService) buildSearchTargets(
@@ -912,29 +937,68 @@ func (s *sessionService) buildSearchTargets(
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 
+	// Build a map from KB ID to TenantID for all KBs we need to process
+	kbTenantMap := make(map[string]uint64)
+
 	// Track which KBs are fully searched
 	fullKBSet := make(map[string]bool)
-	for _, kbID := range knowledgeBaseIDs {
-		fullKBSet[kbID] = true
-		targets = append(targets, &types.SearchTarget{
-			Type:            types.SearchTargetTypeKnowledgeBase,
-			KnowledgeBaseID: kbID,
-		})
+
+	// First pass: process knowledge base IDs and get their tenant info
+	if len(knowledgeBaseIDs) > 0 {
+		// Get KB details to determine their actual tenant IDs (may include shared KBs)
+		for _, kbID := range knowledgeBaseIDs {
+			fullKBSet[kbID] = true
+			// Try to get KB info - first from current tenant, then from shared access
+			kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+			if err != nil {
+				// May be a shared KB from another tenant - use kbShareService to check
+				if s.kbShareService != nil {
+					userID, _ := ctx.Value(types.UserIDContextKey).(string)
+					if userID != "" {
+						// Check if user has at least viewer permission on this KB
+						hasAccess, _ := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
+						if hasAccess {
+							// Get KB info without tenant filter
+							kbInfo, err := s.knowledgeBaseService.GetKnowledgeBaseByIDOnly(ctx, kbID)
+							if err == nil && kbInfo != nil {
+								kbTenantMap[kbID] = kbInfo.TenantID
+							}
+						}
+					}
+				}
+			} else if kb != nil {
+				kbTenantMap[kbID] = kb.TenantID
+			}
+			// Default to current tenant if we couldn't determine the actual tenant
+			if kbTenantMap[kbID] == 0 {
+				kbTenantMap[kbID] = tenantID
+			}
+			targets = append(targets, &types.SearchTarget{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: kbID,
+				TenantID:        kbTenantMap[kbID],
+			})
+		}
 	}
 
-	// Process individual knowledge IDs
+	// Process individual knowledge IDs (include shared KB files the user has access to)
 	if len(knowledgeIDs) > 0 {
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
 			return targets, nil // Return what we have, don't fail
 		}
 
 		// Group knowledge IDs by their KB, excluding those already covered by full KB search
+		// Also track KB tenant IDs from knowledge items
 		kbToKnowledgeIDs := make(map[string][]string)
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
 				continue
+			}
+			// Track KB -> TenantID mapping from knowledge items
+			if kbTenantMap[k.KnowledgeBaseID] == 0 {
+				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
 			}
 			// Skip if this KB is already fully searched
 			if fullKBSet[k.KnowledgeBaseID] {
@@ -945,16 +1009,21 @@ func (s *sessionService) buildSearchTargets(
 
 		// Create SearchTargetTypeKnowledge targets for each KB with specific files
 		for kbID, kidList := range kbToKnowledgeIDs {
+			kbTenant := kbTenantMap[kbID]
+			if kbTenant == 0 {
+				kbTenant = tenantID // fallback
+			}
 			targets = append(targets, &types.SearchTarget{
 				Type:            types.SearchTargetTypeKnowledge,
 				KnowledgeBaseID: kbID,
+				TenantID:        kbTenant,
 				KnowledgeIDs:    kidList,
 			})
 		}
 	}
 
-	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB",
-		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs))
+	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB, kbTenantMap=%v",
+		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
 	return targets, nil
 }

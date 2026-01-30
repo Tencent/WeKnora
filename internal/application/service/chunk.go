@@ -100,6 +100,19 @@ func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chun
 	return chunk, nil
 }
 
+// GetChunkByIDOnly retrieves a chunk by ID without tenant filter (for permission resolution).
+func (s *chunkService) GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error) {
+	chunk, err := s.chunkRepository.GetChunkByIDOnly(ctx, id)
+	if err != nil {
+		if err != nil && err.Error() == "chunk not found" {
+			return nil, ErrChunkNotFound
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"chunk_id": id})
+		return nil, err
+	}
+	return chunk, nil
+}
+
 // ListChunksByKnowledgeID lists all chunks for a knowledge ID
 // This method retrieves all chunks belonging to a specific knowledge document
 // Parameters:

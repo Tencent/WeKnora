@@ -320,9 +320,22 @@ const sendMsg = async (value, modelId = '', mentionedItems = []) => {
     const webSearchEnabled = useSettingsStoreInstance.isWebSearchEnabled;
     
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
-    const kbIds = useSettingsStoreInstance.settings.selectedKnowledgeBases || [];
-    const knowledgeIds = useSettingsStoreInstance.settings.selectedFiles || [];
-    
+    // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
+    const sidebarKbIds = useSettingsStoreInstance.settings.selectedKnowledgeBases || [];
+    const sidebarFileIds = useSettingsStoreInstance.settings.selectedFiles || [];
+    const kbIdSet = new Set(sidebarKbIds);
+    const fileIdSet = new Set(sidebarFileIds);
+    for (const item of mentionedItems || []) {
+      if (!item?.id) continue;
+      if (item.type === 'kb' && !kbIdSet.has(item.id)) {
+        kbIdSet.add(item.id);
+      } else if (item.type === 'file' && !fileIdSet.has(item.id)) {
+        fileIdSet.add(item.id);
+      }
+    }
+    const kbIds = [...kbIdSet];
+    const knowledgeIds = [...fileIdSet];
+
     // Get selected agent ID
     const selectedAgentId = useSettingsStoreInstance.selectedAgentId || '';
 

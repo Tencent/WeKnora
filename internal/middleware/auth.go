@@ -131,13 +131,17 @@ func Auth(
 				c.Set(types.TenantIDContextKey.String(), targetTenantID)
 				c.Set(types.TenantInfoContextKey.String(), tenant)
 				c.Set(types.UserContextKey.String(), user)
+				c.Set(types.UserIDContextKey.String(), user.ID)
 				c.Request = c.Request.WithContext(
 					context.WithValue(
 						context.WithValue(
-							context.WithValue(c.Request.Context(), types.TenantIDContextKey, targetTenantID),
-							types.TenantInfoContextKey, tenant,
+							context.WithValue(
+								context.WithValue(c.Request.Context(), types.TenantIDContextKey, targetTenantID),
+								types.TenantInfoContextKey, tenant,
+							),
+							types.UserContextKey, user,
 						),
-						types.UserContextKey, user,
+						types.UserIDContextKey, user.ID,
 					),
 				)
 				c.Next()

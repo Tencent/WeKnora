@@ -6,8 +6,37 @@
         <h2>{{ $t('knowledgeBase.title') }}</h2>
         <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
       </div>
+      <div class="header-actions">
+        <t-button class="kb-create-btn" @click="handleCreateKnowledgeBase">
+          <template #icon><t-icon name="folder-add" /></template>
+          {{ $t('knowledgeList.create') }}
+        </t-button>
+      </div>
     </div>
-    <div class="header-divider"></div>
+    <!-- Tab 切换（下划线式，替代分隔线） -->
+    <div class="kb-tabs">
+      <div
+        class="tab-item"
+        :class="{ 'active': activeTab === 'all' }"
+        @click="activeTab = 'all'"
+      >
+        {{ $t('knowledgeList.tabs.all') }} ({{ allKnowledgeBases }})
+      </div>
+      <div
+        class="tab-item"
+        :class="{ 'active': activeTab === 'mine' }"
+        @click="activeTab = 'mine'"
+      >
+        {{ $t('knowledgeList.tabs.myKnowledgeBases') }} ({{ kbs.length }})
+      </div>
+      <div
+        class="tab-item"
+        :class="{ 'active': activeTab === 'shared' }"
+        @click="activeTab = 'shared'"
+      >
+        {{ $t('knowledgeList.tabs.sharedToMe') }} ({{ sharedKbs.length }})
+      </div>
+    </div>
     
     <!-- 未初始化知识库提示 -->
     <div v-if="hasUninitializedKbs" class="warning-banner">
@@ -58,12 +87,185 @@
     </div>
 
     <!-- 卡片网格 -->
-    <div v-if="kbs.length > 0" class="kb-card-wrap">
-      <div 
-        v-for="(kb, index) in kbs" 
-        :key="kb.id" 
+    <div v-if="activeTab === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
+      <!-- 全部：我的知识库 + 共享给我的知识库 -->
+      <template v-for="kb in filteredKnowledgeBases" :key="kb.id">
+        <!-- 我的知识库卡片 -->
+        <div
+          v-if="kb.isMine"
+          class="kb-card"
+          :class="{
+            'uninitialized': !isInitialized(kb),
+            'kb-type-document': (kb.type || 'document') === 'document',
+            'kb-type-faq': kb.type === 'faq',
+            'highlight-flash': highlightedKbId !== null && highlightedKbId === kb.id
+          }"
+          :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
+          @click="handleCardClick(kb)"
+        >
+          <!-- 卡片头部 -->
+          <div class="card-header">
+            <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+            <t-popup
+              overlayClassName="card-more-popup"
+              trigger="click"
+              destroy-on-close
+              placement="bottom-right"
+            >
+              <div class="more-wrap" @click.stop>
+                <img class="more-icon" src="@/assets/img/more.png" alt="" />
+              </div>
+              <template #content>
+                <div class="popup-menu" @click.stop>
+                  <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
+                    <t-icon class="menu-icon" name="setting" />
+                    <span>{{ $t('knowledgeBase.settings') }}</span>
+                  </div>
+                  <div class="popup-menu-item delete" @click.stop="handleDeleteById(kb.id)">
+                    <t-icon class="menu-icon" name="delete" />
+                    <span>{{ $t('common.delete') }}</span>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
+          </div>
+
+          <!-- 卡片内容 -->
+          <div class="card-content">
+            <div class="card-description">
+              {{ kb.description || $t('knowledgeBase.noDescription') }}
+            </div>
+          </div>
+
+          <!-- 卡片底部 -->
+          <div class="card-bottom">
+            <div class="bottom-left">
+              <div class="feature-badges">
+                <t-tooltip :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
+                  <div class="feature-badge" :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
+                    <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                    <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0) }}</span>
+                    <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')" placement="top">
+                  <div class="feature-badge kg">
+                    <t-icon name="relation" size="14px" />
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.cos_config?.provider && kb.cos_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+                  <div class="feature-badge multimodal">
+                    <t-icon name="image" size="14px" />
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.question_generation_config?.enabled" :content="$t('knowledgeList.features.questionGeneration')" placement="top">
+                  <div class="feature-badge question">
+                    <t-icon name="help-circle" size="14px" />
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.share_count && kb.share_count > 0" :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count })" placement="top">
+                  <div class="feature-badge shared">
+                    <t-icon name="share" size="14px" />
+                  </div>
+                </t-tooltip>
+              </div>
+            </div>
+            <span class="card-time">{{ kb.updated_at }}</span>
+          </div>
+        </div>
+
+        <!-- 共享知识库卡片 -->
+        <div
+          v-else
+          class="kb-card shared-kb-card"
+          :class="{
+            'kb-type-document': (kb.type || 'document') === 'document',
+            'kb-type-faq': kb.type === 'faq'
+          }"
+          @click="handleSharedKbClickFromAll(kb)"
+        >
+          <!-- 共享标识 -->
+          <div class="shared-badge">
+            <t-icon name="share" size="12px" />
+            <span>{{ $t('knowledgeList.sharedLabel') }}</span>
+          </div>
+          <!-- 卡片头部 -->
+          <div class="card-header">
+            <span class="card-title" :title="kb.name">{{ kb.name }}</span>
+            <t-popup
+              overlayClassName="card-more-popup"
+              trigger="click"
+              destroy-on-close
+              placement="bottom-right"
+            >
+              <div class="more-wrap" @click.stop>
+                <img class="more-icon" src="@/assets/img/more.png" alt="" />
+              </div>
+              <template #content>
+                <div class="popup-menu" @click.stop>
+                  <div class="popup-menu-item" @click.stop="handleViewSharedKbDetailFromAll(kb)">
+                    <t-icon class="menu-icon" name="browse" />
+                    <span>{{ $t('knowledgeList.menu.viewDetails') }}</span>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
+          </div>
+
+          <!-- 卡片内容 -->
+          <div class="card-content">
+            <div class="card-description">
+              {{ kb.description || $t('knowledgeBase.noDescription') }}
+            </div>
+          </div>
+
+          <!-- 卡片底部 -->
+          <div class="card-bottom">
+            <div class="bottom-left">
+              <div class="feature-badges">
+                <t-tooltip :content="kb.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
+                  <div class="feature-badge" :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
+                    <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                    <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count || '-') }}</span>
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')" placement="top">
+                  <div class="feature-badge kg">
+                    <t-icon name="relation" size="14px" />
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.cos_config?.provider && kb.cos_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+                  <div class="feature-badge multimodal">
+                    <t-icon name="image" size="14px" />
+                  </div>
+                </t-tooltip>
+                <t-tooltip v-if="kb.question_generation_config?.enabled" :content="$t('knowledgeList.features.questionGeneration')" placement="top">
+                  <div class="feature-badge question">
+                    <t-icon name="help-circle" size="14px" />
+                  </div>
+                </t-tooltip>
+              </div>
+            </div>
+            <div class="bottom-right">
+              <t-tooltip :content="kb.org_name" placement="top">
+                <div class="org-source">
+                  <t-icon name="usergroup" size="12px" />
+                  <span>{{ kb.org_name }}</span>
+                </div>
+              </t-tooltip>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div v-if="activeTab === 'mine' && kbs.length > 0" class="kb-card-wrap">
+      <!-- 我的知识库 -->
+      <div
+        v-for="(kb, index) in kbs"
+        :key="kb.id"
         class="kb-card"
-        :class="{ 
+        :class="{
           'uninitialized': !isInitialized(kb),
           'kb-type-document': (kb.type || 'document') === 'document',
           'kb-type-faq': kb.type === 'faq',
@@ -75,17 +277,17 @@
         <!-- 卡片头部 -->
         <div class="card-header">
           <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-          <t-popup 
-            v-model="kb.showMore" 
+          <t-popup
+            v-model="kb.showMore"
             overlayClassName="card-more-popup"
             :on-visible-change="onVisibleChange"
-            trigger="click" 
-            destroy-on-close 
+            trigger="click"
+            destroy-on-close
             placement="bottom-right"
           >
-            <div 
-              variant="outline" 
-              class="more-wrap" 
+            <div
+              variant="outline"
+              class="more-wrap"
               @click.stop="openMore(index)"
               :class="{ 'active-more': currentMoreIndex === index }"
             >
@@ -139,6 +341,12 @@
                   <t-icon name="help-circle" size="14px" />
                 </div>
               </t-tooltip>
+              <!-- 共享状态图标 -->
+              <t-tooltip v-if="kb.share_count > 0" :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count })" placement="top">
+                <div class="feature-badge shared">
+                  <t-icon name="share" size="14px" />
+                </div>
+              </t-tooltip>
             </div>
           </div>
           <span class="card-time">{{ kb.updated_at }}</span>
@@ -146,13 +354,97 @@
       </div>
     </div>
 
-    <!-- 空状态 -->
-    <div v-else-if="!loading" class="empty-state">
+    <!-- 共享给我的知识库 -->
+    <div v-if="activeTab === 'shared' && sharedKbs.length > 0" class="kb-card-wrap">
+      <div
+        v-for="shared in sharedKbs"
+        :key="'shared-' + shared.share_id"
+        class="kb-card shared-kb-card"
+        :class="{
+          'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
+          'kb-type-faq': shared.knowledge_base.type === 'faq'
+        }"
+        @click="handleSharedKbClick(shared)"
+      >
+        <!-- 共享标识 -->
+        <div class="shared-badge">
+          <t-icon name="share" size="12px" />
+          <span>{{ $t('knowledgeList.sharedLabel') }}</span>
+        </div>
+        <!-- 卡片头部 -->
+        <div class="card-header">
+          <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+          <t-popup
+            overlayClassName="card-more-popup"
+            trigger="click"
+            destroy-on-close
+            placement="bottom-right"
+          >
+            <div class="more-wrap" @click.stop>
+              <img class="more-icon" src="@/assets/img/more.png" alt="" />
+            </div>
+            <template #content>
+              <div class="popup-menu" @click.stop>
+                <div class="popup-menu-item" @click.stop="handleViewSharedKbDetail(shared)">
+                  <t-icon class="menu-icon" name="browse" />
+                  <span>{{ $t('knowledgeList.menu.viewDetails') }}</span>
+                </div>
+              </div>
+            </template>
+          </t-popup>
+        </div>
+
+        <!-- 卡片内容 -->
+        <div class="card-content">
+          <div class="card-description">
+            {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
+          </div>
+        </div>
+
+        <!-- 卡片底部 -->
+        <div class="card-bottom">
+          <div class="bottom-left">
+            <div class="feature-badges">
+              <t-tooltip :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
+                <div class="feature-badge" :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
+                  <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                  <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ? (shared.knowledge_base.chunk_count ?? '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
+                </div>
+              </t-tooltip>
+            </div>
+          </div>
+          <div class="bottom-right">
+            <t-tooltip :content="shared.org_name" placement="top">
+              <div class="org-source">
+                <t-icon name="usergroup" size="12px" />
+                <span>{{ shared.org_name }}</span>
+              </div>
+            </t-tooltip>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全部 Tab 空状态 -->
+    <div v-if="activeTab === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
     </div>
 
+    <!-- 我的知识库空状态 -->
+    <div v-if="activeTab === 'mine' && kbs.length === 0 && !loading" class="empty-state">
+      <img class="empty-img" src="@/assets/img/upload.svg" alt="">
+      <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
+      <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
+    </div>
+
+    <!-- 共享知识库空状态 -->
+    <div v-if="activeTab === 'shared' && sharedKbs.length === 0 && !loading" class="empty-state">
+      <img class="empty-img" src="@/assets/img/upload.svg" alt="">
+      <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') || '暂无共享知识库' }}</span>
+      <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') || '您可以加入组织或请求他人共享知识库给您' }}</span>
+    </div>
 
     <!-- 删除确认对话框 -->
     <t-dialog 
@@ -186,6 +478,144 @@
       @update:visible="(val) => val ? null : uiStore.closeKBEditor()"
       @success="handleKBEditorSuccess"
     />
+
+    <!-- 共享知识库对话框 -->
+    <ShareKnowledgeBaseDialog
+      v-model:visible="shareDialogVisible"
+      :knowledge-base-id="sharingKbId"
+      :knowledge-base-name="sharingKbName"
+      @shared="handleShareSuccess"
+    />
+
+    <!-- 共享知识库详情对话框（与知识库设置一致的结构与样式） -->
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="sharedKbDetailVisible" class="shared-kb-overlay" @click.self="sharedKbDetailVisible = false">
+          <div class="shared-kb-modal">
+            <button class="close-btn" @click="sharedKbDetailVisible = false" :aria-label="$t('general.close')">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+
+            <div class="settings-container" v-if="currentSharedKb">
+              <div class="settings-sidebar">
+                <div class="sidebar-header">
+                  <h2 class="sidebar-title">{{ t('knowledgeList.detail.title') }}</h2>
+                </div>
+                <div class="settings-nav">
+                  <div
+                    :class="['nav-item', { active: currentDetailSection === 'overview' }]"
+                    @click="currentDetailSection = 'overview'"
+                  >
+                    <t-icon name="info-circle" class="nav-icon" />
+                    <span class="nav-label">{{ t('knowledgeList.detail.overview') }}</span>
+                  </div>
+                  <div
+                    :class="['nav-item', { active: currentDetailSection === 'permission' }]"
+                    @click="currentDetailSection = 'permission'"
+                  >
+                    <t-icon name="lock-on" class="nav-icon" />
+                    <span class="nav-label">{{ t('knowledgeList.detail.permission') }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-content">
+                <div class="content-wrapper">
+                  <div v-show="currentDetailSection === 'overview'" class="section">
+                    <div class="section-content">
+                      <div class="section-header">
+                        <h3 class="section-title">{{ t('knowledgeList.detail.overview') }}</h3>
+                        <p class="section-desc">{{ t('knowledgeList.detail.overviewDesc') }}</p>
+                      </div>
+                      <div class="section-body">
+                        <div class="form-item read-only-row">
+                          <label class="form-label">{{ t('knowledgeBase.name') }}</label>
+                          <div class="form-value-row">{{ currentSharedKb.knowledge_base.name }}</div>
+                        </div>
+                        <div class="form-item read-only-row">
+                          <label class="form-label">{{ t('knowledgeBase.description') }}</label>
+                          <div class="form-value-row form-value-desc">{{ currentSharedKb.knowledge_base.description || t('knowledgeBase.noDescription') }}</div>
+                        </div>
+                        <div class="form-item read-only-row">
+                          <label class="form-label">{{ t('knowledgeEditor.basic.typeLabel') }}</label>
+                          <div class="form-value-row">
+                            <t-tag
+                              size="medium"
+                              :theme="currentSharedKb.knowledge_base.type === 'faq' ? 'primary' : 'success'"
+                            >
+                              {{ currentSharedKb.knowledge_base.type === 'faq' ? t('knowledgeEditor.basic.typeFAQ') : t('knowledgeEditor.basic.typeDocument') }}
+                            </t-tag>
+                          </div>
+                        </div>
+                        <div class="form-item read-only-row">
+                          <label class="form-label">{{ t('knowledgeList.detail.sourceOrg') }}</label>
+                          <div class="form-value-row">
+                            <t-icon name="usergroup" size="16px" class="form-value-icon" />
+                            <span>{{ currentSharedKb.org_name }}</span>
+                          </div>
+                        </div>
+                        <div class="form-item read-only-row">
+                          <label class="form-label">{{ t('knowledgeList.detail.sharedAt') }}</label>
+                          <div class="form-value-row">{{ formatStringDate(new Date(currentSharedKb.shared_at)) }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-show="currentDetailSection === 'permission'" class="section">
+                    <div class="section-content">
+                      <div class="section-header">
+                        <h3 class="section-title">{{ t('knowledgeList.detail.permission') }}</h3>
+                        <p class="section-desc">{{ t('knowledgeList.detail.permissionDesc') }}</p>
+                      </div>
+                      <div class="section-body">
+                        <div class="form-item">
+                          <label class="form-label">{{ t('knowledgeList.detail.myPermission') }}</label>
+                          <div class="form-value-row">
+                            <t-tag
+                              size="medium"
+                              :theme="currentSharedKb.permission === 'admin' ? 'primary' : currentSharedKb.permission === 'editor' ? 'warning' : 'default'"
+                            >
+                              {{ t(`organization.role.${currentSharedKb.permission}`) }}
+                            </t-tag>
+                          </div>
+                        </div>
+                        <div class="permission-list">
+                          <div class="permission-item" :class="{ allowed: currentSharedKb.permission !== 'viewer' }">
+                            <t-icon :name="currentSharedKb.permission !== 'viewer' ? 'check-circle' : 'close-circle'" size="18px" />
+                            <span>{{ t('knowledgeList.detail.canEdit') }}</span>
+                          </div>
+                          <div class="permission-item allowed">
+                            <t-icon name="check-circle" size="18px" />
+                            <span>{{ t('knowledgeList.detail.canView') }}</span>
+                          </div>
+                          <div class="permission-item allowed">
+                            <t-icon name="check-circle" size="18px" />
+                            <span>{{ t('knowledgeList.detail.canSearch') }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="settings-footer">
+                  <t-button theme="default" variant="outline" @click="sharedKbDetailVisible = false">
+                    {{ t('common.close') }}
+                  </t-button>
+                  <t-button theme="primary" @click="goToSharedKb">
+                    <t-icon name="browse" style="margin-right: 4px;" />
+                    {{ t('knowledgeList.detail.goToKb') }}
+                  </t-button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -196,13 +626,20 @@ import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { listKnowledgeBases, deleteKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
+import { useOrganizationStore } from '@/stores/organization'
+import type { SharedKnowledgeBase } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
+import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import { useI18n } from 'vue-i18n'
 
 const router = useRouter()
 const route = useRoute()
 const uiStore = useUIStore()
+const orgStore = useOrganizationStore()
 const { t } = useI18n()
+
+// Tab 状态
+const activeTab = ref<'all' | 'mine' | 'shared'>('all')
 
 interface KB { 
   id: string; 
@@ -221,6 +658,7 @@ interface KB {
   chunk_count?: number;
   isProcessing?: boolean; // 是否有正在处理的导入任务
   processing_count?: number; // 正在处理的文档数量（仅文档类型）
+  share_count?: number; // 共享给组织的数量
 }
 
 const kbs = ref<KB[]>([])
@@ -234,6 +672,45 @@ const uploadTasks = ref<UploadTaskState[]>([])
 const uploadCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let uploadRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const UPLOAD_CLEANUP_DELAY = 10000
+
+// Share dialog state
+const shareDialogVisible = ref(false)
+const sharingKbId = ref('')
+const sharingKbName = ref('')
+
+// Shared knowledge bases
+const sharedKbs = computed<SharedKnowledgeBase[]>(() => orgStore.sharedKnowledgeBases || [])
+
+// All knowledge bases (mine + shared to me)
+const allKnowledgeBases = computed(() => kbs.value.length + sharedKbs.value.length)
+
+// Filtered knowledge bases based on active tab
+const filteredKnowledgeBases = computed(() => {
+  if (activeTab.value === 'mine') return []
+  if (activeTab.value === 'shared') return []
+  // activeTab === 'all'
+  const result: Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)> = []
+  // Add my knowledge bases
+  kbs.value.forEach(kb => {
+    result.push({ ...kb, isMine: true as const })
+  })
+  // Add shared knowledge bases (skip entries where knowledge_base is null, e.g. deleted KB)
+  sharedKbs.value.forEach(shared => {
+    const kb = shared.knowledge_base
+    if (!kb) return
+    result.push({
+      ...kb,
+      isMine: false as const,
+      permission: shared.permission,
+      shared_at: shared.shared_at,
+      share_id: shared.share_id,
+      org_name: shared.org_name,
+      knowledge_count: kb.knowledge_count,
+      chunk_count: kb.chunk_count,
+    } as any)
+  })
+  return result
+})
 
 interface UploadTaskState {
   uploadId: string
@@ -255,18 +732,21 @@ interface UploadSummary {
 
 const fetchList = () => {
   loading.value = true
-  return listKnowledgeBases().then((res: any) => {
-    const data = res.data || []
-    // 格式化时间，并初始化 showMore 状态
-    // is_processing 字段由后端返回
-    kbs.value = data.map((kb: any) => ({
-      ...kb,
-      updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
-      showMore: false,
-      isProcessing: kb.is_processing || false,
-      processing_count: kb.processing_count || 0
-    }))
-  }).finally(() => loading.value = false)
+  return Promise.all([
+    listKnowledgeBases().then((res: any) => {
+      const data = res.data || []
+      // 格式化时间，并初始化 showMore 状态
+      // is_processing 字段由后端返回
+      kbs.value = data.map((kb: any) => ({
+        ...kb,
+        updated_at: kb.updated_at ? formatStringDate(new Date(kb.updated_at)) : '',
+        showMore: false,
+        isProcessing: kb.is_processing || false,
+        processing_count: kb.processing_count || 0
+      }))
+    }),
+    orgStore.fetchSharedKnowledgeBases()
+  ]).finally(() => loading.value = false)
 }
 
 onMounted(() => {
@@ -325,6 +805,71 @@ const handleSettings = (kb: KB) => {
   // 手动关闭弹窗
   kb.showMore = false
   goSettings(kb.id)
+}
+
+// 通过 ID 处理设置（用于全部 Tab 下的知识库）
+const handleSettingsById = (id: string) => {
+  goSettings(id)
+}
+
+// 通过 ID 处理删除（用于全部 Tab 下的知识库）
+const handleDeleteById = (id: string) => {
+  const kb = kbs.value.find(k => k.id === id)
+  if (kb) {
+    deletingKb.value = kb
+    deleteVisible.value = true
+  }
+}
+
+const handleShare = (kb: KB) => {
+  // 手动关闭弹窗
+  kb.showMore = false
+  sharingKbId.value = kb.id
+  sharingKbName.value = kb.name
+  shareDialogVisible.value = true
+}
+
+const handleShareSuccess = () => {
+  // 共享成功后可刷新列表
+  fetchList()
+}
+
+const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
+  // 跳转到共享知识库详情页
+  router.push(`/platform/knowledge-bases/${sharedKb.knowledge_base.id}`)
+}
+
+// 处理"全部"Tab 中的共享知识库卡片点击（直接进入知识库）
+const handleSharedKbClickFromAll = (kb: any) => {
+  router.push(`/platform/knowledge-bases/${kb.id}`)
+}
+
+// 处理"全部"Tab 中的共享知识库"查看详情"菜单项点击（弹出详情弹窗）
+const handleViewSharedKbDetailFromAll = (kb: any) => {
+  const sharedKb = sharedKbs.value.find(s => s.knowledge_base.id === kb.id)
+  if (sharedKb) {
+    currentSharedKb.value = sharedKb
+    currentDetailSection.value = 'overview'
+    sharedKbDetailVisible.value = true
+  }
+}
+
+// 处理"共享给我"Tab 中的共享知识库"查看详情"菜单项点击
+const handleViewSharedKbDetail = (sharedKb: SharedKnowledgeBase) => {
+  currentSharedKb.value = sharedKb
+  currentDetailSection.value = 'overview'
+  sharedKbDetailVisible.value = true
+}
+
+const sharedKbDetailVisible = ref(false)
+const currentSharedKb = ref<SharedKnowledgeBase | null>(null)
+const currentDetailSection = ref<'overview' | 'permission'>('overview')
+
+const goToSharedKb = () => {
+  if (currentSharedKb.value) {
+    sharedKbDetailVisible.value = false
+    router.push(`/platform/knowledge-bases/${currentSharedKb.value.knowledge_base.id}`)
+  }
 }
 
 const handleDelete = (kb: KB) => {
@@ -473,6 +1018,11 @@ const goSettings = (id: string) => {
   uiStore.openKBSettings(id)
 }
 
+// 创建知识库
+const handleCreateKnowledgeBase = () => {
+  uiStore.openCreateKB()
+}
+
 // 知识库编辑器成功回调（创建或编辑成功）
 const handleKBEditorSuccess = (kbId: string) => {
   console.log('[KnowledgeBaseList] knowledge operation success:', kbId)
@@ -584,6 +1134,22 @@ const handleUploadFinishedEvent = (event: Event) => {
     font-weight: 600;
     line-height: 32px;
   }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .kb-create-btn {
+      background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
+      border: none;
+      color: #fff;
+
+      &:hover {
+        background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
+      }
+    }
+  }
 }
 
 .header-subtitle {
@@ -595,10 +1161,150 @@ const handleUploadFinishedEvent = (event: Event) => {
   line-height: 20px;
 }
 
-.header-divider {
-  height: 1px;
-  background: #e7ebf0;
+// Tab 切换样式（下划线式，简洁清晰）
+.kb-tabs {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  border-bottom: 1px solid #e7ebf0;
   margin-bottom: 20px;
+
+  .tab-item {
+    padding: 12px 0;
+    cursor: pointer;
+    color: #666;
+    font-family: "PingFang SC";
+    font-size: 14px;
+    font-weight: 400;
+    user-select: none;
+    position: relative;
+    transition: color 0.2s ease;
+
+    &:hover {
+      color: #333;
+    }
+
+    &.active {
+      color: #07c05f;
+      font-weight: 500;
+
+      &::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: #07c05f;
+        border-radius: 1px;
+      }
+    }
+  }
+}
+
+
+// 共享知识库卡片样式
+// 共享标识（文档类型默认绿色，位置贴右上角）
+.shared-badge {
+  position: absolute;
+  top: 10px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(7, 192, 95, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #07c05f;
+  font-weight: 500;
+
+  .t-icon {
+    color: #07c05f;
+  }
+}
+
+// 来源组织
+.org-source {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #666;
+  max-width: 120px;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .t-icon {
+    color: #999;
+    flex-shrink: 0;
+  }
+}
+
+.shared-kb-card {
+  position: relative;
+
+  // 共享知识库根据类型显示不同样式
+  &.kb-type-document {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fcfa 100%) !important;
+    border-color: #e8f5ed !important;
+
+    &:hover {
+      border-color: #07c05f !important;
+      box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12) !important;
+      background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%) !important;
+    }
+
+    &::after {
+      background: linear-gradient(135deg, rgba(7, 192, 95, 0.08) 0%, transparent 100%) !important;
+    }
+  }
+
+  &.kb-type-faq {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%) !important;
+    border-color: #e6f0ff !important;
+
+    &:hover {
+      border-color: #0052d9 !important;
+      box-shadow: 0 4px 12px rgba(0, 82, 217, 0.12) !important;
+      background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%) !important;
+    }
+
+    &::after {
+      background: linear-gradient(135deg, rgba(0, 82, 217, 0.08) 0%, transparent 100%) !important;
+    }
+
+    // FAQ 类型共享标识使用蓝色
+    .shared-badge {
+      background: rgba(0, 82, 217, 0.1);
+      color: #0052d9;
+
+      .t-icon {
+        color: #0052d9;
+      }
+    }
+  }
+
+  .org-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    border-color: rgba(0, 82, 217, 0.15);
+    color: #0052d9;
+    background: rgba(0, 82, 217, 0.04);
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 4px;
+    max-width: fit-content;
+  }
 }
 
 .warning-banner {
@@ -617,6 +1323,276 @@ const handleUploadFinishedEvent = (event: Event) => {
   .t-icon {
     color: #d46b08;
     flex-shrink: 0;
+  }
+}
+
+// 共享知识库详情对话框（与知识库设置 KnowledgeBaseEditorModal 一致的结构与样式）
+.shared-kb-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.shared-kb-overlay .shared-kb-modal {
+  position: relative;
+  width: 90vw;
+  max-width: 800px;
+  height: 85vh;
+  max-height: 600px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shared-kb-overlay .shared-kb-modal {
+  .settings-container {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .settings-sidebar {
+    width: 200px;
+    background: #fafafa;
+    border-right: 1px solid #e5e5e5;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 24px 20px;
+    border-bottom: 1px solid #e5e5e5;
+  }
+
+  .sidebar-title {
+    margin: 0;
+    font-family: "PingFang SC";
+    font-size: 18px;
+    font-weight: 600;
+    color: #000000e6;
+  }
+
+  .settings-nav {
+    flex: 1;
+    padding: 12px 8px;
+    overflow-y: auto;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    margin-bottom: 4px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: "PingFang SC";
+    font-size: 14px;
+    color: #00000099;
+
+    .nav-icon {
+      margin-right: 8px;
+      font-size: 18px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .nav-label {
+      flex: 1;
+    }
+
+    &:hover {
+      background: #f0f0f0;
+    }
+
+    &.active {
+      background: #07c05f1a;
+      color: #07c05f;
+      font-weight: 500;
+    }
+  }
+
+  .settings-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .content-wrapper {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+  }
+
+  .section {
+    margin-bottom: 32px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .section-content .section-header {
+    margin-bottom: 20px;
+  }
+
+  .section-content .section-title {
+    margin: 0 0 8px 0;
+    font-family: "PingFang SC";
+    font-size: 16px;
+    font-weight: 600;
+    color: #000000e6;
+  }
+
+  .section-content .section-desc {
+    margin: 0;
+    font-family: "PingFang SC";
+    font-size: 14px;
+    color: #00000066;
+    line-height: 22px;
+  }
+
+  .section-body {
+    background: #fff;
+  }
+
+  .form-item {
+    margin-bottom: 20px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-family: "PingFang SC";
+    font-size: 14px;
+    font-weight: 500;
+    color: #000000e6;
+  }
+
+  .form-value-row {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    font-size: 14px;
+    color: #1a1a1a;
+
+    .form-value-icon {
+      color: #07c05f;
+      margin-right: 6px;
+    }
+  }
+
+  .form-item.read-only-row .form-value-row {
+    min-height: auto;
+    padding: 8px 0;
+    border: none;
+    background: transparent;
+    font-family: "PingFang SC";
+    word-break: break-word;
+  }
+
+  .form-value-desc {
+    align-items: flex-start;
+    white-space: pre-wrap;
+    line-height: 1.5;
+    color: #00000099;
+  }
+
+  .permission-list {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .permission-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #fafafa;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #666;
+
+    .t-icon {
+      color: #d9d9d9;
+      flex-shrink: 0;
+    }
+
+    &.allowed {
+      color: #1a1a1a;
+
+      .t-icon {
+        color: #07c05f;
+      }
+    }
+  }
+
+  .settings-footer {
+    padding: 16px 32px;
+    border-top: 1px solid #e5e5e5;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background: #fff;
+    flex-shrink: 0;
+  }
+}
+
+.shared-kb-overlay .close-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: #f5f5f5;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  transition: all 0.2s ease;
+  z-index: 10;
+
+  &:hover {
+    background: #e5e5e5;
+    color: #000;
+  }
+}
+
+.shared-kb-overlay .modal-enter-active,
+.shared-kb-overlay .modal-leave-active {
+  transition: all 0.3s ease;
+}
+
+.shared-kb-overlay .modal-enter-from,
+.shared-kb-overlay .modal-leave-to {
+  opacity: 0;
+
+  .shared-kb-modal {
+    transform: scale(0.95);
   }
 }
 
@@ -784,6 +1760,41 @@ const handleUploadFinishedEvent = (event: Event) => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+
+  .card-title {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1a1a1a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .card-more-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    color: #999;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.05);
+      color: #666;
+    }
+  }
+
+  .permission-tag {
+    flex-shrink: 0;
+  }
 }
 
 .card-title {
@@ -835,6 +1846,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   flex: 1;
   margin-bottom: 12px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .card-description {
@@ -863,6 +1877,20 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.bottom-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+
+  .card-time {
+    font-size: 12px;
+    color: #999;
+  }
 }
 
 .feature-badges {
@@ -947,6 +1975,42 @@ const handleUploadFinishedEvent = (event: Event) => {
 
     &:hover {
       background: rgba(0, 150, 136, 0.12);
+    }
+  }
+
+  &.shared {
+    background: rgba(0, 82, 217, 0.08);
+    color: #0052d9;
+
+    &:hover {
+      background: rgba(0, 82, 217, 0.12);
+    }
+  }
+
+  &.role-admin {
+    background: rgba(7, 192, 95, 0.1);
+    color: #059669;
+
+    &:hover {
+      background: rgba(7, 192, 95, 0.15);
+    }
+  }
+
+  &.role-editor {
+    background: rgba(255, 152, 0, 0.1);
+    color: #f59e0b;
+
+    &:hover {
+      background: rgba(255, 152, 0, 0.15);
+    }
+  }
+
+  &.role-viewer {
+    background: rgba(0, 0, 0, 0.05);
+    color: #666;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.08);
     }
   }
 }

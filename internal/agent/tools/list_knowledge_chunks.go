@@ -67,27 +67,25 @@ type ListKnowledgeChunksTool struct {
 	BaseTool
 	chunkService     interfaces.ChunkService
 	knowledgeService interfaces.KnowledgeService
+	searchTargets    types.SearchTargets // Pre-computed unified search targets with KB-tenant mapping
 }
 
 // NewListKnowledgeChunksTool creates a new tool instance.
 func NewListKnowledgeChunksTool(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
+	searchTargets types.SearchTargets,
 ) *ListKnowledgeChunksTool {
 	return &ListKnowledgeChunksTool{
 		BaseTool:         listKnowledgeChunksTool,
 		chunkService:     chunkService,
 		knowledgeService: knowledgeService,
+		searchTargets:    searchTargets,
 	}
 }
 
 // Execute performs the chunk fetch against the chunk service.
 func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
-	tenantID := uint64(0)
-	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-		tenantID = tid
-	}
-
 	// Parse args from json.RawMessage
 	var input ListKnowledgeChunksInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -107,6 +105,26 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	}
 	knowledgeID = strings.TrimSpace(knowledgeID)
 
+	// Get knowledge info without tenant filter to support shared KB
+	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
+	if err != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Knowledge not found: %v", err),
+		}, err
+	}
+
+	// Verify the knowledge's KB is in searchTargets (permission check)
+	if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
+		return &types.ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("Knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
+		}, fmt.Errorf("knowledge base not in search targets")
+	}
+
+	// Use the knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB)
+	effectiveTenantID := knowledge.TenantID
+
 	chunkLimit := 20
 	if input.Limit > 0 {
 		chunkLimit = input.Limit
@@ -125,7 +143,7 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	chunks, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-		tenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
+		effectiveTenantID, knowledgeID, pagination, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,
@@ -206,11 +224,12 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 }
 
 // lookupKnowledgeTitle looks up the title of a knowledge document
+// Uses GetKnowledgeByIDOnly to support cross-tenant shared KB
 func (t *ListKnowledgeChunksTool) lookupKnowledgeTitle(ctx context.Context, knowledgeID string) string {
 	if t.knowledgeService == nil {
 		return ""
 	}
-	knowledge, err := t.knowledgeService.GetKnowledgeByID(ctx, knowledgeID)
+	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil || knowledge == nil {
 		return ""
 	}

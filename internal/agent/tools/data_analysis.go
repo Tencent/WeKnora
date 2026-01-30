@@ -369,7 +369,8 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 func (t *DataAnalysisTool) LoadFromKnowledgeID(ctx context.Context, knowledgeID string) (*TableSchema, error) {
-	knowledge, err := t.knowledgeService.GetKnowledgeByID(ctx, knowledgeID)
+	// Use GetKnowledgeByIDOnly to support cross-tenant shared KB
+	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to get knowledge by ID '%s': %v", knowledgeID, err)
 		return nil, fmt.Errorf("failed to get knowledge by ID: %w", err)

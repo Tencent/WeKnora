@@ -97,8 +97,10 @@ export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 
-export function batchQueryKnowledge(idsQueryString: string) {
-  return get(`/api/v1/knowledge/batch?${idsQueryString}`);
+/** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
+export function batchQueryKnowledge(idsQueryString: string, kbId?: string) {
+  const qs = kbId ? `${idsQueryString}&kb_id=${encodeURIComponent(kbId)}` : idsQueryString;
+  return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
 export function getKnowledgeDetailsCon(id: string, page: number) {

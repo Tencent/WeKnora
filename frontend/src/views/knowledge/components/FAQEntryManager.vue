@@ -39,11 +39,10 @@
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.faq.title') }}</span>
             </h2>
-            <t-tooltip :content="$t('knowledgeBase.settings')" placement="top">
+            <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
                 class="kb-settings-button"
-                :disabled="!props.kbId"
                 @click="handleOpenKBSettings"
               >
                 <t-icon name="setting" size="16px" />
@@ -51,6 +50,41 @@
             </t-tooltip>
           </div>
           <p class="faq-subtitle">{{ $t('knowledgeEditor.faq.subtitle') }}</p>
+          <!-- 当前知识库权限与来源信息 -->
+          <div v-if="kbInfo" class="faq-access-info">
+            <span class="faq-access-role">
+              <span class="faq-access-label">{{ $t('knowledgeBase.accessInfo.myRole') }}：</span>
+              <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')">
+                {{ accessRoleLabel }}
+              </t-tag>
+            </span>
+            <span class="faq-access-summary">{{ accessPermissionSummary }}</span>
+            <template v-if="currentSharedKb">
+              <span class="faq-access-sep">·</span>
+              <span class="faq-access-source">
+                {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
+              </span>
+            </template>
+            <template v-else-if="kbLastUpdated">
+              <span class="faq-access-sep">·</span>
+              <span class="faq-access-updated">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+            </template>
+          </div>
+        </div>
+        <div class="faq-header-actions">
+          <t-dropdown
+            :options="faqActionOptions"
+            trigger="click"
+            placement="bottom-right"
+            @click="handleFaqAction"
+          >
+            <t-button class="faq-action-btn dropdown-action-btn">
+              <template #icon><t-icon name="help-circle" /></template>
+              <span>{{ $t('knowledgeEditor.faq.manageFaq') }}</span>
+              <t-icon name="chevron-down" size="14px" class="dropdown-arrow" />
+            </t-button>
+          </t-dropdown>
         </div>
       </div>
 
@@ -173,7 +207,7 @@
               <span>{{ $t('knowledgeBase.faqCategoryTitle') }}</span>
               <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
             </div>
-            <div class="sidebar-actions">
+            <div v-if="canEdit" class="sidebar-actions">
               <t-button
                 size="small"
                 variant="text"
@@ -290,7 +324,7 @@
                       </div>
                     </template>
                     <template v-else>
-                      <div class="tag-more" @click.stop>
+                      <div v-if="canEdit" class="tag-more" @click.stop>
                         <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
                           <div class="tag-more-btn">
                             <t-icon name="more" size="14px" />
@@ -359,6 +393,7 @@
                       </div>
                       <div class="faq-card-actions">
                         <t-popup
+                          v-if="canManage"
                           v-model="entry.showMore"
                           overlayClassName="faq-card-popup"
                           trigger="click"
@@ -502,7 +537,7 @@
                   <!-- Card Footer -->
                   <div class="faq-card-footer">
                     <div class="faq-card-tag" @click.stop>
-                      <template v-if="tagList.length">
+                      <template v-if="canEdit && tagList.length">
                         <t-dropdown
                           :options="tagDropdownOptions"
                           trigger="click"
@@ -539,22 +574,21 @@
                         </div>
                       </t-tooltip>
                       -->
-                      <t-tooltip
-                        :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
-                        placement="top"
-                      >
-                        <div class="status-item-compact">
-                          <t-switch
-                            :key="`${entry.id}-${entry.is_enabled}`"
-                            size="small"
-                            :value="entry.is_enabled"
-                            :loading="!!entryStatusLoading[entry.id]"
-                            :disabled="!!entryStatusLoading[entry.id]"
-                            @click.stop
-                            @change="(value: boolean) => handleEntryStatusChange(entry, value)"
-                          />
-                        </div>
-                      </t-tooltip>
+                                            <t-tooltip
+                                              :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
+                                              placement="top"
+                                            >
+                                              <div class="status-item-compact">
+                                                <t-switch
+                                                  :key="`${entry.id}-${entry.is_enabled}`"
+                                                  size="small"
+                                                  :value="entry.is_enabled"
+                                                  :loading="!!entryStatusLoading[entry.id]"
+                                                  :disabled="!!entryStatusLoading[entry.id] || !canEdit"
+                                                  @click.stop @change="(value: boolean) => handleEntryStatusChange(entry, value)"
+                                                />
+                                              </div>
+                                            </t-tooltip>
                     </div>
                   </div>
                 </div>
@@ -1161,6 +1195,8 @@ import { MessagePlugin, DialogPlugin, Icon as TIcon } from 'tdesign-vue-next'
 import type { FormRules, FormInstanceFunctions } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { useOrganizationStore } from '@/stores/organization'
 import {
   listFAQEntries,
   upsertFAQEntries,
@@ -1226,6 +1262,95 @@ const props = defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
+const orgStore = useOrganizationStore()
+
+// Permission control: check if current user owns this KB or has edit/manage permission
+const isOwner = computed(() => {
+  if (!kbInfo.value) return false
+  // Check if the current user's tenant ID matches the KB's tenant ID
+  const userTenantId = authStore.effectiveTenantId
+  return kbInfo.value.tenant_id === userTenantId
+})
+
+// Can edit: owner, admin, or editor
+const canEdit = computed(() => {
+  return orgStore.canEditKB(props.kbId, isOwner.value)
+})
+
+// Can manage (delete, settings, etc.): owner or admin
+const canManage = computed(() => {
+  return orgStore.canManageKB(props.kbId, isOwner.value)
+})
+
+// Current KB's shared record (when accessed via organization share)
+const currentSharedKb = computed(() =>
+  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === props.kbId) ?? null,
+)
+
+// Display role label: owner or org role (admin/editor/viewer)
+const accessRoleLabel = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
+  const perm = orgStore.getKBPermission(props.kbId)
+  if (perm) return t(`organization.role.${perm}`)
+  return '--'
+})
+
+// Permission summary text for current role
+const accessPermissionSummary = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
+  const perm = orgStore.getKBPermission(props.kbId)
+  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
+  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor')
+  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer')
+  return '--'
+})
+
+// Last updated time from kbInfo
+const kbLastUpdated = computed(() => {
+  const raw = kbInfo.value?.updated_at
+  if (!raw) return null
+  return formatImportTime(raw)
+})
+
+// FAQ 操作下拉选项
+const faqActionOptions = computed(() => {
+  const options = []
+  
+  // 编辑权限相关操作
+  if (canEdit.value) {
+    options.push(
+      { content: t('knowledgeEditor.faq.editorCreate'), value: 'create', prefixIcon: () => h(TIcon, { name: 'add', size: '16px' }) },
+      { content: t('knowledgeEditor.faqImport.importButton'), value: 'import', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
+    )
+  }
+  
+  // 通用操作
+  options.push(
+    { content: t('knowledgeEditor.faq.searchTest'), value: 'search', prefixIcon: () => h(TIcon, { name: 'search', size: '16px' }) },
+    { content: t('knowledgeEditor.faqExport.exportButton'), value: 'export', prefixIcon: () => h(TIcon, { name: 'download', size: '16px' }) },
+  )
+  
+  return options
+})
+
+// 处理 FAQ 操作
+const handleFaqAction = (data: { value: string }) => {
+  switch (data.value) {
+    case 'create':
+      openEditor()
+      break
+    case 'import':
+      openImportDialog()
+      break
+    case 'search':
+      searchDrawerVisible.value = true
+      break
+    case 'export':
+      handleExportCSV()
+      break
+  }
+}
 
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -1336,11 +1461,26 @@ const loadKnowledgeInfo = async (kbId: string) => {
 const loadKnowledgeList = async () => {
   try {
     const res: any = await listKnowledgeBases()
-    knowledgeList.value = (res?.data || []).map((item: any) => ({
+    const myKbs = (res?.data || []).map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type,
     }))
+    
+    // Also include shared knowledge bases from orgStore
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter(s => s.knowledge_base != null)
+      .map(s => ({
+        id: String(s.knowledge_base.id),
+        name: s.knowledge_base.name,
+        type: s.knowledge_base.type,
+      }))
+    
+    // Merge and deduplicate by id (my KBs take precedence)
+    const myKbIds = new Set(myKbs.map(kb => kb.id))
+    const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id))
+    
+    knowledgeList.value = [...myKbs, ...uniqueSharedKbs]
   } catch (error) {
     console.error('Failed to load knowledge bases:', error)
   }
@@ -1671,13 +1811,15 @@ const handleKnowledgeDropdownSelect = (data: { value: string }) => {
 const handleFaqMenuAction = (event: Event) => {
   const detail = (event as CustomEvent<{ action: string; kbId: string }>).detail
   if (!detail || detail.kbId !== props.kbId) return
+
   if (detail.action === 'create') {
-    openEditor()
+    if (canEdit.value) openEditor()
   } else if (detail.action === 'import') {
-    openImportDialog()
+    if (canEdit.value) openImportDialog()
   } else if (detail.action === 'search') {
     searchDrawerVisible.value = true
   } else if (detail.action === 'export') {
+    // Export is usually allowed for viewers as well
     handleExportCSV()
   } else if (detail.action === 'batch') {
     // 批量操作通过左侧菜单的下拉菜单处理
@@ -1685,19 +1827,19 @@ const handleFaqMenuAction = (event: Event) => {
       MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst') || '请先选中要操作的FAQ条目')
     }
   } else if (detail.action === 'batchTag') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       openBatchTagDialog()
     }
   } else if (detail.action === 'batchEnable') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       handleBatchStatusChange(true)
     }
   } else if (detail.action === 'batchDisable') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       handleBatchStatusChange(false)
     }
   } else if (detail.action === 'batchDelete') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canManage.value && selectedRowKeys.value.length > 0) {
       handleBatchDelete()
     }
   }
@@ -3021,6 +3163,8 @@ const handleResize = () => {
 }
 
 onMounted(async () => {
+  // Ensure shared knowledge bases are loaded before loading the knowledge list
+  orgStore.fetchSharedKnowledgeBases()
   loadKnowledgeList()
   window.addEventListener('resize', handleResize)
   window.addEventListener('faqMenuAction', handleFaqMenuAction as EventListener)
@@ -3603,6 +3747,160 @@ watch(() => entries.value.map(e => ({
   margin-bottom: 20px;
   border-bottom: 1px solid #e7ebf0;
   flex-shrink: 0;
+
+  .faq-header-title {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .faq-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .faq-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #1d2129;
+  }
+
+  .breadcrumb-link {
+    border: none;
+    background: transparent;
+    padding: 4px 8px;
+    margin: -4px -8px;
+    font: inherit;
+    color: #4e5969;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 6px;
+    transition: all 0.12s ease;
+
+    &:hover:not(:disabled) {
+      color: #10b981;
+      background: #f6f8f7;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      color: #c9ced6;
+    }
+
+    &.dropdown {
+      padding-right: 6px;
+      
+      :deep(.t-icon) {
+        font-size: 14px;
+        transition: transform 0.12s ease;
+      }
+
+      &:hover:not(:disabled) {
+        :deep(.t-icon) {
+          transform: translateY(1px);
+        }
+      }
+    }
+  }
+
+  .breadcrumb-separator {
+    font-size: 14px;
+    color: #c9ced6;
+  }
+
+  .breadcrumb-current {
+    color: #1d2129;
+    font-weight: 600;
+  }
+
+  h2 {
+    margin: 0;
+    color: #1d2129;
+    font-family: "PingFang SC";
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 32px;
+  }
+
+  .faq-subtitle {
+    margin: 0;
+    color: #00000099;
+    font-family: "PingFang SC";
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
+  .faq-access-info {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #86909c;
+    line-height: 1.5;
+  }
+
+  .faq-access-label {
+    color: #4e5969;
+  }
+
+  .faq-access-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .faq-access-summary {
+    color: #86909c;
+  }
+
+  .faq-access-sep {
+    color: #c9ced6;
+    user-select: none;
+  }
+
+  .faq-access-source,
+  .faq-access-updated {
+    color: #86909c;
+  }
+}
+
+.faq-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+
+  .faq-action-btn {
+    background: linear-gradient(135deg, #26a69a 0%, #00897b 100%);
+    border: none;
+    color: #fff;
+
+    &:hover {
+      background: linear-gradient(135deg, #00897b 0%, #00796b 100%);
+    }
+  }
+
+  :deep(.dropdown-action-btn) {
+    .t-button__text {
+      display: inline-flex;
+      align-items: center;
+    }
+    
+    .dropdown-arrow {
+      margin-left: 4px;
+    }
+  }
 }
 
 // 导入进度条样式（显示在列表页面顶部）
@@ -3849,97 +4147,6 @@ watch(() => entries.value.map(e => ({
     flex-shrink: 0;
   }
 }
-
-  .faq-header-title {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .faq-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .faq-breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: #1d2129;
-  }
-
-  .breadcrumb-link {
-    border: none;
-    background: transparent;
-    padding: 4px 8px;
-    margin: -4px -8px;
-    font: inherit;
-    color: #4e5969;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border-radius: 6px;
-    transition: all 0.12s ease;
-
-    &:hover:not(:disabled) {
-      color: #10b981;
-      background: #f6f8f7;
-    }
-
-    &:disabled {
-      cursor: not-allowed;
-      color: #c9ced6;
-    }
-
-    &.dropdown {
-      padding-right: 6px;
-      
-      :deep(.t-icon) {
-        font-size: 14px;
-        transition: transform 0.12s ease;
-      }
-
-      &:hover:not(:disabled) {
-        :deep(.t-icon) {
-          transform: translateY(1px);
-        }
-      }
-    }
-  }
-
-  .breadcrumb-separator {
-    font-size: 14px;
-    color: #c9ced6;
-  }
-
-  .breadcrumb-current {
-    color: #1d2129;
-    font-weight: 600;
-  }
-
-  h2 {
-    margin: 0;
-    color: #1d2129;
-    font-family: "PingFang SC";
-    font-size: 24px;
-    font-weight: 600;
-    line-height: 32px;
-  }
-
-  .faq-subtitle {
-    margin: 0;
-    color: #00000099;
-    font-family: "PingFang SC";
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
-  }
 
 
 .tag-filter-bar {

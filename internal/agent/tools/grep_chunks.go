@@ -94,18 +94,16 @@ type GrepChunksInput struct {
 // Similar to grep command in Unix-like systems, but operates on knowledge base content
 type GrepChunksTool struct {
 	BaseTool
-	db               *gorm.DB
-	knowledgeBaseIDs []string
-	knowledgeIDs     []string // Specific knowledge/document IDs to search within
+	db            *gorm.DB
+	searchTargets types.SearchTargets // Pre-computed unified search targets with KB-tenant mapping
 }
 
 // NewGrepChunksTool creates a new grep chunks tool
-func NewGrepChunksTool(db *gorm.DB, knowledgeBaseIDs []string, knowledgeIDs []string) *GrepChunksTool {
+func NewGrepChunksTool(db *gorm.DB, searchTargets types.SearchTargets) *GrepChunksTool {
 	return &GrepChunksTool{
-		BaseTool:         grepChunksTool,
-		db:               db,
-		knowledgeBaseIDs: knowledgeBaseIDs,
-		knowledgeIDs:     knowledgeIDs,
+		BaseTool:      grepChunksTool,
+		db:            db,
+		searchTargets: searchTargets,
 	}
 }
 
@@ -148,27 +146,38 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}
 	}
 
-	// Parse knowledge_base_ids filter
-	kbIDs := input.KnowledgeBaseIDs
-	if len(kbIDs) == 0 {
-		kbIDs = t.knowledgeBaseIDs
+	// Get allowed KBs from searchTargets
+	allowedKBIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
+	kbTenantMap := t.searchTargets.GetKBTenantMap()
+
+	// Collect all specific knowledge IDs from searchTargets
+	var allowedKnowledgeIDs []string
+	for _, target := range t.searchTargets {
+		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
+			allowedKnowledgeIDs = append(allowedKnowledgeIDs, target.KnowledgeIDs...)
+		}
 	}
 
-	// // Parse knowledge_ids filter
-	// var knowledgeIDs []string
-	// if knowledgeIDsRaw, ok := args["knowledge_ids"].([]interface{}); ok {
-	// 	for _, id := range knowledgeIDsRaw {
-	// 		if idStr, ok := id.(string); ok && idStr != "" {
-	// 			knowledgeIDs = append(knowledgeIDs, idStr)
-	// 		}
-	// 	}
-	// }
+	// Parse knowledge_base_ids filter from input
+	kbIDs := input.KnowledgeBaseIDs
+	if len(kbIDs) == 0 {
+		kbIDs = allowedKBIDs
+	} else {
+		// Validate input KBs against allowed KBs
+		validKBs := make([]string, 0)
+		for _, kbID := range kbIDs {
+			if t.searchTargets.ContainsKB(kbID) {
+				validKBs = append(validKBs, kbID)
+			}
+		}
+		kbIDs = validKBs
+	}
 
-	logger.Infof(ctx, "[Tool][GrepChunks] Patterns: %v, MaxResults: %d, KnowledgeIDs: %v",
-		patterns, maxResults, t.knowledgeIDs)
+	logger.Infof(ctx, "[Tool][GrepChunks] Patterns: %v, MaxResults: %d, KBs: %v, KnowledgeIDs: %v, KBTenantMap: %v",
+		patterns, maxResults, kbIDs, allowedKnowledgeIDs, kbTenantMap)
 
-	// Build and execute query
-	results, totalCount, err := t.searchChunks(ctx, patterns, kbIDs, t.knowledgeIDs)
+	// Build and execute query with tenant info
+	results, totalCount, err := t.searchChunks(ctx, patterns, kbIDs, allowedKnowledgeIDs, kbTenantMap)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Search failed: %v", err)
 		return &types.ToolResult{
@@ -256,32 +265,53 @@ type chunkWithTitle struct {
 }
 
 // searchChunks performs the database search with pattern matching
+// kbTenantMap provides KB-to-tenant mapping for cross-tenant queries
 func (t *GrepChunksTool) searchChunks(
 	ctx context.Context,
 	patterns []string,
 	kbIDs []string,
 	knowledgeIDs []string,
+	kbTenantMap map[string]uint64,
 ) ([]chunkWithTitle, int64, error) {
-	tenantID := uint64(0)
-	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-		tenantID = tid
+	// Safety check: must have either kbIDs or knowledgeIDs
+	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
+		logger.Warnf(ctx, "[Tool][GrepChunks] No kbIDs or knowledgeIDs specified, returning empty results")
+		return nil, 0, nil
 	}
+
 	// Build base query
+	// Use knowledge_base_id filter combined with tenant_id to ensure data isolation
 	query := t.db.Debug().WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, knowledges.title as knowledge_title, COUNT(*) OVER (PARTITION BY chunks.knowledge_id) AS total_chunk_count").
 		Joins("LEFT JOIN knowledges ON chunks.knowledge_id = knowledges.id").
-		Where("chunks.tenant_id = ?", tenantID).
 		Where("chunks.is_enabled = ?", true).
 		Where("chunks.deleted_at IS NULL").
 		Where("knowledges.deleted_at IS NULL")
 
-	// Apply knowledge IDs filter (specific documents) - takes priority over KB filter
+	// Build tenant-aware KB filter: (kb_id = X AND tenant_id = Y) OR (kb_id = Z AND tenant_id = W) ...
+	// This ensures we only access chunks from KBs we have permission for, with correct tenant scope
 	if len(knowledgeIDs) > 0 {
+		// For specific knowledge IDs, filter directly by knowledge_id
+		// Permission already checked when building searchTargets
 		query = query.Where("chunks.knowledge_id IN ?", knowledgeIDs)
 		logger.Infof(ctx, "[Tool][GrepChunks] Filtering by %d specific knowledge IDs", len(knowledgeIDs))
 	} else if len(kbIDs) > 0 {
-		// Apply knowledge base filter only if no specific knowledge IDs
-		query = query.Where("chunks.knowledge_base_id IN ?", kbIDs)
+		// Build OR conditions for each KB with its tenant
+		var conditions []string
+		var args []interface{}
+		for _, kbID := range kbIDs {
+			tenantID := kbTenantMap[kbID]
+			if tenantID > 0 {
+				conditions = append(conditions, "(chunks.knowledge_base_id = ? AND chunks.tenant_id = ?)")
+				args = append(args, kbID, tenantID)
+			}
+		}
+		if len(conditions) > 0 {
+			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+		} else {
+			logger.Warnf(ctx, "[Tool][GrepChunks] No valid KB-tenant pairs found")
+			return nil, 0, nil
+		}
 	}
 
 	// Apply pattern matching (case-insensitive fixed string matching, OR logic for multiple patterns)

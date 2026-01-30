@@ -965,10 +965,6 @@ func (t *KnowledgeSearchTool) formatOutput(
 	kbsToSearch []string,
 	queries []string,
 ) (*types.ToolResult, error) {
-	tenantID := uint64(0)
-	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-		tenantID = tid
-	}
 	if len(results) == 0 {
 		data := map[string]interface{}{
 			"knowledge_base_ids": kbsToSearch,
@@ -1052,22 +1048,30 @@ func (t *KnowledgeSearchTool) formatOutput(
 			output += fmt.Sprintf("[Source Document: %s]\n", result.KnowledgeTitle)
 
 			// Get total chunk count for this knowledge (cache it)
+			// Use KB's tenant_id from searchTargets to support cross-tenant shared KB
 			if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
-				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-					tenantID, result.KnowledgeID,
-					&types.Pagination{Page: 1, PageSize: 1},
-					[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
-				)
-				if err != nil {
-					logger.Warnf(
-						ctx,
-						"[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v",
-						result.KnowledgeID,
-						err,
-					)
+				// Get tenant_id from searchTargets using the KB ID from the result
+				effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
+				if effectiveTenantID == 0 {
+					logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
 					knowledgeTotalMap[result.KnowledgeID] = 0
 				} else {
-					knowledgeTotalMap[result.KnowledgeID] = total
+					_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
+						effectiveTenantID, result.KnowledgeID,
+						&types.Pagination{Page: 1, PageSize: 1},
+						[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
+					)
+					if err != nil {
+						logger.Warnf(
+							ctx,
+							"[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v",
+							result.KnowledgeID,
+							err,
+						)
+						knowledgeTotalMap[result.KnowledgeID] = 0
+					} else {
+						knowledgeTotalMap[result.KnowledgeID] = total
+					}
 				}
 			}
 		}

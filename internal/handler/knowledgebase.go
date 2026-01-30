@@ -22,6 +22,7 @@ import (
 type KnowledgeBaseHandler struct {
 	service          interfaces.KnowledgeBaseService
 	knowledgeService interfaces.KnowledgeService
+	kbShareService   interfaces.KBShareService
 	asynqClient      *asynq.Client
 }
 
@@ -29,11 +30,13 @@ type KnowledgeBaseHandler struct {
 func NewKnowledgeBaseHandler(
 	service interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	kbShareService interfaces.KBShareService,
 	asynqClient *asynq.Client,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		service:          service,
 		knowledgeService: knowledgeService,
+		kbShareService:   kbShareService,
 		asynqClient:      asynqClient,
 	}
 }
@@ -56,11 +59,10 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 
 	logger.Info(ctx, "Start hybrid search")
 
-	// Validate knowledge base ID
-	id := secutils.SanitizeForLog(c.Param("id"))
-	if id == "" {
-		logger.Error(ctx, "Knowledge base ID is empty")
-		c.Error(errors.NewBadRequestError("Knowledge base ID cannot be empty"))
+	// Validate and check permission for knowledge base access
+	_, id, effectiveTenantID, _, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		c.Error(err)
 		return
 	}
 
@@ -72,10 +74,11 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s",
-		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText))
+	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
+		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
 
 	// Execute hybrid search with default search parameters
+	// Note: For shared KBs, the service uses effectiveTenantID internally via context
 	results, err := h.service.HybridSearch(ctx, id, req)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
@@ -139,43 +142,64 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 }
 
 // validateAndGetKnowledgeBase validates request parameters and retrieves the knowledge base
-// Returns the knowledge base, knowledge base ID, and any errors encountered
-func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*types.KnowledgeBase, string, error) {
+// Returns the knowledge base, knowledge base ID, effective tenant ID for embedding, permission level, and any errors encountered
+// For owned KBs, effectiveTenantID is the caller's tenant ID
+// For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
+func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
 	ctx := c.Request.Context()
 
 	// Get tenant ID from context
 	tenantID, exists := c.Get(types.TenantIDContextKey.String())
 	if !exists {
 		logger.Error(ctx, "Failed to get tenant ID")
-		return nil, "", errors.NewUnauthorizedError("Unauthorized")
+		return nil, "", 0, "", errors.NewUnauthorizedError("Unauthorized")
 	}
+
+	// Get user ID from context (needed for shared KB permission check)
+	userID, userExists := c.Get(types.UserIDContextKey.String())
 
 	// Get knowledge base ID from URL parameter
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
-		return nil, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
+		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
 	}
 
 	// Verify tenant has permission to access this knowledge base
 	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		return nil, id, errors.NewInternalServerError(err.Error())
+		return nil, id, 0, "", errors.NewInternalServerError(err.Error())
 	}
 
-	// Verify tenant ownership
-	if kb.TenantID != tenantID.(uint64) {
-		logger.Warnf(
-			ctx,
-			"Tenant has no permission to access this knowledge base, knowledge base ID: %s, "+
-				"request tenant ID: %d, knowledge base tenant ID: %d",
-			id, tenantID.(uint64), kb.TenantID,
-		)
-		return nil, id, errors.NewForbiddenError("No permission to operate")
+	// Check 1: Verify tenant ownership (owner has full access)
+	if kb.TenantID == tenantID.(uint64) {
+		return kb, id, tenantID.(uint64), types.OrgRoleAdmin, nil
 	}
 
-	return kb, id, nil
+	// Check 2: If not owner, check organization shared access
+	if userExists && h.kbShareService != nil {
+		// Check if user has shared access through organization
+		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, id, userID.(string))
+		if permErr == nil && isShared {
+			// User has shared access, get the source tenant ID for embedding queries
+			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, id)
+			if srcErr == nil {
+				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
+					userID.(string), id, permission, sourceTenantID)
+				return kb, id, sourceTenantID, permission, nil
+			}
+		}
+	}
+
+	// No permission: not owner and no shared access
+	logger.Warnf(
+		ctx,
+		"Tenant has no permission to access this knowledge base, knowledge base ID: %s, "+
+			"request tenant ID: %d, knowledge base tenant ID: %d",
+		id, tenantID.(uint64), kb.TenantID,
+	)
+	return nil, id, 0, "", errors.NewForbiddenError("No permission to operate")
 }
 
 // GetKnowledgeBase godoc
@@ -193,7 +217,7 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 // @Router       /knowledge-bases/{id} [get]
 func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	// Validate and get the knowledge base
-	kb, _, err := h.validateAndGetKnowledgeBase(c)
+	kb, _, _, _, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -224,6 +248,25 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
+	}
+
+	// Get share counts for all knowledge bases
+	if len(kbs) > 0 && h.kbShareService != nil {
+		kbIDs := make([]string, len(kbs))
+		for i, kb := range kbs {
+			kbIDs[i] = kb.ID
+		}
+
+		shareCounts, err := h.kbShareService.CountSharesByKnowledgeBaseIDs(ctx, kbIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to get share counts: %v", err)
+		} else {
+			for _, kb := range kbs {
+				if count, ok := shareCounts[kb.ID]; ok {
+					kb.ShareCount = count
+				}
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -257,9 +300,15 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start updating knowledge base")
 
 	// Validate and get the knowledge base
-	_, id, err := h.validateAndGetKnowledgeBase(c)
+	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+
+	// Only admin/editor can update knowledge base
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to update knowledge base"))
 		return
 	}
 
@@ -307,9 +356,16 @@ func (h *KnowledgeBaseHandler) DeleteKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start deleting knowledge base")
 
 	// Validate and get the knowledge base
-	kb, id, err := h.validateAndGetKnowledgeBase(c)
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
+		return
+	}
+
+	// Only owner (admin with matching tenant) can delete knowledge base
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	if kb.TenantID != tenantID.(uint64) || permission != types.OrgRoleAdmin {
+		c.Error(errors.NewForbiddenError("Only knowledge base owner can delete"))
 		return
 	}
 

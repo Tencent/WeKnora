@@ -47,6 +47,18 @@ func (r *knowledgeRepository) GetKnowledgeByID(
 	return &knowledge, nil
 }
 
+// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
+func (r *knowledgeRepository) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
+	var knowledge types.Knowledge
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&knowledge).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrKnowledgeNotFound
+		}
+		return nil, err
+	}
+	return &knowledge, nil
+}
+
 // ListKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base
 func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	ctx context.Context, tenantID uint64, kbID string,
@@ -393,6 +405,111 @@ func (r *knowledgeRepository) SearchKnowledge(
 	}
 
 	// Convert to []*types.Knowledge
+	knowledges := make([]*types.Knowledge, len(results))
+	for i, r := range results {
+		k := r.Knowledge
+		k.KnowledgeBaseName = r.KnowledgeBaseName
+		knowledges[i] = &k
+	}
+	return knowledges, hasMore, nil
+}
+
+// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (e.g. own + shared KBs).
+func (r *knowledgeRepository) SearchKnowledgeInScopes(
+	ctx context.Context,
+	scopes []types.KnowledgeSearchScope,
+	keyword string,
+	offset, limit int,
+	fileTypes []string,
+) ([]*types.Knowledge, bool, error) {
+	if len(scopes) == 0 {
+		return nil, false, nil
+	}
+
+	type KnowledgeWithKBName struct {
+		types.Knowledge
+		KnowledgeBaseName string `gorm:"column:knowledge_base_name"`
+	}
+
+	placeholders := make([]string, len(scopes))
+	args := make([]interface{}, 0, len(scopes)*2)
+	for i, s := range scopes {
+		placeholders[i] = "(?,?)"
+		args = append(args, s.TenantID, s.KBID)
+	}
+	scopeCondition := "(knowledges.tenant_id, knowledges.knowledge_base_id) IN (" + strings.Join(placeholders, ",") + ")"
+
+	query := r.db.WithContext(ctx).
+		Table("knowledges").
+		Select("knowledges.*, knowledge_bases.name as knowledge_base_name").
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = knowledges.knowledge_base_id AND knowledge_bases.tenant_id = knowledges.tenant_id").
+		Where(scopeCondition, args...).
+		Where("knowledge_bases.type = ?", types.KnowledgeBaseTypeDocument).
+		Where("knowledges.deleted_at IS NULL")
+
+	if keyword != "" {
+		query = query.Where("knowledges.file_name LIKE ?", "%"+keyword+"%")
+	}
+
+	if len(fileTypes) > 0 {
+		seen := make(map[string]bool)
+		var uniquePatterns []string
+		for _, ft := range fileTypes {
+			ft = strings.ToLower(strings.TrimPrefix(ft, "."))
+			pattern := "%." + ft
+			if !seen[pattern] {
+				seen[pattern] = true
+				uniquePatterns = append(uniquePatterns, pattern)
+			}
+			var aliases []string
+			switch ft {
+			case "xlsx":
+				aliases = []string{"%.xls"}
+			case "xls":
+				aliases = []string{"%.xlsx"}
+			case "docx":
+				aliases = []string{"%.doc"}
+			case "doc":
+				aliases = []string{"%.docx"}
+			case "jpg":
+				aliases = []string{"%.jpeg", "%.png"}
+			case "jpeg":
+				aliases = []string{"%.jpg", "%.png"}
+			case "png":
+				aliases = []string{"%.jpg", "%.jpeg"}
+			}
+			for _, alias := range aliases {
+				if !seen[alias] {
+					seen[alias] = true
+					uniquePatterns = append(uniquePatterns, alias)
+				}
+			}
+		}
+		if len(uniquePatterns) > 0 {
+			orConditions := make([]string, len(uniquePatterns))
+			ftArgs := make([]interface{}, len(uniquePatterns))
+			for i, p := range uniquePatterns {
+				orConditions[i] = "LOWER(knowledges.file_name) LIKE ?"
+				ftArgs[i] = p
+			}
+			query = query.Where("("+strings.Join(orConditions, " OR ")+")", ftArgs...)
+		}
+	}
+
+	var results []KnowledgeWithKBName
+	err := query.Order("knowledges.created_at DESC").
+		Offset(offset).
+		Limit(limit + 1).
+		Scan(&results).Error
+	if err != nil {
+		return nil, false, err
+	}
+
+	hasMore := len(results) > limit
+	if hasMore {
+		results = results[:limit]
+	}
+
 	knowledges := make([]*types.Knowledge, len(results))
 	for i, r := range results {
 		k := r.Knowledge

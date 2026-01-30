@@ -1,0 +1,1196 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/Tencent/WeKnora/internal/application/service"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// OrganizationHandler implements HTTP request handlers for organization management
+type OrganizationHandler struct {
+	orgService    interfaces.OrganizationService
+	shareService  interfaces.KBShareService
+	userService   interfaces.UserService
+	knowledgeRepo interfaces.KnowledgeRepository
+	chunkRepo     interfaces.ChunkRepository
+}
+
+// NewOrganizationHandler creates a new organization handler
+func NewOrganizationHandler(
+	orgService interfaces.OrganizationService,
+	shareService interfaces.KBShareService,
+	userService interfaces.UserService,
+	knowledgeRepo interfaces.KnowledgeRepository,
+	chunkRepo interfaces.ChunkRepository,
+) *OrganizationHandler {
+	return &OrganizationHandler{
+		orgService:    orgService,
+		shareService:  shareService,
+		userService:   userService,
+		knowledgeRepo: knowledgeRepo,
+		chunkRepo:     chunkRepo,
+	}
+}
+
+// CreateOrganization creates a new organization
+// @Summary      创建组织
+// @Description  创建新的组织，创建者自动成为管理员
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.CreateOrganizationRequest  true  "组织信息"
+// @Success      201      {object}  map[string]interface{}
+// @Failure      400      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations [post]
+func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+
+	var req types.CreateOrganizationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Errorf(ctx, "Invalid request parameters: %v", err)
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	org, err := h.orgService.CreateOrganization(ctx, userID.(string), tenantID.(uint64), &req)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create organization: %v", err)
+		if errors.Is(err, service.ErrInvalidValidityDays) {
+			c.Error(apperrors.NewValidationError(err.Error()))
+			return
+		}
+		c.Error(apperrors.NewInternalServerError("Failed to create organization").WithDetails(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Organization created: %s", org.ID)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+	})
+}
+
+// GetOrganization gets an organization by ID
+// @Summary      获取组织详情
+// @Description  根据ID获取组织详情
+// @Tags         组织管理
+// @Produce      json
+// @Param        id   path      string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      404  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id} [get]
+func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	org, err := h.orgService.GetOrganization(ctx, orgID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get organization: %v", err)
+		c.Error(apperrors.NewNotFoundError("Organization not found"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+	})
+}
+
+// ListMyOrganizations lists organizations that the current user belongs to
+// @Summary      获取我的组织列表
+// @Description  获取当前用户所属的所有组织
+// @Tags         组织管理
+// @Produce      json
+// @Success      200  {object}  types.ListOrganizationsResponse
+// @Security     Bearer
+// @Router       /organizations [get]
+func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	orgs, err := h.orgService.ListUserOrganizations(ctx, userID.(string))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list organizations: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list organizations").WithDetails(err.Error()))
+		return
+	}
+
+	response := make([]types.OrganizationResponse, 0, len(orgs))
+	for _, org := range orgs {
+		response = append(response, h.toOrgResponse(ctx, org, userID.(string)))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": types.ListOrganizationsResponse{
+			Organizations: response,
+			Total:         int64(len(response)),
+		},
+	})
+}
+
+// UpdateOrganization updates an organization
+// @Summary      更新组织
+// @Description  更新组织信息（需要管理员权限）
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                           true  "组织ID"
+// @Param        request  body      types.UpdateOrganizationRequest  true  "更新信息"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      403      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id} [put]
+func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	var req types.UpdateOrganizationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	org, err := h.orgService.UpdateOrganization(ctx, orgID, userID.(string), &req)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to update organization: %v", err)
+		if errors.Is(err, service.ErrInvalidValidityDays) {
+			c.Error(apperrors.NewValidationError(err.Error()))
+			return
+		}
+		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+	})
+}
+
+// DeleteOrganization deletes an organization
+// @Summary      删除组织
+// @Description  删除组织（仅组织创建者可操作）
+// @Tags         组织管理
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      403  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id} [delete]
+func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	if err := h.orgService.DeleteOrganization(ctx, orgID, userID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to delete organization: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Organization deleted successfully",
+	})
+}
+
+// ListMembers lists all members of an organization
+// @Summary      获取组织成员列表
+// @Description  获取组织的所有成员
+// @Tags         组织管理
+// @Produce      json
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  types.ListMembersResponse
+// @Security     Bearer
+// @Router       /organizations/{id}/members [get]
+func (h *OrganizationHandler) ListMembers(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+
+	members, err := h.orgService.ListMembers(ctx, orgID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list members: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list members").WithDetails(err.Error()))
+		return
+	}
+
+	response := make([]types.OrganizationMemberResponse, 0, len(members))
+	for _, m := range members {
+		resp := types.OrganizationMemberResponse{
+			ID:       m.ID,
+			UserID:   m.UserID,
+			Role:     string(m.Role),
+			TenantID: m.TenantID,
+			JoinedAt: m.CreatedAt,
+		}
+		if m.User != nil {
+			resp.Username = m.User.Username
+			resp.Email = m.User.Email
+			resp.Avatar = m.User.Avatar
+		}
+		response = append(response, resp)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": types.ListMembersResponse{
+			Members: response,
+			Total:   int64(len(response)),
+		},
+	})
+}
+
+// UpdateMemberRole updates a member's role
+// @Summary      更新成员角色
+// @Description  更新组织成员的角色（需要管理员权限）
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                       true  "组织ID"
+// @Param        user_id  path      string                       true  "用户ID"
+// @Param        request  body      types.UpdateMemberRoleRequest  true  "角色信息"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      403      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/members/{user_id} [put]
+func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	memberUserID := c.Param("user_id")
+	operatorUserID, _ := c.Get(types.UserIDContextKey.String())
+
+	var req types.UpdateMemberRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	if err := h.orgService.UpdateMemberRole(ctx, orgID, memberUserID, req.Role, operatorUserID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to update member role: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Member role updated successfully",
+	})
+}
+
+// RemoveMember removes a member from an organization
+// @Summary      移除成员
+// @Description  从组织中移除成员（需要管理员权限）
+// @Tags         组织管理
+// @Param        id       path  string  true  "组织ID"
+// @Param        user_id  path  string  true  "用户ID"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      403      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/members/{user_id} [delete]
+func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	memberUserID := c.Param("user_id")
+	operatorUserID, _ := c.Get(types.UserIDContextKey.String())
+
+	if err := h.orgService.RemoveMember(ctx, orgID, memberUserID, operatorUserID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to remove member: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Member removed successfully",
+	})
+}
+
+// GenerateInviteCode generates a new invite code
+// @Summary      生成邀请码
+// @Description  生成新的组织邀请码（需要管理员权限）
+// @Tags         组织管理
+// @Produce      json
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      403  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/invite-code [post]
+func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	code, err := h.orgService.GenerateInviteCode(ctx, orgID, userID.(string))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to generate invite code: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":     true,
+		"invite_code": code,
+	})
+}
+
+// PreviewByInviteCode previews organization info by invite code (without joining)
+// @Summary      通过邀请码预览组织
+// @Description  通过邀请码获取组织基本信息（不加入）
+// @Tags         组织管理
+// @Produce      json
+// @Param        code  path  string  true  "邀请码"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      404   {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/preview/{code} [get]
+func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	inviteCode := c.Param("code")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Get organization by invite code
+	org, err := h.orgService.GetOrganizationByInviteCode(ctx, inviteCode)
+	if err != nil {
+		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
+		return
+	}
+
+	// Get member count
+	members, _ := h.orgService.ListMembers(ctx, org.ID)
+	memberCount := len(members)
+
+	// Get shared knowledge bases count
+	shares, _ := h.shareService.ListSharesByOrganization(ctx, org.ID)
+	shareCount := len(shares)
+
+	// Check if user is already a member
+	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID.(string))
+	isAlreadyMember := memberErr == nil
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"id":                org.ID,
+			"name":              org.Name,
+			"description":       org.Description,
+			"avatar":            org.Avatar,
+			"member_count":      memberCount,
+			"share_count":       shareCount,
+			"is_already_member": isAlreadyMember,
+			"require_approval":  org.RequireApproval,
+			"created_at":        org.CreatedAt,
+		},
+	})
+}
+
+// JoinByInviteCode joins an organization by invite code
+// @Summary      通过邀请码加入组织
+// @Description  使用邀请码加入组织
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.JoinOrganizationRequest  true  "邀请码"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      404      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/join [post]
+func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+
+	var req types.JoinOrganizationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	org, err := h.orgService.JoinByInviteCode(ctx, req.InviteCode, userID.(string), tenantID.(uint64))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to join organization: %v", err)
+		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
+		return
+	}
+
+	logger.Infof(ctx, "User %s joined organization %s", secutils.SanitizeForLog(userID.(string)), org.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+	})
+}
+
+// SubmitJoinRequest submits a join request for organizations that require approval
+// @Summary      提交加入申请
+// @Description  对需要审核的组织提交加入申请
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.SubmitJoinRequestRequest  true  "申请信息"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      400      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/join-request [post]
+func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+
+	var req types.SubmitJoinRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	// Get organization by invite code
+	org, err := h.orgService.GetOrganizationByInviteCode(ctx, req.InviteCode)
+	if err != nil {
+		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
+		return
+	}
+
+	// Check if organization requires approval
+	if !org.RequireApproval {
+		c.Error(apperrors.NewValidationError("This organization does not require approval. Use the join endpoint instead."))
+		return
+	}
+
+	// Check if user is already a member
+	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID.(string))
+	if memberErr == nil {
+		c.Error(apperrors.NewValidationError("You are already a member of this organization"))
+		return
+	}
+
+	// Validate requested role: only viewer/editor/admin allowed
+	requestedRole := req.Role
+	if requestedRole != "" && !requestedRole.IsValid() {
+		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		return
+	}
+
+	// Submit join request (service defaults to viewer if role empty)
+	request, err := h.orgService.SubmitJoinRequest(ctx, org.ID, userID.(string), tenantID.(uint64), req.Message, requestedRole)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to submit join request: %v", err)
+		if err.Error() == "pending request already exists" {
+			c.Error(apperrors.NewValidationError("You have already submitted a request to join this organization"))
+			return
+		}
+		c.Error(apperrors.NewInternalServerError("Failed to submit join request"))
+		return
+	}
+
+	logger.Infof(ctx, "User %s submitted join request for organization %s", secutils.SanitizeForLog(userID.(string)), org.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    request,
+	})
+}
+
+// RequestRoleUpgrade submits a request to upgrade role in an organization
+// @Summary      申请权限升级
+// @Description  现有成员申请更高权限
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                          true  "组织ID"
+// @Param        request  body      types.RequestRoleUpgradeRequest  true  "申请信息"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      400      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/request-upgrade [post]
+func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+
+	var req types.RequestRoleUpgradeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	// Validate requested role
+	if !req.RequestedRole.IsValid() {
+		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		return
+	}
+
+	request, err := h.orgService.RequestRoleUpgrade(ctx, orgID, userID.(string), tenantID.(uint64), req.RequestedRole, req.Message)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to submit role upgrade request: %v", err)
+		if err.Error() == "pending request already exists" {
+			c.Error(apperrors.NewValidationError("You already have a pending upgrade request"))
+			return
+		}
+		if err.Error() == "user is not a member of this organization" {
+			c.Error(apperrors.NewValidationError("You are not a member of this organization"))
+			return
+		}
+		if err.Error() == "user is already an admin" {
+			c.Error(apperrors.NewValidationError("You are already an admin"))
+			return
+		}
+		if err.Error() == "cannot request upgrade to same or lower role" {
+			c.Error(apperrors.NewValidationError("Cannot request upgrade to same or lower role"))
+			return
+		}
+		c.Error(apperrors.NewInternalServerError("Failed to submit upgrade request"))
+		return
+	}
+
+	logger.Infof(ctx, "User %s submitted role upgrade request for organization %s", secutils.SanitizeForLog(userID.(string)), orgID)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    request,
+	})
+}
+
+// LeaveOrganization allows a user to leave an organization
+// @Summary      退出组织
+// @Description  退出指定组织
+// @Tags         组织管理
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      403  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/leave [post]
+func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Check if user is the owner
+	org, err := h.orgService.GetOrganization(ctx, orgID)
+	if err != nil {
+		c.Error(apperrors.NewNotFoundError("Organization not found"))
+		return
+	}
+
+	if org.OwnerID == userID.(string) {
+		c.Error(apperrors.NewForbiddenError("Organization owner cannot leave. Please transfer ownership or delete the organization."))
+		return
+	}
+
+	// Remove the user from the organization
+	if err := h.orgService.RemoveMember(ctx, orgID, userID.(string), userID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to leave organization: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to leave organization"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Left organization successfully",
+	})
+}
+
+// ListJoinRequests lists pending join requests for an organization (admin only)
+// @Summary      获取待审核加入申请列表
+// @Description  获取组织的待审核加入申请（仅管理员）
+// @Tags         组织管理
+// @Produce      json
+// @Param        id   path  string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      403  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/join-requests [get]
+func (h *OrganizationHandler) ListJoinRequests(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Check admin
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	if err != nil || !isAdmin {
+		c.Error(apperrors.NewForbiddenError("Only organization admins can view join requests"))
+		return
+	}
+
+	requests, err := h.orgService.ListJoinRequests(ctx, orgID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list join requests: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list join requests"))
+		return
+	}
+
+	// Only return pending requests for approval UI
+	resp := make([]types.JoinRequestResponse, 0)
+	for _, r := range requests {
+		if r.Status != types.JoinRequestStatusPending {
+			continue
+		}
+		item := types.JoinRequestResponse{
+			ID:            r.ID,
+			UserID:        r.UserID,
+			Message:       r.Message,
+			RequestType:   string(r.RequestType),
+			PrevRole:      string(r.PrevRole),
+			RequestedRole: string(r.RequestedRole),
+			Status:        string(r.Status),
+			CreatedAt:     r.CreatedAt,
+			ReviewedAt:    r.ReviewedAt,
+		}
+		// Default request_type to 'join' for backward compatibility
+		if item.RequestType == "" {
+			item.RequestType = string(types.JoinRequestTypeJoin)
+		}
+		if r.User != nil {
+			item.Username = r.User.Username
+			item.Email = r.User.Email
+		}
+		resp = append(resp, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": types.ListJoinRequestsResponse{
+			Requests: resp,
+			Total:    int64(len(resp)),
+		},
+	})
+}
+
+// ReviewJoinRequest approves or rejects a join request (admin only)
+// @Summary      审核加入申请
+// @Description  通过或拒绝加入申请（仅管理员）
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        id          path  string  true  "组织ID"
+// @Param        request_id  path  string  true  "申请ID"
+// @Param        request    body  types.ReviewJoinRequestRequest  true  "审核结果"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      403  {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/join-requests/{request_id}/review [put]
+func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	requestID := c.Param("request_id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Check admin
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	if err != nil || !isAdmin {
+		c.Error(apperrors.NewForbiddenError("Only organization admins can review join requests"))
+		return
+	}
+
+	var req types.ReviewJoinRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	var assignRole *types.OrgMemberRole
+	if req.Role != "" {
+		if !req.Role.IsValid() {
+			c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+			return
+		}
+		assignRole = &req.Role
+	}
+
+	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID.(string), req.Message, assignRole); err != nil {
+		logger.Errorf(ctx, "Failed to review join request: %v", err)
+		if err.Error() == "request has already been reviewed" {
+			c.Error(apperrors.NewValidationError("Request has already been reviewed"))
+			return
+		}
+		c.Error(apperrors.NewInternalServerError("Failed to review join request"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Review completed",
+	})
+}
+
+// ShareKnowledgeBase shares a knowledge base to an organization
+// @Summary      共享知识库到组织
+// @Description  将知识库共享到指定组织
+// @Tags         知识库共享
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                         true  "知识库ID"
+// @Param        request  body      types.ShareKnowledgeBaseRequest  true  "共享信息"
+// @Success      201      {object}  map[string]interface{}
+// @Failure      403      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/shares [post]
+func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	kbID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+
+	var req types.ShareKnowledgeBaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	share, err := h.shareService.ShareKnowledgeBase(ctx, kbID, req.OrganizationID, userID.(string), tenantID.(uint64), req.Permission)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to share knowledge base: %v", err)
+		if errors.Is(err, service.ErrOrgRoleCannotShare) {
+			c.Error(apperrors.NewForbiddenError("Only editors and admins can share knowledge bases to this organization"))
+			return
+		}
+		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    share,
+	})
+}
+
+// ListKBShares lists all shares for a knowledge base
+// @Summary      获取知识库的共享列表
+// @Description  获取知识库的所有共享记录
+// @Tags         知识库共享
+// @Produce      json
+// @Param        id  path  string  true  "知识库ID"
+// @Success      200  {object}  types.ListSharesResponse
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/shares [get]
+func (h *OrganizationHandler) ListKBShares(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	kbID := c.Param("id")
+
+	shares, err := h.shareService.ListSharesByKnowledgeBase(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list shares: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		return
+	}
+
+	response := make([]types.KnowledgeBaseShareResponse, 0, len(shares))
+	for _, s := range shares {
+		resp := types.KnowledgeBaseShareResponse{
+			ID:              s.ID,
+			KnowledgeBaseID: s.KnowledgeBaseID,
+			OrganizationID:  s.OrganizationID,
+			SharedByUserID:  s.SharedByUserID,
+			SourceTenantID:  s.SourceTenantID,
+			Permission:      string(s.Permission),
+			CreatedAt:       s.CreatedAt,
+		}
+		if s.Organization != nil {
+			resp.OrganizationName = s.Organization.Name
+		}
+		response = append(response, resp)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": types.ListSharesResponse{
+			Shares: response,
+			Total:  int64(len(response)),
+		},
+	})
+}
+
+// UpdateSharePermission updates the permission of a share
+// @Summary      更新共享权限
+// @Description  更新知识库共享的权限级别
+// @Tags         知识库共享
+// @Accept       json
+// @Produce      json
+// @Param        id        path      string                          true  "知识库ID"
+// @Param        share_id  path      string                          true  "共享记录ID"
+// @Param        request   body      types.UpdateSharePermissionRequest  true  "权限信息"
+// @Success      200       {object}  map[string]interface{}
+// @Failure      403       {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/shares/{share_id} [put]
+func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	shareID := c.Param("share_id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	var req types.UpdateSharePermissionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to update share permission: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Share permission updated successfully",
+	})
+}
+
+// RemoveShare removes a share
+// @Summary      取消共享
+// @Description  取消知识库的共享
+// @Tags         知识库共享
+// @Param        id        path  string  true  "知识库ID"
+// @Param        share_id  path  string  true  "共享记录ID"
+// @Success      200       {object}  map[string]interface{}
+// @Failure      403       {object}  errors.AppError
+// @Security     Bearer
+// @Router       /knowledge-bases/{id}/shares/{share_id} [delete]
+func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	shareID := c.Param("share_id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	if err := h.shareService.RemoveShare(ctx, shareID, userID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to remove share: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Share removed successfully",
+	})
+}
+
+// ListOrgShares lists all knowledge bases shared to a specific organization
+// @Summary      获取组织的共享知识库列表
+// @Description  获取共享到指定组织的所有知识库
+// @Tags         组织管理
+// @Produce      json
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  types.ListSharesResponse
+// @Security     Bearer
+// @Router       /organizations/{id}/shares [get]
+func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Check if user is a member and get their role for effective-permission calculation
+	member, err := h.orgService.GetMember(ctx, orgID, userID.(string))
+	if err != nil {
+		c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+		return
+	}
+	myRoleInOrg := member.Role
+
+	shares, err := h.shareService.ListSharesByOrganization(ctx, orgID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list organization shares: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		return
+	}
+
+	response := make([]types.KnowledgeBaseShareResponse, 0, len(shares))
+	for _, s := range shares {
+		// Effective permission for current user = min(share permission, my role in org)
+		effectivePerm := s.Permission
+		if !myRoleInOrg.HasPermission(s.Permission) {
+			effectivePerm = myRoleInOrg
+		}
+		resp := types.KnowledgeBaseShareResponse{
+			ID:              s.ID,
+			KnowledgeBaseID: s.KnowledgeBaseID,
+			OrganizationID:  s.OrganizationID,
+			SharedByUserID:  s.SharedByUserID,
+			SourceTenantID:  s.SourceTenantID,
+			Permission:      string(s.Permission),
+			MyRoleInOrg:     string(myRoleInOrg),
+			MyPermission:    string(effectivePerm),
+			CreatedAt:       s.CreatedAt,
+		}
+		if s.KnowledgeBase != nil {
+			resp.KnowledgeBaseName = s.KnowledgeBase.Name
+			resp.KnowledgeBaseType = s.KnowledgeBase.Type
+			// Get knowledge count for document type
+			if count, err := h.knowledgeRepo.CountKnowledgeByKnowledgeBaseID(ctx, s.SourceTenantID, s.KnowledgeBaseID); err == nil {
+				resp.KnowledgeCount = count
+			}
+			// Get chunk count for FAQ type
+			if count, err := h.chunkRepo.CountChunksByKnowledgeBaseID(ctx, s.SourceTenantID, s.KnowledgeBaseID); err == nil {
+				resp.ChunkCount = count
+			}
+		}
+		// Get shared by user info
+		if user, err := h.userService.GetUserByID(ctx, s.SharedByUserID); err == nil && user != nil {
+			resp.SharedByUsername = user.Username
+		}
+		response = append(response, resp)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": types.ListSharesResponse{
+			Shares: response,
+			Total:  int64(len(response)),
+		},
+	})
+}
+
+// ListSharedKnowledgeBases lists all knowledge bases shared to the current user
+// @Summary      获取共享给我的知识库列表
+// @Description  获取通过组织共享给当前用户的所有知识库
+// @Tags         知识库共享
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /shared-knowledge-bases [get]
+func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, userID.(string), tenantID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list shared knowledge bases: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    sharedKBs,
+		"total":   len(sharedKBs),
+	})
+}
+
+// toOrgResponse converts an organization to response format
+func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Organization, currentUserID string) types.OrganizationResponse {
+	resp := types.OrganizationResponse{
+		ID:                     org.ID,
+		Name:                   org.Name,
+		Description:            org.Description,
+		Avatar:                 org.Avatar,
+		OwnerID:                org.OwnerID,
+		IsOwner:                org.OwnerID == currentUserID,
+		RequireApproval:        org.RequireApproval,
+		InviteCodeValidityDays: org.InviteCodeValidityDays,
+		CreatedAt:              org.CreatedAt,
+		UpdatedAt:              org.UpdatedAt,
+	}
+
+	// Get member count
+	if members, err := h.orgService.ListMembers(ctx, org.ID); err == nil {
+		resp.MemberCount = len(members)
+	}
+
+	// Get shared knowledge base count for this organization
+	if shares, err := h.shareService.ListSharesByOrganization(ctx, org.ID); err == nil {
+		resp.ShareCount = len(shares)
+	}
+
+	// Get current user's role in this organization
+	isAdmin := false
+	if role, err := h.orgService.GetUserRoleInOrg(ctx, org.ID, currentUserID); err == nil {
+		resp.MyRole = string(role)
+		isAdmin = (role == types.OrgRoleAdmin)
+	}
+	if isAdmin || org.OwnerID == currentUserID {
+		resp.InviteCode = org.InviteCode
+		resp.InviteCodeExpiresAt = org.InviteCodeExpiresAt
+		if n, err := h.orgService.CountPendingJoinRequests(ctx, org.ID); err == nil {
+			resp.PendingJoinRequestCount = int(n)
+		}
+	}
+
+	// Check if current user has pending upgrade request
+	if _, err := h.orgService.GetPendingUpgradeRequest(ctx, org.ID, currentUserID); err == nil {
+		resp.HasPendingUpgrade = true
+	}
+
+	return resp
+}
+
+// SearchUsersForInvite searches users for inviting to organization
+// @Summary      搜索可邀请的用户
+// @Description  搜索用户（排除已有成员）用于邀请加入组织
+// @Tags         组织管理
+// @Produce      json
+// @Param        id     path   string  true   "组织ID"
+// @Param        q      query  string  true   "搜索关键词（用户名或邮箱）"
+// @Param        limit  query  int     false  "返回数量限制" default(10)
+// @Success      200    {object}  map[string]interface{}
+// @Failure      403    {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/search-users [get]
+func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	query := c.Query("q")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Check admin permission
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	if err != nil || !isAdmin {
+		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
+		return
+	}
+
+	if query == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    []interface{}{},
+		})
+		return
+	}
+
+	// Get limit from query
+	limit := 10
+	if l := c.Query("limit"); l != "" {
+		if _, err := c.GetQuery("limit"); err {
+			limit = 10
+		}
+	}
+
+	// Search users
+	users, err := h.userService.SearchUsers(ctx, query, limit+20) // fetch more to filter out existing members
+	if err != nil {
+		logger.Errorf(ctx, "Failed to search users: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to search users"))
+		return
+	}
+
+	// Get existing members
+	existingMembers, _ := h.orgService.ListMembers(ctx, orgID)
+	existingMemberIDs := make(map[string]bool)
+	for _, m := range existingMembers {
+		existingMemberIDs[m.UserID] = true
+	}
+
+	// Filter out existing members and build response
+	var result []gin.H
+	for _, u := range users {
+		if existingMemberIDs[u.ID] {
+			continue
+		}
+		result = append(result, gin.H{
+			"id":       u.ID,
+			"username": u.Username,
+			"email":    u.Email,
+			"avatar":   u.Avatar,
+		})
+		if len(result) >= limit {
+			break
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// InviteMember directly adds a user to organization
+// @Summary      邀请成员
+// @Description  管理员直接添加用户为组织成员
+// @Tags         组织管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                         true  "组织ID"
+// @Param        request  body      types.InviteMemberRequest      true  "邀请信息"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      400      {object}  errors.AppError
+// @Failure      403      {object}  errors.AppError
+// @Security     Bearer
+// @Router       /organizations/{id}/invite [post]
+func (h *OrganizationHandler) InviteMember(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+
+	// Check admin permission
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	if err != nil || !isAdmin {
+		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
+		return
+	}
+
+	var req types.InviteMemberRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	// Validate role
+	if !req.Role.IsValid() {
+		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
+		return
+	}
+
+	// Check if user exists
+	invitedUser, err := h.userService.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		c.Error(apperrors.NewNotFoundError("User not found"))
+		return
+	}
+
+	// Check if already a member
+	_, memberErr := h.orgService.GetMember(ctx, orgID, req.UserID)
+	if memberErr == nil {
+		c.Error(apperrors.NewValidationError("User is already a member of this organization"))
+		return
+	}
+
+	// Add member
+	if err := h.orgService.AddMember(ctx, orgID, req.UserID, invitedUser.TenantID, req.Role); err != nil {
+		logger.Errorf(ctx, "Failed to add member: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to add member"))
+		return
+	}
+
+	logger.Infof(ctx, "User %s invited user %s to organization %s with role %s",
+		secutils.SanitizeForLog(userID.(string)),
+		secutils.SanitizeForLog(req.UserID),
+		orgID,
+		req.Role)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Member added successfully",
+	})
+}

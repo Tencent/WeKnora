@@ -8,9 +8,13 @@ import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
 import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
+import { useOrganizationStore } from '@/stores/organization';
+import { useAuthStore } from '@/stores/auth';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
+const orgStore = useOrganizationStore();
+const authStore = useAuthStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
@@ -32,9 +36,59 @@ const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadInputRef = ref<HTMLInputElement | null>(null);
+const folderUploadInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const kbLoading = ref(false);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
+
+// Permission control: check if current user owns this KB or has edit/manage permission
+const isOwner = computed(() => {
+  if (!kbInfo.value) return false;
+  // Check if the current user's tenant ID matches the KB's tenant ID
+  const userTenantId = authStore.effectiveTenantId;
+  return kbInfo.value.tenant_id === userTenantId;
+});
+
+// Can edit: owner, admin, or editor
+const canEdit = computed(() => {
+  return orgStore.canEditKB(kbId.value, isOwner.value);
+});
+
+// Can manage (delete, settings, etc.): owner or admin
+const canManage = computed(() => {
+  return orgStore.canManageKB(kbId.value, isOwner.value);
+});
+
+// Current KB's shared record (when accessed via organization share)
+const currentSharedKb = computed(() =>
+  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
+);
+
+// Display role label: owner or org role (admin/editor/viewer)
+const accessRoleLabel = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
+  const perm = orgStore.getKBPermission(kbId.value);
+  if (perm) return t(`organization.role.${perm}`);
+  return '--';
+});
+
+// Permission summary text for current role
+const accessPermissionSummary = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
+  const perm = orgStore.getKBPermission(kbId.value);
+  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
+  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
+  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer');
+  return '--';
+});
+
+// Last updated time from kbInfo
+const kbLastUpdated = computed(() => {
+  const raw = kbInfo.value?.updated_at;
+  if (!raw) return null;
+  return formatStringDate(new Date(raw));
+});
+
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
 let isCardDetails = ref(false);
@@ -397,11 +451,26 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
 const loadKnowledgeList = async () => {
   try {
     const res: any = await listKnowledgeBases();
-    knowledgeList.value = (res?.data || []).map((item: any) => ({
+    const myKbs = (res?.data || []).map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type || 'document',
     }));
+    
+    // Also include shared knowledge bases from orgStore
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter(s => s.knowledge_base != null)
+      .map(s => ({
+        id: String(s.knowledge_base.id),
+        name: s.knowledge_base.name,
+        type: s.knowledge_base.type || 'document',
+      }));
+    
+    // Merge and deduplicate by id (my KBs take precedence)
+    const myKbIds = new Set(myKbs.map(kb => kb.id));
+    const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id));
+    
+    knowledgeList.value = [...myKbs, ...uniqueSharedKbs];
   } catch (error) {
     console.error('Failed to load knowledge list:', error);
   }
@@ -485,7 +554,9 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
 onMounted(() => {
   loadKnowledgeBaseInfo(kbId.value);
   loadKnowledgeList();
-  
+  // Load shared knowledge bases to get permission info
+  orgStore.fetchSharedKnowledgeBases();
+
   // 监听文件上传事件
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   // 监听URL导入对话框打开事件
@@ -587,6 +658,32 @@ const documentTitle = computed(() => {
   return t('knowledgeEditor.document.title');
 });
 
+// 文档操作下拉菜单选项
+const documentActionOptions = computed(() => [
+  { content: t('upload.uploadDocument'), value: 'upload', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
+  { content: t('upload.uploadFolder'), value: 'uploadFolder', prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }) },
+  { content: t('knowledgeBase.importURL'), value: 'importURL', prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }) },
+  { content: t('upload.onlineEdit'), value: 'manualCreate', prefixIcon: () => h(TIcon, { name: 'edit', size: '16px' }) },
+]);
+
+// 处理文档操作下拉菜单选择
+const handleDocumentActionSelect = (data: { value: string }) => {
+  switch (data.value) {
+    case 'upload':
+      handleDocumentUploadClick();
+      break;
+    case 'uploadFolder':
+      handleFolderUploadClick();
+      break;
+    case 'importURL':
+      handleURLImportClick();
+      break;
+    case 'manualCreate':
+      handleManualCreate();
+      break;
+  }
+};
+
 const ensureDocumentKbReady = () => {
   if (isFAQ.value) {
     MessagePlugin.warning('当前知识库类型不支持该操作');
@@ -607,6 +704,11 @@ const ensureDocumentKbReady = () => {
 const handleDocumentUploadClick = () => {
   if (!ensureDocumentKbReady()) return;
   uploadInputRef.value?.click();
+};
+
+const handleFolderUploadClick = () => {
+  if (!ensureDocumentKbReady()) return;
+  folderUploadInputRef.value?.click();
 };
 
 const resetUploadInput = () => {
@@ -705,6 +807,102 @@ const handleDocumentUpload = async (event: Event) => {
   resetUploadInput();
 };
 
+// 处理文件夹上传
+const handleFolderUpload = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const files = input?.files;
+  if (!files || files.length === 0) return;
+
+  if (!kbId.value) {
+    MessagePlugin.error("缺少知识库ID");
+    if (input) input.value = '';
+    return;
+  }
+
+  // 检查是否启用了VLM
+  const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
+
+  // 过滤有效文件
+  const validFiles: File[] = [];
+  let hiddenFileCount = 0;
+  let imageFilteredCount = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const relativePath = (file as any).webkitRelativePath || file.name;
+    
+    // 1. 过滤隐藏文件和隐藏文件夹
+    const pathParts = relativePath.split('/');
+    const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'));
+    if (hasHiddenComponent) {
+      hiddenFileCount++;
+      continue;
+    }
+    
+    // 2. 如果未启用VLM，过滤图片文件
+    if (!vlmEnabled) {
+      const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
+      const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+      if (imageTypes.includes(fileExt)) {
+        imageFilteredCount++;
+        continue;
+      }
+    }
+    
+    // 3. 文件类型验证
+    if (!kbFileTypeVerification(file, true)) {
+      validFiles.push(file);
+    }
+  }
+
+  if (validFiles.length === 0) {
+    MessagePlugin.warning(t('knowledgeBase.noValidFilesInFolder', { total: files.length }));
+    if (input) input.value = '';
+    return;
+  }
+
+  MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: validFiles.length }));
+
+  // 批量上传
+  let successCount = 0;
+  let failCount = 0;
+  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+
+  for (const file of validFiles) {
+    const relativePath = (file as any).webkitRelativePath;
+    let fileName = file.name;
+    if (relativePath) {
+      const pathParts = relativePath.split('/');
+      if (pathParts.length > 2) {
+        const subPath = pathParts.slice(1, -1).join('/');
+        fileName = `${subPath}/${file.name}`;
+      }
+    }
+
+    try {
+      await uploadKnowledgeFile(kbId.value, { file, fileName, tag_id: tagIdToUpload });
+      successCount++;
+    } catch (error: any) {
+      failCount++;
+    }
+  }
+
+  if (successCount > 0) {
+    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+      detail: { kbId: kbId.value }
+    }));
+  }
+
+  if (failCount === 0) {
+    MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
+  } else if (successCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
+  } else {
+    MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
+  }
+
+  if (input) input.value = '';
+};
 
 const handleManualCreate = () => {
   if (!ensureDocumentKbReady()) return;
@@ -939,7 +1137,7 @@ async function createNewSession(value: string): Promise<void> {
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
-            <t-tooltip :content="$t('knowledgeBase.settings')" placement="top">
+            <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
                 class="kb-settings-button"
@@ -951,6 +1149,41 @@ async function createNewSession(value: string): Promise<void> {
             </t-tooltip>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
+          <!-- 当前知识库权限与来源信息 -->
+          <div v-if="kbInfo" class="kb-access-info">
+            <span class="kb-access-role">
+              <span class="kb-access-label">{{ $t('knowledgeBase.accessInfo.myRole') }}：</span>
+              <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')">
+                {{ accessRoleLabel }}
+              </t-tag>
+            </span>
+            <span class="kb-access-summary">{{ accessPermissionSummary }}</span>
+            <template v-if="currentSharedKb">
+              <span class="kb-access-sep">·</span>
+              <span class="kb-access-source">
+                {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
+              </span>
+            </template>
+            <template v-else-if="kbLastUpdated">
+              <span class="kb-access-sep">·</span>
+              <span class="kb-access-updated">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+            </template>
+          </div>
+        </div>
+        <div v-if="canEdit" class="document-header-actions">
+          <t-dropdown
+            :options="documentActionOptions"
+            trigger="click"
+            placement="bottom-right"
+            @click="handleDocumentActionSelect"
+          >
+            <t-button class="doc-action-btn dropdown-action-btn">
+              <template #icon><t-icon name="file-add" /></template>
+              <span>{{ $t('knowledgeBase.addDocument') }}</span>
+              <t-icon name="chevron-down" size="14px" class="dropdown-arrow" />
+            </t-button>
+          </t-dropdown>
         </div>
       </div>
       
@@ -962,6 +1195,13 @@ async function createNewSession(value: string): Promise<void> {
         multiple
         @change="handleDocumentUpload"
       />
+      <input
+        ref="folderUploadInputRef"
+        type="file"
+        class="document-upload-input"
+        webkitdirectory
+        @change="handleFolderUpload"
+      />
       <div class="knowledge-main">
         <aside class="tag-sidebar">
           <div class="sidebar-header">
@@ -969,7 +1209,7 @@ async function createNewSession(value: string): Promise<void> {
               <span>{{ $t('knowledgeBase.documentCategoryTitle') }}</span>
               <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
             </div>
-            <div class="sidebar-actions">
+            <div v-if="canEdit" class="sidebar-actions">
               <t-button
                 size="small"
                 variant="text"
@@ -1086,7 +1326,7 @@ async function createNewSession(value: string): Promise<void> {
                       </div>
                     </template>
                     <template v-else>
-                      <div class="tag-more" @click.stop>
+                      <div v-if="canEdit" class="tag-more" @click.stop>
                         <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
                           <div class="tag-more-btn">
                             <t-icon name="more" size="14px" />
@@ -1168,6 +1408,7 @@ async function createNewSession(value: string): Promise<void> {
                       <div class="card-content-nav">
                         <span class="card-content-title">{{ item.file_name }}</span>
                         <t-popup
+                          v-if="canEdit"
                           v-model="item.isMore"
                           overlayClassName="card-more"
                           :on-visible-change="onVisibleChange"
@@ -1232,6 +1473,7 @@ async function createNewSession(value: string): Promise<void> {
                       <div class="card-bottom-right">
                         <div v-if="tagList.length" class="card-tag-selector" @click.stop>
                           <t-dropdown
+                            v-if="canEdit"
                             :options="tagDropdownOptions"
                             trigger="click"
                             @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)"
@@ -1240,6 +1482,9 @@ async function createNewSession(value: string): Promise<void> {
                               <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
                             </t-tag>
                           </t-dropdown>
+                          <t-tag v-else size="small" variant="light-outline">
+                            <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                          </t-tag>
                         </div>
                         <div class="card-type">
                           <span>{{ getKnowledgeType(item) }}</span>
@@ -1869,6 +2114,34 @@ async function createNewSession(value: string): Promise<void> {
     gap: 4px;
   }
 
+  .document-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+
+    .doc-action-btn {
+      background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
+      border: none;
+      color: #fff;
+
+      &:hover {
+        background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
+      }
+    }
+
+    :deep(.dropdown-action-btn) {
+      .t-button__text {
+        display: inline-flex;
+        align-items: center;
+      }
+      
+      .dropdown-arrow {
+        margin-left: 4px;
+      }
+    }
+  }
+
   .document-title-row {
     display: flex;
     align-items: center;
@@ -1954,7 +2227,42 @@ async function createNewSession(value: string): Promise<void> {
     line-height: 20px;
   }
 
+  .kb-access-info {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #86909c;
+    line-height: 1.5;
+  }
+
+  .kb-access-label {
+    color: #4e5969;
+  }
+
+  .kb-access-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .kb-access-summary {
+    color: #86909c;
+  }
+
+  .kb-access-sep {
+    color: #c9ced6;
+    user-select: none;
+  }
+
+  .kb-access-source,
+  .kb-access-updated {
+    color: #86909c;
+  }
 }
+
 
 .document-upload-input {
   display: none;

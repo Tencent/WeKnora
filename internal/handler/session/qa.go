@@ -86,6 +86,48 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		}
 	}
 
+	// Merge @mentioned items into knowledge_base_ids and knowledge_ids so that
+	// retrieval (quick-answer and agent mode) uses the same targets the user @mentioned.
+	// This fixes the case where user only @mentions a (shared) KB in the input but
+	// does not select it in the sidebar — without this merge, retrieval would not search those KBs.
+	kbIDs := make([]string, 0, len(request.KnowledgeBaseIDs)+len(request.MentionedItems))
+	kbIDSet := make(map[string]bool)
+	for _, id := range request.KnowledgeBaseIDs {
+		if id != "" && !kbIDSet[id] {
+			kbIDs = append(kbIDs, id)
+			kbIDSet[id] = true
+		}
+	}
+	knowledgeIDs := make([]string, 0, len(request.KnowledgeIds)+len(request.MentionedItems))
+	knowledgeIDSet := make(map[string]bool)
+	for _, id := range request.KnowledgeIds {
+		if id != "" && !knowledgeIDSet[id] {
+			knowledgeIDs = append(knowledgeIDs, id)
+			knowledgeIDSet[id] = true
+		}
+	}
+	for _, item := range request.MentionedItems {
+		if item.ID == "" {
+			continue
+		}
+		switch item.Type {
+		case "kb":
+			if !kbIDSet[item.ID] {
+				kbIDs = append(kbIDs, item.ID)
+				kbIDSet[item.ID] = true
+			}
+		case "file":
+			if !knowledgeIDSet[item.ID] {
+				knowledgeIDs = append(knowledgeIDs, item.ID)
+				knowledgeIDSet[item.ID] = true
+			}
+		}
+	}
+
+	// Log merge results for debugging
+	logger.Infof(ctx, "[%s] @mention merge: request.KnowledgeBaseIDs=%v, request.MentionedItems=%d, merged kbIDs=%v, merged knowledgeIDs=%v",
+		logPrefix, request.KnowledgeBaseIDs, len(request.MentionedItems), kbIDs, knowledgeIDs)
+
 	// Build request context
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
@@ -101,8 +143,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			RequestID:   c.GetString(types.RequestIDContextKey.String()),
 			IsCompleted: false,
 		},
-		knowledgeBaseIDs: secutils.SanitizeForLogArray(request.KnowledgeBaseIDs),
-		knowledgeIDs:     secutils.SanitizeForLogArray(request.KnowledgeIds),
+		knowledgeBaseIDs: secutils.SanitizeForLogArray(kbIDs),
+		knowledgeIDs:     secutils.SanitizeForLogArray(knowledgeIDs),
 		summaryModelID:   secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled: request.WebSearchEnabled,
 		mentionedItems:   convertMentionedItems(request.MentionedItems),

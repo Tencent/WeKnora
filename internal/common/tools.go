@@ -202,6 +202,9 @@ func formatPipelineLogValue(value interface{}) string {
 		return strconv.Quote(truncatePipelineValue(v))
 	case fmt.Stringer:
 		return strconv.Quote(truncatePipelineValue(v.String()))
+	case json.RawMessage:
+		bytes, _ := v.MarshalJSON()
+		return string(bytes)
 	default:
 		return fmt.Sprintf("%v", v)
 	}

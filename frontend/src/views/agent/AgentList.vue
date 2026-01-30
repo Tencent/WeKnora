@@ -6,6 +6,20 @@
         <h2>{{ $t('agent.title') }}</h2>
         <p class="header-subtitle">{{ $t('agent.subtitle') }}</p>
       </div>
+      <div class="header-actions">
+        <t-button class="agent-create-btn" @click="handleCreateAgent">
+          <template #icon>
+            <span class="btn-icon-wrapper">
+              <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+          </template>
+          <span>{{ $t('agent.createAgent') }}</span>
+        </t-button>
+      </div>
     </div>
     <div class="header-divider"></div>
 
@@ -323,6 +337,11 @@ const openCreateModal = () => {
   editorVisible.value = true
 }
 
+// 创建智能体
+const handleCreateAgent = () => {
+  openCreateModal()
+}
+
 defineExpose({
   openCreateModal
 })
@@ -357,6 +376,76 @@ defineExpose({
     font-size: 24px;
     font-weight: 600;
     line-height: 32px;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    :deep(.agent-create-btn) {
+      --ripple-color: rgba(118, 75, 162, 0.3) !important;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+      border: none !important;
+      color: #fff !important;
+      position: relative;
+      overflow: hidden;
+      
+      &:hover,
+      &:active,
+      &:focus,
+      &.t-is-active,
+      &[data-state="active"] {
+        background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%) !important;
+        border: none !important;
+        color: #fff !important;
+      }
+      
+      // 覆盖 TDesign 按钮的 CSS 变量
+      --td-button-primary-bg-color: #667eea !important;
+      --td-button-primary-border-color: #667eea !important;
+      --td-button-primary-active-bg-color: #5a6fd6 !important;
+      --td-button-primary-active-border-color: #5a6fd6 !important;
+    }
+    
+    .agent-create-btn {
+      .btn-icon-wrapper {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .sparkles-icon {
+        animation: twinkle 2s ease-in-out infinite;
+      }
+      
+      &::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(
+          45deg,
+          transparent 30%,
+          rgba(255, 255, 255, 0.1) 50%,
+          transparent 70%
+        );
+        transform: translateX(-100%);
+        transition: transform 0.6s ease;
+        z-index: 0;
+      }
+
+      &:hover::before {
+        transform: translateX(100%);
+      }
+    }
+  }
+  
+  @keyframes twinkle {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(0.95); }
   }
 }
 

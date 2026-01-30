@@ -22,6 +22,9 @@ type SearchTarget struct {
 	Type SearchTargetType `json:"type"`
 	// KnowledgeBaseID is the ID of the knowledge base to search
 	KnowledgeBaseID string `json:"knowledge_base_id"`
+	// TenantID is the tenant ID that owns this knowledge base
+	// Required for cross-tenant shared KB queries
+	TenantID uint64 `json:"tenant_id"`
 	// KnowledgeIDs is the list of specific knowledge IDs to search within the knowledge base
 	// Only used when Type is SearchTargetTypeKnowledge
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
@@ -41,6 +44,38 @@ func (st SearchTargets) GetAllKnowledgeBaseIDs() []string {
 		}
 	}
 	return result
+}
+
+// GetKBTenantMap returns a map from knowledge base ID to tenant ID
+func (st SearchTargets) GetKBTenantMap() map[string]uint64 {
+	result := make(map[string]uint64)
+	for _, t := range st {
+		if t.KnowledgeBaseID != "" {
+			result[t.KnowledgeBaseID] = t.TenantID
+		}
+	}
+	return result
+}
+
+// GetTenantIDForKB returns the tenant ID for a given knowledge base ID
+// Returns 0 if not found
+func (st SearchTargets) GetTenantIDForKB(kbID string) uint64 {
+	for _, t := range st {
+		if t.KnowledgeBaseID == kbID {
+			return t.TenantID
+		}
+	}
+	return 0
+}
+
+// ContainsKB checks if the search targets contain a given knowledge base ID
+func (st SearchTargets) ContainsKB(kbID string) bool {
+	for _, t := range st {
+		if t.KnowledgeBaseID == kbID {
+			return true
+		}
+	}
+	return false
 }
 
 // SearchResult represents the search result

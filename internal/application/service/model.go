@@ -268,6 +268,62 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 	return embedder, nil
 }
 
+// GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
+// This is used for cross-tenant knowledge base sharing where the embedding model from
+// the source tenant must be used to ensure vector compatibility
+func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error) {
+	// Check if model ID is empty
+	if modelId == "" {
+		logger.Error(ctx, "Model ID is empty")
+		return nil, errors.New("model ID cannot be empty")
+	}
+
+	// Fetch model from repository using the specified tenant ID
+	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":  modelId,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+
+	if model == nil {
+		logger.Error(ctx, "Model not found for specified tenant")
+		return nil, ErrModelNotFound
+	}
+
+	if model.Status != types.ModelStatusActive {
+		logger.Errorf(ctx, "Model is not active, status: %s", model.Status)
+		return nil, errors.New("model is not active")
+	}
+
+	logger.Infof(ctx, "Getting cross-tenant embedding model: %s, source: %s, tenant: %d", model.Name, model.Source, tenantID)
+
+	// Initialize the embedder with model configuration
+	embedder, err := embedding.NewEmbedder(embedding.Config{
+		Source:               model.Source,
+		BaseURL:              model.Parameters.BaseURL,
+		APIKey:               model.Parameters.APIKey,
+		ModelID:              model.ID,
+		ModelName:            model.Name,
+		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
+		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
+		Provider:             model.Parameters.Provider,
+	}, s.pooler, s.ollamaService)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   model.ID,
+			"model_name": model.Name,
+			"tenant_id":  tenantID,
+		})
+		return nil, err
+	}
+
+	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
+	return embedder, nil
+}
+
 // GetRerankModel retrieves and initializes a reranking model instance
 // Takes a model ID and returns a Reranker interface implementation
 func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error) {

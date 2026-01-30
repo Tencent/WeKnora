@@ -23,6 +23,8 @@ type ModelService interface {
 	DeleteModel(ctx context.Context, id string) error
 	// GetEmbeddingModel gets an embedding model
 	GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error)
+	// GetEmbeddingModelForTenant gets an embedding model for a specific tenant (for cross-tenant sharing)
+	GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error)
 	// GetRerankModel gets a rerank model
 	GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error)
 	// GetChatModel gets a chat model

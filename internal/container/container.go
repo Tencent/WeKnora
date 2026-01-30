@@ -111,6 +111,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
+	must(container.Provide(repository.NewOrganizationRepository))
+	must(container.Provide(repository.NewKBShareRepository))
 	must(container.Provide(service.NewWebSearchStateService))
 
 	// MCP manager for managing MCP client connections
@@ -121,6 +123,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering business services...")
 	must(container.Provide(service.NewTenantService))
 	must(container.Provide(service.NewKnowledgeBaseService))
+	must(container.Provide(service.NewOrganizationService))
+	must(container.Provide(service.NewKBShareService)) // KBShareService must be registered before KnowledgeService and KnowledgeTagService
 	must(container.Provide(service.NewKnowledgeService))
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
@@ -199,6 +203,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
+	must(container.Provide(handler.NewOrganizationHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Router configuration

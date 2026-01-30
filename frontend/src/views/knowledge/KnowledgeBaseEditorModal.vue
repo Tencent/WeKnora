@@ -150,6 +150,11 @@
                     @update:question-generation="handleQuestionGenerationUpdate"
                   />
                 </div>
+
+                <!-- 共享设置（仅编辑模式） -->
+                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
+                  <KBShareSettings :kb-id="kbId" />
+                </div>
               </div>
 
               <!-- 保存按钮 -->
@@ -180,6 +185,7 @@ import KBModelConfig from './settings/KBModelConfig.vue'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import GraphSettings from './settings/GraphSettings.vue'
+import KBShareSettings from './settings/KBShareSettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -218,6 +224,10 @@ const navItems = computed(() => {
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
+  }
+  // 只在编辑模式下显示共享标签页
+  if (props.mode === 'edit' && props.kbId) {
+    items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
   return items
 })

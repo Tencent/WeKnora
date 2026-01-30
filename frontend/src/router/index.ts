@@ -17,6 +17,19 @@ const router = createRouter({
       meta: { requiresAuth: false, requiresInit: false }
     },
     {
+      path: "/join",
+      name: "joinOrganization",
+      // 重定向到组织列表页，并将 code 参数转换为 invite_code
+      redirect: (to) => {
+        const code = to.query.code as string
+        return {
+          path: '/platform/organizations',
+          query: code ? { invite_code: code } : {}
+        }
+      },
+      meta: { requiresInit: true, requiresAuth: true }
+    },
+    {
       path: "/knowledgeBase",
       name: "home",
       component: () => import("../views/knowledge/KnowledgeBase.vue"),
@@ -73,6 +86,12 @@ const router = createRouter({
           path: "chat/:chatid",
           name: "chat",
           component: () => import("../views/chat/index.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
+        {
+          path: "organizations",
+          name: "organizationList",
+          component: () => import("../views/organization/OrganizationList.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
       ],

@@ -32,6 +32,16 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error)
 
+	// GetKnowledgeBaseByIDOnly retrieves knowledge base by ID without tenant filter
+	// Used for cross-tenant shared KB access where permission is checked elsewhere
+	// Parameters:
+	//   - ctx: Context information
+	//   - id: Unique identifier of the knowledge base
+	// Returns:
+	//   - Knowledge base object, if found
+	//   - Possible errors such as not existing, etc.
+	GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error)
+
 	// ListKnowledgeBases lists all knowledge bases under the current tenant
 	// Parameters:
 	//   - ctx: Context information, containing tenant information

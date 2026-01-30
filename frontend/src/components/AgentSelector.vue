@@ -44,16 +44,23 @@
                   <TIcon name="app" size="14px" />
                 </div>
                 <span class="agent-option-name">{{ agent.name }}</span>
-                <svg 
-                  v-if="currentAgentId === agent.id"
-                  width="14" 
-                  height="14" 
-                  viewBox="0 0 16 16" 
-                  fill="currentColor"
-                  class="check-icon"
-                >
-                  <path d="M13.5 4.5L6 12L2.5 8.5L3.5 7.5L6 10L12.5 3.5L13.5 4.5Z"/>
-                </svg>
+                <div class="agent-option-actions">
+                  <t-tooltip :content="$t('agent.selector.goToSettings')" placement="top">
+                    <div class="settings-btn" @click.stop="goToSettings(agent)">
+                      <TIcon name="setting" size="14px" />
+                    </div>
+                  </t-tooltip>
+                  <svg 
+                    v-if="currentAgentId === agent.id"
+                    width="14" 
+                    height="14" 
+                    viewBox="0 0 16 16" 
+                    fill="currentColor"
+                    class="check-icon"
+                  >
+                    <path d="M13.5 4.5L6 12L2.5 8.5L3.5 7.5L6 10L12.5 3.5L13.5 4.5Z"/>
+                  </svg>
+                </div>
               </div>
               <template #content>
                 <div class="agent-tooltip-content">
@@ -103,16 +110,23 @@
               >
                 <AgentAvatar :name="agent.name" size="small" />
                 <span class="agent-option-name">{{ agent.name }}</span>
-                <svg 
-                  v-if="currentAgentId === agent.id"
-                  width="14" 
-                  height="14" 
-                  viewBox="0 0 16 16" 
-                  fill="currentColor"
-                  class="check-icon"
-                >
-                  <path d="M13.5 4.5L6 12L2.5 8.5L3.5 7.5L6 10L12.5 3.5L13.5 4.5Z"/>
-                </svg>
+                <div class="agent-option-actions">
+                  <t-tooltip :content="$t('agent.selector.goToSettings')" placement="top">
+                    <div class="settings-btn" @click.stop="goToSettings(agent)">
+                      <TIcon name="setting" size="14px" />
+                    </div>
+                  </t-tooltip>
+                  <svg 
+                    v-if="currentAgentId === agent.id"
+                    width="14" 
+                    height="14" 
+                    viewBox="0 0 16 16" 
+                    fill="currentColor"
+                    class="check-icon"
+                  >
+                    <path d="M13.5 4.5L6 12L2.5 8.5L3.5 7.5L6 10L12.5 3.5L13.5 4.5Z"/>
+                  </svg>
+                </div>
               </div>
               <template #content>
                 <div class="agent-tooltip-content">
@@ -164,11 +178,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { Icon as TIcon, Popup as TPopup } from 'tdesign-vue-next';
+import { useRouter } from 'vue-router';
+import { Icon as TIcon, Popup as TPopup, Tooltip as TTooltip } from 'tdesign-vue-next';
 import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 
 const { t } = useI18n();
+const router = useRouter();
 
 const props = defineProps<{
   visible: boolean;
@@ -240,6 +256,15 @@ const loadAgents = async () => {
 // 选择智能体
 const selectAgent = (agent: CustomAgent) => {
   emit('select', agent);
+};
+
+// 跳转到智能体设置页面
+const goToSettings = (agent: CustomAgent) => {
+  emit('close');
+  router.push({
+    path: '/platform/agents',
+    query: { edit: agent.id }
+  });
 };
 
 // 更新下拉框位置（与模型选择器一致）
@@ -481,12 +506,40 @@ onMounted(() => {
   background: var(--td-bg-color-secondarycontainer, #f5f5f5);
 }
 
+.agent-option-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.settings-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: var(--td-text-color-placeholder, #999);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s ease;
+  
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer-hover, #e8e8e8);
+    color: var(--td-brand-color, #07c05f);
+  }
+}
+
+.agent-option:hover .settings-btn {
+  opacity: 1;
+}
+
 .check-icon {
   width: 14px;
   height: 14px;
   color: #10b981;
   flex-shrink: 0;
-  margin-left: 6px;
 }
 
 // Tooltip 内容样式

@@ -14,8 +14,11 @@
         <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
           <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
         </div>
-        <span class="name">{{ item.name }}</span>
-        <span class="count">({{ item.count || 0 }})</span>
+        <div class="item-main">
+          <span class="name">{{ item.name }}</span>
+          <span class="count">({{ item.count || 0 }})</span>
+        </div>
+        <span v-if="item.orgName" class="org-name">{{ item.orgName }}</span>
       </div>
     </div>
     
@@ -54,7 +57,7 @@ import { computed, watch, ref, nextTick } from 'vue';
 const props = defineProps<{
   visible: boolean;
   style: any;
-  items: Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string }>;
+  items: Array<{ id: string; name: string; type: 'kb' | 'file'; kbType?: 'document' | 'faq'; count?: number; kbName?: string; orgName?: string }>;
   activeIndex: number;
   hasMore?: boolean;
   loading?: boolean;
@@ -205,17 +208,40 @@ const scrollToItem = (index: number) => {
   color: inherit;
 }
 
-.name {
+.item-main {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 文件项中的 name 需要占据剩余空间，将 kb-name 推到右边 */
+.mention-item > .name {
+  flex: 1;
+  min-width: 0;
 }
 
 .count {
   flex-shrink: 0;
   font-size: var(--td-font-size-mark-small, 12px);
   color: var(--td-text-color-secondary, #999);
+}
+
+.org-name {
+  flex-shrink: 0;
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--td-font-size-mark-small, 12px);
+  color: var(--td-text-color-placeholder, #999);
 }
 
 .kb-name {
