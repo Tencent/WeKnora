@@ -18,6 +18,9 @@ import (
 // Default invite code validity in days; allowed values: 0 (never), 1, 7, 30
 const DefaultInviteCodeValidityDays = 7
 
+// DefaultMemberLimit is the default max members per organization (0 = unlimited)
+const DefaultMemberLimit = 50
+
 // ValidInviteCodeValidityDays are the allowed values for invite_code_validity_days
 var ValidInviteCodeValidityDays = map[int]bool{0: true, 1: true, 7: true, 30: true}
 
@@ -30,6 +33,8 @@ var (
 	ErrInvalidRole           = errors.New("invalid role")
 	ErrInviteCodeExpired     = errors.New("invite code has expired")
 	ErrInvalidValidityDays   = errors.New("invite_code_validity_days must be 0, 1, 7, or 30")
+	ErrOrgMemberLimitReached = errors.New("organization member limit reached")
+	ErrOrgMemberLimitTooLow  = errors.New("member limit cannot be lower than current member count")
 )
 
 // organizationService implements OrganizationService interface
@@ -68,6 +73,13 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 		}
 		validityDays = *req.InviteCodeValidityDays
 	}
+	memberLimit := DefaultMemberLimit
+	if req.MemberLimit != nil {
+		if *req.MemberLimit < 0 {
+			return nil, errors.New("member_limit must be >= 0")
+		}
+		memberLimit = *req.MemberLimit
+	}
 
 	now := time.Now()
 	org := &types.Organization{
@@ -79,6 +91,7 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 		InviteCode:             generateInviteCode(),
 		InviteCodeExpiresAt:    resolveInviteExpiry(validityDays, now),
 		InviteCodeValidityDays: validityDays,
+		MemberLimit:            memberLimit,
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
@@ -178,6 +191,21 @@ func (s *organizationService) UpdateOrganization(ctx context.Context, id string,
 			return nil, ErrInvalidValidityDays
 		}
 		org.InviteCodeValidityDays = *req.InviteCodeValidityDays
+	}
+	if req.MemberLimit != nil {
+		if *req.MemberLimit < 0 {
+			return nil, errors.New("member_limit must be >= 0")
+		}
+		if *req.MemberLimit > 0 {
+			count, err := s.orgRepo.CountMembers(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if int64(*req.MemberLimit) < count {
+				return nil, ErrOrgMemberLimitTooLow
+			}
+		}
+		org.MemberLimit = *req.MemberLimit
 	}
 	org.UpdatedAt = time.Now()
 
@@ -291,6 +319,20 @@ func (s *organizationService) DeleteOrganization(ctx context.Context, id string,
 func (s *organizationService) AddMember(ctx context.Context, orgID string, userID string, tenantID uint64, role types.OrgMemberRole) error {
 	if !role.IsValid() {
 		return ErrInvalidRole
+	}
+
+	org, err := s.orgRepo.GetByID(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if org.MemberLimit > 0 {
+		count, errCount := s.orgRepo.CountMembers(ctx, orgID)
+		if errCount != nil {
+			return errCount
+		}
+		if count >= int64(org.MemberLimit) {
+			return ErrOrgMemberLimitReached
+		}
 	}
 
 	member := &types.OrganizationMember{
@@ -435,6 +477,17 @@ func (s *organizationService) JoinByInviteCode(ctx context.Context, inviteCode s
 		return nil, err
 	}
 
+	// Check member limit (0 = unlimited)
+	if org.MemberLimit > 0 {
+		count, errCount := s.orgRepo.CountMembers(ctx, org.ID)
+		if errCount != nil {
+			return nil, errCount
+		}
+		if count >= int64(org.MemberLimit) {
+			return nil, ErrOrgMemberLimitReached
+		}
+	}
+
 	// Add user as viewer by default
 	member := &types.OrganizationMember{
 		ID:             uuid.New().String(),
@@ -504,6 +557,24 @@ func (s *organizationService) SubmitJoinRequest(ctx context.Context, orgID strin
 	existing, err := s.orgRepo.GetPendingRequestByType(ctx, orgID, userID, types.JoinRequestTypeJoin)
 	if err == nil && existing != nil {
 		return nil, ErrPendingRequestExists
+	}
+
+	// Reject if organization is already at member limit
+	org, err := s.orgRepo.GetByID(ctx, orgID)
+	if err != nil {
+		if errors.Is(err, repository.ErrOrganizationNotFound) {
+			return nil, ErrOrgNotFound
+		}
+		return nil, err
+	}
+	if org.MemberLimit > 0 {
+		count, errCount := s.orgRepo.CountMembers(ctx, orgID)
+		if errCount != nil {
+			return nil, errCount
+		}
+		if count >= int64(org.MemberLimit) {
+			return nil, ErrOrgMemberLimitReached
+		}
 	}
 
 	// Default to viewer if role is empty or invalid
@@ -577,7 +648,20 @@ func (s *organizationService) ReviewJoinRequest(ctx context.Context, orgID strin
 			}
 			logger.Infof(ctx, "Upgrade request %s approved, user %s role updated to %s in organization %s", requestID, request.UserID, role, request.OrganizationID)
 		} else {
-			// Join: add new member
+			// Join: check member limit then add new member
+			org, errOrg := s.orgRepo.GetByID(ctx, request.OrganizationID)
+			if errOrg != nil {
+				return errOrg
+			}
+			if org.MemberLimit > 0 {
+				count, errCount := s.orgRepo.CountMembers(ctx, request.OrganizationID)
+				if errCount != nil {
+					return errCount
+				}
+				if count >= int64(org.MemberLimit) {
+					return ErrOrgMemberLimitReached
+				}
+			}
 			member := &types.OrganizationMember{
 				ID:             uuid.New().String(),
 				OrganizationID: request.OrganizationID,

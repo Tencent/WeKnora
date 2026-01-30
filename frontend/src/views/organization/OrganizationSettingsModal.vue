@@ -179,6 +179,28 @@
                               <span class="approval-desc">{{ $t('organization.settings.searchableDesc') }}</span>
                             </div>
                           </div>
+                          
+                          <div class="invite-divider"></div>
+                          
+                          <!-- 成员人数上限 -->
+                          <div class="invite-method">
+                            <div class="invite-method-header">
+                              <t-icon name="user-add" class="invite-icon" />
+                              <span class="invite-method-title">{{ $t('organization.settings.memberLimit') }}</span>
+                            </div>
+                            <p class="invite-validity-desc">{{ $t('organization.settings.memberLimitDesc') }}</p>
+                            <div class="member-limit-input-row">
+                              <t-input-number
+                                v-model="formData.member_limit"
+                                :min="0"
+                                :max="10000"
+                                :placeholder="$t('organization.settings.memberLimitPlaceholder')"
+                                theme="normal"
+                                style="width: 140px;"
+                              />
+                              <span class="member-limit-hint">{{ $t('organization.settings.memberLimitHint', { count: orgInfo?.member_count ?? 0 }) }}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -673,7 +695,8 @@ const formData = ref({
   description: '',
   require_approval: false,
   searchable: false,
-  invite_code_validity_days: 7 as number
+  invite_code_validity_days: 7 as number,
+  member_limit: 50 as number // 0 = unlimited
 })
 
 // Computed
@@ -794,12 +817,14 @@ const fetchOrgDetail = async () => {
     if (res.success && res.data) {
       orgInfo.value = res.data
       const validity = res.data.invite_code_validity_days
+      const memberLimit = res.data.member_limit
       formData.value = {
         name: res.data.name,
         description: res.data.description || '',
         require_approval: res.data.require_approval || false,
         searchable: res.data.searchable || false,
-        invite_code_validity_days: typeof validity === 'number' ? validity : 7
+        invite_code_validity_days: typeof validity === 'number' ? validity : 7,
+        member_limit: typeof memberLimit === 'number' && memberLimit >= 0 ? memberLimit : 50
       }
       inviteCode.value = res.data.invite_code || ''
       inviteCodeExpiresAt.value = res.data.invite_code_expires_at ?? null
@@ -949,7 +974,8 @@ const handleSave = async () => {
         description: formData.value.description.trim(),
         require_approval: formData.value.require_approval,
         searchable: formData.value.searchable,
-        invite_code_validity_days: formData.value.invite_code_validity_days
+        invite_code_validity_days: formData.value.invite_code_validity_days,
+        member_limit: formData.value.member_limit
       })
       if (res.success) {
         MessagePlugin.success(t('common.saveSuccess'))
@@ -1233,7 +1259,7 @@ watch(() => props.visible, (newVal) => {
     joinRequests.value = []
     if (props.mode === 'create') {
       // 创建模式：重置表单
-      formData.value = { name: '', description: '', require_approval: false, searchable: false, invite_code_validity_days: 7 }
+      formData.value = { name: '', description: '', require_approval: false, searchable: false, invite_code_validity_days: 7, member_limit: 50 }
       orgInfo.value = null
       members.value = []
       sharedKnowledgeBases.value = []
@@ -1281,8 +1307,12 @@ watch(currentSection, (section) => {
   height: 85vh;
   max-height: 750px;
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 4px 6px -1px rgba(15, 23, 42, 0.06),
+    0 12px 24px -4px rgba(15, 23, 42, 0.1),
+    0 24px 48px -8px rgba(15, 23, 42, 0.12);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1292,22 +1322,27 @@ watch(currentSection, (section) => {
   position: absolute;
   top: 20px;
   right: 20px;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: none;
-  background: #f5f5f5;
-  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 10px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
-  transition: all 0.2s ease;
+  color: #64748b;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
   z-index: 10;
 
   &:hover {
-    background: #e5e5e5;
-    color: #000;
+    background: rgba(0, 0, 0, 0.08);
+    color: #0f172a;
+    transform: scale(1.02);
+  }
+
+  &:active {
+    transform: scale(0.98);
   }
 }
 
@@ -1319,22 +1354,23 @@ watch(currentSection, (section) => {
 
 .settings-sidebar {
   width: 200px;
-  background: #fafafa;
-  border-right: 1px solid #e5e5e5;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
 
   .sidebar-header {
-    padding: 24px 20px;
-    border-bottom: 1px solid #e5e5e5;
+    padding: 26px 20px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 
     .sidebar-title {
       margin: 0;
-      font-family: "PingFang SC";
+      font-family: "PingFang SC", -apple-system, sans-serif;
       font-size: 18px;
       font-weight: 600;
-      color: #000000e6;
+      color: #0f172a;
+      letter-spacing: -0.02em;
     }
   }
 
@@ -1346,23 +1382,24 @@ watch(currentSection, (section) => {
     .nav-item {
       display: flex;
       align-items: center;
-      padding: 10px 12px;
+      padding: 12px 14px;
       margin-bottom: 4px;
-      border-radius: 6px;
+      border-radius: 10px;
       cursor: pointer;
-      transition: all 0.2s ease;
-      font-family: "PingFang SC";
+      transition: background 0.2s ease, color 0.2s ease;
+      font-family: "PingFang SC", -apple-system, sans-serif;
       font-size: 14px;
-      color: #00000099;
+      color: #64748b;
+      font-weight: 500;
 
       .nav-icon {
-        margin-right: 8px;
+        margin-right: 10px;
         font-size: 18px;
         flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        color: #86909c;
+        color: #94a3b8;
         transition: color 0.2s;
       }
 
@@ -1372,31 +1409,31 @@ watch(currentSection, (section) => {
       }
 
       .nav-item-badge {
-        min-width: 18px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 9px;
-        background: rgba(250, 173, 20, 0.2);
-        color: #d48806;
+        min-width: 20px;
+        height: 20px;
+        padding: 0 6px;
+        border-radius: 10px;
+        background: rgba(250, 173, 20, 0.18);
+        color: #b45309;
         font-size: 12px;
         font-weight: 600;
-        line-height: 18px;
+        line-height: 20px;
         text-align: center;
         flex-shrink: 0;
       }
 
       &:hover {
-        background: #f0f0f0;
+        background: rgba(0, 0, 0, 0.04);
 
         .nav-icon {
-          color: #00000099;
+          color: #64748b;
         }
       }
 
       &.active {
         background: rgba(7, 192, 95, 0.1);
         color: @primary-color;
-        font-weight: 500;
+        font-weight: 600;
 
         .nav-icon {
           color: @primary-color;
@@ -1598,6 +1635,18 @@ watch(currentSection, (section) => {
 
   .invite-validity-select {
     min-width: 140px;
+  }
+
+  .member-limit-input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+
+    .member-limit-hint {
+      font-size: 12px;
+      color: #86909c;
+    }
   }
 
   .invite-divider {
@@ -2151,19 +2200,23 @@ watch(currentSection, (section) => {
 }
 
 .settings-footer {
-  padding: 16px 32px;
-  border-top: 1px solid #e5e5e5;
+  padding: 20px 32px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
-  background: #fff;
+  background: linear-gradient(0deg, #fafbfc 0%, #ffffff 100%);
 }
 
 // Transitions
 .modal-enter-active,
 .modal-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+
+  .settings-modal {
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 }
 
 .modal-enter-from,
@@ -2171,7 +2224,14 @@ watch(currentSection, (section) => {
   opacity: 0;
 
   .settings-modal {
-    transform: scale(0.95);
+    transform: scale(0.92) translateY(-8px);
+  }
+}
+
+.modal-enter-to,
+.modal-leave-from {
+  .settings-modal {
+    transform: scale(1) translateY(0);
   }
 }
 

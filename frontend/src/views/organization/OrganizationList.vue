@@ -51,13 +51,15 @@
         :class="{ 'joined-org': !org.is_owner }"
         @click="handleCardClick(org)"
       >
-        <!-- 装饰图标 - 无限/连接/圈子 -->
+        <!-- 装饰：协作网络感图形 -->
         <div class="card-decoration">
-          <svg class="org-icon" width="28" height="28" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3 10 A4 4 0 0 1 11 10 A4 4 0 0 1 19 10 A4 4 0 0 1 11 10 A4 4 0 0 1 3 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.9"/>
-          </svg>
-          <svg class="connect-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3 10 A4 4 0 0 1 11 10 A4 4 0 0 1 19 10 A4 4 0 0 1 11 10 A4 4 0 0 1 3 10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.7"/>
+          <svg class="card-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+            <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+            <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+            <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+            <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35"/>
+            <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
           </svg>
         </div>
 
@@ -70,7 +72,6 @@
             </div>
             <div class="card-title-block">
               <span class="card-title" :title="org.name">{{ org.name }}</span>
-              <span v-if="!org.is_owner" class="card-subtitle">{{ $t('organization.joinedByMe') }}</span>
             </div>
           </div>
           <t-popup
@@ -118,6 +119,11 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
+              <t-tooltip v-if="!org.is_owner" :content="$t('organization.joinedByMe')" placement="top">
+                <div class="feature-badge joined-badge">
+                  <t-icon name="usergroup" size="14px" />
+                </div>
+              </t-tooltip>
               <t-tooltip :content="$t('organization.memberCount')" placement="top">
                 <div class="feature-badge member-badge">
                   <t-icon name="user" size="14px" />
@@ -968,15 +974,16 @@ onUnmounted(() => {
   .header-title {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
   }
 
   h2 {
     margin: 0;
-    color: #000000e6;
-    font-family: "PingFang SC";
-    font-size: 24px;
+    color: #0f172a;
+    font-family: "PingFang SC", system-ui, sans-serif;
+    font-size: 26px;
     font-weight: 600;
+    letter-spacing: -0.02em;
     line-height: 32px;
   }
 
@@ -986,23 +993,30 @@ onUnmounted(() => {
     gap: 12px;
 
     .org-join-btn {
-      border-color: #07c05f;
-      color: #07c05f;
-      
+      border-color: rgba(7, 192, 95, 0.5);
+      color: #059669;
+      font-weight: 500;
+      transition: all 0.2s ease;
+
       &:hover {
-        background-color: rgba(7, 192, 95, 0.08);
-        border-color: #05a04f;
-        color: #05a04f;
+        background: linear-gradient(135deg, rgba(7, 192, 95, 0.06) 0%, rgba(0, 166, 126, 0.06) 100%);
+        border-color: #07c05f;
+        color: #047857;
       }
     }
 
     .org-create-btn {
-      background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
+      background: linear-gradient(135deg, #07c05f 0%, #059669 50%, #047857 100%);
       border: none;
       color: #fff;
+      font-weight: 500;
+      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.25);
+      transition: all 0.25s ease;
 
       &:hover {
-        background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
+        transform: translateY(-1px);
       }
     }
   }
@@ -1010,26 +1024,26 @@ onUnmounted(() => {
 
 .header-subtitle {
   margin: 0;
-  color: #00000099;
-  font-family: "PingFang SC";
+  color: #64748b;
+  font-family: "PingFang SC", system-ui, sans-serif;
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
 }
 
-// Tab 切换样式（下划线式，简洁清晰）
+// Tab 切换样式（下划线式，与整体协作感一致）
 .org-tabs {
   display: flex;
   align-items: center;
-  gap: 24px;
-  border-bottom: 1px solid #e7ebf0;
-  margin-bottom: 20px;
+  gap: 28px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 24px;
 
   .tab-item {
     padding: 12px 0;
     cursor: pointer;
-    color: #666;
-    font-family: "PingFang SC";
+    color: #64748b;
+    font-family: "PingFang SC", system-ui, sans-serif;
     font-size: 14px;
     font-weight: 400;
     user-select: none;
@@ -1037,11 +1051,11 @@ onUnmounted(() => {
     transition: color 0.2s ease;
 
     &:hover {
-      color: #333;
+      color: #334155;
     }
 
     &.active {
-      color: #07c05f;
+      color: #059669;
       font-weight: 500;
 
       &::after {
@@ -1051,7 +1065,7 @@ onUnmounted(() => {
         left: 0;
         right: 0;
         height: 2px;
-        background: #07c05f;
+        background: linear-gradient(90deg, #07c05f, #059669);
         border-radius: 1px;
       }
     }
@@ -1079,38 +1093,50 @@ onUnmounted(() => {
 }
 
 .org-card {
-  border: 1px solid #e8ecf1;
-  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: #fff;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
   position: relative;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
   height: 160px;
 
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 120px;
+    height: 80px;
+    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(7, 192, 95, 0.06) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
   &.joined-org {
     &:hover {
-      border-color: #b8e6c9;
-      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.08);
+      border-color: rgba(7, 192, 95, 0.4);
+      box-shadow: 0 4px 16px rgba(7, 192, 95, 0.08);
     }
   }
 
   &:hover {
-    border-color: #07c05f;
-    box-shadow: 0 2px 10px rgba(7, 192, 95, 0.1);
+    border-color: rgba(7, 192, 95, 0.5);
+    box-shadow: 0 6px 20px rgba(7, 192, 95, 0.12);
   }
 
   .card-decoration {
-    color: rgba(7, 192, 95, 0.24);
+    color: rgba(7, 192, 95, 0.35);
   }
 
   &:hover .card-decoration {
-    color: rgba(7, 192, 95, 0.38);
+    color: rgba(7, 192, 95, 0.55);
   }
 
   .card-header {
@@ -1125,25 +1151,20 @@ onUnmounted(() => {
   }
 }
 
-// 装饰图标样式
+// 卡片装饰：协作网络图形
 .card-decoration {
   position: absolute;
-  top: 10px;
-  right: 50px;
+  top: 8px;
+  right: 16px;
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  justify-content: flex-end;
   pointer-events: none;
   z-index: 0;
-  transition: color 0.25s ease;
+  transition: color 0.3s ease;
 
-  .org-icon {
-    opacity: 0.9;
-  }
-
-  .connect-icon {
-    margin-top: 16px;
-    opacity: 0.7;
+  .card-deco-svg {
+    display: block;
   }
 }
 
@@ -1189,14 +1210,6 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.card-subtitle {
-  font-family: "PingFang SC";
-  font-size: 12px;
-  font-weight: 400;
-  color: #9ca3af;
-  line-height: 1.3;
 }
 
 .more-wrap {
@@ -1256,7 +1269,7 @@ onUnmounted(() => {
   justify-content: space-between;
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid #f0f2f5;
+  border-top: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 .bottom-left {
@@ -1312,6 +1325,15 @@ onUnmounted(() => {
     }
   }
 
+  &.joined-badge {
+    padding: 0 6px;
+    background: rgba(100, 116, 139, 0.08);
+    color: #64748b;
+
+    &:hover {
+      background: rgba(100, 116, 139, 0.12);
+    }
+  }
 }
 
 .role-tag {
@@ -1596,8 +1618,12 @@ onUnmounted(() => {
   max-width: 480px;
   max-height: 90vh;
   background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 4px 6px -1px rgba(15, 23, 42, 0.06),
+    0 12px 24px -4px rgba(15, 23, 42, 0.1),
+    0 24px 48px -8px rgba(15, 23, 42, 0.12);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1607,39 +1633,46 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px 24px 16px;
-  border-bottom: 1px solid #e5e5e5;
+  padding: 28px 24px 20px;
+  background: linear-gradient(180deg, #fafbfc 0%, #ffffff 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
 }
 
 .invite-preview-title {
   margin: 0;
-  font-family: "PingFang SC";
-  font-size: 16px;
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-size: 18px;
   font-weight: 600;
-  color: #000000e6;
+  color: #0f172a;
+  letter-spacing: -0.02em;
 }
 
 .invite-preview-close {
   position: absolute;
   top: 20px;
   right: 20px;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: none;
-  background: #f5f5f5;
-  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 10px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
-  transition: all 0.2s ease;
+  color: #64748b;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.15s ease;
   z-index: 10;
 
   &:hover {
-    background: #e5e5e5;
-    color: #000;
+    background: rgba(0, 0, 0, 0.08);
+    color: #0f172a;
+    transform: scale(1.02);
+  }
+
+  &:active {
+    transform: scale(0.98);
   }
 }
 
@@ -1656,55 +1689,56 @@ onUnmounted(() => {
   }
 
   &::-webkit-scrollbar-track {
-    background: #f5f5f5;
+    background: #f1f5f9;
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #d0d0d0;
+    background: #cbd5e1;
     border-radius: 3px;
     transition: background 0.2s;
 
     &:hover {
-      background: #07C05F;
+      background: #07c05f;
     }
   }
 }
 
 .join-modal-tabs {
   display: flex;
-  gap: 24px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #e5e5e5;
+  gap: 32px;
+  margin-bottom: 24px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 
   .join-tab {
-    padding: 8px 0;
+    padding: 10px 0;
     cursor: pointer;
-    color: #00000099;
+    color: #64748b;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: 500;
     user-select: none;
     position: relative;
     transition: color 0.2s ease;
-    font-family: "PingFang SC";
+    font-family: "PingFang SC", -apple-system, sans-serif;
 
     &:hover {
-      color: #000000e6;
+      color: #0f172a;
     }
 
     &.active {
       color: #07c05f;
-      font-weight: 500;
+      font-weight: 600;
 
       &::after {
         content: '';
         position: absolute;
-        bottom: -1px;
+        bottom: -5px;
         left: 0;
         right: 0;
-        height: 2px;
-        background: #07c05f;
-        border-radius: 1px;
+        height: 3px;
+        background: linear-gradient(90deg, #07c05f, #05a650);
+        border-radius: 2px 2px 0 0;
       }
     }
   }
@@ -1725,74 +1759,82 @@ onUnmounted(() => {
 }
 
 .searchable-list-wrap {
-  max-height: 300px;
+  max-height: 320px;
   overflow-y: auto;
   margin-bottom: 20px;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  background: #fafafa;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  background: #f8fafc;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.02);
 
   &::-webkit-scrollbar {
     width: 6px;
   }
 
   &::-webkit-scrollbar-track {
-    background: #f5f5f5;
+    background: #f1f5f9;
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #d0d0d0;
+    background: #cbd5e1;
     border-radius: 3px;
     transition: background 0.2s;
 
     &:hover {
-      background: #07C05F;
+      background: #07c05f;
     }
   }
 }
 
 .searchable-empty {
-  padding: 40px 16px;
+  padding: 48px 20px;
   text-align: center;
-  color: #00000066;
+  color: #64748b;
   font-size: 14px;
-  font-family: "PingFang SC";
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  line-height: 1.5;
 }
 
 .searchable-list {
   display: flex;
   flex-direction: column;
   gap: 0;
+  padding: 4px;
 
   .searchable-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid #e5e5e5;
+    gap: 14px;
+    padding: 14px 16px;
+    margin-bottom: 4px;
+    border-radius: 10px;
     background: #fff;
-    transition: background 0.2s;
+    border: 1px solid transparent;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
     cursor: pointer;
 
     &:last-child {
-      border-bottom: none;
+      margin-bottom: 0;
     }
 
     &:hover:not(.is-already-member) {
-      background: #f5f5f5;
+      background: #fff;
+      border-color: rgba(7, 192, 95, 0.2);
+      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.06);
     }
 
     &.is-already-member {
       cursor: default;
-      opacity: 0.6;
+      opacity: 0.75;
+      background: #f8fafc;
     }
 
     .searchable-item-left {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
       flex: 1;
       min-width: 0;
     }
@@ -1808,33 +1850,36 @@ onUnmounted(() => {
       .searchable-item-name {
         display: block;
         font-size: 14px;
-        font-weight: 500;
-        color: #000000e6;
+        font-weight: 600;
+        color: #0f172a;
         margin-bottom: 4px;
-        font-family: "PingFang SC";
+        font-family: "PingFang SC", -apple-system, sans-serif;
       }
 
       .searchable-item-desc {
         display: block;
         font-size: 13px;
-        color: #00000066;
+        color: #64748b;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         margin-bottom: 8px;
-        font-family: "PingFang SC";
+        font-family: "PingFang SC", -apple-system, sans-serif;
       }
 
       .searchable-item-badges {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         flex-wrap: wrap;
 
         .badge {
           font-size: 12px;
-          color: #00000066;
-          font-family: "PingFang SC";
+          color: #64748b;
+          font-family: "PingFang SC", -apple-system, sans-serif;
+          padding: 2px 8px;
+          background: rgba(0, 0, 0, 0.04);
+          border-radius: 6px;
         }
 
         .approval-tag {
@@ -1852,32 +1897,32 @@ onUnmounted(() => {
 .invite-preview-input {
   .invite-preview-input-desc {
     font-size: 14px;
-    color: #333333;
+    color: #475569;
     margin: 0 0 16px;
-    line-height: 1.5;
-    font-family: "PingFang SC";
+    line-height: 1.55;
+    font-family: "PingFang SC", -apple-system, sans-serif;
   }
   .invite-preview-input-wrap {
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
   .invite-preview-input-tip {
     font-size: 12px;
-    color: #00000066;
+    color: #64748b;
     margin: 0 0 20px;
-    line-height: 1.4;
-    font-family: "PingFang SC";
+    line-height: 1.5;
+    font-family: "PingFang SC", -apple-system, sans-serif;
   }
   .invite-preview-error-inline {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #FA5151;
+    color: #dc2626;
     font-size: 13px;
     margin-bottom: 16px;
-    font-family: "PingFang SC";
+    font-family: "PingFang SC", -apple-system, sans-serif;
   }
   .invite-preview-footer-single {
-    margin: 20px 0 0;
+    margin: 24px 0 0;
     padding: 0;
     border-top: none;
     background: transparent;
@@ -1889,13 +1934,13 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 56px 28px;
-  gap: 16px;
+  padding: 64px 28px;
+  gap: 20px;
 
   .invite-preview-loading-text {
     font-size: 14px;
-    color: #86909c;
-    font-family: "PingFang SC";
+    color: #64748b;
+    font-family: "PingFang SC", -apple-system, sans-serif;
   }
 }
 
@@ -1928,16 +1973,26 @@ onUnmounted(() => {
   }
 }
 
-// 预览内容区域 - 紧凑布局
+// 预览内容区域 - 空间信息卡片
+.invite-preview-body-preview {
+  padding-top: 20px;
+}
+
 .invite-preview-org {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 18px;
+  margin-bottom: 24px;
+  padding: 20px;
+  background: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .invite-preview-org-icon {
   flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.06));
 }
 
 .invite-preview-org-info {
@@ -1946,69 +2001,82 @@ onUnmounted(() => {
 }
 
 .invite-preview-org-name {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 600;
-  color: #000000e6;
-  margin: 0 0 6px;
-  font-family: "PingFang SC";
+  color: #0f172a;
+  margin: 0 0 8px;
+  font-family: "PingFang SC", -apple-system, sans-serif;
   line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 
 .invite-preview-org-desc {
   font-size: 14px;
-  color: #00000066;
+  color: #64748b;
   margin: 0;
-  line-height: 1.5;
-  font-family: "PingFang SC";
+  line-height: 1.55;
+  font-family: "PingFang SC", -apple-system, sans-serif;
 }
 
 .invite-preview-stats {
   display: flex;
-  gap: 24px;
-  margin-bottom: 20px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid #e5e5e5;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 18px 0 22px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .invite-preview-stat {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(7, 192, 95, 0.06);
+  border: 1px solid rgba(7, 192, 95, 0.12);
+  border-radius: 10px;
   font-size: 14px;
-  color: #333333;
-  font-family: "PingFang SC";
+  color: #0f172a;
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  transition: background 0.2s ease, border-color 0.2s ease;
+
+  &:hover {
+    background: rgba(7, 192, 95, 0.08);
+    border-color: rgba(7, 192, 95, 0.18);
+  }
 
   .invite-preview-stat-icon {
     color: #07c05f;
-    font-size: 16px;
+    font-size: 18px;
+    flex-shrink: 0;
   }
 
   .invite-preview-stat-value {
     font-weight: 600;
-    color: #000000e6;
+    color: #0f172a;
+    font-size: 15px;
   }
 
   .invite-preview-stat-label {
-    color: #00000066;
-    font-weight: 400;
+    color: #64748b;
+    font-weight: 500;
   }
 }
 
 .invite-preview-join-section,
 .invite-preview-status-section {
-  margin-top: 20px;
+  margin-top: 24px;
 }
 
 .invite-preview-approval-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
+  gap: 12px;
+  margin-bottom: 18px;
   font-size: 14px;
-  font-family: "PingFang SC";
+  font-family: "PingFang SC", -apple-system, sans-serif;
 
   .invite-preview-approval-label {
-    color: #333333;
+    color: #475569;
     flex-shrink: 0;
     font-weight: 500;
   }
@@ -2016,19 +2084,21 @@ onUnmounted(() => {
   .invite-preview-approval-badge {
     display: inline-flex;
     align-items: center;
-    padding: 4px 10px;
-    border-radius: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
 
     &.need-approval {
       background: rgba(250, 173, 20, 0.12);
-      color: #d48806;
+      color: #b45309;
+      border: 1px solid rgba(250, 173, 20, 0.2);
     }
 
     &.no-approval {
-      background: rgba(7, 192, 95, 0.12);
-      color: #07c05f;
+      background: rgba(7, 192, 95, 0.1);
+      color: #059669;
+      border: 1px solid rgba(7, 192, 95, 0.2);
     }
   }
 }
@@ -2036,13 +2106,14 @@ onUnmounted(() => {
 .invite-preview-tip {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 6px;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
   font-size: 13px;
-  line-height: 1.5;
-  font-family: "PingFang SC";
-  margin-bottom: 16px;
+  line-height: 1.55;
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  margin-bottom: 18px;
+  border: 1px solid transparent;
 
   .t-icon {
     flex-shrink: 0;
@@ -2052,17 +2123,20 @@ onUnmounted(() => {
 
 .invite-preview-tip-success {
   background: rgba(7, 192, 95, 0.08);
-  color: #07c05f;
+  color: #059669;
+  border-color: rgba(7, 192, 95, 0.15);
 }
 
 .invite-preview-tip-warning {
   background: rgba(250, 173, 20, 0.08);
-  color: #d48806;
+  color: #b45309;
+  border-color: rgba(250, 173, 20, 0.15);
 }
 
 .invite-preview-tip-info {
   background: rgba(0, 112, 240, 0.06);
-  color: #0052d9;
+  color: #0369a1;
+  border-color: rgba(0, 112, 240, 0.12);
 }
 
 .invite-preview-form-group {
@@ -2076,11 +2150,11 @@ onUnmounted(() => {
 .invite-preview-form-label {
   display: block;
   margin-bottom: 8px;
-  font-family: "PingFang SC";
+  font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 14px;
   font-weight: 500;
-  color: #333333;
-  letter-spacing: -0.2px;
+  color: #475569;
+  letter-spacing: -0.02em;
 }
 
 .invite-preview-role-select {
@@ -2093,8 +2167,9 @@ onUnmounted(() => {
 }
 
 .invite-preview-footer {
-  padding: 16px 24px;
-  border-top: 1px solid #e5e5e5;
+  padding: 20px 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  background: linear-gradient(0deg, #fafbfc 0%, #ffffff 100%);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -2103,14 +2178,24 @@ onUnmounted(() => {
 
 .modal-enter-active,
 .modal-leave-active {
-  transition: all 0.3s ease;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+
+  .invite-preview-modal {
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 }
 .modal-enter-from,
 .modal-leave-to {
   opacity: 0;
 
   .invite-preview-modal {
-    transform: scale(0.95);
+    transform: scale(0.92) translateY(-8px);
+  }
+}
+.modal-enter-to,
+.modal-leave-from {
+  .invite-preview-modal {
+    transform: scale(1) translateY(0);
   }
 }
 </style>

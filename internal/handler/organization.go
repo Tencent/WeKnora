@@ -178,6 +178,10 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 			c.Error(apperrors.NewValidationError(err.Error()))
 			return
 		}
+		if errors.Is(err, service.ErrOrgMemberLimitTooLow) {
+			c.Error(apperrors.NewValidationError("当前成员数已超过新的上限，请先移除成员或设置更大的上限"))
+			return
+		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
 		return
 	}
@@ -435,6 +439,10 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 	org, err := h.orgService.JoinByInviteCode(ctx, req.InviteCode, userID.(string), tenantID.(uint64))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to join organization: %v", err)
+		if errors.Is(err, service.ErrOrgMemberLimitReached) {
+			c.Error(apperrors.NewValidationError("该空间成员已满，无法加入"))
+			return
+		}
 		c.Error(apperrors.NewNotFoundError("Invalid invite code"))
 		return
 	}
@@ -500,6 +508,10 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	request, err := h.orgService.SubmitJoinRequest(ctx, org.ID, userID.(string), tenantID.(uint64), req.Message, requestedRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to submit join request: %v", err)
+		if errors.Is(err, service.ErrOrgMemberLimitReached) {
+			c.Error(apperrors.NewValidationError("该空间成员已满，无法提交加入申请"))
+			return
+		}
 		if err.Error() == "pending request already exists" {
 			c.Error(apperrors.NewValidationError("You have already submitted a request to join this organization"))
 			return
@@ -583,6 +595,10 @@ func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 		}
 		if errors.Is(err, service.ErrOrgPermissionDenied) {
 			c.Error(apperrors.NewForbiddenError("Organization not open for search"))
+			return
+		}
+		if errors.Is(err, service.ErrOrgMemberLimitReached) {
+			c.Error(apperrors.NewValidationError("该空间成员已满，无法加入"))
 			return
 		}
 		if errors.Is(err, service.ErrInvalidRole) {
@@ -810,6 +826,10 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 
 	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID.(string), req.Message, assignRole); err != nil {
 		logger.Errorf(ctx, "Failed to review join request: %v", err)
+		if errors.Is(err, service.ErrOrgMemberLimitReached) {
+			c.Error(apperrors.NewValidationError("空间成员已满，无法通过该加入申请"))
+			return
+		}
 		if err.Error() == "request has already been reviewed" {
 			c.Error(apperrors.NewValidationError("Request has already been reviewed"))
 			return
@@ -1093,6 +1113,7 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 		IsOwner:                org.OwnerID == currentUserID,
 		RequireApproval:        org.RequireApproval,
 		Searchable:             org.Searchable,
+		MemberLimit:            org.MemberLimit,
 		InviteCodeValidityDays: org.InviteCodeValidityDays,
 		CreatedAt:              org.CreatedAt,
 		UpdatedAt:              org.UpdatedAt,
@@ -1265,6 +1286,10 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 	// Add member
 	if err := h.orgService.AddMember(ctx, orgID, req.UserID, invitedUser.TenantID, req.Role); err != nil {
 		logger.Errorf(ctx, "Failed to add member: %v", err)
+		if errors.Is(err, service.ErrOrgMemberLimitReached) {
+			c.Error(apperrors.NewValidationError("该空间成员已满，无法添加新成员"))
+			return
+		}
 		c.Error(apperrors.NewInternalServerError("Failed to add member"))
 		return
 	}

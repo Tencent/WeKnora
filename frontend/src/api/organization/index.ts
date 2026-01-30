@@ -12,6 +12,8 @@ export interface Organization {
   invite_code_validity_days?: number
   require_approval?: boolean
   searchable?: boolean
+  /** Max members; 0 = unlimited */
+  member_limit?: number
   member_count?: number
   share_count?: number
   pending_join_request_count?: number
@@ -101,6 +103,7 @@ export interface CreateOrganizationRequest {
   description?: string
   avatar?: string
   invite_code_validity_days?: number // 0=never, 1, 7, 30; default 7
+  member_limit?: number // 0=unlimited; default 50
 }
 
 export interface UpdateOrganizationRequest {
@@ -110,6 +113,7 @@ export interface UpdateOrganizationRequest {
   require_approval?: boolean
   searchable?: boolean
   invite_code_validity_days?: number // 0=never, 1, 7, 30
+  member_limit?: number // 0=unlimited
 }
 
 export interface UpdateMemberRoleRequest {

@@ -4,9 +4,14 @@
     :style="avatarStyle"
     :class="{ 'space-avatar-small': size === 'small', 'space-avatar-large': size === 'large' }"
   >
-    <!-- 无限符号：右下角周边点缀，不干扰中央文字 -->
-    <svg class="space-avatar-decoration" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M3 10 A4 4 0 0 1 11 10 A4 4 0 0 1 19 10 A4 4 0 0 1 11 10 A4 4 0 0 1 3 10" stroke="rgba(255,255,255,0.25)" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <!-- 协作网络图案：右下角点缀，可调大小/变形 -->
+    <svg class="space-avatar-decoration" viewBox="0 0 56 40" preserveAspectRatio="xMaxYMax meet" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+      <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+      <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+      <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+      <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35"/>
+      <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
     </svg>
     <span class="space-avatar-letter" :style="letterStyle">{{ letter }}</span>
   </div>
@@ -117,11 +122,12 @@ const letterStyle = computed(() => {
 
 .space-avatar-decoration {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 40%;
-  height: 40%;
-  opacity: 0.85;
+  right: 0;
+  bottom: 0;
+  width: 55%;
+  height: 55%;
+  opacity: 0.35;
+  color: rgba(255, 255, 255, 0.9);
   pointer-events: none;
 }
 

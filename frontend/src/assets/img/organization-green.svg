@@ -1,3 +1,17 @@
-<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M3 10 A4 4 0 0 1 11 10 A4 4 0 0 1 19 10 A4 4 0 0 1 11 10 A4 4 0 0 1 3 10" stroke="#07C05F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg width="20" height="20" viewBox="0 0 56 40" fill="none" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs>
+    <radialGradient id="orbGreen" cx="0.35" cy="0.35" r="0.7" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#6ee7a0"/>
+      <stop offset="45%" stop-color="#07C05F"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </radialGradient>
+  </defs>
+  <!-- 连接线：粗实线 -->
+  <path d="M14 13 L24 10 M32 10 L42 13" stroke="#07C05F" stroke-width="2.2" stroke-linecap="round" opacity="0.95"/>
+  <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="#07C05F" stroke-width="1.8" stroke-linecap="round" opacity="0.9"/>
+  <!-- 节点：立体球体 -->
+  <circle cx="10" cy="12" r="5" fill="url(#orbGreen)" stroke="#059669" stroke-width="0.8"/>
+  <circle cx="28" cy="8" r="6" fill="url(#orbGreen)" stroke="#059669" stroke-width="0.9"/>
+  <circle cx="46" cy="14" r="5" fill="url(#orbGreen)" stroke="#059669" stroke-width="0.8"/>
+  <circle cx="28" cy="28" r="7" fill="url(#orbGreen)" stroke="#059669" stroke-width="0.9"/>
 </svg>

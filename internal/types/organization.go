@@ -60,6 +60,8 @@ type Organization struct {
 	RequireApproval bool `json:"require_approval" gorm:"default:false"`
 	// Whether the space is open for search (discoverable; non-members can search and join by org ID)
 	Searchable bool `json:"searchable" gorm:"default:false"`
+	// Max members allowed; 0 means no limit
+	MemberLimit int `json:"member_limit" gorm:"default:50"`
 	// Creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time
@@ -218,6 +220,7 @@ type CreateOrganizationRequest struct {
 	Description            string `json:"description" binding:"max=1000"`
 	Avatar                 string `json:"avatar" binding:"omitempty,max=512"` // optional avatar URL
 	InviteCodeValidityDays *int   `json:"invite_code_validity_days"`          // optional: 0=never, 1, 7, 30; default 7
+	MemberLimit            *int   `json:"member_limit"`                       // optional: max members; 0=unlimited; default 50
 }
 
 // UpdateOrganizationRequest represents a request to update an organization
@@ -226,8 +229,9 @@ type UpdateOrganizationRequest struct {
 	Description            *string `json:"description" binding:"omitempty,max=1000"`
 	Avatar                 *string `json:"avatar" binding:"omitempty,max=512"` // optional avatar URL
 	RequireApproval        *bool   `json:"require_approval"`
-	Searchable             *bool   `json:"searchable"` // open for search so others can discover and join
+	Searchable             *bool   `json:"searchable"`             // open for search so others can discover and join
 	InviteCodeValidityDays *int    `json:"invite_code_validity_days"` // 0=never, 1, 7, 30
+	MemberLimit            *int    `json:"member_limit"`           // max members; 0=unlimited
 }
 
 // AddMemberRequest represents a request to add a member to an organization
@@ -295,6 +299,7 @@ type OrganizationResponse struct {
 	InviteCodeValidityDays  int        `json:"invite_code_validity_days"`
 	RequireApproval         bool       `json:"require_approval"`
 	Searchable              bool       `json:"searchable"`
+	MemberLimit             int        `json:"member_limit"` // 0 = unlimited
 	MemberCount             int        `json:"member_count"`
 	ShareCount              int        `json:"share_count"`                // 共享到该组织的知识库数量
 	PendingJoinRequestCount int        `json:"pending_join_request_count"` // 待审批加入申请数（仅管理员可见）
