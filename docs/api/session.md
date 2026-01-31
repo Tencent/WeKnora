@@ -10,7 +10,9 @@
 | PUT    | `/sessions/:id`                         | 更新会话              |
 | DELETE | `/sessions/:id`                         | 删除会话              |
 | POST   | `/sessions/:session_id/generate_title`  | 生成会话标题          |
+| POST   | `/sessions/:session_id/stop`            | 停止会话              |
 | GET    | `/sessions/continue-stream/:session_id` | 继续未完成的会话      |
+
 
 ## POST `/sessions` - 创建会话
 
@@ -340,6 +342,26 @@ curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-f
 ```json
 {
     "data": "模型优化策略",
+    "success": true
+}
+```
+
+## POST `/sessions/:session_id/stop` - 停止会话
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions/7c966c74-610e-4516-8d5b-05e14b2e4ee0/stop' \
+--header 'X-API-Key: sk-An-W8T4tdZDbWKJgfwgdea5rS8ue_mRhCTZ8Smhnvku-bWEE' \
+--header 'Content-Type: application/json' \
+--data '{"message_id":"ebbf7e53-dfe6-44d5-882f-36a4104910b5"}'
+```
+
+**响应**:
+
+```json
+{
+    "message": "Session stopped successfully",
     "success": true
 }
 ```
