@@ -24,7 +24,7 @@
           <t-icon name="server" class="menu-icon" />
           <span>Ollama</span>
         </div>
-        <div class="menu-item" @click="handleQuickNav('websearch')">
+        <div class="menu-item" @click="handleQuickNav('web_search')">
           <svg 
             width="16" 
             height="16" 

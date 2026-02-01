@@ -41,6 +41,7 @@
     "less": "^4.3.0",
     "less-loader": "^12.2.0",
     "npm-run-all2": "^7.0.2",
+    "prettier": "^3.8.1",
     "typescript": "~5.8.0",
     "vite": "^7.2.2",
     "vue-tsc": "^2.2.8"
