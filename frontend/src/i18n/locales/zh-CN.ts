@@ -1019,6 +1019,12 @@ export default {
         databaseQuery: { label: "查询数据库", desc: "查询数据库中的信息" },
         dataAnalysis: { label: "数据分析", desc: "理解数据文件并进行数据分析" },
         dataSchema: { label: "查看数据元信息", desc: "获取表格文件的元信息" },
+        searchKnowledge: { label: "知识库检索", desc: "从知识库中检索相关内容" },
+        webSearch: { label: "网络搜索", desc: "搜索互联网获取信息" },
+        webFetch: { label: "网页抓取", desc: "获取网页内容" },
+        getRelatedDocuments: { label: "获取相关文档", desc: "获取与当前文档相关的文档" },
+        getDocumentContent: { label: "获取文档内容", desc: "获取指定文档的详细内容" },
+        knowledgeGraphExtract: { label: "知识图谱提取", desc: "从文本中提取知识图谱实体和关系" },
       },
       fileTypes: {
         pdf: { label: "PDF", desc: "PDF 文档" },

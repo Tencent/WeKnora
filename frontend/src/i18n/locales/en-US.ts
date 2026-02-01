@@ -490,6 +490,12 @@ export default {
         databaseQuery: { label: 'Database Query', desc: 'Query information from the database' },
         dataAnalysis: { label: 'Data Analysis', desc: 'Analyze data files and summarize insights' },
         dataSchema: { label: 'Data Schema', desc: 'View table and file metadata' },
+        searchKnowledge: { label: 'Knowledge Search', desc: 'Search content from knowledge base' },
+        webSearch: { label: 'Web Search', desc: 'Search internet for information' },
+        webFetch: { label: 'Web Fetch', desc: 'Fetch web page content' },
+        getRelatedDocuments: { label: 'Get Related Documents', desc: 'Get documents related to current document' },
+        getDocumentContent: { label: 'Get Document Content', desc: 'Get detailed content of specific document' },
+        knowledgeGraphExtract: { label: 'Knowledge Graph Extract', desc: 'Extract knowledge graph entities and relations from text' },
       },
       fileTypes: {
         pdf: { label: 'PDF', desc: 'PDF documents' },
