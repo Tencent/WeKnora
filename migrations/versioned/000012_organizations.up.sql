@@ -1,6 +1,6 @@
--- Migration: 000011_organizations (merged 000011–000017, 000012)
--- Description: Organization tables, approval, invite expiry, join requests, avatar, searchable
-DO $$ BEGIN RAISE NOTICE '[Migration 000011] Starting organization tables setup...'; END $$;
+-- Migration: 000012_organizations (merged 000011–000017, 000012, 000013)
+-- Description: Organization tables, approval, invite expiry, join requests, avatar, searchable, member_limit
+DO $$ BEGIN RAISE NOTICE '[Migration 000012] Starting organization tables setup...'; END $$;
 
 -- Create organizations table
 CREATE TABLE IF NOT EXISTS organizations (
@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     invite_code_validity_days SMALLINT NOT NULL DEFAULT 7,
     avatar VARCHAR(512) DEFAULT '',
     searchable BOOLEAN NOT NULL DEFAULT FALSE,
+    member_limit INTEGER NOT NULL DEFAULT 50,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE
@@ -30,6 +31,7 @@ COMMENT ON COLUMN organizations.require_approval IS 'Whether joining this organi
 COMMENT ON COLUMN organizations.invite_code_expires_at IS 'When the current invite code expires; NULL means no expiry (legacy)';
 COMMENT ON COLUMN organizations.invite_code_validity_days IS 'Invite link validity in days: 0=never expire, 1/7/30 days';
 COMMENT ON COLUMN organizations.searchable IS 'When true, space appears in search and can be joined by org ID';
+COMMENT ON COLUMN organizations.member_limit IS 'Max members allowed; 0 means no limit';
 
 -- Create organization_members table
 CREATE TABLE IF NOT EXISTS organization_members (
@@ -106,4 +108,4 @@ COMMENT ON COLUMN organization_join_requests.message IS 'Optional message from t
 COMMENT ON COLUMN organization_join_requests.reviewed_by IS 'User ID of the admin who reviewed the request';
 COMMENT ON COLUMN organization_join_requests.review_message IS 'Optional message from the reviewer';
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000011] Organization tables setup completed successfully!'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000012] Organization tables setup completed successfully!'; END $$;

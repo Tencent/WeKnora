@@ -99,7 +99,7 @@ func (r *organizationRepository) ListSearchable(ctx context.Context, query strin
 // Update updates an organization (Select ensures zero values like invite_code_validity_days=0 are persisted)
 func (r *organizationRepository) Update(ctx context.Context, org *types.Organization) error {
 	return r.db.WithContext(ctx).Model(&types.Organization{}).Where("id = ?", org.ID).
-		Select("name", "description", "require_approval", "searchable", "invite_code_validity_days", "member_limit", "updated_at").
+		Select("name", "description", "avatar", "require_approval", "searchable", "invite_code_validity_days", "member_limit", "updated_at").
 		Updates(org).Error
 }
 

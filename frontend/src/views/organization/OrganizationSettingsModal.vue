@@ -41,7 +41,7 @@
                   </div>
                   
                   <div class="settings-group">
-                    <!-- 空间名称（头像由名称生成，与智能体一致） -->
+                    <!-- 空间名称与头像：一行展示，头像点击弹出 Emoji 选择 -->
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('organization.name') }} <span class="required">*</span></label>
@@ -49,7 +49,44 @@
                       </div>
                       <div class="setting-control">
                         <div class="name-input-wrapper">
-                          <SpaceAvatar :name="formData.name || '?'" size="large" />
+                          <t-popup
+                            v-model="avatarPopoverVisible"
+                            trigger="click"
+                            placement="bottom-left"
+                            :disabled="!isAdmin"
+                            overlay-class-name="avatar-emoji-popover"
+                          >
+                            <div class="avatar-trigger-wrap">
+                              <SpaceAvatar :name="formData.name || '?'" :avatar="formData.avatar" size="large" />
+                              <span v-if="isAdmin" class="avatar-change-hint">{{ $t('organization.avatar') }}</span>
+                            </div>
+                            <template #content>
+                              <div class="avatar-popover-content" @click.stop>
+                                <p class="avatar-popover-title">{{ $t('organization.avatarPickerHint') }}</p>
+                                <div class="avatar-emoji-grid">
+                                  <button
+                                    v-for="emoji in avatarEmojiOptions"
+                                    :key="emoji"
+                                    type="button"
+                                    class="avatar-emoji-btn"
+                                    :class="{ 'is-selected': formData.avatar === 'emoji:' + emoji }"
+                                    @click="selectAvatarEmoji(emoji)"
+                                  >
+                                    {{ emoji }}
+                                  </button>
+                                </div>
+                                <t-button
+                                  v-if="formData.avatar"
+                                  variant="text"
+                                  size="small"
+                                  class="avatar-clear-btn"
+                                  @click="clearAvatarEmoji"
+                                >
+                                  {{ $t('organization.avatarClear') }}
+                                </t-button>
+                              </div>
+                            </template>
+                          </t-popup>
                           <t-input 
                             v-model="formData.name" 
                             :placeholder="$t('organization.namePlaceholder')"
@@ -693,11 +730,29 @@ const addMemberRole = ref<'admin' | 'editor' | 'viewer'>('viewer')
 const formData = ref({
   name: '',
   description: '',
+  avatar: '' as string,
   require_approval: false,
   searchable: false,
   invite_code_validity_days: 7 as number,
   member_limit: 50 as number // 0 = unlimited
 })
+
+// 空间头像可选 Emoji（方案三：Emoji 作为头像）
+const avatarEmojiOptions = [
+  '🚀', '📁', '👥', '🏢', '💡', '📚', '🌟', '🔧', '📌', '🎯',
+  '📂', '🔒', '🌐', '⚡', '🎨', '📊', '🤝', '💼', '📧', '🏠',
+  '🔑', '📈', '✨', '📋', '🌍', '💬', '🔔', '📦', '🎉', '🌈'
+]
+const avatarPopoverVisible = ref(false)
+
+function selectAvatarEmoji(emoji: string) {
+  formData.value.avatar = 'emoji:' + emoji
+  avatarPopoverVisible.value = false
+}
+function clearAvatarEmoji() {
+  formData.value.avatar = ''
+  avatarPopoverVisible.value = false
+}
 
 // Computed
 const isCreateMode = computed(() => props.mode === 'create')
@@ -821,6 +876,7 @@ const fetchOrgDetail = async () => {
       formData.value = {
         name: res.data.name,
         description: res.data.description || '',
+        avatar: res.data.avatar || '',
         require_approval: res.data.require_approval || false,
         searchable: res.data.searchable || false,
         invite_code_validity_days: typeof validity === 'number' ? validity : 7,
@@ -972,6 +1028,7 @@ const handleSave = async () => {
       const res = await updateOrganization(props.orgId, {
         name: formData.value.name.trim(),
         description: formData.value.description.trim(),
+        avatar: formData.value.avatar || undefined,
         require_approval: formData.value.require_approval,
         searchable: formData.value.searchable,
         invite_code_validity_days: formData.value.invite_code_validity_days,
@@ -1259,7 +1316,7 @@ watch(() => props.visible, (newVal) => {
     joinRequests.value = []
     if (props.mode === 'create') {
       // 创建模式：重置表单
-      formData.value = { name: '', description: '', require_approval: false, searchable: false, invite_code_validity_days: 7, member_limit: 50 }
+      formData.value = { name: '', description: '', avatar: '', require_approval: false, searchable: false, invite_code_validity_days: 7, member_limit: 50 }
       orgInfo.value = null
       members.value = []
       sharedKnowledgeBases.value = []
@@ -1560,6 +1617,26 @@ watch(currentSection, (section) => {
   }
 }
 
+.avatar-trigger-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 4px;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+.avatar-trigger-wrap:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+.avatar-change-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.2;
+}
+
 .name-input-wrapper {
   display: flex;
   align-items: center;
@@ -1568,6 +1645,54 @@ watch(currentSection, (section) => {
 .name-input-wrapper .name-input {
   flex: 1;
   min-width: 0;
+}
+
+/* 头像 Emoji 弹层内容 */
+.avatar-popover-content {
+  padding: 12px;
+  min-width: 260px;
+}
+.avatar-popover-title {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+.avatar-popover-content .avatar-emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 280px;
+}
+.avatar-popover-content .avatar-emoji-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.avatar-popover-content .avatar-emoji-btn:hover {
+  border-color: #07c05f;
+  background: rgba(7, 192, 95, 0.06);
+}
+.avatar-popover-content .avatar-emoji-btn.is-selected {
+  border-color: #07c05f;
+  background: rgba(7, 192, 95, 0.12);
+}
+.avatar-popover-content .avatar-clear-btn {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 12px;
+}
+.avatar-popover-content .avatar-clear-btn:hover {
+  color: #059669;
 }
 
 // 邀请卡片样式

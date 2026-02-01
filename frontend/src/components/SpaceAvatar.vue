@@ -2,18 +2,22 @@
   <div
     class="space-avatar"
     :style="avatarStyle"
-    :class="{ 'space-avatar-small': size === 'small', 'space-avatar-large': size === 'large' }"
+    :class="{ 'space-avatar-small': size === 'small', 'space-avatar-large': size === 'large', 'space-avatar-emoji': isEmoji }"
   >
-    <!-- 协作网络图案：右下角点缀，可调大小/变形 -->
-    <svg class="space-avatar-decoration" viewBox="0 0 56 40" preserveAspectRatio="xMaxYMax meet" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-      <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
-      <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
-      <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
-      <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35"/>
-      <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
-    </svg>
-    <span class="space-avatar-letter" :style="letterStyle">{{ letter }}</span>
+    <template v-if="isEmoji">
+      <span class="space-avatar-emoji-char">{{ emojiChar }}</span>
+    </template>
+    <template v-else>
+      <svg class="space-avatar-decoration" viewBox="0 0 56 40" preserveAspectRatio="xMaxYMax meet" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+        <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7"/>
+        <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5"/>
+        <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.4"/>
+        <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35"/>
+        <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
+      </svg>
+      <span class="space-avatar-letter" :style="letterStyle">{{ letter }}</span>
+    </template>
   </div>
 </template>
 
@@ -22,9 +26,23 @@ import { computed } from 'vue';
 
 const props = withDefaults(defineProps<{
   name: string;
+  /** Optional: "emoji:🚀" for emoji avatar; otherwise name-based */
+  avatar?: string;
   size?: 'small' | 'medium' | 'large';
 }>(), {
-  size: 'medium'
+  size: 'medium',
+  avatar: ''
+});
+
+const isEmoji = computed(() => {
+  const v = (props.avatar || '').trim();
+  return v.startsWith('emoji:') && v.length > 6;
+});
+
+const emojiChar = computed(() => {
+  const v = (props.avatar || '').trim();
+  if (!v.startsWith('emoji:')) return '';
+  return v.slice(6).trim() || '';
 });
 
 // 预定义渐变色（与项目绿色主色协调，偏空间/协作感）
@@ -67,6 +85,9 @@ const gradient = computed(() => {
 });
 
 const avatarStyle = computed(() => {
+  if (isEmoji.value) {
+    return { background: 'linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)' };
+  }
   const g = gradient.value;
   return {
     background: `linear-gradient(135deg, ${g.from} 0%, ${g.to} 100%)`
@@ -117,6 +138,28 @@ const letterStyle = computed(() => {
     .space-avatar-letter {
       font-size: 20px;
     }
+
+    .space-avatar-emoji-char {
+      font-size: 28px;
+    }
+  }
+
+  &.space-avatar-emoji {
+    .space-avatar-emoji-char {
+      position: relative;
+      z-index: 1;
+      line-height: 1;
+      user-select: none;
+    }
+  }
+}
+
+.space-avatar-emoji-char {
+  font-size: 18px;
+  line-height: 1;
+
+  .space-avatar-small & {
+    font-size: 14px;
   }
 }
 
