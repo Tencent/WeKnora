@@ -8,10 +8,13 @@ import TDesign from "tdesign-vue-next";
 import "tdesign-vue-next/es/style/index.css";
 import "@/assets/theme/theme.css";
 import i18n from "./i18n";
+import LocalTIcon from "@/components/LocalTIcon.vue";
 
 const app = createApp(App);
 
 app.use(TDesign);
+// Override t-icon to use local SVG icons instead of fetching font from CDN
+app.component("t-icon", LocalTIcon);
 app.use(createPinia());
 app.use(router);
 app.use(i18n);

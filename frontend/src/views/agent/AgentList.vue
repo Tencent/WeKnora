@@ -41,7 +41,7 @@
             </div>
             <!-- 自定义智能体使用 AgentAvatar -->
             <AgentAvatar v-else :name="agent.name" size="medium" />
-            <span class="card-title" :title="agent.name">{{ agent.name }}</span>
+            <span class="card-title" :title="getAgentDisplayName(agent)">{{ getAgentDisplayName(agent) }}</span>
           </div>
           <t-popup 
             v-model="agent.showMore" 
@@ -80,7 +80,7 @@
         <!-- 卡片内容 -->
         <div class="card-content">
           <div class="card-description">
-            {{ agent.description || $t('agent.noDescription') }}
+            {{ getAgentDisplayDescription(agent) || $t('agent.noDescription') }}
           </div>
         </div>
 
@@ -189,6 +189,33 @@ interface AgentWithUI extends CustomAgent {
   showMore?: boolean
 }
 
+const builtinAgentI18nMap: Record<string, { nameKey: string; descriptionKey: string }> = {
+  'builtin-quick-answer': {
+    nameKey: 'agent.builtinInfo.quickAnswer.name',
+    descriptionKey: 'agent.builtinInfo.quickAnswer.description'
+  },
+  'builtin-smart-reasoning': {
+    nameKey: 'agent.builtinInfo.smartReasoning.name',
+    descriptionKey: 'agent.builtinInfo.smartReasoning.description'
+  },
+  'builtin-deep-researcher': {
+    nameKey: 'agent.builtinInfo.deepResearcher.name',
+    descriptionKey: 'agent.builtinInfo.deepResearcher.description'
+  },
+  'builtin-data-analyst': {
+    nameKey: 'agent.builtinInfo.dataAnalyst.name',
+    descriptionKey: 'agent.builtinInfo.dataAnalyst.description'
+  },
+  'builtin-knowledge-graph-expert': {
+    nameKey: 'agent.builtinInfo.knowledgeGraphExpert.name',
+    descriptionKey: 'agent.builtinInfo.knowledgeGraphExpert.description'
+  },
+  'builtin-document-assistant': {
+    nameKey: 'agent.builtinInfo.documentAssistant.name',
+    descriptionKey: 'agent.builtinInfo.documentAssistant.description'
+  }
+}
+
 const agents = ref<AgentWithUI[]>([])
 const loading = ref(false)
 const deleteVisible = ref(false)
@@ -197,6 +224,20 @@ const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const editingAgent = ref<CustomAgent | null>(null)
 const editorInitialSection = ref<string>('basic')
+
+const getAgentDisplayName = (agent: CustomAgent) => {
+  if (agent.is_builtin && builtinAgentI18nMap[agent.id]) {
+    return t(builtinAgentI18nMap[agent.id].nameKey)
+  }
+  return agent.name
+}
+
+const getAgentDisplayDescription = (agent: CustomAgent) => {
+  if (agent.is_builtin && builtinAgentI18nMap[agent.id]) {
+    return t(builtinAgentI18nMap[agent.id].descriptionKey)
+  }
+  return agent.description
+}
 
 const fetchList = () => {
   loading.value = true

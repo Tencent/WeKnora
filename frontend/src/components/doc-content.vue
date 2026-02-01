@@ -19,10 +19,10 @@ marked.use({
 });
 const renderer = new marked.Renderer();
 let page = 1;
-let doc = null;
-let down = ref()
-let mdContentWrap = ref()
-let url = ref('')
+let doc: HTMLElement | null = null;
+const down = ref<HTMLAnchorElement | null>(null)
+const mdContentWrap = ref<HTMLElement | null>(null)
+const url = ref('')
 // 视图模式：chunks / original / merged
 const viewMode = ref<'chunks' | 'original' | 'merged'>('merged');
 const originalContent = ref<string>('');
@@ -38,14 +38,14 @@ const mergedContent = ref<string>('');
  */
 const mergeChunks = (chunks: any[]): string => {
   if (!chunks || chunks.length === 0) return '';
-  
+
   // 按 start_at 排序
   const sortedChunks = [...chunks].sort((a, b) => {
     const startA = a.start_at ?? a.chunk_index ?? 0;
     const startB = b.start_at ?? b.chunk_index ?? 0;
     return startA - startB;
   });
-  
+
   // 初始化合并结果，第一个 chunk 直接加入
   const mergedChunks: Array<{
     content: string;
@@ -56,16 +56,16 @@ const mergeChunks = (chunks: any[]): string => {
     start_at: sortedChunks[0].start_at ?? 0,
     end_at: sortedChunks[0].end_at ?? 0
   }];
-  
+
   // 从第二个 chunk 开始遍历
   for (let i = 1; i < sortedChunks.length; i++) {
     const currentChunk = sortedChunks[i];
     const lastChunk = mergedChunks[mergedChunks.length - 1];
-    
+
     const currentStartAt = currentChunk.start_at ?? 0;
     const currentEndAt = currentChunk.end_at ?? 0;
     const currentContent = currentChunk.content || '';
-    
+
     // 如果当前 chunk 的起始位置在最后一个 chunk 的结束位置之后，直接添加
     if (currentStartAt > lastChunk.end_at) {
       mergedChunks.push({
@@ -75,40 +75,45 @@ const mergeChunks = (chunks: any[]): string => {
       });
       continue;
     }
-    
+
     // 合并重叠的 chunks
     if (currentEndAt > lastChunk.end_at) {
       // 将内容转换为字符数组以正确处理多字节字符
       const contentRunes = Array.from(currentContent);
       const contentLength = contentRunes.length;
-      
+
       // 计算偏移量：内容长度 - (当前结束位置 - 上一个结束位置)
       const offset = contentLength - (currentEndAt - lastChunk.end_at);
-      
+
       // 拼接非重叠部分
       const newContent = contentRunes.slice(offset).join('');
       lastChunk.content = lastChunk.content + newContent;
       lastChunk.end_at = currentEndAt;
     }
   }
-  
+
   // 合并所有段落，用双换行符连接
   return mergedChunks.map(chunk => chunk.content).join('\n\n');
 };
 
 onMounted(() => {
   nextTick(() => {
-    doc = document.getElementsByClassName('t-drawer__body')[0]
-    doc.addEventListener('scroll', handleDetailsScroll);
+    const element = document.getElementsByClassName('t-drawer__body')[0] as HTMLElement | undefined
+    doc = element || null
+    if (doc) {
+      doc.addEventListener('scroll', handleDetailsScroll);
+    }
   })
 })
 onUpdated(() => {
   page = 1
 })
 onUnmounted(() => {
-  doc.removeEventListener('scroll', handleDetailsScroll);
+  if (doc) {
+    doc.removeEventListener('scroll', handleDetailsScroll);
+  }
 })
-const checkImage = (url) => {
+const checkImage = (url: string) => {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => resolve(true);
@@ -116,14 +121,15 @@ const checkImage = (url) => {
     img.src = url;
   });
 };
-renderer.image = function (href, title, text) {
+renderer.image = function (href?: string | null, title?: string | null, text?: string) {
   // 安全地处理图片链接
-  if (!isValidImageURL(href)) {
+  const safeHref = typeof href === 'string' ? href : '';
+  if (!isValidImageURL(safeHref)) {
     return `<p>${t('error.invalidImageLink')}</p>`;
   }
-  
+
   // 使用安全的图片创建函数
-  const safeImage = createSafeImage(href, text || '', title || '');
+  const safeImage = createSafeImage(safeHref, String(text || ''), String(title || ''));
   return `<figure>
                 ${safeImage}
                 <figcaption style="text-align: left;">${text || ''}</figcaption>
@@ -179,41 +185,20 @@ const isMarkdownFile = (fileType?: string): boolean => {
   const markdownTypes = ['md', 'markdown'];
   return markdownTypes.includes(fileType.toLowerCase());
 };
-const loadOriginalContent = async () => {
-  if (!props.details.id || !props.details.type || props.details.type !== 'file') return;
-  const fileType = props.details.file_type?.toLowerCase();
-  if (!isTextFile(fileType)) {
-    MessagePlugin.warning(t('knowledgeBase.originalFileNotSupported') || '该文件类型不支持原文件展示，请下载查看');
-    return;
-  }
-  loadingOriginal.value = true;
-  try {
-    const blob = await downKnowledgeDetails(props.details.id);
-    const text = await blob.text();
-    originalContent.value = text;
-  } catch (error: any) {
-    console.error('Failed to load original content:', error);
-    MessagePlugin.error(error?.message || t('knowledgeBase.loadOriginalFailed') || '加载原文件内容失败');
-  } finally {
-    loadingOriginal.value = false;
-  }
-};
-watch(() => props.details.md, (newVal) => {
+watch(() => props.details.md, () => {
   nextTick(async () => {
-    const images = mdContentWrap.value.querySelectorAll('img.markdown-image');
-    if (images) {
-      images.forEach(async item => {
-        const isValid = await checkImage(item.src);
-        if (!isValid) {
-          item.remove();
-        }
-      })
-    }
+    const images = mdContentWrap.value?.querySelectorAll<HTMLImageElement>('img.markdown-image');
+    images?.forEach(async (item) => {
+      const isValid = await checkImage(item.src);
+      if (!isValid) {
+        item.remove();
+      }
+    })
   })
 }, { immediate: true, deep: true })
 
 // 安全地处理 Markdown 内容（使用 marked）
-const processMarkdown = (markdownText) => {
+const processMarkdown = (markdownText: string) => {
   if (!markdownText || typeof markdownText !== 'string') return '';
 
   // 先还原原始文本中的 HTML 实体，让它们作为普通字符参与渲染
@@ -250,7 +235,9 @@ const processMarkdown = (markdownText) => {
 };
 const handleClose = () => {
   emit("closeDoc", false);
-  doc.scrollTop = 0;
+  if (doc) {
+    doc.scrollTop = 0;
+  }
   viewMode.value = 'merged';
   originalContent.value = '';
 };
@@ -438,12 +425,13 @@ const isDeleting = (chunkIndex: number, questionId: string) => {
 
 const downloadFile = () => {
   downKnowledgeDetails(props.details.id)
-    .then((result) => {
-      if (result) {
+    .then((response) => {
+      const blob = response instanceof Blob ? response : response?.data;
+      if (blob) {
         if (url.value) {
           URL.revokeObjectURL(url.value);
         }
-        url.value = URL.createObjectURL(result);
+        url.value = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.style.display = "none";
         link.setAttribute("href", url.value);
@@ -455,7 +443,7 @@ const downloadFile = () => {
         })
       }
     })
-    .catch((err) => {
+    .catch(() => {
       MessagePlugin.error(t('file.downloadFailed'));
     });
 };
@@ -527,22 +515,14 @@ const handleDetailsScroll = () => {
           <div class="meta-row">
             <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
             <div class="view-mode-buttons">
-              <t-button 
-                size="small" 
-                :variant="viewMode === 'merged' ? 'base' : 'outline'" 
-                :theme="viewMode === 'merged' ? 'primary' : 'default'"
-                @click="viewMode = 'merged'"
-                class="view-mode-btn"
-              >
+              <t-button size="small" :variant="viewMode === 'merged' ? 'base' : 'outline'"
+                :theme="viewMode === 'merged' ? 'primary' : 'default'" @click="viewMode = 'merged'"
+                class="view-mode-btn">
                 {{ $t('knowledgeBase.viewMerged') || '全文' }}
               </t-button>
-              <t-button 
-                size="small" 
-                :variant="viewMode === 'chunks' ? 'base' : 'outline'" 
-                :theme="viewMode === 'chunks' ? 'primary' : 'default'"
-                @click="viewMode = 'chunks'"
-                class="view-mode-btn"
-              >
+              <t-button size="small" :variant="viewMode === 'chunks' ? 'base' : 'outline'"
+                :theme="viewMode === 'chunks' ? 'primary' : 'default'" @click="viewMode = 'chunks'"
+                class="view-mode-btn">
                 {{ $t('knowledgeBase.viewChunks') || '分块' }}
               </t-button>
 
@@ -561,20 +541,12 @@ const handleDetailsScroll = () => {
       <div v-else-if="viewMode === 'chunks'">
         <div v-if="details.md.length == 0" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="chunk-list">
-          <div class="chunk-item" 
-            v-for="(item, index) in details.md" 
-            :key="index"
-            :class="getChunkClass(index)"
-          >
+          <div class="chunk-item" v-for="(item, index) in details.md" :key="index"
+            :class="getChunkClass(Number(index))">
             <div class="chunk-header">
-              <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ index + 1 }}</span>
+              <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ Number(index) + 1 }}</span>
               <div class="chunk-header-right">
-                <t-tag 
-                  v-if="getGeneratedQuestions(item).length > 0" 
-                  size="small" 
-                  theme="success" 
-                  variant="light"
-                >
+                <t-tag v-if="getGeneratedQuestions(item).length > 0" size="small" theme="success" variant="light">
                   {{ $t('knowledgeBase.questions') || '问题' }} {{ getGeneratedQuestions(item).length }}
                 </t-tag>
                 <span class="chunk-meta">{{ getChunkMeta(item) }}</span>
@@ -584,26 +556,18 @@ const handleDetailsScroll = () => {
             
             <!-- 生成的问题展示 -->
             <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
-              <div class="questions-toggle" @click="toggleQuestions(index)">
-                <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                <span>{{ $t('knowledgeBase.generatedQuestions') || '生成的问题' }} ({{ getGeneratedQuestions(item).length }})</span>
+              <div class="questions-toggle" @click="toggleQuestions(Number(index))">
+                <t-icon :name="isExpanded(Number(index)) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <span>{{ $t('knowledgeBase.generatedQuestions') || '生成的问题' }} ({{ getGeneratedQuestions(item).length
+                  }})</span>
               </div>
-              <div v-show="isExpanded(index)" class="questions-list">
-                <div 
-                  v-for="question in getGeneratedQuestions(item)" 
-                  :key="question.id" 
-                  class="question-item"
-                >
+              <div v-show="isExpanded(Number(index))" class="questions-list">
+                <div v-for="question in getGeneratedQuestions(item)" :key="question.id" class="question-item">
                   <t-icon name="help-circle" size="14px" class="question-icon" />
                   <span class="question-text">{{ question.question }}</span>
-                  <t-button 
-                    theme="default" 
-                    variant="text" 
-                    size="small"
-                    class="delete-question-btn"
-                    :loading="isDeleting(index, question.id)"
-                    @click.stop="handleDeleteQuestion(item, index, question)"
-                  >
+                  <t-button theme="default" variant="text" size="small" class="delete-question-btn"
+                    :loading="isDeleting(Number(index), question.id)"
+                    @click.stop="handleDeleteQuestion(item, Number(index), question)">
                     <template #icon>
                       <t-icon name="delete" size="14px" />
                     </template>

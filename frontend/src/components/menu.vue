@@ -1058,7 +1058,7 @@ const handleDocFolderChange = async (event: Event) => {
         const uploadId = `${file.name}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
         let progress = 0
         let status: 'uploading' | 'success' | 'error' = 'uploading'
-        let errorReason: string | undefined
+        let errorReason = ''
 
         window.dispatchEvent(new CustomEvent('knowledgeFileUploadStart', {
             detail: {
@@ -1096,7 +1096,7 @@ const handleDocFolderChange = async (event: Event) => {
             if (error?.code === 'duplicate_file' || error?.error?.code === 'duplicate_file') {
                 errorReason = t('knowledgeBase.fileExists')
             }
-            failedFiles.push({ name: fileName, reason: errorReason })
+            failedFiles.push({ name: fileName, reason: errorReason || t('knowledgeBase.uploadFailed') })
             status = 'error'
         } finally {
             window.dispatchEvent(new CustomEvent('knowledgeFileUploadComplete', {

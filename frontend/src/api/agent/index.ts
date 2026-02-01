@@ -109,32 +109,32 @@ export const BUILTIN_AGENT_AGENT_ID = BUILTIN_SMART_REASONING_ID;
 
 // 获取智能体列表（包括内置智能体）
 export function listAgents() {
-  return get<{ data: CustomAgent[] }>('/api/v1/agents');
+  return get('/api/v1/agents') as Promise<{ data: CustomAgent[] }>;
 }
 
 // 获取智能体详情
 export function getAgentById(id: string) {
-  return get<{ data: CustomAgent }>(`/api/v1/agents/${id}`);
+  return get(`/api/v1/agents/${id}`) as Promise<{ data: CustomAgent }>;
 }
 
 // 创建智能体
 export function createAgent(data: CreateAgentRequest) {
-  return post<{ data: CustomAgent }>('/api/v1/agents', data);
+  return post('/api/v1/agents', data) as Promise<{ data: CustomAgent }>;
 }
 
 // 更新智能体
 export function updateAgent(id: string, data: UpdateAgentRequest) {
-  return put<{ data: CustomAgent }>(`/api/v1/agents/${id}`, data);
+  return put(`/api/v1/agents/${id}`, data) as Promise<{ data: CustomAgent }>;
 }
 
 // 删除智能体
 export function deleteAgent(id: string) {
-  return del<{ success: boolean }>(`/api/v1/agents/${id}`);
+  return del(`/api/v1/agents/${id}`) as unknown as Promise<{ success: boolean }>;
 }
 
 // 复制智能体
 export function copyAgent(id: string) {
-  return post<{ data: CustomAgent }>(`/api/v1/agents/${id}/copy`);
+  return post(`/api/v1/agents/${id}/copy`) as Promise<{ data: CustomAgent }>;
 }
 
 // 判断是否为内置智能体（通过 agent.is_builtin 字段或 ID 前缀判断）
@@ -162,5 +162,5 @@ export interface PlaceholdersResponse {
 
 // 获取占位符定义
 export function getPlaceholders() {
-  return get<{ data: PlaceholdersResponse }>('/api/v1/agents/placeholders');
+  return get('/api/v1/agents/placeholders') as Promise<{ data: PlaceholdersResponse }>;
 }

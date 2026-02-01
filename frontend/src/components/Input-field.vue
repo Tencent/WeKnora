@@ -39,7 +39,7 @@ const selectedAgentId = computed({
 const selectedAgent = computed(() => {
   return agents.value.find(a => a.id === selectedAgentId.value) || {
     id: BUILTIN_QUICK_ANSWER_ID,
-    name: t('input.normalMode'),
+    name: t('agent.builtinInfo.quickAnswer.name'),
     is_builtin: true,
     config: { agent_mode: 'quick-answer' as const }
   } as CustomAgent;

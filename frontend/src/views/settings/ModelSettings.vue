@@ -346,7 +346,7 @@ const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm') => {
 const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: any) => {
   // 内置模型不能编辑
   if (model.isBuiltin) {
-    MessagePlugin.warning('内置模型不能编辑')
+    MessagePlugin.warning(t('model.builtinCannotEdit'))
     return
   }
   currentModelType.value = type

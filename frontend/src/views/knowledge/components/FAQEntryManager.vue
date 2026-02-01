@@ -1239,7 +1239,7 @@ const hasMore = ref(true)
 const pageSize = 20
 let currentPage = 1
 const entrySearchKeyword = ref('')
-let entrySearchDebounce: ReturnType<typeof setTimeout> | null = null
+let entrySearchDebounce: number | null = null
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>
 
 const tagList = ref<any[]>([])
@@ -1254,7 +1254,7 @@ const tagPage = ref(1)
 const tagHasMore = ref(false)
 const tagLoadingMore = ref(false)
 const tagTotal = ref(0)
-let tagSearchDebounce: ReturnType<typeof setTimeout> | null = null
+let tagSearchDebounce: number | null = null
 const editingTagInputRefs = new Map<string, TagInputInstance | null>()
 const setEditingTagInputRef = (el: TagInputInstance | null, tagId: string) => {
   if (el) {

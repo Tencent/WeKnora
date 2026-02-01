@@ -161,7 +161,7 @@
             </t-button>
           </div>
           <p class="prompt-tab-hint">
-            {{ $t('agentSettings.systemPrompt.tabHint') }}（留空则使用系统默认，使用 {{web_search_status}} 占位符动态控制网络搜索行为）
+            {{ $t('agentSettings.systemPrompt.tabHint') }}（留空则使用系统默认，使用 <code v-pre>{{web_search_status}}</code> 占位符动态控制网络搜索行为）
           </p>
           <div class="system-prompt-tabs">
             <div class="prompt-textarea-wrapper textarea-with-template">
@@ -982,6 +982,10 @@ const getTextareaElement = (): HTMLTextAreaElement | null => {
   // 如果还是找不到，尝试通过 DOM 查找
   const wrapper = document.querySelector('.setting-control.full-width')
   return wrapper?.querySelector('textarea') || null
+}
+
+const getActivePromptRef = () => {
+  return activeTab.value === 'normal' ? localSystemPromptNormal : localSystemPrompt
 }
 
 // 初始化加载

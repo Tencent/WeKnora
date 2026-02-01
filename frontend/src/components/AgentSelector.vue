@@ -194,14 +194,14 @@ const builtinAgents = computed(() => {
     if (agent.id === BUILTIN_QUICK_ANSWER_ID) {
       return {
         ...agent,
-        name: t('input.normalMode'),
-        description: t('input.normalModeDesc'),
+        name: t('agent.builtinInfo.quickAnswer.name'),
+        description: t('agent.builtinInfo.quickAnswer.description'),
       };
     } else if (agent.id === BUILTIN_SMART_REASONING_ID) {
       return {
         ...agent,
-        name: t('input.agentMode'),
-        description: t('input.agentModeDesc'),
+        name: t('agent.builtinInfo.smartReasoning.name'),
+        description: t('agent.builtinInfo.smartReasoning.description'),
       };
     }
     // 其他内置智能体使用 API 返回的名称和描述
