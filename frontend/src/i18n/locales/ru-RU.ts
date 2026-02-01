@@ -205,7 +205,64 @@ export default {
     updatePlan: 'Обновить план',
     webSearchFound: 'Найдено <strong>{count}</strong> результатов веб‑поиска',
     argumentsLabel: 'Параметры',
-    toolFallback: 'Инструмент'
+    toolFallback: 'Инструмент',
+    punctuation: {
+      comma: ', ',
+      list: ', '
+    },
+    kbTooltip: {
+      loading: 'Загрузка...'
+    },
+    toolStatus: {
+      calling: 'Вызов {tool}...',
+      callSuccess: 'Вызов {tool}',
+      callFailed: 'Вызов {tool} не удался',
+      searchKnowledge: {
+        success: 'Поиск по базе знаний',
+        failure: 'Поиск по базе знаний не удался'
+      },
+      webSearch: {
+        success: 'Веб-поиск',
+        failure: 'Веб-поиск не удался'
+      },
+      getDocumentInfo: {
+        success: 'Получение информации о документе',
+        failure: 'Не удалось получить информацию о документе'
+      },
+      thinking: {
+        success: 'Размышление завершено',
+        failure: 'Размышление не удалось'
+      },
+      todoWrite: {
+        success: 'Обновление списка задач',
+        failure: 'Не удалось обновить список задач'
+      }
+    },
+    searchResults: {
+      none: 'Совпадений не найдено',
+      summary: 'Найдено {count} результатов',
+      kbSummary: 'Найдено {count} результатов из {kbCount} файлов'
+    },
+    webSearchResults: {
+      summary: 'Найдено {count} результатов веб‑поиска'
+    },
+    grepResults: {
+      none: 'Совпадений не найдено',
+      summary: 'Найдено {count} совпадений',
+      shown: ' (показано {count})'
+    },
+    manual: {
+      emptyQuestion: '(Вопрос не указан)',
+      emptyAnswer: '(Ответ не указан)',
+      title: 'Фрагмент диалога'
+    },
+    answerMessages: {
+      emptyAnswerCopy: 'Ответ пуст, копирование невозможно',
+      copiedToClipboard: 'Скопировано в буфер обмена',
+      copyFailed: 'Не удалось скопировать, скопируйте вручную',
+      emptyAnswerSave: 'Ответ пуст, нельзя сохранить в базу знаний',
+      openedEditor: 'Редактор открыт. Выберите базу знаний перед сохранением'
+    }
   },
   settings: {
     title: 'Настройки',
@@ -276,7 +333,7 @@ export default {
     compressionSummary: 'LLM-конспект',
     blacklistLabel: 'Чёрный список URL',
     blacklistDescription: 'Исключите домены или URL из результатов. По одному в строке. Поддерживаются подстановки (*) и регулярные выражения (/pattern/).',
-    blacklistPlaceholder: 'Например:\n*://*.example.com/*\n/example\\.(net|org)/',
+    blacklistPlaceholder: 'Например:\n*://*.example.com/*\n/example\\.(net{\'|\'}org)/',
     errors: {
       unknown: 'Неизвестная ошибка'
     },
