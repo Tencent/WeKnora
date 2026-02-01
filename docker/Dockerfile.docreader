@@ -53,31 +53,16 @@ RUN echo "检查本地protoc安装包..." && \
         rm -f ${PROTOC_PACKAGE}; \
     fi
 
-# 预下载 PP-OCRv4 模型
-RUN mkdir -p /root/.paddleocr/whl/det/ch && \
-    mkdir -p /root/.paddleocr/whl/rec/ch && \
-    mkdir -p /root/.paddleocr/whl/cls/ch && \
-    # 下载检测模型
-    wget https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_det_infer.tar \
-        -O /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar && \
-    tar -xf /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar -C /root/.paddleocr/whl/det/ch/ && \
-    # 下载识别模型
-    wget https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_rec_infer.tar \
-        -O /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar && \
-    tar -xf /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar -C /root/.paddleocr/whl/rec/ch/ && \
-    # 下载文本方向分类模型（用于判断文本是否需要旋转）
-    wget https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar \
-        -O /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar && \
-    tar -xf /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar -C /root/.paddleocr/whl/cls/ && \
-    # 清理压缩包
-    rm -f /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar && \
-    rm -f /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar && \
-    rm -f /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar
+# PaddleOCR 模型下载源（默认 HuggingFace；可在构建时覆盖）
+ARG PADDLE_PDX_MODEL_SOURCE=HUGGINGFACE
+ENV PADDLE_PDX_MODEL_SOURCE=${PADDLE_PDX_MODEL_SOURCE}
 
 # 复制依赖文件
 COPY docreader/pyproject.toml docreader/uv.lock ./
 RUN pip install uv --break-system-packages && \
     python -m uv sync --locked --no-dev
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 # 复制源代码和生成脚本
 COPY docreader docreader
@@ -86,8 +71,13 @@ COPY docreader docreader
 RUN chmod +x docreader/scripts/generate_proto.sh && \
     bash docreader/scripts/generate_proto.sh
 
-# 确保模型目录存在
-RUN ls -la /root/.paddleocr/whl/
+# 预下载 PaddleOCR 模型（使用官方下载逻辑，避免直连 BOS）
+RUN PYTHONPATH=/app:/app/docreader \
+    python docreader/scripts/download_deps.py
+
+# 确保模型目录存在（避免构建失败）
+RUN mkdir -p /root/.paddleocr/whl && \
+    ls -la /root/.paddleocr
 
 # =========================
 # 运行阶段
