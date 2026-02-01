@@ -235,6 +235,9 @@
               </button>
             </div>
 
+            <!-- 步骤1/2/Loading 共用高度过渡容器 -->
+            <div class="invite-preview-body-wrap" :style="inviteBodyWrapStyle">
+              <div ref="inviteBodyInnerRef" class="invite-body-inner">
             <!-- 步骤1：输入邀请码 或 搜索空间 -->
             <div v-if="!invitePreviewLoading && !invitePreviewData" class="invite-preview-body invite-preview-input">
               <div class="join-modal-tabs">
@@ -409,8 +412,7 @@
             </div>
 
             <!-- 步骤2：空间详情预览（与主列表卡片风格一致） -->
-            <template v-else-if="invitePreviewData">
-              <div class="invite-preview-body invite-preview-body-preview">
+            <div v-else-if="invitePreviewData" class="invite-preview-body invite-preview-body-preview">
                 <!-- 空间信息卡片（与 org-card / searchable-card 一致） -->
                 <div class="preview-detail-card">
                   <div class="preview-detail-decoration">
@@ -499,31 +501,32 @@
                     {{ $t('organization.invite.alreadyMember') }}
                   </div>
                 </div>
-              </div>
 
-              <div class="invite-preview-footer">
-                <t-button theme="default" variant="outline" size="medium" @click="backFromPreview">
-                  {{ !inviteCode ? $t('organization.join.backToSearch') : $t('common.cancel') }}
-                </t-button>
-                <t-button
-                  v-if="!invitePreviewData.is_already_member"
-                  theme="primary"
-                  size="medium"
-                  :loading="inviteJoining"
-                  @click="confirmJoinOrganization"
-                >
-                  {{ invitePreviewData.require_approval ? $t('organization.invite.submitRequest') : $t('organization.invite.primaryJoin') }}
-                </t-button>
-                <t-button
-                  v-else
-                  theme="primary"
-                  size="medium"
-                  @click="viewOrganizationFromPreview"
-                >
-                  {{ $t('organization.invite.viewOrganization') }}
-                </t-button>
+                <div class="invite-preview-footer">
+                  <t-button theme="default" variant="outline" size="medium" @click="backFromPreview">
+                    {{ !inviteCode ? $t('organization.join.backToSearch') : $t('common.cancel') }}
+                  </t-button>
+                  <t-button
+                    v-if="!invitePreviewData.is_already_member"
+                    theme="primary"
+                    size="medium"
+                    :loading="inviteJoining"
+                    @click="confirmJoinOrganization"
+                  >
+                    {{ invitePreviewData.require_approval ? $t('organization.invite.submitRequest') : $t('organization.invite.primaryJoin') }}
+                  </t-button>
+                  <t-button
+                    v-else
+                    theme="primary"
+                    size="medium"
+                    @click="viewOrganizationFromPreview"
+                  >
+                    {{ $t('organization.invite.viewOrganization') }}
+                  </t-button>
+                </div>
+            </div>
               </div>
-            </template>
+            </div>
           </div>
         </div>
       </Transition>
@@ -590,6 +593,82 @@ const CACHE_DURATION = 5 * 60 * 1000 // 缓存5分钟
 
 // Tab 内容容器 ref，用于高度过渡
 const tabContentWrapperRef = ref<HTMLElement | null>(null)
+
+// 加入弹框整体 body 高度过渡（输入邀请码 / 搜索空间 / 查看详情）
+const inviteBodyInnerRef = ref<HTMLElement | null>(null)
+const inviteBodyHeightPx = ref<number>(0)
+let inviteBodyResizeObserver: ResizeObserver | null = null
+
+const inviteBodyWrapStyle = computed(() => {
+  const px = inviteBodyHeightPx.value
+  if (px <= 0) return {}
+  return { maxHeight: `${px}px`, minHeight: `${px}px` }
+})
+
+// 根据当前 body 内容更新高度（用于过渡动画）
+function updateInviteBodyHeight() {
+  const el = inviteBodyInnerRef.value
+  if (!el || !showInvitePreview.value) return
+  const h = el.scrollHeight
+  // 避免把高度写成 0 导致闪缩，仅在得到有效高度时更新
+  if (h > 0) inviteBodyHeightPx.value = h
+}
+
+// 观察加入弹框 body 内容高度，用于步骤切换时的高度过渡动画
+function setupInviteBodyResizeObserver() {
+  if (inviteBodyResizeObserver) return
+  const el = inviteBodyInnerRef.value
+  if (!el || !showInvitePreview.value) return
+  inviteBodyResizeObserver = new ResizeObserver((entries) => {
+    const entry = entries[0]
+    if (!entry) return
+    const h = entry.contentRect.height
+    // 避免切换瞬间读到 0 导致闪缩
+    if (h > 0 || inviteBodyHeightPx.value <= 0) inviteBodyHeightPx.value = h
+  })
+  inviteBodyResizeObserver.observe(el)
+  inviteBodyHeightPx.value = el.scrollHeight
+}
+
+function teardownInviteBodyResizeObserver() {
+  if (inviteBodyResizeObserver) {
+    inviteBodyResizeObserver.disconnect()
+    inviteBodyResizeObserver = null
+  }
+  inviteBodyHeightPx.value = 0
+}
+
+watch(
+  [showInvitePreview, inviteBodyInnerRef],
+  ([show, inner]) => {
+    if (!show) {
+      teardownInviteBodyResizeObserver()
+      return
+    }
+    if (inner) {
+      nextTick(() => {
+        setupInviteBodyResizeObserver()
+      })
+    }
+  },
+  { flush: 'post' }
+)
+
+// 步骤切换时在布局完成后读取新内容高度，保证高度过渡动画可见
+watch(
+  [() => invitePreviewLoading.value, () => invitePreviewData.value],
+  () => {
+    if (!showInvitePreview.value || !inviteBodyInnerRef.value) return
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          updateInviteBodyHeight()
+        })
+      })
+    })
+  },
+  { flush: 'post' }
+)
 
 // 更新容器高度的辅助函数
 const updateTabContentHeight = () => {
@@ -1059,6 +1138,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
+  teardownInviteBodyResizeObserver()
 })
 </script>
 
@@ -1845,6 +1925,20 @@ onUnmounted(() => {
   &:active {
     background: #e2e8f0;
   }
+}
+
+// 加入弹框 body 外层：高度过渡动画（输入邀请码 ↔ 搜索空间 ↔ 查看详情）
+.invite-preview-body-wrap {
+  flex: 0 0 auto;
+  overflow: hidden;
+  height: auto;
+  transition:
+    min-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.invite-body-inner {
+  display: block;
 }
 
 .invite-preview-body {
