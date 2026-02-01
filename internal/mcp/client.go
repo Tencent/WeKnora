@@ -3,8 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -124,10 +126,32 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		return nil, ErrUnsupportedTransport
 	}
 
-	return &mcpGoClient{
+	instance := &mcpGoClient{
 		service: config.Service,
 		client:  mcpClient,
-	}, nil
+	}
+	mcpClient.OnConnectionLost(instance.onConnectionLost)
+	return instance, nil
+}
+
+// onConnectionLost callback when the connection is lost
+func (c *mcpGoClient) onConnectionLost(err error) {
+	_ = c.Disconnect()
+	logger.Warnf(context.Background(), "MCP server connection has been lost, URL:%s, error:%v", *c.service.URL, err)
+}
+
+// checkErrorAndDisconnectIfNeeded Check for errors and call Disconnect when reconnection is required
+func (c *mcpGoClient) checkErrorAndDisconnectIfNeeded(err error) {
+	var transportErr *transport.Error
+	// In SSE transport type, connection loss does not always actively trigger onConnectionLost (a go-mcp issue).
+	// Once the connection is lost, the session becomes invalid.
+	// Without reconnecting, it will continuously cause "Invalid session ID" errors.
+	if c.service.TransportType == types.MCPTransportSSE &&
+		errors.As(err, &transportErr) &&
+		transportErr.Err != nil &&
+		strings.Contains(transportErr.Err.Error(), "Invalid session ID") {
+		_ = c.Disconnect()
+	}
 }
 
 // Connect establishes connection to the MCP service
@@ -140,7 +164,6 @@ func (c *mcpGoClient) Connect(ctx context.Context) error {
 	if err := c.client.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start client: %w", err)
 	}
-
 	c.connected = true
 	if c.service.TransportType == types.MCPTransportStdio {
 		logger.GetLogger(ctx).Infof("MCP stdio client connected: %s %v",
@@ -161,7 +184,6 @@ func (c *mcpGoClient) Disconnect() error {
 	if c.client != nil {
 		c.client.Close()
 	}
-
 	c.connected = false
 	c.initialized = false
 	return nil
@@ -187,6 +209,7 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 
 	result, err := c.client.Initialize(ctx, req)
 	if err != nil {
+		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to initialize: %w", err)
 	}
 
@@ -210,6 +233,7 @@ func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 	req := mcp.ListToolsRequest{}
 	result, err := c.client.ListTools(ctx, req)
 	if err != nil {
+		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
 
@@ -236,6 +260,7 @@ func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, 
 	req := mcp.ListResourcesRequest{}
 	result, err := c.client.ListResources(ctx, req)
 	if err != nil {
+		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list resources: %w", err)
 	}
 
@@ -268,6 +293,7 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 
 	result, err := c.client.CallTool(ctx, req)
 	if err != nil {
+		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
@@ -308,6 +334,7 @@ func (c *mcpGoClient) ReadResource(ctx context.Context, uri string) (*ReadResour
 
 	result, err := c.client.ReadResource(ctx, req)
 	if err != nil {
+		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to read resource: %w", err)
 	}
 
