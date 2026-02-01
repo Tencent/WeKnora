@@ -1,4 +1,4 @@
-package web_search
+package websearch
 
 import (
 	"fmt"

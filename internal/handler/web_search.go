@@ -3,18 +3,18 @@ package handler
 import (
 	"net/http"
 
-	"github.com/Tencent/WeKnora/internal/application/service/web_search"
+	websearch "github.com/Tencent/WeKnora/internal/application/service/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
 )
 
 // WebSearchHandler handles web search related requests
 type WebSearchHandler struct {
-	registry *web_search.Registry
+	registry *websearch.Registry
 }
 
 // NewWebSearchHandler creates a new web search handler
-func NewWebSearchHandler(registry *web_search.Registry) *WebSearchHandler {
+func NewWebSearchHandler(registry *websearch.Registry) *WebSearchHandler {
 	return &WebSearchHandler{
 		registry: registry,
 	}

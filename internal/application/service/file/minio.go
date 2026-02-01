@@ -66,7 +66,9 @@ func (s *minioFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() {
+		_ = src.Close()
+	}()
 
 	// Upload file to MinIO
 	_, err = s.client.PutObject(ctx, s.bucketName, objectName, src, file.Size, minio.PutObjectOptions{
@@ -130,7 +132,7 @@ func (s *minioFileService) DeleteFile(ctx context.Context, filePath string) erro
 
 // SaveBytes saves bytes data to MinIO and returns the file path
 // temp parameter is ignored for MinIO (no auto-expiration support in this implementation)
-func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
+func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
 	ext := filepath.Ext(fileName)
 	objectName := fmt.Sprintf("%d/exports/%s%s", tenantID, uuid.New().String(), ext)
 

@@ -59,7 +59,9 @@ func (n *Neo4jRepository) AddGraph(ctx context.Context, namespace types.NameSpac
 // addGraph adds a graph to the Neo4j repository
 func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpace, graph *types.GraphData) error {
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() {
+		_ = session.Close(ctx)
+	}()
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		// Node import query
@@ -121,7 +123,9 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 		return nil
 	}
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
-	defer session.Close(ctx)
+	defer func() {
+		_ = session.Close(ctx)
+	}()
 
 	result, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		for _, namespace := range namespaces {
@@ -171,7 +175,9 @@ func (n *Neo4jRepository) SearchNode(
 		return nil, nil
 	}
 	session := n.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
-	defer session.Close(ctx)
+	defer func() {
+		_ = session.Close(ctx)
+	}()
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		labelExpr := n.Label(namespace)

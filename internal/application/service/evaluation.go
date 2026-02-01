@@ -341,10 +341,12 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	logger.Infof(ctx, "Dataset retrieved successfully with %d QA pairs", len(dataset))
 
 	// Update total QA pairs count in task details
-	e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
+	if err := e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
 		params.Task.Total = len(dataset)
 		logger.Infof(ctx, "Updated task total to %d QA pairs", params.Task.Total)
-	})
+	}); err != nil {
+		logger.Warnf(ctx, "Failed to update task total: %v", err)
+	}
 
 	// Extract and organize passages from dataset
 	passages := getPassageList(dataset)
@@ -427,11 +429,13 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 			finished += 1
 			metricResult := metricHook.MetricResult()
 			mu.Unlock()
-			e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
+			if err := e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
 				params.Metric = metricResult
 				params.Task.Finished = finished
 				logger.Infof(ctx, "Updated task progress: %d/%d completed", finished, params.Task.Total)
-			})
+			}); err != nil {
+				logger.Warnf(ctx, "Failed to update task progress: %v", err)
+			}
 			return nil
 		})
 	}
@@ -444,10 +448,12 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	}
 
 	// Final update of evaluation metrics
-	e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
+	if err := e.evaluationMemoryStorage.update(detail.Task.ID, func(params *types.EvaluationDetail) {
 		params.Metric = metricHook.MetricResult()
 		params.Task.Finished = finished
-	})
+	}); err != nil {
+		logger.Warnf(ctx, "Failed to update final metrics: %v", err)
+	}
 
 	logger.Infof(ctx, "Dataset evaluation completed successfully, task ID: %s", detail.Task.ID)
 	return nil

@@ -37,7 +37,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
-	"github.com/Tencent/WeKnora/internal/application/service/web_search"
+	websearch "github.com/Tencent/WeKnora/internal/application/service/web_search"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -140,7 +140,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Web search service (needed by AgentService)
 	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
-	must(container.Provide(web_search.NewRegistry))
+	must(container.Provide(websearch.NewRegistry))
 	must(container.Invoke(registerWebSearchProviders))
 	must(container.Provide(service.NewWebSearchService))
 
@@ -652,14 +652,14 @@ func NewDuckDB() (*sql.DB, error) {
 }
 
 // registerWebSearchProviders registers all web search providers to the registry
-func registerWebSearchProviders(registry *web_search.Registry) {
+func registerWebSearchProviders(registry *websearch.Registry) {
 	// Register DuckDuckGo provider
-	registry.Register(web_search.DuckDuckGoProviderInfo(), func() (interfaces.WebSearchProvider, error) {
-		return web_search.NewDuckDuckGoProvider()
+	registry.Register(websearch.DuckDuckGoProviderInfo(), func() (interfaces.WebSearchProvider, error) {
+		return websearch.NewDuckDuckGoProvider()
 	})
 
 	// Register Google provider
-	registry.Register(web_search.GoogleProviderInfo(), func() (interfaces.WebSearchProvider, error) {
-		return web_search.NewGoogleProvider()
+	registry.Register(websearch.GoogleProviderInfo(), func() (interfaces.WebSearchProvider, error) {
+		return websearch.NewGoogleProvider()
 	})
 }

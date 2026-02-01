@@ -33,58 +33,58 @@ var (
 	// Common placeholders
 	PlaceholderQuery = PromptPlaceholder{
 		Name:        "query",
-		Label:       "用户问题",
-		Description: "用户当前的问题或查询内容",
+		Label:       "User Query",
+		Description: "The user's current question or query",
 	}
 
 	PlaceholderContexts = PromptPlaceholder{
 		Name:        "contexts",
-		Label:       "检索内容",
-		Description: "从知识库检索到的相关内容列表",
+		Label:       "Retrieved Contexts",
+		Description: "List of relevant content retrieved from the knowledge base",
 	}
 
 	PlaceholderCurrentTime = PromptPlaceholder{
 		Name:        "current_time",
-		Label:       "当前时间",
-		Description: "当前系统时间（格式：2006-01-02 15:04:05）",
+		Label:       "Current Time",
+		Description: "Current system time (format: 2006-01-02 15:04:05)",
 	}
 
 	PlaceholderCurrentWeek = PromptPlaceholder{
 		Name:        "current_week",
-		Label:       "当前星期",
-		Description: "当前星期几（如：星期一、Monday）",
+		Label:       "Current Weekday",
+		Description: "Current weekday (e.g., Monday)",
 	}
 
 	// Rewrite prompt placeholders
 	PlaceholderConversation = PromptPlaceholder{
 		Name:        "conversation",
-		Label:       "历史对话",
-		Description: "格式化的历史对话内容，用于多轮对话改写",
+		Label:       "Conversation History",
+		Description: "Formatted conversation history for multi-turn rewrite",
 	}
 
 	PlaceholderYesterday = PromptPlaceholder{
 		Name:        "yesterday",
-		Label:       "昨天日期",
-		Description: "昨天的日期（格式：2006-01-02）",
+		Label:       "Yesterday",
+		Description: "Yesterday's date (format: 2006-01-02)",
 	}
 
 	PlaceholderAnswer = PromptPlaceholder{
 		Name:        "answer",
-		Label:       "助手回答",
-		Description: "助手的回答内容（用于对话历史格式化）",
+		Label:       "Assistant Answer",
+		Description: "Assistant response (for conversation formatting)",
 	}
 
 	// Agent mode specific placeholders
 	PlaceholderKnowledgeBases = PromptPlaceholder{
 		Name:        "knowledge_bases",
-		Label:       "知识库列表",
-		Description: "自动格式化的知识库列表，包含名称、描述、文档数量等信息",
+		Label:       "Knowledge Bases",
+		Description: "Formatted knowledge base list including name, description, and document counts",
 	}
 
 	PlaceholderWebSearchStatus = PromptPlaceholder{
 		Name:        "web_search_status",
-		Label:       "网络搜索状态",
-		Description: "网络搜索工具是否启用的状态（Enabled 或 Disabled）",
+		Label:       "Web Search Status",
+		Description: "Whether web search is enabled (Enabled or Disabled)",
 	}
 )
 

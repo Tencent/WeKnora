@@ -97,7 +97,7 @@ func (p *PluginStreamFilter) filterEventsWithPrefix(
 			})
 
 			// Emit the accumulated content as valid answer
-			originalEventBus.Emit(ctx, types.Event{
+			if err := originalEventBus.Emit(ctx, types.Event{
 				ID:        evt.ID,
 				Type:      types.EventType(event.EventAgentFinalAnswer),
 				SessionID: chatManage.SessionID,
@@ -105,7 +105,12 @@ func (p *PluginStreamFilter) filterEventsWithPrefix(
 					Content: responseBuilder.String(),
 					Done:    data.Done,
 				},
-			})
+			}); err != nil {
+				pipelineWarn(ctx, "StreamFilter", "emit_valid_chunk_failed", map[string]interface{}{
+					"session_id": chatManage.SessionID,
+					"error":      err.Error(),
+				})
+			}
 			matchFound = true
 		}
 
@@ -121,7 +126,7 @@ func (p *PluginStreamFilter) filterEventsWithPrefix(
 			"session_id": chatManage.SessionID,
 		})
 		fallbackID := fmt.Sprintf("%s-fallback", uuid.New().String()[:8])
-		originalEventBus.Emit(ctx, types.Event{
+		if err := originalEventBus.Emit(ctx, types.Event{
 			ID:        fallbackID,
 			Type:      types.EventType(event.EventAgentFinalAnswer),
 			SessionID: chatManage.SessionID,
@@ -129,7 +134,12 @@ func (p *PluginStreamFilter) filterEventsWithPrefix(
 				Content: chatManage.FallbackResponse,
 				Done:    true,
 			},
-		})
+		}); err != nil {
+			pipelineWarn(ctx, "StreamFilter", "emit_fallback_failed", map[string]interface{}{
+				"session_id": chatManage.SessionID,
+				"error":      err.Error(),
+			})
+		}
 	}
 
 	// Restore original EventBus

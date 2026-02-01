@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // slidingWindowStrategy implements CompressionStrategy using sliding window
@@ -192,13 +193,16 @@ func (s *smartCompressionStrategy) summarizeMessages(ctx context.Context, messag
 		}
 	}
 
-	// Create summarization prompt
+	languageDirective := buildLanguageDirectiveFromMessages(messages)
+	systemContent := "You are a helpful assistant that summarizes conversations. " +
+		"Provide a concise summary that captures the key points, decisions, and context. " +
+		"Keep the summary brief but informative."
+	systemContent = utils.AppendLanguageDirective(systemContent, languageDirective)
+
 	summaryPrompt := []chat.Message{
 		{
-			Role: "system",
-			Content: "You are a helpful assistant that summarizes conversations. " +
-				"Provide a concise summary that captures the key points, decisions, and context. " +
-				"Keep the summary brief but informative.",
+			Role:    "system",
+			Content: systemContent,
 		},
 		{
 			Role:    "user",
@@ -224,6 +228,15 @@ func (s *smartCompressionStrategy) summarizeMessages(ctx context.Context, messag
 		len(summary), len(messages))
 
 	return summary, nil
+}
+
+func buildLanguageDirectiveFromMessages(messages []chat.Message) string {
+	for _, msg := range messages {
+		if msg.Role == "user" && msg.Content != "" {
+			return utils.BuildLanguageDirectiveFromText(msg.Content)
+		}
+	}
+	return ""
 }
 
 // EstimateTokens estimates token count (rough approximation: 4 characters ≈ 1 token)

@@ -56,7 +56,11 @@ func (s *localFileService) SaveFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to open source file: %v", err)
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() {
+		if closeErr := src.Close(); closeErr != nil {
+			logger.Warnf(ctx, "Failed to close source file: %v", closeErr)
+		}
+	}()
 
 	// Create destination file for writing
 	logger.Info(ctx, "Creating destination file")
@@ -65,7 +69,11 @@ func (s *localFileService) SaveFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create destination file: %v", err)
 		return "", fmt.Errorf("failed to create file: %w", err)
 	}
-	defer dst.Close()
+	defer func() {
+		if closeErr := dst.Close(); closeErr != nil {
+			logger.Warnf(ctx, "Failed to close destination file: %v", closeErr)
+		}
+	}()
 
 	// Copy content from source to destination
 	logger.Info(ctx, "Copying file content")
@@ -140,7 +148,7 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 
 // GetFileURL returns a download URL for the file
 // For local storage, returns the file path itself (no URL support)
-func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
+func (s *localFileService) GetFileURL(_ context.Context, filePath string) (string, error) {
 	// Local storage doesn't support URLs, return the path
 	return filePath, nil
 }

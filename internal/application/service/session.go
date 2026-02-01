@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -296,8 +297,13 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 
 	// Prepare messages for title generation
 	var chatMessages []chat.Message
+	systemPrompt := s.cfg.Conversation.GenerateSessionTitlePrompt
+	if message != nil {
+		languageDirective := utils.BuildLanguageDirectiveFromText(message.Content)
+		systemPrompt = utils.AppendLanguageDirective(systemPrompt, languageDirective)
+	}
 	chatMessages = append(chatMessages,
-		chat.Message{Role: "system", Content: s.cfg.Conversation.GenerateSessionTitlePrompt},
+		chat.Message{Role: "system", Content: systemPrompt},
 	)
 	chatMessages = append(chatMessages,
 		chat.Message{Role: "user", Content: message.Content + " /no_think"},
@@ -558,6 +564,10 @@ func (s *sessionService) KnowledgeQA(
 			logger.Infof(ctx, "Multi-turn disabled by custom agent, clearing history")
 		}
 	}
+
+	languageDirective := s.buildLanguageDirective(ctx, session.ID, query)
+	summaryConfig.Prompt = utils.AppendLanguageDirective(summaryConfig.Prompt, languageDirective)
+	fallbackPrompt = utils.AppendLanguageDirective(fallbackPrompt, languageDirective)
 
 	// Extract FAQ strategy settings from custom agent
 	var faqPriorityEnabled bool
@@ -1246,6 +1256,8 @@ func (s *sessionService) AgentQA(
 	// Set system prompt for the current agent in context manager
 	// This ensures the context uses the correct system prompt when switching agents
 	systemPrompt := agentConfig.ResolveSystemPrompt(agentConfig.WebSearchEnabled)
+	languageDirective := s.buildLanguageDirective(ctx, sessionID, query)
+	systemPrompt = utils.AppendLanguageDirective(systemPrompt, languageDirective)
 	if systemPrompt != "" {
 		if err := contextManager.SetSystemPrompt(ctx, sessionID, systemPrompt); err != nil {
 			logger.Warnf(ctx, "Failed to set system prompt in context manager: %v", err)
@@ -1510,4 +1522,12 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 	} else {
 		logger.Infof(ctx, "Fallback answer event emitted successfully")
 	}
+}
+
+func (s *sessionService) buildLanguageDirective(ctx context.Context, sessionID string, fallbackText string) string {
+	message, err := s.messageRepo.GetFirstMessageOfUser(ctx, sessionID)
+	if err == nil && message != nil && message.Content != "" {
+		return utils.BuildLanguageDirectiveFromText(message.Content)
+	}
+	return utils.BuildLanguageDirectiveFromText(fallbackText)
 }

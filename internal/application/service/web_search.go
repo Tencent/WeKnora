@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/application/service/web_search"
+	websearch "github.com/Tencent/WeKnora/internal/application/service/web_search"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -286,7 +286,7 @@ func (s *WebSearchService) Search(
 }
 
 // NewWebSearchService creates a new web search service
-func NewWebSearchService(cfg *config.Config, registry *web_search.Registry) (interfaces.WebSearchService, error) {
+func NewWebSearchService(cfg *config.Config, registry *websearch.Registry) (interfaces.WebSearchService, error) {
 	timeout := 10 // default timeout
 	if cfg.WebSearch != nil && cfg.WebSearch.Timeout > 0 {
 		timeout = cfg.WebSearch.Timeout

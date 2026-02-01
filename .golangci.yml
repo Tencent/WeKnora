@@ -1,14 +1,21 @@
-version: 2
-linters-settings:
-  lll:
-    line-length: 120
-    tab-width: 4
+# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+version: "2"
 linters:
   enable:
-    - lll           # 控制行宽
     - govet
     - revive
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
 formatters:
   enable:
     - gofmt
-    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Tencent/WeKnora

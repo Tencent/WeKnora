@@ -88,7 +88,9 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to open file: %w", err)
 	}
-	defer src.Close()
+	defer func() {
+		_ = src.Close()
+	}()
 	_, err = s.client.Object.Put(ctx, objectName, src, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file to COS: %w", err)

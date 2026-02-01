@@ -11,13 +11,16 @@
 # IDE和编辑器文件
 .idea/
 .vscode/
+.kiro
 *.swp
 *.swo
+*.egg-info/
 
 # 构建和依赖文件
 node_modules/
 /dist/
 /build/
+output/
 *.log
 
 # 临时文件
@@ -41,3 +44,4 @@ data/files/
 /scripts/scale_dev_jobs.sh
 server
 frontend/.vite
+codeql/
