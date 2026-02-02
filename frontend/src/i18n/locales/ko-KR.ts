@@ -752,6 +752,12 @@ export default {
     knowledgeBase: "지식베이스",
     noResult: "결과 없음",
   },
+  mentionDetail: {
+    faqCount: "Q&A {count}개",
+    kbCount: "문서 {count}개",
+    belongsToKb: "지식베이스: ",
+    belongsToOrg: "공간: ",
+  },
   file: {
     upload: "파일 업로드",
     uploadSuccess: "파일 업로드 성공",

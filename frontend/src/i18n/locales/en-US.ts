@@ -868,6 +868,12 @@ export default {
     knowledgeBase: 'Knowledge Base',
     noResult: 'No results',
   },
+  mentionDetail: {
+    faqCount: '{count} Q&A entries',
+    kbCount: '{count} documents',
+    belongsToKb: 'Knowledge base: ',
+    belongsToOrg: 'Space: ',
+  },
   file: {
     upload: 'Upload File',
     uploadSuccess: 'File uploaded successfully',

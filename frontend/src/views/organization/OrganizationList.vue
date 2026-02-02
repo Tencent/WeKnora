@@ -12,7 +12,7 @@
           {{ $t('organization.joinOrg') }}
         </t-button>
         <t-button class="org-create-btn" @click="handleCreateOrganization">
-          <template #icon><t-icon name="usergroup-add" /></template>
+          <template #icon><img src="@/assets/img/organization.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
           {{ $t('organization.createOrg') }}
         </t-button>
       </div>
@@ -72,7 +72,7 @@
             <div class="card-title-block">
               <span class="card-title" :title="org.name">{{ org.name }}</span>
               <span class="card-relation" :class="{ 'is-owner': org.is_owner }">
-                <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="12px" />
+                <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="10px" />
                 <span>{{ org.is_owner ? $t('organization.createdByMe') : $t('organization.joinedByMe') }}</span>
               </span>
             </div>
@@ -1123,7 +1123,12 @@ onUnmounted(() => {
       &:hover {
         background: linear-gradient(135deg, #059669 0%, #047857 100%);
         box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
-        transform: translateY(-1px);
+      }
+
+      .org-create-icon {
+        width: 16px;
+        height: 16px;
+        filter: brightness(0) invert(1);
       }
     }
   }
@@ -1322,30 +1327,33 @@ onUnmounted(() => {
 .card-relation {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   margin-top: 2px;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 400;
   line-height: 1.4;
-  color: #64748b;
+  color: #94a3b8;
+  opacity: 0.95;
 
   .t-icon {
     flex-shrink: 0;
   }
 
   &.is-owner {
-    color: #7c4dff;
+    color: #a78bfa;
+    opacity: 0.9;
 
     .t-icon {
-      color: #7c4dff;
+      color: #a78bfa;
     }
   }
 
   &:not(.is-owner) {
-    color: #059669;
+    color: #34d399;
+    opacity: 0.9;
 
     .t-icon {
-      color: #059669;
+      color: #34d399;
     }
   }
 }

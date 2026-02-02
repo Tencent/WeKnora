@@ -745,6 +745,12 @@ export default {
     knowledgeBase: "知识库",
     noResult: "无结果",
   },
+  mentionDetail: {
+    faqCount: "共 {count} 条问答",
+    kbCount: "共 {count} 个文档",
+    belongsToKb: "所属知识库：",
+    belongsToOrg: "所属空间：",
+  },
   agent: {
     taskLabel: "任务:",
     copy: "复制",

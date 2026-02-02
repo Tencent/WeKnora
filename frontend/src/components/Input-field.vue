@@ -195,7 +195,8 @@ const selectedKbs = computed(() => {
       name: s.knowledge_base.name,
       type: s.knowledge_base.type || 'document',
       knowledge_count: s.knowledge_base.knowledge_count,
-      chunk_count: s.knowledge_base.chunk_count
+      chunk_count: s.knowledge_base.chunk_count,
+      org_name: s.org_name || ''
     }));
   const ownIds = new Set(own.map(kb => kb.id));
   const sharedOnly = sharedMapped.filter((kb: any) => !ownIds.has(kb.id));
@@ -225,12 +226,23 @@ const selectedFiles = computed(() => {
       isAgentConfigured: agentKbIds.includes(kb.id)
     }));
     
-    // 用户选择的文件
-    const files = selectedFiles.value.map((f: { id: string; name: string }) => ({ 
-      ...f, 
-      type: 'file' as const,
-      isAgentConfigured: false
-    }));
+    // 用户选择的文件（根据 fileIdToKbId + 共享列表补全 org_name，用于角标）
+    const sharedKbOrgMap: Record<string, string> = {};
+    (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
+      if (s.knowledge_base?.id != null && s.org_name) {
+        sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
+      }
+    });
+    const files = selectedFiles.value.map((f: { id: string; name: string }) => {
+      const kbId = fileIdToKbId.value[f.id];
+      const org_name = kbId ? sharedKbOrgMap[String(kbId)] || '' : '';
+      return {
+        ...f,
+        type: 'file' as const,
+        isAgentConfigured: false,
+        org_name
+      };
+    });
     
     // 智能体配置的放在前面
     const agentConfiguredKbs = allKbs.filter(kb => kb.isAgentConfigured);
@@ -701,16 +713,27 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         // 如果智能体配置了 kb_selection_mode === 'selected'，只显示指定知识库中的文件
         if (hasAgentConfig.value && agentKBSelectionMode.value === 'selected') {
           const configuredKbIds = agentKnowledgeBases.value;
-          files = files.filter((f: any) => configuredKbIds.includes(f.knowledge_base_id));
+          files = files.filter((f: any) => configuredKbIds.includes(f.knowledge_base_id ?? f.kb_id));
         }
-        
-        fileItems = files.map((f: any) => ({
-          id: f.id,
-          name: f.title || f.file_name,
-          type: 'file' as const,
-          kbName: f.knowledge_base_name || '',
-          kbId: f.knowledge_base_id || undefined
-        }));
+        // 共享知识库 kb_id -> org_name，用于文件项显示组织角标（key 统一转 string 避免类型不一致）
+        const sharedKbOrgMap: Record<string, string> = {};
+        (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
+          if (s.knowledge_base?.id != null && s.org_name) {
+            sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
+          }
+        });
+        fileItems = files.map((f: any) => {
+          const kbId = f.knowledge_base_id ?? f.kb_id;
+          const kbIdStr = kbId != null ? String(kbId) : '';
+          return {
+            id: f.id,
+            name: f.title || f.file_name,
+            type: 'file' as const,
+            kbName: f.knowledge_base_name || '',
+            kbId: kbId || undefined,
+            orgName: kbIdStr ? sharedKbOrgMap[kbIdStr] || undefined : undefined
+          };
+        });
       }
       mentionHasMore.value = res.has_more || false;
       mentionOffset.value += fileItems.length;
@@ -1553,9 +1576,14 @@ onBeforeRouteUpdate((to, from, next) => {
             { 'agent-configured': item.isAgentConfigured }
           ]"
         >
-          <span class="tag-icon">
-            <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
-            <t-icon v-else name="file" />
+          <span class="tag-icon-wrap" :class="{ 'has-org': item.org_name }">
+            <span class="tag-icon">
+              <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
+              <t-icon v-else name="file" />
+            </span>
+            <span v-if="item.org_name" class="tag-org-badge-wrap">
+              <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')" class="tag-org-badge" alt="" aria-hidden="true" />
+            </span>
           </span>
           <span class="tag-name">{{ item.name }}</span>
           <span class="tag-remove" @click="removeSelectedItem(item)">×</span>
@@ -1876,10 +1904,41 @@ const getImgSrc = (url: string) => {
     }
   }
   
+  .tag-icon-wrap {
+    position: relative;
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+  }
+
   .tag-icon {
     font-size: 14px;
     display: flex;
     align-items: center;
+  }
+
+  /* 右下角组织角标：柔和小圆 + 绿色/灰色 icon，不刺眼 */
+  .tag-org-badge-wrap {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--td-bg-color-secondarycontainer, #f0f2f5);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .tag-org-badge-wrap .tag-org-badge {
+    width: 5px;
+    height: 5px;
+    object-fit: contain;
   }
   
   .tag-name {

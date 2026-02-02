@@ -660,6 +660,12 @@ export default {
     knowledgeBase: 'База знаний',
     noResult: 'Нет результатов',
   },
+  mentionDetail: {
+    faqCount: '{count} вопросов и ответов',
+    kbCount: '{count} документов',
+    belongsToKb: 'База знаний: ',
+    belongsToOrg: 'Пространство: ',
+  },
   file: {
     upload: 'Загрузить файл',
     uploadSuccess: 'Файл успешно загружен',
