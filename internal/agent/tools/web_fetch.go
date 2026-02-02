@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
@@ -56,6 +58,16 @@ type WebFetchItem struct {
 type webFetchParams struct {
 	URL    string
 	Prompt string
+}
+
+// validatedParams holds validated input plus DNS-pinned host/IP for SSRF protection.
+// PinnedIP is the single IP we resolved at validation time; chromedp and HTTP both use it.
+type validatedParams struct {
+	URL      string
+	Prompt   string
+	Host     string
+	Port     string
+	PinnedIP net.IP
 }
 
 // webFetchItemResult is the result for a web fetch item
@@ -124,7 +136,10 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 		go func(index int, p webFetchParams) {
 			defer wg.Done()
 
-			if err := t.validateParams(p); err != nil {
+			// Normalize URL before validation so we pin the host we actually fetch (e.g. raw.githubusercontent.com)
+			finalURL := t.normalizeGitHubURL(p.URL)
+			vp, err := t.validateAndResolve(webFetchParams{URL: finalURL, Prompt: p.Prompt})
+			if err != nil {
 				results[index] = &webFetchItemResult{
 					err: err,
 					data: map[string]interface{}{
@@ -137,7 +152,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 				return
 			}
 
-			output, data, err := t.executeFetch(ctx, p)
+			output, data, err := t.executeFetch(ctx, vp, p.URL)
 			results[index] = &webFetchItemResult{
 				output: output,
 				data:   data,
@@ -234,42 +249,78 @@ func (t *WebFetchTool) parseParams(item interface{}) webFetchParams {
 	return params
 }
 
-// validateParams validates the parameters for a web fetch item
-func (t *WebFetchTool) validateParams(p webFetchParams) error {
+// validateAndResolve validates parameters and resolves the host to a single public IP (DNS pinning).
+// The returned PinnedIP is used for both chromedp (host-resolver-rules) and HTTP to prevent DNS rebinding.
+func (t *WebFetchTool) validateAndResolve(p webFetchParams) (*validatedParams, error) {
 	if p.URL == "" {
-		return fmt.Errorf("url is required")
+		return nil, fmt.Errorf("url is required")
 	}
 	if p.Prompt == "" {
-		return fmt.Errorf("prompt is required")
+		return nil, fmt.Errorf("prompt is required")
 	}
 	if !strings.HasPrefix(p.URL, "http://") && !strings.HasPrefix(p.URL, "https://") {
-		return fmt.Errorf("invalid URL format")
+		return nil, fmt.Errorf("invalid URL format")
 	}
 
-	// SSRF protection: validate URL is safe to fetch
+	// SSRF protection: validate URL is safe (scheme, hostname, and that resolved IPs are not restricted)
 	if safe, reason := utils.IsSSRFSafeURL(p.URL); !safe {
-		return fmt.Errorf("URL rejected for security reasons: %s", reason)
+		return nil, fmt.Errorf("URL rejected for security reasons: %s", reason)
 	}
 
-	return nil
+	u, err := url.Parse(p.URL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	hostname := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+
+	// Resolve and pin to the first public IP (same resolver as IsSSRFSafeURL; we pin so chromedp cannot re-resolve)
+	ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", hostname)
+	if err != nil || len(ips) == 0 {
+		return nil, fmt.Errorf("DNS lookup failed for %s: %w", hostname, err)
+	}
+	var pinnedIP net.IP
+	for _, ip := range ips {
+		if utils.IsPublicIP(ip) {
+			pinnedIP = ip
+			break
+		}
+	}
+	if pinnedIP == nil {
+		return nil, fmt.Errorf("no public IP available for host %s", hostname)
+	}
+
+	return &validatedParams{
+		URL:      p.URL,
+		Prompt:   p.Prompt,
+		Host:     hostname,
+		Port:     port,
+		PinnedIP: pinnedIP,
+	}, nil
 }
 
-// executeFetch executes a web fetch item
+// executeFetch executes a web fetch item. displayURL is the URL shown to the user (e.g. original); vp.URL is the normalized URL we fetch.
 func (t *WebFetchTool) executeFetch(
 	ctx context.Context,
-	params webFetchParams,
+	vp *validatedParams,
+	displayURL string,
 ) (string, map[string]interface{}, error) {
-	logger.Infof(ctx, "[Tool][WebFetch] Fetching URL: %s", params.URL)
+	logger.Infof(ctx, "[Tool][WebFetch] Fetching URL: %s", displayURL)
 
-	finalURL := t.normalizeGitHubURL(params.URL)
-
-	htmlContent, method, err := t.fetchHTMLContent(ctx, finalURL)
+	htmlContent, method, err := t.fetchHTMLContent(ctx, vp)
 	if err != nil {
-		logger.Errorf(ctx, "[Tool][WebFetch] 获取页面失败 url=%s err=%v", finalURL, err)
-		return fmt.Sprintf("URL: %s\n错误: %v\n", params.URL, err),
+		logger.Errorf(ctx, "[Tool][WebFetch] 获取页面失败 url=%s err=%v", vp.URL, err)
+		return fmt.Sprintf("URL: %s\n错误: %v\n", displayURL, err),
 			map[string]interface{}{
-				"url":    params.URL,
-				"prompt": params.Prompt,
+				"url":    displayURL,
+				"prompt": vp.Prompt,
 				"error":  err.Error(),
 			}, err
 	}
@@ -277,17 +328,18 @@ func (t *WebFetchTool) executeFetch(
 	textContent := t.convertHTMLToText(htmlContent)
 
 	resultData := map[string]interface{}{
-		"url":            params.URL,
-		"prompt":         params.Prompt,
+		"url":            displayURL,
+		"prompt":         vp.Prompt,
 		"raw_content":    textContent,
 		"content_length": len(textContent),
 		"method":         method,
 	}
+	params := webFetchParams{URL: displayURL, Prompt: vp.Prompt}
 	var summary string
 	var summaryErr error
 	summary, summaryErr = t.processWithLLM(ctx, params, textContent)
 	if summaryErr != nil {
-		logger.Warnf(ctx, "[Tool][WebFetch] LLM 处理失败 url=%s err=%v", params.URL, summaryErr)
+		logger.Warnf(ctx, "[Tool][WebFetch] LLM 处理失败 url=%s err=%v", displayURL, summaryErr)
 	} else if summary != "" {
 		resultData["summary"] = summary
 	}
@@ -360,18 +412,18 @@ func (t *WebFetchTool) buildOutputText(params webFetchParams, content string, su
 	return builder.String()
 }
 
-// fetchHTMLContent fetches the HTML content for a web fetch item
-func (t *WebFetchTool) fetchHTMLContent(ctx context.Context, targetURL string) (string, string, error) {
-	html, err := t.fetchWithChromedp(ctx, targetURL)
+// fetchHTMLContent fetches the HTML content for a web fetch item using pinned IP (DNS pinning).
+func (t *WebFetchTool) fetchHTMLContent(ctx context.Context, vp *validatedParams) (string, string, error) {
+	html, err := t.fetchWithChromedp(ctx, vp)
 	if err == nil && strings.TrimSpace(html) != "" {
 		return html, "chromedp", nil
 	}
 
 	if err != nil {
-		logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取失败 url=%s err=%v，尝试直接请求", targetURL, err)
+		logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取失败 url=%s err=%v，尝试直接请求", vp.URL, err)
 	}
 
-	html, httpErr := t.fetchWithHTTP(ctx, targetURL)
+	html, httpErr := t.fetchWithHTTP(ctx, vp)
 	if httpErr != nil {
 		if err != nil {
 			return "", "", fmt.Errorf("chromedp error: %v; http error: %w", err, httpErr)
@@ -382,12 +434,15 @@ func (t *WebFetchTool) fetchHTMLContent(ctx context.Context, targetURL string) (
 	return html, "http", nil
 }
 
-// fetchWithChromedp fetches the HTML content with Chromedp
-func (t *WebFetchTool) fetchWithChromedp(ctx context.Context, targetURL string) (string, error) {
-	logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取开始 url=%s", targetURL)
+// fetchWithChromedp fetches the HTML content with Chromedp. Uses host-resolver-rules to pin host to vp.PinnedIP (DNS rebinding protection).
+func (t *WebFetchTool) fetchWithChromedp(ctx context.Context, vp *validatedParams) (string, error) {
+	logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取开始 url=%s", vp.URL)
 
+	// DNS pinning: force Chrome to use the IP we resolved at validation time, not a second resolution.
+	hostRule := fmt.Sprintf("MAP %s %s", vp.Host, vp.PinnedIP.String())
 	opts := append(
 		chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("host-resolver-rules", hostRule),
 		chromedp.Flag("headless", true),
 		chromedp.Flag("disable-setuid-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
@@ -410,7 +465,7 @@ func (t *WebFetchTool) fetchWithChromedp(ctx context.Context, targetURL string) 
 
 	var html string
 	err := chromedp.Run(ctx,
-		chromedp.Navigate(targetURL),
+		chromedp.Navigate(vp.URL),
 		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.OuterHTML("html", &html),
 	)
@@ -418,13 +473,13 @@ func (t *WebFetchTool) fetchWithChromedp(ctx context.Context, targetURL string) 
 		return "", fmt.Errorf("chromedp run failed: %w", err)
 	}
 
-	logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取成功 url=%s", targetURL)
+	logger.Debugf(ctx, "[Tool][WebFetch] Chromedp 抓取成功 url=%s", vp.URL)
 	return html, nil
 }
 
-// fetchWithHTTP fetches the HTML content with HTTP
-func (t *WebFetchTool) fetchWithHTTP(ctx context.Context, targetURL string) (string, error) {
-	resp, err := t.fetchWithTimeout(ctx, targetURL)
+// fetchWithHTTP fetches the HTML content with HTTP using pinned IP (same as chromedp path).
+func (t *WebFetchTool) fetchWithHTTP(ctx context.Context, vp *validatedParams) (string, error) {
+	resp, err := t.fetchWithTimeout(ctx, vp)
 	if err != nil {
 		return "", err
 	}
@@ -443,12 +498,19 @@ func (t *WebFetchTool) fetchWithHTTP(ctx context.Context, targetURL string) (str
 	return string(htmlBytes), nil
 }
 
-// fetchWithTimeout fetches the HTML content with a timeout
-func (t *WebFetchTool) fetchWithTimeout(ctx context.Context, targetURL string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+// fetchWithTimeout fetches the HTML content with a timeout. Uses pinned IP and original Host header (DNS pinning).
+func (t *WebFetchTool) fetchWithTimeout(ctx context.Context, vp *validatedParams) (*http.Response, error) {
+	// Connect to pinned IP so we do not re-resolve; set Host so the server gets the right virtual host.
+	hostPort := net.JoinHostPort(vp.PinnedIP.String(), vp.Port)
+	rawURL := vp.URL
+	u, _ := url.Parse(rawURL)
+	u.Host = hostPort
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+	// Preserve original host for TLS SNI and Host header (required for virtual hosting).
+	req.Host = net.JoinHostPort(vp.Host, vp.Port)
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; WebFetchTool/1.0)")
 	req.Header.Set(

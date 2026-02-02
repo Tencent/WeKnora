@@ -244,6 +244,13 @@ func isRestrictedIP(ip net.IP) (bool, string) {
 	return false, ""
 }
 
+// IsPublicIP returns true if the IP is safe for outbound fetch (not private, loopback, link-local, etc.).
+// Used for DNS pinning: after resolving a hostname we pick the first public IP and pin all requests to it.
+func IsPublicIP(ip net.IP) bool {
+	restricted, _ := isRestrictedIP(ip)
+	return !restricted
+}
+
 // isZeros checks if a byte slice is all zeros
 func isZeros(b []byte) bool {
 	for _, v := range b {
@@ -652,10 +659,10 @@ func ValidateStdioConfig(command string, args []string, envVars map[string]strin
 
 // SSRFSafeHTTPClientConfig contains configuration for the SSRF-safe HTTP client
 type SSRFSafeHTTPClientConfig struct {
-	Timeout             time.Duration
-	MaxRedirects        int
-	DisableKeepAlives   bool
-	DisableCompression  bool
+	Timeout            time.Duration
+	MaxRedirects       int
+	DisableKeepAlives  bool
+	DisableCompression bool
 }
 
 // DefaultSSRFSafeHTTPClientConfig returns the default configuration
