@@ -492,9 +492,8 @@
                           class="shared-item"
                           @click="handleShareClick(share)"
                         >
-                          <div :class="['shared-icon', share.knowledge_base_type === 'faq' ? 'type-faq' : 'type-document']">
-                            <t-icon :name="share.knowledge_base_type === 'faq' ? 'chat-bubble-help' : 'folder'" size="16px" />
-                            <span class="badge-count">{{ share.knowledge_base_type === 'faq' ? (share.chunk_count || 0) : (share.knowledge_count || 0) }}</span>
+                          <div class="shared-icon shared-icon-org">
+                            <img src="@/assets/img/organization.svg" class="org-icon-img" alt="" aria-hidden="true" />
                           </div>
                           <div class="shared-info">
                             <span class="shared-name">{{ share.knowledge_base_name }}</span>
@@ -2256,6 +2255,17 @@ watch(currentSection, (section) => {
       &.type-faq {
         background: rgba(0, 82, 217, 0.08);
         color: #0052d9;
+      }
+
+      &.shared-icon-org {
+        background: rgba(0, 82, 217, 0.06);
+        color: #0052d9;
+      }
+
+      .org-icon-img {
+        width: 18px;
+        height: 18px;
+        flex-shrink: 0;
       }
 
       .badge-count {

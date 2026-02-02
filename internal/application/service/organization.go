@@ -240,15 +240,15 @@ func (s *organizationService) SearchSearchableOrganizations(ctx context.Context,
 	items := make([]types.SearchableOrganizationItem, 0, len(orgs))
 	for _, org := range orgs {
 		items = append(items, types.SearchableOrganizationItem{
-			ID:               org.ID,
-			Name:             org.Name,
-			Description:      org.Description,
-			Avatar:           org.Avatar,
-			MemberCount:      int(memberCounts[org.ID]),
-			MemberLimit:      org.MemberLimit,
-			ShareCount:       int(shareCounts[org.ID]),
-			IsAlreadyMember:  memberOrgIDs[org.ID],
-			RequireApproval:  org.RequireApproval,
+			ID:              org.ID,
+			Name:            org.Name,
+			Description:     org.Description,
+			Avatar:          org.Avatar,
+			MemberCount:     int(memberCounts[org.ID]),
+			MemberLimit:     org.MemberLimit,
+			ShareCount:      int(shareCounts[org.ID]),
+			IsAlreadyMember: memberOrgIDs[org.ID],
+			RequireApproval: org.RequireApproval,
 		})
 	}
 	return &types.ListSearchableOrganizationsResponse{

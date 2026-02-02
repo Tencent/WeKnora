@@ -229,9 +229,9 @@ type UpdateOrganizationRequest struct {
 	Description            *string `json:"description" binding:"omitempty,max=1000"`
 	Avatar                 *string `json:"avatar" binding:"omitempty,max=512"` // optional avatar URL
 	RequireApproval        *bool   `json:"require_approval"`
-	Searchable             *bool   `json:"searchable"`             // open for search so others can discover and join
+	Searchable             *bool   `json:"searchable"`                // open for search so others can discover and join
 	InviteCodeValidityDays *int    `json:"invite_code_validity_days"` // 0=never, 1, 7, 30
-	MemberLimit            *int    `json:"member_limit"`           // max members; 0=unlimited
+	MemberLimit            *int    `json:"member_limit"`              // max members; 0=unlimited
 }
 
 // AddMemberRequest represents a request to add a member to an organization
@@ -350,28 +350,28 @@ type ListOrganizationsResponse struct {
 
 // SearchableOrganizationItem is a searchable org item for discovery (no invite code)
 type SearchableOrganizationItem struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	Avatar           string `json:"avatar,omitempty"`
-	MemberCount      int    `json:"member_count"`
-	MemberLimit      int    `json:"member_limit"` // 0 = unlimited
-	ShareCount       int    `json:"share_count"`
-	IsAlreadyMember  bool   `json:"is_already_member"`
-	RequireApproval  bool   `json:"require_approval"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Avatar          string `json:"avatar,omitempty"`
+	MemberCount     int    `json:"member_count"`
+	MemberLimit     int    `json:"member_limit"` // 0 = unlimited
+	ShareCount      int    `json:"share_count"`
+	IsAlreadyMember bool   `json:"is_already_member"`
+	RequireApproval bool   `json:"require_approval"`
 }
 
 // ListSearchableOrganizationsResponse is the response for searching discoverable organizations
 type ListSearchableOrganizationsResponse struct {
 	Organizations []SearchableOrganizationItem `json:"organizations"`
-	Total         int64                         `json:"total"`
+	Total         int64                        `json:"total"`
 }
 
 // JoinByOrganizationIDRequest is used to join a searchable organization by ID (no invite code)
 type JoinByOrganizationIDRequest struct {
 	OrganizationID string        `json:"organization_id" binding:"required"`
-	Message        string        `json:"message" binding:"max=500"`         // Optional message for join request
-	Role           OrgMemberRole `json:"role"`                               // Optional: requested role (admin/editor/viewer); default viewer
+	Message        string        `json:"message" binding:"max=500"` // Optional message for join request
+	Role           OrgMemberRole `json:"role"`                      // Optional: requested role (admin/editor/viewer); default viewer
 }
 
 // JoinRequestResponse represents a join request in API responses

@@ -248,11 +248,11 @@
             </div>
             <div class="bottom-right">
               <t-tooltip :content="kb.org_name" placement="top">
-                <div class="org-source">
-                  <t-icon name="usergroup" size="12px" />
-                  <span>{{ kb.org_name }}</span>
-                </div>
-              </t-tooltip>
+                  <div class="org-source">
+                    <img src="@/assets/img/organization.svg" class="org-source-icon" alt="" aria-hidden="true" />
+                    <span>{{ kb.org_name }}</span>
+                  </div>
+                </t-tooltip>
             </div>
           </div>
         </div>
@@ -342,7 +342,7 @@
                 </div>
               </t-tooltip>
               <!-- 共享状态图标 -->
-              <t-tooltip v-if="kb.share_count > 0" :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count })" placement="top">
+              <t-tooltip v-if="(kb.share_count ?? 0) > 0" :content="$t('knowledgeList.sharedToOrgs', { count: kb.share_count ?? 0 })" placement="top">
                 <div class="feature-badge shared">
                   <t-icon name="share" size="14px" />
                 </div>
@@ -416,7 +416,7 @@
           <div class="bottom-right">
             <t-tooltip :content="shared.org_name" placement="top">
               <div class="org-source">
-                <t-icon name="usergroup" size="12px" />
+                <img src="@/assets/img/organization.svg" class="org-source-icon" alt="" aria-hidden="true" />
                 <span>{{ shared.org_name }}</span>
               </div>
             </t-tooltip>
@@ -551,8 +551,8 @@
                         </div>
                         <div class="form-item read-only-row">
                           <label class="form-label">{{ t('knowledgeList.detail.sourceOrg') }}</label>
-                          <div class="form-value-row">
-                            <t-icon name="usergroup" size="16px" class="form-value-icon" />
+                          <div class="form-value-row form-value-org">
+                            <img src="@/assets/img/organization.svg" class="form-value-org-icon" alt="" aria-hidden="true" />
                             <span>{{ currentSharedKb.org_name }}</span>
                           </div>
                         </div>
@@ -1224,11 +1224,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-// 来源组织
+// 来源组织（空间图标）
 .org-source {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   padding: 2px 8px;
   background: rgba(0, 0, 0, 0.04);
   border-radius: 4px;
@@ -1240,6 +1240,12 @@ const handleUploadFinishedEvent = (event: Event) => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .org-source-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
   }
 
   .t-icon {
@@ -1515,6 +1521,16 @@ const handleUploadFinishedEvent = (event: Event) => {
     white-space: pre-wrap;
     line-height: 1.5;
     color: #00000099;
+  }
+
+  .form-value-org {
+    gap: 8px;
+  }
+
+  .form-value-org-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
   }
 
   .permission-list {

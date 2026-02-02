@@ -432,7 +432,15 @@
                       </div>
                       <div class="preview-detail-title-block">
                         <h2 class="preview-detail-name">{{ invitePreviewData.name }}</h2>
-                        <p class="preview-detail-id">{{ $t('organization.join.spaceId') }}: {{ invitePreviewData.id }}</p>
+                        <div class="preview-detail-id-row">
+                          <span class="preview-detail-id-label">{{ $t('organization.join.spaceId') }}</span>
+                          <span class="preview-detail-id-value">{{ shortPreviewSpaceId }}</span>
+                          <t-tooltip :content="$t('common.copy')">
+                            <t-button variant="text" size="small" class="preview-detail-id-copy" @click="copyPreviewSpaceId">
+                              <t-icon name="file-copy" />
+                            </t-button>
+                          </t-tooltip>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -603,6 +611,13 @@ const inviteBodyWrapStyle = computed(() => {
   const px = inviteBodyHeightPx.value
   if (px <= 0) return {}
   return { maxHeight: `${px}px`, minHeight: `${px}px` }
+})
+
+// 预览中空间 ID 的简短显示（前 8 位 + …）
+const shortPreviewSpaceId = computed(() => {
+  const id = invitePreviewData.value?.id
+  if (!id) return ''
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id
 })
 
 // 根据当前 body 内容更新高度（用于过渡动画）
@@ -1090,6 +1105,16 @@ function viewOrganizationFromPreview() {
   showSettingsModal.value = true
 }
 
+// 复制预览中的空间 ID
+function copyPreviewSpaceId() {
+  if (!invitePreviewData.value?.id) return
+  navigator.clipboard.writeText(invitePreviewData.value.id).then(() => {
+    MessagePlugin.success(t('common.copied'))
+  }).catch(() => {
+    MessagePlugin.error('复制失败')
+  })
+}
+
 // 从搜索列表加入空间（通过空间 ID，无需邀请码）- 在预览确认后调用
 async function joinBySearchOrg() {
   if (!invitePreviewData.value || invitePreviewData.value.is_already_member) return
@@ -1133,6 +1158,18 @@ onMounted(async () => {
   const code = route.query.invite_code as string
   if (code) {
     await handleInvitePreview(code)
+  }
+  
+  // 检查 URL 中是否有 orgId，如果有则打开空间设置
+  const orgId = route.query.orgId as string
+  if (orgId) {
+    settingsOrgId.value = orgId
+    settingsMode.value = 'edit'
+    showSettingsModal.value = true
+    // 清除 URL 中的 orgId 参数，避免刷新时重复打开
+    const newQuery = { ...route.query }
+    delete newQuery.orgId
+    router.replace({ path: route.path, query: newQuery })
   }
 })
 
@@ -2407,12 +2444,33 @@ onUnmounted(() => {
   letter-spacing: -0.02em;
 }
 
-.preview-detail-id {
+.preview-detail-id-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
   font-size: 12px;
   color: #94a3b8;
-  margin: 0;
   font-family: "PingFang SC", system-ui, sans-serif;
-  word-break: break-all;
+}
+
+.preview-detail-id-label {
+  flex-shrink: 0;
+}
+
+.preview-detail-id-value {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #64748b;
+}
+
+.preview-detail-id-copy {
+  padding: 2px;
+  color: #94a3b8;
+}
+.preview-detail-id-copy:hover {
+  color: #0f172a;
 }
 
 .preview-detail-content {
@@ -2571,7 +2629,6 @@ onUnmounted(() => {
 .invite-preview-footer {
   padding: 20px 24px;
   border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
   display: flex;
   justify-content: flex-end;
   gap: 12px;

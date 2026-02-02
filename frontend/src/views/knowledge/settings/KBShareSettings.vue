@@ -14,7 +14,8 @@
               v-model="selectedOrgId"
               :placeholder="$t('organization.share.selectOrgPlaceholder')"
               :loading="loadingOrgs"
-              class="org-select"
+              class="org-select org-select-dropdown"
+              :popup-props="{ overlayClassName: 'org-select-dropdown-popup' }"
             >
               <t-option
                 v-for="org in availableOrganizations"
@@ -23,25 +24,29 @@
                 :label="org.name"
               >
                 <div class="org-option-content">
-                  <div class="org-option-header">
-                    <span class="org-option-name">{{ org.name }}</span>
-                    <t-tag v-if="org.is_owner" theme="primary" size="small" variant="light">
-                      {{ $t('organization.owner') }}
-                    </t-tag>
-                    <t-tag v-else-if="org.my_role" :theme="org.my_role === 'admin' ? 'warning' : 'default'" size="small" variant="light">
-                      {{ $t(`organization.role.${org.my_role}`) }}
-                    </t-tag>
+                  <div class="org-option-icon-wrap">
+                    <img src="@/assets/img/organization.svg" class="org-option-icon" alt="" aria-hidden="true" />
                   </div>
-                  <div v-if="org.description" class="org-option-desc">{{ org.description }}</div>
-                  <div class="org-option-meta">
-                    <span class="org-meta-item">
-                      <t-icon name="usergroup" size="14px" />
-                      {{ org.member_count || 0 }} {{ $t('organization.members') }}
-                    </span>
-                    <span v-if="org.share_count !== undefined" class="org-meta-item">
-                      <t-icon name="share" size="14px" />
-                      {{ org.share_count }} {{ $t('organization.share.sharedKBs') }}
-                    </span>
+                  <div class="org-option-body">
+                    <div class="org-option-header">
+                      <span class="org-option-name">{{ org.name }}</span>
+                      <t-tag v-if="org.is_owner" theme="primary" size="small" variant="light">
+                        {{ $t('organization.owner') }}
+                      </t-tag>
+                      <t-tag v-else-if="org.my_role" :theme="org.my_role === 'admin' ? 'warning' : 'default'" size="small" variant="light">
+                        {{ $t(`organization.role.${org.my_role}`) }}
+                      </t-tag>
+                    </div>
+                    <div class="org-option-meta">
+                      <span class="org-meta-item">
+                        <t-icon name="usergroup" size="12px" />
+                        {{ org.member_count || 0 }} {{ $t('organization.members') }}
+                      </span>
+                      <span v-if="org.share_count !== undefined" class="org-meta-item">
+                        <t-icon name="share" size="12px" />
+                        {{ org.share_count }} {{ $t('organization.share.sharedKBs') }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </t-option>
@@ -87,7 +92,7 @@
           <div v-for="share in shares" :key="share.id" class="share-item">
             <div class="share-info">
               <div class="share-org">
-                <t-icon name="usergroup" class="org-icon" />
+                <img src="@/assets/img/organization-green.svg" class="org-icon" alt="" aria-hidden="true" />
                 <span class="org-name">{{ share.organization_name }}</span>
               </div>
               <t-tag
@@ -99,6 +104,11 @@
               </t-tag>
             </div>
             <div class="share-actions">
+              <t-tooltip :content="$t('organization.settings.editTitle')" placement="top">
+                <t-button variant="text" theme="default" size="small" @click="handleGoToOrgSettings(share.organization_id)">
+                  <t-icon name="setting" />
+                </t-button>
+              </t-tooltip>
               <t-select
                 :value="share.permission"
                 size="small"
@@ -137,11 +147,13 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useOrganizationStore } from '@/stores/organization'
 import { shareKnowledgeBase, listKBShares, removeShare, updateSharePermission } from '@/api/organization'
 import type { KnowledgeBaseShare } from '@/api/organization'
 
 const { t } = useI18n()
+const router = useRouter()
 const orgStore = useOrganizationStore()
 
 interface Props {
@@ -258,6 +270,14 @@ async function handleUnshare(share: KnowledgeBaseShare) {
   }
 }
 
+// Navigate to organization settings
+function handleGoToOrgSettings(orgId: string) {
+  router.push({
+    path: '/platform/organizations',
+    query: { orgId }
+  })
+}
+
 // Watch for kbId changes
 watch(() => props.kbId, async (newKbId) => {
   if (newKbId) {
@@ -323,14 +343,16 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
 
   .org-select {
     flex: 1;
-    min-width: 200px;
+    min-width: 240px;
   }
 
   .permission-select {
     width: 120px;
+    flex-shrink: 0;
   }
 }
 
@@ -390,20 +412,24 @@ onMounted(async () => {
 .shares-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .share-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 14px 16px;
   background: #fafafa;
+  border: 1px solid #f0f0f0;
   border-radius: 8px;
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease;
 
   &:hover {
     background: #f5f5f5;
+    border-color: #e8e8e8;
   }
 }
 
@@ -419,7 +445,9 @@ onMounted(async () => {
   gap: 8px;
 
   .org-icon {
-    font-size: 16px;
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
     color: #0052d9;
   }
 
@@ -434,7 +462,7 @@ onMounted(async () => {
 .share-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 
   .permission-change-select {
     width: 100px;
@@ -472,79 +500,107 @@ onMounted(async () => {
   }
 }
 
-// Custom option styles for organization select
+// Custom option styles for organization select (compact)
 :deep(.t-select-option) {
   height: auto;
-  align-items: flex-start;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 4px;
+  margin: 1px 6px;
+  transition: background 0.15s ease;
+}
+
+:deep(.t-select-option:hover),
+:deep(.t-select-option.t-is-selected) {
+  background: #f0f7ff;
 }
 
 :deep(.t-select-option__content) {
-  white-space: normal;
   width: 100%;
 }
 
 .org-option-content {
-  padding: 2px 0;
-  min-width: 280px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  min-width: 260px;
   width: 100%;
+}
+
+.org-option-icon-wrap {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(0, 82, 217, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.org-option-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.org-option-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .org-option-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 2px;
 
   .org-option-name {
     font-family: "PingFang SC";
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     color: #000000e6;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-}
-
-.org-option-desc {
-  font-family: "PingFang SC";
-  font-size: 12px;
-  color: #00000066;
-  line-height: 18px;
-  margin-bottom: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 .org-option-meta {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   font-family: "PingFang SC";
-  font-size: 12px;
-  color: #00000066;
+  font-size: 11px;
+  color: #00000099;
 
   .org-meta-item {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
   }
 }
 </style>
 
 <style lang="less">
-// Global styles for select dropdown (outside scoped)
-.t-select__dropdown .t-select-option {
-  height: auto;
-  align-items: flex-start;
-  padding-top: 8px;
-  padding-bottom: 8px;
+// Global styles for organization select dropdown (compact)
+.org-select-dropdown-popup.t-select__dropdown {
+  padding: 4px 0;
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
-.t-select__dropdown .t-select-option__content {
-  white-space: normal;
+.org-select-dropdown-popup .t-select-option {
+  height: auto;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 4px;
+  margin: 1px 6px;
+}
+
+.org-select-dropdown-popup .t-select-option__content {
   width: 100%;
 }
 </style>
