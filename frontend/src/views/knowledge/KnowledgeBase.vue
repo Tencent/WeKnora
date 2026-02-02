@@ -377,6 +377,8 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
     const res: any = await getKnowledgeBaseById(targetKbId);
     kbInfo.value = res?.data || null;
     selectedTagId.value = '';
+    // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
+    uiStore.setSelectedTagId('');
     if (!isFAQ.value) {
       loadKnowledgeFiles(targetKbId);
     } else {
@@ -410,6 +412,8 @@ watch(() => kbId.value, (newKbId, oldKbId) => {
   if (newKbId && newKbId !== oldKbId) {
     tagSearchQuery.value = '';
     tagPage.value = 1;
+    // 重置标签选择状态，避免在不同知识库间保持标签选择
+    uiStore.setSelectedTagId('');
     loadKnowledgeBaseInfo(newKbId);
   }
 }, { immediate: false });
