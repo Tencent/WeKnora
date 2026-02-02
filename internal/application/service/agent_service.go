@@ -551,8 +551,8 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 		tenantID = tid
 	}
 
-	// Fetch knowledge metadata
-	knowledges, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	// Fetch knowledge metadata (include docs from shared KBs the user has access to)
+	knowledges, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get knowledge batch: %w", err)
 	}

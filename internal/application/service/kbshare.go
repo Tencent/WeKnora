@@ -119,7 +119,8 @@ func (s *kbShareService) ShareKnowledgeBase(ctx context.Context, kbID string, or
 	return share, nil
 }
 
-// UpdateSharePermission updates the permission of a share
+// UpdateSharePermission updates the permission of a share.
+// Allowed if: (1) current user is the sharer, or (2) current user is admin of the target organization.
 func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID string, permission types.OrgMemberRole, userID string) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
@@ -129,9 +130,12 @@ func (s *kbShareService) UpdateSharePermission(ctx context.Context, shareID stri
 		return err
 	}
 
-	// Only the user who shared can update
+	// Sharer can always update; org admin can also update (e.g. when sharer left)
 	if share.SharedByUserID != userID {
-		return ErrSharePermissionDenied
+		member, err := s.orgRepo.GetMember(ctx, share.OrganizationID, userID)
+		if err != nil || member.Role != types.OrgRoleAdmin {
+			return ErrSharePermissionDenied
+		}
 	}
 
 	if !permission.IsValid() {

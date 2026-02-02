@@ -22,15 +22,17 @@ type PluginExtractEntity struct {
 	modelService      interfaces.ModelService         // Model service for calling large language models
 	template          *types.PromptTemplateStructured // Template for generating prompts
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository
+	knowledgeService  interfaces.KnowledgeService // For shared KB document resolution
 	knowledgeRepo     interfaces.KnowledgeRepository
 }
 
-// NewPluginRewrite creates a new query rewriting plugin instance
+// NewPluginExtractEntity creates a new extract-entity plugin instance
 // Also registers the plugin with the event manager
 func NewPluginExtractEntity(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
 	knowledgeBaseRepo interfaces.KnowledgeBaseRepository,
+	knowledgeService interfaces.KnowledgeService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	config *config.Config,
 ) *PluginExtractEntity {
@@ -38,6 +40,7 @@ func NewPluginExtractEntity(
 		modelService:      modelService,
 		template:          config.ExtractManager.ExtractEntity,
 		knowledgeBaseRepo: knowledgeBaseRepo,
+		knowledgeService:  knowledgeService,
 		knowledgeRepo:     knowledgeRepo,
 	}
 	eventManager.Register(res)
@@ -74,11 +77,11 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 		kbIDSet[id] = struct{}{}
 	}
 
-	// If KnowledgeIDs is specified, retrieve them and collect their knowledge base IDs
+	// If KnowledgeIDs is specified, retrieve them and collect their knowledge base IDs (include shared KB docs)
 	// Also build a mapping from KnowledgeID to KnowledgeBaseID
 	knowledgeToKBMap := make(map[string]string)
 	if len(chatManage.KnowledgeIDs) > 0 {
-		knowledges, err := p.knowledgeRepo.GetKnowledgeBatch(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
+		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, chatManage.TenantID, chatManage.KnowledgeIDs)
 		if err != nil {
 			logger.Errorf(ctx, "failed to get knowledges: %v", err)
 			return next()

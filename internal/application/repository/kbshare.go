@@ -108,13 +108,15 @@ func (r *kbShareRepository) ListByKnowledgeBase(ctx context.Context, kbID string
 	return shares, nil
 }
 
-// ListByOrganization lists all share records for an organization
+// ListByOrganization lists all share records for an organization.
+// Excludes shares whose knowledge base has been soft-deleted.
 func (r *kbShareRepository) ListByOrganization(ctx context.Context, orgID string) ([]*types.KnowledgeBaseShare, error) {
 	var shares []*types.KnowledgeBaseShare
 	err := r.db.WithContext(ctx).
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = kb_shares.knowledge_base_id AND knowledge_bases.deleted_at IS NULL").
 		Preload("KnowledgeBase").
-		Where("organization_id = ?", orgID).
-		Order("created_at DESC").
+		Where("kb_shares.organization_id = ? AND kb_shares.deleted_at IS NULL", orgID).
+		Order("kb_shares.created_at DESC").
 		Find(&shares).Error
 
 	if err != nil {
@@ -124,12 +126,13 @@ func (r *kbShareRepository) ListByOrganization(ctx context.Context, orgID string
 }
 
 // ListSharedKBsForUser lists all knowledge bases shared to organizations that the user belongs to.
-// Excludes shares for soft-deleted organizations so users no longer see KBs after the space is deleted.
+// Excludes shares for soft-deleted organizations and soft-deleted knowledge bases.
 func (r *kbShareRepository) ListSharedKBsForUser(ctx context.Context, userID string) ([]*types.KnowledgeBaseShare, error) {
 	var shares []*types.KnowledgeBaseShare
 
-	// Get shares for organizations that the user is a member of; exclude deleted organizations
+	// Get shares for organizations that the user is a member of; exclude deleted orgs and deleted KBs
 	err := r.db.WithContext(ctx).
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = kb_shares.knowledge_base_id AND knowledge_bases.deleted_at IS NULL").
 		Preload("KnowledgeBase").
 		Preload("Organization").
 		Joins("JOIN organization_members ON organization_members.organization_id = kb_shares.organization_id").
