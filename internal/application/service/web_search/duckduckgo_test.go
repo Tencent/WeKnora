@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/Tencent/WeKnora/internal/config"
 )
 
 // testRoundTripper rewrites outgoing requests that target DuckDuckGo hosts
@@ -46,7 +44,7 @@ func newTestClient(ts *httptest.Server) *http.Client {
 }
 
 func TestDuckDuckGoProvider_Name(t *testing.T) {
-	p, _ := NewDuckDuckGoProvider(config.WebSearchProviderConfig{})
+	p, _ := NewDuckDuckGoProvider()
 	if p.Name() != "duckduckgo" {
 		t.Fatalf("expected provider name duckduckgo, got %s", p.Name())
 	}
@@ -80,7 +78,7 @@ func TestDuckDuckGoProvider(t *testing.T) {
 	defer ts.Close()
 
 	// Build provider and inject our test client
-	prov, _ := NewDuckDuckGoProvider(config.WebSearchProviderConfig{})
+	prov, _ := NewDuckDuckGoProvider()
 	dp := prov.(*DuckDuckGoProvider)
 	if dp == nil {
 		t.Fatalf("failed to build provider")
@@ -141,7 +139,7 @@ func TestDuckDuckGoProvider_Fallback(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	prov, _ := NewDuckDuckGoProvider(config.WebSearchProviderConfig{})
+	prov, _ := NewDuckDuckGoProvider()
 	dp := prov.(*DuckDuckGoProvider)
 	if dp == nil {
 		t.Fatalf("failed to build provider")
@@ -171,7 +169,7 @@ func TestDuckDuckGoProvider_Search_Real(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := NewDuckDuckGoProvider(config.WebSearchProviderConfig{})
+	provider, err := NewDuckDuckGoProvider()
 	if err != nil {
 		t.Fatalf("Failed to create DuckDuckGo provider: %v", err)
 	}
@@ -239,7 +237,7 @@ func TestDuckDuckGo_SearchChinese(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	provider, err := NewDuckDuckGoProvider(config.WebSearchProviderConfig{})
+	provider, err := NewDuckDuckGoProvider()
 	if err != nil {
 		t.Fatalf("Failed to create DuckDuckGo provider: %v", err)
 	}

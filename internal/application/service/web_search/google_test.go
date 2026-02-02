@@ -6,43 +6,47 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
-
-	"github.com/Tencent/WeKnora/internal/config"
 )
+
+func setGoogleEnv(apiURL string) {
+	os.Setenv("GOOGLE_SEARCH_API_URL", apiURL)
+}
+
+func unsetGoogleEnv() {
+	os.Unsetenv("GOOGLE_SEARCH_API_URL")
+}
 
 func TestNewGoogleProvider(t *testing.T) {
 	testCases := []struct {
 		name     string
-		cfg      config.WebSearchProviderConfig
+		apiURL   string
 		expected error
 	}{
 		{
-			name: "valid config",
-			cfg: config.WebSearchProviderConfig{
-				APIURL: "https://customsearch.googleapis.com/customsearch/v1?api_key=test&engine_id=test",
-			},
+			name:     "valid config",
+			apiURL:   "https://customsearch.googleapis.com/customsearch/v1?api_key=test&engine_id=test",
 			expected: nil,
 		},
 		{
-			name: "missing engine id",
-			cfg: config.WebSearchProviderConfig{
-				APIURL: "https://customsearch.googleapis.com/customsearch/v1?api_key=test",
-			},
+			name:     "missing engine id",
+			apiURL:   "https://customsearch.googleapis.com/customsearch/v1?api_key=test",
 			expected: fmt.Errorf("engine_id is empty"),
 		},
 		{
-			name: "missing api key",
-			cfg: config.WebSearchProviderConfig{
-				APIURL: "https://customsearch.googleapis.com/customsearch/v1?engine_id=test",
-			},
+			name:     "missing api key",
+			apiURL:   "https://customsearch.googleapis.com/customsearch/v1?engine_id=test",
 			expected: fmt.Errorf("api_key is empty"),
 		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewGoogleProvider(tc.cfg)
+			setGoogleEnv(tc.apiURL)
+			defer unsetGoogleEnv()
+			_, err := NewGoogleProvider()
+
 			if tc.expected == nil {
 				if err != nil {
 					t.Fatalf("expected no error, got %v", err)
@@ -60,10 +64,9 @@ func TestNewGoogleProvider(t *testing.T) {
 }
 
 func TestGoogleProvider_Name(t *testing.T) {
-	cfg := config.WebSearchProviderConfig{
-		APIURL: "https://customsearch.googleapis.com/customsearch/v1?api_key=test&engine_id=test",
-	}
-	p, err := NewGoogleProvider(cfg)
+	setGoogleEnv("https://customsearch.googleapis.com/customsearch/v1?api_key=test&engine_id=test")
+	defer unsetGoogleEnv()
+	p, err := NewGoogleProvider()
 	if err != nil {
 		t.Fatalf("failed to create Google provider: %v", err)
 	}
@@ -115,10 +118,9 @@ func TestGoogleProvider_Search(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := config.WebSearchProviderConfig{
-		APIURL: fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL),
-	}
-	prov, err := NewGoogleProvider(cfg)
+	setGoogleEnv(fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL))
+	defer unsetGoogleEnv()
+	prov, err := NewGoogleProvider()
 	if err != nil {
 		t.Fatalf("failed to create Google provider: %v", err)
 	}
@@ -154,10 +156,9 @@ func TestGoogleProvider_Search(t *testing.T) {
 }
 
 func TestGoogleProvider_Search_EmptyQuery(t *testing.T) {
-	cfg := config.WebSearchProviderConfig{
-		APIURL: "https://customsearch.googleapis.com/customsearch/v1?api_key=test&engine_id=test",
-	}
-	prov, err := NewGoogleProvider(cfg)
+	setGoogleEnv("https://customsearch.googleapis.com/customsearch/v1?api_key=test&engine_id=test")
+	defer unsetGoogleEnv()
+	prov, err := NewGoogleProvider()
 	if err != nil {
 		t.Fatalf("failed to create Google provider: %v", err)
 	}
@@ -188,10 +189,9 @@ func TestGoogleProvider_Search_NoResults(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := config.WebSearchProviderConfig{
-		APIURL: fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL),
-	}
-	prov, err := NewGoogleProvider(cfg)
+	setGoogleEnv(fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL))
+	defer unsetGoogleEnv()
+	prov, err := NewGoogleProvider()
 	if err != nil {
 		t.Fatalf("failed to create Google provider: %v", err)
 	}
@@ -214,10 +214,9 @@ func TestGoogleProvider_Search_ErrorResponse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := config.WebSearchProviderConfig{
-		APIURL: fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL),
-	}
-	prov, err := NewGoogleProvider(cfg)
+	setGoogleEnv(fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL))
+	defer unsetGoogleEnv()
+	prov, err := NewGoogleProvider()
 	if err != nil {
 		t.Fatalf("failed to create Google provider: %v", err)
 	}
@@ -254,10 +253,9 @@ func TestGoogleProvider_Search_MaxResults(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	cfg := config.WebSearchProviderConfig{
-		APIURL: fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL),
-	}
-	prov, err := NewGoogleProvider(cfg)
+	setGoogleEnv(fmt.Sprintf("%s/customsearch/v1?api_key=test-key&engine_id=test-engine-id", ts.URL))
+	defer unsetGoogleEnv()
+	prov, err := NewGoogleProvider()
 	if err != nil {
 		t.Fatalf("failed to create Google provider: %v", err)
 	}
