@@ -29,7 +29,7 @@
             >
               <div class="org-option-content">
                 <div class="org-option-icon-wrap">
-                  <img src="@/assets/img/organization.svg" class="org-option-icon" alt="" aria-hidden="true" />
+                  <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
                 </div>
                 <div class="org-option-body">
                   <div class="org-option-header">
@@ -43,11 +43,11 @@
                   </div>
                   <div class="org-option-meta">
                     <span class="org-meta-item">
-                      <t-icon name="usergroup" size="12px" />
+                      <t-icon name="user" class="org-meta-icon org-meta-icon-user" />
                       {{ org.member_count || 0 }} {{ $t('organization.members') }}
                     </span>
                     <span v-if="org.share_count !== undefined" class="org-meta-item">
-                      <t-icon name="share" size="12px" />
+                      <img src="@/assets/img/zhishiku.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
                       {{ org.share_count }} {{ $t('organization.share.sharedKBs') }}
                     </span>
                   </div>
@@ -96,7 +96,11 @@
       <div v-else class="share-items">
         <div v-for="share in shares" :key="share.id" class="share-item">
           <div class="share-info">
-            <img src="@/assets/img/organization.svg" class="share-org-icon" alt="" aria-hidden="true" />
+            <SpaceAvatar
+              :name="share.organization_name || ''"
+              :avatar="orgStore.organizations.find(o => o.id === share.organization_id)?.avatar"
+              size="small"
+            />
             <span class="share-org-name">{{ share.organization_name }}</span>
             <t-tag :theme="share.permission === 'editor' ? 'warning' : 'default'" size="small">
               {{ share.permission === 'editor' ? $t('organization.share.permissionEditable') : $t('organization.share.permissionReadonly') }}
@@ -131,6 +135,7 @@ import { useRouter } from 'vue-router'
 import { useOrganizationStore } from '@/stores/organization'
 import { shareKnowledgeBase, listKBShares, removeShare } from '@/api/organization'
 import type { KnowledgeBaseShare } from '@/api/organization'
+import SpaceAvatar from '@/components/SpaceAvatar.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -347,12 +352,6 @@ function handleGoToOrgSettings(orgId: string) {
   gap: 10px;
 }
 
-.share-org-icon {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
 .share-org-name {
   font-weight: 500;
 }
@@ -393,18 +392,9 @@ function handleGoToOrgSettings(orgId: string) {
 
 .org-option-icon-wrap {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: rgba(0, 82, 217, 0.06);
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.org-option-icon {
-  width: 16px;
-  height: 16px;
 }
 
 .org-option-body {
@@ -434,13 +424,31 @@ function handleGoToOrgSettings(orgId: string) {
   align-items: center;
   gap: 12px;
   font-family: "PingFang SC";
-  font-size: 11px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
 
   .org-meta-item {
     display: flex;
     align-items: center;
     gap: 3px;
+  }
+
+  .org-meta-icon {
+    flex-shrink: 0;
+    vertical-align: middle;
+    color: var(--td-text-color-secondary);
+  }
+
+  .org-meta-icon-user {
+    font-size: 14px;
+    margin-right: 2px;
+  }
+
+  .org-meta-icon-kb {
+    width: 14px;
+    height: 14px;
+    margin-right: 2px;
+    opacity: 0.75;
   }
 }
 </style>

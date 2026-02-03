@@ -53,22 +53,30 @@
           <!-- 当前知识库权限与来源信息 -->
           <div v-if="kbInfo" class="faq-access-info">
             <span class="faq-access-role">
+              <t-icon name="user" class="faq-access-item-icon" />
               <span class="faq-access-label">{{ $t('knowledgeBase.accessInfo.myRole') }}：</span>
               <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')">
                 {{ accessRoleLabel }}
               </t-tag>
+              <t-tooltip :content="accessPermissionSummary" placement="top">
+                <t-icon name="help-circle" class="faq-access-item-icon faq-access-permission-tip" />
+              </t-tooltip>
             </span>
-            <span class="faq-access-summary">{{ accessPermissionSummary }}</span>
             <template v-if="currentSharedKb">
               <span class="faq-access-sep">·</span>
               <span class="faq-access-source">
+                <img src="@/assets/img/organization-green.svg" class="faq-access-org-icon" alt="" aria-hidden="true" />
                 {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                <t-icon name="time" class="faq-access-item-icon" />
                 {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
               </span>
             </template>
             <template v-else-if="kbLastUpdated">
               <span class="faq-access-sep">·</span>
-              <span class="faq-access-updated">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+              <span class="faq-access-updated">
+                <t-icon name="time" class="faq-access-item-icon" />
+                {{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}
+              </span>
             </template>
           </div>
         </div>
@@ -3860,8 +3868,19 @@ watch(() => entries.value.map(e => ({
     gap: 6px;
   }
 
-  .faq-access-summary {
+  .faq-access-permission-tip {
+    cursor: help;
+    opacity: 0.7;
+  }
+
+  .faq-access-permission-tip:hover {
+    opacity: 1;
+  }
+
+  .faq-access-item-icon {
+    font-size: 14px;
     color: #86909c;
+    flex-shrink: 0;
   }
 
   .faq-access-sep {
@@ -3871,7 +3890,17 @@ watch(() => entries.value.map(e => ({
 
   .faq-access-source,
   .faq-access-updated {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     color: #86909c;
+  }
+
+  .faq-access-org-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    vertical-align: middle;
   }
 }
 

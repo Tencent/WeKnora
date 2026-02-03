@@ -184,32 +184,14 @@
           }"
           @click="handleSharedKbClickFromAll(kb)"
         >
-          <!-- 共享标识 -->
-          <div class="shared-badge">
-            <t-icon name="share" size="12px" />
-            <span>{{ $t('knowledgeList.sharedLabel') }}</span>
-          </div>
           <!-- 卡片头部 -->
           <div class="card-header">
             <span class="card-title" :title="kb.name">{{ kb.name }}</span>
-            <t-popup
-              overlayClassName="card-more-popup"
-              trigger="click"
-              destroy-on-close
-              placement="bottom-right"
-            >
-              <div class="more-wrap" @click.stop>
-                <img class="more-icon" src="@/assets/img/more.png" alt="" />
-              </div>
-              <template #content>
-                <div class="popup-menu" @click.stop>
-                  <div class="popup-menu-item" @click.stop="handleViewSharedKbDetailFromAll(kb)">
-                    <t-icon class="menu-icon" name="browse" />
-                    <span>{{ $t('knowledgeList.menu.viewDetails') }}</span>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
+            <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+              <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetailFromAll(kb)" :aria-label="$t('knowledgeList.menu.viewDetails')">
+                <t-icon name="info-circle" size="16px" />
+              </button>
+            </t-tooltip>
           </div>
 
           <!-- 卡片内容 -->
@@ -249,7 +231,7 @@
             <div class="bottom-right">
               <t-tooltip :content="kb.org_name" placement="top">
                   <div class="org-source">
-                    <img src="@/assets/img/organization.svg" class="org-source-icon" alt="" aria-hidden="true" />
+                    <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
                     <span>{{ kb.org_name }}</span>
                   </div>
                 </t-tooltip>
@@ -366,32 +348,15 @@
         }"
         @click="handleSharedKbClick(shared)"
       >
-        <!-- 共享标识 -->
-        <div class="shared-badge">
-          <t-icon name="share" size="12px" />
-          <span>{{ $t('knowledgeList.sharedLabel') }}</span>
-        </div>
         <!-- 卡片头部 -->
         <div class="card-header">
           <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-          <t-popup
-            overlayClassName="card-more-popup"
-            trigger="click"
-            destroy-on-close
-            placement="bottom-right"
-          >
-            <div class="more-wrap" @click.stop>
-              <img class="more-icon" src="@/assets/img/more.png" alt="" />
-            </div>
-            <template #content>
-              <div class="popup-menu" @click.stop>
-                <div class="popup-menu-item" @click.stop="handleViewSharedKbDetail(shared)">
-                  <t-icon class="menu-icon" name="browse" />
-                  <span>{{ $t('knowledgeList.menu.viewDetails') }}</span>
-                </div>
-              </div>
-            </template>
-          </t-popup>
+          <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+            <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)" :aria-label="$t('knowledgeList.menu.viewDetails')">
+              <t-icon name="info-circle" size="16px" />
+              <span>{{ $t('knowledgeList.menu.viewDetails') }}</span>
+            </button>
+          </t-tooltip>
         </div>
 
         <!-- 卡片内容 -->
@@ -416,7 +381,7 @@
           <div class="bottom-right">
             <t-tooltip :content="shared.org_name" placement="top">
               <div class="org-source">
-                <img src="@/assets/img/organization.svg" class="org-source-icon" alt="" aria-hidden="true" />
+                <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
                 <span>{{ shared.org_name }}</span>
               </div>
             </t-tooltip>
@@ -487,135 +452,52 @@
       @shared="handleShareSuccess"
     />
 
-    <!-- 共享知识库详情对话框（与知识库设置一致的结构与样式） -->
+    <!-- 右侧：共享知识库详情面板 -->
     <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="sharedKbDetailVisible" class="shared-kb-overlay" @click.self="sharedKbDetailVisible = false">
-          <div class="shared-kb-modal">
-            <button class="close-btn" @click="sharedKbDetailVisible = false" :aria-label="$t('general.close')">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </button>
-
-            <div class="settings-container" v-if="currentSharedKb">
-              <div class="settings-sidebar">
-                <div class="sidebar-header">
-                  <h2 class="sidebar-title">{{ t('knowledgeList.detail.title') }}</h2>
-                </div>
-                <div class="settings-nav">
-                  <div
-                    :class="['nav-item', { active: currentDetailSection === 'overview' }]"
-                    @click="currentDetailSection = 'overview'"
-                  >
-                    <t-icon name="info-circle" class="nav-icon" />
-                    <span class="nav-label">{{ t('knowledgeList.detail.overview') }}</span>
-                  </div>
-                  <div
-                    :class="['nav-item', { active: currentDetailSection === 'permission' }]"
-                    @click="currentDetailSection = 'permission'"
-                  >
-                    <t-icon name="lock-on" class="nav-icon" />
-                    <span class="nav-label">{{ t('knowledgeList.detail.permission') }}</span>
-                  </div>
-                </div>
+      <Transition name="shared-detail-drawer">
+        <div v-if="sharedDetailPanelVisible && currentSharedKbForDetail" class="shared-detail-drawer-overlay" @click.self="closeSharedDetailPanel">
+          <div class="shared-detail-drawer">
+            <div class="shared-detail-drawer-header">
+              <h3 class="shared-detail-drawer-title">{{ $t('knowledgeList.detail.title') }}</h3>
+              <button type="button" class="shared-detail-drawer-close" @click="closeSharedDetailPanel" :aria-label="$t('general.close')">
+                <t-icon name="close" size="20px" />
+              </button>
+            </div>
+            <div class="shared-detail-drawer-body">
+              <div class="shared-detail-row">
+                <span class="shared-detail-label">{{ $t('knowledgeBase.name') }}</span>
+                <span class="shared-detail-value">{{ currentSharedKbForDetail.knowledge_base.name }}</span>
               </div>
-
-              <div class="settings-content">
-                <div class="content-wrapper">
-                  <div v-show="currentDetailSection === 'overview'" class="section">
-                    <div class="section-content">
-                      <div class="section-header">
-                        <h3 class="section-title">{{ t('knowledgeList.detail.overview') }}</h3>
-                        <p class="section-desc">{{ t('knowledgeList.detail.overviewDesc') }}</p>
-                      </div>
-                      <div class="section-body">
-                        <div class="form-item read-only-row">
-                          <label class="form-label">{{ t('knowledgeBase.name') }}</label>
-                          <div class="form-value-row">{{ currentSharedKb.knowledge_base.name }}</div>
-                        </div>
-                        <div class="form-item read-only-row">
-                          <label class="form-label">{{ t('knowledgeBase.description') }}</label>
-                          <div class="form-value-row form-value-desc">{{ currentSharedKb.knowledge_base.description || t('knowledgeBase.noDescription') }}</div>
-                        </div>
-                        <div class="form-item read-only-row">
-                          <label class="form-label">{{ t('knowledgeEditor.basic.typeLabel') }}</label>
-                          <div class="form-value-row">
-                            <t-tag
-                              size="medium"
-                              :theme="currentSharedKb.knowledge_base.type === 'faq' ? 'primary' : 'success'"
-                            >
-                              {{ currentSharedKb.knowledge_base.type === 'faq' ? t('knowledgeEditor.basic.typeFAQ') : t('knowledgeEditor.basic.typeDocument') }}
-                            </t-tag>
-                          </div>
-                        </div>
-                        <div class="form-item read-only-row">
-                          <label class="form-label">{{ t('knowledgeList.detail.sourceOrg') }}</label>
-                          <div class="form-value-row form-value-org">
-                            <img src="@/assets/img/organization.svg" class="form-value-org-icon" alt="" aria-hidden="true" />
-                            <span>{{ currentSharedKb.org_name }}</span>
-                          </div>
-                        </div>
-                        <div class="form-item read-only-row">
-                          <label class="form-label">{{ t('knowledgeList.detail.sharedAt') }}</label>
-                          <div class="form-value-row">{{ formatStringDate(new Date(currentSharedKb.shared_at)) }}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-show="currentDetailSection === 'permission'" class="section">
-                    <div class="section-content">
-                      <div class="section-header">
-                        <h3 class="section-title">{{ t('knowledgeList.detail.permission') }}</h3>
-                        <p class="section-desc">{{ t('knowledgeList.detail.permissionDesc') }}</p>
-                      </div>
-                      <div class="section-body">
-                        <div class="form-item">
-                          <label class="form-label">{{ t('knowledgeList.detail.myPermission') }}</label>
-                          <div class="form-value-row">
-                            <t-tag
-                              size="medium"
-                              :theme="currentSharedKb.permission === 'admin' ? 'primary' : currentSharedKb.permission === 'editor' ? 'warning' : 'default'"
-                            >
-                              {{ t(`organization.role.${currentSharedKb.permission}`) }}
-                            </t-tag>
-                          </div>
-                        </div>
-                        <div class="permission-list">
-                          <div class="permission-item" :class="{ allowed: currentSharedKb.permission !== 'viewer' }">
-                            <t-icon :name="currentSharedKb.permission !== 'viewer' ? 'check-circle' : 'close-circle'" size="18px" />
-                            <span>{{ t('knowledgeList.detail.canEdit') }}</span>
-                          </div>
-                          <div class="permission-item allowed">
-                            <t-icon name="check-circle" size="18px" />
-                            <span>{{ t('knowledgeList.detail.canView') }}</span>
-                          </div>
-                          <div class="permission-item allowed">
-                            <t-icon name="check-circle" size="18px" />
-                            <span>{{ t('knowledgeList.detail.canSearch') }}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="settings-footer">
-                  <t-button theme="default" variant="outline" @click="sharedKbDetailVisible = false">
-                    {{ t('common.close') }}
-                  </t-button>
-                  <t-button theme="primary" @click="goToSharedKb">
-                    <t-icon name="browse" style="margin-right: 4px;" />
-                    {{ t('knowledgeList.detail.goToKb') }}
-                  </t-button>
-                </div>
+              <div class="shared-detail-row">
+                <span class="shared-detail-label">{{ $t('knowledgeList.detail.sourceOrg') }}</span>
+                <span class="shared-detail-value shared-detail-org">
+                  <img src="@/assets/img/organization-green.svg" class="shared-detail-org-icon" alt="" aria-hidden="true" />
+                  {{ currentSharedKbForDetail.org_name }}
+                </span>
               </div>
+              <div class="shared-detail-row">
+                <span class="shared-detail-label">{{ $t('knowledgeList.detail.sharedAt') }}</span>
+                <span class="shared-detail-value">{{ formatStringDate(new Date(currentSharedKbForDetail.shared_at)) }}</span>
+              </div>
+              <div class="shared-detail-row">
+                <span class="shared-detail-label">{{ $t('knowledgeList.detail.myPermission') }}</span>
+                <t-tag size="small" :theme="currentSharedKbForDetail.permission === 'admin' ? 'primary' : currentSharedKbForDetail.permission === 'editor' ? 'warning' : 'default'">
+                  {{ $t(`organization.role.${currentSharedKbForDetail.permission}`) }}
+                </t-tag>
+              </div>
+            </div>
+            <div class="shared-detail-drawer-footer">
+              <t-button theme="default" variant="outline" @click="closeSharedDetailPanel">{{ $t('common.close') }}</t-button>
+              <t-button theme="primary" class="go-to-kb-btn" @click="goToSharedKbFromPanel">
+                <t-icon name="browse" />
+                {{ $t('knowledgeList.detail.goToKb') }}
+              </t-button>
             </div>
           </div>
         </div>
       </Transition>
     </Teleport>
+
   </div>
 </template>
 
@@ -844,31 +726,35 @@ const handleSharedKbClickFromAll = (kb: any) => {
   router.push(`/platform/knowledge-bases/${kb.id}`)
 }
 
-// 处理"全部"Tab 中的共享知识库"查看详情"菜单项点击（弹出详情弹窗）
-const handleViewSharedKbDetailFromAll = (kb: any) => {
+// 右侧详情面板：共享知识库详情
+const sharedDetailPanelVisible = ref(false)
+const currentSharedKbForDetail = ref<SharedKnowledgeBase | null>(null)
+
+const closeSharedDetailPanel = () => {
+  sharedDetailPanelVisible.value = false
+  currentSharedKbForDetail.value = null
+}
+
+// 打开右侧详情面板（全部 Tab 共享卡片）
+const openSharedDetailFromAll = (kb: any) => {
   const sharedKb = sharedKbs.value.find(s => s.knowledge_base.id === kb.id)
   if (sharedKb) {
-    currentSharedKb.value = sharedKb
-    currentDetailSection.value = 'overview'
-    sharedKbDetailVisible.value = true
+    currentSharedKbForDetail.value = sharedKb
+    sharedDetailPanelVisible.value = true
   }
 }
 
-// 处理"共享给我"Tab 中的共享知识库"查看详情"菜单项点击
-const handleViewSharedKbDetail = (sharedKb: SharedKnowledgeBase) => {
-  currentSharedKb.value = sharedKb
-  currentDetailSection.value = 'overview'
-  sharedKbDetailVisible.value = true
+// 打开右侧详情面板（共享给我 Tab）
+const openSharedDetail = (sharedKb: SharedKnowledgeBase) => {
+  currentSharedKbForDetail.value = sharedKb
+  sharedDetailPanelVisible.value = true
 }
 
-const sharedKbDetailVisible = ref(false)
-const currentSharedKb = ref<SharedKnowledgeBase | null>(null)
-const currentDetailSection = ref<'overview' | 'permission'>('overview')
-
-const goToSharedKb = () => {
-  if (currentSharedKb.value) {
-    sharedKbDetailVisible.value = false
-    router.push(`/platform/knowledge-bases/${currentSharedKb.value.knowledge_base.id}`)
+// 从右侧面板进入知识库
+const goToSharedKbFromPanel = () => {
+  if (currentSharedKbForDetail.value) {
+    router.push(`/platform/knowledge-bases/${currentSharedKbForDetail.value.knowledge_base.id}`)
+    closeSharedDetailPanel()
   }
 }
 
@@ -1224,32 +1110,36 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-// 来源组织（空间图标）
+// 来源组织（空间图标 + 空间名）
 .org-source {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 4px;
+  gap: 5px;
+  padding: 3px 8px;
+  background: rgba(7, 192, 95, 0.06);
+  border-radius: 6px;
   font-size: 12px;
-  color: #666;
-  max-width: 120px;
+  line-height: 1.4;
+  color: #4e5969;
+  max-width: 140px;
+  transition: background-color 0.15s ease;
 
   span {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 500;
   }
 
   .org-source-icon {
     width: 14px;
     height: 14px;
     flex-shrink: 0;
+    vertical-align: middle;
   }
 
   .t-icon {
-    color: #999;
+    color: #07c05f;
     flex-shrink: 0;
   }
 }
@@ -1329,286 +1219,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   .t-icon {
     color: #d46b08;
     flex-shrink: 0;
-  }
-}
-
-// 共享知识库详情对话框（与知识库设置 KnowledgeBaseEditorModal 一致的结构与样式）
-.shared-kb-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-}
-
-.shared-kb-overlay .shared-kb-modal {
-  position: relative;
-  width: 90vw;
-  max-width: 800px;
-  height: 85vh;
-  max-height: 600px;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.shared-kb-overlay .shared-kb-modal {
-  .settings-container {
-    display: flex;
-    height: 100%;
-    overflow: hidden;
-  }
-
-  .settings-sidebar {
-    width: 200px;
-    background: #fafafa;
-    border-right: 1px solid #e5e5e5;
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-
-  .sidebar-header {
-    padding: 24px 20px;
-    border-bottom: 1px solid #e5e5e5;
-  }
-
-  .sidebar-title {
-    margin: 0;
-    font-family: "PingFang SC";
-    font-size: 18px;
-    font-weight: 600;
-    color: #000000e6;
-  }
-
-  .settings-nav {
-    flex: 1;
-    padding: 12px 8px;
-    overflow-y: auto;
-  }
-
-  .nav-item {
-    display: flex;
-    align-items: center;
-    padding: 10px 12px;
-    margin-bottom: 4px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: "PingFang SC";
-    font-size: 14px;
-    color: #00000099;
-
-    .nav-icon {
-      margin-right: 8px;
-      font-size: 18px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .nav-label {
-      flex: 1;
-    }
-
-    &:hover {
-      background: #f0f0f0;
-    }
-
-    &.active {
-      background: #07c05f1a;
-      color: #07c05f;
-      font-weight: 500;
-    }
-  }
-
-  .settings-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .content-wrapper {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px 32px;
-  }
-
-  .section {
-    margin-bottom: 32px;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-
-  .section-content .section-header {
-    margin-bottom: 20px;
-  }
-
-  .section-content .section-title {
-    margin: 0 0 8px 0;
-    font-family: "PingFang SC";
-    font-size: 16px;
-    font-weight: 600;
-    color: #000000e6;
-  }
-
-  .section-content .section-desc {
-    margin: 0;
-    font-family: "PingFang SC";
-    font-size: 14px;
-    color: #00000066;
-    line-height: 22px;
-  }
-
-  .section-body {
-    background: #fff;
-  }
-
-  .form-item {
-    margin-bottom: 20px;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-
-  .form-label {
-    display: block;
-    margin-bottom: 8px;
-    font-family: "PingFang SC";
-    font-size: 14px;
-    font-weight: 500;
-    color: #000000e6;
-  }
-
-  .form-value-row {
-    display: flex;
-    align-items: center;
-    min-height: 32px;
-    font-size: 14px;
-    color: #1a1a1a;
-
-    .form-value-icon {
-      color: #07c05f;
-      margin-right: 6px;
-    }
-  }
-
-  .form-item.read-only-row .form-value-row {
-    min-height: auto;
-    padding: 8px 0;
-    border: none;
-    background: transparent;
-    font-family: "PingFang SC";
-    word-break: break-word;
-  }
-
-  .form-value-desc {
-    align-items: flex-start;
-    white-space: pre-wrap;
-    line-height: 1.5;
-    color: #00000099;
-  }
-
-  .form-value-org {
-    gap: 8px;
-  }
-
-  .form-value-org-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-  }
-
-  .permission-list {
-    margin-top: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .permission-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 16px;
-    background: #fafafa;
-    border-radius: 8px;
-    font-size: 14px;
-    color: #666;
-
-    .t-icon {
-      color: #d9d9d9;
-      flex-shrink: 0;
-    }
-
-    &.allowed {
-      color: #1a1a1a;
-
-      .t-icon {
-        color: #07c05f;
-      }
-    }
-  }
-
-  .settings-footer {
-    padding: 16px 32px;
-    border-top: 1px solid #e5e5e5;
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-    background: #fff;
-    flex-shrink: 0;
-  }
-}
-
-.shared-kb-overlay .close-btn {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: #f5f5f5;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #666;
-  transition: all 0.2s ease;
-  z-index: 10;
-
-  &:hover {
-    background: #e5e5e5;
-    color: #000;
-  }
-}
-
-.shared-kb-overlay .modal-enter-active,
-.shared-kb-overlay .modal-leave-active {
-  transition: all 0.3s ease;
-}
-
-.shared-kb-overlay .modal-enter-from,
-.shared-kb-overlay .modal-leave-to {
-  opacity: 0;
-
-  .shared-kb-modal {
-    transform: scale(0.95);
   }
 }
 
@@ -2267,6 +1877,165 @@ const handleUploadFinishedEvent = (event: Event) => {
         color: #fa5151;
       }
     }
+  }
+}
+
+// 共享知识库卡片：详情触发（替代三点，用「查看详情」链接样式）
+.shared-detail-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #07c05f;
+  font-size: 13px;
+  font-family: "PingFang SC", sans-serif;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+
+  .t-icon {
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    background: rgba(7, 192, 95, 0.08);
+    color: #059655;
+  }
+}
+
+// 右侧滑出：共享知识库详情面板
+.shared-detail-drawer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.shared-detail-drawer {
+  width: 360px;
+  max-width: 90vw;
+  height: 100%;
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  font-family: "PingFang SC", sans-serif;
+}
+
+.shared-detail-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e7ebf0;
+  flex-shrink: 0;
+}
+
+.shared-detail-drawer-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.shared-detail-drawer-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: #f5f6f8;
+  color: #86909c;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+
+  &:hover {
+    background: #e7ebf0;
+    color: #1d2129;
+  }
+}
+
+.shared-detail-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.shared-detail-drawer-body .shared-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shared-detail-drawer-body .shared-detail-label {
+  font-size: 12px;
+  color: #86909c;
+  line-height: 1.4;
+}
+
+.shared-detail-drawer-body .shared-detail-value {
+  font-size: 14px;
+  color: #1d2129;
+  line-height: 1.5;
+  word-break: break-word;
+
+  &.shared-detail-org {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+}
+
+.shared-detail-drawer-body .shared-detail-org-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.shared-detail-drawer-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e7ebf0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+  background: #fff;
+
+  .go-to-kb-btn .t-button__text {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+// 右侧滑入动画
+.shared-detail-drawer-enter-active,
+.shared-detail-drawer-leave-active {
+  transition: opacity 0.25s ease;
+
+  .shared-detail-drawer {
+    transition: transform 0.25s ease;
+  }
+}
+
+.shared-detail-drawer-enter-from,
+.shared-detail-drawer-leave-to {
+  opacity: 0;
+
+  .shared-detail-drawer {
+    transform: translateX(100%);
   }
 }
 

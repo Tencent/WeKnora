@@ -1152,22 +1152,30 @@ async function createNewSession(value: string): Promise<void> {
           <!-- 当前知识库权限与来源信息 -->
           <div v-if="kbInfo" class="kb-access-info">
             <span class="kb-access-role">
+              <t-icon name="user" class="kb-access-item-icon" />
               <span class="kb-access-label">{{ $t('knowledgeBase.accessInfo.myRole') }}：</span>
               <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')">
                 {{ accessRoleLabel }}
               </t-tag>
+              <t-tooltip :content="accessPermissionSummary" placement="top">
+                <t-icon name="help-circle" class="kb-access-item-icon kb-access-permission-tip" />
+              </t-tooltip>
             </span>
-            <span class="kb-access-summary">{{ accessPermissionSummary }}</span>
             <template v-if="currentSharedKb">
               <span class="kb-access-sep">·</span>
               <span class="kb-access-source">
+                <img src="@/assets/img/organization-green.svg" class="kb-access-org-icon" alt="" aria-hidden="true" />
                 {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                <t-icon name="time" class="kb-access-item-icon" />
                 {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
               </span>
             </template>
             <template v-else-if="kbLastUpdated">
               <span class="kb-access-sep">·</span>
-              <span class="kb-access-updated">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+              <span class="kb-access-updated">
+                <t-icon name="time" class="kb-access-item-icon" />
+                {{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}
+              </span>
             </template>
           </div>
         </div>
@@ -2248,8 +2256,13 @@ async function createNewSession(value: string): Promise<void> {
     gap: 6px;
   }
 
-  .kb-access-summary {
-    color: #86909c;
+  .kb-access-permission-tip {
+    cursor: help;
+    opacity: 0.7;
+  }
+
+  .kb-access-permission-tip:hover {
+    opacity: 1;
   }
 
   .kb-access-sep {
@@ -2259,7 +2272,23 @@ async function createNewSession(value: string): Promise<void> {
 
   .kb-access-source,
   .kb-access-updated {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     color: #86909c;
+  }
+
+  .kb-access-item-icon {
+    font-size: 14px;
+    color: #86909c;
+    flex-shrink: 0;
+  }
+
+  .kb-access-org-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    vertical-align: middle;
   }
 }
 
