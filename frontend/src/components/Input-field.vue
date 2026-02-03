@@ -1132,13 +1132,32 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 
 const emit = defineEmits(['send-msg', 'stop-generation']);
 
-const createSession = (val: string) => {
+const createSession = async (val: string) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
   }
   if (props.isReplying) {
     return MessagePlugin.error(t('input.messages.replying'));
+  }
+  // 发送前校验当前选中的智能体（含默认快速问答）是否已配置完成
+  const agentToCheck = selectedAgent.value;
+  let actualAgent = agentToCheck;
+  if (agentToCheck.is_builtin) {
+    let builtin = agents.value.find(a => a.id === selectedAgentId.value);
+    if (!builtin) {
+      await loadAgents();
+      builtin = agents.value.find(a => a.id === selectedAgentId.value);
+    }
+    actualAgent = builtin || agentToCheck;
+  }
+  const isAgentMode = actualAgent.config?.agent_mode === 'smart-reasoning';
+  const notReadyReasons = actualAgent.is_builtin
+    ? getBuiltinAgentNotReadyReasons(actualAgent, isAgentMode)
+    : getCustomAgentNotReadyReasons(actualAgent);
+  if (notReadyReasons.length > 0) {
+    showAgentNotReadyMessage(actualAgent, notReadyReasons);
+    return;
   }
   // 获取@提及的知识库和文件信息
   const mentionedItems = allSelectedItems.value.map(item => ({
