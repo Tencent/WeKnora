@@ -19,7 +19,7 @@ import (
 const DefaultInviteCodeValidityDays = 7
 
 // DefaultMemberLimit is the default max members per organization (0 = unlimited)
-const DefaultMemberLimit = 50
+const DefaultMemberLimit = 200
 
 // ValidInviteCodeValidityDays are the allowed values for invite_code_validity_days
 var ValidInviteCodeValidityDays = map[int]bool{0: true, 1: true, 7: true, 30: true}
