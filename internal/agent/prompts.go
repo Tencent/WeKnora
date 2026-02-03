@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -193,6 +194,28 @@ func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseIn
 	return result
 }
 
+// formatSkillsMetadata formats skills metadata for the system prompt (Level 1 - Progressive Disclosure)
+// This is a lightweight representation that only includes skill name and description
+func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
+	if len(skillsMetadata) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("\n### Available Skills\n\n")
+	builder.WriteString("The following skills are available. When a user request matches a skill's description, ")
+	builder.WriteString("use the `read_skill` tool to load its full instructions before proceeding.\n\n")
+
+	for i, skill := range skillsMetadata {
+		builder.WriteString(fmt.Sprintf("%d. **%s**: %s\n", i+1, skill.Name, skill.Description))
+	}
+
+	builder.WriteString("\nUse `read_skill` with the skill name to load detailed instructions when needed.\n")
+	builder.WriteString("Use `execute_skill_script` to run utility scripts bundled with a skill.\n")
+
+	return builder.String()
+}
+
 // formatSelectedDocuments formats selected documents for the prompt (summary only, no content)
 func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
 	if len(docs) == 0 {
@@ -230,6 +253,7 @@ func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
 //   - {{knowledge_bases}}
 //   - {{web_search_status}} -> "Enabled" or "Disabled"
 //   - {{current_time}} -> current time string
+//   - {{skills}} -> formatted skills metadata (if any)
 func renderPromptPlaceholdersWithStatus(
 	template string,
 	knowledgeBases []*KnowledgeBaseInfo,
@@ -246,6 +270,11 @@ func renderPromptPlaceholdersWithStatus(
 	}
 	if strings.Contains(result, "{{current_time}}") {
 		result = strings.ReplaceAll(result, "{{current_time}}", currentTime)
+	}
+	// Remove {{skills}} placeholder if present but no skills provided
+	// (it will be appended separately if skills exist)
+	if strings.Contains(result, "{{skills}}") {
+		result = strings.ReplaceAll(result, "{{skills}}", "")
 	}
 	return result
 }
@@ -298,12 +327,28 @@ func BuildPureAgentSystemPrompt(
 	return renderPromptPlaceholdersWithStatus(template, []*KnowledgeBaseInfo{}, webSearchEnabled, currentTime)
 }
 
+// BuildSystemPromptOptions contains optional parameters for BuildSystemPrompt
+type BuildSystemPromptOptions struct {
+	SkillsMetadata []*skills.SkillMetadata
+}
+
 // BuildSystemPrompt builds the progressive RAG system prompt
 // This is the main function to use - it uses a unified template with dynamic web search status
 func BuildSystemPrompt(
 	knowledgeBases []*KnowledgeBaseInfo,
 	webSearchEnabled bool,
 	selectedDocs []*SelectedDocumentInfo,
+	systemPromptTemplate ...string,
+) string {
+	return BuildSystemPromptWithOptions(knowledgeBases, webSearchEnabled, selectedDocs, nil, systemPromptTemplate...)
+}
+
+// BuildSystemPromptWithOptions builds the system prompt with additional options like skills
+func BuildSystemPromptWithOptions(
+	knowledgeBases []*KnowledgeBaseInfo,
+	webSearchEnabled bool,
+	selectedDocs []*SelectedDocumentInfo,
+	options *BuildSystemPromptOptions,
 	systemPromptTemplate ...string,
 ) string {
 	var basePrompt string
@@ -324,6 +369,11 @@ func BuildSystemPrompt(
 	// Append selected documents section if any
 	if len(selectedDocs) > 0 {
 		basePrompt += formatSelectedDocuments(selectedDocs)
+	}
+
+	// Append skills metadata if available (Level 1 - Progressive Disclosure)
+	if options != nil && len(options.SkillsMetadata) > 0 {
+		basePrompt += formatSkillsMetadata(options.SkillsMetadata)
 	}
 
 	return basePrompt
