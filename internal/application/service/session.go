@@ -843,6 +843,66 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 	}
 }
 
+// configureSkillsFromAgent configures skills settings in AgentConfig based on CustomAgentConfig
+// Returns the skill directories and allowed skills based on the selection mode:
+//   - "all": uses all preloaded skills
+//   - "selected": uses the explicitly selected skills
+//   - "none" or "": skills are disabled
+func (s *sessionService) configureSkillsFromAgent(
+	ctx context.Context,
+	agentConfig *types.AgentConfig,
+	customAgent *types.CustomAgent,
+) {
+	if customAgent == nil {
+		return
+	}
+
+	switch customAgent.Config.SkillsSelectionMode {
+	case "all":
+		// Enable all preloaded skills
+		agentConfig.SkillsEnabled = true
+		agentConfig.SkillDirs = []string{DefaultPreloadedSkillsDir}
+		agentConfig.AllowedSkills = nil // Empty means all skills allowed
+		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all preloaded skills")
+	case "selected":
+		// Enable only selected skills
+		if len(customAgent.Config.SelectedSkills) > 0 {
+			agentConfig.SkillsEnabled = true
+			agentConfig.SkillDirs = []string{DefaultPreloadedSkillsDir}
+			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
+			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
+				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
+		} else {
+			agentConfig.SkillsEnabled = false
+			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")
+		}
+	case "none", "":
+		// Skills disabled
+		agentConfig.SkillsEnabled = false
+		logger.Infof(ctx, "SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
+	default:
+		// Unknown mode, disable skills
+		agentConfig.SkillsEnabled = false
+		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
+	}
+
+	// Configure sandbox mode for skill script execution
+	if agentConfig.SkillsEnabled {
+		// Set sandbox mode (default to "docker" when skills are enabled)
+		agentConfig.SandboxMode = customAgent.Config.SandboxMode
+		if agentConfig.SandboxMode == "" {
+			agentConfig.SandboxMode = "docker" // Default to docker for security
+		}
+		// Set sandbox timeout (default to 60 seconds)
+		agentConfig.SandboxTimeout = customAgent.Config.SandboxTimeout
+		if agentConfig.SandboxTimeout == 0 {
+			agentConfig.SandboxTimeout = 60
+		}
+		logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds",
+			agentConfig.SandboxMode, agentConfig.SandboxTimeout)
+	}
+}
+
 // buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs
 // This is called once at the request entry point to avoid repeated queries later in the pipeline
 // Logic:
@@ -1129,6 +1189,9 @@ func (s *sessionService) AgentQA(
 		Thinking:                    customAgent.Config.Thinking,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 	}
+
+	// Configure skills based on CustomAgentConfig
+	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
 
 	// Resolve knowledge bases: request-level @ mentions take priority over agent config
 	// If RetrieveKBOnlyWhenMentioned is enabled and no @ mentions, don't use KB at all

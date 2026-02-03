@@ -44,6 +44,7 @@ type ExecuteSkillScriptInput struct {
 	SkillName  string   `json:"skill_name" jsonschema:"Name of the skill containing the script"`
 	ScriptPath string   `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
 	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script"`
+	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin"`
 }
 
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox
@@ -98,10 +99,10 @@ func (t *ExecuteSkillScriptTool) Execute(ctx context.Context, args json.RawMessa
 	}
 
 	// Execute the script in sandbox
-	logger.Infof(ctx, "[Tool][ExecuteSkillScript] Executing script: %s/%s with args: %v",
-		input.SkillName, input.ScriptPath, input.Args)
+	logger.Infof(ctx, "[Tool][ExecuteSkillScript] Executing script: %s/%s with args: %v, input length: %d",
+		input.SkillName, input.ScriptPath, input.Args, len(input.Input))
 
-	result, err := t.skillManager.ExecuteScript(ctx, input.SkillName, input.ScriptPath, input.Args)
+	result, err := t.skillManager.ExecuteScript(ctx, input.SkillName, input.ScriptPath, input.Args, input.Input)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][ExecuteSkillScript] Script execution failed: %v", err)
 		return &types.ToolResult{

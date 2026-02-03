@@ -172,7 +172,7 @@ func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]strin
 }
 
 // ExecuteScript executes a script from a skill in the sandbox
-func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string) (*sandbox.ExecuteResult, error) {
+func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string, stdin string) (*sandbox.ExecuteResult, error) {
 	if !m.enabled {
 		return nil, fmt.Errorf("skills are not enabled")
 	}
@@ -207,6 +207,7 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 		Script:  file.Path,
 		Args:    args,
 		WorkDir: basePath,
+		Stdin:   stdin,
 	}
 
 	// Execute in sandbox

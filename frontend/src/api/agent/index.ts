@@ -21,6 +21,11 @@ export interface CustomAgentConfig {
   mcp_selection_mode?: 'all' | 'selected' | 'none';
   mcp_services?: string[];          // 选择的MCP服务ID列表
 
+  // ===== Skills设置（仅Agent模式）=====
+  // Skills选择模式：all=全部预装, selected=指定, none=不使用
+  skills_selection_mode?: 'all' | 'selected' | 'none';
+  selected_skills?: string[];       // 选择的Skill名称列表
+
   // ===== 知识库设置 =====
   // 知识库选择模式：all=全部知识库, selected=指定知识库, none=不使用知识库
   kb_selection_mode?: 'all' | 'selected' | 'none';

@@ -236,7 +236,7 @@ func (l *Loader) LoadSkillFile(skillName, relativePath string) (*SkillFile, erro
 
 	return &SkillFile{
 		Name:     relativePath,
-		Path:     fullPath,
+		Path:     absFilePath, // Use absolute path for sandbox execution
 		Content:  string(content),
 		IsScript: IsScript(relativePath),
 	}, nil
@@ -287,7 +287,7 @@ func (l *Loader) GetSkillByName(name string) (*Skill, bool) {
 	return skill, ok
 }
 
-// GetSkillBasePath returns the base path for a skill
+// GetSkillBasePath returns the base path for a skill (always absolute)
 func (l *Loader) GetSkillBasePath(skillName string) (string, error) {
 	skill, ok := l.discoveredSkills[skillName]
 	if !ok {
@@ -297,7 +297,8 @@ func (l *Loader) GetSkillBasePath(skillName string) (string, error) {
 			return "", fmt.Errorf("skill not found: %s", skillName)
 		}
 	}
-	return skill.BasePath, nil
+	// Return absolute path for consistent sandbox execution
+	return filepath.Abs(skill.BasePath)
 }
 
 // Reload clears the cache and rediscovers all skills

@@ -202,16 +202,27 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("\n### Available Skills\n\n")
-	builder.WriteString("The following skills are available. When a user request matches a skill's description, ")
-	builder.WriteString("use the `read_skill` tool to load its full instructions before proceeding.\n\n")
+	builder.WriteString("\n### Available Skills (IMPORTANT - READ CAREFULLY)\n\n")
+	builder.WriteString("**You MUST actively consider using these skills for EVERY user request.**\n\n")
 
+	builder.WriteString("#### Skill Matching Protocol (MANDATORY)\n\n")
+	builder.WriteString("Before responding to ANY user query, follow this checklist:\n\n")
+	builder.WriteString("1. **SCAN**: Read each skill's description and trigger conditions below\n")
+	builder.WriteString("2. **MATCH**: Check if the user's intent matches ANY skill's triggers (keywords, scenarios, or task types)\n")
+	builder.WriteString("3. **LOAD**: If a match is found, call `read_skill(skill_name=\"...\")` BEFORE generating your response\n")
+	builder.WriteString("4. **APPLY**: Follow the skill's instructions to provide a higher-quality, structured response\n\n")
+
+	builder.WriteString("**⚠️ CRITICAL**: Skill usage is MANDATORY when applicable. Do NOT skip skills to save time or tokens.\n\n")
+
+	builder.WriteString("#### Available Skills\n\n")
 	for i, skill := range skillsMetadata {
-		builder.WriteString(fmt.Sprintf("%d. **%s**: %s\n", i+1, skill.Name, skill.Description))
+		builder.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, skill.Name))
+		builder.WriteString(fmt.Sprintf("   %s\n\n", skill.Description))
 	}
 
-	builder.WriteString("\nUse `read_skill` with the skill name to load detailed instructions when needed.\n")
-	builder.WriteString("Use `execute_skill_script` to run utility scripts bundled with a skill.\n")
+	builder.WriteString("#### Tool Reference\n\n")
+	builder.WriteString("- `read_skill(skill_name)`: Load full skill instructions (MUST call before using a skill)\n")
+	builder.WriteString("- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n")
 
 	return builder.String()
 }

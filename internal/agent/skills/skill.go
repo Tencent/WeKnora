@@ -23,8 +23,8 @@ const (
 // Reserved words that cannot be used in skill names
 var reservedWords = []string{"anthropic", "claude"}
 
-// namePattern validates skill names: lowercase letters, numbers, and hyphens only
-var namePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
+// namePattern validates skill names: unicode letters, numbers only
+var namePattern = regexp.MustCompile(`^[\p{L}\p{N}-]+$`)
 
 // xmlTagPattern detects XML tags in content
 var xmlTagPattern = regexp.MustCompile(`<[^>]+>`)

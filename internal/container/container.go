@@ -197,6 +197,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewWebSearchHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
+	must(container.Provide(service.NewSkillService))
+	must(container.Provide(handler.NewSkillHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Router configuration
