@@ -62,6 +62,8 @@ func (h *SkillHandler) ListSkills(c *gin.Context) {
 	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
 	skillsAvailable := sandboxMode != "" && sandboxMode != "disabled"
 
+	logger.Infof(ctx, "skills_available: %v, sandboxMode: %s", skillsAvailable, sandboxMode)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":          true,
 		"data":             response,
