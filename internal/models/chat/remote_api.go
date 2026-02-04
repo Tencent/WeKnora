@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -241,8 +242,13 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	}
 
 	choice := resp.Choices[0]
+
+	// 处理思考模型的输出：移除 <think></think> 标签包裹的思考过程
+	// 为设置了 Thinking=false 但模型仍返回思考内容的情况和部分不支持Thinking=false的思考模型(例如Miniax-M2.1)提供兜底策略
+	content := removeThinkingContent(choice.Message.Content)
+
 	response := &types.ChatResponse{
-		Content:      choice.Message.Content,
+		Content:      content,
 		FinishReason: string(choice.FinishReason),
 		Usage: struct {
 			PromptTokens     int `json:"prompt_tokens"`
@@ -270,6 +276,28 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	}
 
 	return response, nil
+}
+
+// removeThinkingContent 移除思考模型输出中的 <think></think> 思考过程
+// 仅当内容以 <think> 开头时才处理
+func removeThinkingContent(content string) string {
+	const thinkStartTag = "<think>"
+	const thinkEndTag = "</think>"
+
+	trimmed := strings.TrimSpace(content)
+	if !strings.HasPrefix(trimmed, thinkStartTag) {
+		return content
+	}
+
+	// 查找最后一个 </think> 标签（处理嵌套情况）
+	if lastEndIdx := strings.LastIndex(trimmed, thinkEndTag); lastEndIdx != -1 {
+		if result := strings.TrimSpace(trimmed[lastEndIdx+len(thinkEndTag):]); result != "" {
+			return result
+		}
+		return ""
+	}
+
+	return "" // 未找到 </think>，可能思考内容过长被截断，返回空字符串
 }
 
 // ChatStream 进行流式聊天
