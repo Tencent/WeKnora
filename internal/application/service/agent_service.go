@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
@@ -219,18 +221,32 @@ func (s *agentService) initializeSkillsManager(
 	config *types.AgentConfig,
 	toolRegistry *tools.ToolRegistry,
 ) (*skills.Manager, error) {
-	// Initialize sandbox manager based on configuration
+	// Initialize sandbox manager based on environment variables
+	// WEKNORA_SANDBOX_MODE: "docker", "local", "disabled" (default: "disabled")
+	// WEKNORA_SANDBOX_TIMEOUT: timeout in seconds (default: 60)
+	// WEKNORA_SANDBOX_DOCKER_IMAGE: custom Docker image (default: wechatopenai/weknora-sandbox:latest)
 	var sandboxMgr sandbox.Manager
 	var err error
 
-	sandboxMode := config.SandboxMode
+	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
 	if sandboxMode == "" {
 		sandboxMode = "disabled"
+	}
+	dockerImage := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE")
+	if dockerImage == "" {
+		dockerImage = sandbox.DefaultDockerImage
+	}
+	sandboxTimeoutStr := os.Getenv("WEKNORA_SANDBOX_TIMEOUT")
+	sandboxTimeout := 60
+	if sandboxTimeoutStr != "" {
+		if v, err := strconv.Atoi(sandboxTimeoutStr); err == nil && v > 0 {
+			sandboxTimeout = v
+		}
 	}
 
 	switch sandboxMode {
 	case "docker":
-		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, config.DockerImage) // Enable fallback to local
+		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, dockerImage) // Enable fallback to local
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize Docker sandbox, falling back to disabled: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()
@@ -244,6 +260,7 @@ func (s *agentService) initializeSkillsManager(
 	default:
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
+	logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s", sandboxMode, sandboxTimeout, dockerImage)
 
 	// Create skills manager
 	skillsConfig := &skills.ManagerConfig{

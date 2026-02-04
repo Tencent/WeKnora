@@ -38,9 +38,6 @@ type AgentConfig struct {
 	SkillsEnabled  bool     `json:"skills_enabled"`   // Whether skills are enabled (default: false)
 	SkillDirs      []string `json:"skill_dirs"`       // Directories to search for skills
 	AllowedSkills  []string `json:"allowed_skills"`   // Skill names whitelist (empty = allow all)
-	SandboxMode    string   `json:"sandbox_mode"`     // Sandbox mode: "docker", "local", "disabled" (default: "disabled")
-	SandboxTimeout int      `json:"sandbox_timeout"`  // Script execution timeout in seconds (default: 60)
-	DockerImage    string   `json:"docker_image"`     // Custom sandbox Docker image (default: wechatopenai/weknora-sandbox:latest)
 }
 
 // SessionAgentConfig represents session-level agent configuration

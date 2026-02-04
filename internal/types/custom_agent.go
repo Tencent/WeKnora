@@ -99,13 +99,6 @@ type CustomAgentConfig struct {
 	SkillsSelectionMode string `yaml:"skills_selection_mode" json:"skills_selection_mode"`
 	// Selected skill names (only used when SkillsSelectionMode is "selected")
 	SelectedSkills []string `yaml:"selected_skills" json:"selected_skills"`
-	// Sandbox mode for skill script execution: "docker", "local", "disabled" (default: "docker" when skills enabled)
-	SandboxMode string `yaml:"sandbox_mode" json:"sandbox_mode"`
-	// Script execution timeout in seconds (default: 60)
-	SandboxTimeout int `yaml:"sandbox_timeout" json:"sandbox_timeout"`
-	// Custom sandbox Docker image (default: wechatopenai/weknora-sandbox:latest)
-	DockerImage string `yaml:"docker_image" json:"docker_image"`
-
 	// ===== Knowledge Base Settings =====
 	// Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB
 	KBSelectionMode string `yaml:"kb_selection_mode" json:"kb_selection_mode"`

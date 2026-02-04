@@ -101,13 +101,11 @@ with pdfplumber.open("document.pdf") as pdf:
 ```go
 type AgentConfig struct {
     // ... 其他配置 ...
-    
+
     // Skills 相关配置
     SkillsEnabled  bool     `json:"skills_enabled"`   // 是否启用 Skills
     SkillDirs      []string `json:"skill_dirs"`       // Skill 目录列表
     AllowedSkills  []string `json:"allowed_skills"`   // 白名单（空=全部允许）
-    SandboxMode    string   `json:"sandbox_mode"`     // sandbox 模式
-    SandboxTimeout int      `json:"sandbox_timeout"`  // 脚本执行超时（秒）
 }
 ```
 
@@ -120,11 +118,19 @@ type AgentConfig struct {
     "/path/to/project/skills",
     "/home/user/.agent-skills"
   ],
-  "allowed_skills": ["pdf-processing", "code-review"],
-  "sandbox_mode": "docker",
-  "sandbox_timeout": 30
+  "allowed_skills": ["pdf-processing", "code-review"]
 }
 ```
+
+### Sandbox 配置（环境变量）
+
+Sandbox 相关配置通过环境变量设置：
+
+| 环境变量 | 说明 | 默认值 |
+|---------|------|--------|
+| `WEKNORA_SANDBOX_MODE` | sandbox 模式: `docker`, `local`, `disabled` | `disabled` |
+| `WEKNORA_SANDBOX_TIMEOUT` | 脚本执行超时（秒） | `60` |
+| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像 | `wechatopenai/weknora-sandbox:latest` |
 
 ### Sandbox 模式
 

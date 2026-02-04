@@ -886,23 +886,6 @@ func (s *sessionService) configureSkillsFromAgent(
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
 
-	// Configure sandbox mode for skill script execution
-	if agentConfig.SkillsEnabled {
-		// Set sandbox mode (default to "docker" when skills are enabled)
-		agentConfig.SandboxMode = customAgent.Config.SandboxMode
-		if agentConfig.SandboxMode == "" {
-			agentConfig.SandboxMode = "docker" // Default to docker for security
-		}
-		// Set sandbox timeout (default to 60 seconds)
-		agentConfig.SandboxTimeout = customAgent.Config.SandboxTimeout
-		if agentConfig.SandboxTimeout == 0 {
-			agentConfig.SandboxTimeout = 60
-		}
-		// Set custom Docker image (empty means use default)
-		agentConfig.DockerImage = customAgent.Config.DockerImage
-		logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s",
-			agentConfig.SandboxMode, agentConfig.SandboxTimeout, agentConfig.DockerImage)
-	}
 }
 
 // buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs
