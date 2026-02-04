@@ -1,11 +1,12 @@
 package router
 
 import (
-	"log"
+	"context"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -100,7 +101,7 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	go func() {
 		// Start the server
 		if err := params.Server.Run(mux); err != nil {
-			log.Fatalf("could not run server: %v", err)
+			logger.Fatalf(context.Background(), "could not run server: %v", err)
 		}
 	}()
 	return mux

@@ -87,7 +87,9 @@ type phrase []string
 func (p phrase) String() string {
 	b, err := json.Marshal(p)
 	if err != nil {
-		log.Fatal("encode error:", err)
+		// Fallback to a simple string representation if JSON marshaling fails
+		// This should never happen for a []string, but we handle it gracefully
+		return strings.Join(p, " ")
 	}
 	return string(b)
 }
