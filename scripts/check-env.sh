@@ -127,7 +127,7 @@ if command -v air &> /dev/null; then
     log_success "Air 已安装（支持热重载）"
 else
     log_warning "Air 未安装（可选，用于热重载）"
-    log_info "安装命令: go install github.com/cosmtrek/air@latest"
+    log_info "安装命令: go install github.com/air-verse/air@latest"
 fi
 
 # 检查 npm
