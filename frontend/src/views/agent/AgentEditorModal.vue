@@ -1069,6 +1069,8 @@ const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number }[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
+// 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
+const skillsAvailable = ref(false);
 
 // 系统默认配置（用于内置智能体显示默认提示词）
 const defaultAgentSystemPrompt = ref('');  // Agent 模式的默认系统提示词（来自 agent-config）
@@ -1236,8 +1238,8 @@ const navItems = computed(() => {
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') || '工具配置' });
   }
-  // Agent模式才显示Skills配置
-  if (isAgentMode.value) {
+  // Agent 模式且沙箱已启用时才显示 Skills 配置（disabled 时无法启用 Skills）
+  if (isAgentMode.value && skillsAvailable.value) {
     items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
   }
   // 有知识库能力时才显示检索策略
@@ -1646,14 +1648,16 @@ const loadDependencies = async () => {
       console.warn('Failed to load MCP services', e);
     }
 
-    // 加载预装 Skills 列表
+    // 加载预装 Skills 列表及沙箱可用性（skills_available=false 时前端不展示 Skills 配置）
     try {
       const skillsRes = await listSkills();
+      skillsAvailable.value = skillsRes.skills_available !== false;
       if (skillsRes.data && skillsRes.data.length > 0) {
         skillOptions.value = skillsRes.data;
       }
     } catch (e) {
       console.warn('Failed to load skills', e);
+      skillsAvailable.value = false;
     }
 
     // 加载占位符定义（从统一 API）

@@ -96,19 +96,13 @@ services:
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
-      - INIT_LLM_MODEL_NAME=${INIT_LLM_MODEL_NAME:-}
-      - INIT_LLM_MODEL_BASE_URL=${INIT_LLM_MODEL_BASE_URL:-}
-      - INIT_LLM_MODEL_API_KEY=${INIT_LLM_MODEL_API_KEY:-}
-      - INIT_EMBEDDING_MODEL_NAME=${INIT_EMBEDDING_MODEL_NAME:-}
-      - INIT_EMBEDDING_MODEL_BASE_URL=${INIT_EMBEDDING_MODEL_BASE_URL:-}
-      - INIT_EMBEDDING_MODEL_API_KEY=${INIT_EMBEDDING_MODEL_API_KEY:-}
-      - INIT_EMBEDDING_MODEL_DIMENSION=${INIT_EMBEDDING_MODEL_DIMENSION:-}
-      - INIT_EMBEDDING_MODEL_ID=${INIT_EMBEDDING_MODEL_ID:-}
-      - INIT_RERANK_MODEL_NAME=${INIT_RERANK_MODEL_NAME:-}
-      - INIT_RERANK_MODEL_BASE_URL=${INIT_RERANK_MODEL_BASE_URL:-}
-      - INIT_RERANK_MODEL_API_KEY=${INIT_RERANK_MODEL_API_KEY:-}
       # File size limit (in MB)
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      # Agent Skills Sandbox
+      - WEKNORA_SANDBOX_MODE=${WEKNORA_SANDBOX_MODE:-docker}
+      - WEKNORA_SANDBOX_TIMEOUT=${WEKNORA_SANDBOX_TIMEOUT:-60}
+      - WEKNORA_SANDBOX_DOCKER_IMAGE=${WEKNORA_SANDBOX_DOCKER_IMAGE:-wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}}
+      - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
     depends_on:
       redis:
         condition: service_started
@@ -121,6 +115,17 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Sandbox 镜像：仅用于 build/pull，非常驻服务；app 执行 Skills 时按需 docker run 该镜像，用毕即释
+  sandbox:
+    image: wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.sandbox
+    profiles:
+      - sandbox
+    command: ["true"]
+    restart: "no"
 
   docreader:
     image: wechatopenai/weknora-docreader:${WEKNORA_VERSION:-latest}
