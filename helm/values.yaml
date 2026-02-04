@@ -386,6 +386,8 @@ secrets:
   dbPassword: ""
   # -- Database name
   dbName: weknora
+  # -- Redis username (OPTIONAL: for Redis 6.0+ ACL)
+  redisUsername: ""
   # -- Redis password (REQUIRED: change in production)
   redisPassword: ""
   # -- JWT signing secret (REQUIRED: change in production)
@@ -394,7 +396,7 @@ secrets:
   tenantAesKey: ""
 
   # -- Use existing secret instead of creating one
-  # The secret must contain keys: DB_USER, DB_PASSWORD, DB_NAME, REDIS_PASSWORD, JWT_SECRET, TENANT_AES_KEY
+  # The secret must contain keys: DB_USER, DB_PASSWORD, DB_NAME, REDIS_USERNAME, REDIS_PASSWORD, JWT_SECRET, TENANT_AES_KEY
   existingSecret: ""
 
 # -----------------------------------------------------------------------------

@@ -25,6 +25,7 @@ func NewStreamManager() (interfaces.StreamManager, error) {
 		ttl := time.Hour // 默认1小时
 		return NewRedisStreamManager(
 			os.Getenv("REDIS_ADDR"),
+			os.Getenv("REDIS_USERNAME"),
 			os.Getenv("REDIS_PASSWORD"),
 			db,
 			os.Getenv("REDIS_PREFIX"),

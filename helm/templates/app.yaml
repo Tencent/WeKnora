@@ -76,6 +76,12 @@ spec:
             # Redis configuration
             - name: REDIS_ADDR
               value: "redis:6379"
+            - name: REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: REDIS_USERNAME
+                  optional: true
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:

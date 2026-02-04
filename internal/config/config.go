@@ -149,6 +149,7 @@ type StreamManagerConfig struct {
 // RedisConfig Redis配置
 type RedisConfig struct {
 	Address  string        `yaml:"address"  json:"address"`  // Redis地址
+	Username string        `yaml:"username" json:"username"` // Redis用户名
 	Password string        `yaml:"password" json:"password"` // Redis密码
 	DB       int           `yaml:"db"       json:"db"`       // Redis数据库
 	Prefix   string        `yaml:"prefix"   json:"prefix"`   // 键前缀

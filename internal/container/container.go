@@ -238,6 +238,7 @@ func initRedisClient() (*redis.Client, error) {
 
 	client := redis.NewClient(&redis.Options{
 		Addr:     os.Getenv("REDIS_ADDR"),
+		Username: os.Getenv("REDIS_USERNAME"),
 		Password: os.Getenv("REDIS_PASSWORD"),
 		DB:       db,
 	})

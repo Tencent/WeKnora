@@ -18,11 +18,12 @@ type RedisStreamManager struct {
 }
 
 // NewRedisStreamManager creates a new Redis-based stream manager
-func NewRedisStreamManager(redisAddr, redisPassword string,
+func NewRedisStreamManager(redisAddr, redisUsername, redisPassword string,
 	redisDB int, prefix string, ttl time.Duration,
 ) (*RedisStreamManager, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
+		Username: redisUsername,
 		Password: redisPassword,
 		DB:       redisDB,
 	})
