@@ -38,6 +38,7 @@ services:
       retries: 3
       start_period: 60s
     environment:
+      - LOG_LEVEL=${LOG_LEVEL:-}
       - COS_SECRET_ID=${COS_SECRET_ID:-}
       - COS_SECRET_KEY=${COS_SECRET_KEY:-}
       - COS_REGION=${COS_REGION:-}

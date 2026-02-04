@@ -3,6 +3,7 @@ package logger
 import (
 	"context"
 	"fmt"
+	"os"
 	"path"
 	"runtime"
 	"sort"
@@ -126,6 +127,10 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 // 初始化全局日志设置
 func init() {
+	// 根据环境变量设置全局日志级别
+	logLevel := getLogLevelFromEnv()
+	logrus.SetLevel(logLevel)
+
 	// 设置日志格式而不修改全局时区
 	logrus.SetFormatter(&CustomFormatter{ForceColor: true})
 	logrus.SetReportCaller(false)
@@ -136,12 +141,8 @@ func GetLogger(c context.Context) *logrus.Entry {
 	if logger := c.Value(types.LoggerContextKey); logger != nil {
 		return logger.(*logrus.Entry)
 	}
-	newLogger := logrus.New()
-	newLogger.SetFormatter(&CustomFormatter{ForceColor: true})
-	// 设置默认日志级别
-	newLogger.SetLevel(logrus.DebugLevel)
-	// 启用调用者信息
-	return logrus.NewEntry(newLogger)
+	// 使用全局logrus实例，确保日志级别设置正确生效
+	return logrus.NewEntry(logrus.StandardLogger())
 }
 
 // SetLogLevel 设置日志级别
@@ -164,6 +165,27 @@ func SetLogLevel(level LogLevel) {
 	}
 
 	logrus.SetLevel(logLevel)
+}
+
+// getLogLevelFromEnv 从环境变量读取日志级别配置
+func getLogLevelFromEnv() logrus.Level {
+	// 从环境变量读取LOG_LEVEL配置
+	logLevelStr := strings.ToLower(os.Getenv("LOG_LEVEL"))
+
+	switch logLevelStr {
+	case "debug":
+		return logrus.DebugLevel
+	case "info":
+		return logrus.InfoLevel
+	case "warn", "warning":
+		return logrus.WarnLevel
+	case "error":
+		return logrus.ErrorLevel
+	case "fatal":
+		return logrus.FatalLevel
+	default:
+		return logrus.DebugLevel // 无效配置时使用默认值
+	}
 }
 
 // 添加调用者字段
