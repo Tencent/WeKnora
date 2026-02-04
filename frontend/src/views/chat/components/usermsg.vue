@@ -72,33 +72,15 @@ const props = defineProps({
     border: 1px solid transparent;
     color: var(--td-text-color-primary, #333);
     
-    /* KB - Document (Greenish tint) */
-    &.kb-tag {
-        background: rgba(16, 185, 129, 0.08);
-        color: #059669;
-        
-        .tag_icon {
-            color: #10b981;
-        }
-    }
-
-    /* KB - FAQ (Blueish tint) */
-    &.faq-tag {
-        background: rgba(0, 82, 217, 0.08);
-        color: #0052d9;
-        
-        .tag_icon {
-            color: #0052d9;
-        }
-    }
-    
-    /* File (Orange tint) */
+    /* 知识库 / 文件 - 无背景，与整体一致 */
+    &.kb-tag,
+    &.faq-tag,
     &.file-tag {
-        background: rgba(237, 123, 47, 0.08);
-        color: #e65100;
+        background: transparent;
+        color: var(--td-text-color-primary, #333);
         
         .tag_icon {
-            color: #ed7b2f;
+            color: var(--td-text-color-secondary, #666);
         }
     }
     

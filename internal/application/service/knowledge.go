@@ -7585,6 +7585,14 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
 
+// SearchKnowledgeForScopes searches knowledge within the given scopes (e.g. for shared agent context).
+func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
+	if len(scopes) == 0 {
+		return nil, false, nil
+	}
+	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+}
+
 // ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks
 func (s *knowledgeService) ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error {
 	var payload types.KnowledgeListDeletePayload

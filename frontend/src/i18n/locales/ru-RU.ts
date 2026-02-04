@@ -1801,6 +1801,7 @@ export default {
     knowledgeBase: 'База знаний',
     knowledgeBaseWithCount: 'База знаний ({count})',
     notConfigured: 'Не настроено',
+    sharedAgentModelLabel: 'Модель из общего агента',
     model: 'Модель',
     remote: 'Удалённая',
     noModel: 'Нет доступных моделей',

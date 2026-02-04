@@ -134,6 +134,12 @@
                   <span>{{ org.share_count ?? 0 }}</span>
                 </span>
               </t-tooltip>
+              <t-tooltip :content="$t('organization.invite.agents')" placement="top">
+                <span class="stat-item stat-item-agent">
+                  <img src="@/assets/img/agent.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
+                  <span>{{ org.agent_share_count ?? 0 }}</span>
+                </span>
+              </t-tooltip>
             </div>
             <t-tooltip v-if="(org.pending_join_request_count ?? 0) > 0" :content="$t('organization.settings.pendingJoinRequestsBadge')" placement="top">
               <span class="pending-requests-badge">{{ org.pending_join_request_count }} {{ $t('organization.settings.pendingReview') }}</span>
@@ -384,6 +390,10 @@
                                 <t-icon name="folder" size="12px" />
                                 {{ org.share_count }}
                               </span>
+                              <span class="searchable-badge searchable-badge-agent">
+                                <img src="@/assets/img/agent.svg" class="searchable-badge-agent-icon" alt="" aria-hidden="true" />
+                                {{ org.agent_share_count ?? 0 }}
+                              </span>
                               <t-tag v-if="org.require_approval" class="searchable-tag-approval" size="small" variant="light">
                                 {{ $t('organization.invite.needApproval') }}
                               </t-tag>
@@ -456,6 +466,10 @@
                       <span class="preview-badge share">
                         <t-icon name="folder" size="14px" />
                         {{ invitePreviewData.share_count }} {{ $t('organization.invite.knowledgeBases') }}
+                      </span>
+                      <span class="preview-badge preview-badge-agent">
+                        <img src="@/assets/img/agent.svg" class="preview-badge-agent-icon" alt="" aria-hidden="true" />
+                        {{ invitePreviewData.agent_share_count ?? 0 }} {{ $t('organization.invite.agents') }}
                       </span>
                       <t-tag v-if="invitePreviewData.require_approval" class="preview-tag-approval" size="small" variant="light">
                         {{ $t('organization.invite.needApproval') }}
@@ -1082,6 +1096,7 @@ function previewSearchableOrg(org: SearchableOrganizationItem) {
     avatar: org.avatar,
     member_count: org.member_count,
     share_count: org.share_count,
+    agent_share_count: org.agent_share_count ?? 0,
     is_already_member: org.is_already_member,
     require_approval: org.require_approval,
     created_at: '', // 搜索列表中没有创建时间，使用空字符串
@@ -1570,6 +1585,16 @@ onUnmounted(() => {
 
   span {
     line-height: 1;
+  }
+
+  &.stat-item-agent {
+    background: rgba(7, 192, 95, 0.08);
+    color: #059669;
+    .stat-agent-icon {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+    }
   }
 
   &:hover {
@@ -2275,6 +2300,15 @@ onUnmounted(() => {
       background: rgba(0, 82, 217, 0.08);
       color: #0052d9;
     }
+
+    &.searchable-badge-agent {
+      background: rgba(7, 192, 95, 0.08);
+      color: #059669;
+      .searchable-badge-agent-icon {
+        width: 12px;
+        height: 12px;
+      }
+    }
   }
 
   .searchable-tag-approval {
@@ -2527,6 +2561,15 @@ onUnmounted(() => {
   &.share {
     background: rgba(0, 82, 217, 0.08);
     color: #0052d9;
+  }
+
+  &.preview-badge-agent {
+    background: rgba(7, 192, 95, 0.08);
+    color: #059669;
+    .preview-badge-agent-icon {
+      width: 14px;
+      height: 14px;
+    }
   }
 }
 

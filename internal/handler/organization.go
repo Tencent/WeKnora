@@ -18,27 +18,30 @@ import (
 
 // OrganizationHandler implements HTTP request handlers for organization management
 type OrganizationHandler struct {
-	orgService    interfaces.OrganizationService
-	shareService  interfaces.KBShareService
-	userService   interfaces.UserService
-	knowledgeRepo interfaces.KnowledgeRepository
-	chunkRepo     interfaces.ChunkRepository
+	orgService        interfaces.OrganizationService
+	shareService      interfaces.KBShareService
+	agentShareService interfaces.AgentShareService
+	userService       interfaces.UserService
+	knowledgeRepo     interfaces.KnowledgeRepository
+	chunkRepo         interfaces.ChunkRepository
 }
 
 // NewOrganizationHandler creates a new organization handler
 func NewOrganizationHandler(
 	orgService interfaces.OrganizationService,
 	shareService interfaces.KBShareService,
+	agentShareService interfaces.AgentShareService,
 	userService interfaces.UserService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 ) *OrganizationHandler {
 	return &OrganizationHandler{
-		orgService:    orgService,
-		shareService:  shareService,
-		userService:   userService,
-		knowledgeRepo: knowledgeRepo,
-		chunkRepo:     chunkRepo,
+		orgService:        orgService,
+		shareService:      shareService,
+		agentShareService: agentShareService,
+		userService:       userService,
+		knowledgeRepo:     knowledgeRepo,
+		chunkRepo:         chunkRepo,
 	}
 }
 
@@ -392,6 +395,9 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	// Get shared knowledge bases count
 	shares, _ := h.shareService.ListSharesByOrganization(ctx, org.ID)
 	shareCount := len(shares)
+	// Get shared agents count
+	agentShares, _ := h.agentShareService.ListSharesByOrganization(ctx, org.ID)
+	agentShareCount := len(agentShares)
 
 	// Check if user is already a member
 	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID.(string))
@@ -406,6 +412,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 			"avatar":            org.Avatar,
 			"member_count":      memberCount,
 			"share_count":       shareCount,
+			"agent_share_count": agentShareCount,
 			"is_already_member": isAlreadyMember,
 			"require_approval":  org.RequireApproval,
 			"created_at":        org.CreatedAt,
@@ -1102,6 +1109,149 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	})
 }
 
+// ShareAgent shares an agent to an organization
+func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
+	ctx := c.Request.Context()
+	agentID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+
+	var req types.ShareKnowledgeBaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+
+	share, err := h.agentShareService.ShareAgent(ctx, agentID, req.OrganizationID, userID.(string), tenantID.(uint64), req.Permission)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to share agent: %v", err)
+		if errors.Is(err, service.ErrOrgRoleCannotShareAgent) {
+			c.Error(apperrors.NewForbiddenError("Only editors and admins can share agents to this organization"))
+			return
+		}
+		if errors.Is(err, service.ErrAgentNotConfigured) {
+			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model and, if using knowledge bases, the rerank model in agent settings."))
+			return
+		}
+		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"success": true, "data": share})
+}
+
+// ListAgentShares lists all shares for an agent
+func (h *OrganizationHandler) ListAgentShares(c *gin.Context) {
+	ctx := c.Request.Context()
+	agentID := c.Param("id")
+	shares, err := h.agentShareService.ListSharesByAgent(ctx, agentID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list agent shares: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		return
+	}
+	response := make([]types.AgentShareResponse, 0, len(shares))
+	for _, s := range shares {
+		resp := types.AgentShareResponse{
+			ID: s.ID, AgentID: s.AgentID, OrganizationID: s.OrganizationID,
+			SharedByUserID: s.SharedByUserID, SourceTenantID: s.SourceTenantID,
+			Permission: string(s.Permission), CreatedAt: s.CreatedAt,
+		}
+		if s.Organization != nil {
+			resp.OrganizationName = s.Organization.Name
+		}
+		response = append(response, resp)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"shares": response, "total": len(response)}})
+}
+
+// RemoveAgentShare removes an agent share
+func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
+	ctx := c.Request.Context()
+	shareID := c.Param("share_id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	if err := h.agentShareService.RemoveShare(ctx, shareID, userID.(string)); err != nil {
+		logger.Errorf(ctx, "Failed to remove agent share: %v", err)
+		c.Error(apperrors.NewForbiddenError("Permission denied"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Share removed successfully"})
+}
+
+// ListOrgAgentShares lists all agents shared to an organization
+func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
+	ctx := c.Request.Context()
+	orgID := c.Param("id")
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	member, err := h.orgService.GetMember(ctx, orgID, userID.(string))
+	if err != nil {
+		c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+		return
+	}
+	myRoleInOrg := member.Role
+	shares, err := h.agentShareService.ListSharesByOrganization(ctx, orgID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list organization agent shares: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
+		return
+	}
+	response := make([]types.AgentShareResponse, 0, len(shares))
+	for _, s := range shares {
+		effectivePerm := s.Permission
+		if !myRoleInOrg.HasPermission(s.Permission) {
+			effectivePerm = myRoleInOrg
+		}
+		resp := types.AgentShareResponse{
+			ID: s.ID, AgentID: s.AgentID, OrganizationID: s.OrganizationID,
+			SharedByUserID: s.SharedByUserID, SourceTenantID: s.SourceTenantID,
+			Permission: string(s.Permission), MyRoleInOrg: string(myRoleInOrg), MyPermission: string(effectivePerm), CreatedAt: s.CreatedAt,
+		}
+		if s.Agent != nil {
+			resp.AgentName = s.Agent.Name
+			resp.AgentAvatar = s.Agent.Avatar
+			cfg := &s.Agent.Config
+			if cfg.KBSelectionMode != "" {
+				resp.ScopeKB = cfg.KBSelectionMode
+				if cfg.KBSelectionMode == "selected" && len(cfg.KnowledgeBases) > 0 {
+					resp.ScopeKBCount = len(cfg.KnowledgeBases)
+				}
+			} else {
+				resp.ScopeKB = "none"
+			}
+			resp.ScopeWebSearch = cfg.WebSearchEnabled
+			if cfg.MCPSelectionMode != "" {
+				resp.ScopeMCP = cfg.MCPSelectionMode
+				if cfg.MCPSelectionMode == "selected" && len(cfg.MCPServices) > 0 {
+					resp.ScopeMCPCount = len(cfg.MCPServices)
+				}
+			} else {
+				resp.ScopeMCP = "none"
+			}
+		}
+		if s.Organization != nil {
+			resp.OrganizationName = s.Organization.Name
+		}
+		if u, err := h.userService.GetUserByID(ctx, s.SharedByUserID); err == nil && u != nil {
+			resp.SharedByUsername = u.Username
+		}
+		response = append(response, resp)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"shares": response, "total": len(response)}})
+}
+
+// ListSharedAgents lists agents shared to the current user
+func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	list, err := h.agentShareService.ListSharedAgents(ctx, userID.(string), tenantID.(uint64))
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list shared agents: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
+}
+
 // toOrgResponse converts an organization to response format
 func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Organization, currentUserID string) types.OrganizationResponse {
 	resp := types.OrganizationResponse{
@@ -1127,6 +1277,10 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 	// Get shared knowledge base count for this organization
 	if shares, err := h.shareService.ListSharesByOrganization(ctx, org.ID); err == nil {
 		resp.ShareCount = len(shares)
+	}
+	// Get shared agent count for this organization
+	if agentShares, err := h.agentShareService.ListSharesByOrganization(ctx, org.ID); err == nil {
+		resp.AgentShareCount = len(agentShares)
 	}
 
 	// Get current user's role in this organization

@@ -18,19 +18,15 @@
           @click="$emit('select', item)"
           @mouseenter="$emit('update:activeIndex', index)"
         >
-          <div class="icon-wrap" :class="{ 'has-org': item.orgName }">
+          <div class="icon-wrap">
             <div class="icon" :class="item.kbType === 'faq' ? 'faq-icon' : 'kb-icon'">
               <t-icon :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
             </div>
-            <span v-if="item.orgName" class="org-badge-wrap">
-              <img src="@/assets/img/organization-green.svg" class="org-badge" alt="" aria-hidden="true" />
-            </span>
           </div>
           <div class="item-main">
             <span class="name">{{ item.name }}</span>
             <span class="count">({{ item.count || 0 }})</span>
           </div>
-          <span v-if="item.orgName" class="org-name">{{ item.orgName }}</span>
         </div>
         <template #content>
           <div class="mention-detail-content">
@@ -90,16 +86,12 @@
           @click="$emit('select', item)"
           @mouseenter="$emit('update:activeIndex', kbItems.length + index)"
         >
-          <div class="icon-wrap" :class="{ 'has-org': item.orgName }">
+          <div class="icon-wrap">
             <div class="icon file-icon">
               <t-icon name="file" />
             </div>
-            <span v-if="item.orgName" class="org-badge-wrap">
-              <img src="@/assets/img/organization-grey.svg" class="org-badge" alt="" aria-hidden="true" />
-            </span>
           </div>
           <span class="name">{{ item.name }}</span>
-          <span v-if="item.kbName" class="kb-name">{{ item.kbName }}</span>
         </div>
         <template #content>
           <div class="mention-detail-content">
@@ -158,6 +150,7 @@ import { useRouter } from 'vue-router';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
+import { useSettingsStore } from '@/stores/settings';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
 
@@ -174,8 +167,16 @@ const emit = defineEmits(['select', 'update:activeIndex', 'loadMore']);
 
 const router = useRouter();
 const orgStore = useOrganizationStore();
+const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
+
+// 共享智能体上下文：用于请求知识库/知识详情时带 agent_id，后端据此校验权限
+const agentIdForDetail = computed(() => {
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  const agentId = settingsStore.selectedAgentId;
+  return sourceTenantId && agentId ? agentId : undefined;
+});
 
 const kbItems = computed(() => props.items.filter(item => item.type === 'kb'));
 const fileItems = computed(() => props.items.filter(item => item.type === 'file'));
@@ -184,7 +185,8 @@ async function fetchKbDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
   detailCache.value = { ...detailCache.value, [item.id]: { loading: true } };
   try {
-    const res: any = await getKnowledgeBaseById(item.id);
+    const opts = agentIdForDetail.value ? { agent_id: agentIdForDetail.value } : undefined;
+    const res: any = await getKnowledgeBaseById(item.id, opts);
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, data: res?.data ?? res } };
   } catch (e: any) {
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, error: e?.message || 'Failed to load' } };
@@ -195,7 +197,8 @@ async function fetchFileDetail(item: { id: string }) {
   if (detailCache.value[item.id]?.data || detailCache.value[item.id]?.loading) return;
   detailCache.value = { ...detailCache.value, [item.id]: { loading: true } };
   try {
-    const res: any = await getKnowledgeDetails(item.id);
+    const opts = agentIdForDetail.value ? { agent_id: agentIdForDetail.value } : undefined;
+    const res: any = await getKnowledgeDetails(item.id, opts);
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, data: res?.data ?? res } };
   } catch (e: any) {
     detailCache.value = { ...detailCache.value, [item.id]: { loading: false, error: e?.message || 'Failed to load' } };
@@ -365,22 +368,12 @@ const scrollToItem = (index: number) => {
   object-fit: contain;
 }
 
-/* Document KB - Greenish */
-.kb-icon {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-
-/* FAQ KB - Blueish */
-.faq-icon {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052d9;
-}
-
-/* File - Orange */
+/* 知识库 / 文件 - 无背景，与整体一致 */
+.kb-icon,
+.faq-icon,
 .file-icon {
-  background: rgba(237, 123, 47, 0.1);
-  color: #ed7b2f;
+  background: transparent;
+  color: var(--td-text-color-secondary, #666);
 }
 
 .mention-item.active .icon {

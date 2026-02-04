@@ -42,13 +42,17 @@
                     </t-tag>
                   </div>
                   <div class="org-option-meta">
-                    <span class="org-meta-item">
+                    <span class="org-meta-tag">
                       <t-icon name="user" class="org-meta-icon org-meta-icon-user" />
-                      {{ org.member_count || 0 }} {{ $t('organization.members') }}
+                      {{ org.member_count ?? 0 }}
                     </span>
-                    <span v-if="org.share_count !== undefined" class="org-meta-item">
+                    <span class="org-meta-tag">
                       <img src="@/assets/img/zhishiku.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
-                      {{ org.share_count }} {{ $t('organization.share.sharedKBs') }}
+                      {{ org.share_count ?? 0 }}
+                    </span>
+                    <span class="org-meta-tag">
+                      <img src="@/assets/img/organization-grey.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
+                      {{ org.agent_share_count ?? 0 }}
                     </span>
                   </div>
                 </div>
@@ -422,15 +426,18 @@ function handleGoToOrgSettings(orgId: string) {
 .org-option-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   font-family: "PingFang SC";
   font-size: 12px;
   color: var(--td-text-color-placeholder);
 
-  .org-meta-item {
-    display: flex;
+  .org-meta-tag {
+    display: inline-flex;
     align-items: center;
     gap: 3px;
+    padding: 0px 4px;
+    background: #f0f0f0;
+    border-radius: 4px;
   }
 
   .org-meta-icon {
@@ -440,14 +447,12 @@ function handleGoToOrgSettings(orgId: string) {
   }
 
   .org-meta-icon-user {
-    font-size: 14px;
-    margin-right: 2px;
+    font-size: 12px;
   }
 
   .org-meta-icon-kb {
-    width: 14px;
-    height: 14px;
-    margin-right: 2px;
+    width: 12px;
+    height: 12px;
     opacity: 0.75;
   }
 }

@@ -229,6 +229,10 @@
               <t-icon name="folder" />
               <span>{{ $t('organization.join.shareCount', { count: previewInfo.share_count }) }}</span>
             </div>
+            <div class="stat-item stat-item-agent">
+              <img src="@/assets/img/agent.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
+              <span>{{ $t('organization.join.agentShareCount', { count: previewInfo.agent_share_count ?? 0 }) }}</span>
+            </div>
           </div>
         </div>
         <div v-if="previewInfo.is_already_member" class="already-member-notice">
@@ -878,6 +882,12 @@ watch(() => props.mode, () => {
   .t-icon {
     font-size: 16px;
     color: #00000066;
+  }
+
+  &.stat-item-agent .stat-agent-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
   }
 }
 

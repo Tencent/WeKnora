@@ -16,6 +16,7 @@ export interface Organization {
   member_limit?: number
   member_count?: number
   share_count?: number
+  agent_share_count?: number
   pending_join_request_count?: number
   is_owner?: boolean
   my_role?: string
@@ -80,6 +81,7 @@ export interface OrganizationPreview {
   avatar?: string
   member_count: number
   share_count: number
+  agent_share_count?: number
   is_already_member: boolean
   require_approval: boolean
   created_at: string
@@ -94,6 +96,7 @@ export interface SearchableOrganizationItem {
   member_count: number
   member_limit: number // 0 = unlimited
   share_count: number
+  agent_share_count?: number
   is_already_member: boolean
   require_approval: boolean
 }
@@ -201,6 +204,47 @@ export interface UserSearchResult {
 
 export interface ListSharesResponse {
   shares: KnowledgeBaseShare[]
+  total: number
+}
+
+// Agent share types
+export interface AgentShareResponse {
+  id: string
+  agent_id: string
+  agent_name?: string
+  organization_id: string
+  organization_name?: string
+  shared_by_user_id: string
+  shared_by_username?: string
+  source_tenant_id: number
+  permission: string
+  my_role_in_org?: string
+  my_permission?: string
+  created_at: string
+  /** Agent scope summary for list display */
+  scope_kb?: string
+  scope_kb_count?: number
+  scope_web_search?: boolean
+  scope_mcp?: string
+  scope_mcp_count?: number
+  /** Agent avatar (emoji) for list display */
+  agent_avatar?: string
+}
+
+export interface SharedAgentInfo {
+  agent: { id: string; name: string; description?: string; [key: string]: any }
+  share_id: string
+  organization_id: string
+  org_name: string
+  permission: string
+  source_tenant_id: number
+  shared_at: string
+  shared_by_user_id?: string
+  shared_by_username?: string
+}
+
+export interface ListAgentSharesResponse {
+  shares: AgentShareResponse[]
   total: number
 }
 
@@ -517,6 +561,61 @@ export async function listOrgShares(orgId: string): Promise<ApiResponse<ListShar
     return response as unknown as ApiResponse<ListSharesResponse>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to list organization shares' }
+  }
+}
+
+// Agent sharing
+export async function shareAgent(agentId: string, req: ShareKnowledgeBaseRequest): Promise<ApiResponse<AgentShareResponse>> {
+  try {
+    const response = await post(`/api/v1/agents/${agentId}/shares`, req)
+    return response as unknown as ApiResponse<AgentShareResponse>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to share agent' }
+  }
+}
+
+export async function listAgentShares(agentId: string): Promise<ApiResponse<ListAgentSharesResponse>> {
+  try {
+    const response = await get(`/api/v1/agents/${agentId}/shares`)
+    return response as unknown as ApiResponse<ListAgentSharesResponse>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to list agent shares' }
+  }
+}
+
+export async function updateAgentSharePermission(agentId: string, shareId: string, req: UpdateSharePermissionRequest): Promise<ApiResponse<void>> {
+  try {
+    const response = await put(`/api/v1/agents/${agentId}/shares/${shareId}`, req)
+    return response as unknown as ApiResponse<void>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to update share permission' }
+  }
+}
+
+export async function removeAgentShare(agentId: string, shareId: string): Promise<ApiResponse<void>> {
+  try {
+    const response = await del(`/api/v1/agents/${agentId}/shares/${shareId}`)
+    return response as unknown as ApiResponse<void>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to remove share' }
+  }
+}
+
+export async function listSharedAgents(): Promise<ApiResponse<SharedAgentInfo[]>> {
+  try {
+    const response = await get('/api/v1/shared-agents')
+    return response as unknown as ApiResponse<SharedAgentInfo[]>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to list shared agents' }
+  }
+}
+
+export async function listOrgAgentShares(orgId: string): Promise<ApiResponse<ListAgentSharesResponse>> {
+  try {
+    const response = await get(`/api/v1/organizations/${orgId}/agent-shares`)
+    return response as unknown as ApiResponse<ListAgentSharesResponse>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to list organization agent shares' }
   }
 }
 

@@ -4,6 +4,7 @@ import type {
   Organization,
   OrganizationMember,
   SharedKnowledgeBase,
+  SharedAgentInfo,
   OrganizationPreview
 } from '@/api/organization'
 import {
@@ -18,7 +19,8 @@ import {
   listMembers,
   updateMemberRole,
   removeMember,
-  listSharedKnowledgeBases
+  listSharedKnowledgeBases,
+  listSharedAgents
 } from '@/api/organization'
 
 export const useOrganizationStore = defineStore('organization', () => {
@@ -27,6 +29,7 @@ export const useOrganizationStore = defineStore('organization', () => {
   const currentOrganization = ref<Organization | null>(null)
   const currentMembers = ref<OrganizationMember[]>([])
   const sharedKnowledgeBases = ref<SharedKnowledgeBase[]>([])
+  const sharedAgents = ref<SharedAgentInfo[]>([])
   const previewData = ref<OrganizationPreview | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -350,6 +353,22 @@ export const useOrganizationStore = defineStore('organization', () => {
   }
 
   /**
+   * Fetch shared agents (shared to me through organizations)
+   */
+  async function fetchSharedAgents() {
+    try {
+      const response = await listSharedAgents()
+      if (response.success && response.data) {
+        sharedAgents.value = response.data.filter(s => s.agent != null)
+        return sharedAgents.value
+      }
+      return []
+    } catch (e: any) {
+      return []
+    }
+  }
+
+  /**
    * Set current organization for detail view
    */
   function setCurrentOrganization(org: Organization | null) {
@@ -393,6 +412,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     currentOrganization.value = null
     currentMembers.value = []
     sharedKnowledgeBases.value = []
+    sharedAgents.value = []
     previewData.value = null
     error.value = null
   }
@@ -403,6 +423,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     currentOrganization,
     currentMembers,
     sharedKnowledgeBases,
+    sharedAgents,
     previewData,
     loading,
     error,
@@ -426,6 +447,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     changeMemberRole,
     kickMember,
     fetchSharedKnowledgeBases,
+    fetchSharedAgents,
     setCurrentOrganization,
     getKBPermission,
     canEditKB,

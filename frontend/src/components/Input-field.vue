@@ -39,7 +39,16 @@ const selectedAgentId = computed({
   set: (val: string) => settingsStore.selectAgent(val)
 });
 const selectedAgent = computed(() => {
-  return agents.value.find(a => a.id === selectedAgentId.value) || {
+  const mine = agents.value.find(a => a.id === selectedAgentId.value);
+  if (mine) return mine;
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  if (sourceTenantId && orgStore.sharedAgents?.length) {
+    const shared = orgStore.sharedAgents.find(
+      s => s.agent.id === selectedAgentId.value && String(s.source_tenant_id) === sourceTenantId
+    );
+    if (shared?.agent) return shared.agent as CustomAgent;
+  }
+  return {
     id: BUILTIN_QUICK_ANSWER_ID,
     name: t('input.normalMode'),
     is_builtin: true,
@@ -80,24 +89,48 @@ const agentKnowledgeBases = computed(() => {
   return currentAgentConfig.value?.knowledge_bases || [];
 });
 
-// 当智能体改变时，将智能体配置的知识库同步到 store
-// 这样用户可以移除这些知识库
-watch([selectedAgentId, agentKnowledgeBases], ([newAgentId, newAgentKbs], [oldAgentId]) => {
-  if (newAgentId !== oldAgentId && newAgentKbs && newAgentKbs.length > 0) {
-    // 智能体切换了，将新智能体配置的知识库添加到 store
-    const currentSelected = settingsStore.settings.selectedKnowledgeBases || [];
-    const toAdd = newAgentKbs.filter((id: string) => !currentSelected.includes(id));
-    if (toAdd.length > 0) {
-      settingsStore.selectKnowledgeBases([...currentSelected, ...toAdd]);
-    }
-  }
-}, { immediate: true });
-
 // 智能体的知识库选择模式
 const agentKBSelectionMode = computed(() => {
   if (!hasAgentConfig.value) return null; // null 表示不受智能体控制
   return currentAgentConfig.value?.kb_selection_mode || 'all';
 });
+
+// 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
+// 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
+watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
+  if (newAgentId !== oldAgentId && oldAgentId !== undefined) {
+    if (newKbMode === 'none') {
+      settingsStore.selectKnowledgeBases([]);
+    } else {
+      settingsStore.selectKnowledgeBases(newAgentKbs && newAgentKbs.length > 0 ? [...newAgentKbs] : []);
+    }
+    // 若 @ 面板已打开，刷新可@列表以立即反映新智能体的知识库范围
+    if (showMention.value) {
+      loadMentionItems(mentionQuery.value, true);
+    }
+  }
+}, { immediate: true });
+
+// 共享智能体时预取该智能体知识库列表，使已选标签在未打开 @ 时也能显示共享空间角标
+watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async ([agentId, sourceTenantId]) => {
+  if (sourceTenantId && agentId) {
+    try {
+      const res: any = await listKnowledgeBases({ agent_id: agentId });
+      const list = res?.data && Array.isArray(res.data) ? res.data : [];
+      sharedAgentKbList.value = list.map((kb: any) => ({
+        id: kb.id,
+        name: kb.name,
+        type: kb.type || 'document',
+        knowledge_count: kb.knowledge_count,
+        chunk_count: kb.chunk_count
+      }));
+    } catch {
+      sharedAgentKbList.value = [];
+    }
+  } else {
+    sharedAgentKbList.value = [];
+  }
+}, { immediate: true });
 
 // 智能体是否启用了网络搜索
 const agentWebSearchEnabled = computed(() => {
@@ -159,6 +192,20 @@ const mentionLoading = ref(false);
 const mentionOffset = ref(0);
 const MENTION_PAGE_SIZE = 20;
 
+// 共享智能体时用于标识「共享空间」的展示名（组织名或共享者），供 @ 列表与已选标签显示角标
+const sharedAgentOrgName = computed(() => {
+  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+  const agentId = selectedAgentId.value;
+  if (!sourceTenantId || !agentId || !orgStore.sharedAgents?.length) return '';
+  const shared = orgStore.sharedAgents.find(
+    (s: any) => s.agent?.id === agentId && String(s.source_tenant_id) === sourceTenantId
+  );
+  return shared?.org_name || shared?.shared_by_username || '';
+});
+
+// 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
+const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
+
 const props = defineProps({
   isReplying: {
     type: Boolean,
@@ -184,7 +231,7 @@ const isWebSearchConfigured = ref(false);
 const knowledgeBases = ref<Array<{ id: string; name: string; type?: 'document' | 'faq'; knowledge_count?: number; chunk_count?: number }>>([]);
 const fileList = ref<Array<{ id: string; name: string }>>([]);
 
-// 选中的知识库：包含自己的 + 别人共享的（用于展示已选列表）
+// 选中的知识库：包含自己的 + 组织共享的 + 共享智能体下的（用于展示已选列表与 org 角标）
 const selectedKbs = computed(() => {
   const own = knowledgeBases.value.filter(kb => selectedKbIds.value.includes(kb.id));
   const sharedList = orgStore.sharedKnowledgeBases || [];
@@ -200,7 +247,18 @@ const selectedKbs = computed(() => {
     }));
   const ownIds = new Set(own.map(kb => kb.id));
   const sharedOnly = sharedMapped.filter((kb: any) => !ownIds.has(kb.id));
-  return [...own, ...sharedOnly];
+  const sharedOnlyIds = new Set(sharedOnly.map((kb: any) => kb.id));
+  // 共享智能体下的知识库：从 sharedAgentKbList 中取在选中列表里的，并打上共享空间标识
+  const agentOrg = sharedAgentOrgName.value;
+  const sharedFromAgent = (sharedAgentKbList.value || []).filter(kb => selectedKbIds.value.includes(kb.id) && !ownIds.has(kb.id) && !sharedOnlyIds.has(kb.id)).map(kb => ({
+    id: kb.id,
+    name: kb.name,
+    type: kb.type || 'document',
+    knowledge_count: kb.knowledge_count,
+    chunk_count: kb.chunk_count,
+    org_name: agentOrg || ''
+  }));
+  return [...own, ...sharedOnly, ...sharedFromAgent];
 });
 
 const selectedFiles = computed(() => {
@@ -226,13 +284,18 @@ const selectedFiles = computed(() => {
       isAgentConfigured: agentKbIds.includes(kb.id)
     }));
     
-    // 用户选择的文件（根据 fileIdToKbId + 共享列表补全 org_name，用于角标）
+    // 用户选择的文件（根据 fileIdToKbId + 共享列表/共享智能体补全 org_name，用于角标）
     const sharedKbOrgMap: Record<string, string> = {};
     (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
       if (s.knowledge_base?.id != null && s.org_name) {
         sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
       }
     });
+    if (sharedAgentOrgName.value) {
+      (sharedAgentKbList.value || []).forEach((kb) => {
+        sharedKbOrgMap[String(kb.id)] = sharedAgentOrgName.value;
+      });
+    }
     const files = selectedFiles.value.map((f: { id: string; name: string }) => {
       const kbId = fileIdToKbId.value[f.id];
       const org_name = kbId ? sharedKbOrgMap[String(kbId)] || '' : '';
@@ -361,10 +424,11 @@ const loadFiles = async () => {
     });
 
     const allNewFiles: Array<{ id: string; name: string }> = [];
-    const runBatch = async (batchIds: string[], kbId?: string) => {
+    const agentIdForBatch = settingsStore.selectedAgentSourceTenantId ? settingsStore.selectedAgentId : undefined;
+    const runBatch = async (batchIds: string[], kbId?: string, agentId?: string) => {
       const query = new URLSearchParams();
       batchIds.forEach((id: string) => query.append('ids', id));
-      const res: any = await batchQueryKnowledge(query.toString(), kbId);
+      const res: any = await batchQueryKnowledge(query.toString(), kbId, agentId);
       if (res.data && Array.isArray(res.data)) {
         res.data.forEach((f: any) => allNewFiles.push({ id: f.id, name: f.title || f.file_name }));
       }
@@ -374,7 +438,7 @@ const loadFiles = async () => {
       await runBatch(batchIds, kbId);
     }
     if (noKbId.length > 0) {
-      await runBatch(noKbId);
+      await runBatch(noKbId, undefined, agentIdForBatch);
     }
     if (allNewFiles.length > 0) {
       fileList.value = [...fileList.value, ...allNewFiles];
@@ -407,11 +471,14 @@ const loadWebSearchConfig = async () => {
   }
 };
 
-// 加载智能体列表
+// 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
 const loadAgents = async () => {
   try {
-    const response = await listAgents();
-    agents.value = response.data || [];
+    const [agentsRes] = await Promise.all([
+      listAgents(),
+      orgStore.fetchSharedAgents(),
+    ]);
+    agents.value = agentsRes.data || [];
   } catch (error) {
     console.error('Failed to load agents:', error);
   }
@@ -525,6 +592,16 @@ const handleModelChange = async (value: string | number | Array<string | number>
 
 const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
+});
+
+// 模型展示名：本租户列表中有则用名称；若为共享智能体且其 model_id 不在本租户列表中则显示“共享智能体配置的模型”
+const selectedModelDisplayName = computed(() => {
+  if (selectedModel.value) return selectedModel.value.name;
+  if (!selectedModelId.value) return t('input.notConfigured');
+  const isSharedAgent = !!settingsStore.selectedAgentSourceTenantId;
+  const modelFromAgent = agentModelId.value && agentModelId.value === selectedModelId.value;
+  if (isSharedAgent && modelFromAgent) return t('input.sharedAgentModelLabel');
+  return t('input.notConfigured');
 });
 
 const updateModelDropdownPosition = () => {
@@ -644,33 +721,61 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     mentionOffset.value = 0;
   }
   
-  // 根据智能体的 kb_selection_mode 过滤知识库；合并「自己的」+「共享的」知识库
+  // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该租户下的知识库，否则使用本租户 + 共享给自己的
   let kbItems: any[] = [];
   if (!append) {
-    // 自己的知识库（需有 embedding/summary 模型）
-    let availableKbs = [...knowledgeBases.value];
-    // 共享的知识库（有权限的），映射为与 knowledgeBases 同结构便于合并
-    const sharedList = orgStore.sharedKnowledgeBases || [];
-    const sharedKbsForMention = sharedList
-      .filter((s: any) => s.knowledge_base != null)
-      .map((s: any) => ({
-        id: s.knowledge_base.id,
-        name: s.knowledge_base.name,
-        type: s.knowledge_base.type || 'document',
-        knowledge_count: s.knowledge_base.knowledge_count,
-        chunk_count: s.knowledge_base.chunk_count,
-        org_name: s.org_name || ''
-      }));
-    // 去重：若某 KB 既在自己列表又在共享列表，只保留一份（自己的优先）
-    const ownIds = new Set(availableKbs.map((kb: any) => kb.id));
-    sharedKbsForMention.forEach((kb: any) => {
-      if (!ownIds.has(kb.id)) {
-        availableKbs.push(kb);
-        ownIds.add(kb.id);
+    let availableKbs: any[];
+    const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+    const agentId = selectedAgentId.value;
+    if (sourceTenantId && agentId) {
+      // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析租户）
+      try {
+        const res: any = await listKnowledgeBases({ agent_id: agentId });
+        const list = res?.data && Array.isArray(res.data) ? res.data : [];
+        const orgLabel = sharedAgentOrgName.value || '';
+        availableKbs = list.map((kb: any) => ({
+          id: kb.id,
+          name: kb.name,
+          type: kb.type || 'document',
+          knowledge_count: kb.knowledge_count,
+          chunk_count: kb.chunk_count,
+          org_name: orgLabel
+        }));
+        sharedAgentKbList.value = list.map((kb: any) => ({
+          id: kb.id,
+          name: kb.name,
+          type: kb.type || 'document',
+          knowledge_count: kb.knowledge_count,
+          chunk_count: kb.chunk_count
+        }));
+      } catch (e) {
+        console.error('[Mention] listKnowledgeBases(agent_id) error:', e);
+        availableKbs = [];
+        sharedAgentKbList.value = [];
       }
-    });
+    } else {
+      sharedAgentKbList.value = [];
+      availableKbs = [...knowledgeBases.value];
+      const sharedList = orgStore.sharedKnowledgeBases || [];
+      const sharedKbsForMention = sharedList
+        .filter((s: any) => s.knowledge_base != null)
+        .map((s: any) => ({
+          id: s.knowledge_base.id,
+          name: s.knowledge_base.name,
+          type: s.knowledge_base.type || 'document',
+          knowledge_count: s.knowledge_base.knowledge_count,
+          chunk_count: s.knowledge_base.chunk_count,
+          org_name: s.org_name || ''
+        }));
+      const ownIds = new Set(availableKbs.map((kb: any) => kb.id));
+      sharedKbsForMention.forEach((kb: any) => {
+        if (!ownIds.has(kb.id)) {
+          availableKbs.push(kb);
+          ownIds.add(kb.id);
+        }
+      });
+    }
 
-    // 如果智能体有配置，根据 kb_selection_mode 过滤
     if (hasAgentConfig.value) {
       const kbMode = agentKBSelectionMode.value;
       if (kbMode === 'none') {
@@ -681,7 +786,6 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       }
     }
 
-    // 按查询过滤
     const kbs = availableKbs.filter((kb: any) =>
       !q || (kb.name && kb.name.toLowerCase().includes(q.toLowerCase()))
     );
@@ -691,7 +795,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       type: 'kb' as const,
       kbType: kb.type || 'document',
       count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
-      orgName: kb.org_name || undefined
+      orgName: kb.org_name || sharedAgentOrgName.value || undefined
     }));
   }
   
@@ -703,35 +807,42 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   if (shouldLoadFiles) {
     mentionLoading.value = true;
     try {
-      // 将文件类型过滤传递给后端
       const fileTypesParam = agentSupportedFileTypes.value.length > 0 ? agentSupportedFileTypes.value : undefined;
-      const res: any = await searchKnowledge(q || '', mentionOffset.value, MENTION_PAGE_SIZE, fileTypesParam);
+      const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+      const agentId = selectedAgentId.value;
+      const searchOptions = sourceTenantId && agentId ? { agent_id: agentId } : undefined;
+      const res: any = await searchKnowledge(
+        q || '',
+        mentionOffset.value,
+        MENTION_PAGE_SIZE,
+        fileTypesParam,
+        searchOptions
+      );
       console.log('[Mention] searchKnowledge response:', res);
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
-        
-        // 如果智能体配置了 kb_selection_mode === 'selected'，只显示指定知识库中的文件
-        if (hasAgentConfig.value && agentKBSelectionMode.value === 'selected') {
+        if (!sourceTenantId && hasAgentConfig.value && agentKBSelectionMode.value === 'selected') {
           const configuredKbIds = agentKnowledgeBases.value;
           files = files.filter((f: any) => configuredKbIds.includes(f.knowledge_base_id ?? f.kb_id));
         }
-        // 共享知识库 kb_id -> org_name，用于文件项显示组织角标（key 统一转 string 避免类型不一致）
         const sharedKbOrgMap: Record<string, string> = {};
         (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
           if (s.knowledge_base?.id != null && s.org_name) {
             sharedKbOrgMap[String(s.knowledge_base.id)] = s.org_name;
           }
         });
+        const agentOrgLabel = sourceTenantId && agentId ? sharedAgentOrgName.value : '';
         fileItems = files.map((f: any) => {
           const kbId = f.knowledge_base_id ?? f.kb_id;
           const kbIdStr = kbId != null ? String(kbId) : '';
+          const fileOrgName = agentOrgLabel || (kbIdStr ? sharedKbOrgMap[kbIdStr] : undefined);
           return {
             id: f.id,
             name: f.title || f.file_name,
             type: 'file' as const,
             kbName: f.knowledge_base_name || '',
             kbId: kbId || undefined,
-            orgName: kbIdStr ? sharedKbOrgMap[kbIdStr] || undefined : undefined
+            orgName: fileOrgName || undefined
           };
         });
       }
@@ -961,6 +1072,7 @@ const onMentionSelect = (item: any) => {
       settingsStore.addFile(item.id);
       if (item.kbId) {
         fileIdToKbId.value[item.id] = item.kbId;
+        settingsStore.setFileKbMap({ [item.id]: item.kbId });
       }
       // Add to local cache immediately
       if (!fileList.value.find(f => f.id === item.id)) {
@@ -1065,6 +1177,17 @@ onMounted(() => {
   loadConversationConfig();
   loadChatModels();
   loadAgents();
+
+  // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
+  const persisted = settingsStore.settings.selectedFileKbMap;
+  const ids = settingsStore.settings.selectedFiles || [];
+  if (persisted && typeof persisted === 'object' && ids.length > 0) {
+    const next: Record<string, string> = {};
+    ids.forEach((id: string) => {
+      if (persisted[id]) next[id] = persisted[id];
+    });
+    fileIdToKbId.value = next;
+  }
   
   // 如果从知识库内部进入，自动选中该知识库
   const kbId = (route.params as any)?.kbId as string;
@@ -1298,8 +1421,8 @@ const selectAgentMode = (mode: 'quick-answer' | 'smart-reasoning') => {
   showAgentModeSelector.value = false;
 }
 
-// 选择智能体（新版）
-const handleSelectAgent = (agent: CustomAgent) => {
+// 选择智能体（新版）；sourceTenantId 为共享智能体时传入
+const handleSelectAgent = (agent: CustomAgent, sourceTenantId?: string) => {
   // 根据智能体的 agent_mode 判断是否为 Agent 模式
   const isAgentType = agent.config?.agent_mode === 'smart-reasoning';
   
@@ -1317,27 +1440,23 @@ const handleSelectAgent = (agent: CustomAgent) => {
     return;
   }
   
-  selectedAgentId.value = agent.id;
+  settingsStore.selectAgent(agent.id, sourceTenantId);
   settingsStore.toggleAgent(!!isAgentType);
   
-  // 同步智能体的配置状态（包括内置和自定义智能体）
+  // 同步智能体的配置状态（含内置、自定义、共享智能体）：模型、网络搜索、知识库由 watch 同步
   // 1. 同步网络搜索状态
   const agentWebSearch = agent.config?.web_search_enabled;
   if (agentWebSearch !== undefined) {
-    // 智能体配置了网络搜索设置，同步到 store
     settingsStore.toggleWebSearch(agentWebSearch);
   } else if (agent.is_builtin) {
-    // 如果是内置智能体且未配置网络搜索，不强制修改，保留当前用户设置
-    // 或者可以考虑恢复默认值，视需求而定
+    // 内置智能体未配置时保留当前用户设置
   }
   
-  // 2. 同步模型
+  // 2. 同步模型（选中的对话模型随智能体切换，含共享智能体）
   const agentModel = agent.config?.model_id;
-  if (agentModel) {
+  if (agentModel && agentModel.trim() !== '') {
     selectedModelId.value = agentModel;
-  } else if (agent.is_builtin) {
-    // 如果是内置智能体且未配置特定模型，恢复为系统默认模型
-    // 这样可以确保从专用模型切换回普通模式时，模型也切回通用模型
+  } else {
     if (conversationConfig.value?.summary_model_id) {
       selectedModelId.value = conversationConfig.value.summary_model_id;
     }
@@ -1672,6 +1791,7 @@ onBeforeRouteUpdate((to, from, next) => {
           :visible="showAgentModeSelector"
           :anchorEl="agentModeButtonRef"
           :currentAgentId="selectedAgentId"
+          :agents="agents"
           @close="closeAgentModeSelector"
           @select="handleSelectAgent"
         />
@@ -1748,7 +1868,7 @@ onBeforeRouteUpdate((to, from, next) => {
               @click.stop="toggleModelSelector"
             >
               <span class="model-selector-name">
-                {{ selectedModel?.name || $t('input.notConfigured') }}
+                {{ selectedModelDisplayName }}
               </span>
               <svg 
                 width="12" 
@@ -1893,33 +2013,15 @@ const getImgSrc = (url: string) => {
   border: 1px solid transparent;
   color: var(--td-text-color-primary, #333);
   
-  /* KB - Document (Greenish tint) */
-  &.kb-tag {
-    background: rgba(16, 185, 129, 0.08);
-    color: #059669;
-    
-    .tag-icon {
-      color: #10b981;
-    }
-  }
-
-  /* KB - FAQ (Blueish tint) */
-  &.faq-tag {
-    background: rgba(0, 82, 217, 0.08);
-    color: #0052d9;
-    
-    .tag-icon {
-      color: #0052d9;
-    }
-  }
-  
-  /* File (Orange tint) */
+  /* 知识库 / 文件 - 无背景，与整体一致 */
+  &.kb-tag,
+  &.faq-tag,
   &.file-tag {
-    background: rgba(237, 123, 47, 0.08);
-    color: #e65100;
+    background: transparent;
+    color: var(--td-text-color-primary, #333);
     
     .tag-icon {
-      color: #ed7b2f;
+      color: var(--td-text-color-secondary, #666);
     }
   }
   

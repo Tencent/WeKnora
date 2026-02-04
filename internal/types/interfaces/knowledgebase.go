@@ -42,6 +42,12 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, etc.
 	GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error)
 
+	// GetKnowledgeBasesByIDsOnly retrieves knowledge bases by IDs without tenant filter (batch).
+	GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error)
+
+	// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB (uses kb.TenantID).
+	FillKnowledgeBaseCounts(ctx context.Context, kb *types.KnowledgeBase) error
+
 	// ListKnowledgeBases lists all knowledge bases under the current tenant
 	// Parameters:
 	//   - ctx: Context information, containing tenant information
@@ -49,6 +55,8 @@ type KnowledgeBaseService interface {
 	//   - List of knowledge base objects
 	//   - Possible errors such as insufficient permissions, etc.
 	ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error)
+	// ListKnowledgeBasesByTenantID lists all knowledge bases for a specific tenant (e.g. for shared agent context).
+	ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error)
 
 	// UpdateKnowledgeBase updates knowledge base information
 	// Parameters:

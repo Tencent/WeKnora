@@ -1,5 +1,5 @@
--- Migration: 000012_organizations (merged 000011–000017, 000012, 000013)
--- Description: Organization tables, approval, invite expiry, join requests, avatar, searchable, member_limit
+-- Migration: 000012_organizations (merged 000012, 000013, 000014)
+-- Description: Organization tables, kb_shares, join requests, agent_shares (model_shares omitted/dropped)
 DO $$ BEGIN RAISE NOTICE '[Migration 000012] Starting organization tables setup...'; END $$;
 
 -- Create organizations table
@@ -108,4 +108,28 @@ COMMENT ON COLUMN organization_join_requests.message IS 'Optional message from t
 COMMENT ON COLUMN organization_join_requests.reviewed_by IS 'User ID of the admin who reviewed the request';
 COMMENT ON COLUMN organization_join_requests.review_message IS 'Optional message from the reviewer';
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000012] Organization tables setup completed successfully!'; END $$;
+-- Agent shares (merged from 000013; model_shares omitted, dropped in 000014)
+CREATE TABLE IF NOT EXISTS agent_shares (
+    id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),
+    agent_id VARCHAR(36) NOT NULL,
+    organization_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    shared_by_user_id VARCHAR(36) NOT NULL,
+    source_tenant_id INTEGER NOT NULL,
+    permission VARCHAR(32) NOT NULL DEFAULT 'viewer',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    FOREIGN KEY (agent_id, source_tenant_id) REFERENCES custom_agents(id, tenant_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_shares_agent_org ON agent_shares(agent_id, source_tenant_id, organization_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_agent_shares_agent_id ON agent_shares(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_shares_org_id ON agent_shares(organization_id);
+CREATE INDEX IF NOT EXISTS idx_agent_shares_source_tenant ON agent_shares(source_tenant_id);
+CREATE INDEX IF NOT EXISTS idx_agent_shares_deleted_at ON agent_shares(deleted_at);
+
+COMMENT ON TABLE agent_shares IS 'Custom agent sharing records to organizations';
+COMMENT ON COLUMN agent_shares.source_tenant_id IS 'Original tenant ID of the agent';
+COMMENT ON COLUMN agent_shares.permission IS 'Access permission: viewer or editor';
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000012] Organization tables and agent_shares setup completed successfully!'; END $$;

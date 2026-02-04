@@ -210,6 +210,39 @@ type SharedKnowledgeBaseInfo struct {
 	SharedAt       time.Time      `json:"shared_at"`
 }
 
+// AgentShare represents a sharing record of an agent to an organization
+type AgentShare struct {
+	ID             string         `json:"id" gorm:"type:varchar(36);primaryKey"`
+	AgentID        string         `json:"agent_id" gorm:"type:varchar(36);not null;index"`
+	OrganizationID string         `json:"organization_id" gorm:"type:varchar(36);not null;index"`
+	SharedByUserID string         `json:"shared_by_user_id" gorm:"type:varchar(36);not null"`
+	SourceTenantID uint64         `json:"source_tenant_id" gorm:"not null;index"`
+	Permission     OrgMemberRole  `json:"permission" gorm:"type:varchar(32);not null;default:'viewer'"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	Agent          *CustomAgent   `json:"agent,omitempty" gorm:"foreignKey:AgentID,SourceTenantID;references:ID,TenantID"`
+	Organization   *Organization  `json:"organization,omitempty" gorm:"foreignKey:OrganizationID"`
+}
+
+// TableName returns the table name for GORM
+func (AgentShare) TableName() string {
+	return "agent_shares"
+}
+
+// SharedAgentInfo represents a shared agent with additional sharing info
+type SharedAgentInfo struct {
+	Agent             *CustomAgent  `json:"agent"`
+	ShareID           string        `json:"share_id"`
+	OrganizationID    string        `json:"organization_id"`
+	OrgName           string        `json:"org_name"`
+	Permission        OrgMemberRole `json:"permission"`
+	SourceTenantID    uint64        `json:"source_tenant_id"`
+	SharedAt          time.Time     `json:"shared_at"`
+	SharedByUserID    string        `json:"shared_by_user_id,omitempty"`
+	SharedByUsername  string        `json:"shared_by_username,omitempty"`
+}
+
 // ----------------------
 // Request/Response Types
 // ----------------------
@@ -302,6 +335,7 @@ type OrganizationResponse struct {
 	MemberLimit             int        `json:"member_limit"` // 0 = unlimited
 	MemberCount             int        `json:"member_count"`
 	ShareCount              int        `json:"share_count"`                // 共享到该组织的知识库数量
+	AgentShareCount         int        `json:"agent_share_count"`        // 共享到该组织的智能体数量
 	PendingJoinRequestCount int        `json:"pending_join_request_count"` // 待审批加入申请数（仅管理员可见）
 	IsOwner                 bool       `json:"is_owner"`
 	MyRole                  string     `json:"my_role,omitempty"`
@@ -342,6 +376,30 @@ type KnowledgeBaseShareResponse struct {
 	RequireApproval   bool      `json:"require_approval"`
 }
 
+// AgentShareResponse represents an agent share record in API responses
+type AgentShareResponse struct {
+	ID               string    `json:"id"`
+	AgentID          string    `json:"agent_id"`
+	AgentName        string    `json:"agent_name"`
+	OrganizationID   string    `json:"organization_id"`
+	OrganizationName string    `json:"organization_name"`
+	SharedByUserID   string    `json:"shared_by_user_id"`
+	SharedByUsername string    `json:"shared_by_username"`
+	SourceTenantID   uint64    `json:"source_tenant_id"`
+	Permission       string    `json:"permission"`
+	MyRoleInOrg      string    `json:"my_role_in_org,omitempty"`
+	MyPermission     string    `json:"my_permission,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	// Agent scope summary for list display (from agent config when available)
+	ScopeKB        string `json:"scope_kb,omitempty"`        // "all" | "selected" | "none"
+	ScopeKBCount   int    `json:"scope_kb_count,omitempty"` // when selected
+	ScopeWebSearch bool   `json:"scope_web_search,omitempty"`
+	ScopeMCP       string `json:"scope_mcp,omitempty"`        // "all" | "selected" | "none"
+	ScopeMCPCount  int    `json:"scope_mcp_count,omitempty"` // when selected
+	// Agent avatar (emoji or icon name) for list display
+	AgentAvatar string `json:"agent_avatar,omitempty"`
+}
+
 // ListOrganizationsResponse represents the response for listing organizations
 type ListOrganizationsResponse struct {
 	Organizations []OrganizationResponse `json:"organizations"`
@@ -357,6 +415,7 @@ type SearchableOrganizationItem struct {
 	MemberCount     int    `json:"member_count"`
 	MemberLimit     int    `json:"member_limit"` // 0 = unlimited
 	ShareCount      int    `json:"share_count"`
+	AgentShareCount int    `json:"agent_share_count"` // 共享到该组织的智能体数量
 	IsAlreadyMember bool   `json:"is_already_member"`
 	RequireApproval bool   `json:"require_approval"`
 }

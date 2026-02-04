@@ -23,9 +23,13 @@
                   :class="['nav-item', { 'active': currentSection === item.key }]"
                   @click="currentSection = item.key"
                 >
-                  <t-icon :name="item.icon" class="nav-icon" />
+                  <img v-if="item.key === 'sharedAgents'" :src="currentSection === 'sharedAgents' ? agentIconActiveSrc : agentIconSrc" class="nav-icon nav-icon-img" alt="" aria-hidden="true" />
+                  <t-icon v-else :name="item.icon" class="nav-icon" />
                   <span class="nav-label">{{ item.label }}</span>
-                  <span v-if="item.badge != null && item.badge > 0" class="nav-item-badge">{{ item.badge }}</span>
+                  <span
+                    v-if="item.badge != null && (item.key === 'sharedKb' || item.key === 'sharedAgents' ? true : item.badge > 0)"
+                    :class="['nav-item-badge', { 'nav-item-badge-count': item.key === 'sharedKb' || item.key === 'sharedAgents' }]"
+                  >{{ item.badge }}</span>
                 </div>
               </div>
             </div>
@@ -461,8 +465,8 @@
                   </div>
                 </div>
 
-                <!-- 共享知识库 -->
-                <div v-show="currentSection === 'shared'" class="section">
+                <!-- 共享知识库（独立侧边栏） -->
+                <div v-show="currentSection === 'sharedKb'" class="section">
                   <div class="section-header">
                     <h2>{{ $t('organization.share.sharedKnowledgeBase') }}</h2>
                     <p class="section-description">{{ $t('organization.settings.sharedDesc') }}</p>
@@ -475,12 +479,11 @@
                       </t-tooltip>
                     </p>
                   </div>
-
                   <div class="settings-group">
                     <t-loading :loading="sharesLoading">
                       <div v-if="sharedKnowledgeBases.length === 0 && !sharesLoading" class="empty-shared">
                         <div class="empty-icon">
-                          <t-icon name="folder-open" size="48px" />
+                          <img src="@/assets/img/zhishiku.svg" class="empty-icon-kb" alt="" aria-hidden="true" />
                         </div>
                         <p class="empty-text">{{ $t('organization.settings.noSharedKB') }}</p>
                         <p class="empty-subtext">{{ $t('organization.settings.noSharedKBTip') }}</p>
@@ -492,8 +495,8 @@
                           class="shared-item"
                           @click="handleShareClick(share)"
                         >
-                          <div class="shared-icon shared-icon-org">
-                            <img src="@/assets/img/organization.svg" class="org-icon-img" alt="" aria-hidden="true" />
+                          <div class="shared-icon shared-icon-kb">
+                            <img src="@/assets/img/zhishiku.svg" class="shared-icon-kb-img" alt="" aria-hidden="true" />
                           </div>
                           <div class="shared-info">
                             <span class="shared-name">{{ share.knowledge_base_name }}</span>
@@ -545,7 +548,80 @@
                   </div>
                 </div>
 
+                <!-- 共享智能体（独立侧边栏） -->
+                <div v-show="currentSection === 'sharedAgents'" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
+                    <p class="section-description">{{ $t('organization.settings.sharedAgentsDesc') }}</p>
+                  </div>
+                  <div class="settings-group">
+                    <div v-if="sharedAgents.length === 0" class="empty-shared">
+                      <div class="empty-icon">
+                        <img src="@/assets/img/agent.svg" class="empty-icon-agent" alt="" aria-hidden="true" />
+                      </div>
+                      <p class="empty-text">{{ $t('organization.settings.noSharedAgents') }}</p>
+                      <p class="empty-subtext">{{ $t('organization.settings.noSharedAgentsTip') }}</p>
+                    </div>
+                    <div v-else class="shared-list">
+                      <div
+                        v-for="share in sharedAgents"
+                        :key="share.id"
+                        class="shared-item"
+                        @mouseenter="onSharedAgentMouseEnter(share, $event)"
+                        @mousemove="onSharedAgentMouseMove($event)"
+                        @mouseleave="onSharedAgentMouseLeave"
+                      >
+                        <div class="shared-icon shared-icon-agent-wrap">
+                          <AgentAvatar :name="share.agent_name || share.agent_id" size="small" />
+                        </div>
+                        <div class="shared-info">
+                          <span class="shared-name">{{ share.agent_name || share.agent_id }}</span>
+                          <div class="shared-meta">
+                            <span v-if="share.shared_by_username" class="shared-by"><t-icon name="user" size="12px" />{{ share.shared_by_username }}</span>
+                            <span class="shared-time"><t-icon name="time" size="12px" />{{ formatDate(share.created_at) }}</span>
+                          </div>
+                        </div>
+                        <t-popconfirm v-if="isAdmin" :content="$t('organization.settings.removeAgentShareConfirm', { name: share.agent_name || share.agent_id })" :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }" :cancel-btn="{ content: $t('common.cancel') }" @confirm="handleRemoveAgentShare(share)">
+                          <t-button variant="text" size="small" theme="danger" class="shared-remove-btn" @click.stop><t-icon name="delete" size="16px" /></t-button>
+                        </t-popconfirm>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
               </div>
+
+              <!-- 共享智能体 hover 跟随气泡 -->
+              <Teleport to="body">
+                <Transition name="agent-scope-popover-fade">
+                  <div
+                    v-if="agentScopePopover"
+                    class="agent-scope-popover-follow"
+                    :style="agentScopePopoverStyle"
+                  >
+                    <div class="agent-scope-popover-card">
+                      <div class="agent-scope-popover-name">{{ agentScopePopover.share.agent_name || agentScopePopover.share.agent_id }}</div>
+                      <div class="agent-scope-popover-meta">
+                        <span v-if="agentScopePopover.share.shared_by_username" class="popover-meta-item">
+                          <t-icon name="user" size="12px" /> {{ agentScopePopover.share.shared_by_username }}
+                        </span>
+                        <span class="popover-meta-item">
+                          <t-icon name="time" size="12px" /> {{ formatDate(agentScopePopover.share.created_at) }}
+                        </span>
+                      </div>
+                      <div class="agent-scope-popover-permission">
+                        <span class="popover-label">{{ $t('organization.settings.sharePermissionLabel') }}</span>
+                        <span class="popover-value">{{ $t('organization.share.permissionReadonly') }}</span>
+                      </div>
+                      <template v-if="getAgentScopeTags(agentScopePopover.share).length">
+                        <div class="agent-scope-popover-divider" />
+                        <div class="agent-scope-popover-section-title">{{ $t('agent.shareScope.title') }}</div>
+                        <div v-for="(tag, idx) in getAgentScopeTags(agentScopePopover.share)" :key="idx" class="agent-scope-popover-row">{{ tag }}</div>
+                      </template>
+                    </div>
+                  </div>
+                </Transition>
+              </Teleport>
 
               <!-- 底部操作按钮 -->
               <div class="settings-footer">
@@ -658,24 +734,31 @@ import {
   removeMember,
   generateInviteCode,
   listOrgShares,
+  listOrgAgentShares,
   listJoinRequests,
   reviewJoinRequest,
   removeShare,
+  removeAgentShare,
   requestRoleUpgrade,
   searchUsersForInvite,
   inviteMember,
   type Organization,
   type OrganizationMember,
   type KnowledgeBaseShare,
+  type AgentShareResponse,
   type JoinRequestResponse
 } from '@/api/organization'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
+import AgentAvatar from '@/components/AgentAvatar.vue'
+import agentIconSrc from '@/assets/img/agent.svg'
+import agentIconActiveSrc from '@/assets/img/agent-green.svg'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const { t } = useI18n()
+
 const orgStore = useOrganizationStore()
 
 interface Props {
@@ -698,6 +781,7 @@ const currentSection = ref('basic')
 const orgInfo = ref<Organization | null>(null)
 const members = ref<OrganizationMember[]>([])
 const sharedKnowledgeBases = ref<KnowledgeBaseShare[]>([])
+const sharedAgents = ref<AgentShareResponse[]>([])
 const joinRequests = ref<JoinRequestResponse[]>([])
 const joinRequestsLoading = ref(false)
 const reviewingRequestId = ref<string | null>(null)
@@ -735,6 +819,12 @@ const formData = ref({
   invite_code_validity_days: 7 as number,
   member_limit: 50 as number // 0 = unlimited
 })
+
+// 共享智能体 hover 跟随气泡
+const agentScopePopover = ref<{ share: AgentShareResponse; x: number; y: number } | null>(null)
+const agentScopePopoverTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+const POPOVER_OFFSET = 14
+const POPOVER_DELAY = 200
 
 // 空间头像可选 Emoji（方案三：Emoji 作为头像）
 const avatarEmojiOptions = [
@@ -817,7 +907,18 @@ const navItems = computed(() => {
         badge: pendingCount > 0 ? pendingCount : undefined
       })
     }
-    items.push({ key: 'shared', icon: 'folder-open', label: t('organization.share.sharedKnowledgeBase') })
+    items.push({
+      key: 'sharedKb',
+      icon: 'folder-open',
+      label: t('organization.share.sharedKnowledgeBase'),
+      badge: sharedKnowledgeBases.value.length
+    })
+    items.push({
+      key: 'sharedAgents',
+      icon: 'control-platform',
+      label: t('organization.settings.sharedAgents'),
+      badge: sharedAgents.value.length
+    })
   }
   return items
 })
@@ -910,15 +1011,24 @@ const fetchSharedKBs = async () => {
   if (!props.orgId) return
   sharesLoading.value = true
   try {
-    const res = await listOrgShares(props.orgId)
-    if (res.success && res.data) {
-      sharedKnowledgeBases.value = res.data.shares || []
+    const [kbRes, agentRes] = await Promise.all([
+      listOrgShares(props.orgId),
+      listOrgAgentShares(props.orgId)
+    ])
+    if (kbRes.success && kbRes.data) {
+      sharedKnowledgeBases.value = kbRes.data.shares || []
     } else {
       sharedKnowledgeBases.value = []
     }
+    if (agentRes.success && agentRes.data) {
+      sharedAgents.value = agentRes.data.shares || []
+    } else {
+      sharedAgents.value = []
+    }
   } catch (error) {
-    console.error('Failed to fetch shared KBs:', error)
+    console.error('Failed to fetch shared resources:', error)
     sharedKnowledgeBases.value = []
+    sharedAgents.value = []
   } finally {
     sharesLoading.value = false
   }
@@ -1280,6 +1390,21 @@ const handleRemoveShare = async (share: KnowledgeBaseShare) => {
   }
 }
 
+const handleRemoveAgentShare = async (share: AgentShareResponse) => {
+  if (!props.orgId) return
+  try {
+    const res = await removeAgentShare(share.agent_id, share.id)
+    if (res.success) {
+      MessagePlugin.success(t('organization.settings.removeShareSuccess'))
+      sharedAgents.value = sharedAgents.value.filter(s => s.id !== share.id)
+    } else {
+      MessagePlugin.error(res.message || t('organization.settings.removeShareFailed'))
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('organization.settings.removeShareFailed'))
+  }
+}
+
 const formatDate = (dateStr: string) => {
   if (!dateStr) return ''
   const date = new Date(dateStr)
@@ -1288,6 +1413,68 @@ const formatDate = (dateStr: string) => {
   const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
+
+/** 共享智能体能力范围标签（知识库、网络搜索、MCP） */
+function getAgentScopeTags(share: AgentShareResponse): string[] {
+  const tags: string[] = []
+  if (share.scope_kb !== undefined && share.scope_kb !== '') {
+    const kbText = share.scope_kb === 'all'
+      ? t('agent.shareScope.kbAll')
+      : share.scope_kb === 'selected' && (share.scope_kb_count ?? 0) > 0
+        ? t('agent.shareScope.kbSelected', { count: share.scope_kb_count })
+        : t('agent.shareScope.kbNone')
+    tags.push(`${t('agent.shareScope.knowledgeBase')}：${kbText}`)
+  }
+  if (share.scope_web_search !== undefined) {
+    tags.push(`${t('agent.shareScope.webSearch')}：${share.scope_web_search ? t('agent.shareScope.enabled') : t('agent.shareScope.disabled')}`)
+  }
+  if (share.scope_mcp !== undefined && share.scope_mcp !== '') {
+    const mcpText = share.scope_mcp === 'all'
+      ? t('agent.shareScope.mcpAll')
+      : share.scope_mcp === 'selected' && (share.scope_mcp_count ?? 0) > 0
+        ? t('agent.shareScope.mcpSelected', { count: share.scope_mcp_count })
+        : t('agent.shareScope.mcpNone')
+    tags.push(`${t('agent.shareScope.mcp')}：${mcpText}`)
+  }
+  return tags
+}
+
+function onSharedAgentMouseEnter(share: AgentShareResponse, e: MouseEvent) {
+  agentScopePopoverTimer.value = setTimeout(() => {
+    agentScopePopover.value = { share, x: e.clientX, y: e.clientY }
+    agentScopePopoverTimer.value = null
+  }, POPOVER_DELAY)
+}
+
+function onSharedAgentMouseMove(e: MouseEvent) {
+  if (agentScopePopover.value) {
+    agentScopePopover.value = { ...agentScopePopover.value, x: e.clientX, y: e.clientY }
+  }
+}
+
+function onSharedAgentMouseLeave() {
+  if (agentScopePopoverTimer.value) {
+    clearTimeout(agentScopePopoverTimer.value)
+    agentScopePopoverTimer.value = null
+  }
+  agentScopePopover.value = null
+}
+
+const agentScopePopoverStyle = computed(() => {
+  if (!agentScopePopover.value) return {}
+  const { x, y } = agentScopePopover.value
+  const popoverWidth = 240
+  const popoverHeight = 180
+  let left = x + POPOVER_OFFSET
+  let top = y + POPOVER_OFFSET
+  const rightEdge = window.innerWidth - popoverWidth - 12
+  const bottomEdge = window.innerHeight - popoverHeight - 12
+  if (left > rightEdge) left = rightEdge
+  if (left < 12) left = 12
+  if (top > bottomEdge) top = bottomEdge
+  if (top < 12) top = 12
+  return { left: `${left}px`, top: `${top}px` }
+})
 
 const getRoleTheme = (role: string) => {
   switch (role) {
@@ -1326,6 +1513,12 @@ watch(() => props.visible, (newVal) => {
       fetchMembers()
       fetchSharedKBs()
     }
+  } else {
+    if (agentScopePopoverTimer.value) {
+      clearTimeout(agentScopePopoverTimer.value)
+      agentScopePopoverTimer.value = null
+    }
+    agentScopePopover.value = null
   }
 })
 
@@ -1457,6 +1650,11 @@ watch(currentSection, (section) => {
         justify-content: center;
         color: #94a3b8;
         transition: color 0.2s;
+
+        &.nav-icon-img {
+          width: 18px;
+          height: 18px;
+        }
       }
 
       .nav-label {
@@ -1476,6 +1674,12 @@ watch(currentSection, (section) => {
         line-height: 20px;
         text-align: center;
         flex-shrink: 0;
+
+        &.nav-item-badge-count {
+          background: rgba(0, 0, 0, 0.06);
+          color: #64748b;
+          font-weight: 500;
+        }
       }
 
       &:hover {
@@ -2067,6 +2271,16 @@ watch(currentSection, (section) => {
     align-items: center;
     justify-content: center;
     color: #c9ced6;
+
+    .empty-icon-agent {
+      width: 48px;
+      height: 48px;
+    }
+
+    .empty-icon-kb {
+      width: 48px;
+      height: 48px;
+    }
   }
 
   .empty-text {
@@ -2079,6 +2293,24 @@ watch(currentSection, (section) => {
     font-size: 12px;
     color: #86909c;
     margin: 0;
+  }
+
+  &.small {
+    padding: 24px 16px;
+    .empty-text { margin: 0; }
+  }
+}
+
+.shared-subsection {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #e5e7eb;
+
+  .shared-subtitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0 0 12px 0;
   }
 }
 
@@ -2257,9 +2489,32 @@ watch(currentSection, (section) => {
         color: #0052d9;
       }
 
-      &.shared-icon-org {
-        background: rgba(0, 82, 217, 0.06);
-        color: #0052d9;
+      &      .shared-icon-org {
+        background: rgba(7, 192, 95, 0.08);
+        color: #059669;
+      }
+
+      &.shared-icon-agent-wrap {
+        padding: 0;
+        height: auto;
+        background: transparent;
+      }
+
+      &.shared-icon-kb {
+        background: rgba(7, 192, 95, 0.08);
+        color: #059669;
+      }
+
+      .shared-icon-kb-img {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
+      }
+
+      .shared-icon-agent {
+        width: 20px;
+        height: 20px;
+        flex-shrink: 0;
       }
 
       .org-icon-img {
@@ -2434,5 +2689,92 @@ watch(currentSection, (section) => {
       color: #86909c;
     }
   }
+}
+</style>
+
+<style lang="less">
+/* 共享智能体 hover 跟随气泡（Teleport 到 body） */
+.agent-scope-popover-follow {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.agent-scope-popover-card {
+  min-width: 220px;
+  max-width: 280px;
+  padding: 14px 16px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e5e7eb;
+}
+
+.agent-scope-popover-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2129;
+  margin-bottom: 8px;
+  line-height: 1.3;
+  padding-right: 8px;
+}
+
+.agent-scope-popover-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 12px;
+  color: #86909c;
+  margin-bottom: 10px;
+
+  .popover-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+.agent-scope-popover-permission {
+  font-size: 12px;
+  margin-bottom: 10px;
+
+  .popover-label {
+    color: #86909c;
+    margin-right: 6px;
+  }
+
+  .popover-value {
+    color: #1d2129;
+    font-weight: 500;
+  }
+}
+
+.agent-scope-popover-divider {
+  height: 1px;
+  background: #f0f0f0;
+  margin: 10px 0;
+}
+
+.agent-scope-popover-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1d2129;
+  margin-bottom: 8px;
+}
+
+.agent-scope-popover-row {
+  font-size: 12px;
+  color: #4e5969;
+  line-height: 1.7;
+  padding: 2px 0;
+}
+
+.agent-scope-popover-fade-enter-active,
+.agent-scope-popover-fade-leave-active {
+  transition: opacity 0.12s ease;
+}
+.agent-scope-popover-fade-enter-from,
+.agent-scope-popover-fade-leave-to {
+  opacity: 0;
 }
 </style>

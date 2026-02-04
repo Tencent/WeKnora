@@ -39,17 +39,24 @@ var (
 
 // organizationService implements OrganizationService interface
 type organizationService struct {
-	orgRepo   interfaces.OrganizationRepository
-	userRepo  interfaces.UserRepository
-	shareRepo interfaces.KBShareRepository
+	orgRepo        interfaces.OrganizationRepository
+	userRepo       interfaces.UserRepository
+	shareRepo      interfaces.KBShareRepository
+	agentShareRepo interfaces.AgentShareRepository
 }
 
 // NewOrganizationService creates a new organization service
-func NewOrganizationService(orgRepo interfaces.OrganizationRepository, userRepo interfaces.UserRepository, shareRepo interfaces.KBShareRepository) interfaces.OrganizationService {
+func NewOrganizationService(
+	orgRepo interfaces.OrganizationRepository,
+	userRepo interfaces.UserRepository,
+	shareRepo interfaces.KBShareRepository,
+	agentShareRepo interfaces.AgentShareRepository,
+) interfaces.OrganizationService {
 	return &organizationService{
-		orgRepo:   orgRepo,
-		userRepo:  userRepo,
-		shareRepo: shareRepo,
+		orgRepo:        orgRepo,
+		userRepo:       userRepo,
+		shareRepo:      shareRepo,
+		agentShareRepo: agentShareRepo,
 	}
 }
 
@@ -227,6 +234,7 @@ func (s *organizationService) SearchSearchableOrganizations(ctx context.Context,
 	}
 	memberCounts := make(map[string]int64)
 	shareCounts := make(map[string]int64)
+	agentShareCounts := make(map[string]int)
 	memberOrgIDs := make(map[string]bool)
 	for _, org := range orgs {
 		if mc, err := s.orgRepo.CountMembers(ctx, org.ID); err == nil {
@@ -234,6 +242,9 @@ func (s *organizationService) SearchSearchableOrganizations(ctx context.Context,
 		}
 		shares, _ := s.shareRepo.ListByOrganization(ctx, org.ID)
 		shareCounts[org.ID] = int64(len(shares))
+		if agentShares, err := s.agentShareRepo.ListByOrganization(ctx, org.ID); err == nil {
+			agentShareCounts[org.ID] = len(agentShares)
+		}
 		_, err := s.orgRepo.GetMember(ctx, org.ID, userID)
 		memberOrgIDs[org.ID] = (err == nil)
 	}
@@ -247,6 +258,7 @@ func (s *organizationService) SearchSearchableOrganizations(ctx context.Context,
 			MemberCount:     int(memberCounts[org.ID]),
 			MemberLimit:     org.MemberLimit,
 			ShareCount:      int(shareCounts[org.ID]),
+			AgentShareCount: agentShareCounts[org.ID],
 			IsAlreadyMember: memberOrgIDs[org.ID],
 			RequireApproval: org.RequireApproval,
 		})
@@ -311,6 +323,9 @@ func (s *organizationService) DeleteOrganization(ctx context.Context, id string,
 	// Remove all KB shares for this org so members no longer see associated knowledge bases
 	if err := s.shareRepo.DeleteByOrganizationID(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to delete KB shares for organization %s: %v", id, err)
+	}
+	if err := s.agentShareRepo.DeleteByOrganizationID(ctx, id); err != nil {
+		logger.Warnf(ctx, "Failed to delete agent shares for organization %s: %v", id, err)
 	}
 
 	return s.orgRepo.Delete(ctx, id)

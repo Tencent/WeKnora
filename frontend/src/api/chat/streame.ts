@@ -89,7 +89,7 @@ export function useStream() {
       if (params.knowledge_ids !== undefined && params.knowledge_ids.length > 0) {
         postBody.knowledge_ids = params.knowledge_ids;
       }
-      // Include agent_id if provided (for custom agent configuration)
+      // Include agent_id if provided (backend resolves shared agent and tenant from share relation)
       if (params.agent_id) {
         postBody.agent_id = params.agent_id;
       }

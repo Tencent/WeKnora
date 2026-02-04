@@ -30,7 +30,7 @@
             >
               <div 
                 class="agent-option"
-                :class="{ 'selected': currentAgentId === agent.id }"
+                :class="{ 'selected': isMyAgentSelected(agent) }"
                 @click="selectAgent(agent)"
               >
                 <!-- 快速回答和智能推理使用图标，其他内置智能体使用 avatar -->
@@ -51,7 +51,7 @@
                     </div>
                   </t-tooltip>
                   <svg 
-                    v-if="currentAgentId === agent.id"
+                    v-if="isMyAgentSelected(agent)"
                     width="14" 
                     height="14" 
                     viewBox="0 0 16 16" 
@@ -77,7 +77,7 @@
                     </div>
                     <div class="agent-tooltip-title">
                       <span class="agent-tooltip-name">{{ agent.name }}</span>
-                      <span v-if="currentAgentId === agent.id" class="agent-tooltip-selected">{{ $t('agent.selector.current') }}</span>
+                      <span v-if="isMyAgentSelected(agent)" class="agent-tooltip-selected">{{ $t('agent.selector.current') }}</span>
                     </div>
                   </div>
                   <p class="agent-tooltip-desc">{{ agent.description || $t('agent.noDescription') }}</p>
@@ -85,6 +85,22 @@
                     <div class="capability-item">
                       <TIcon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="12px" />
                       <span>{{ agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.type.agent') : $t('agent.type.normal') }}</span>
+                    </div>
+                    <div v-if="getKbCapability(agent)" class="capability-item">
+                      <TIcon name="folder" size="12px" />
+                      <span>{{ getKbCapability(agent) }}</span>
+                    </div>
+                    <div v-if="agent.config?.web_search_enabled" class="capability-item">
+                      <TIcon name="internet" size="12px" />
+                      <span>{{ $t('agent.capabilities.webSearchOn') }}</span>
+                    </div>
+                    <div v-if="getMcpCapability(agent)" class="capability-item">
+                      <TIcon name="extension" size="12px" />
+                      <span>{{ getMcpCapability(agent) }}</span>
+                    </div>
+                    <div v-if="agent.config?.multi_turn_enabled" class="capability-item">
+                      <TIcon name="chat-bubble" size="12px" />
+                      <span>{{ $t('agent.capabilities.multiTurn') }}</span>
                     </div>
                   </div>
                 </div>
@@ -105,7 +121,7 @@
             >
               <div 
                 class="agent-option"
-                :class="{ 'selected': currentAgentId === agent.id }"
+                :class="{ 'selected': isMyAgentSelected(agent) }"
                 @click="selectAgent(agent)"
               >
                 <AgentAvatar :name="agent.name" size="small" />
@@ -117,7 +133,7 @@
                     </div>
                   </t-tooltip>
                   <svg 
-                    v-if="currentAgentId === agent.id"
+                    v-if="isMyAgentSelected(agent)"
                     width="14" 
                     height="14" 
                     viewBox="0 0 16 16" 
@@ -134,7 +150,7 @@
                     <AgentAvatar :name="agent.name" size="small" />
                     <div class="agent-tooltip-title">
                       <span class="agent-tooltip-name">{{ agent.name }}</span>
-                      <span v-if="currentAgentId === agent.id" class="agent-tooltip-selected">{{ $t('agent.selector.current') }}</span>
+                      <span v-if="isMyAgentSelected(agent)" class="agent-tooltip-selected">{{ $t('agent.selector.current') }}</span>
                     </div>
                   </div>
                   <p class="agent-tooltip-desc">{{ agent.description || $t('agent.noDescription') }}</p>
@@ -151,9 +167,9 @@
                       <TIcon name="internet" size="12px" />
                       <span>{{ $t('agent.capabilities.webSearchOn') }}</span>
                     </div>
-                    <div v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'" class="capability-item">
+                    <div v-if="getMcpCapability(agent)" class="capability-item">
                       <TIcon name="extension" size="12px" />
-                      <span>{{ $t('agent.capabilities.mcpEnabled') }}</span>
+                      <span>{{ getMcpCapability(agent) }}</span>
                     </div>
                     <div v-if="agent.config?.multi_turn_enabled" class="capability-item">
                       <TIcon name="chat-bubble" size="12px" />
@@ -165,8 +181,87 @@
             </t-popup>
           </div>
 
+          <!-- 共享给我分组 -->
+          <div v-if="sharedAgentsList.length > 0" class="agent-group">
+            <div class="agent-group-title">{{ $t('agent.tabs.sharedToMe') }}</div>
+            <t-popup
+              v-for="shared in sharedAgentsList"
+              :key="`${shared.agent.id}-${shared.source_tenant_id}`"
+              placement="right"
+              trigger="hover"
+              :show-arrow="true"
+              :overlay-inner-class-name="'agent-tooltip-popup'"
+            >
+              <div
+                class="agent-option"
+                :class="{ 'selected': isSharedAgentSelected(shared) }"
+                @click="selectSharedAgent(shared)"
+              >
+                <AgentAvatar :name="shared.agent.name" size="small" />
+                <span class="agent-option-name">{{ shared.agent.name }}</span>
+                <span class="shared-tag">{{ $t('agent.selector.sharedLabel') }}</span>
+                <div class="agent-option-actions">
+                  <svg
+                    v-if="isSharedAgentSelected(shared)"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    class="check-icon"
+                  >
+                    <path d="M13.5 4.5L6 12L2.5 8.5L3.5 7.5L6 10L12.5 3.5L13.5 4.5Z"/>
+                  </svg>
+                </div>
+              </div>
+              <template #content>
+                <div class="agent-tooltip-content">
+                  <div class="agent-tooltip-header">
+                    <AgentAvatar :name="shared.agent.name" size="small" />
+                    <div class="agent-tooltip-title">
+                      <span class="agent-tooltip-name">{{ shared.agent.name }}</span>
+                      <span v-if="isSharedAgentSelected(shared)" class="agent-tooltip-selected">{{ $t('agent.selector.current') }}</span>
+                    </div>
+                  </div>
+                  <p class="agent-tooltip-desc">{{ shared.agent.description || $t('agent.noDescription') }}</p>
+                  <div class="agent-tooltip-capabilities">
+                    <div class="capability-item">
+                      <TIcon :name="shared.agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="12px" />
+                      <span>{{ shared.agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.type.agent') : $t('agent.type.normal') }}</span>
+                    </div>
+                    <div v-if="getKbCapability(shared.agent)" class="capability-item">
+                      <TIcon name="folder" size="12px" />
+                      <span>{{ getKbCapability(shared.agent) }}</span>
+                    </div>
+                    <div v-if="shared.agent.config?.web_search_enabled" class="capability-item">
+                      <TIcon name="internet" size="12px" />
+                      <span>{{ $t('agent.capabilities.webSearchOn') }}</span>
+                    </div>
+                    <div v-if="getMcpCapability(shared.agent)" class="capability-item">
+                      <TIcon name="extension" size="12px" />
+                      <span>{{ getMcpCapability(shared.agent) }}</span>
+                    </div>
+                    <div v-if="shared.agent.config?.multi_turn_enabled" class="capability-item">
+                      <TIcon name="chat-bubble" size="12px" />
+                      <span>{{ $t('agent.capabilities.multiTurn') }}</span>
+                    </div>
+                  </div>
+                  <div v-if="shared.org_name || shared.shared_by_username" class="agent-tooltip-meta-list">
+                    <div v-if="shared.org_name" class="agent-tooltip-meta-row">
+                      <img src="@/assets/img/organization-green.svg" class="agent-tooltip-meta-icon" alt="" aria-hidden="true" />
+                      <span class="agent-tooltip-meta-text">{{ shared.org_name }}</span>
+                    </div>
+                    <div v-if="shared.shared_by_username" class="agent-tooltip-meta-row">
+                      <img src="@/assets/img/user.svg" class="agent-tooltip-meta-icon" alt="" aria-hidden="true" />
+                      <span class="agent-tooltip-meta-text">{{ shared.shared_by_username }}</span>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </t-popup>
+          </div>
+
           <!-- 空状态 -->
-          <div v-if="builtinAgents.length === 0 && customAgents.length === 0" class="agent-option empty">
+          <div v-if="builtinAgents.length === 0 && customAgents.length === 0 && sharedAgentsList.length === 0" class="agent-option empty">
             {{ $t('agent.noAgents') }}
           </div>
         </div>
@@ -176,34 +271,43 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { Icon as TIcon, Popup as TPopup, Tooltip as TTooltip } from 'tdesign-vue-next';
-import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import AgentAvatar from '@/components/AgentAvatar.vue';
+import { useOrganizationStore } from '@/stores/organization';
+import { useSettingsStore } from '@/stores/settings';
+import type { SharedAgentInfo } from '@/api/organization';
 
 const { t } = useI18n();
 const router = useRouter();
+const orgStore = useOrganizationStore();
+const settingsStore = useSettingsStore();
 
 const props = defineProps<{
   visible: boolean;
   anchorEl?: HTMLElement;
   currentAgentId: string;
+  /** 由父组件加载的智能体列表，避免下拉打开时重复请求 agents / shared-agents */
+  agents?: CustomAgent[];
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'select', agent: CustomAgent): void;
+  (e: 'select', agent: CustomAgent, sourceTenantId?: string): void;
 }>();
 
-const agents = ref<CustomAgent[]>([]);
 const dropdownStyle = ref<Record<string, string>>({});
+
+// 使用父组件传入的 agents，避免与父组件重复请求
+const agentsList = computed(() => props.agents ?? []);
 
 // 内置智能体（从 API 获取，对特定 ID 使用本地化名称）
 const builtinAgents = computed(() => {
   // 从 API 获取的内置智能体
-  const apiBuiltins = agents.value.filter(a => a.is_builtin);
+  const apiBuiltins = agentsList.value.filter(a => a.is_builtin);
   
   // 对特定内置智能体使用本地化名称和描述
   return apiBuiltins.map(agent => {
@@ -225,10 +329,23 @@ const builtinAgents = computed(() => {
   });
 });
 
-// 自定义智能体
+// 自定义智能体（我的）
 const customAgents = computed(() => {
-  return agents.value.filter(a => !a.is_builtin);
+  return agentsList.value.filter(a => !a.is_builtin);
 });
+
+// 共享给我的智能体
+const sharedAgentsList = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || []);
+
+// 当前选中的来源租户（共享智能体时）
+const currentAgentSourceTenantId = computed(() => settingsStore.selectedAgentSourceTenantId ?? null);
+
+const isSharedAgentSelected = (shared: SharedAgentInfo) =>
+  props.currentAgentId === shared.agent.id && currentAgentSourceTenantId.value === String(shared.source_tenant_id);
+
+// 我的智能体（内置或自定义）选中态：仅当未选共享来源时
+const isMyAgentSelected = (agent: CustomAgent) =>
+  props.currentAgentId === agent.id && !currentAgentSourceTenantId.value;
 
 // 获取知识库能力描述
 const getKbCapability = (agent: CustomAgent): string => {
@@ -243,19 +360,29 @@ const getKbCapability = (agent: CustomAgent): string => {
   return '';
 };
 
-// 加载智能体列表
-const loadAgents = async () => {
-  try {
-    const response = await listAgents();
-    agents.value = response.data || [];
-  } catch (error) {
-    console.error('Failed to load agents:', error);
+// 获取 MCP 能力描述（更详细：全部 / 指定 N 个）
+const getMcpCapability = (agent: CustomAgent): string => {
+  const config = agent.config || {};
+  if (config.mcp_selection_mode === 'none' || (!config.mcp_services?.length && config.mcp_selection_mode !== 'all')) {
+    return '';
   }
+  if (config.mcp_selection_mode === 'all') {
+    return t('agent.detail.shareScope.mcpAll');
+  }
+  if (config.mcp_services?.length) {
+    return t('agent.detail.shareScope.mcpSelected', { count: config.mcp_services.length });
+  }
+  return t('agent.capabilities.mcpEnabled');
 };
 
-// 选择智能体
+// 选择智能体（我的或内置）
 const selectAgent = (agent: CustomAgent) => {
   emit('select', agent);
+};
+
+// 选择共享智能体
+const selectSharedAgent = (shared: SharedAgentInfo) => {
+  emit('select', shared.agent as CustomAgent, String(shared.source_tenant_id));
 };
 
 // 跳转到智能体设置页面
@@ -325,19 +452,12 @@ const updateDropdownPosition = () => {
   }
 };
 
-// 监听显示状态
+// 监听显示状态（仅更新位置，数据由父组件加载后通过 props.agents 传入）
 watch(() => props.visible, (newVal) => {
   if (newVal) {
-    loadAgents();
     nextTick(() => {
       updateDropdownPosition();
     });
-  }
-});
-
-onMounted(() => {
-  if (props.visible) {
-    loadAgents();
   }
 });
 </script>
@@ -472,6 +592,41 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.4;
+}
+
+.shared-tag {
+  font-size: 10px;
+  color: var(--td-text-color-placeholder, #999);
+  flex-shrink: 0;
+}
+
+.agent-tooltip-meta-list {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--td-component-stroke, #f0f0f0);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-tooltip-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--td-text-color-placeholder, #999);
+}
+
+.agent-tooltip-meta-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.agent-tooltip-meta-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .builtin-icon {

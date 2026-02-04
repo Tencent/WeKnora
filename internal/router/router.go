@@ -500,6 +500,8 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.PUT("/:id/join-requests/:request_id/review", orgHandler.ReviewJoinRequest)
 		// List knowledge bases shared to this organization
 		orgs.GET("/:id/shares", orgHandler.ListOrgShares)
+		// List agents shared to this organization
+		orgs.GET("/:id/agent-shares", orgHandler.ListOrgAgentShares)
 	}
 
 	// Knowledge base sharing routes (add to existing kb routes)
@@ -515,6 +517,16 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		kbShares.DELETE("/:share_id", orgHandler.RemoveShare)
 	}
 
+	// Agent sharing routes
+	agentShares := r.Group("/agents/:id/shares")
+	{
+		agentShares.POST("", orgHandler.ShareAgent)
+		agentShares.GET("", orgHandler.ListAgentShares)
+		agentShares.DELETE("/:share_id", orgHandler.RemoveAgentShare)
+	}
+
 	// Shared knowledge bases route
 	r.GET("/shared-knowledge-bases", orgHandler.ListSharedKnowledgeBases)
+	// Shared agents route
+	r.GET("/shared-agents", orgHandler.ListSharedAgents)
 }

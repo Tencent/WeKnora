@@ -139,6 +139,23 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByIDOnly(ctx context.Context, id 
 	return kb, nil
 }
 
+// GetKnowledgeBasesByIDsOnly retrieves knowledge bases by IDs without tenant filter (batch).
+func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, kb := range kbs {
+		if kb != nil {
+			kb.EnsureDefaults()
+		}
+	}
+	return kbs, nil
+}
+
 // ListKnowledgeBases returns all knowledge bases for a tenant
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
@@ -193,6 +210,59 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		}
 	}
 	return kbs, nil
+}
+
+// ListKnowledgeBasesByTenantID returns all knowledge bases for the given tenant (e.g. for shared agent context).
+func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
+	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+	for _, kb := range kbs {
+		kb.EnsureDefaults()
+		switch kb.Type {
+		case types.KnowledgeBaseTypeDocument:
+			if cnt, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+				kb.KnowledgeCount = cnt
+			}
+		case types.KnowledgeBaseTypeFAQ:
+			if cnt, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+				kb.ChunkCount = cnt
+			}
+		}
+		if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
+			kb.IsProcessing = processingCount > 0
+			kb.ProcessingCount = processingCount
+		}
+	}
+	return kbs, nil
+}
+
+// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB using kb.TenantID.
+func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *types.KnowledgeBase) error {
+	if kb == nil {
+		return nil
+	}
+	tenantID := kb.TenantID
+	kb.EnsureDefaults()
+	switch kb.Type {
+	case types.KnowledgeBaseTypeDocument:
+		if cnt, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+			kb.KnowledgeCount = cnt
+		}
+	case types.KnowledgeBaseTypeFAQ:
+		if cnt, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+			kb.ChunkCount = cnt
+		}
+	}
+	if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
+		kb.IsProcessing = processingCount > 0
+		kb.ProcessingCount = processingCount
+	}
+	return nil
 }
 
 // UpdateKnowledgeBase updates a knowledge base's properties

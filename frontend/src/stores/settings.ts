@@ -10,11 +10,13 @@ interface Settings {
   agentConfig: AgentConfig;
   selectedKnowledgeBases: string[];  // 当前选中的知识库ID列表
   selectedFiles: string[]; // 当前选中的文件ID列表
+  selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
+  selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源租户 ID（用于后端 model/KB/MCP 解析）
 }
 
 // Agent 配置接口
@@ -72,6 +74,7 @@ const defaultSettings: Settings = {
   },
   selectedKnowledgeBases: [],  // 默认为空数组
   selectedFiles: [], // 默认为空数组
+  selectedFileKbMap: {},  // 文件ID -> 知识库ID
   modelConfig: {
     chatModels: [],
     embeddingModels: [],
@@ -89,6 +92,7 @@ const defaultSettings: Settings = {
     selectedChatModelId: "",  // 用户当前选择的对话模型ID
   },
   selectedAgentId: BUILTIN_QUICK_ANSWER_ID,  // 默认选中快速问答模式
+  selectedAgentSourceTenantId: null as string | null,  // 共享智能体来源租户 ID
 };
 
 export const useSettingsStore = defineStore("settings", {
@@ -136,6 +140,8 @@ export const useSettingsStore = defineStore("settings", {
     
     // 当前选中的智能体ID
     selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
+    // 共享智能体来源租户 ID（可选）
+    selectedAgentSourceTenantId: (state) => state.settings.selectedAgentSourceTenantId ?? null,
   },
 
   actions: {
@@ -302,11 +308,24 @@ export const useSettingsStore = defineStore("settings", {
     removeFile(fileId: string) {
       if (!this.settings.selectedFiles) return;
       this.settings.selectedFiles = this.settings.selectedFiles.filter((id: string) => id !== fileId);
+      if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
     clearFiles() {
       this.settings.selectedFiles = [];
+      this.settings.selectedFileKbMap = {};
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    setFileKbMap(updates: Record<string, string>) {
+      if (!this.settings.selectedFileKbMap) this.settings.selectedFileKbMap = {};
+      Object.assign(this.settings.selectedFileKbMap, updates);
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    removeFileKbId(fileId: string) {
+      if (this.settings.selectedFileKbMap) delete this.settings.selectedFileKbMap[fileId];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
@@ -314,9 +333,10 @@ export const useSettingsStore = defineStore("settings", {
       return this.settings.selectedFiles || [];
     },
     
-    // 选择智能体
-    selectAgent(agentId: string) {
+    // 选择智能体（sourceTenantId 仅在使用共享智能体时传入）
+    selectAgent(agentId: string, sourceTenantId?: string | null) {
       this.settings.selectedAgentId = agentId;
+      this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
       // 根据智能体类型自动切换 Agent 模式
       if (agentId === BUILTIN_QUICK_ANSWER_ID) {
         this.settings.isAgentEnabled = false;
@@ -329,7 +349,7 @@ export const useSettingsStore = defineStore("settings", {
       // 因为不同智能体关联的知识库不同，需要清空用户之前的选择
       this.settings.selectedKnowledgeBases = [];
       this.settings.selectedFiles = [];
-      
+      this.settings.selectedFileKbMap = {};
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     

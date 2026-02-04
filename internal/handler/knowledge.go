@@ -9,8 +9,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	goerrors "errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -19,9 +21,10 @@ import (
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
-	kgService      interfaces.KnowledgeService
-	kbService      interfaces.KnowledgeBaseService
-	kbShareService interfaces.KBShareService
+	kgService        interfaces.KnowledgeService
+	kbService        interfaces.KnowledgeBaseService
+	kbShareService   interfaces.KBShareService
+	agentShareService interfaces.AgentShareService
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -29,11 +32,13 @@ func NewKnowledgeHandler(
 	kgService interfaces.KnowledgeService,
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
+	agentShareService interfaces.AgentShareService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
-		kgService:      kgService,
-		kbService:      kbService,
-		kbShareService: kbShareService,
+		kgService:        kgService,
+		kbService:        kbService,
+		kbShareService:   kbShareService,
+		agentShareService: agentShareService,
 	}
 }
 
@@ -157,18 +162,41 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 	}
 
 	// Shared KB: check organization permission
-	if !userExists || h.kbShareService == nil {
-		return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+	if userExists && h.kbShareService != nil {
+		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
+		if permErr == nil && isShared && permission.HasPermission(requiredPermission) {
+			effectiveTenantID := knowledge.TenantID
+			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID), nil
+		}
 	}
-	permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
-	if permErr != nil || !isShared {
-		return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+	// Shared agent: request passes agent_id, verify user has that shared agent and the agent has access to this knowledge/KB
+	if userExists && h.agentShareService != nil && requiredPermission == types.OrgRoleViewer {
+		agentID := c.Query("agent_id")
+		if agentID != "" {
+			agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID.(string), tenantID, agentID)
+			if err == nil && agent != nil {
+				if knowledge.TenantID != agent.TenantID {
+					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+				}
+				mode := agent.Config.KBSelectionMode
+				if mode == "none" {
+					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+				}
+				if mode == "all" {
+					return knowledge, context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
+				}
+				if mode == "selected" {
+					for _, kbID := range agent.Config.KnowledgeBases {
+						if kbID == knowledge.KnowledgeBaseID {
+							return knowledge, context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
+						}
+					}
+					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
+				}
+			}
+		}
 	}
-	if !permission.HasPermission(requiredPermission) {
-		return nil, ctx, errors.NewForbiddenError("Insufficient permission for this operation")
-	}
-	effectiveTenantID := knowledge.TenantID
-	return knowledge, context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID), nil
+	return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
 }
 
 // handleDuplicateKnowledgeError handles cases where duplicate knowledge is detected
@@ -680,20 +708,22 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 
 // GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval
 type GetKnowledgeBatchRequest struct {
-	IDs  []string `form:"ids" binding:"required"` // List of knowledge IDs
-	KBID string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
+	IDs     []string `form:"ids" binding:"required"` // List of knowledge IDs
+	KBID    string   `form:"kb_id"`                  // Optional: scope to this KB (validates access and uses effective tenant for shared KB)
+	AgentID string   `form:"agent_id"`               // Optional: when using a shared agent, use agent's tenant for retrieval (validates shared agent access)
 }
 
 // GetKnowledgeBatch godoc
 // @Summary      批量获取知识
-// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析
+// @Description  根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        ids    query     []string  true   "知识ID列表"
-// @Param        kb_id  query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
-// @Success      200    {object}  map[string]interface{}  "知识列表"
-// @Failure      400    {object}  errors.AppError         "请求参数错误"
+// @Param        ids       query     []string  true   "知识ID列表"
+// @Param        kb_id     query     string   false  "可选，知识库ID（用于共享知识库时指定范围）"
+// @Param        agent_id  query     string   false  "可选，共享智能体ID（用于按智能体租户批量拉取文件详情）"
+// @Success      200       {object}  map[string]interface{}  "知识列表"
+// @Failure      400       {object}  errors.AppError        "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge/batch [get]
@@ -715,6 +745,30 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		return
 	}
 
+	// Optional agent_id: when using shared agent, resolve agent and use its tenant for batch retrieval (so shared KB files can be loaded after refresh)
+	if agentID := secutils.SanitizeForLog(req.AgentID); agentID != "" && h.agentShareService != nil {
+		userIDVal, ok := c.Get(types.UserIDContextKey.String())
+		if !ok {
+			c.Error(errors.NewUnauthorizedError("Unauthorized"))
+			return
+		}
+		userID, _ := userIDVal.(string)
+		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
+		if currentTenantID == 0 {
+			c.Error(errors.NewUnauthorizedError("Unauthorized"))
+			return
+		}
+		agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID, currentTenantID, agentID)
+		if err != nil || agent == nil {
+			logger.Warnf(ctx, "GetKnowledgeBatch: invalid or inaccessible shared agent %s: %v", agentID, err)
+			c.Error(errors.NewForbiddenError("Invalid or inaccessible shared agent").WithDetails(err.Error()))
+			return
+		}
+		effectiveTenantID = agent.TenantID
+		logger.Infof(ctx, "Batch retrieving knowledge with agent_id, effective tenant ID: %d, IDs count: %d",
+			effectiveTenantID, len(req.IDs))
+	}
+
 	var knowledges []*types.Knowledge
 	var err error
 
@@ -733,9 +787,8 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 
 		knowledges, err = h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, req.IDs)
 	} else {
-		// No kb_id provided: use GetKnowledgeBatchWithSharedAccess to support cross-tenant shared files
-		// This is needed when page is refreshed and frontend doesn't have kb_id mapping
-		logger.Infof(ctx, "Batch retrieving knowledge without kb_id (using shared access), tenant ID: %d, IDs count: %d",
+		// No kb_id: use GetKnowledgeBatchWithSharedAccess (or effectiveTenantID may already be set by agent_id for shared agent)
+		logger.Infof(ctx, "Batch retrieving knowledge without kb_id, effective tenant ID: %d, IDs count: %d",
 			effectiveTenantID, len(req.IDs))
 
 		knowledges, err = h.kgService.GetKnowledgeBatchWithSharedAccess(ctx, effectiveTenantID, req.IDs)
@@ -999,14 +1052,15 @@ func (h *KnowledgeHandler) UpdateImageInfo(c *gin.Context) {
 
 // SearchKnowledge godoc
 // @Summary      Search knowledge
-// @Description  Search knowledge files by keyword across all knowledge bases
+// @Description  Search knowledge files by keyword. When agent_id is set (shared agent), scope is the agent's configured knowledge bases.
 // @Tags         Knowledge
 // @Accept       json
 // @Produce      json
-// @Param        keyword     query     string  false "Keyword to search"
-// @Param        offset      query     int     false "Offset for pagination"
-// @Param        limit       query     int     false "Limit for pagination (default 20)"
-// @Param        file_types  query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
+// @Param        keyword    query     string  false "Keyword to search"
+// @Param        offset     query     int     false "Offset for pagination"
+// @Param        limit      query     int     false "Limit for pagination (default 20)"
+// @Param        file_types query     string  false "Comma-separated file extensions to filter (e.g., csv,xlsx)"
+// @Param        agent_id   query     string  false "Shared agent ID (search within agent's KB scope)"
 // @Success      200         {object}  map[string]interface{}     "Search results"
 // @Failure      400         {object}  errors.AppError            "Invalid request"
 // @Security     Bearer
@@ -1021,7 +1075,6 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 
-	// Parse file_types parameter (comma-separated)
 	var fileTypes []string
 	if fileTypesStr := c.Query("file_types"); fileTypesStr != "" {
 		for _, ft := range strings.Split(fileTypesStr, ",") {
@@ -1032,7 +1085,75 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		}
 	}
 
-	// Retrieve knowledge entries (own + shared KBs; empty keyword returns recent files)
+	agentID := c.Query("agent_id")
+	if agentID != "" {
+		userIDVal, ok := c.Get(types.UserIDContextKey.String())
+		if !ok {
+			c.Error(errors.NewUnauthorizedError("user ID not found"))
+			return
+		}
+		userID, _ := userIDVal.(string)
+		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
+		if currentTenantID == 0 {
+			c.Error(errors.NewUnauthorizedError("tenant ID not found"))
+			return
+		}
+		agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID, currentTenantID, agentID)
+		if err != nil {
+			if goerrors.Is(err, service.ErrAgentShareNotFound) || goerrors.Is(err, service.ErrAgentSharePermission) || goerrors.Is(err, service.ErrAgentNotFoundForShare) {
+				c.Error(errors.NewForbiddenError("no permission for this shared agent"))
+				return
+			}
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to verify shared agent access").WithDetails(err.Error()))
+			return
+		}
+		sourceTenantID := agent.TenantID
+		mode := agent.Config.KBSelectionMode
+		if mode == "none" {
+			c.JSON(http.StatusOK, gin.H{
+				"success":  true,
+				"data":     []interface{}{},
+				"has_more": false,
+			})
+			return
+		}
+		var scopes []types.KnowledgeSearchScope
+		if mode == "selected" && len(agent.Config.KnowledgeBases) > 0 {
+			for _, kbID := range agent.Config.KnowledgeBases {
+				if kbID != "" {
+					scopes = append(scopes, types.KnowledgeSearchScope{TenantID: sourceTenantID, KBID: kbID})
+				}
+			}
+		}
+		if len(scopes) == 0 {
+			kbs, err := h.kbService.ListKnowledgeBasesByTenantID(ctx, sourceTenantID)
+			if err != nil {
+				logger.ErrorWithFields(ctx, err, nil)
+				c.Error(errors.NewInternalServerError("Failed to list knowledge bases").WithDetails(err.Error()))
+				return
+			}
+			for _, kb := range kbs {
+				if kb != nil && kb.Type == types.KnowledgeBaseTypeDocument {
+					scopes = append(scopes, types.KnowledgeSearchScope{TenantID: sourceTenantID, KBID: kb.ID})
+				}
+			}
+		}
+		knowledges, hasMore, err := h.kgService.SearchKnowledgeForScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to search knowledge").WithDetails(err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":  true,
+			"data":     knowledges,
+			"has_more": hasMore,
+		})
+		return
+	}
+
+	// Default: own + shared KBs
 	knowledges, hasMore, err := h.kgService.SearchKnowledge(ctx, keyword, offset, limit, fileTypes)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)

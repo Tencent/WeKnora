@@ -1557,6 +1557,7 @@ export default {
     knowledgeBase: "지식베이스",
     knowledgeBaseWithCount: "지식베이스({count})",
     notConfigured: "구성되지 않음",
+    sharedAgentModelLabel: "공유 에이전트에 구성된 모델",
     model: "모델",
     remote: "원격",
     noModel: "사용 가능한 모델 없음",
