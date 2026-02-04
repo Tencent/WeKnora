@@ -21,7 +21,7 @@ func NewDockerSandbox(config *Config) *DockerSandbox {
 		config = DefaultConfig()
 	}
 	if config.DockerImage == "" {
-		config.DockerImage = "python:3.11-slim"
+		config.DockerImage = DefaultDockerImage
 	}
 	return &DockerSandbox{
 		config: config,
@@ -186,6 +186,28 @@ func getInterpreter(scriptName string) string {
 	default:
 		return "sh"
 	}
+}
+
+// ImageExists checks if the configured Docker image exists locally
+func (s *DockerSandbox) ImageExists(ctx context.Context) bool {
+	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", s.config.DockerImage)
+	return cmd.Run() == nil
+}
+
+// EnsureImage pulls the Docker image if it doesn't exist locally.
+// This is intended to be called during initialization so the image is
+// ready before the first script execution.
+func (s *DockerSandbox) EnsureImage(ctx context.Context) error {
+	if s.ImageExists(ctx) {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "pull", s.config.DockerImage)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to pull image %s: %w (%s)", s.config.DockerImage, err, stderr.String())
+	}
+	return nil
 }
 
 // Cleanup removes any lingering resources

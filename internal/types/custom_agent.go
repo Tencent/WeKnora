@@ -103,6 +103,8 @@ type CustomAgentConfig struct {
 	SandboxMode string `yaml:"sandbox_mode" json:"sandbox_mode"`
 	// Script execution timeout in seconds (default: 60)
 	SandboxTimeout int `yaml:"sandbox_timeout" json:"sandbox_timeout"`
+	// Custom sandbox Docker image (default: wechatopenai/weknora-sandbox:latest)
+	DockerImage string `yaml:"docker_image" json:"docker_image"`
 
 	// ===== Knowledge Base Settings =====
 	// Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB

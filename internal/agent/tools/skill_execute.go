@@ -43,8 +43,8 @@ var executeSkillScriptTool = BaseTool{
 type ExecuteSkillScriptInput struct {
 	SkillName  string   `json:"skill_name" jsonschema:"Name of the skill containing the script"`
 	ScriptPath string   `json:"script_path" jsonschema:"Relative path to the script within the skill directory (e.g. scripts/analyze.py)"`
-	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script"`
-	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin"`
+	Args       []string `json:"args,omitempty" jsonschema:"Optional command-line arguments to pass to the script. Note: if using --file flag, you must provide an actual file path that exists in the skill directory. If you have data in memory (not a file), use the 'input' parameter instead."`
+	Input      string   `json:"input,omitempty" jsonschema:"Optional input data to pass to the script via stdin. Use this when you have data in memory (e.g. JSON string) that the script should process. This is equivalent to piping data: echo 'data' | python script.py"`
 }
 
 // ExecuteSkillScriptTool allows the agent to execute skill scripts in a sandbox

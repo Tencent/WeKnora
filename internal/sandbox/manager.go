@@ -3,15 +3,18 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"sync"
 )
 
 // DefaultManager implements the Manager interface
 // It handles sandbox selection and fallback logic
 type DefaultManager struct {
-	config  *Config
-	sandbox Sandbox
-	mu      sync.RWMutex
+	config    *Config
+	sandbox   Sandbox
+	validator *ScriptValidator
+	mu        sync.RWMutex
 }
 
 // NewManager creates a new sandbox manager with the given configuration
@@ -25,7 +28,8 @@ func NewManager(config *Config) (Manager, error) {
 	}
 
 	manager := &DefaultManager{
-		config: config,
+		config:    config,
+		validator: NewScriptValidator(),
 	}
 
 	// Initialize the appropriate sandbox
@@ -47,6 +51,14 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		dockerSandbox := NewDockerSandbox(m.config)
 		if dockerSandbox.IsAvailable(ctx) {
 			m.sandbox = dockerSandbox
+			// Pre-pull the sandbox image asynchronously so it's ready before first use
+			go func() {
+				if err := dockerSandbox.EnsureImage(context.Background()); err != nil {
+					log.Printf("[sandbox] failed to pre-pull image %s: %v", m.config.DockerImage, err)
+				} else {
+					log.Printf("[sandbox] image %s is ready", m.config.DockerImage)
+				}
+			}()
 			return nil
 		}
 
@@ -68,6 +80,7 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 }
 
 // Execute runs a script using the configured sandbox
+// It performs security validation before execution to prevent prompt injection attacks
 func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*ExecuteResult, error) {
 	m.mu.RLock()
 	sandbox := m.sandbox
@@ -77,7 +90,87 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 		return nil, ErrSandboxDisabled
 	}
 
+	// Check if sandbox is disabled - return early without validation
+	if sandbox.Type() == SandboxTypeDisabled {
+		return nil, ErrSandboxDisabled
+	}
+
+	// Perform security validation unless explicitly skipped
+	if !config.SkipValidation {
+		if err := m.validateExecution(config); err != nil {
+			log.Printf("[sandbox] Security validation failed: %v", err)
+			return &ExecuteResult{
+				ExitCode: -1,
+				Error:    err.Error(),
+				Stderr:   fmt.Sprintf("Security validation failed: %v", err),
+			}, ErrSecurityViolation
+		}
+	}
+
 	return sandbox.Execute(ctx, config)
+}
+
+// validateExecution performs comprehensive security validation on the execution config
+func (m *DefaultManager) validateExecution(config *ExecuteConfig) error {
+	if m.validator == nil {
+		return nil
+	}
+
+	// Get script content for validation
+	scriptContent := config.ScriptContent
+	if scriptContent == "" && config.Script != "" {
+		content, err := os.ReadFile(config.Script)
+		if err != nil {
+			return fmt.Errorf("failed to read script for validation: %w", err)
+		}
+		scriptContent = string(content)
+	}
+
+	// Validate script content
+	if scriptContent != "" {
+		result := m.validator.ValidateScript(scriptContent)
+		if !result.Valid {
+			// Log all validation errors
+			for _, verr := range result.Errors {
+				log.Printf("[sandbox] Validation error: %s", verr.Error())
+			}
+			// Return the first error
+			if len(result.Errors) > 0 {
+				return result.Errors[0]
+			}
+			return ErrSecurityViolation
+		}
+	}
+
+	// Validate arguments
+	if len(config.Args) > 0 {
+		result := m.validator.ValidateArgs(config.Args)
+		if !result.Valid {
+			for _, verr := range result.Errors {
+				log.Printf("[sandbox] Arg validation error: %s", verr.Error())
+			}
+			if len(result.Errors) > 0 {
+				return result.Errors[0]
+			}
+			return ErrArgInjection
+		}
+	}
+
+	// Validate stdin
+	if config.Stdin != "" {
+		result := m.validator.ValidateStdin(config.Stdin)
+		if !result.Valid {
+			for _, verr := range result.Errors {
+				log.Printf("[sandbox] Stdin validation error: %s", verr.Error())
+			}
+			if len(result.Errors) > 0 {
+				return result.Errors[0]
+			}
+			return ErrStdinInjection
+		}
+	}
+
+	return nil
 }
 
 // Cleanup releases all sandbox resources
@@ -129,8 +222,9 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 	return false
 }
 
-// NewManagerFromType creates a sandbox manager with the specified type
-func NewManagerFromType(sandboxType string, fallbackEnabled bool) (Manager, error) {
+// NewManagerFromType creates a sandbox manager with the specified type.
+// dockerImage is optional; if empty, the default image is used.
+func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
 	case "docker":
@@ -146,6 +240,9 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool) (Manager, erro
 	config := DefaultConfig()
 	config.Type = sType
 	config.FallbackEnabled = fallbackEnabled
+	if dockerImage != "" {
+		config.DockerImage = dockerImage
+	}
 
 	return NewManager(config)
 }
@@ -153,7 +250,8 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool) (Manager, erro
 // NewDisabledManager creates a manager that rejects all execution requests
 func NewDisabledManager() Manager {
 	return &DefaultManager{
-		config:  DefaultConfig(),
-		sandbox: &disabledSandbox{},
+		config:    DefaultConfig(),
+		sandbox:   &disabledSandbox{},
+		validator: NewScriptValidator(),
 	}
 }

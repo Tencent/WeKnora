@@ -303,31 +303,6 @@ Stage 3: 读者测试 (Reader Testing)
 
 ---
 
-### 5. summary-generator - 摘要生成器
-
-**用途**：生成多层级文档摘要
-
-**触发场景**：
-- 生成内容摘要
-- 提取要点
-- 创建不同长度的文档概述
-
-**摘要层级**：
-| 层级 | 名称 | 长度 | 说明 |
-|------|------|------|------|
-| Level 1 | 一句话摘要 | ~20字 | 核心内容概括 |
-| Level 2 | 要点摘要 | 3-5个要点 | **默认层级**，提取最重要的要点 |
-| Level 3 | 段落摘要 | 100-200字 | 1-2段文字全面概括 |
-| Level 4 | 详细摘要 | 章节式 | 按文档结构分章节摘要 |
-
-**摘要原则**：
-- 准确性：摘要必须准确反映原文内容
-- 完整性：不遗漏重要信息
-- 简洁性：用最少的文字表达核心内容
-- 客观性：不添加个人观点
-
----
-
 ### 技能目录结构
 
 预加载技能位于 `skills/preloaded/` 目录下：
@@ -357,6 +332,135 @@ skills/preloaded/
 
 ## 沙箱安全机制
 
+### 脚本安全校验（Script Validator）
+
+在脚本执行前，系统会进行多层安全校验，拦截潜在的恶意操作：
+
+#### 校验类型
+
+| 类型 | 说明 | 示例 |
+|------|------|------|
+| **危险命令检测** | 检测可能破坏系统的命令 | `rm -rf /`, `mkfs`, `shutdown`, fork bombs |
+| **危险模式匹配** | 正则匹配高危操作模式 | `curl \| bash`, `base64 -d`, `eval()` |
+| **网络访问检测** | 检测网络请求尝试 | `curl`, `wget`, `socket.connect`, `requests.get` |
+| **反向 Shell 检测** | 检测远程控制后门 | `/dev/tcp/`, `bash -i`, `nc -e` |
+| **参数注入检测** | 检测命令行参数中的注入 | `&&`, `\|`, `$()`, 反引号 |
+| **Stdin 注入检测** | 检测标准输入中的嵌入命令 | 嵌入的命令替换语法 |
+
+#### 拦截的危险命令
+
+**系统破坏类**：
+- `rm -rf /`, `rm -rf /*` - 递归删除根目录
+- `mkfs`, `dd if=/dev/zero` - 文件系统/磁盘操作
+- Fork bombs: `:(){ :|:& };:`
+
+**系统控制类**：
+- `shutdown`, `reboot`, `halt`, `poweroff`
+- `killall`, `pkill`
+- `systemctl`, `service`
+
+**权限提升类**：
+- `chmod 777 /`, `chown root`
+- `setuid`, `setgid`, `passwd`
+- 访问 `/etc/passwd`, `/etc/shadow`, `/etc/sudoers`
+
+**凭证窃取类**：
+- 访问 `.ssh/`, `id_rsa`, `id_ed25519`
+- 读取敏感配置文件
+
+**容器逃逸类**：
+- `docker`, `kubectl`, `nsenter`
+- `unshare`, `capsh`
+
+#### 拦截的危险模式
+
+**代码注入**：
+```
+# 以下模式会被拦截
+curl ... | bash           # 下载并执行
+wget ... | sh             # 下载并执行
+eval()                    # 动态代码执行
+exec()                    # 命令执行
+os.system()               # 系统命令执行
+subprocess.Popen(shell=True)  # Shell 命令执行
+```
+
+**编码绕过尝试**：
+```
+# 以下模式会被拦截
+base64 -d                 # Base64 解码执行
+echo ... | base64 -d      # 管道解码
+xxd -r                    # Hex 解码
+```
+
+**Python 特有风险**：
+```python
+# 以下模式会被拦截
+__import__()              # 动态导入
+pickle.load()             # 反序列化（可执行任意代码）
+yaml.load()               # 不安全的 YAML 加载
+yaml.unsafe_load()        # 显式不安全加载
+```
+
+#### Shell 操作符拦截
+
+参数中包含以下操作符时会被拦截：
+
+| 操作符 | 说明 |
+|--------|------|
+| `&&`, `\|\|` | 命令链接 |
+| `;` | 命令分隔 |
+| `\|` | 管道 |
+| `$()`, `` ` `` | 命令替换 |
+| `>`, `>>`, `<` | 重定向 |
+| `2>`, `&>` | 错误/组合重定向 |
+| `\n`, `\r` | 换行注入 |
+
+#### 校验结果
+
+校验失败时返回详细的错误信息：
+
+```go
+type ValidationError struct {
+    Type    string // 错误类型：dangerous_command, dangerous_pattern, arg_injection 等
+    Pattern string // 匹配到的模式
+    Context string // 上下文信息
+    Message string // 人类可读的描述
+}
+```
+
+**示例错误**：
+```
+security validation failed [dangerous_command]: Script contains dangerous command: rm -rf / (pattern: rm -rf /, context: ...cleanup && rm -rf / && echo done...)
+```
+
+#### 使用示例
+
+```go
+// 创建校验器
+validator := sandbox.NewScriptValidator()
+
+// 校验脚本内容
+result := validator.ValidateScript(scriptContent)
+if !result.Valid {
+    for _, err := range result.Errors {
+        log.Printf("Security error: %s", err.Error())
+    }
+    return errors.New("script validation failed")
+}
+
+// 校验命令行参数
+argsResult := validator.ValidateArgs(args)
+
+// 校验标准输入
+stdinResult := validator.ValidateStdin(stdin)
+
+// 或一次性校验全部
+fullResult := validator.ValidateAll(scriptContent, args, stdin)
+```
+
+---
+
 ### Docker 沙箱
 
 Docker 模式提供最强的隔离：
@@ -367,6 +471,28 @@ Docker 模式提供最强的隔离：
 - **资源限制**：内存 256MB，CPU 限制
 - **网络隔离**：默认无网络访问
 - **临时挂载**：Skill 目录只读挂载
+- **脚本预校验**：执行前进行安全校验
+
+#### 沙箱镜像
+
+系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.11、Node.js 20、常用 CLI 工具和 Python 库，无需在执行时临时安装依赖。
+
+**预拉取镜像**（推荐在首次部署时执行，避免首次执行脚本时等待下载）：
+
+```bash
+# 方式一：直接拉取
+docker pull wechatopenai/weknora-sandbox:latest
+
+# 方式二：本地构建
+sh scripts/build_images.sh -s
+```
+
+> 如果未预拉取，应用启动时会自动异步拉取镜像（`EnsureImage`），但首次执行可能需要等待下载完成。
+
+**镜像内置环境**：
+- Python 3.11 + pip（requests、pyyaml、pandas、beautifulsoup4）
+- Node.js 20 + npm
+- CLI 工具：jq、curl、bash、grep、sed、awk 等
 
 ```bash
 # Docker 执行示例
@@ -378,7 +504,7 @@ docker run --rm \
   --network=none \
   -v /path/to/skill:/skill:ro \
   -w /skill \
-  python:3.11-slim \
+  wechatopenai/weknora-sandbox:latest \
   python scripts/analyze.py input.pdf
 ```
 
@@ -391,6 +517,7 @@ Local 模式提供基础保护：
 - **环境变量过滤**：仅传递安全变量
 - **超时控制**：默认 30 秒超时
 - **路径遍历防护**：防止访问 Skill 目录外文件
+- **脚本预校验**：执行前进行安全校验
 
 **允许的命令**：
 - `python`, `python3`

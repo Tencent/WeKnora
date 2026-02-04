@@ -40,6 +40,7 @@ type AgentConfig struct {
 	AllowedSkills  []string `json:"allowed_skills"`   // Skill names whitelist (empty = allow all)
 	SandboxMode    string   `json:"sandbox_mode"`     // Sandbox mode: "docker", "local", "disabled" (default: "disabled")
 	SandboxTimeout int      `json:"sandbox_timeout"`  // Script execution timeout in seconds (default: 60)
+	DockerImage    string   `json:"docker_image"`     // Custom sandbox Docker image (default: wechatopenai/weknora-sandbox:latest)
 }
 
 // SessionAgentConfig represents session-level agent configuration

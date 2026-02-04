@@ -223,6 +223,8 @@ func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
 	builder.WriteString("#### Tool Reference\n\n")
 	builder.WriteString("- `read_skill(skill_name)`: Load full skill instructions (MUST call before using a skill)\n")
 	builder.WriteString("- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n")
+	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
+	builder.WriteString("  - `args`: Command-line arguments (only use `--file` if you have an actual file path in the skill directory)\n")
 
 	return builder.String()
 }

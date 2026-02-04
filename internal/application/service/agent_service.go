@@ -230,13 +230,13 @@ func (s *agentService) initializeSkillsManager(
 
 	switch sandboxMode {
 	case "docker":
-		sandboxMgr, err = sandbox.NewManagerFromType("docker", true) // Enable fallback to local
+		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, config.DockerImage) // Enable fallback to local
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize Docker sandbox, falling back to disabled: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()
 		}
 	case "local":
-		sandboxMgr, err = sandbox.NewManagerFromType("local", false)
+		sandboxMgr, err = sandbox.NewManagerFromType("local", false, "")
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()

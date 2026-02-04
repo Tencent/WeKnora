@@ -898,8 +898,10 @@ func (s *sessionService) configureSkillsFromAgent(
 		if agentConfig.SandboxTimeout == 0 {
 			agentConfig.SandboxTimeout = 60
 		}
-		logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds",
-			agentConfig.SandboxMode, agentConfig.SandboxTimeout)
+		// Set custom Docker image (empty means use default)
+		agentConfig.DockerImage = customAgent.Config.DockerImage
+		logger.Infof(ctx, "Sandbox configured: mode=%s, timeout=%ds, image=%s",
+			agentConfig.SandboxMode, agentConfig.SandboxTimeout, agentConfig.DockerImage)
 	}
 }
 

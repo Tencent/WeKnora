@@ -25,15 +25,20 @@ const (
 	DefaultTimeout     = 60 * time.Second
 	DefaultMemoryLimit = 256 * 1024 * 1024 // 256MB
 	DefaultCPULimit    = 1.0               // 1 CPU core
+	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
 )
 
 // Common errors
 var (
-	ErrSandboxDisabled = errors.New("sandbox is disabled")
-	ErrTimeout         = errors.New("execution timed out")
-	ErrScriptNotFound  = errors.New("script not found")
-	ErrInvalidScript   = errors.New("invalid script")
-	ErrExecutionFailed = errors.New("script execution failed")
+	ErrSandboxDisabled   = errors.New("sandbox is disabled")
+	ErrTimeout           = errors.New("execution timed out")
+	ErrScriptNotFound    = errors.New("script not found")
+	ErrInvalidScript     = errors.New("invalid script")
+	ErrExecutionFailed   = errors.New("script execution failed")
+	ErrSecurityViolation = errors.New("security validation failed")
+	ErrDangerousCommand  = errors.New("script contains dangerous command")
+	ErrArgInjection      = errors.New("argument injection detected")
+	ErrStdinInjection    = errors.New("stdin injection detected")
 )
 
 // Sandbox defines the interface for isolated script execution
@@ -102,6 +107,12 @@ type ExecuteConfig struct {
 
 	// Stdin provides input to the script
 	Stdin string
+
+	// SkipValidation skips security validation (use with caution, only for trusted scripts)
+	SkipValidation bool
+
+	// ScriptContent is the script content for validation (optional, will be read from file if not provided)
+	ScriptContent string
 }
 
 // ExecuteResult contains the result of script execution
@@ -171,7 +182,7 @@ func DefaultConfig() *Config {
 		Type:            SandboxTypeLocal,
 		FallbackEnabled: true,
 		DefaultTimeout:  DefaultTimeout,
-		DockerImage:     "python:3.11-slim",
+		DockerImage:     DefaultDockerImage,
 		AllowedCommands: defaultAllowedCommands(),
 		MaxMemory:       DefaultMemoryLimit,
 		MaxCPU:          DefaultCPULimit,

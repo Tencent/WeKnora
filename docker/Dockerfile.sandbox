@@ -1,0 +1,30 @@
+# WeKnora Sandbox Image
+# Pre-built environment for executing agent skill scripts in Docker sandbox
+# Multi-stage build, minimal dependencies
+
+# Stage 1: Get Node.js binaries
+FROM node:20-slim AS node-base
+
+# Stage 2: Final image
+FROM python:3.11-slim
+
+# Copy Node.js from node image (avoids NodeSource install overhead)
+COPY --from=node-base /usr/local/bin/node /usr/local/bin/
+COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+# Install minimal CLI tools (bash/grep/sed/coreutils already in slim image)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    jq \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+
+# Note: Current preloaded skills only use Python stdlib
+# Add packages here when skills actually need them:
+
+# Create non-root user (UID 1000) for sandbox execution
+RUN groupadd -g 1000 sandbox && \
+    useradd -u 1000 -g sandbox -m -s /bin/bash sandbox
+
+WORKDIR /workspace
+USER sandbox

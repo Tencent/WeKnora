@@ -28,13 +28,34 @@ description: 数据处理与分析技能。当用户需要对知识库检索结�
 
 分析输入的 JSON 数据，生成统计报告。
 
-**用法**:
+**命令行用法** (仅供参考):
 ```bash
 # 通过 stdin 传入 JSON 数据
 echo '{"items": [1, 2, 3, 4, 5]}' | python scripts/analyze.py
 
-# 或传入文件路径
+# 或传入文件路径（需要文件实际存在）
 python scripts/analyze.py --file data.json
+```
+
+**使用 execute_skill_script 工具时**:
+- 如果你有内存中的数据（如 JSON 字符串），使用 `input` 参数传入，不要使用 `args`
+- `--file` 参数仅用于读取技能目录中已存在的文件，不适用于传递内存数据
+
+```json
+// ✅ 正确：通过 input 传入数据
+{
+  "skill_name": "数据处理器",
+  "script_path": "scripts/analyze.py",
+  "input": "{\"items\": [1, 2, 3], \"query\": \"统计分析\"}"
+}
+
+// ❌ 错误：--file 需要文件路径，不能单独使用
+{
+  "skill_name": "数据处理器",
+  "script_path": "scripts/analyze.py",
+  "args": ["--file"],
+  "input": "{...}"
+}
 ```
 
 **输入格式**:

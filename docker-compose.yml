@@ -31,6 +31,8 @@ services:
       - data-files:/data/files
       # Optional: mount custom config file
       # - ./config/config.yaml:/app/config/config.yaml
+      # Optional: mount custom skills directory (allows adding skills without rebuilding image)
+      - ./skills/preloaded:/app/skills/preloaded
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
