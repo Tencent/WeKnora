@@ -210,7 +210,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	}
 
 	// Setup stop event handler
-	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.assistantMessage, cancel)
+	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.session.TenantID, reqCtx.assistantMessage, cancel)
 
 	// Setup stream handler
 	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
@@ -413,7 +413,9 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 
 			logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 			// Content already contains <think>...</think> tags from chat_completion_stream.go
-			h.completeAssistantMessage(streamCtx.asyncCtx, streamCtx.assistantMessage)
+			// Use session's tenant for message update (asyncCtx may have effectiveTenantID when using shared agent)
+			updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
+			h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage)
 			// Emit EventAgentComplete - this will trigger handleComplete which sends the SSE complete event
 			// Note: Don't cancel context here, let the SSE handler close naturally after receiving the complete event
 			streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
@@ -517,7 +519,9 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 					errors.NewInternalServerError(fmt.Sprintf("Agent QA service panicked: %v\n%s", r, string(buf))),
 					map[string]interface{}{"session_id": sessionID})
 			}
-			h.completeAssistantMessage(streamCtx.asyncCtx, streamCtx.assistantMessage)
+			// Use session's tenant for message update (session belongs to session.TenantID; asyncCtx may have effectiveTenantID when using shared agent)
+			updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
+			h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage)
 			logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 		}()
 

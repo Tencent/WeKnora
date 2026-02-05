@@ -342,15 +342,12 @@ func (s *sessionService) GenerateTitleAsync(
 	modelID string,
 	eventBus *event.EventBus,
 ) {
-	// Extract values from context before cloning
-	tenantID := ctx.Value(types.TenantIDContextKey)
+	// Use session's tenant for title generation (session belongs to session.TenantID; ctx may have effectiveTenantID when using shared agent)
+	sessionTenantID := session.TenantID
 	requestID := ctx.Value(types.RequestIDContextKey)
 	go func() {
-		// Create new background context and copy values
-		bgCtx := context.Background()
-		if tenantID != nil {
-			bgCtx = context.WithValue(bgCtx, types.TenantIDContextKey, tenantID)
-		}
+		// Create new background context with session owner's tenant so ListModels/GetChatModel/Update use correct scope
+		bgCtx := context.WithValue(context.Background(), types.TenantIDContextKey, sessionTenantID)
 		if requestID != nil {
 			bgCtx = context.WithValue(bgCtx, types.RequestIDContextKey, requestID)
 		}
