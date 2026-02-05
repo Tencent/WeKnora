@@ -18,12 +18,13 @@ import (
 
 // OrganizationHandler implements HTTP request handlers for organization management
 type OrganizationHandler struct {
-	orgService        interfaces.OrganizationService
-	shareService      interfaces.KBShareService
-	agentShareService interfaces.AgentShareService
-	userService       interfaces.UserService
-	knowledgeRepo     interfaces.KnowledgeRepository
-	chunkRepo         interfaces.ChunkRepository
+	orgService           interfaces.OrganizationService
+	shareService         interfaces.KBShareService
+	agentShareService    interfaces.AgentShareService
+	customAgentService   interfaces.CustomAgentService
+	userService          interfaces.UserService
+	knowledgeRepo        interfaces.KnowledgeRepository
+	chunkRepo            interfaces.ChunkRepository
 }
 
 // NewOrganizationHandler creates a new organization handler
@@ -31,17 +32,19 @@ func NewOrganizationHandler(
 	orgService interfaces.OrganizationService,
 	shareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
+	customAgentService interfaces.CustomAgentService,
 	userService interfaces.UserService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 ) *OrganizationHandler {
 	return &OrganizationHandler{
-		orgService:        orgService,
-		shareService:      shareService,
-		agentShareService: agentShareService,
-		userService:       userService,
-		knowledgeRepo:     knowledgeRepo,
-		chunkRepo:         chunkRepo,
+		orgService:         orgService,
+		shareService:       shareService,
+		agentShareService:  agentShareService,
+		customAgentService: customAgentService,
+		userService:        userService,
+		knowledgeRepo:      knowledgeRepo,
+		chunkRepo:          chunkRepo,
 	}
 }
 
@@ -1250,6 +1253,46 @@ func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
+}
+
+// SetSharedAgentDisabledByMeRequest is the body for POST /shared-agents/disabled
+type SetSharedAgentDisabledByMeRequest struct {
+	AgentID  string `json:"agent_id" binding:"required"`
+	Disabled bool   `json:"disabled"`
+}
+
+// SetSharedAgentDisabledByMe sets whether the current tenant has disabled this shared agent for their conversation dropdown
+func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID, _ := c.Get(types.UserIDContextKey.String())
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	uid := userID.(string)
+	tid := tenantID.(uint64)
+
+	var req SetSharedAgentDisabledByMeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewBadRequestError("Invalid request").WithDetails(err.Error()))
+		return
+	}
+	// Derive sourceTenantID: own agent (current tenant) or from shared list
+	var sourceTenantID uint64
+	agent, err := h.customAgentService.GetAgentByID(ctx, req.AgentID)
+	if err == nil && agent != nil && agent.TenantID == tid {
+		sourceTenantID = tid
+	} else {
+		share, err := h.agentShareService.GetShareByAgentIDForUser(ctx, uid, req.AgentID, tid)
+		if err != nil || share == nil {
+			c.Error(apperrors.NewForbiddenError("No access to this agent"))
+			return
+		}
+		sourceTenantID = share.SourceTenantID
+	}
+	if err := h.agentShareService.SetSharedAgentDisabledByMe(ctx, tid, req.AgentID, sourceTenantID, req.Disabled); err != nil {
+		logger.Errorf(ctx, "SetSharedAgentDisabledByMe failed: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to update preference"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // toOrgResponse converts an organization to response format

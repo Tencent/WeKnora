@@ -135,10 +135,14 @@ type AgentShareService interface {
 	ListSharesByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error)
 	ListSharesByOrganization(ctx context.Context, orgID string) ([]*types.AgentShare, error)
 	ListSharedAgents(ctx context.Context, userID string, currentTenantID uint64) ([]*types.SharedAgentInfo, error)
+	// SetSharedAgentDisabledByMe sets whether the current tenant has "disabled" this shared agent for their conversation dropdown (per-user preference).
+	SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error
 	// GetSharedAgentForUser returns the shared agent by agentID if the user has access (source tenant is resolved from share); used to resolve KB scope for @ mention.
 	GetSharedAgentForUser(ctx context.Context, userID string, currentTenantID uint64, agentID string) (*types.CustomAgent, error)
 	GetShare(ctx context.Context, shareID string) (*types.AgentShare, error)
 	GetShareByAgentAndOrg(ctx context.Context, agentID string, orgID string) (*types.AgentShare, error)
+	// GetShareByAgentIDForUser returns one share for the given agentID that the user can access, excluding source_tenant_id == excludeTenantID (e.g. current tenant to get shared-from-other only).
+	GetShareByAgentIDForUser(ctx context.Context, userID, agentID string, excludeTenantID uint64) (*types.AgentShare, error)
 }
 
 // AgentShareRepository defines the agent sharing repository interface
@@ -155,4 +159,13 @@ type AgentShareRepository interface {
 	ListSharedAgentsForUser(ctx context.Context, userID string) ([]*types.AgentShare, error)
 	// GetShareByAgentIDForUser returns one share for the given agentID that the user can access (user in org), excluding source_tenant_id == excludeTenantID.
 	GetShareByAgentIDForUser(ctx context.Context, userID, agentID string, excludeTenantID uint64) (*types.AgentShare, error)
+}
+
+// TenantDisabledSharedAgentRepository stores per-tenant "disabled" agents (hidden from conversation dropdown; own and shared)
+type TenantDisabledSharedAgentRepository interface {
+	ListByTenantID(ctx context.Context, tenantID uint64) ([]*types.TenantDisabledSharedAgent, error)
+	// ListDisabledOwnAgentIDs returns agent IDs that this tenant has disabled for their own agents (source_tenant_id = tenant_id)
+	ListDisabledOwnAgentIDs(ctx context.Context, tenantID uint64) ([]string, error)
+	Add(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64) error
+	Remove(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64) error
 }

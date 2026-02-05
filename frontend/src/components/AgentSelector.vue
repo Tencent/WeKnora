@@ -301,12 +301,12 @@ const emit = defineEmits<{
 
 const dropdownStyle = ref<Record<string, string>>({});
 
-// 使用父组件传入的 agents，避免与父组件重复请求
+// 父组件已按「当前租户停用」过滤，此处直接使用
 const agentsList = computed(() => props.agents ?? []);
 
 // 内置智能体（从 API 获取，对特定 ID 使用本地化名称）
 const builtinAgents = computed(() => {
-  // 从 API 获取的内置智能体
+  // 从 API 获取的内置智能体（内置无 disabled 概念，全部展示）
   const apiBuiltins = agentsList.value.filter(a => a.is_builtin);
   
   // 对特定内置智能体使用本地化名称和描述
@@ -334,8 +334,10 @@ const customAgents = computed(() => {
   return agentsList.value.filter(a => !a.is_builtin);
 });
 
-// 共享给我的智能体
-const sharedAgentsList = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || []);
+// 共享给我的智能体（仅展示当前用户未停用的）
+const sharedAgentsList = computed<SharedAgentInfo[]>(() =>
+  (orgStore.sharedAgents || []).filter(shared => !shared.disabled_by_me)
+);
 
 // 当前选中的来源租户（共享智能体时）
 const currentAgentSourceTenantId = computed(() => settingsStore.selectedAgentSourceTenantId ?? null);

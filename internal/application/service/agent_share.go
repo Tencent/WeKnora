@@ -24,24 +24,27 @@ var (
 
 // agentShareService implements AgentShareService interface
 type agentShareService struct {
-	shareRepo interfaces.AgentShareRepository
-	orgRepo   interfaces.OrganizationRepository
-	agentRepo interfaces.CustomAgentRepository
-	userRepo  interfaces.UserRepository
+	shareRepo    interfaces.AgentShareRepository
+	disabledRepo interfaces.TenantDisabledSharedAgentRepository
+	orgRepo      interfaces.OrganizationRepository
+	agentRepo    interfaces.CustomAgentRepository
+	userRepo     interfaces.UserRepository
 }
 
 // NewAgentShareService creates a new agent share service
 func NewAgentShareService(
 	shareRepo interfaces.AgentShareRepository,
+	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	orgRepo interfaces.OrganizationRepository,
 	agentRepo interfaces.CustomAgentRepository,
 	userRepo interfaces.UserRepository,
 ) interfaces.AgentShareService {
 	return &agentShareService{
-		shareRepo: shareRepo,
-		orgRepo:   orgRepo,
-		agentRepo: agentRepo,
-		userRepo:  userRepo,
+		shareRepo:    shareRepo,
+		disabledRepo: disabledRepo,
+		orgRepo:      orgRepo,
+		agentRepo:    agentRepo,
+		userRepo:     userRepo,
 	}
 }
 
@@ -202,7 +205,31 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, userID string,
 	for _, info := range agentInfoMap {
 		result = append(result, info)
 	}
+
+	// Set DisabledByMe from tenant_disabled_shared_agents for current tenant
+	disabledList, err := s.disabledRepo.ListByTenantID(ctx, currentTenantID)
+	if err != nil {
+		return result, nil // non-fatal: return list without DisabledByMe
+	}
+	disabledSet := make(map[string]bool)
+	for _, d := range disabledList {
+		disabledSet[fmt.Sprintf("%s_%d", d.AgentID, d.SourceTenantID)] = true
+	}
+	for _, info := range result {
+		if info.Agent != nil {
+			key := fmt.Sprintf("%s_%d", info.Agent.ID, info.SourceTenantID)
+			info.DisabledByMe = disabledSet[key]
+		}
+	}
 	return result, nil
+}
+
+// SetSharedAgentDisabledByMe adds or removes (tenantID, agentID, sourceTenantID) from tenant_disabled_shared_agents.
+func (s *agentShareService) SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error {
+	if disabled {
+		return s.disabledRepo.Add(ctx, tenantID, agentID, sourceTenantID)
+	}
+	return s.disabledRepo.Remove(ctx, tenantID, agentID, sourceTenantID)
 }
 
 // GetSharedAgentForUser returns the shared agent by agentID if the user has access; source tenant is resolved from the user's share. One share lookup + one agent lookup.
@@ -249,4 +276,9 @@ func (s *agentShareService) GetShareByAgentAndOrg(ctx context.Context, agentID s
 		return nil, err
 	}
 	return share, nil
+}
+
+// GetShareByAgentIDForUser returns one share for the given agentID that the user can access (user in org), excluding source_tenant_id == excludeTenantID.
+func (s *agentShareService) GetShareByAgentIDForUser(ctx context.Context, userID, agentID string, excludeTenantID uint64) (*types.AgentShare, error) {
+	return s.shareRepo.GetShareByAgentIDForUser(ctx, userID, agentID, excludeTenantID)
 }

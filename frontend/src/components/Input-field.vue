@@ -32,8 +32,10 @@ const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
 
-// 智能体相关状态
+// 智能体相关状态（完整列表供选中态解析；对话下拉用 enabledAgents）
 const agents = ref<CustomAgent[]>([]);
+/** 当前租户在对话下拉中停用的「我的」智能体 ID（仅影响本租户） */
+const disabledOwnAgentIds = ref<string[]>([]);
 const selectedAgentId = computed({
   get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
   set: (val: string) => settingsStore.selectAgent(val)
@@ -478,11 +480,18 @@ const loadAgents = async () => {
       listAgents(),
       orgStore.fetchSharedAgents(),
     ]);
-    agents.value = agentsRes.data || [];
+    const res = agentsRes as { data?: CustomAgent[]; disabled_own_agent_ids?: string[] }
+    agents.value = res.data || []
+    disabledOwnAgentIds.value = res.disabled_own_agent_ids || []
   } catch (error) {
-    console.error('Failed to load agents:', error);
+    console.error('Failed to load agents:', error)
   }
-};
+}
+
+// 对话下拉中展示的「我的」智能体（排除当前租户已停用的）
+const enabledAgents = computed(() =>
+  agents.value.filter(a => !disabledOwnAgentIds.value.includes(a.id))
+);
 
 const loadConversationConfig = async () => {
   try {
@@ -1791,7 +1800,7 @@ onBeforeRouteUpdate((to, from, next) => {
           :visible="showAgentModeSelector"
           :anchorEl="agentModeButtonRef"
           :currentAgentId="selectedAgentId"
-          :agents="agents"
+          :agents="enabledAgents"
           @close="closeAgentModeSelector"
           @select="handleSelectAgent"
         />

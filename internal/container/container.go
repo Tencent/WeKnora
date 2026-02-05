@@ -114,6 +114,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
 	must(container.Provide(repository.NewAgentShareRepository))
+	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
 	must(container.Provide(service.NewWebSearchStateService))
 
 	// MCP manager for managing MCP client connections

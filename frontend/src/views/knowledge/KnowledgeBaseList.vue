@@ -1,43 +1,37 @@
 <template>
   <div class="kb-list-container">
-    <!-- 头部 -->
+    <!-- 头部：仅标题与副标题 -->
     <div class="header">
       <div class="header-title">
         <h2>{{ $t('knowledgeBase.title') }}</h2>
         <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
       </div>
-      <div class="header-actions">
-        <t-button class="kb-create-btn" @click="handleCreateKnowledgeBase">
-          <template #icon><t-icon name="folder-add" /></template>
-          {{ $t('knowledgeList.create') }}
-        </t-button>
-      </div>
     </div>
-    <!-- Tab 切换（下划线式，替代分隔线） -->
-    <div class="kb-tabs">
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'all' }"
-        @click="activeTab = 'all'"
+
+    <!-- 左侧菜单 + 主内容 -->
+    <div class="kb-list-body">
+      <ListSpaceSidebar
+        v-model="spaceSelection"
+        :count-all="allKnowledgeBases"
+        :count-mine="kbs.length"
+        :count-by-org="sharedCountByOrg"
       >
-        {{ $t('knowledgeList.tabs.all') }} ({{ allKnowledgeBases }})
-      </div>
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'mine' }"
-        @click="activeTab = 'mine'"
-      >
-        {{ $t('knowledgeList.tabs.myKnowledgeBases') }} ({{ kbs.length }})
-      </div>
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'shared' }"
-        @click="activeTab = 'shared'"
-      >
-        {{ $t('knowledgeList.tabs.sharedToMe') }} ({{ sharedKbs.length }})
-      </div>
-    </div>
-    
+        <template #actions>
+          <t-tooltip :content="$t('knowledgeList.create')" placement="top">
+            <t-button
+              variant="text"
+              theme="default"
+              class="sidebar-action-btn"
+              size="small"
+              :aria-label="$t('knowledgeList.create')"
+              @click="handleCreateKnowledgeBase"
+            >
+              <template #icon><t-icon name="folder-add" size="16px" /></template>
+            </t-button>
+          </t-tooltip>
+        </template>
+      </ListSpaceSidebar>
+      <div class="kb-list-main">
     <!-- 未初始化知识库提示 -->
     <div v-if="hasUninitializedKbs" class="warning-banner">
       <t-icon name="info-circle" size="16px" />
@@ -86,8 +80,8 @@
       </div>
     </div>
 
-    <!-- 卡片网格 -->
-    <div v-if="activeTab === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
+    <!-- 卡片网格：全部 -->
+    <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
       <!-- 全部：我的知识库 + 共享给我的知识库 -->
       <template v-for="kb in filteredKnowledgeBases" :key="kb.id">
         <!-- 我的知识库卡片 -->
@@ -246,7 +240,7 @@
       </template>
     </div>
 
-    <div v-if="activeTab === 'mine' && kbs.length > 0" class="kb-card-wrap">
+    <div v-if="spaceSelection === 'mine' && kbs.length > 0" class="kb-card-wrap">
       <!-- 我的知识库 -->
       <div
         v-for="(kb, index) in kbs"
@@ -346,10 +340,10 @@
       </div>
     </div>
 
-    <!-- 共享给我的知识库 -->
-    <div v-if="activeTab === 'shared' && sharedKbs.length > 0" class="kb-card-wrap">
+    <!-- 按空间筛选：该空间下共享给我的知识库 -->
+    <div v-if="spaceSelectionOrgId && sharedKbsByOrg.length > 0" class="kb-card-wrap">
       <div
-        v-for="shared in sharedKbs"
+        v-for="shared in sharedKbsByOrg"
         :key="'shared-' + shared.share_id"
         class="kb-card shared-kb-card"
         :class="{
@@ -399,25 +393,35 @@
       </div>
     </div>
 
-    <!-- 全部 Tab 空状态 -->
-    <div v-if="activeTab === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
+    <!-- 全部空状态 -->
+    <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
+      <t-button class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
+        <template #icon><t-icon name="folder-add" /></template>
+        {{ $t('knowledgeList.create') }}
+      </t-button>
     </div>
 
     <!-- 我的知识库空状态 -->
-    <div v-if="activeTab === 'mine' && kbs.length === 0 && !loading" class="empty-state">
+    <div v-if="spaceSelection === 'mine' && kbs.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
+      <t-button class="kb-create-btn empty-state-btn" @click="handleCreateKnowledgeBase">
+        <template #icon><t-icon name="folder-add" /></template>
+        {{ $t('knowledgeList.create') }}
+      </t-button>
     </div>
 
-    <!-- 共享知识库空状态 -->
-    <div v-if="activeTab === 'shared' && sharedKbs.length === 0 && !loading" class="empty-state">
+    <!-- 空间下共享知识库空状态 -->
+    <div v-if="spaceSelectionOrgId && sharedKbsByOrg.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') || '暂无共享知识库' }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') || '您可以加入组织或请求他人共享知识库给您' }}</span>
+    </div>
+      </div>
     </div>
 
     <!-- 删除确认对话框 -->
@@ -521,6 +525,7 @@ import { useOrganizationStore } from '@/stores/organization'
 import type { SharedKnowledgeBase } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
+import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import { useI18n } from 'vue-i18n'
 
 const router = useRouter()
@@ -529,8 +534,8 @@ const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
 
-// Tab 状态
-const activeTab = ref<'all' | 'mine' | 'shared'>('all')
+// 左侧空间选择：全部 / 我的 / 空间 ID
+const spaceSelection = ref<'all' | 'mine' | string>('all')
 
 interface KB { 
   id: string; 
@@ -575,17 +580,42 @@ const sharedKbs = computed<SharedKnowledgeBase[]>(() => orgStore.sharedKnowledge
 // All knowledge bases (mine + shared to me)
 const allKnowledgeBases = computed(() => kbs.value.length + sharedKbs.value.length)
 
-// Filtered knowledge bases based on active tab
+// 当前选中的是空间 ID（非全部、非我的）
+const spaceSelectionOrgId = computed(() => {
+  const s = spaceSelection.value
+  return s !== 'all' && s !== 'mine' && !!s
+})
+
+// 当前空间下共享给我的知识库
+const sharedKbsByOrg = computed(() => {
+  const orgId = spaceSelection.value
+  if (orgId === 'all' || orgId === 'mine') return []
+  return sharedKbs.value.filter(s => s.organization_id === orgId)
+})
+
+// 各空间下的共享知识库数量（用于侧栏展示）
+const sharedCountByOrg = computed<Record<string, number>>(() => {
+  const map: Record<string, number> = {}
+  sharedKbs.value.forEach(s => {
+    const id = s.organization_id
+    if (!id) return
+    map[id] = (map[id] || 0) + 1
+  })
+  return map
+})
+
+// Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
 const filteredKnowledgeBases = computed(() => {
-  if (activeTab.value === 'mine') return []
-  if (activeTab.value === 'shared') return []
-  // activeTab === 'all'
+  if (spaceSelection.value === 'mine') {
+    return kbs.value.map(kb => ({ ...kb, isMine: true as const }))
+  }
+  if (spaceSelection.value !== 'all') {
+    return []
+  }
   const result: Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)> = []
-  // Add my knowledge bases
   kbs.value.forEach(kb => {
     result.push({ ...kb, isMine: true as const })
   })
-  // Add shared knowledge bases (skip entries where knowledge_base is null, e.g. deleted KB)
   sharedKbs.value.forEach(shared => {
     const kb = shared.knowledge_base
     if (!kb) return
@@ -1000,13 +1030,14 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  padding: 24px 44px;
-  // background: #fff;
+  padding: 24px 10px;
   margin: 0 20px;
   height: calc(100vh);
-  overflow-y: auto;
   box-sizing: border-box;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .header {
@@ -1030,21 +1061,34 @@ const handleUploadFinishedEvent = (event: Event) => {
     line-height: 32px;
   }
 
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+}
 
-    .kb-create-btn {
-      background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
-      border: none;
-      color: #fff;
+.kb-create-btn {
+  background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
+  border: none;
+  color: #fff;
 
-      &:hover {
-        background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
-      }
-    }
+  &:hover {
+    background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
   }
+}
+
+.kb-list-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.kb-list-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
 }
 
 .header-subtitle {
@@ -1056,7 +1100,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   line-height: 20px;
 }
 
-// Tab 切换样式（下划线式，简洁清晰）
+// Tab 切换样式（已由左侧菜单替代，保留以备兼容）
 .kb-tabs {
   display: flex;
   align-items: center;
@@ -1326,13 +1370,13 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .kb-card-wrap {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   grid-template-columns: 1fr;
 }
 
 .kb-card {
   border: 1px solid #f0f0f0;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1340,10 +1384,10 @@ const handleUploadFinishedEvent = (event: Event) => {
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 16px 18px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  height: 160px;
+  height: 132px;
 
   &:hover {
     border-color: #07c05f;
@@ -1370,10 +1414,10 @@ const handleUploadFinishedEvent = (event: Event) => {
       position: absolute;
       top: 0;
       right: 0;
-      width: 60px;
-      height: 60px;
+      width: 50px;
+      height: 50px;
       background: linear-gradient(135deg, rgba(7, 192, 95, 0.08) 0%, transparent 100%);
-      border-radius: 0 12px 0 100%;
+      border-radius: 0 10px 0 100%;
       pointer-events: none;
       z-index: 0;
     }
@@ -1396,10 +1440,10 @@ const handleUploadFinishedEvent = (event: Event) => {
       position: absolute;
       top: 0;
       right: 0;
-      width: 60px;
-      height: 60px;
+      width: 50px;
+      height: 50px;
       background: linear-gradient(135deg, rgba(0, 82, 217, 0.08) 0%, transparent 100%);
-      border-radius: 0 12px 0 100%;
+      border-radius: 0 10px 0 100%;
       pointer-events: none;
       z-index: 0;
     }
@@ -1418,11 +1462,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 
   .card-title {
     flex: 1;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
     color: #1a1a1a;
     white-space: nowrap;
@@ -1430,13 +1474,13 @@ const handleUploadFinishedEvent = (event: Event) => {
     text-overflow: ellipsis;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
   }
 
   .card-more-btn {
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1459,9 +1503,9 @@ const handleUploadFinishedEvent = (event: Event) => {
 .card-title {
   color: #1a1a1a;
   font-family: "PingFang SC";
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 22px;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1471,8 +1515,8 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .more-wrap {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   justify-content: center;
   align-items: center;
   border-radius: 6px;
@@ -1496,18 +1540,18 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .more-icon {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 }
 
 .card-content {
   flex: 1;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .card-description {
@@ -1518,9 +1562,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow: hidden;
   color: #666;
   font-family: "PingFang SC";
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
-  line-height: 20px;
+  line-height: 18px;
 }
 
 .card-bottom {
@@ -1528,7 +1572,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   justify-content: space-between;
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 8px;
   border-top: 1px solid #f0f0f0;
 }
 
@@ -1562,9 +1606,9 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
   cursor: default;
   transition: background 0.2s ease;
 
@@ -1572,15 +1616,15 @@ const handleUploadFinishedEvent = (event: Event) => {
     background: rgba(7, 192, 95, 0.08);
     color: #059669;
     width: auto;
-    padding: 0 8px;
-    gap: 4px;
+    padding: 0 6px;
+    gap: 3px;
 
     &:hover {
       background: rgba(7, 192, 95, 0.12);
     }
 
     .badge-count {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
     }
 
@@ -1593,15 +1637,15 @@ const handleUploadFinishedEvent = (event: Event) => {
     background: rgba(0, 82, 217, 0.08);
     color: #0052d9;
     width: auto;
-    padding: 0 8px;
-    gap: 4px;
+    padding: 0 6px;
+    gap: 3px;
 
     &:hover {
       background: rgba(0, 82, 217, 0.12);
     }
 
     .badge-count {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 500;
     }
 
@@ -1744,6 +1788,11 @@ const handleUploadFinishedEvent = (event: Event) => {
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
+    margin-bottom: 0;
+  }
+
+  .empty-state-btn {
+    margin-top: 20px;
   }
 }
 

@@ -241,6 +241,8 @@ export interface SharedAgentInfo {
   shared_at: string
   shared_by_user_id?: string
   shared_by_username?: string
+  /** 当前用户是否已停用该共享智能体（仅影响本人对话下拉显示） */
+  disabled_by_me?: boolean
 }
 
 export interface ListAgentSharesResponse {
@@ -607,6 +609,22 @@ export async function listSharedAgents(): Promise<ApiResponse<SharedAgentInfo[]>
     return response as unknown as ApiResponse<SharedAgentInfo[]>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to list shared agents' }
+  }
+}
+
+/** 设置当前用户对某共享智能体的停用状态（仅影响本人对话下拉显示） */
+export async function setSharedAgentDisabledByMe(
+  agentId: string,
+  disabled: boolean
+): Promise<ApiResponse<void>> {
+  try {
+    const response = await post('/api/v1/shared-agents/disabled', {
+      agent_id: agentId,
+      disabled
+    })
+    return response as unknown as ApiResponse<void>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to update preference' }
   }
 }
 

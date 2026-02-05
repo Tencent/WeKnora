@@ -529,4 +529,5 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	r.GET("/shared-knowledge-bases", orgHandler.ListSharedKnowledgeBases)
 	// Shared agents route
 	r.GET("/shared-agents", orgHandler.ListSharedAgents)
+	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
 }

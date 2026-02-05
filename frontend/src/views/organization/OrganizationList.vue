@@ -1,47 +1,50 @@
 <template>
   <div class="org-list-container">
-    <!-- 头部 -->
+    <!-- 头部：仅标题与副标题 -->
     <div class="header">
       <div class="header-title">
         <h2>{{ $t('organization.title') }}</h2>
         <p class="header-subtitle">{{ $t('organization.subtitle') }}</p>
       </div>
-      <div class="header-actions">
-        <t-button theme="default" variant="outline" class="org-join-btn" @click="handleJoinOrganization">
-          <template #icon><t-icon name="enter" /></template>
-          {{ $t('organization.joinOrg') }}
-        </t-button>
-        <t-button class="org-create-btn" @click="handleCreateOrganization">
-          <template #icon><img src="@/assets/img/organization.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
-          {{ $t('organization.createOrg') }}
-        </t-button>
-      </div>
-    </div>
-    <!-- Tab 切换（下划线式，替代分隔线） -->
-    <div class="org-tabs">
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'all' }"
-        @click="activeTab = 'all'"
-      >
-        {{ $t('organization.all') }} ({{ organizations.length }})
-      </div>
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'created' }"
-        @click="activeTab = 'created'"
-      >
-        {{ $t('organization.createdByMe') }} ({{ organizations.filter(o => o.is_owner).length }})
-      </div>
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'joined' }"
-        @click="activeTab = 'joined'"
-      >
-        {{ $t('organization.joinedByMe') }} ({{ organizations.filter(o => !o.is_owner).length }})
-      </div>
     </div>
 
+    <!-- 左侧筛选 + 主内容 -->
+    <div class="org-list-body">
+      <ListSpaceSidebar
+        mode="organization"
+        v-model="spaceSelection"
+        :count-all="organizations.length"
+        :count-created="createdCount"
+        :count-joined="joinedCount"
+      >
+        <template #actions>
+          <t-tooltip :content="$t('organization.joinOrg')" placement="top">
+            <t-button
+              variant="text"
+              theme="default"
+              class="sidebar-action-btn"
+              size="small"
+              :aria-label="$t('organization.joinOrg')"
+              @click="handleJoinOrganization"
+            >
+              <template #icon><t-icon name="enter" size="16px" /></template>
+            </t-button>
+          </t-tooltip>
+          <t-tooltip :content="$t('organization.createOrg')" placement="top">
+            <t-button
+              variant="text"
+              theme="default"
+              class="sidebar-action-btn"
+              size="small"
+              :aria-label="$t('organization.createOrg')"
+              @click="handleCreateOrganization"
+            >
+              <template #icon><img src="@/assets/img/organization.svg" class="org-create-icon sidebar-org-icon" alt="" aria-hidden="true" /></template>
+            </t-button>
+          </t-tooltip>
+        </template>
+      </ListSpaceSidebar>
+      <div class="org-list-main">
     <!-- 卡片网格 -->
     <div v-if="filteredOrganizations.length > 0" class="org-card-wrap">
       <div
@@ -67,14 +70,10 @@
         <div class="card-header">
           <div class="card-header-left">
             <div class="org-avatar">
-              <SpaceAvatar :name="org.name" :avatar="org.avatar" />
+              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
             </div>
             <div class="card-title-block">
               <span class="card-title" :title="org.name">{{ org.name }}</span>
-              <span class="card-relation" :class="{ 'is-owner': org.is_owner }">
-                <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="10px" />
-                <span>{{ org.is_owner ? $t('organization.createdByMe') : $t('organization.joinedByMe') }}</span>
-              </span>
             </div>
           </div>
           <t-popup
@@ -118,49 +117,60 @@
           </div>
         </div>
 
-        <!-- 卡片底部 -->
+        <!-- 卡片底部（与知识库卡片风格统一：小标签、无日期、智能体用主题色） -->
         <div class="card-bottom">
           <div class="bottom-left">
-            <div class="card-stats">
+            <div class="feature-badges">
               <t-tooltip :content="$t('organization.memberCount')" placement="top">
-                <span class="stat-item">
-                  <t-icon name="user" size="12px" />
-                  <span>{{ org.member_count || 0 }}</span>
-                </span>
+                <div class="feature-badge stat-member">
+                  <t-icon name="user" size="14px" />
+                  <span class="badge-count">{{ org.member_count || 0 }}</span>
+                </div>
               </t-tooltip>
               <t-tooltip :content="$t('organization.invite.knowledgeBases')" placement="top">
-                <span class="stat-item">
-                  <t-icon name="folder" size="12px" />
-                  <span>{{ org.share_count ?? 0 }}</span>
-                </span>
+                <div class="feature-badge stat-kb">
+                  <t-icon name="folder" size="14px" />
+                  <span class="badge-count">{{ org.share_count ?? 0 }}</span>
+                </div>
               </t-tooltip>
               <t-tooltip :content="$t('organization.invite.agents')" placement="top">
-                <span class="stat-item stat-item-agent">
-                  <img src="@/assets/img/agent.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
-                  <span>{{ org.agent_share_count ?? 0 }}</span>
-                </span>
+                <div class="feature-badge stat-agent">
+                  <img src="@/assets/img/agent-green.svg" class="stat-agent-icon" alt="" aria-hidden="true" />
+                  <span class="badge-count">{{ org.agent_share_count ?? 0 }}</span>
+                </div>
               </t-tooltip>
             </div>
             <t-tooltip v-if="(org.pending_join_request_count ?? 0) > 0" :content="$t('organization.settings.pendingJoinRequestsBadge')" placement="top">
               <span class="pending-requests-badge">{{ org.pending_join_request_count }} {{ $t('organization.settings.pendingReview') }}</span>
             </t-tooltip>
-            <t-tag v-if="org.is_owner" class="role-tag owner" size="small">
-              {{ $t('organization.owner') }}
-            </t-tag>
-            <t-tag v-else-if="org.my_role" class="role-tag" :class="org.my_role" size="small">
-              {{ $t(`organization.role.${org.my_role}`) }}
-            </t-tag>
           </div>
-          <span class="card-time">{{ formatDate(org.created_at) }}</span>
+          <div class="bottom-right">
+            <div class="relation-role-tag" :class="org.is_owner ? 'owner' : (org.my_role || '')">
+              <t-icon :name="org.is_owner ? 'usergroup-add' : 'usergroup'" size="14px" />
+              <span>{{ org.is_owner ? $t('organization.owner') : (org.my_role ? $t(`organization.role.${org.my_role}`) : $t('organization.joinedByMe')) }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 空状态（按 Tab 显示不同文案） -->
+    <!-- 空状态（按筛选显示不同文案） -->
     <div v-else-if="!loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ emptyStateTitle }}</span>
       <span class="empty-desc">{{ emptyStateDesc }}</span>
+      <div class="empty-state-actions">
+        <t-button theme="default" variant="outline" class="org-join-btn" @click="handleJoinOrganization">
+          <template #icon><t-icon name="enter" /></template>
+          {{ $t('organization.joinOrg') }}
+        </t-button>
+        <t-button class="org-create-btn" @click="handleCreateOrganization">
+          <template #icon><img src="@/assets/img/organization.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
+          {{ $t('organization.createOrg') }}
+        </t-button>
+      </div>
+    </div>
+      </div>
     </div>
 
     <!-- Organization Settings Modal (用于创建和编辑组织) -->
@@ -566,6 +576,7 @@ import { previewOrganization, joinOrganization, submitJoinRequest, searchSearcha
 import { useI18n } from 'vue-i18n'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
+import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 
 interface OrgWithUI extends Organization {
   showMore?: boolean
@@ -763,28 +774,31 @@ const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'j
   }
 }) as EventListener
 
-// Tab: 'all' | 'created' | 'joined'
-const activeTab = ref<'all' | 'created' | 'joined'>('all')
+// 左侧筛选：'all' | 'created' | 'joined'
+const spaceSelection = ref<'all' | 'created' | 'joined'>('all')
 
 // Computed
 const loading = computed(() => orgStore.loading)
 const organizations = ref<OrgWithUI[]>([])
 
+const createdCount = computed(() => organizations.value.filter(o => o.is_owner).length)
+const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).length)
+
 const filteredOrganizations = computed(() => {
-  if (activeTab.value === 'created') return organizations.value.filter(o => o.is_owner)
-  if (activeTab.value === 'joined') return organizations.value.filter(o => !o.is_owner)
+  if (spaceSelection.value === 'created') return organizations.value.filter(o => o.is_owner)
+  if (spaceSelection.value === 'joined') return organizations.value.filter(o => !o.is_owner)
   return organizations.value
 })
 
 const emptyStateTitle = computed(() => {
-  if (activeTab.value === 'created') return t('organization.emptyCreated')
-  if (activeTab.value === 'joined') return t('organization.emptyJoined')
+  if (spaceSelection.value === 'created') return t('organization.emptyCreated')
+  if (spaceSelection.value === 'joined') return t('organization.emptyJoined')
   return t('organization.empty')
 })
 
 const emptyStateDesc = computed(() => {
-  if (activeTab.value === 'created') return t('organization.emptyCreatedDesc')
-  if (activeTab.value === 'joined') return t('organization.emptyJoinedDesc')
+  if (spaceSelection.value === 'created') return t('organization.emptyCreatedDesc')
+  if (spaceSelection.value === 'joined') return t('organization.emptyJoinedDesc')
   return t('organization.emptyDesc')
 })
 
@@ -798,15 +812,6 @@ watch(
 )
 
 // Methods
-function formatDate(dateStr: string) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 function getRoleTheme(role: string) {
   switch (role) {
     case 'admin': return 'primary'
@@ -1196,18 +1201,37 @@ onUnmounted(() => {
 
 <style scoped lang="less">
 .org-list-container {
-  padding: 24px 44px;
+  padding: 24px 10px;
   margin: 0 20px;
   height: calc(100vh);
-  overflow-y: auto;
   box-sizing: border-box;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.org-list-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.org-list-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
 }
 
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   margin-bottom: 16px;
 
   .header-title {
@@ -1220,49 +1244,43 @@ onUnmounted(() => {
     margin: 0;
     color: #0f172a;
     font-family: "PingFang SC", system-ui, sans-serif;
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 600;
     letter-spacing: -0.02em;
     line-height: 32px;
   }
+}
 
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+.org-join-btn {
+  border-color: rgba(7, 192, 95, 0.5);
+  color: #059669;
+  font-weight: 500;
+  transition: all 0.2s ease;
 
-    .org-join-btn {
-      border-color: rgba(7, 192, 95, 0.5);
-      color: #059669;
-      font-weight: 500;
-      transition: all 0.2s ease;
+  &:hover {
+    background: linear-gradient(135deg, rgba(7, 192, 95, 0.06) 0%, rgba(0, 166, 126, 0.06) 100%);
+    border-color: #07c05f;
+    color: #047857;
+  }
+}
 
-      &:hover {
-        background: linear-gradient(135deg, rgba(7, 192, 95, 0.06) 0%, rgba(0, 166, 126, 0.06) 100%);
-        border-color: #07c05f;
-        color: #047857;
-      }
-    }
+.org-create-btn {
+  background: linear-gradient(135deg, #07c05f 0%, #059669 50%, #047857 100%);
+  border: none;
+  color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(7, 192, 95, 0.25);
+  transition: all 0.25s ease;
 
-    .org-create-btn {
-      background: linear-gradient(135deg, #07c05f 0%, #059669 50%, #047857 100%);
-      border: none;
-      color: #fff;
-      font-weight: 500;
-      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.25);
-      transition: all 0.25s ease;
+  &:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
+  }
 
-      &:hover {
-        background: linear-gradient(135deg, #059669 0%, #047857 100%);
-        box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
-      }
-
-      .org-create-icon {
-        width: 16px;
-        height: 16px;
-        filter: brightness(0) invert(1);
-      }
-    }
+  .org-create-icon {
+    width: 16px;
+    height: 16px;
+    filter: brightness(0) invert(1);
   }
 }
 
@@ -1318,27 +1336,13 @@ onUnmounted(() => {
 
 .org-card-wrap {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   grid-template-columns: 1fr;
-}
-
-// 已加入标识（底部与角色标签同行）
-.pending-requests-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  background: rgba(250, 173, 20, 0.12);
-  color: #d48806;
-  white-space: nowrap;
 }
 
 .org-card {
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: 10px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1346,10 +1350,10 @@ onUnmounted(() => {
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 18px 20px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  height: 160px;
+  height: 132px;
 
   &::before {
     content: '';
@@ -1398,8 +1402,8 @@ onUnmounted(() => {
 // 卡片装饰：协作网络图形
 .card-decoration {
   position: absolute;
-  top: 8px;
-  right: 16px;
+  top: 6px;
+  right: 12px;
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
@@ -1409,6 +1413,8 @@ onUnmounted(() => {
 
   .card-deco-svg {
     display: block;
+    width: 48px;
+    height: 34px;
   }
 }
 
@@ -1416,7 +1422,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   position: relative;
   z-index: 2;
 }
@@ -1424,7 +1430,7 @@ onUnmounted(() => {
 .card-header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -1448,7 +1454,7 @@ onUnmounted(() => {
 .card-title {
   color: #1f2937;
   font-family: "PingFang SC";
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
   line-height: 1.4;
   overflow: hidden;
@@ -1456,45 +1462,10 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-.card-relation {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-top: 2px;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.4;
-  color: #94a3b8;
-  opacity: 0.95;
-
-  .t-icon {
-    flex-shrink: 0;
-  }
-
-  &.is-owner {
-    color: #a78bfa;
-    opacity: 0.9;
-
-    .t-icon {
-      color: #a78bfa;
-    }
-  }
-
-  &:not(.is-owner) {
-    color: #34d399;
-    opacity: 0.9;
-
-    .t-icon {
-      color: #34d399;
-    }
-  }
-}
-
-
 .more-wrap {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   justify-content: center;
   align-items: center;
   border-radius: 6px;
@@ -1518,14 +1489,14 @@ onUnmounted(() => {
   }
 
   .more-icon {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 }
 
 .card-content {
   flex: 1;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   overflow: hidden;
 }
 
@@ -1537,9 +1508,9 @@ onUnmounted(() => {
   overflow: hidden;
   color: #64748b;
   font-family: "PingFang SC";
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .card-bottom {
@@ -1547,126 +1518,137 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 8px;
   border-top: 1px solid rgba(226, 232, 240, 0.8);
 }
 
 .bottom-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
-.card-stats {
+// 与知识库卡片统一的底部标签：小尺寸、统一圆角
+.feature-badges {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
 }
 
-.stat-item {
+.feature-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 12px;
+  justify-content: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  font-size: 11px;
   font-weight: 500;
   font-family: "PingFang SC", system-ui, sans-serif;
   cursor: default;
-  background: rgba(100, 116, 139, 0.08);
-  color: #64748b;
   transition: background 0.2s ease;
 
   .t-icon {
     flex-shrink: 0;
-    color: #64748b;
   }
 
-  span {
+  .badge-count {
     line-height: 1;
   }
 
-  &.stat-item-agent {
+  &.stat-member {
+    background: rgba(100, 116, 139, 0.08);
+    color: #64748b;
+    .t-icon { color: #64748b; }
+    &:hover { background: rgba(100, 116, 139, 0.12); }
+  }
+
+  &.stat-kb {
     background: rgba(7, 192, 95, 0.08);
     color: #059669;
+    .t-icon { color: #059669; }
+    &:hover { background: rgba(7, 192, 95, 0.12); }
+  }
+
+  &.stat-agent {
+    background: rgba(124, 77, 255, 0.08);
+    color: #7c4dff;
     .stat-agent-icon {
-      width: 12px;
-      height: 12px;
+      width: 14px;
+      height: 14px;
       flex-shrink: 0;
+      /* 将绿色 icon 着色为紫色，与标签统一 */
+      filter: brightness(0) saturate(100%) invert(48%) sepia(79%) saturate(2476%) hue-rotate(236deg);
     }
-  }
-
-  &:hover {
-    background: rgba(100, 116, 139, 0.12);
-  }
-
-  // 成员数标签 - 绿色主题
-  &:first-child {
-    background: rgba(7, 192, 95, 0.08);
-    color: #07c05f;
-
-    .t-icon {
-      color: #07c05f;
-    }
-
-    &:hover {
-      background: rgba(7, 192, 95, 0.12);
-    }
-  }
-
-  // 知识库数标签 - 蓝色主题
-  &:last-child {
-    background: rgba(0, 82, 217, 0.08);
-    color: #0052d9;
-
-    .t-icon {
-      color: #0052d9;
-    }
-
-    &:hover {
-      background: rgba(0, 82, 217, 0.12);
-    }
+    &:hover { background: rgba(124, 77, 255, 0.12); }
   }
 }
 
-.role-tag {
+// 待审核角标：与 feature-badge 同高
+.pending-requests-badge {
+  display: inline-flex;
+  align-items: center;
   height: 22px;
-  padding: 0 8px;
+  padding: 0 6px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
+  background: rgba(250, 173, 20, 0.12);
+  color: #d48806;
+  white-space: nowrap;
+}
+
+// 右下角：创建者/角色 合并标签（带图标）
+.bottom-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.relation-role-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: "PingFang SC", system-ui, sans-serif;
+  background: rgba(107, 114, 128, 0.08);
+  color: #6b7280;
+
+  .t-icon {
+    flex-shrink: 0;
+    color: #6b7280;
+  }
 
   &.owner {
     background: rgba(124, 77, 255, 0.1);
     color: #7c4dff;
-    border: none;
+    .t-icon { color: #7c4dff; }
   }
 
   &.admin {
     background: rgba(7, 192, 95, 0.12);
     color: #07c05f;
-    border: none;
+    .t-icon { color: #07c05f; }
   }
 
   &.editor {
     background: rgba(7, 192, 95, 0.08);
     color: #059669;
-    border: none;
+    .t-icon { color: #059669; }
   }
 
   &.viewer {
     background: rgba(107, 114, 128, 0.08);
     color: #6b7280;
-    border: none;
+    .t-icon { color: #6b7280; }
   }
-}
-
-.card-time {
-  color: #9ca3af;
-  font-family: "PingFang SC";
-  font-size: 12px;
-  font-weight: 400;
 }
 
 .empty-state {
@@ -1698,6 +1680,14 @@ onUnmounted(() => {
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
+    margin-bottom: 0;
+  }
+
+  .empty-state-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
   }
 }
 

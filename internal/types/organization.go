@@ -241,6 +241,21 @@ type SharedAgentInfo struct {
 	SharedAt          time.Time     `json:"shared_at"`
 	SharedByUserID    string        `json:"shared_by_user_id,omitempty"`
 	SharedByUsername  string        `json:"shared_by_username,omitempty"`
+	// DisabledByMe: current tenant has hidden this shared agent from their conversation dropdown (per-user preference)
+	DisabledByMe bool `json:"disabled_by_me"`
+}
+
+// TenantDisabledSharedAgent records that a tenant has "disabled" a shared agent for their own dropdown
+type TenantDisabledSharedAgent struct {
+	TenantID       uint64    `json:"tenant_id" gorm:"primaryKey"`
+	AgentID        string    `json:"agent_id" gorm:"type:varchar(36);primaryKey"`
+	SourceTenantID uint64    `json:"source_tenant_id" gorm:"primaryKey"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// TableName returns the table name for GORM
+func (TenantDisabledSharedAgent) TableName() string {
+	return "tenant_disabled_shared_agents"
 }
 
 // ----------------------

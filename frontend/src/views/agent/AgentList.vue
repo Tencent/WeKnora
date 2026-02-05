@@ -1,54 +1,47 @@
 <template>
   <div class="agent-list-container">
-    <!-- 头部 -->
+    <!-- 头部：仅标题与副标题 -->
     <div class="header">
       <div class="header-title">
         <h2>{{ $t('agent.title') }}</h2>
         <p class="header-subtitle">{{ $t('agent.subtitle') }}</p>
       </div>
-      <div class="header-actions">
-        <t-button class="agent-create-btn" @click="handleCreateAgent">
-          <template #icon>
-            <span class="btn-icon-wrapper">
-              <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </span>
-          </template>
-          <span>{{ $t('agent.createAgent') }}</span>
-        </t-button>
-      </div>
     </div>
-    <!-- Tab 切换 -->
-    <div class="agent-tabs">
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'all' }"
-        @click="activeTab = 'all'"
-      >
-        {{ $t('agent.tabs.all') }} ({{ allAgentsCount }})
-      </div>
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'mine' }"
-        @click="activeTab = 'mine'"
-      >
-        {{ $t('agent.tabs.mine') }} ({{ agents.length }})
-      </div>
-      <div
-        class="tab-item"
-        :class="{ 'active': activeTab === 'shared' }"
-        @click="activeTab = 'shared'"
-      >
-        {{ $t('agent.tabs.sharedToMe') }} ({{ sharedAgents.length }})
-      </div>
-    </div>
-    <div class="header-divider"></div>
 
+    <!-- 左侧菜单 + 主内容 -->
+    <div class="agent-list-body">
+      <ListSpaceSidebar
+        v-model="spaceSelection"
+        :count-all="allAgentsCount"
+        :count-mine="agents.length"
+        :count-by-org="sharedCountByOrg"
+      >
+        <template #actions>
+          <t-tooltip :content="$t('agent.createAgent')" placement="top">
+            <t-button
+              variant="text"
+              theme="default"
+              class="sidebar-action-btn"
+              size="small"
+              :aria-label="$t('agent.createAgent')"
+              @click="handleCreateAgent"
+            >
+              <template #icon>
+                <span class="btn-icon-wrapper">
+                  <svg class="sparkles-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+              </template>
+            </t-button>
+          </t-tooltip>
+        </template>
+      </ListSpaceSidebar>
+      <div class="agent-list-main">
     <!-- 全部：我的 + 共享 -->
-    <div v-if="activeTab === 'all' && filteredAgents.length > 0" class="agent-card-wrap">
+    <div v-if="spaceSelection === 'all' && filteredAgents.length > 0" class="agent-card-wrap">
       <div
         v-for="agent in filteredAgents"
         :key="agent.isMine ? agent.id : `shared-${agent.share_id}`"
@@ -76,7 +69,7 @@
               <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="18px" />
             </div>
             <div v-else-if="agent.avatar" class="builtin-avatar agent-emoji">{{ agent.avatar }}</div>
-            <AgentAvatar v-else :name="agent.name" size="medium" />
+            <AgentAvatar v-else :name="agent.name" size="small" />
             <span class="card-title" :title="agent.name">{{ agent.name }}</span>
           </div>
           <t-popup
@@ -96,7 +89,32 @@
               <div class="popup-menu">
                 <div class="popup-menu-item" @click="handleEdit(agent)"><t-icon class="menu-icon" name="edit" /><span>{{ $t('common.edit') }}</span></div>
                 <div class="popup-menu-item" @click="handleCopy(agent)"><t-icon class="menu-icon" name="file-copy" /><span>{{ $t('common.copy') }}</span></div>
+                <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
+                  <t-icon class="menu-icon" name="poweroff" />
+                  <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
+                </div>
                 <div v-if="!agent.is_builtin" class="popup-menu-item delete" @click="handleDelete(agent)"><t-icon class="menu-icon" name="delete" /><span>{{ $t('common.delete') }}</span></div>
+              </div>
+            </template>
+          </t-popup>
+          <t-popup
+            v-else
+            :visible="openMoreAgentId === 'shared-' + agent.share_id"
+            trigger="hover"
+            overlayClassName="card-more-popup"
+            destroy-on-close
+            placement="bottom-right"
+            @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }"
+          >
+            <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-' + agent.share_id }" @click.stop="toggleMore($event, 'shared-' + agent.share_id)">
+              <img class="more-icon" src="@/assets/img/more.png" alt="" />
+            </div>
+            <template #content>
+              <div class="popup-menu">
+                <div class="popup-menu-item" @click="handleToggleSharedDisabled(agent)">
+                  <t-icon class="menu-icon" name="poweroff" />
+                  <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
+                </div>
               </div>
             </template>
           </t-popup>
@@ -107,6 +125,8 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
+              <t-tag v-if="agent.isMine && !agent.is_builtin && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
+              <t-tag v-if="!agent.isMine && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
               <t-tooltip :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')" placement="top">
                 <div class="feature-badge" :class="{ 'mode-normal': agent.config?.agent_mode === 'quick-answer', 'mode-agent': agent.config?.agent_mode === 'smart-reasoning' }">
                   <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
@@ -156,7 +176,7 @@
     </div>
 
     <!-- 我的智能体 -->
-    <div v-if="activeTab === 'mine' && agents.length > 0" class="agent-card-wrap">
+    <div v-if="spaceSelection === 'mine' && agents.length > 0" class="agent-card-wrap">
       <div 
         v-for="agent in agents" 
         :key="agent.id" 
@@ -186,7 +206,7 @@
               <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="18px" />
             </div>
             <div v-else-if="agent.avatar" class="builtin-avatar agent-emoji">{{ agent.avatar }}</div>
-            <AgentAvatar v-else :name="agent.name" size="medium" />
+            <AgentAvatar v-else :name="agent.name" size="small" />
             <span class="card-title" :title="agent.name">{{ agent.name }}</span>
           </div>
           <t-popup
@@ -215,6 +235,10 @@
                   <t-icon class="menu-icon" name="file-copy" />
                   <span>{{ $t('common.copy') }}</span>
                 </div>
+                <div v-if="!agent.is_builtin" class="popup-menu-item" @click="handleToggleDisabled(agent)">
+                  <t-icon class="menu-icon" name="poweroff" />
+                  <span>{{ agent.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
+                </div>
                 <div v-if="!agent.is_builtin" class="popup-menu-item delete" @click="handleDelete(agent)">
                   <t-icon class="menu-icon" name="delete" />
                   <span>{{ $t('common.delete') }}</span>
@@ -235,6 +259,7 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
+              <t-tag v-if="!agent.is_builtin && agent.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
               <t-tooltip :content="agent.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')" placement="top">
                 <div class="feature-badge" :class="{ 'mode-normal': agent.config?.agent_mode === 'quick-answer', 'mode-agent': agent.config?.agent_mode === 'smart-reasoning' }">
                   <t-icon :name="agent.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
@@ -279,10 +304,10 @@
       </div>
     </div>
 
-    <!-- 共享给我的智能体 -->
-    <div v-if="activeTab === 'shared' && sharedAgents.length > 0" class="agent-card-wrap">
+    <!-- 按空间筛选：该空间下共享给我的智能体 -->
+    <div v-if="spaceSelectionOrgId && sharedAgentsByOrg.length > 0" class="agent-card-wrap">
       <div
-        v-for="shared in sharedAgents"
+        v-for="shared in sharedAgentsByOrg"
         :key="'shared-' + shared.share_id"
         class="agent-card shared-agent-card"
         :class="{
@@ -302,9 +327,29 @@
         <div class="card-header">
           <div class="card-header-left">
             <div v-if="shared.agent?.avatar" class="builtin-avatar agent-emoji">{{ shared.agent.avatar }}</div>
-            <AgentAvatar v-else :name="shared.agent?.name" size="medium" />
+            <AgentAvatar v-else :name="shared.agent?.name" size="small" />
             <span class="card-title" :title="shared.agent?.name">{{ shared.agent?.name }}</span>
           </div>
+          <t-popup
+            :visible="openMoreAgentId === 'shared-tab-' + shared.share_id"
+            trigger="hover"
+            overlayClassName="card-more-popup"
+            destroy-on-close
+            placement="bottom-right"
+            @update:visible="(v: boolean) => { if (!v) openMoreAgentId = null }"
+          >
+            <div class="more-wrap" :class="{ 'active-more': openMoreAgentId === 'shared-tab-' + shared.share_id }" @click.stop="toggleMore($event, 'shared-tab-' + shared.share_id)">
+              <img class="more-icon" src="@/assets/img/more.png" alt="" />
+            </div>
+            <template #content>
+              <div class="popup-menu">
+                <div class="popup-menu-item" @click="handleToggleSharedDisabledFromShared(shared)">
+                  <t-icon class="menu-icon" name="poweroff" />
+                  <span>{{ shared.disabled_by_me ? $t('agent.enable') : $t('agent.disable') }}</span>
+                </div>
+              </div>
+            </template>
+          </t-popup>
         </div>
         <div class="card-content">
           <div class="card-description">{{ shared.agent?.description || $t('agent.noDescription') }}</div>
@@ -312,6 +357,7 @@
         <div class="card-bottom">
           <div class="bottom-left">
             <div class="feature-badges">
+              <t-tag v-if="shared.disabled_by_me" theme="default" size="small" class="disabled-badge">{{ $t('agent.disabled') }}</t-tag>
               <t-tooltip :content="shared.agent?.config?.agent_mode === 'smart-reasoning' ? $t('agent.mode.agent') : $t('agent.mode.normal')" placement="top">
                 <div class="feature-badge" :class="{ 'mode-normal': shared.agent?.config?.agent_mode === 'quick-answer', 'mode-agent': shared.agent?.config?.agent_mode === 'smart-reasoning' }">
                   <t-icon :name="shared.agent?.config?.agent_mode === 'smart-reasoning' ? 'control-platform' : 'chat'" size="14px" />
@@ -341,22 +387,48 @@
     </div>
 
     <!-- 空状态：全部 -->
-    <div v-if="activeTab === 'all' && filteredAgents.length === 0 && !loading" class="empty-state">
+    <div v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
       <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
+      <t-button class="agent-create-btn empty-state-btn" @click="handleCreateAgent">
+        <template #icon>
+          <span class="btn-icon-wrapper">
+            <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </template>
+        <span>{{ $t('agent.createAgent') }}</span>
+      </t-button>
     </div>
     <!-- 空状态：我的 -->
-    <div v-if="activeTab === 'mine' && agents.length === 0 && !loading" class="empty-state">
+    <div v-if="spaceSelection === 'mine' && agents.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
       <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
+      <t-button class="agent-create-btn empty-state-btn" @click="handleCreateAgent">
+        <template #icon>
+          <span class="btn-icon-wrapper">
+            <svg class="sparkles-icon" width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M10 3L10.8 6.2C10.9 6.7 11.3 7.1 11.8 7.2L15 8L11.8 8.8C11.3 8.9 10.9 9.3 10.8 9.8L10 13L9.2 9.8C9.1 9.3 8.7 8.9 8.2 8.8L5 8L8.2 7.2C8.7 7.1 9.1 6.7 9.2 6.2L10 3Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M15.5 4L15.8 5.2C15.85 5.45 16.05 5.65 16.3 5.7L17.5 6L16.3 6.3C16.05 6.35 15.85 6.55 15.8 6.8L15.5 8L15.2 6.8C15.15 6.55 14.95 6.35 14.7 6.3L13.5 6L14.7 5.7C14.95 5.65 15.15 5.45 15.2 5.2L15.5 4Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4.5 13L4.8 14.2C4.85 14.45 5.05 14.65 5.3 14.7L6.5 15L5.3 15.3C5.05 15.35 4.85 15.55 4.8 15.8L4.5 17L4.2 15.8C4.15 15.55 3.95 15.35 3.7 15.3L2.5 15L3.7 14.7C3.95 14.65 4.15 14.45 4.2 14.2L4.5 13Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+        </template>
+        <span>{{ $t('agent.createAgent') }}</span>
+      </t-button>
     </div>
-    <!-- 空状态：共享给我 -->
-    <div v-if="activeTab === 'shared' && sharedAgents.length === 0 && !loading" class="empty-state">
+    <!-- 空状态：空间下共享给我 -->
+    <div v-if="spaceSelectionOrgId && sharedAgentsByOrg.length === 0 && !loading" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('agent.empty.sharedTitle') }}</span>
       <span class="empty-desc">{{ $t('agent.empty.sharedDescription') }}</span>
+    </div>
+      </div>
     </div>
 
     <!-- 删除确认对话框 -->
@@ -463,11 +535,13 @@ import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
 import { useOrganizationStore } from '@/stores/organization'
+import { setSharedAgentDisabledByMe } from '@/api/organization'
 import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
+import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -476,17 +550,44 @@ const orgStore = useOrganizationStore()
 
 interface AgentWithUI extends CustomAgent {
   showMore?: boolean
+  /** 当前租户在对话下拉中停用（仅影响本租户） */
+  disabled_by_me?: boolean
 }
 
-/** Merged agent for "all" tab: my agents (isMine: true) or shared (isMine: false, org_name, source_tenant_id, share_id) */
-type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: false; org_name: string; source_tenant_id: number; share_id: string; showMore?: boolean })
+/** Merged agent for "all" tab: my agents (isMine: true) or shared (isMine: false, org_name, source_tenant_id, share_id, disabled_by_me?) */
+type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: false; org_name: string; source_tenant_id: number; share_id: string; showMore?: boolean; disabled_by_me?: boolean })
 
-const activeTab = ref<'all' | 'mine' | 'shared'>('all')
+const spaceSelection = ref<'all' | 'mine' | string>('all')
 const agents = ref<AgentWithUI[]>([])
 const sharedAgents = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || [])
 const allAgentsCount = computed(() => agents.value.length + sharedAgents.value.length)
+
+const spaceSelectionOrgId = computed(() => {
+  const s = spaceSelection.value
+  return s !== 'all' && s !== 'mine' && !!s
+})
+
+const sharedAgentsByOrg = computed(() => {
+  const orgId = spaceSelection.value
+  if (orgId === 'all' || orgId === 'mine') return []
+  return sharedAgents.value.filter(s => s.organization_id === orgId)
+})
+
+const sharedCountByOrg = computed<Record<string, number>>(() => {
+  const map: Record<string, number> = {}
+  sharedAgents.value.forEach(s => {
+    const id = s.organization_id
+    if (!id) return
+    map[id] = (map[id] || 0) + 1
+  })
+  return map
+})
+
 const filteredAgents = computed<DisplayAgent[]>(() => {
-  if (activeTab.value !== 'all') return []
+  if (spaceSelection.value === 'mine') {
+    return agents.value.map(a => ({ ...a, isMine: true as const }))
+  }
+  if (spaceSelection.value !== 'all') return []
   const list: DisplayAgent[] = []
   agents.value.forEach(a => list.push({ ...a, isMine: true as const }))
   sharedAgents.value.forEach(shared => {
@@ -497,6 +598,7 @@ const filteredAgents = computed<DisplayAgent[]>(() => {
       org_name: shared.org_name,
       source_tenant_id: shared.source_tenant_id,
       share_id: shared.share_id,
+      disabled_by_me: shared.disabled_by_me,
       showMore: false
     } as DisplayAgent)
   })
@@ -538,7 +640,12 @@ const fetchList = () => {
   return Promise.all([
     listAgents().then((res: any) => {
       const data = res.data || []
-      agents.value = data.map((agent: CustomAgent) => ({ ...agent, showMore: false }))
+      const disabledOwnIds = res.disabled_own_agent_ids || []
+      agents.value = data.map((agent: CustomAgent) => ({
+        ...agent,
+        showMore: false,
+        disabled_by_me: disabledOwnIds.includes(agent.id)
+      }))
       checkAndOpenEditModal()
     }),
     orgStore.fetchSharedAgents()
@@ -671,6 +778,55 @@ const handleCopy = (agent: AgentWithUI) => {
   })
 }
 
+/** 切换「我的」智能体停用状态（仅影响当前租户对话下拉显示） */
+const handleToggleDisabled = (agent: AgentWithUI) => {
+  openMoreAgentId.value = null
+  const nextDisabled = !agent.disabled_by_me
+  setSharedAgentDisabledByMe(agent.id, nextDisabled).then((res: any) => {
+    if (res.success) {
+      MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
+      fetchList()
+    } else {
+      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
+    }
+  }).catch((e: any) => {
+    MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
+  })
+}
+
+/** 切换共享智能体“停用”状态（仅影响当前用户对话下拉显示） */
+const handleToggleSharedDisabled = (agent: DisplayAgent) => {
+  if (agent.isMine) return
+  openMoreAgentId.value = null
+  const nextDisabled = !agent.disabled_by_me
+  setSharedAgentDisabledByMe(agent.id, nextDisabled).then((res: any) => {
+    if (res.success) {
+      MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
+      orgStore.fetchSharedAgents()
+    } else {
+      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
+    }
+  }).catch((e: any) => {
+    MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
+  })
+}
+
+const handleToggleSharedDisabledFromShared = (shared: SharedAgentInfo) => {
+  if (!shared.agent) return
+  openMoreAgentId.value = null
+  const nextDisabled = !shared.disabled_by_me
+  setSharedAgentDisabledByMe(shared.agent.id, nextDisabled).then((res: any) => {
+    if (res.success) {
+      MessagePlugin.success(nextDisabled ? t('agent.messages.disabled') : t('agent.messages.enabled'))
+      orgStore.fetchSharedAgents()
+    } else {
+      MessagePlugin.error(res.message || t('agent.messages.saveFailed'))
+    }
+  }).catch((e: any) => {
+    MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
+  })
+}
+
 const confirmDelete = () => {
   if (!deletingAgent.value) return
   
@@ -718,18 +874,37 @@ defineExpose({
 
 <style scoped lang="less">
 .agent-list-container {
-  padding: 24px 44px;
+  padding: 24px 10px;
   margin: 0 20px;
   height: calc(100vh);
-  overflow-y: auto;
   box-sizing: border-box;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.agent-list-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.agent-list-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
 }
 
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   margin-bottom: 16px;
 
   .header-title {
@@ -746,76 +921,67 @@ defineExpose({
     font-weight: 600;
     line-height: 32px;
   }
+}
 
-  .header-actions {
-    display: flex;
+:deep(.agent-create-btn) {
+  --ripple-color: rgba(118, 75, 162, 0.3) !important;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  position: relative;
+  overflow: hidden;
+
+  &:hover,
+  &:active,
+  &:focus,
+  &.t-is-active,
+  &[data-state="active"] {
+    background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%) !important;
+    border: none !important;
+    color: #fff !important;
+  }
+
+  --td-button-primary-bg-color: #667eea !important;
+  --td-button-primary-border-color: #667eea !important;
+  --td-button-primary-active-bg-color: #5a6fd6 !important;
+  --td-button-primary-active-border-color: #5a6fd6 !important;
+
+  .btn-icon-wrapper {
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
-
-    :deep(.agent-create-btn) {
-      --ripple-color: rgba(118, 75, 162, 0.3) !important;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-      border: none !important;
-      color: #fff !important;
-      position: relative;
-      overflow: hidden;
-      
-      &:hover,
-      &:active,
-      &:focus,
-      &.t-is-active,
-      &[data-state="active"] {
-        background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%) !important;
-        border: none !important;
-        color: #fff !important;
-      }
-      
-      // 覆盖 TDesign 按钮的 CSS 变量
-      --td-button-primary-bg-color: #667eea !important;
-      --td-button-primary-border-color: #667eea !important;
-      --td-button-primary-active-bg-color: #5a6fd6 !important;
-      --td-button-primary-active-border-color: #5a6fd6 !important;
-    }
-    
-    .agent-create-btn {
-      .btn-icon-wrapper {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      
-      .sparkles-icon {
-        animation: twinkle 2s ease-in-out infinite;
-      }
-      
-      &::before {
-        content: '';
-        position: absolute;
-        top: -50%;
-        left: -50%;
-        width: 200%;
-        height: 200%;
-        background: linear-gradient(
-          45deg,
-          transparent 30%,
-          rgba(255, 255, 255, 0.1) 50%,
-          transparent 70%
-        );
-        transform: translateX(-100%);
-        transition: transform 0.6s ease;
-        z-index: 0;
-      }
-
-      &:hover::before {
-        transform: translateX(100%);
-      }
-    }
+    justify-content: center;
   }
-  
-  @keyframes twinkle {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.8; transform: scale(0.95); }
+
+  .sparkles-icon {
+    animation: twinkle 2s ease-in-out infinite;
   }
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(
+      45deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent 70%
+    );
+    transform: translateX(-100%);
+    transition: transform 0.6s ease;
+    z-index: 0;
+  }
+
+  &:hover::before {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(0.95); }
 }
 
 .header-subtitle {
@@ -901,13 +1067,13 @@ defineExpose({
 
 .agent-card-wrap {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   grid-template-columns: 1fr;
 }
 
 .agent-card {
   border: 1px solid #f0f0f0;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -915,10 +1081,10 @@ defineExpose({
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 16px 18px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  height: 160px;
+  height: 132px;
 
   &:hover {
     border-color: #07c05f;
@@ -975,8 +1141,8 @@ defineExpose({
 
 .card-decoration {
   position: absolute;
-  top: 12px;
-  right: 50px;
+  top: 10px;
+  right: 40px;
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -988,7 +1154,7 @@ defineExpose({
     opacity: 0.9;
     
     &.small {
-      margin-top: 14px;
+      margin-top: 10px;
       opacity: 0.7;
     }
   }
@@ -998,13 +1164,13 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .card-header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -1012,9 +1178,9 @@ defineExpose({
 .card-title {
   color: #1a1a1a;
   font-family: "PingFang SC";
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 22px;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1040,13 +1206,13 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   flex-shrink: 0;
 
   &.agent-emoji {
-    font-size: 18px;
+    font-size: 16px;
     line-height: 1;
     background: rgba(0, 0, 0, 0.04);
   }
@@ -1064,8 +1230,8 @@ defineExpose({
 
 .edit-btn {
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   justify-content: center;
   align-items: center;
   border-radius: 6px;
@@ -1082,8 +1248,8 @@ defineExpose({
 
 .more-wrap {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   justify-content: center;
   align-items: center;
   border-radius: 6px;
@@ -1107,14 +1273,14 @@ defineExpose({
   }
 
   .more-icon {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 }
 
 .card-content {
   flex: 1;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   overflow: hidden;
 }
 
@@ -1126,9 +1292,9 @@ defineExpose({
   overflow: hidden;
   color: #666;
   font-family: "PingFang SC";
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 400;
-  line-height: 20px;
+  line-height: 18px;
 }
 
 .card-bottom {
@@ -1136,7 +1302,7 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   margin-top: auto;
-  padding-top: 12px;
+  padding-top: 8px;
   border-top: 1px solid #f0f0f0;
 }
 
@@ -1156,9 +1322,9 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
   cursor: default;
   transition: background 0.2s ease;
 
@@ -1253,6 +1419,11 @@ defineExpose({
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
+    margin-bottom: 0;
+  }
+
+  .empty-state-btn {
+    margin-top: 20px;
   }
 }
 

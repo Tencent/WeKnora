@@ -1,5 +1,5 @@
 -- Migration: 000012_organizations (merged 000012, 000013, 000014)
--- Description: Organization tables, kb_shares, join requests, agent_shares (model_shares omitted/dropped)
+-- Description: Organization tables, kb_shares, join requests, agent_shares, tenant_disabled_shared_agents
 DO $$ BEGIN RAISE NOTICE '[Migration 000012] Starting organization tables setup...'; END $$;
 
 -- Create organizations table
@@ -132,4 +132,15 @@ COMMENT ON TABLE agent_shares IS 'Custom agent sharing records to organizations'
 COMMENT ON COLUMN agent_shares.source_tenant_id IS 'Original tenant ID of the agent';
 COMMENT ON COLUMN agent_shares.permission IS 'Access permission: viewer or editor';
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000012] Organization tables and agent_shares setup completed successfully!'; END $$;
+-- Per-tenant "disabled" list for shared agents (merged from 000014)
+DO $$ BEGIN RAISE NOTICE '[Migration 000012] Creating table: tenant_disabled_shared_agents'; END $$;
+CREATE TABLE IF NOT EXISTS tenant_disabled_shared_agents (
+    tenant_id BIGINT NOT NULL,
+    agent_id VARCHAR(36) NOT NULL,
+    source_tenant_id BIGINT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (tenant_id, agent_id, source_tenant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_disabled_shared_agents_tenant_id ON tenant_disabled_shared_agents(tenant_id);
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000012] Organization tables and tenant_disabled_shared_agents setup completed successfully!'; END $$;

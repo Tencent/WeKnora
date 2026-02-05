@@ -39,6 +39,27 @@
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.faq.title') }}</span>
             </h2>
+            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
+            <div v-if="kbInfo" class="faq-access-meta">
+              <t-tooltip :content="accessPermissionSummary" placement="top">
+                <span class="faq-access-meta-inner">
+                  <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')" class="faq-access-role-tag">
+                    {{ accessRoleLabel }}
+                  </t-tag>
+                  <template v-if="currentSharedKb">
+                    <span class="faq-access-meta-sep">·</span>
+                    <span class="faq-access-meta-text">
+                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
+                    </span>
+                  </template>
+                  <template v-else-if="kbLastUpdated">
+                    <span class="faq-access-meta-sep">·</span>
+                    <span class="faq-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+                  </template>
+                </span>
+              </t-tooltip>
+            </div>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
@@ -50,49 +71,6 @@
             </t-tooltip>
           </div>
           <p class="faq-subtitle">{{ $t('knowledgeEditor.faq.subtitle') }}</p>
-          <!-- 当前知识库权限与来源信息 -->
-          <div v-if="kbInfo" class="faq-access-info">
-            <span class="faq-access-role">
-              <t-icon name="user" class="faq-access-item-icon" />
-              <span class="faq-access-label">{{ $t('knowledgeBase.accessInfo.myRole') }}：</span>
-              <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')">
-                {{ accessRoleLabel }}
-              </t-tag>
-              <t-tooltip :content="accessPermissionSummary" placement="top">
-                <t-icon name="help-circle" class="faq-access-item-icon faq-access-permission-tip" />
-              </t-tooltip>
-            </span>
-            <template v-if="currentSharedKb">
-              <span class="faq-access-sep">·</span>
-              <span class="faq-access-source">
-                <img src="@/assets/img/organization-green.svg" class="faq-access-org-icon" alt="" aria-hidden="true" />
-                {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                <t-icon name="time" class="faq-access-item-icon" />
-                {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
-              </span>
-            </template>
-            <template v-else-if="kbLastUpdated">
-              <span class="faq-access-sep">·</span>
-              <span class="faq-access-updated">
-                <t-icon name="time" class="faq-access-item-icon" />
-                {{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}
-              </span>
-            </template>
-          </div>
-        </div>
-        <div class="faq-header-actions">
-          <t-dropdown
-            :options="faqActionOptions"
-            trigger="click"
-            placement="bottom-right"
-            @click="handleFaqAction"
-          >
-            <t-button class="faq-action-btn dropdown-action-btn">
-              <template #icon><t-icon name="help-circle" /></template>
-              <span>{{ $t('knowledgeEditor.faq.manageFaq') }}</span>
-              <t-icon name="chevron-down" size="14px" class="dropdown-arrow" />
-            </t-button>
-          </t-dropdown>
         </div>
       </div>
 
@@ -366,12 +344,13 @@
         </aside>
 
         <div class="faq-card-area">
-          <!-- 搜索栏 -->
+          <!-- 搜索栏与管理 FAQ -->
           <div class="faq-search-bar">
             <t-input
               v-model.trim="entrySearchKeyword"
               :placeholder="$t('knowledgeEditor.faq.searchPlaceholder')"
               clearable
+              class="faq-search-input"
               @clear="loadEntries()"
               @keydown.enter="loadEntries()"
             >
@@ -379,6 +358,35 @@
                 <t-icon name="search" size="16px" />
               </template>
             </t-input>
+            <div class="faq-search-actions">
+              <!-- 新建：新建条目 / 导入 -->
+              <template v-if="faqCreateOptions.length">
+                <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
+                  <t-dropdown
+                    :options="faqCreateOptions"
+                    trigger="click"
+                    placement="bottom-right"
+                    @click="handleFaqAction"
+                  >
+                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                      <template #icon><t-icon name="add" size="16px" /></template>
+                    </t-button>
+                  </t-dropdown>
+                </t-tooltip>
+              </template>
+              <!-- 导出 -->
+              <t-tooltip :content="$t('knowledgeEditor.faqExport.exportButton')" placement="top">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" @click="handleFaqAction({ value: 'export' })">
+                  <template #icon><t-icon name="download" size="16px" /></template>
+                </t-button>
+              </t-tooltip>
+              <!-- 检索 -->
+              <t-tooltip :content="$t('knowledgeEditor.faq.searchTest')" placement="top">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" @click="handleFaqAction({ value: 'search' })">
+                  <template #icon><t-icon name="search" size="16px" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
           </div>
           <!-- Card List Container with Scroll -->
           <div ref="scrollContainer" class="faq-scroll-container" @scroll="handleScroll">
@@ -1321,25 +1329,13 @@ const kbLastUpdated = computed(() => {
   return formatImportTime(raw)
 })
 
-// FAQ 操作下拉选项
-const faqActionOptions = computed(() => {
-  const options = []
-  
-  // 编辑权限相关操作
-  if (canEdit.value) {
-    options.push(
-      { content: t('knowledgeEditor.faq.editorCreate'), value: 'create', prefixIcon: () => h(TIcon, { name: 'add', size: '16px' }) },
-      { content: t('knowledgeEditor.faqImport.importButton'), value: 'import', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
-    )
-  }
-  
-  // 通用操作
-  options.push(
-    { content: t('knowledgeEditor.faq.searchTest'), value: 'search', prefixIcon: () => h(TIcon, { name: 'search', size: '16px' }) },
-    { content: t('knowledgeEditor.faqExport.exportButton'), value: 'export', prefixIcon: () => h(TIcon, { name: 'download', size: '16px' }) },
-  )
-  
-  return options
+// FAQ 操作：新建组（新建条目 + 导入）
+const faqCreateOptions = computed(() => {
+  if (!canEdit.value) return []
+  return [
+    { content: t('knowledgeEditor.faq.editorCreate'), value: 'create', prefixIcon: () => h(TIcon, { name: 'add', size: '16px' }) },
+    { content: t('knowledgeEditor.faqImport.importButton'), value: 'import', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
+  ]
 })
 
 // 处理 FAQ 操作
@@ -3329,19 +3325,22 @@ watch(() => entries.value.map(e => ({
   min-height: 0;
 }
 
+// 与列表页一致：整体一块白底圆角区，左侧标签栏为内部分区
 .faq-main {
   display: flex;
-  gap: 16px;
   flex: 1;
   min-height: 0;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .faq-tag-panel {
-  width: 230px;
-  background: #fff;
-  border: 1px solid #e7ebf0;
-  border-radius: 12px;
-  padding: 16px;
+  width: 176px;
+  background: #fafbfc;
+  border-right: 1px solid #e7ebf0;
+  padding: 12px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -3363,35 +3362,36 @@ watch(() => entries.value.map(e => ({
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     color: #1d2129;
 
     .sidebar-title {
       display: flex;
       align-items: baseline;
       gap: 4px;
+      font-size: 13px;
       font-weight: 600;
 
       .sidebar-count {
-        font-size: 12px;
+        font-size: 11px;
         color: #86909c;
       }
     }
 
     .sidebar-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       color: #c9ced6;
 
       .create-tag-btn {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         padding: 0;
         border-radius: 6px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
         color: #00a870;
         line-height: 1;
@@ -3408,8 +3408,8 @@ watch(() => entries.value.map(e => ({
       }
 
       .sidebar-action-icon {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         border-radius: 6px;
         display: flex;
         align-items: center;
@@ -3426,26 +3426,34 @@ watch(() => entries.value.map(e => ({
   }
 
   .tag-search-bar {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 
     :deep(.t-input) {
-      font-size: 12px;
+      font-size: 11px;
       background-color: #f7f9fc;
       border-color: #e5e9f2;
+    }
+
+    :deep(.t-input__inner) {
+      font-size: 12px;
+    }
+
+    :deep(.t-input__prefix-icon) {
+      margin-right: 0;
     }
   }
 
   .faq-tag-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
 
     .tag-loading-more {
-      padding: 12px 0;
+      padding: 8px 0;
       display: flex;
       justify-content: center;
       flex-shrink: 0;
@@ -3455,24 +3463,24 @@ watch(() => entries.value.map(e => ({
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px;
+      padding: 6px 8px;
       border-radius: 6px;
       color: #4e5969;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 13px;
+      font-size: 12px;
 
       .faq-tag-left {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         min-width: 0;
         flex: 1;
 
         .t-icon {
           flex-shrink: 0;
           color: #86909c;
-          font-size: 16px;
+          font-size: 14px;
           transition: color 0.2s ease;
         }
       }
@@ -3489,18 +3497,18 @@ watch(() => entries.value.map(e => ({
       .faq-tag-right {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin-left: 8px;
+        gap: 5px;
+        margin-left: 6px;
         min-width: 0;
         flex-shrink: 0;
       }
 
       .faq-tag-count {
-        font-size: 12px;
+        font-size: 11px;
         color: #86909c;
         font-weight: 500;
-        padding: 2px 6px;
-        border-radius: 10px;
+        padding: 2px 5px;
+        border-radius: 8px;
         background: #f7f9fc;
         transition: all 0.2s ease;
       }
@@ -3639,8 +3647,8 @@ watch(() => entries.value.map(e => ({
       }
 
       .tag-more-btn {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -3663,17 +3671,17 @@ watch(() => entries.value.map(e => ({
       }
 
       .tag-more-placeholder {
-        width: 24px;  // Same width as tag-more-btn
-        height: 24px;
+        width: 22px;
+        height: 22px;
         flex-shrink: 0;
       }
     }
 
     .tag-empty-state {
       text-align: center;
-      padding: 12px 8px;
+      padding: 10px 6px;
       color: #a1a7b3;
-      font-size: 12px;
+      font-size: 11px;
     }
   }
 }
@@ -3684,11 +3692,37 @@ watch(() => entries.value.map(e => ({
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 16px;
+  overflow: hidden;
 }
 
 .faq-search-bar {
   padding: 0px 0px 10px 0px;
   flex-shrink: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+
+  .faq-search-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .faq-search-actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    :deep(.content-bar-icon-btn) {
+      color: #86909c;
+      background: transparent;
+      border: none;
+      &:hover {
+        color: #4e5969;
+        background: #f2f3f5;
+      }
+    }
+  }
 
   :deep(.t-input) {
     font-size: 13px;
@@ -3702,6 +3736,10 @@ watch(() => entries.value.map(e => ({
       background-color: #fff;
       border-color: #00a870;
     }
+  }
+
+  :deep(.t-input__prefix-icon) {
+    margin-right: 0;
   }
 }
 
@@ -3747,13 +3785,11 @@ watch(() => entries.value.map(e => ({
 
 .faq-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 0 0 16px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #e7ebf0;
+  gap: 12px;
+  margin-bottom: 12px;
   flex-shrink: 0;
 
   .faq-header-title {
@@ -3767,6 +3803,32 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .faq-access-meta {
+    flex-shrink: 0;
+  }
+
+  .faq-access-meta-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #86909c;
+    cursor: default;
+  }
+
+  .faq-access-role-tag {
+    flex-shrink: 0;
+  }
+
+  .faq-access-meta-sep {
+    color: #c9ced6;
+    user-select: none;
+  }
+
+  .faq-access-meta-text {
+    white-space: nowrap;
   }
 
   .faq-breadcrumb {
@@ -3846,91 +3908,8 @@ watch(() => entries.value.map(e => ({
     font-weight: 400;
     line-height: 20px;
   }
-
-  .faq-access-info {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    margin-top: 8px;
-    font-size: 12px;
-    color: #86909c;
-    line-height: 1.5;
-  }
-
-  .faq-access-label {
-    color: #4e5969;
-  }
-
-  .faq-access-role {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .faq-access-permission-tip {
-    cursor: help;
-    opacity: 0.7;
-  }
-
-  .faq-access-permission-tip:hover {
-    opacity: 1;
-  }
-
-  .faq-access-item-icon {
-    font-size: 14px;
-    color: #86909c;
-    flex-shrink: 0;
-  }
-
-  .faq-access-sep {
-    color: #c9ced6;
-    user-select: none;
-  }
-
-  .faq-access-source,
-  .faq-access-updated {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: #86909c;
-  }
-
-  .faq-access-org-icon {
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
-    vertical-align: middle;
-  }
 }
 
-.faq-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-
-  .faq-action-btn {
-    background: linear-gradient(135deg, #26a69a 0%, #00897b 100%);
-    border: none;
-    color: #fff;
-
-    &:hover {
-      background: linear-gradient(135deg, #00897b 0%, #00796b 100%);
-    }
-  }
-
-  :deep(.dropdown-action-btn) {
-    .t-button__text {
-      display: inline-flex;
-      align-items: center;
-    }
-    
-    .dropdown-arrow {
-      margin-left: 4px;
-    }
-  }
-}
 
 // 导入进度条样式（显示在列表页面顶部）
 .faq-import-progress-bar {
@@ -4237,21 +4216,20 @@ watch(() => entries.value.map(e => ({
 
 .faq-card {
   border: 1px solid #E7E7E7;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
-  padding: 12px;
+  padding: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
   box-sizing: border-box;
-  height: fit-content; // 高度根据内容自适应
-  // 注意：top 和 left 的 transition 由 JS 动态控制，避免与布局动画冲突
+  height: fit-content;
 
   &:hover {
     border-color: #07C05F;
@@ -4268,8 +4246,8 @@ watch(() => entries.value.map(e => ({
 .faq-card-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-bottom: 12px;
+  gap: 8px;
+  padding-bottom: 10px;
   border-bottom: 1px solid #F3F4F6;
   position: relative;
 }
@@ -4277,13 +4255,13 @@ watch(() => entries.value.map(e => ({
 .faq-header-top {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 
 .faq-card-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -4292,28 +4270,28 @@ watch(() => entries.value.map(e => ({
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding-top: 6px;
+  gap: 8px;
+  padding-top: 5px;
   border-top: 1px dashed #F3F4F6;
 }
 
 .faq-meta-item {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: #F9FAFB;
   border: 1px solid #EEF2F7;
 
   .meta-label {
-    font-size: 12px;
+    font-size: 11px;
     color: #6B7280;
     font-weight: 500;
   }
 
   .meta-value {
-    font-size: 13px;
+    font-size: 12px;
     color: #111827;
     font-weight: 600;
   }
@@ -4323,9 +4301,9 @@ watch(() => entries.value.map(e => ({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 16px;
-  margin: 0 -16px -12px;
+  gap: 6px;
+  padding: 8px 12px;
+  margin: 0 -10px -10px;
   background: rgba(48, 50, 54, 0.02);
   border-top: 1px solid #f5f5f5;
   flex-wrap: nowrap;
@@ -4334,7 +4312,7 @@ watch(() => entries.value.map(e => ({
 .faq-card-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
   margin-left: auto;
 }
@@ -4342,17 +4320,17 @@ watch(() => entries.value.map(e => ({
 .status-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: #F9FAFB;
   border: 1px solid #EEF2F7;
-  font-size: 12px;
+  font-size: 11px;
   color: #4B5563;
   font-family: "PingFang SC";
 
   .status-icon {
-    font-size: 14px;
+    font-size: 13px;
     color: #9CA3AF;
 
     &.warning {
@@ -4409,14 +4387,14 @@ watch(() => entries.value.map(e => ({
     display: inline-flex;
     align-items: center;
     cursor: pointer;
-    max-width: 140px;
-    height: 22px;
+    max-width: 120px;
+    height: 20px;
     border-radius: 4px;
     border-color: #e5e7eb;
     color: #00000066;
-    padding: 0 8px;
+    padding: 0 6px;
     background: #3032360f;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
     font-family: "PingFang SC";
     transition: all 0.2s ease;
@@ -4435,11 +4413,11 @@ watch(() => entries.value.map(e => ({
   cursor: pointer;
 
   .tag-text {
-    max-width: 120px;
+    max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
     color: #00000066;
   }
@@ -4531,36 +4509,36 @@ watch(() => entries.value.map(e => ({
 .faq-card-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  contain: layout; // 优化渲染性能
+  contain: layout;
 }
 
 .faq-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
 
   .faq-section-label {
     color: #6B7280;
     font-family: "PingFang SC";
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 2px;
+    gap: 5px;
+    margin-bottom: 1px;
 
     &::before {
       content: '';
       width: 3px;
-      height: 12px;
+      height: 10px;
       background: #07C05F;
       border-radius: 2px;
       flex-shrink: 0;
@@ -4583,7 +4561,7 @@ watch(() => entries.value.map(e => ({
     }
 
     .collapse-icon {
-      font-size: 14px;
+      font-size: 13px;
       color: #9CA3AF;
       flex-shrink: 0;
       margin-left: auto; // 让箭头靠右对齐
@@ -4612,8 +4590,8 @@ watch(() => entries.value.map(e => ({
 .faq-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  min-height: 20px;
+  gap: 5px;
+  min-height: 18px;
   min-width: 0;
   width: 100%;
   overflow: hidden;
@@ -4633,11 +4611,11 @@ watch(() => entries.value.map(e => ({
 }
 
 .question-tag {
-  font-size: 12px;
-  padding: 4px 10px;
+  font-size: 11px;
+  padding: 3px 8px;
   max-width: 100%;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   font-family: "PingFang SC";
   flex: 0 1 auto;
   

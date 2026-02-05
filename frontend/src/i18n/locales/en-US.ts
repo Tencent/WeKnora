@@ -14,6 +14,12 @@ export default {
     confirmLogout: 'Are you sure you want to logout?',
     systemInfo: 'System Information'
   },
+  listSpaceSidebar: {
+    title: 'Filter',
+    all: 'All',
+    mine: 'Mine',
+    spaces: 'Spaces'
+  },
   knowledgeBase: {
     title: 'Knowledge Base',
     list: 'Knowledge Base List',
@@ -224,7 +230,11 @@ export default {
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',
+    createAgentShort: 'New',
     builtin: 'Built-in',
+    disabled: 'Disabled',
+    disable: 'Disable',
+    enable: 'Enable',
     noDescription: 'No description',
     selectAgent: 'Select Agent',
     noAgents: 'No agents',
@@ -309,6 +319,8 @@ export default {
       builtinReadonly: 'Built-in agents cannot be edited',
       copied: 'Agent copied successfully',
       copyFailed: 'Copy failed',
+      disabled: 'Agent disabled',
+      enabled: 'Agent enabled',
     },
     editor: {
       createTitle: 'Create Agent',
@@ -329,6 +341,8 @@ export default {
       name: 'Name',
       namePlaceholder: 'Enter agent name',
       nameRequired: 'Agent name is required',
+      disabled: 'Disable',
+      disabledDesc: 'When disabled, this agent will not appear in the conversation agent dropdown',
       systemPromptRequired: 'System prompt is required',
       modelRequired: 'Please select a model',
       rerankModelRequired: 'ReRank model is required when using knowledge bases',
@@ -1090,6 +1104,7 @@ export default {
   },
   knowledgeList: {
     create: 'Create Knowledge Base',
+    createShort: 'New',
     createFAQ: 'Create FAQ Knowledge Base',
     subtitle: 'Manage and organize your knowledge bases, supporting document-based and FAQ-based knowledge bases',
     myKnowledgeBases: 'My Knowledge Bases',
@@ -1253,6 +1268,7 @@ export default {
       searchTest: 'Search Test',
       addFaq: 'Add FAQ',
       manageFaq: 'FAQ Actions',
+      createGroup: 'New',
       searchTestTitle: 'FAQ Search Test',
       queryLabel: 'Query',
       queryPlaceholder: 'Enter a question to search',
@@ -2377,7 +2393,9 @@ export default {
     title: 'Shared Spaces',
     subtitle: 'Create or join shared spaces to share knowledge bases and agents with your team',
     createOrg: 'Create Space',
+    createOrgShort: 'New',
     joinOrg: 'Join Space',
+    joinOrgShort: 'Join',
     name: 'Space Name',
     namePlaceholder: 'Enter space name',
     nameRequired: 'Please enter space name',

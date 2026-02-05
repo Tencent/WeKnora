@@ -1137,6 +1137,27 @@ async function createNewSession(value: string): Promise<void> {
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
+            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
+            <div v-if="kbInfo" class="kb-access-meta">
+              <t-tooltip :content="accessPermissionSummary" placement="top">
+                <span class="kb-access-meta-inner">
+                  <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
+                    {{ accessRoleLabel }}
+                  </t-tag>
+                  <template v-if="currentSharedKb">
+                    <span class="kb-access-meta-sep">·</span>
+                    <span class="kb-access-meta-text">
+                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
+                    </span>
+                  </template>
+                  <template v-else-if="kbLastUpdated">
+                    <span class="kb-access-meta-sep">·</span>
+                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+                  </template>
+                </span>
+              </t-tooltip>
+            </div>
             <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
@@ -1149,49 +1170,6 @@ async function createNewSession(value: string): Promise<void> {
             </t-tooltip>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
-          <!-- 当前知识库权限与来源信息 -->
-          <div v-if="kbInfo" class="kb-access-info">
-            <span class="kb-access-role">
-              <t-icon name="user" class="kb-access-item-icon" />
-              <span class="kb-access-label">{{ $t('knowledgeBase.accessInfo.myRole') }}：</span>
-              <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')">
-                {{ accessRoleLabel }}
-              </t-tag>
-              <t-tooltip :content="accessPermissionSummary" placement="top">
-                <t-icon name="help-circle" class="kb-access-item-icon kb-access-permission-tip" />
-              </t-tooltip>
-            </span>
-            <template v-if="currentSharedKb">
-              <span class="kb-access-sep">·</span>
-              <span class="kb-access-source">
-                <img src="@/assets/img/organization-green.svg" class="kb-access-org-icon" alt="" aria-hidden="true" />
-                {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
-                <t-icon name="time" class="kb-access-item-icon" />
-                {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
-              </span>
-            </template>
-            <template v-else-if="kbLastUpdated">
-              <span class="kb-access-sep">·</span>
-              <span class="kb-access-updated">
-                <t-icon name="time" class="kb-access-item-icon" />
-                {{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}
-              </span>
-            </template>
-          </div>
-        </div>
-        <div v-if="canEdit" class="document-header-actions">
-          <t-dropdown
-            :options="documentActionOptions"
-            trigger="click"
-            placement="bottom-right"
-            @click="handleDocumentActionSelect"
-          >
-            <t-button class="doc-action-btn dropdown-action-btn">
-              <template #icon><t-icon name="file-add" /></template>
-              <span>{{ $t('knowledgeBase.addDocument') }}</span>
-              <t-icon name="chevron-down" size="14px" class="dropdown-arrow" />
-            </t-button>
-          </t-dropdown>
         </div>
       </div>
       
@@ -1375,7 +1353,7 @@ async function createNewSession(value: string): Promise<void> {
         </aside>
         <div class="tag-content">
           <div class="doc-card-area">
-            <!-- 搜索栏和筛选 -->
+            <!-- 搜索栏、筛选与添加文档 -->
             <div class="doc-filter-bar">
               <t-input
                 v-model.trim="docSearchKeyword"
@@ -1396,6 +1374,20 @@ async function createNewSession(value: string): Promise<void> {
                 class="doc-type-select"
                 clearable
               />
+              <div v-if="canEdit" class="doc-filter-actions">
+                <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
+                  <t-dropdown
+                    :options="documentActionOptions"
+                    trigger="click"
+                    placement="bottom-right"
+                    @click="handleDocumentActionSelect"
+                  >
+                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                      <template #icon><t-icon name="file-add" size="16px" /></template>
+                    </t-button>
+                  </t-dropdown>
+                </t-tooltip>
+              </div>
             </div>
             <div
               class="doc-scroll-container"
@@ -1672,23 +1664,26 @@ async function createNewSession(value: string): Promise<void> {
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 24px 44px 32px;
+  padding: 24px 30px 32px;
   box-sizing: border-box;
 }
 
+// 与列表页一致：整体一块白底圆角区，左侧标签栏为内部分区
 .knowledge-main {
   display: flex;
-  gap: 12px;
   flex: 1;
   min-height: 0;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .tag-sidebar {
-  width: 230px;
-  background: #fff;
-  border-radius: 12px;
-  border: 1px solid #e7ebf0;
-  padding: 16px;
+  width: 176px;
+  background: #fafbfc;
+  border-right: 1px solid #e7ebf0;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1699,36 +1694,37 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     color: #1d2129;
 
     .sidebar-title {
       display: flex;
       align-items: baseline;
       gap: 4px;
+      font-size: 13px;
       font-weight: 600;
 
       .sidebar-count {
-        font-size: 12px;
+        font-size: 11px;
         color: #86909c;
       }
     }
 
     .sidebar-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       color: #c9ced6;
       align-items: center;
 
       .create-tag-btn {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         padding: 0;
         border-radius: 6px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
         color: #00a870;
         line-height: 1;
@@ -1747,7 +1743,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .tag-search-bar {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 
     :deep(.t-input) {
       font-size: 12px;
@@ -1759,19 +1755,19 @@ async function createNewSession(value: string): Promise<void> {
   .tag-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
 
     .tag-load-more {
-      padding: 8px 0 0;
+      padding: 6px 0 0;
       display: flex;
       justify-content: center;
 
       :deep(.t-button) {
         padding: 0;
-        font-size: 12px;
+        font-size: 11px;
         color: #00a870;
       }
     }
@@ -1780,24 +1776,24 @@ async function createNewSession(value: string): Promise<void> {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px;
+      padding: 6px 8px;
       border-radius: 6px;
       color: #4e5969;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 13px;
+      font-size: 12px;
 
       .tag-list-left {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
         min-width: 0;
         flex: 1;
 
         .t-icon {
           flex-shrink: 0;
           color: #86909c;
-          font-size: 16px;
+          font-size: 14px;
           transition: color 0.2s ease;
         }
       }
@@ -1813,17 +1809,17 @@ async function createNewSession(value: string): Promise<void> {
       .tag-list-right {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin-left: 8px;
+        gap: 5px;
+        margin-left: 6px;
         min-width: 0;
       }
 
       .tag-count {
-        font-size: 12px;
+        font-size: 11px;
         color: #86909c;
         font-weight: 500;
-        padding: 2px 6px;
-        border-radius: 10px;
+        padding: 2px 5px;
+        border-radius: 8px;
         background: #f7f9fc;
         transition: all 0.2s ease;
       }
@@ -1963,8 +1959,8 @@ async function createNewSession(value: string): Promise<void> {
       }
 
       .tag-more-btn {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1983,9 +1979,9 @@ async function createNewSession(value: string): Promise<void> {
 
     .tag-empty-state {
       text-align: center;
-      padding: 12px 8px;
+      padding: 10px 6px;
       color: #a1a7b3;
-      font-size: 12px;
+      font-size: 11px;
     }
   }
 }
@@ -2032,9 +2028,12 @@ async function createNewSession(value: string): Promise<void> {
 
 .tag-content {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding: 16px;
+  overflow: hidden;
 }
 
 .doc-card-area {
@@ -2053,11 +2052,25 @@ async function createNewSession(value: string): Promise<void> {
 
   .doc-search-input {
     flex: 1;
+    min-width: 0;
   }
 
   .doc-type-select {
     width: 140px;
     flex-shrink: 0;
+  }
+
+  .doc-filter-actions {
+    flex-shrink: 0;
+    :deep(.content-bar-icon-btn) {
+      color: #86909c;
+      background: transparent;
+      border: none;
+      &:hover {
+        color: #4e5969;
+        background: #f2f3f5;
+      }
+    }
   }
 
   :deep(.t-input) {
@@ -2105,16 +2118,14 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
-// Header 样式
+// Header 样式（无底部分割线，留更多空间给下方内容区）
 .document-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 0 0 16px;
+  gap: 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid #e7ebf0;
 
   .document-header-title {
     display: flex;
@@ -2122,39 +2133,38 @@ async function createNewSession(value: string): Promise<void> {
     gap: 4px;
   }
 
-  .document-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
-
-    .doc-action-btn {
-      background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
-      border: none;
-      color: #fff;
-
-      &:hover {
-        background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
-      }
-    }
-
-    :deep(.dropdown-action-btn) {
-      .t-button__text {
-        display: inline-flex;
-        align-items: center;
-      }
-      
-      .dropdown-arrow {
-        margin-left: 4px;
-      }
-    }
-  }
-
   .document-title-row {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .kb-access-meta {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .kb-access-meta-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #86909c;
+    cursor: default;
+  }
+
+  .kb-access-role-tag {
+    flex-shrink: 0;
+  }
+
+  .kb-access-meta-sep {
+    color: #c9ced6;
+    user-select: none;
+  }
+
+  .kb-access-meta-text {
+    white-space: nowrap;
   }
 
   .document-breadcrumb {
@@ -2235,61 +2245,6 @@ async function createNewSession(value: string): Promise<void> {
     line-height: 20px;
   }
 
-  .kb-access-info {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    margin-top: 8px;
-    font-size: 12px;
-    color: #86909c;
-    line-height: 1.5;
-  }
-
-  .kb-access-label {
-    color: #4e5969;
-  }
-
-  .kb-access-role {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .kb-access-permission-tip {
-    cursor: help;
-    opacity: 0.7;
-  }
-
-  .kb-access-permission-tip:hover {
-    opacity: 1;
-  }
-
-  .kb-access-sep {
-    color: #c9ced6;
-    user-select: none;
-  }
-
-  .kb-access-source,
-  .kb-access-updated {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: #86909c;
-  }
-
-  .kb-access-item-icon {
-    font-size: 14px;
-    color: #86909c;
-    flex-shrink: 0;
-  }
-
-  .kb-access-org-icon {
-    width: 14px;
-    height: 14px;
-    flex-shrink: 0;
-    vertical-align: middle;
-  }
 }
 
 
@@ -2378,7 +2333,7 @@ async function createNewSession(value: string): Promise<void> {
 
 .faq-manager-wrapper {
   flex: 1;
-  padding: 24px 44px;
+  padding: 24px 30px;
   overflow-y: auto;
 }
 
@@ -2425,7 +2380,7 @@ async function createNewSession(value: string): Promise<void> {
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
-  gap: 20px;
+  gap: 12px;
   align-content: flex-start;
   width: 100%;
 }
@@ -2546,18 +2501,18 @@ async function createNewSession(value: string): Promise<void> {
 .card-draft {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 0;
+  gap: 8px;
+  padding: 6px 0;
 }
 
 .card-draft-tip {
   color: #b05b00;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .knowledge-card {
   border: 2px solid #fbfbfb;
-  height: 174px;
+  height: 132px;
   border-radius: 6px;
   overflow: hidden;
   box-sizing: border-box;
@@ -2567,26 +2522,26 @@ async function createNewSession(value: string): Promise<void> {
   cursor: pointer;
 
   .card-content {
-    padding: 10px 20px 23px;
+    padding: 10px 14px 12px;
   }
 
   .card-analyze {
-    height: 66px;
+    height: 50px;
     display: flex;
   }
 
   .card-analyze-loading {
     display: block;
     color: #07c05f;
-    font-size: 15px;
+    font-size: 14px;
     margin-top: 2px;
   }
 
   .card-analyze-txt {
     color: #07c05f;
     font-family: "PingFang SC";
-    font-size: 12px;
-    margin-left: 9px;
+    font-size: 11px;
+    margin-left: 8px;
   }
 
   .failure {
@@ -2596,27 +2551,27 @@ async function createNewSession(value: string): Promise<void> {
   .card-content-nav {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .card-content-title {
     width: 200px;
-    height: 32px;
-    line-height: 32px;
+    height: 28px;
+    line-height: 28px;
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #000000e6;
     font-family: "PingFang SC";
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 400;
   }
 
   .more-wrap {
     display: flex;
-    width: 32px;
-    height: 32px;
+    width: 24px;
+    height: 24px;
     justify-content: center;
     align-items: center;
     border-radius: 3px;
@@ -2628,8 +2583,8 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .more {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 
   .active-more {
@@ -2639,22 +2594,22 @@ async function createNewSession(value: string): Promise<void> {
   .card-content-txt {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     overflow: hidden;
     color: #00000066;
     font-family: "PingFang SC";
     font-size: 12px;
     font-weight: 400;
-    line-height: 20px;
+    line-height: 18px;
   }
 
   .card-bottom {
     position: absolute;
     bottom: 0;
-    padding: 0 20px;
+    padding: 0 14px;
     box-sizing: border-box;
-    height: 32px;
+    height: 28px;
     width: 100%;
     display: flex;
     align-items: center;
@@ -2665,7 +2620,7 @@ async function createNewSession(value: string): Promise<void> {
   .card-time {
     color: #00000066;
     font-family: "PingFang SC";
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
   }
 
@@ -2744,31 +2699,31 @@ async function createNewSession(value: string): Promise<void> {
   vertical-align: middle;
 }
 
-/* 小屏幕平板 - 2列 */
+/* 小屏幕平板 - 3列，卡片更窄 */
 @media (min-width: 900px) {
-  .doc-card-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-/* 中等屏幕 - 3列 */
-@media (min-width: 1250px) {
   .doc-card-list {
     grid-template-columns: repeat(3, 1fr);
   }
 }
 
-/* 中等屏幕 - 3列 */
-@media (min-width: 1600px) {
+/* 中等屏幕 - 4列 */
+@media (min-width: 1250px) {
   .doc-card-list {
     grid-template-columns: repeat(4, 1fr);
   }
 }
 
-/* 大屏幕 - 4列 */
-@media (min-width: 2000px) {
+/* 宽屏 - 5列 */
+@media (min-width: 1600px) {
   .doc-card-list {
     grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* 大屏幕 - 6列 */
+@media (min-width: 2000px) {
+  .doc-card-list {
+    grid-template-columns: repeat(6, 1fr);
   }
 }
 </style>
