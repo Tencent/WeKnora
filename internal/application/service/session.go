@@ -342,12 +342,15 @@ func (s *sessionService) GenerateTitleAsync(
 	modelID string,
 	eventBus *event.EventBus,
 ) {
-	// Use session's tenant for title generation (session belongs to session.TenantID; ctx may have effectiveTenantID when using shared agent)
-	sessionTenantID := session.TenantID
+	// Use context tenant (effective tenant when using shared agent) so ListModels/GetChatModel find the agent's model.
+	// sessionRepo.Update uses session.TenantID in WHERE, so the session row is updated correctly regardless of ctx.
+	tenantID := ctx.Value(types.TenantIDContextKey)
 	requestID := ctx.Value(types.RequestIDContextKey)
 	go func() {
-		// Create new background context with session owner's tenant so ListModels/GetChatModel/Update use correct scope
-		bgCtx := context.WithValue(context.Background(), types.TenantIDContextKey, sessionTenantID)
+		bgCtx := context.Background()
+		if tenantID != nil {
+			bgCtx = context.WithValue(bgCtx, types.TenantIDContextKey, tenantID)
+		}
 		if requestID != nil {
 			bgCtx = context.WithValue(bgCtx, types.RequestIDContextKey, requestID)
 		}
@@ -660,7 +663,8 @@ func (s *sessionService) KnowledgeQA(
 		pipeline = types.Pipline["rag_stream"]
 	}
 
-	// Start knowledge QA event processing
+	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
+	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, session.TenantID)
 	logger.Info(ctx, "Triggering question answering event")
 	err = s.KnowledgeQAByEvent(ctx, chatManage, pipeline)
 	if err != nil {

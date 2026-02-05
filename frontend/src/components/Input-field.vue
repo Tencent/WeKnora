@@ -385,14 +385,26 @@ const loadKnowledgeBases = async () => {
       // 拉取共享知识库（供 @ 提及与清理选中项时识别）
       await orgStore.fetchSharedKnowledgeBases().catch(() => {});
 
-      // 清理无效的知识库ID：只移除既不在自己列表也不在共享列表中的 ID（保留共享 KB 的选中状态）
+      // 清理无效的知识库ID：只移除既不在自己列表、也不在组织共享、也不在共享智能体知识库中的 ID（刷新后保留共享智能体下已选知识库）
       const validKbIds = new Set(validKbs.map((kb: any) => kb.id));
       const sharedKbIds = new Set(
         (orgStore.sharedKnowledgeBases || []).map((s: any) => s.knowledge_base?.id).filter(Boolean)
       );
+      let sharedAgentKbIdSet = new Set<string>();
+      const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
+      const agentId = settingsStore.selectedAgentId;
+      if (sourceTenantId && agentId) {
+        try {
+          const res: any = await listKnowledgeBases({ agent_id: agentId });
+          const list = res?.data && Array.isArray(res.data) ? res.data : [];
+          list.forEach((kb: any) => kb?.id && sharedAgentKbIdSet.add(kb.id));
+        } catch {
+          sharedAgentKbIdSet = new Set();
+        }
+      }
       const currentSelectedIds = settingsStore.settings.selectedKnowledgeBases || [];
       const validSelectedIds = currentSelectedIds.filter(
-        (id: string) => validKbIds.has(id) || sharedKbIds.has(id)
+        (id: string) => validKbIds.has(id) || sharedKbIds.has(id) || sharedAgentKbIdSet.has(id)
       );
 
       if (validSelectedIds.length !== currentSelectedIds.length) {
@@ -1717,23 +1729,23 @@ onBeforeRouteUpdate((to, from, next) => {
         <span 
           v-for="item in allSelectedItems" 
           :key="item.id" 
-          class="inline-tag"
+          class="mention-chip"
           :class="[
-            item.type === 'kb' ? (item.kbType === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag',
-            { 'agent-configured': item.isAgentConfigured }
+            item.type === 'kb' ? (item.kbType === 'faq' ? 'mention-chip--faq' : 'mention-chip--kb') : 'mention-chip--file',
+            { 'mention-chip--agent': item.isAgentConfigured }
           ]"
         >
-          <span class="tag-icon-wrap" :class="{ 'has-org': item.org_name }">
-            <span class="tag-icon">
+          <span class="mention-chip__icon-wrap" :class="{ 'has-org': item.org_name }">
+            <span class="mention-chip__icon">
               <t-icon v-if="item.type === 'kb'" :name="item.kbType === 'faq' ? 'chat-bubble-help' : 'folder'" />
               <t-icon v-else name="file" />
             </span>
-            <span v-if="item.org_name" class="tag-org-badge-wrap">
-              <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')" class="tag-org-badge" alt="" aria-hidden="true" />
+            <span v-if="item.org_name" class="mention-chip__org-badge">
+              <img :src="getImgSrc(item.type === 'file' ? 'organization-grey.svg' : 'organization-green.svg')" class="mention-chip__org-img" alt="" aria-hidden="true" />
             </span>
           </span>
-          <span class="tag-name">{{ item.name }}</span>
-          <span class="tag-remove" @click="removeSelectedItem(item)">×</span>
+          <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
+          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)" aria-label="移除">×</span>
         </span>
       </div>
       
@@ -1999,112 +2011,171 @@ const getImgSrc = (url: string) => {
   }
 }
 
-/* 选中的标签（输入框内顶部） */
+/* 选中的知识库/文件标签（mention list 已选项） */
 .selected-tags-inline {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 12px 16px 8px;
-  border-bottom: 1px solid var(--td-component-border, #f0f0f0);
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px 6px;
+  border-bottom: 1px solid var(--td-component-stroke, #e7e7e7);
+  background: var(--td-bg-color-container, #fff);
+  border-radius: 11px 11px 0 0; /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
 }
 
-.inline-tag {
+.mention-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 3px 6px 3px 5px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
   cursor: default;
-  transition: all 0.15s;
-  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
   border: 1px solid transparent;
-  color: var(--td-text-color-primary, #333);
-  
-  /* 知识库 / 文件 - 无背景，与整体一致 */
-  &.kb-tag,
-  &.faq-tag,
-  &.file-tag {
-    background: transparent;
-    color: var(--td-text-color-primary, #333);
-    
-    .tag-icon {
-      color: var(--td-text-color-secondary, #666);
-    }
-  }
-  
-  .tag-icon-wrap {
-    position: relative;
-    display: inline-flex;
-    width: 18px;
-    height: 18px;
-    align-items: center;
-    justify-content: center;
-  }
+  color: var(--td-text-color-primary, #1f2937);
+  line-height: 1.3;
+}
 
-  .tag-icon {
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-  }
+.mention-chip__icon-wrap {
+  position: relative;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+}
 
-  /* 右下角组织角标：柔和小圆 + 绿色/灰色 icon，不刺眼 */
-  .tag-org-badge-wrap {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--td-bg-color-secondarycontainer, #f0f2f5);
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
+.mention-chip__icon {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
 
-  .tag-org-badge-wrap .tag-org-badge {
-    width: 5px;
-    height: 5px;
-    object-fit: contain;
-  }
-  
-  .tag-name {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: currentColor;
-  }
-  
-  .tag-remove {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    margin-left: 2px;
-    border-radius: 50%;
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    opacity: 0.5;
-    transition: opacity 0.15s, background 0.15s;
-    color: currentColor;
-    
-    &:hover {
-      opacity: 1;
-      background: rgba(0, 0, 0, 0.1);
-    }
-  }
-  
-  // 智能体配置的标签样式（用虚线边框区分，不显示锁图标）
-  &.agent-configured {
-    border-style: dashed;
-    opacity: 0.9;
-  }
+.mention-chip__org-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--td-bg-color-secondarycontainer, #f0f2f5);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.mention-chip__org-img {
+  width: 5px;
+  height: 5px;
+  object-fit: contain;
+}
+
+.mention-chip__name {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: currentColor;
+}
+
+.mention-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 400;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  color: currentColor;
+  flex-shrink: 0;
+}
+
+.mention-chip:hover .mention-chip__remove {
+  opacity: 0.85;
+}
+
+.mention-chip__remove:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--td-text-color-primary, #1f2937);
+}
+
+/* 知识库：浅绿/青色调 */
+.mention-chip--kb {
+  background: rgba(5, 192, 95, 0.08);
+  border-color: rgba(5, 192, 95, 0.25);
+  color: var(--td-text-color-primary, #1f2937);
+}
+
+.mention-chip--kb .mention-chip__icon-wrap {
+  background: rgba(5, 192, 95, 0.12);
+  color: var(--td-brand-color, #07c05f);
+}
+
+.mention-chip--kb:hover {
+  background: rgba(5, 192, 95, 0.12);
+  border-color: rgba(5, 192, 95, 0.35);
+}
+
+/* FAQ：浅紫/靛色调 */
+.mention-chip--faq {
+  background: rgba(107, 114, 228, 0.08);
+  border-color: rgba(107, 114, 228, 0.25);
+  color: var(--td-text-color-primary, #1f2937);
+}
+
+.mention-chip--faq .mention-chip__icon-wrap {
+  background: rgba(107, 114, 228, 0.12);
+  color: #6366f1;
+}
+
+.mention-chip--faq:hover {
+  background: rgba(107, 114, 228, 0.12);
+  border-color: rgba(107, 114, 228, 0.35);
+}
+
+/* 文件：浅灰/中性色 */
+.mention-chip--file {
+  background: var(--td-bg-color-secondarycontainer, #f3f4f6);
+  border-color: var(--td-component-stroke, #e5e7eb);
+  color: var(--td-text-color-primary, #1f2937);
+}
+
+.mention-chip--file .mention-chip__icon-wrap {
+  background: rgba(107, 114, 128, 0.12);
+  color: var(--td-text-color-secondary, #6b7280);
+}
+
+.mention-chip--file:hover {
+  background: var(--td-bg-color-component, #e5e7eb);
+  border-color: var(--td-component-stroke, #d1d5db);
+}
+
+/* 智能体预配置：虚线边框区分 */
+.mention-chip--agent {
+  border-style: dashed;
+}
+
+.mention-chip--agent.mention-chip--kb {
+  border-color: rgba(5, 192, 95, 0.4);
+}
+
+.mention-chip--agent.mention-chip--faq {
+  border-color: rgba(107, 114, 228, 0.4);
 }
 
 :deep(.t-textarea__inner) {
