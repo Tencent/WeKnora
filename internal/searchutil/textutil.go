@@ -41,6 +41,11 @@ func Jaccard(a, b map[string]struct{}) float64 {
 		return 0
 	}
 
+	// small set drives large set
+	if len(a) > len(b) {
+		return Jaccard(b, a)
+	}
+
 	// Calculate intersection
 	inter := 0
 	for k := range a {
