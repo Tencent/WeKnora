@@ -160,7 +160,7 @@ const handleSettings = () => {
 // 打开 API 文档
 const openApiDoc = () => {
   menuVisible.value = false
-  window.open('https://github.com/Tencent/WeKnora/blob/main/docs/API.md', '_blank')
+  window.open('https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md', '_blank')
 }
 
 // 打开官网
