@@ -483,6 +483,12 @@ func (s *organizationService) JoinByInviteCode(ctx context.Context, inviteCode s
 		return nil, err
 	}
 
+	// check if the organization need approval
+	if org.RequireApproval {
+		logger.Infof(ctx, "Organization %s requires approval", org.ID)
+		return nil, ErrOrgPermissionDenied
+	}
+
 	// Check if user is already a member
 	_, err = s.orgRepo.GetMember(ctx, org.ID, userID)
 	if err == nil {

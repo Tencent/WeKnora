@@ -273,6 +273,7 @@
                         <div class="perm-items">
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.viewerPerm1') }}</span>
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.editorPerm1') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.useSharedAgentsPerm') }}</span>
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.adminPerm1') }}</span>
                         </div>
@@ -286,7 +287,8 @@
                         <div class="perm-items">
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.viewerPerm1') }}</span>
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.editorPerm1') }}</span>
-                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.useSharedAgentsPerm') }}</span>
+                          <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
                           <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.adminPerm1') }}</span>
                         </div>
                       </div>
@@ -299,6 +301,7 @@
                         <div class="perm-items">
                           <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.viewerPerm1') }}</span>
                           <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.editorPerm1') }}</span>
+                          <span class="perm-item has"><t-icon name="check" size="12px" />{{ $t('organization.editor.useSharedAgentsPerm') }}</span>
                           <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.shareKBPerm') }}</span>
                           <span class="perm-item no"><t-icon name="close" size="12px" />{{ $t('organization.editor.adminPerm1') }}</span>
                         </div>

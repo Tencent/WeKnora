@@ -170,7 +170,12 @@
                 </t-tooltip>
               </div>
             </div>
-            <span class="card-time">{{ kb.updated_at }}</span>
+            <div class="bottom-right">
+              <div class="personal-source">
+                <t-icon name="user" size="14px" />
+                <span>{{ $t('knowledgeList.myLabel') }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -331,7 +336,12 @@
               </t-tooltip>
             </div>
           </div>
-          <span class="card-time">{{ kb.updated_at }}</span>
+          <div class="bottom-right">
+            <div class="personal-source">
+              <t-icon name="user" size="14px" />
+              <span>{{ $t('knowledgeList.myLabel') }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -354,7 +364,6 @@
           <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
             <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)" :aria-label="$t('knowledgeList.menu.viewDetails')">
               <t-icon name="info-circle" size="16px" />
-              <span>{{ $t('knowledgeList.menu.viewDetails') }}</span>
             </button>
           </t-tooltip>
         </div>
@@ -1136,6 +1145,30 @@ const handleUploadFinishedEvent = (event: Event) => {
     height: 14px;
     flex-shrink: 0;
     vertical-align: middle;
+  }
+
+  .t-icon {
+    color: #07c05f;
+    flex-shrink: 0;
+  }
+}
+
+// 「我的」知识库标签（与 .org-source 同套样式：灰字 + 绿标 + 浅绿底）
+.personal-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background: rgba(7, 192, 95, 0.06);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #4e5969;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+
+  span {
+    font-weight: 500;
   }
 
   .t-icon {
