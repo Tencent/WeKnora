@@ -1176,11 +1176,12 @@ defineExpose({
 }
 
 .card-title {
-  color: #1a1a1a;
-  font-family: "PingFang SC";
-  font-size: 14px;
+  color: #1d2129;
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-size: 15px;
   font-weight: 600;
-  line-height: 20px;
+  line-height: 22px;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

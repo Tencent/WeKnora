@@ -1466,9 +1466,10 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .card-title {
     flex: 1;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
-    color: #1a1a1a;
+    color: #1d2129;
+    letter-spacing: 0.01em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1501,11 +1502,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .card-title {
-  color: #1a1a1a;
-  font-family: "PingFang SC";
-  font-size: 14px;
+  color: #1d2129;
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-size: 15px;
   font-weight: 600;
-  line-height: 20px;
+  line-height: 22px;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

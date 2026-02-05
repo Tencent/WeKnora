@@ -196,16 +196,20 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
   }
+  :deep(.t-button .t-icon),
+  :deep(.t-button .btn-icon-wrapper) {
+    color: #07c05f;
+  }
+  :deep(.t-button:hover .t-icon),
+  :deep(.t-button:hover .btn-icon-wrapper) {
+    color: #07c05f;
+  }
   :deep(.t-button .t-icon + .t-button__text:not(:empty)) {
     margin-left: 0;
   }
   :deep(.sidebar-org-icon) {
     width: 16px;
     height: 16px;
-    filter: brightness(0) saturate(100%) invert(55%);
-  }
-  :deep(.t-button:hover .sidebar-org-icon) {
-    filter: brightness(0) saturate(100%) invert(40%);
   }
 }
 
@@ -228,7 +232,7 @@ onMounted(() => {
   color: #4e5969;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 12px;
+  font-size: 13px;
 
   .item-left {
     display: flex;
@@ -286,16 +290,16 @@ onMounted(() => {
 
   &.active {
     background: #e6f7ec;
-    color: #00a870;
+    color: #07c05f;
     font-weight: 500;
 
     .item-icon {
-      color: #00a870;
+      color: #07c05f;
     }
 
     .item-count {
       background: #b8f0d3;
-      color: #00a870;
+      color: #07c05f;
       font-weight: 600;
     }
 

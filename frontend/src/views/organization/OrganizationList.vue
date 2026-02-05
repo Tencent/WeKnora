@@ -39,7 +39,7 @@
               :aria-label="$t('organization.createOrg')"
               @click="handleCreateOrganization"
             >
-              <template #icon><img src="@/assets/img/organization.svg" class="org-create-icon sidebar-org-icon" alt="" aria-hidden="true" /></template>
+              <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon sidebar-org-icon" alt="" aria-hidden="true" /></template>
             </t-button>
           </t-tooltip>
         </template>
@@ -165,7 +165,7 @@
           {{ $t('organization.joinOrg') }}
         </t-button>
         <t-button class="org-create-btn" @click="handleCreateOrganization">
-          <template #icon><img src="@/assets/img/organization.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
+          <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
           {{ $t('organization.createOrg') }}
         </t-button>
       </div>
@@ -1253,19 +1253,27 @@ onUnmounted(() => {
 
 .org-join-btn {
   border-color: rgba(7, 192, 95, 0.5);
-  color: #059669;
+  color: #07c05f;
   font-weight: 500;
   transition: all 0.2s ease;
 
+  .t-icon {
+    color: #07c05f;
+  }
+
   &:hover {
-    background: linear-gradient(135deg, rgba(7, 192, 95, 0.06) 0%, rgba(0, 166, 126, 0.06) 100%);
+    background: rgba(7, 192, 95, 0.08);
     border-color: #07c05f;
-    color: #047857;
+    color: #07c05f;
+
+    .t-icon {
+      color: #07c05f;
+    }
   }
 }
 
 .org-create-btn {
-  background: linear-gradient(135deg, #07c05f 0%, #059669 50%, #047857 100%);
+  background: #07c05f;
   border: none;
   color: #fff;
   font-weight: 500;
@@ -1273,7 +1281,7 @@ onUnmounted(() => {
   transition: all 0.25s ease;
 
   &:hover {
-    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    background: #05a650;
     box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
   }
 
@@ -1317,7 +1325,7 @@ onUnmounted(() => {
     }
 
     &.active {
-      color: #059669;
+      color: #07c05f;
       font-weight: 500;
 
       &::after {
@@ -1327,7 +1335,7 @@ onUnmounted(() => {
         left: 0;
         right: 0;
         height: 2px;
-        background: linear-gradient(90deg, #07c05f, #059669);
+        background: #07c05f;
         border-radius: 1px;
       }
     }
@@ -1452,11 +1460,12 @@ onUnmounted(() => {
 }
 
 .card-title {
-  color: #1f2937;
-  font-family: "PingFang SC";
-  font-size: 14px;
-  font-weight: 500;
-  line-height: 1.4;
+  color: #1d2129;
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1568,8 +1577,8 @@ onUnmounted(() => {
 
   &.stat-kb {
     background: rgba(7, 192, 95, 0.08);
-    color: #059669;
-    .t-icon { color: #059669; }
+    color: #07c05f;
+    .t-icon { color: #07c05f; }
     &:hover { background: rgba(7, 192, 95, 0.12); }
   }
 
@@ -1640,8 +1649,8 @@ onUnmounted(() => {
 
   &.editor {
     background: rgba(7, 192, 95, 0.08);
-    color: #059669;
-    .t-icon { color: #059669; }
+    color: #07c05f;
+    .t-icon { color: #07c05f; }
   }
 
   &.viewer {
@@ -1937,7 +1946,7 @@ onUnmounted(() => {
 
   &:hover {
     background: #f1f5f9;
-    color: #059669;
+    color: #07c05f;
   }
 }
 
@@ -2215,11 +2224,12 @@ onUnmounted(() => {
   }
 
   .searchable-card-title {
-    color: #1f2937;
-    font-family: "PingFang SC", system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.4;
+    color: #1d2129;
+    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+    letter-spacing: 0.01em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2293,7 +2303,7 @@ onUnmounted(() => {
 
     &.searchable-badge-agent {
       background: rgba(7, 192, 95, 0.08);
-      color: #059669;
+      color: #07c05f;
       .searchable-badge-agent-icon {
         width: 12px;
         height: 12px;
@@ -2555,7 +2565,7 @@ onUnmounted(() => {
 
   &.preview-badge-agent {
     background: rgba(7, 192, 95, 0.08);
-    color: #059669;
+    color: #07c05f;
     .preview-badge-agent-icon {
       width: 14px;
       height: 14px;
@@ -2594,7 +2604,7 @@ onUnmounted(() => {
   font-weight: 500;
 
   &.value-success {
-    color: #059669;
+    color: #07c05f;
   }
 
   &.value-warning {
@@ -2625,7 +2635,7 @@ onUnmounted(() => {
     gap: 8px;
     background: #f0fdf4;
     border-color: #bbf7d0;
-    color: #059669;
+    color: #07c05f;
 
     .t-icon {
       flex-shrink: 0;

@@ -164,7 +164,7 @@ const editingTagName = ref('');
 const editingTagSubmitting = ref(false);
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  const itemHeight = 174;
+  const itemHeight = 152;
   let itemsInView = Math.floor(viewportHeight / itemHeight) * 5;
   pageSize = Math.max(35, itemsInView);
 }
@@ -1406,7 +1406,7 @@ async function createNewSession(value: string): Promise<void> {
                   >
                     <div class="card-content">
                       <div class="card-content-nav">
-                        <span class="card-content-title">{{ item.file_name }}</span>
+                        <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                         <t-popup
                           v-if="canEdit"
                           v-model="item.isMore"
@@ -2380,6 +2380,7 @@ async function createNewSession(value: string): Promise<void> {
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;
   align-content: flex-start;
   width: 100%;
@@ -2511,18 +2512,20 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .knowledge-card {
-  border: 2px solid #fbfbfb;
-  height: 132px;
-  border-radius: 6px;
+  min-width: 240px;
+  border: 1px solid #e7e9eb;
+  height: 140px;
+  border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
-  box-shadow: 0 0 8px 0 #00000005;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   background: #fff;
   position: relative;
   cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
   .card-content {
-    padding: 10px 14px 12px;
+    padding: 14px 16px 12px;
   }
 
   .card-analyze {
@@ -2551,30 +2554,35 @@ async function createNewSession(value: string): Promise<void> {
   .card-content-nav {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 8px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    gap: 8px;
   }
 
   .card-content-title {
-    width: 200px;
+    flex: 1;
+    min-width: 0;
     height: 28px;
     line-height: 28px;
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #000000e6;
-    font-family: "PingFang SC";
-    font-size: 13px;
-    font-weight: 400;
+    color: #1d2129;
+    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
   .more-wrap {
+    flex-shrink: 0;
     display: flex;
     width: 24px;
     height: 24px;
     justify-content: center;
     align-items: center;
-    border-radius: 3px;
+    border-radius: 4px;
     cursor: pointer;
   }
 
@@ -2597,7 +2605,7 @@ async function createNewSession(value: string): Promise<void> {
     -webkit-line-clamp: 2;
     line-clamp: 2;
     overflow: hidden;
-    color: #00000066;
+    color: #86909c;
     font-family: "PingFang SC";
     font-size: 12px;
     font-weight: 400;
@@ -2607,36 +2615,38 @@ async function createNewSession(value: string): Promise<void> {
   .card-bottom {
     position: absolute;
     bottom: 0;
-    padding: 0 14px;
+    padding: 0 16px;
     box-sizing: border-box;
-    height: 28px;
+    height: 32px;
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: rgba(48, 50, 54, 0.02);
+    background: linear-gradient(to top, #f7f8fa 0%, #fafbfc 100%);
+    border-top: 1px solid #f0f1f3;
   }
 
   .card-time {
-    color: #00000066;
+    color: #86909c;
     font-family: "PingFang SC";
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
   }
 
   .card-type {
-    color: #00000066;
+    color: #4e5969;
     font-family: "PingFang SC";
-    font-size: 12px;
-    font-weight: 400;
-    padding: 2px 4px;
-    background: #3032360f;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    background: #e8e9eb;
     border-radius: 4px;
   }
 }
 
 .knowledge-card:hover {
-  border: 2px solid #07c05f;
+  border-color: #07c05f;
+  box-shadow: 0 2px 8px rgba(7, 192, 95, 0.12);
 }
 
 .url-import-form {
@@ -2691,39 +2701,7 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 auto;
 }
 
-.doc-card-list {
-  grid-template-columns: 1fr;
-}
-
 .del-card {
   vertical-align: middle;
-}
-
-/* 小屏幕平板 - 3列，卡片更窄 */
-@media (min-width: 900px) {
-  .doc-card-list {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-/* 中等屏幕 - 4列 */
-@media (min-width: 1250px) {
-  .doc-card-list {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-/* 宽屏 - 5列 */
-@media (min-width: 1600px) {
-  .doc-card-list {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
-/* 大屏幕 - 6列 */
-@media (min-width: 2000px) {
-  .doc-card-list {
-    grid-template-columns: repeat(6, 1fr);
-  }
 }
 </style>
