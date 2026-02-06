@@ -120,6 +120,17 @@ type KnowledgeBaseRepository interface {
 	//   - Possible errors such as record not existing, database errors, etc.
 	GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error)
 
+	// GetKnowledgeBaseByIDAndTenant queries a knowledge base by ID scoped to a tenant.
+	// Returns ErrKnowledgeBaseNotFound if the KB does not exist or does not belong to the tenant.
+	// Parameters:
+	//   - ctx: Context information
+	//   - id: Knowledge base ID
+	//   - tenantID: Tenant ID (enforces tenant isolation)
+	// Returns:
+	//   - Knowledge base object, if found and owned by tenant
+	//   - Possible errors such as record not existing or wrong tenant, database errors, etc.
+	GetKnowledgeBaseByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error)
+
 	// GetKnowledgeBaseByIDs queries knowledge bases by multiple IDs
 	// Parameters:
 	//   - ctx: Context information

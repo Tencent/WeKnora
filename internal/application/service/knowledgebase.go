@@ -437,21 +437,23 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 	return nil
 }
 
-// CopyKnowledgeBase copies a knowledge base to a new knowledge base
-// 浅拷贝
+// CopyKnowledgeBase copies a knowledge base to a new knowledge base (shallow copy).
+// Source and target must belong to the tenant in context; cross-tenant access is rejected.
 func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	srcKB string, dstKB string,
 ) (*types.KnowledgeBase, *types.KnowledgeBase, error) {
-	sourceKB, err := s.repo.GetKnowledgeBaseByID(ctx, srcKB)
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	// Load source KB with tenant scope to prevent cross-tenant cloning
+	sourceKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, srcKB, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Get source knowledge base failed: %v", err)
 		return nil, nil, err
 	}
 	sourceKB.EnsureDefaults()
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	var targetKB *types.KnowledgeBase
 	if dstKB != "" {
-		targetKB, err = s.repo.GetKnowledgeBaseByID(ctx, dstKB)
+		// Load target KB with tenant scope so we only clone into the caller's tenant
+		targetKB, err = s.repo.GetKnowledgeBaseByIDAndTenant(ctx, dstKB, tenantID)
 		if err != nil {
 			return nil, nil, err
 		}

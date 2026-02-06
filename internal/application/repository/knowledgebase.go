@@ -26,10 +26,22 @@ func (r *knowledgeBaseRepository) CreateKnowledgeBase(ctx context.Context, kb *t
 	return r.db.WithContext(ctx).Create(kb).Error
 }
 
-// GetKnowledgeBaseByID gets a knowledge base by id
+// GetKnowledgeBaseByID gets a knowledge base by id (no tenant scope; caller must enforce isolation where needed)
 func (r *knowledgeBaseRepository) GetKnowledgeBaseByID(ctx context.Context, id string) (*types.KnowledgeBase, error) {
 	var kb types.KnowledgeBase
 	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&kb).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrKnowledgeBaseNotFound
+		}
+		return nil, err
+	}
+	return &kb, nil
+}
+
+// GetKnowledgeBaseByIDAndTenant gets a knowledge base by id only if it belongs to the given tenant (enforces tenant isolation)
+func (r *knowledgeBaseRepository) GetKnowledgeBaseByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
+	var kb types.KnowledgeBase
+	if err := r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).First(&kb).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrKnowledgeBaseNotFound
 		}

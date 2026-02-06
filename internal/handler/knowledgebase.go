@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -370,6 +372,45 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to get tenant ID")
 		c.Error(errors.NewUnauthorizedError("Unauthorized"))
 		return
+	}
+
+	// Validate source knowledge base exists and belongs to caller's tenant (prevent cross-tenant clone)
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, req.SourceID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != tenantID.(uint64) {
+		logger.Warnf(ctx,
+			"Copy rejected: source knowledge base belongs to another tenant, source_id: %s, caller_tenant: %d, kb_tenant: %d",
+			secutils.SanitizeForLog(req.SourceID), tenantID.(uint64), sourceKB.TenantID)
+		c.Error(errors.NewForbiddenError("No permission to copy this knowledge base"))
+		return
+	}
+
+	// If target_id provided, validate target belongs to caller's tenant
+	if req.TargetID != "" {
+		targetKB, err := h.service.GetKnowledgeBaseByID(ctx, req.TargetID)
+		if err != nil {
+			if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+				c.Error(errors.NewNotFoundError("Target knowledge base not found"))
+				return
+			}
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError(err.Error()))
+			return
+		}
+		if targetKB.TenantID != tenantID.(uint64) {
+			logger.Warnf(ctx, "Copy rejected: target knowledge base belongs to another tenant, target_id: %s",
+				secutils.SanitizeForLog(req.TargetID))
+			c.Error(errors.NewForbiddenError("No permission to copy to this knowledge base"))
+			return
+		}
 	}
 
 	// Generate task ID if not provided
