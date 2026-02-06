@@ -51,7 +51,7 @@
                       {{ org.share_count ?? 0 }}
                     </span>
                     <span class="org-meta-tag">
-                      <img src="@/assets/img/organization-grey.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
+                      <t-icon name="control-platform" class="org-meta-icon org-meta-icon-agent" />
                       {{ org.agent_share_count ?? 0 }}
                     </span>
                   </div>
@@ -453,6 +453,12 @@ function handleGoToOrgSettings(orgId: string) {
   .org-meta-icon-kb {
     width: 12px;
     height: 12px;
+    opacity: 0.75;
+  }
+
+  .org-meta-icon-agent {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
     opacity: 0.75;
   }
 }

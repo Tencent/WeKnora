@@ -1201,8 +1201,8 @@ onUnmounted(() => {
 
 <style scoped lang="less">
 .org-list-container {
-  padding: 24px 10px;
-  margin: 0 20px;
+  padding: 24px 32px;
+  margin: 0 16px;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
@@ -1226,13 +1226,13 @@ onUnmounted(() => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
+  padding: 12px;
 }
 
 .header {
   display: flex;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 
   .header-title {
     display: flex;
@@ -1344,13 +1344,13 @@ onUnmounted(() => {
 
 .org-card-wrap {
   display: grid;
-  gap: 12px;
+  gap: 20px;
   grid-template-columns: 1fr;
 }
 
 .org-card {
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1358,10 +1358,10 @@ onUnmounted(() => {
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 12px 14px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  height: 132px;
+  height: 160px;
 
   &::before {
     content: '';
@@ -1398,20 +1398,48 @@ onUnmounted(() => {
   .card-header {
     position: relative;
     z-index: 2;
+    margin-bottom: 10px;
   }
 
-  .card-content,
+  .card-title {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .card-content {
+    position: relative;
+    z-index: 1;
+    margin-bottom: 10px;
+  }
+
   .card-bottom {
     position: relative;
     z-index: 1;
+    padding-top: 10px;
+  }
+
+  .card-description {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .more-wrap {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+
+    .more-icon {
+      width: 16px;
+      height: 16px;
+    }
   }
 }
 
 // 卡片装饰：协作网络图形
 .card-decoration {
   position: absolute;
-  top: 6px;
-  right: 12px;
+  top: 8px;
+  right: 14px;
   display: flex;
   align-items: flex-start;
   justify-content: flex-end;
@@ -1421,8 +1449,8 @@ onUnmounted(() => {
 
   .card-deco-svg {
     display: block;
-    width: 48px;
-    height: 34px;
+    width: 56px;
+    height: 40px;
   }
 }
 
@@ -1473,11 +1501,11 @@ onUnmounted(() => {
 
 .more-wrap {
   display: flex;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   justify-content: center;
   align-items: center;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.2s ease;
@@ -1498,8 +1526,8 @@ onUnmounted(() => {
   }
 
   .more-icon {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
   }
 }
 

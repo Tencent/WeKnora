@@ -51,7 +51,7 @@
                         {{ org.share_count ?? 0 }}
                       </span>
                       <span class="org-meta-tag">
-                        <img src="@/assets/img/organization-grey.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
+                        <t-icon name="control-platform" class="org-meta-icon org-meta-icon-agent" />
                         {{ org.agent_share_count ?? 0 }}
                       </span>
                     </div>
@@ -107,7 +107,7 @@
                 </span>
                 <t-tooltip :content="$t('organization.share.spaceAgentShareCountTip')" placement="top">
                   <span class="org-meta-tag">
-                    <img src="@/assets/img/agent.svg" class="org-meta-icon org-meta-icon-kb" alt="" aria-hidden="true" />
+                    <t-icon name="control-platform" class="org-meta-icon org-meta-icon-agent" />
                     {{ getOrgForShare(share.organization_id)?.agent_share_count ?? 0 }}
                   </span>
                 </t-tooltip>
@@ -377,6 +377,10 @@ defineExpose({ loadShares })
     height: 12px;
     opacity: 0.75;
   }
+  .org-meta-icon-agent {
+    font-size: 12px;
+    opacity: 0.75;
+  }
 }
 .share-actions {
   display: flex;
@@ -484,6 +488,10 @@ defineExpose({ loadShares })
   .org-meta-icon-kb {
     width: 12px;
     height: 12px;
+    opacity: 0.75;
+  }
+  .org-meta-icon-agent {
+    font-size: 12px;
     opacity: 0.75;
   }
 }

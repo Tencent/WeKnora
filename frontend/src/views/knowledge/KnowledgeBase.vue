@@ -164,7 +164,7 @@ const editingTagName = ref('');
 const editingTagSubmitting = ref(false);
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  const itemHeight = 152;
+  const itemHeight = 148;
   let itemsInView = Math.floor(viewportHeight / itemHeight) * 5;
   pageSize = Math.max(35, itemsInView);
 }
@@ -180,6 +180,16 @@ const formatDocTime = (time?: string) => {
   if (!time) return '--'
   const formatted = formatStringDate(new Date(time))
   return formatted.slice(2, 16) // "YY-MM-DD HH:mm"
+}
+
+// 格式化文件大小，用于气泡等展示
+const formatFileSize = (bytes?: number | string) => {
+  if (bytes == null || bytes === '') return ''
+  const n = typeof bytes === 'string' ? parseInt(bytes, 10) : bytes
+  if (Number.isNaN(n) || n <= 0) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // 获取知识条目的显示类型
@@ -637,6 +647,45 @@ const closeDoc = () => {
 const openCardDetails = (item: KnowledgeCard) => {
   isCardDetails.value = true;
   getCardDetails(item);
+};
+
+// 悬停知识卡片时跟随鼠标显示详情气泡
+const hoveredCardItem = ref<KnowledgeCard | null>(null);
+const cardPopoverPos = ref({ x: 0, y: 0 });
+const CARD_POPOVER_OFFSET = 16;
+const cardHoverShowDelay = 300;
+let cardHoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+const onCardMouseEnter = (ev: MouseEvent, item: KnowledgeCard) => {
+  if (cardHoverTimer) {
+    clearTimeout(cardHoverTimer);
+    cardHoverTimer = null;
+  }
+  cardHoverTimer = setTimeout(() => {
+    cardHoverTimer = null;
+    hoveredCardItem.value = item;
+    cardPopoverPos.value = {
+      x: ev.clientX + CARD_POPOVER_OFFSET,
+      y: ev.clientY + CARD_POPOVER_OFFSET,
+    };
+  }, cardHoverShowDelay);
+};
+
+const onCardMouseMove = (ev: MouseEvent) => {
+  if (hoveredCardItem.value) {
+    cardPopoverPos.value = {
+      x: ev.clientX + CARD_POPOVER_OFFSET,
+      y: ev.clientY + CARD_POPOVER_OFFSET,
+    };
+  }
+};
+
+const onCardMouseLeave = () => {
+  if (cardHoverTimer) {
+    clearTimeout(cardHoverTimer);
+    cardHoverTimer = null;
+  }
+  hoveredCardItem.value = null;
 };
 
 const delCard = (index: number, item: KnowledgeCard) => {
@@ -1403,6 +1452,9 @@ async function createNewSession(value: string): Promise<void> {
                     v-for="(item, index) in cardList"
                     :key="index"
                     @click="openCardDetails(item)"
+                    @mouseenter="onCardMouseEnter($event, item)"
+                    @mousemove="onCardMouseMove($event)"
+                    @mouseleave="onCardMouseLeave"
                   >
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -1493,6 +1545,48 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
+                <!-- 悬停卡片时跟随鼠标的详情气泡 -->
+                <Teleport to="body">
+                  <div
+                    v-show="hoveredCardItem"
+                    class="knowledge-card-hover-popover"
+                    :style="{ left: cardPopoverPos.x + 'px', top: cardPopoverPos.y + 'px' }"
+                  >
+                    <template v-if="hoveredCardItem">
+                      <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
+                      <div v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'" class="card-popover-status parsing">
+                        <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
+                      </div>
+                      <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
+                        <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
+                        <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{ (hoveredCardItem as any).error_message }}</span>
+                      </div>
+                      <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
+                        {{ t('knowledgeBase.draft') }}
+                      </div>
+                      <template v-else>
+                        <div v-if="hoveredCardItem.description" class="card-popover-desc">{{ hoveredCardItem.description }}</div>
+                        <div v-if="(hoveredCardItem as any).source" class="card-popover-source" :title="(hoveredCardItem as any).source">
+                          <t-icon name="link" size="12px" /> {{ (hoveredCardItem as any).source }}
+                        </div>
+                        <div class="card-popover-extra">
+                          <span v-if="(hoveredCardItem as any).created_at" class="card-popover-created">
+                            {{ t('knowledgeBase.createdAt') || '创建' }}：{{ formatDocTime((hoveredCardItem as any).created_at) }}
+                          </span>
+                          <span v-if="formatFileSize((hoveredCardItem as any).file_size)" class="card-popover-size">
+                            {{ formatFileSize((hoveredCardItem as any).file_size) }}
+                          </span>
+                        </div>
+                      </template>
+                      <div class="card-popover-meta">
+                        <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') || '更新' }}：{{ formatDocTime(hoveredCardItem.updated_at) }}</span>
+                        <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{ getTagName(hoveredCardItem.tag_id) }}</span>
+                        <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
+                      </div>
+                      <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') || '点击卡片查看全文与分段' }}</div>
+                    </template>
+                  </div>
+                </Teleport>
               </template>
               <template v-else>
                 <div class="doc-empty-state">
@@ -1659,12 +1753,13 @@ async function createNewSession(value: string): Promise<void> {
 .knowledge-layout {
   display: flex;
   flex-direction: column;
+  margin: 0 16px;
   gap: 16px;
   height: 100%;
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 24px 30px 32px;
+  padding: 24px 32px 32px;
   box-sizing: border-box;
 }
 
@@ -1679,11 +1774,12 @@ async function createNewSession(value: string): Promise<void> {
   overflow: hidden;
 }
 
+// 与列表页左侧筛选栏协调：宽度、内边距、项间距
 .tag-sidebar {
-  width: 176px;
+  width: 200px;
   background: #fafbfc;
   border-right: 1px solid #e7ebf0;
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1694,7 +1790,7 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     color: #1d2129;
 
     .sidebar-title {
@@ -1705,7 +1801,7 @@ async function createNewSession(value: string): Promise<void> {
       font-weight: 600;
 
       .sidebar-count {
-        font-size: 11px;
+        font-size: 12px;
         color: #86909c;
       }
     }
@@ -1743,31 +1839,32 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .tag-search-bar {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 
     :deep(.t-input) {
-      font-size: 12px;
+      font-size: 13px;
       background-color: #f7f9fc;
       border-color: #e5e9f2;
+      border-radius: 6px;
     }
   }
 
   .tag-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
 
     .tag-load-more {
-      padding: 6px 0 0;
+      padding: 8px 0 0;
       display: flex;
       justify-content: center;
 
       :deep(.t-button) {
         padding: 0;
-        font-size: 11px;
+        font-size: 12px;
         color: #00a870;
       }
     }
@@ -1776,12 +1873,12 @@ async function createNewSession(value: string): Promise<void> {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 6px 8px;
+      padding: 8px 10px;
       border-radius: 6px;
       color: #4e5969;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 12px;
+      font-size: 13px;
 
       .tag-list-left {
         display: flex;
@@ -1809,19 +1906,22 @@ async function createNewSession(value: string): Promise<void> {
       .tag-list-right {
         display: flex;
         align-items: center;
-        gap: 5px;
-        margin-left: 6px;
-        min-width: 0;
+        gap: 6px;
+        margin-left: 8px;
+        flex-shrink: 0;
       }
 
       .tag-count {
-        font-size: 11px;
+        font-size: 12px;
         color: #86909c;
         font-weight: 500;
-        padding: 2px 5px;
+        min-width: 28px;
+        padding: 3px 6px;
         border-radius: 8px;
         background: #f7f9fc;
         transition: all 0.2s ease;
+        text-align: center;
+        box-sizing: border-box;
       }
 
       &:hover {
@@ -1956,6 +2056,12 @@ async function createNewSession(value: string): Promise<void> {
       .tag-more {
         display: flex;
         align-items: center;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      &:hover .tag-more {
+        opacity: 1;
       }
 
       .tag-more-btn {
@@ -1967,12 +2073,10 @@ async function createNewSession(value: string): Promise<void> {
         border-radius: 4px;
         color: #86909c;
         transition: all 0.2s ease;
-        opacity: 0.6;
 
         &:hover {
           background: #f3f5f7;
           color: #4e5969;
-          opacity: 1;
         }
       }
     }
@@ -2032,7 +2136,7 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 16px;
+  padding: 12px;
   overflow: hidden;
 }
 
@@ -2044,10 +2148,10 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .doc-filter-bar {
-  padding: 0px 0px 10px 0px;
+  padding: 0 0 12px 0;
   flex-shrink: 0;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 
   .doc-search-input {
@@ -2333,8 +2437,9 @@ async function createNewSession(value: string): Promise<void> {
 
 .faq-manager-wrapper {
   flex: 1;
-  padding: 24px 30px;
+  padding: 24px 32px;
   overflow-y: auto;
+  margin: 0 16px;
 }
 
 @media (max-width: 1250px) and (min-width: 1045px) {
@@ -2380,8 +2485,8 @@ async function createNewSession(value: string): Promise<void> {
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 14px;
   align-content: flex-start;
   width: 100%;
 }
@@ -2512,10 +2617,10 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .knowledge-card {
-  min-width: 240px;
+  min-width: 248px;
   border: 1px solid #e7e9eb;
-  height: 140px;
-  border-radius: 8px;
+  height: 148px;
+  border-radius: 9px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -2525,11 +2630,11 @@ async function createNewSession(value: string): Promise<void> {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
   .card-content {
-    padding: 14px 16px 12px;
+    padding: 15px 17px 13px;
   }
 
   .card-analyze {
-    height: 50px;
+    height: 52px;
     display: flex;
   }
 
@@ -2555,15 +2660,15 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 10px;
+    margin-bottom: 11px;
     gap: 8px;
   }
 
   .card-content-title {
     flex: 1;
     min-width: 0;
-    height: 28px;
-    line-height: 28px;
+    height: 29px;
+    line-height: 29px;
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2578,11 +2683,11 @@ async function createNewSession(value: string): Promise<void> {
   .more-wrap {
     flex-shrink: 0;
     display: flex;
-    width: 24px;
-    height: 24px;
+    width: 25px;
+    height: 25px;
     justify-content: center;
     align-items: center;
-    border-radius: 4px;
+    border-radius: 5px;
     cursor: pointer;
   }
 
@@ -2609,15 +2714,15 @@ async function createNewSession(value: string): Promise<void> {
     font-family: "PingFang SC";
     font-size: 12px;
     font-weight: 400;
-    line-height: 18px;
+    line-height: 19px;
   }
 
   .card-bottom {
     position: absolute;
     bottom: 0;
-    padding: 0 16px;
+    padding: 0 17px;
     box-sizing: border-box;
-    height: 32px;
+    height: 34px;
     width: 100%;
     display: flex;
     align-items: center;
@@ -2647,6 +2752,135 @@ async function createNewSession(value: string): Promise<void> {
 .knowledge-card:hover {
   border-color: #07c05f;
   box-shadow: 0 2px 8px rgba(7, 192, 95, 0.12);
+}
+
+/* 悬停知识卡片时跟随鼠标的详情气泡 */
+.knowledge-card-hover-popover {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  transition: opacity 0.15s ease;
+
+  .card-popover-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d2129;
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-popover-status {
+    font-size: 12px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    &.parsing {
+      color: #07c05f;
+    }
+
+    &.failure {
+      color: #fa5151;
+    }
+
+    &.draft {
+      color: #b05b00;
+    }
+  }
+
+  .card-popover-desc {
+    font-size: 12px;
+    color: #4e5969;
+    line-height: 1.5;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
+    line-clamp: 5;
+    overflow: hidden;
+  }
+
+  .card-popover-error-msg {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #fa5151;
+    opacity: 0.95;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+  }
+
+  .card-popover-source {
+    font-size: 11px;
+    color: #0052d9;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .card-popover-extra {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 11px;
+    color: #86909c;
+    margin-bottom: 6px;
+  }
+
+  .card-popover-created,
+  .card-popover-size {
+    flex-shrink: 0;
+  }
+
+  .card-popover-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+    color: #86909c;
+  }
+
+  .card-popover-tag {
+    padding: 1px 6px;
+    background: #e6f7ec;
+    color: #07c05f;
+    border-radius: 4px;
+  }
+
+  .card-popover-type {
+    padding: 1px 6px;
+    background: #e8e9eb;
+    color: #4e5969;
+    border-radius: 4px;
+  }
+
+  .card-popover-hint {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #f0f1f3;
+    font-size: 11px;
+    color: #86909c;
+  }
 }
 
 .url-import-form {

@@ -874,8 +874,8 @@ defineExpose({
 
 <style scoped lang="less">
 .agent-list-container {
-  padding: 24px 10px;
-  margin: 0 20px;
+  padding: 24px 32px;
+  margin: 0 16px;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
@@ -899,13 +899,13 @@ defineExpose({
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
+  padding: 12px;
 }
 
 .header {
   display: flex;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 
   .header-title {
     display: flex;
@@ -1067,13 +1067,13 @@ defineExpose({
 
 .agent-card-wrap {
   display: grid;
-  gap: 12px;
+  gap: 20px;
   grid-template-columns: 1fr;
 }
 
 .agent-card {
   border: 1px solid #f0f0f0;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1081,10 +1081,10 @@ defineExpose({
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 12px 14px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  height: 132px;
+  height: 160px;
 
   &:hover {
     border-color: #07c05f;
@@ -1137,12 +1137,56 @@ defineExpose({
     position: relative;
     z-index: 1;
   }
+
+  .card-header {
+    margin-bottom: 10px;
+  }
+
+  .card-title {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .card-content {
+    margin-bottom: 10px;
+  }
+
+  .card-description {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .card-bottom {
+    padding-top: 10px;
+  }
+
+  .more-wrap {
+    width: 28px;
+    height: 28px;
+
+    .more-icon {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .builtin-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .edit-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
 }
 
 .card-decoration {
   position: absolute;
-  top: 10px;
-  right: 40px;
+  top: 12px;
+  right: 44px;
   display: flex;
   align-items: flex-start;
   gap: 4px;
@@ -1207,13 +1251,13 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   flex-shrink: 0;
 
   &.agent-emoji {
-    font-size: 16px;
+    font-size: 18px;
     line-height: 1;
     background: rgba(0, 0, 0, 0.04);
   }
@@ -1231,11 +1275,11 @@ defineExpose({
 
 .edit-btn {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   justify-content: center;
   align-items: center;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.2s ease;
@@ -1249,11 +1293,11 @@ defineExpose({
 
 .more-wrap {
   display: flex;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   justify-content: center;
   align-items: center;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.2s ease;
@@ -1274,8 +1318,8 @@ defineExpose({
   }
 
   .more-icon {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
   }
 }
 

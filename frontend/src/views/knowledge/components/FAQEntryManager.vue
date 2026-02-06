@@ -3336,11 +3336,12 @@ watch(() => entries.value.map(e => ({
   overflow: hidden;
 }
 
+// 与列表页左侧筛选栏、文档型知识库文档分类协调
 .faq-tag-panel {
-  width: 176px;
+  width: 200px;
   background: #fafbfc;
   border-right: 1px solid #e7ebf0;
-  padding: 12px;
+  padding: 16px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -3362,7 +3363,7 @@ watch(() => entries.value.map(e => ({
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     color: #1d2129;
 
     .sidebar-title {
@@ -3373,7 +3374,7 @@ watch(() => entries.value.map(e => ({
       font-weight: 600;
 
       .sidebar-count {
-        font-size: 11px;
+        font-size: 12px;
         color: #86909c;
       }
     }
@@ -3426,16 +3427,17 @@ watch(() => entries.value.map(e => ({
   }
 
   .tag-search-bar {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 
     :deep(.t-input) {
-      font-size: 11px;
+      font-size: 12px;
       background-color: #f7f9fc;
       border-color: #e5e9f2;
+      border-radius: 6px;
     }
 
     :deep(.t-input__inner) {
-      font-size: 12px;
+      font-size: 13px;
     }
 
     :deep(.t-input__prefix-icon) {
@@ -3446,7 +3448,7 @@ watch(() => entries.value.map(e => ({
   .faq-tag-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -3463,12 +3465,12 @@ watch(() => entries.value.map(e => ({
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 6px 8px;
+      padding: 8px 10px;
       border-radius: 6px;
       color: #4e5969;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 12px;
+      font-size: 13px;
 
       .faq-tag-left {
         display: flex;
@@ -3497,20 +3499,22 @@ watch(() => entries.value.map(e => ({
       .faq-tag-right {
         display: flex;
         align-items: center;
-        gap: 5px;
-        margin-left: 6px;
-        min-width: 0;
+        gap: 6px;
+        margin-left: 8px;
         flex-shrink: 0;
       }
 
       .faq-tag-count {
-        font-size: 11px;
+        font-size: 12px;
         color: #86909c;
         font-weight: 500;
-        padding: 2px 5px;
+        min-width: 28px;
+        padding: 3px 6px;
         border-radius: 8px;
         background: #f7f9fc;
         transition: all 0.2s ease;
+        text-align: center;
+        box-sizing: border-box;
       }
 
       &:hover {
@@ -3692,15 +3696,15 @@ watch(() => entries.value.map(e => ({
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 12px;
   overflow: hidden;
 }
 
 .faq-search-bar {
-  padding: 0px 0px 10px 0px;
+  padding: 0 0 12px 0;
   flex-shrink: 0;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 
   .faq-search-input {
@@ -3789,7 +3793,7 @@ watch(() => entries.value.map(e => ({
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 20px;
   flex-shrink: 0;
 
   .faq-header-title {

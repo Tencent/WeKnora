@@ -132,13 +132,13 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
-// 作为整体内容区左侧一栏，与主内容同属一块区域
+// 左侧筛选栏，与主内容区协调、不抢戏
 .list-space-sidebar {
-  width: 176px;
+  width: 200px;
   flex-shrink: 0;
   background: #fafbfc;
   border-right: 1px solid #e7ebf0;
-  padding: 12px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -150,7 +150,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   flex-shrink: 0;
   min-height: 28px;
 
@@ -216,7 +216,7 @@ onMounted(() => {
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -227,7 +227,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-radius: 6px;
   color: #4e5969;
   cursor: pointer;
@@ -266,7 +266,7 @@ onMounted(() => {
     font-size: 12px;
     color: #86909c;
     font-weight: 500;
-    padding: 2px 5px;
+    padding: 3px 6px;
     border-radius: 8px;
     background: #f7f9fc;
     margin-left: 6px;
@@ -310,8 +310,8 @@ onMounted(() => {
 }
 
 .sidebar-section {
-  padding: 8px 8px 2px;
-  margin-top: 2px;
+  padding: 10px 8px 2px;
+  margin-top: 4px;
   border-top: 1px solid #e7ebf0;
 
   .section-title {

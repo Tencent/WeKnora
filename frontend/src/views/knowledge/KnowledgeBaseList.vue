@@ -1030,8 +1030,8 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  padding: 24px 10px;
-  margin: 0 20px;
+  padding: 24px 32px;
+  margin: 0 16px;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
@@ -1044,7 +1044,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 
   .header-title {
     display: flex;
@@ -1088,7 +1088,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px;
+  padding: 12px;
 }
 
 .header-subtitle {
@@ -1370,13 +1370,13 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .kb-card-wrap {
   display: grid;
-  gap: 12px;
+  gap: 20px;
   grid-template-columns: 1fr;
 }
 
 .kb-card {
   border: 1px solid #f0f0f0;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1384,10 +1384,10 @@ const handleUploadFinishedEvent = (event: Event) => {
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
-  padding: 12px 14px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  height: 132px;
+  height: 160px;
 
   &:hover {
     border-color: #07c05f;
@@ -1414,10 +1414,10 @@ const handleUploadFinishedEvent = (event: Event) => {
       position: absolute;
       top: 0;
       right: 0;
-      width: 50px;
-      height: 50px;
+      width: 60px;
+      height: 60px;
       background: linear-gradient(135deg, rgba(7, 192, 95, 0.08) 0%, transparent 100%);
-      border-radius: 0 10px 0 100%;
+      border-radius: 0 12px 0 100%;
       pointer-events: none;
       z-index: 0;
     }
@@ -1440,10 +1440,10 @@ const handleUploadFinishedEvent = (event: Event) => {
       position: absolute;
       top: 0;
       right: 0;
-      width: 50px;
-      height: 50px;
+      width: 60px;
+      height: 60px;
       background: linear-gradient(135deg, rgba(0, 82, 217, 0.08) 0%, transparent 100%);
-      border-radius: 0 10px 0 100%;
+      border-radius: 0 12px 0 100%;
       pointer-events: none;
       z-index: 0;
     }
@@ -1455,6 +1455,43 @@ const handleUploadFinishedEvent = (event: Event) => {
   .card-bottom {
     position: relative;
     z-index: 1;
+  }
+
+  .card-header {
+    margin-bottom: 10px;
+  }
+
+  .card-title {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .card-content {
+    margin-bottom: 10px;
+  }
+
+  .card-description {
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .card-bottom {
+    padding-top: 10px;
+  }
+
+  .more-wrap {
+    width: 28px;
+    height: 28px;
+
+    .more-icon {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  .card-more-btn {
+    width: 28px;
+    height: 28px;
   }
 }
 
