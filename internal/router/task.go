@@ -32,6 +32,7 @@ func getAsynqRedisClientOpt() *asynq.RedisClientOpt {
 	}
 	opt := &asynq.RedisClientOpt{
 		Addr:         os.Getenv("REDIS_ADDR"),
+		Username:     os.Getenv("REDIS_USERNAME"),
 		Password:     os.Getenv("REDIS_PASSWORD"),
 		ReadTimeout:  100 * time.Millisecond,
 		WriteTimeout: 200 * time.Millisecond,
