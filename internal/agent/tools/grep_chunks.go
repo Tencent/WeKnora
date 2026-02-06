@@ -657,9 +657,12 @@ func (t *GrepChunksTool) applyMMR(
 		selected = append(selected, candidates[bestIdx])
 		selectedTokenSets = append(selectedTokenSets, tokenSets[bestIdx])
 
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
+		// Remove corresponding token set. Use swap deletion
+		last := len(candidates) - 1
+		candidates[bestIdx] = candidates[last]
+		tokenSets[bestIdx] = tokenSets[last]
+		candidates = candidates[:last]
+		tokenSets = tokenSets[:last]
 	}
 
 	// Compute average redundancy among selected results
