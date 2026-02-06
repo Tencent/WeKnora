@@ -909,9 +909,22 @@ func (h *OrganizationHandler) ListKBShares(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	kbID := c.Param("id")
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	if tenantID == nil {
+		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
 
-	shares, err := h.shareService.ListSharesByKnowledgeBase(ctx, kbID)
+	shares, err := h.shareService.ListSharesByKnowledgeBase(ctx, kbID, tenantID.(uint64))
 	if err != nil {
+		if errors.Is(err, service.ErrKBNotFound) {
+			c.Error(apperrors.NewNotFoundError("Knowledge base not found"))
+			return
+		}
+		if errors.Is(err, service.ErrNotKBOwner) {
+			c.Error(apperrors.NewForbiddenError("Only the knowledge base owner can list its shares"))
+			return
+		}
 		logger.Errorf(ctx, "Failed to list shares: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shares"))
 		return

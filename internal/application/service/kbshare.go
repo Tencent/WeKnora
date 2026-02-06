@@ -174,8 +174,15 @@ func (s *kbShareService) RemoveShare(ctx context.Context, shareID string, userID
 	return ErrSharePermissionDenied
 }
 
-// ListSharesByKnowledgeBase lists all shares for a knowledge base
-func (s *kbShareService) ListSharesByKnowledgeBase(ctx context.Context, kbID string) ([]*types.KnowledgeBaseShare, error) {
+// ListSharesByKnowledgeBase lists shares for a knowledge base; caller's tenant must own the KB.
+func (s *kbShareService) ListSharesByKnowledgeBase(ctx context.Context, kbID string, tenantID uint64) ([]*types.KnowledgeBaseShare, error) {
+	kb, err := s.kbRepo.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, ErrKBNotFound
+	}
+	if kb.TenantID != tenantID {
+		return nil, ErrNotKBOwner
+	}
 	return s.shareRepo.ListByKnowledgeBase(ctx, kbID)
 }
 

@@ -86,7 +86,8 @@ type KBShareService interface {
 	RemoveShare(ctx context.Context, shareID string, userID string) error
 
 	// Query
-	ListSharesByKnowledgeBase(ctx context.Context, kbID string) ([]*types.KnowledgeBaseShare, error)
+	// ListSharesByKnowledgeBase lists shares for a KB; tenantID must own the KB (authz check).
+	ListSharesByKnowledgeBase(ctx context.Context, kbID string, tenantID uint64) ([]*types.KnowledgeBaseShare, error)
 	ListSharesByOrganization(ctx context.Context, orgID string) ([]*types.KnowledgeBaseShare, error)
 	ListSharedKnowledgeBases(ctx context.Context, userID string, currentTenantID uint64) ([]*types.SharedKnowledgeBaseInfo, error)
 	GetShare(ctx context.Context, shareID string) (*types.KnowledgeBaseShare, error)
