@@ -1,6 +1,7 @@
 export default {
   menu: {
     knowledgeBase: "지식베이스",
+    agents: "에이전트",
     chat: "대화",
     createChat: "대화 생성",
     tenant: "계정 정보",
@@ -37,8 +38,10 @@ export default {
     tagCreateSuccess: "태그 생성 성공",
     tagEditSuccess: "태그 업데이트 성공",
     tagDeleteTitle: "태그 삭제",
-    tagDeleteDesc: '"{name}" 태그를 삭제하시겠습니까? 해당 태그의 모든 FAQ 항목이 함께 삭제됩니다',
-    tagDeleteDescDoc: '"{name}" 태그를 삭제하시겠습니까? 해당 태그의 모든 문서가 함께 삭제됩니다',
+    tagDeleteDesc:
+      '"{name}" 태그를 삭제하시겠습니까? 해당 태그의 모든 FAQ 항목이 함께 삭제됩니다',
+    tagDeleteDescDoc:
+      '"{name}" 태그를 삭제하시겠습니까? 해당 태그의 모든 문서가 함께 삭제됩니다',
     tagDeleteSuccess: "태그가 삭제되었습니다",
     tagEditAction: "이름 변경",
     tagDeleteAction: "삭제",
@@ -80,7 +83,8 @@ export default {
     urlExists: "해당 URL이 이미 존재합니다",
     urlLabel: "URL 주소",
     urlPlaceholder: "웹페이지 URL을 입력하세요. 예: https://example.com",
-    urlTip: "다양한 웹페이지 콘텐츠를 가져올 수 있으며, 시스템이 자동으로 텍스트를 추출하고 분석합니다",
+    urlTip:
+      "다양한 웹페이지 콘텐츠를 가져올 수 있으며, 시스템이 자동으로 텍스트를 추출하고 분석합니다",
     typeURL: "웹페이지",
     typeManual: "수동 생성",
     typeFile: "파일",
@@ -96,16 +100,20 @@ export default {
     viewOriginal: "원본 파일 보기",
     viewChunks: "청크 보기",
     viewMerged: "전체 텍스트",
-    originalFileNotSupported: "이 파일 유형은 원본 파일 표시를 지원하지 않습니다. 다운로드하여 확인하세요",
+    originalFileNotSupported:
+      "이 파일 유형은 원본 파일 표시를 지원하지 않습니다. 다운로드하여 확인하세요",
     loadOriginalFailed: "원본 파일 내용 로드 실패",
     questions: "질문",
     generatedQuestions: "생성된 질문",
-    confirmDeleteQuestion: "이 질문을 삭제하시겠습니까? 삭제 시 해당 벡터 인덱스도 함께 제거됩니다.",
-    legacyQuestionCannotDelete: "이전 형식의 질문은 삭제할 수 없습니다. 질문을 다시 생성하세요",
+    confirmDeleteQuestion:
+      "이 질문을 삭제하시겠습니까? 삭제 시 해당 벡터 인덱스도 함께 제거됩니다.",
+    legacyQuestionCannotDelete:
+      "이전 형식의 질문은 삭제할 수 없습니다. 질문을 다시 생성하세요",
     docActionUnsupported: "현재 지식베이스 유형은 이 작업을 지원하지 않습니다",
     notInitialized:
       "이 지식베이스는 아직 초기화되지 않았습니다. 설정 페이지에서 모델 정보를 먼저 구성한 후 파일을 업로드하세요",
-    getInfoFailed: "지식베이스 정보를 가져오는 데 실패하여 파일을 업로드할 수 없습니다",
+    getInfoFailed:
+      "지식베이스 정보를 가져오는 데 실패하여 파일을 업로드할 수 없습니다",
     missingId: "지식베이스 ID가 없습니다",
     deleteFailed: "삭제 실패, 나중에 다시 시도하세요!",
     quickActions: "빠른 작업",
@@ -153,7 +161,8 @@ export default {
     parsingInProgress: "파싱 중...",
     generatingSummary: "요약 생성 중...",
     deleteConfirmation: "삭제 확인",
-    confirmDeleteDocument: '"{fileName}" 문서를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다',
+    confirmDeleteDocument:
+      '"{fileName}" 문서를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다',
     cancel: "취소",
     confirmDelete: "삭제 확인",
     selectKnowledgeBaseFirst: "먼저 지식베이스를 선택하세요",
@@ -178,7 +187,8 @@ export default {
       "일부 지식베이스가 초기화되지 않았습니다. 지식 문서를 추가하려면 먼저 설정에서 모델 정보를 구성해야 합니다",
     initializedStatus: "초기화됨",
     notInitializedStatus: "초기화되지 않음",
-    needSettingsFirst: "지식을 추가하려면 먼저 설정에서 모델 정보를 구성해야 합니다",
+    needSettingsFirst:
+      "지식을 추가하려면 먼저 설정에서 모델 정보를 구성해야 합니다",
     documents: "문서",
     configureModelsFirst: "먼저 설정에서 모델 정보를 구성하세요",
     confirmDeleteKnowledgeBase: "이 지식베이스를 삭제하시겠습니까?",
@@ -299,30 +309,6 @@ export default {
     selectKnowledgeBaseWarning: "최소 하나의 지식베이스를 선택하세요",
     processError: "처리 오류",
   },
-  agent: {
-    taskLabel: "작업:",
-    copy: "복사",
-    addToKnowledgeBase: "지식베이스에 추가",
-    updatePlan: "계획 업데이트",
-    webSearchFound: "<strong>{count}</strong>개의 웹 검색 결과 발견",
-    argumentsLabel: "파라미터",
-    toolFallback: "도구",
-    editor: {
-      // Skills 설정
-      skillsConfig: "스킬 Skills",
-      skillsConfigDesc: "Agent가 사용할 수 있는 사전 설치된 Skills를 구성하여 전문 영역 지식과 워크플로를 제공합니다",
-      skillsSelection: "Skills 선택",
-      skillsSelectionDesc: "Agent가 사용할 수 있는 Skills 범위 선택",
-      skillsAll: "전체",
-      skillsSelected: "지정",
-      skillsNone: "비활성화",
-      selectSkills: "Skills 선택",
-      selectSkillsDesc: "활성화할 Skills 선택",
-      noSkillsAvailable: "사전 설치된 Skills가 없습니다",
-      skillsInfoTitle: "Skills란 무엇인가요?",
-      skillsInfoContent: "Skills는 Agent에 특정 도메인의 지침, 워크플로 및 도구 지원을 제공하는 사전 설치된 전문 지식 모듈입니다. 활성화되면 Agent는 필요할 때 자동으로 관련 지식을 로드합니다.",
-    },
-  },
   settings: {
     title: "설정",
     modelConfig: "모델 설정",
@@ -406,9 +392,11 @@ export default {
   },
   graphSettings: {
     title: "지식 그래프 설정",
-    description: "엔티티 관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프 구축",
+    description:
+      "엔티티 관계 추출 기능을 구성하여 텍스트에서 자동으로 엔티티와 관계를 추출하여 지식 그래프 구축",
     enableLabel: "엔티티 관계 추출 활성화",
-    enableDescription: "활성화하면 텍스트에서 자동으로 엔티티와 관계를 추출합니다",
+    enableDescription:
+      "활성화하면 텍스트에서 자동으로 엔티티와 관계를 추출합니다",
     tagsLabel: "관계 유형",
     tagsDescription: "추출할 관계 유형 태그 정의, 여러 태그는 쉼표로 구분",
     tagsPlaceholder: "관계 유형 입력, 예: 근무처, 동료, 친구 등",
@@ -448,7 +436,8 @@ export default {
     extractFailed: "엔티티 관계 추출 실패",
     exampleLoaded: "예시가 로드되었습니다",
     exampleCleared: "예시가 지워졌습니다",
-    disabledWarning: "지식 그래프 데이터베이스가 활성화되지 않아 엔티티 관계 추출 기능을 사용할 수 없습니다",
+    disabledWarning:
+      "지식 그래프 데이터베이스가 활성화되지 않아 엔티티 관계 추출 기능을 사용할 수 없습니다",
     howToEnable: "지식 그래프를 활성화하는 방법?",
     saveSuccess: "그래프 설정이 저장되었습니다",
     saveFailed: "설정 저장 실패: {message}",
@@ -500,7 +489,8 @@ export default {
     connectionFailed: "연결 실패",
     checkingConnection: "연결 확인 중",
     embeddingModelConfig: "임베딩 모델 구성",
-    embeddingWarning: "지식베이스에 이미 파일이 있어 임베딩 모델 구성을 변경할 수 없습니다",
+    embeddingWarning:
+      "지식베이스에 이미 파일이 있어 임베딩 모델 구성을 변경할 수 없습니다",
     dimension: "차원",
     dimensionPlaceholder: "벡터 차원 입력",
     detectDimension: "차원 감지",
@@ -526,7 +516,8 @@ export default {
     appId: "App ID",
     appIdPlaceholder: "App ID 입력",
     functionTest: "기능 테스트",
-    testDescription: "VLM 모델의 이미지 설명 및 텍스트 인식 기능을 테스트하기 위해 이미지 업로드",
+    testDescription:
+      "VLM 모델의 이미지 설명 및 텍스트 인식 기능을 테스트하기 위해 이미지 업로드",
     selectImage: "이미지 선택",
     startTest: "테스트 시작",
     testResult: "테스트 결과",
@@ -565,7 +556,8 @@ export default {
     relationType: "관계 유형",
     generateRandomTags: "랜덤 태그 생성",
     completeModelConfig: "모델 구성을 완료하세요",
-    systemWillExtract: "시스템은 선택한 관계 유형에 따라 텍스트에서 해당 엔티티와 관계를 추출합니다",
+    systemWillExtract:
+      "시스템은 선택한 관계 유형에 따라 텍스트에서 해당 엔티티와 관계를 추출합니다",
     extractionExample: "추출 예시",
     sampleText: "샘플 텍스트",
     sampleTextPlaceholder:
@@ -590,7 +582,8 @@ export default {
     updateKnowledgeBaseSettings: "지식베이스 설정 업데이트",
     updateConfigInfo: "설정 정보 업데이트",
     completeConfig: "설정 완료",
-    waitForDownloads: "모든 Ollama 모델 다운로드가 완료된 후 설정을 업데이트해주세요",
+    waitForDownloads:
+      "모든 Ollama 모델 다운로드가 완료된 후 설정을 업데이트해주세요",
     completeModelConfigInfo: "모델 설정 정보를 완성해주세요",
     knowledgeBaseIdMissing: "지식베이스 ID 누락",
     knowledgeBaseSettingsUpdateSuccess: "지식베이스 설정 업데이트 성공",
@@ -598,7 +591,8 @@ export default {
     systemInitComplete: "시스템 초기화 완료",
     operationFailed: "작업 실패",
     updateKnowledgeBaseInfoFailed: "지식베이스 기본 정보 업데이트 실패",
-    knowledgeBaseIdMissingCannotSave: "지식베이스 ID가 누락되어 설정을 저장할 수 없습니다",
+    knowledgeBaseIdMissingCannotSave:
+      "지식베이스 ID가 누락되어 설정을 저장할 수 없습니다",
     operationFailedCheckNetwork: "작업 실패, 네트워크 연결을 확인해주세요",
     imageUploadSuccess: "이미지 업로드 성공, 테스트를 시작할 수 있습니다",
     multimodalConfigIncomplete:
@@ -611,7 +605,8 @@ export default {
     pleaseEnterLLMModelConfig: "LLM 대규모 언어 모델 설정을 입력해주세요",
     noValidNodesExtracted: "유효한 노드가 추출되지 않았습니다",
     noValidRelationsExtracted: "유효한 관계가 추출되지 않았습니다",
-    extractionFailedCheckNetwork: "추출 실패, 네트워크 또는 텍스트 형식을 확인해주세요",
+    extractionFailedCheckNetwork:
+      "추출 실패, 네트워크 또는 텍스트 형식을 확인해주세요",
     generateFailedRetry: "생성 실패, 다시 시도해주세요",
     pleaseCheckForm: "양식 작성이 올바른지 확인해주세요",
     detectionSuccessful: "감지 성공, 차원이 자동으로 채워짐:",
@@ -626,12 +621,14 @@ export default {
     textRelationExtractionFailed: "텍스트 관계 추출 실패",
     pleaseEnterKnowledgeBaseName: "지식베이스 이름을 입력해주세요",
     knowledgeBaseNameLength: "지식베이스 이름은 1-50자여야 합니다",
-    knowledgeBaseDescriptionLength: "지식베이스 설명은 200자를 초과할 수 없습니다",
+    knowledgeBaseDescriptionLength:
+      "지식베이스 설명은 200자를 초과할 수 없습니다",
     pleaseEnterLLMModelName: "LLM 모델 이름을 입력해주세요",
     pleaseEnterBaseURL: "BaseURL을 입력해주세요",
     pleaseEnterEmbeddingModelName: "임베딩 모델 이름을 입력해주세요",
     pleaseEnterEmbeddingDimension: "임베딩 차원을 입력해주세요",
-    dimensionMustBeInteger: "차원은 유효한 정수여야 합니다 (일반적으로 768, 1024, 1536, 3584 등)",
+    dimensionMustBeInteger:
+      "차원은 유효한 정수여야 합니다 (일반적으로 768, 1024, 1536, 3584 등)",
     pleaseEnterTextContent: "텍스트 내용을 입력해주세요",
     textContentMinLength: "텍스트 내용은 최소 10자 이상이어야 합니다",
     pleaseEnterValidTag: "유효한 태그를 입력해주세요",
@@ -643,7 +640,8 @@ export default {
     startModelDownloadFailed: "모델 다운로드 시작 실패",
     downloadCompleted: "다운로드 완료",
     downloadFailed: "다운로드 실패",
-    knowledgeBaseSettingsModeMissingId: "지식베이스 설정 모드에 지식베이스 ID가 누락되었습니다",
+    knowledgeBaseSettingsModeMissingId:
+      "지식베이스 설정 모드에 지식베이스 ID가 누락되었습니다",
     completeEmbeddingConfig: "먼저 임베딩 설정을 완료해주세요",
     detectionSuccess: "감지 성공, ",
     dimensionAutoFilled: "차원이 자동으로 채워짐: ",
@@ -652,7 +650,8 @@ export default {
     generationFailedRetry: "생성 실패, 다시 시도해주세요",
     chunkSizeDesc:
       "각 텍스트 청크의 크기입니다. 큰 청크는 더 많은 컨텍스트를 유지하지만 검색 정확도가 낮아질 수 있습니다.",
-    chunkOverlapDesc: "인접 청크 간의 중복 문자 수입니다. 청크 경계에서 컨텍스트를 유지하는 데 도움이 됩니다.",
+    chunkOverlapDesc:
+      "인접 청크 간의 중복 문자 수입니다. 청크 경계에서 컨텍스트를 유지하는 데 도움이 됩니다.",
     selectRelationType: "관계 유형 선택",
   },
   auth: {
@@ -674,7 +673,8 @@ export default {
     noAccount: "계정이 없으신가요?",
     backToLogin: "로그인으로 돌아가기",
     registerNow: "지금 가입하기",
-    registerSuccess: "가입 성공! 시스템이 전용 테넌트를 생성했습니다. 로그인해주세요",
+    registerSuccess:
+      "가입 성공! 시스템이 전용 테넌트를 생성했습니다. 로그인해주세요",
     registerFailed: "가입 실패",
     subtitle: "대규모 언어 모델 기반 문서 이해 및 시맨틱 검색 프레임워크",
     registerSubtitle: "가입 후 시스템이 전용 테넌트를 생성합니다",
@@ -698,7 +698,8 @@ export default {
     loginError: "로그인 오류, 이메일 또는 비밀번호를 확인해주세요",
     loginErrorRetry: "로그인 오류, 나중에 다시 시도해주세요",
     registerError: "가입 오류, 나중에 다시 시도해주세요",
-    forgotPasswordNotAvailable: "비밀번호 찾기 기능을 현재 사용할 수 없습니다. 관리자에게 문의해주세요",
+    forgotPasswordNotAvailable:
+      "비밀번호 찾기 기능을 현재 사용할 수 없습니다. 관리자에게 문의해주세요",
   },
   authStore: {
     errors: {
@@ -714,6 +715,7 @@ export default {
     save: "저장",
     delete: "삭제",
     edit: "편집",
+    copy: "복사",
     default: "기본값",
     create: "생성",
     search: "검색",
@@ -751,6 +753,225 @@ export default {
     file: "파일",
     knowledgeBase: "지식베이스",
     noResult: "결과 없음",
+  },
+  agent: {
+    taskLabel: "작업:",
+    copy: "복사",
+    addToKnowledgeBase: "지식베이스에 추가",
+    updatePlan: "계획 업데이트",
+    webSearchFound: "<strong>{count}</strong>개의 웹 검색 결과를 찾았습니다",
+    argumentsLabel: "매개변수",
+    toolFallback: "도구",
+    title: "에이전트",
+    subtitle:
+      "에이전트를 구성하고 관리하며, 대화 동작과 기능을 사용자 정의합니다",
+    createAgent: "에이전트 생성",
+    builtin: "내장",
+    noDescription: "설명 없음",
+    selectAgent: "에이전트 선택",
+    noAgents: "에이전트 없음",
+    manageAgents: "관리",
+    builtinAgents: "내장 에이전트",
+    customAgents: "사용자 정의 에이전트",
+    capabilities: {
+      normal: "빠른 응답, 직접 질문에 답변",
+      agent: "다단계 사고, 복잡한 문제 심층 분석",
+      modelSpecified: "모델 지정",
+      kbCount: "{count}개의 지식베이스 지정",
+      kbAll: "모든 지식베이스 접근 가능",
+      kbDisabled: "지식베이스 비활성화",
+      rerankSpecified: "ReRank 모델 지정",
+      webSearchOn: "웹 검색 활성화",
+      webSearchOff: "웹 검색 비활성화",
+      hasPrompt: "사용자 정의 프롬프트",
+      default: "기본 설정",
+      mcpEnabled: "MCP 서비스 활성화",
+      multiTurn: "다중 턴 대화",
+    },
+    type: {
+      normal: "빠른 질의응답",
+      agent: "지능형 추론",
+      custom: "사용자 정의",
+    },
+    mode: {
+      normal: "빠른 질의응답",
+      agent: "지능형 추론",
+    },
+    features: {
+      webSearch: "웹 검색 지원",
+      knowledgeBase: "지식베이스 연결",
+      mcp: "MCP 서비스 지원",
+      multiTurn: "다중 턴 대화",
+    },
+    empty: {
+      title: "사용자 정의 에이전트 없음",
+      description: "오른쪽 상단 버튼을 클릭하여 첫 번째 에이전트를 생성하세요",
+    },
+    delete: {
+      confirmTitle: "에이전트 삭제",
+      confirmMessage:
+        "에이전트「{name}」을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+      confirmButton: "삭제 확인",
+    },
+    messages: {
+      created: "에이전트 생성 성공",
+      updated: "에이전트 업데이트 성공",
+      deleted: "에이전트가 삭제되었습니다",
+      deleteFailed: "삭제 실패",
+      saveFailed: "저장 실패",
+      builtinReadonly: "내장 에이전트는 편집할 수 없습니다",
+      copied: "에이전트 복사 성공",
+      copyFailed: "복사 실패",
+    },
+    editor: {
+      createTitle: "에이전트 생성",
+      editTitle: "에이전트 편집",
+      basicInfo: "기본 정보",
+      basicInfoDesc: "에이전트의 기본 정보 구성",
+      modelConfig: "모델 설정",
+      modelConfigDesc: "에이전트의 모델 매개변수 구성",
+      capabilities: "능력 및 도구",
+      capabilitiesDesc: "에이전트의 능력과 도구 구성",
+      toolsConfig: "도구 설정",
+      toolsConfigDesc: "Agent가 사용할 수 있는 도구 구성",
+      knowledgeConfig: "지식베이스",
+      knowledgeConfigDesc: "에이전트가 접근할 수 있는 지식베이스 구성",
+      webSearchConfig: "웹 검색",
+      webSearchConfigDesc: "에이전트의 웹 검색 기능 구성",
+      configuration: "설정 항목",
+      name: "이름",
+      namePlaceholder: "에이전트 이름을 입력하세요",
+      nameRequired: "에이전트 이름을 입력하세요",
+      systemPromptRequired: "시스템 프롬프트를 입력하세요",
+      modelRequired: "모델을 선택하세요",
+      rerankModelRequired: "지식베이스를 사용할 때 ReRank 모델을 선택하세요",
+      contextsMissing:
+        "지식베이스를 활성화할 때 컨텍스트 템플릿에 {'{{'}contexts{'}}'} 플레이스홀더가 포함되어야 합니다",
+      queryMissingInContext:
+        "컨텍스트 템플릿에 {'{{'}query{'}}'} 플레이스홀더가 포함되어야 합니다",
+      knowledgeBasesMissing:
+        "시스템 프롬프트에 {'{{'}knowledge_bases{'}}'} 플레이스홀더를 포함하여 모델이 사용 가능한 지식베이스를 이해하도록 권장합니다",
+      queryMissingInRewrite:
+        "사용자 프롬프트 재작성에 {'{{'}query{'}}'} 플레이스홀더가 포함되어야 합니다",
+      conversationMissing:
+        "사용자 프롬프트 재작성에 {'{{'}conversation{'}}'} 플레이스홀더가 포함되어야 합니다",
+      queryMissingInFallback:
+        "폴백 프롬프트에 {'{{'}query{'}}'} 플레이스홀더가 포함되어야 합니다",
+      avatar: "아이콘",
+      avatarPlaceholder: "Emoji를 입력하거나 클릭하여 선택",
+      description: "설명",
+      descriptionPlaceholder: "에이전트 설명을 입력하세요",
+      baseType: "기본 유형",
+      normalDesc: "빠른 응답, 직접 질문에 답변",
+      agentDesc: "다단계 사고, 복잡한 문제 심층 분석",
+      model: "모델",
+      modelPlaceholder: "모델을 선택하세요",
+      systemPrompt: "시스템 프롬프트",
+      systemPromptPlaceholder:
+        "시스템 프롬프트를 사용자 정의하여 에이전트의 동작과 역할을 정의합니다 ({'{{'}web_search_status{'}}'} 플레이스홀더를 사용하여 웹 검색 동작을 동적으로 제어)",
+      defaultPromptHint: "비워두면 다음 시스템 기본 프롬프트가 사용됩니다:",
+      defaultContextTemplateHint:
+        "비워두면 다음 시스템 기본 컨텍스트 템플릿이 사용됩니다:",
+      contextTemplateRequired: "컨텍스트 템플릿을 입력하세요",
+      availablePlaceholders: "사용 가능한 플레이스홀더",
+      placeholderHint: "{'{{'}를 입력하면 자동 완성이 트리거됩니다",
+      temperature: "온도",
+      thinking: "사고 모드",
+      welcomeMessage: "환영 메시지",
+      welcomeMessagePlaceholder: "이 에이전트를 선택할 때 표시되는 환영 메시지",
+      suggestedPrompts: "추천 질문",
+      mode: "실행 모드",
+      webSearch: "웹 검색",
+      webSearchMaxResults: "최대 검색 결과 수",
+      knowledgeBases: "지식베이스 연결",
+      allKnowledgeBases: "모든 지식베이스",
+      allKnowledgeBasesDesc: "에이전트가 모든 지식베이스에 접근할 수 있습니다",
+      selectedKnowledgeBases: "지식베이스 지정",
+      selectedKnowledgeBasesDesc: "선택한 지식베이스만 접근",
+      noKnowledgeBase: "지식베이스 사용 안 함",
+      noKnowledgeBaseDesc: "순수 모델 대화, 지식베이스 검색 없음",
+      selectKnowledgeBases: "지식베이스 선택",
+      retrieveKBOnlyWhenMentioned: "{'@'}로 언급할 때만 검색",
+      retrieveKBOnlyWhenMentionedDesc:
+        "끄기: 구성된 지식베이스를 자동으로 검색, 켜기: 사용자가 {'@'}로 언급할 때만 검색",
+      rerankModel: "ReRank 모델",
+      rerankModelDesc:
+        "지식베이스 검색 결과를 재정렬하여 답변 정확도를 향상시키는 데 사용됩니다",
+      rerankModelPlaceholder: "ReRank 모델을 선택하세요",
+      maxIterations: "최대 반복 횟수",
+      allowedTools: "허용된 도구",
+      multiTurn: "다중 턴 대화",
+      historyTurns: "보존 턴 수",
+      // 검색 전략
+      retrievalStrategy: "검색 전략",
+      embeddingTopK: "벡터 리콜 수",
+      keywordThreshold: "키워드 임계값",
+      vectorThreshold: "벡터 임계값",
+      rerankTopK: "재정렬 수",
+      rerankThreshold: "재정렬 임계값",
+      // 다중 턴 대화
+      conversationSettings: "다중 턴 대화",
+      // 고급 설정
+      advancedSettings: "고급 설정",
+      contextTemplate: "컨텍스트 템플릿",
+      contextTemplatePlaceholder: "컨텍스트 템플릿 사용자 정의...",
+      availableContextPlaceholders: "사용 가능한 플레이스홀더",
+      placeholderQuery: "사용자의 질문",
+      placeholderContexts: "검색된 내용 목록",
+      placeholderCurrentTime: "현재 시간 (형식: 2006-01-02 15:04:05)",
+      placeholderCurrentWeek: "현재 요일 (예: 월요일)",
+      enableQueryExpansion: "쿼리 확장",
+      enableRewrite: "질문 재작성",
+      rewritePromptSystem: "시스템 프롬프트 재작성",
+      rewritePromptSystemPlaceholder: "비워두면 시스템 기본 프롬프트 사용",
+      rewritePromptUser: "사용자 프롬프트 재작성",
+      rewritePromptUserPlaceholder: "비워두면 시스템 기본 프롬프트 사용",
+      maxCompletionTokens: "최대 생성 토큰 수",
+      fallbackStrategy: "폴백 전략",
+      fallbackResponse: "고정 응답 내용",
+      fallbackResponsePlaceholder: "죄송합니다. 이 질문에 답변할 수 없습니다.",
+      fallbackPrompt: "폴백 프롬프트",
+      fallbackPromptPlaceholder: "비워두면 시스템 기본 프롬프트 사용",
+    },
+    selector: {
+      title: "에이전트 선택",
+      builtinSection: "내장 에이전트",
+      customSection: "내 에이전트",
+      addNew: "새 에이전트 추가",
+      current: "현재",
+    },
+    // 내장 에이전트 정보
+    builtinInfo: {
+      quickAnswer: {
+        name: "빠른 질의응답",
+        description:
+          "지식베이스 기반 RAG 질의응답, 빠르고 정확하게 질문에 답변",
+      },
+      smartReasoning: {
+        name: "지능형 추론",
+        description: "ReAct 추론 프레임워크, 다단계 사고 및 도구 호출 지원",
+      },
+      deepResearcher: {
+        name: "심층 연구원",
+        description:
+          "심층 연구 및 종합 분석에 집중하여 연구 계획 수립, 다차원 정보 검색, 심층 사고 및 포괄적인 분석 보고서 제공 가능",
+      },
+      dataAnalyst: {
+        name: "데이터 분석가",
+        description:
+          "데이터베이스 쿼리 및 데이터 분석에 집중하여 비즈니스 요구사항 이해, SQL 쿼리 구성, 데이터 분석 및 인사이트 제공 가능",
+      },
+      knowledgeGraphExpert: {
+        name: "지식 그래프 전문가",
+        description:
+          "지식 그래프 쿼리 및 관계 분석에 집중하여 엔티티 관계 탐색, 숨겨진 연결 발견 및 지식 네트워크 구축 가능",
+      },
+      documentAssistant: {
+        name: "문서 어시스턴트",
+        description:
+          "문서 검색 및 내용 정리에 집중하여 문서 빠르게 찾기, 핵심 정보 추출 및 요약 생성 가능",
+      },
+    },
   },
   file: {
     upload: "파일 업로드",
@@ -799,13 +1020,15 @@ export default {
     statusSuspended: "일시 중지됨",
     statusUnknown: "알 수 없음",
     apiKey: "API 키",
-    keepApiKeySafe: "API 키를 안전하게 보관하세요. 공개 장소나 코드 저장소에 노출하지 마세요",
+    keepApiKeySafe:
+      "API 키를 안전하게 보관하세요. 공개 장소나 코드 저장소에 노출하지 마세요",
     storageInfo: "저장소 정보",
     storageQuota: "저장소 할당량",
     used: "사용됨",
     usage: "사용률",
     apiDevDocs: "API 개발 문서",
-    useApiKey: "API 키를 사용하여 개발을 시작하세요. 전체 API 문서와 코드 예시를 확인하세요.",
+    useApiKey:
+      "API 키를 사용하여 개발을 시작하세요. 전체 API 문서와 코드 예시를 확인하세요.",
     viewApiDoc: "API 문서 보기",
     loadingAccountInfo: "계정 정보 로딩 중...",
     loadingInfo: "정보 로딩 중...",
@@ -975,7 +1198,8 @@ export default {
       dimensionDetected: "감지 성공, 벡터 차원: {value}",
       dimensionFailed: "감지 실패, 차원을 수동으로 입력해주세요",
       remoteDimensionDetected: "감지된 벡터 차원: {value}",
-      dimensionHint: '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
+      dimensionHint:
+        '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: "모델 목록 로드 실패",
       listRefreshed: "목록이 새로고침되었습니다",
       fillModelAndUrl: "먼저 모델 식별자와 Base URL을 입력해주세요",
@@ -988,8 +1212,10 @@ export default {
       downloadCompleted: "{name} 다운로드 완료",
       downloadFailed: "{name} 다운로드 실패",
       downloadStartFailed: "다운로드 시작 실패",
-      ollamaUnavailable: "Ollama 서비스를 사용할 수 없어 로컬 모델을 선택할 수 없습니다",
-      ollamaNotSupportRerank: "Ollama는 ReRank 모델을 지원하지 않습니다. 원격 인터페이스를 사용하여 설정해주세요",
+      ollamaUnavailable:
+        "Ollama 서비스를 사용할 수 없어 로컬 모델을 선택할 수 없습니다",
+      ollamaNotSupportRerank:
+        "Ollama는 ReRank 모델을 지원하지 않습니다. 원격 인터페이스를 사용하여 설정해주세요",
       goToOllamaSettings: "설정 보기",
       validation: {
         modelNameRequired: "모델 이름을 입력해주세요",
@@ -997,7 +1223,8 @@ export default {
         modelNameMax: "모델 이름은 100자를 초과할 수 없습니다",
         baseUrlRequired: "Base URL을 입력해주세요",
         baseUrlEmpty: "Base URL은 비워둘 수 없습니다",
-        baseUrlInvalid: "Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요",
+        baseUrlInvalid:
+          "Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요",
       },
       // Provider related translations
       providerLabel: "제공업체",
@@ -1009,7 +1236,8 @@ export default {
         },
         aliyun: {
           label: "Aliyun DashScope",
-          description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank 등",
+          description:
+            "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank 등",
         },
         zhipu: {
           label: "Zhipu BigModel",
@@ -1033,7 +1261,8 @@ export default {
         },
         volcengine: {
           label: "Volcengine",
-          description: "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615 등",
+          description:
+            "doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615 등",
         },
         deepseek: {
           label: "DeepSeek",
@@ -1069,11 +1298,13 @@ export default {
         },
         moonshot: {
           label: "Moonshot",
-          description: "kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.",
+          description:
+            "kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.",
         },
         qianfan: {
           label: "Baidu Qianfan",
-          description: "ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.",
+          description:
+            "ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.",
         },
         longcat: {
           label: "LongCat AI",
@@ -1083,7 +1314,7 @@ export default {
     },
   },
   language: {
-    zhCN: "简体中文",
+    zhCN: "Simplified Chinese",
     enUS: "English",
     ruRU: "Русский",
     koKR: "한국어",
@@ -1196,7 +1427,8 @@ export default {
       selectKnowledgeBase: "대상 지식베이스를 선택해주세요",
       enterTitle: "지식 제목을 입력해주세요",
       enterContent: "지식 내용을 입력해주세요",
-      contentTooShort: "내용이 너무 짧습니다. 더 많은 정보를 추가한 후 게시하는 것을 권장합니다",
+      contentTooShort:
+        "내용이 너무 짧습니다. 더 많은 정보를 추가한 후 게시하는 것을 권장합니다",
     },
     success: {
       draftSaved: "임시 저장됨",
@@ -1207,9 +1439,11 @@ export default {
       knowledgeBasePlaceholder: "지식베이스를 선택해주세요",
       titleLabel: "지식 제목",
       titlePlaceholder: "제목을 입력해주세요",
-      contentPlaceholder: "Markdown 구문을 지원합니다. # 제목, 목록, 코드 블록 등을 사용할 수 있습니다",
+      contentPlaceholder:
+        "Markdown 구문을 지원합니다. # 제목, 목록, 코드 블록 등을 사용할 수 있습니다",
     },
-    noDocumentKnowledgeBases: "사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요",
+    noDocumentKnowledgeBases:
+      "사용 가능한 문서형 지식베이스가 없습니다. 먼저 문서형 지식베이스를 생성해주세요",
     status: {
       draftTag: "현재 상태: 임시 저장",
       publishedTag: "현재 상태: 게시됨",
@@ -1237,16 +1471,19 @@ export default {
   knowledgeList: {
     create: "지식베이스 생성",
     createFAQ: "FAQ 지식베이스 생성",
-    subtitle: "지식베이스를 관리하고 구성합니다. 문서형과 Q&A형 지식베이스를 지원합니다",
+    subtitle:
+      "지식베이스를 관리하고 구성합니다. 문서형과 Q&A형 지식베이스를 지원합니다",
     uninitializedBanner:
       "일부 지식베이스가 아직 초기화되지 않았습니다. 지식 문서를 추가하려면 먼저 설정에서 모델 정보를 구성해야 합니다",
     empty: {
       title: "지식베이스 없음",
-      description: '왼쪽 빠른 작업에서 "지식베이스 생성" 버튼을 클릭하여 첫 번째 지식베이스를 생성하세요',
+      description:
+        '왼쪽 빠른 작업에서 "지식베이스 생성" 버튼을 클릭하여 첫 번째 지식베이스를 생성하세요',
     },
     delete: {
       confirmTitle: "삭제 확인",
-      confirmMessage: '지식베이스 "{name}"을(를) 삭제하시겠습니까? 삭제 후에는 복구할 수 없습니다',
+      confirmMessage:
+        '지식베이스 "{name}"을(를) 삭제하시겠습니까? 삭제 후에는 복구할 수 없습니다',
       confirmButton: "삭제 확인",
     },
     messages: {
@@ -1271,11 +1508,14 @@ export default {
     uploadProgress: {
       uploadingTitle: "「{name}」에 폴더의 문서 업로드 중",
       detail: "{completed}/{total}개 파일 완료",
-      keepPageOpen: "페이지를 열어두세요. 업로드가 완료되면 파싱 상태가 자동으로 새로고침됩니다.",
+      keepPageOpen:
+        "페이지를 열어두세요. 업로드가 완료되면 파싱 상태가 자동으로 새로고침됩니다.",
       completedTitle: "「{name}」 업로드 완료",
-      completedDetail: "총 {total}개 파일이 업로드되었습니다. 파싱 상태를 확인하기 위해 목록을 새로고침하는 중...",
+      completedDetail:
+        "총 {total}개 파일이 업로드되었습니다. 파싱 상태를 확인하기 위해 목록을 새로고침하는 중...",
       refreshing: "목록을 새로고침하고 최신 파싱 상태를 가져오는 중...",
-      errorTip: "일부 파일 업로드에 실패했습니다. 오른쪽 상단의 알림 세부 정보를 확인해주세요.",
+      errorTip:
+        "일부 파일 업로드에 실패했습니다. 오른쪽 상단의 알림 세부 정보를 확인해주세요.",
       unknownKb: "지식베이스 {id}",
     },
   },
@@ -1296,7 +1536,8 @@ export default {
       typeLabel: "지식베이스 유형",
       typeDocument: "문서",
       typeFAQ: "Q&A",
-      typeDescription: "FAQ 유형은 구조화된 Q&A 데이터에 적합합니다. 문서 유형은 파일 파싱과 청킹을 지원합니다.",
+      typeDescription:
+        "FAQ 유형은 구조화된 Q&A 데이터에 적합합니다. 문서 유형은 파일 파싱과 청킹을 지원합니다.",
       nameLabel: "지식베이스 이름",
       namePlaceholder: "지식베이스 이름을 입력해주세요",
       descriptionLabel: "지식베이스 설명",
@@ -1323,17 +1564,22 @@ export default {
     },
     document: {
       title: "문서",
-      subtitle: "클릭 또는 드래그하여 업로드, 다양한 형식의 문서를 자동으로 파싱하고 지능적으로 청킹하여 검색 가능한 지식베이스를 빠르게 구축합니다",
+      subtitle:
+        "클릭 또는 드래그하여 업로드, 다양한 형식의 문서를 자동으로 파싱하고 지능적으로 청킹하여 검색 가능한 지식베이스를 빠르게 구축합니다",
     },
     faq: {
       title: "Q&A",
-      subtitle: "구조화된 Q&A 관리, 표준 질문, 유사 질문, 반례를 지원하여 사용자 쿼리를 정확하게 매칭하고 Q&A 정확도를 향상시킵니다",
+      subtitle:
+        "구조화된 Q&A 관리, 표준 질문, 유사 질문, 반례를 지원하여 사용자 쿼리를 정확하게 매칭하고 Q&A 정확도를 향상시킵니다",
       description: "FAQ 지식베이스의 인덱스 전략 및 Q&A 구성 방식 설정",
       indexModeLabel: "인덱스 방식",
-      indexModeDescription: "질문만 인덱싱하면 정확도가 향상되고, Q&A를 인덱싱하면 재현율이 향상됩니다",
+      indexModeDescription:
+        "질문만 인덱싱하면 정확도가 향상되고, Q&A를 인덱싱하면 재현율이 향상됩니다",
       questionIndexModeLabel: "질문 인덱스 방식",
-      questionIndexModeDescription: "병합 인덱스: 표준 질문과 유사 질문을 병합 인덱싱; 개별 인덱스: 표준 질문과 각 유사 질문을 독립적으로 인덱싱하여 더 정확하게 검색하지만 더 많은 저장 공간이 필요합니다",
-      entryGuide: "FAQ 항목은 표준 질문, 유사 질문, 반례 및 여러 답변으로 구성됩니다. 지식베이스 세부 정보에서 일괄 가져오기 및 편집할 수 있습니다.",
+      questionIndexModeDescription:
+        "병합 인덱스: 표준 질문과 유사 질문을 병합 인덱싱; 개별 인덱스: 표준 질문과 각 유사 질문을 독립적으로 인덱싱하여 더 정확하게 검색하지만 더 많은 저장 공간이 필요합니다",
+      entryGuide:
+        "FAQ 항목은 표준 질문, 유사 질문, 반례 및 여러 답변으로 구성됩니다. 지식베이스 세부 정보에서 일괄 가져오기 및 편집할 수 있습니다.",
       tagDesc: "FAQ 항목에 분류 선택",
       tagPlaceholder: "분류를 선택하세요",
       modes: {
@@ -1343,19 +1589,24 @@ export default {
         separate: "개별 인덱스",
       },
       standardQuestion: "표준 질문",
-      standardQuestionDesc: "질문의 표준 표현을 설정합니다. 이것은 사용자가 가장 자주 묻는 질문 형식입니다.",
+      standardQuestionDesc:
+        "질문의 표준 표현을 설정합니다. 이것은 사용자가 가장 자주 묻는 질문 형식입니다.",
       answers: "답변",
-      answersDesc: "완전하고 정확한 답변 내용을 제공합니다. 다양한 시나리오를 커버하기 위해 여러 답변을 추가할 수 있습니다.",
+      answersDesc:
+        "완전하고 정확한 답변 내용을 제공합니다. 다양한 시나리오를 커버하기 위해 여러 답변을 추가할 수 있습니다.",
       similarQuestions: "유사 질문",
-      similarQuestionsDesc: "표준 질문과 의미는 같지만 표현이 다른 질문을 추가하여 시스템이 사용자 쿼리를 더 잘 매칭하도록 돕습니다.",
+      similarQuestionsDesc:
+        "표준 질문과 의미는 같지만 표현이 다른 질문을 추가하여 시스템이 사용자 쿼리를 더 잘 매칭하도록 돕습니다.",
       negativeQuestions: "반례",
-      negativeQuestionsDesc: "이 답변과 매칭되지 않아야 하는 질문을 추가하여 잘못된 매칭을 제외합니다.",
+      negativeQuestionsDesc:
+        "이 답변과 매칭되지 않아야 하는 질문을 추가하여 잘못된 매칭을 제외합니다.",
       categoryLabel: "FAQ 분류",
       categoryButton: "분류 전환",
       editorCreate: "FAQ 항목 추가",
       editorEdit: "FAQ 항목 편집",
       addAnswer: "답변 추가",
-      answerPlaceholder: "답변 내용을 입력해주세요. 여러 줄 텍스트를 지원합니다. Ctrl+Enter 또는 버튼을 클릭하여 추가하세요",
+      answerPlaceholder:
+        "답변 내용을 입력해주세요. 여러 줄 텍스트를 지원합니다. Ctrl+Enter 또는 버튼을 클릭하여 추가하세요",
       similarPlaceholder: "유사 질문을 입력한 후 플러스 버튼을 클릭하여 추가",
       negativePlaceholder: "반례를 입력한 후 플러스 버튼을 클릭하여 추가",
       answerRequired: "최소 하나의 답변을 입력해주세요",
@@ -1410,7 +1661,8 @@ export default {
       appendMode: "추가 가져오기",
       replaceMode: "기존 항목 교체",
       fileLabel: "파일 선택",
-      fileTip: "JSON / CSV / Excel 지원. CSV/Excel 헤더: 분류(필수), 질문(필수), 유사 질문(선택-##로 구분), 반례 질문(선택-##로 구분), 로봇 답변(필수-##로 구분), 모든 답변 여부(선택-기본값 FALSE), 비활성화 여부(선택-기본값 FALSE), 추천 금지 여부(선택-기본값 False 추천 가능). 이전 형식도 지원: standard_question, answers, similar_questions, negative_questions",
+      fileTip:
+        "JSON / CSV / Excel 지원. CSV/Excel 헤더: 분류(필수), 질문(필수), 유사 질문(선택-##로 구분), 반례 질문(선택-##로 구분), 로봇 답변(필수-##로 구분), 모든 답변 여부(선택-기본값 FALSE), 비활성화 여부(선택-기본값 FALSE), 추천 금지 여부(선택-기본값 False 추천 가능). 이전 형식도 지원: standard_question, answers, similar_questions, negative_questions",
       clickToUpload: "파일 업로드 클릭",
       dragDropTip: "또는 파일을 여기에 드래그",
       importButton: "FAQ 가져오기",
@@ -1442,7 +1694,8 @@ export default {
       embeddingLabel: "Embedding 임베딩 모델",
       embeddingDesc: "텍스트 벡터화를 위한 임베딩 모델",
       embeddingPlaceholder: "Embedding 모델을 선택해주세요",
-      embeddingLocked: "지식베이스에 이미 파일이 있어 Embedding 모델을 변경할 수 없습니다",
+      embeddingLocked:
+        "지식베이스에 이미 파일이 있어 Embedding 모델을 변경할 수 없습니다",
       rerankLabel: "ReRank 재정렬 모델",
       rerankDesc: "검색 결과 재정렬을 위한 모델 (선택)",
       rerankPlaceholder: "ReRank 모델을 선택해주세요 (선택)",
@@ -1474,7 +1727,8 @@ export default {
       description: "질문 생성, 멀티모달 등 고급 기능 설정",
       questionGeneration: {
         label: "AI 질문 생성",
-        description: "문서 파싱 시 대규모 모델을 호출하여 각 청크에 대한 관련 질문을 생성하여 검색 재현율을 향상시킵니다. 활성화하면 문서 파싱 시간이 증가합니다.",
+        description:
+          "문서 파싱 시 대규모 모델을 호출하여 각 청크에 대한 관련 질문을 생성하여 검색 재현율을 향상시킵니다. 활성화하면 문서 파싱 시간이 증가합니다.",
         countLabel: "생성 질문 수",
         countDescription: "각 문서 청크에서 생성할 질문 수 (1-10)",
       },
@@ -1492,11 +1746,18 @@ export default {
           minio: "MinIO",
           cos: "Tencent Cloud COS",
         },
-        minioDisabledWarning: "MinIO가 활성화되지 않아 Tencent Cloud COS로 자동 전환되었습니다. MinIO를 사용하려면 먼저 시스템 설정에서 MinIO를 활성화해주세요.",
+        minioDisabledWarning:
+          "MinIO가 활성화되지 않아 Tencent Cloud COS로 자동 전환되었습니다. MinIO를 사용하려면 먼저 시스템 설정에서 MinIO를 활성화해주세요.",
         minio: {
           bucketLabel: "버킷 이름",
           bucketDescription: "MinIO 스토리지 버킷 이름 (필수)",
-          bucketPlaceholder: "버킷 이름을 입력해주세요 (필수)",
+          bucketPlaceholder: "버킷 이름을 선택하거나 입력해주세요",
+          bucketHint: "기존의 공개 읽기 권한 Bucket을 선택하거나 새 이름을 입력하면 자동으로 생성됩니다",
+          policyLabels: {
+            public: "공개 읽기",
+            private: "비공개",
+            custom: "사용자 정의",
+          },
           useSslLabel: "SSL 사용",
           useSslDescription: "SSL 연결 사용 여부",
           pathPrefixLabel: "경로 접두사",
@@ -1529,20 +1790,31 @@ export default {
   input: {
     addModel: "모델 추가",
     placeholder: "모델에 직접 질문",
-    placeholderWithContext: "질문을 입력하면 위에서 선택한 지식베이스/파일을 기반으로 답변합니다",
+    placeholderWithContext:
+      "질문을 입력하면 위에서 선택한 지식베이스/파일을 기반으로 답변합니다",
     placeholderWebOnly: "질문을 입력하면 웹 검색을 결합하여 답변합니다",
-    placeholderKbAndWeb: "질문을 입력하면 지식베이스와 웹 검색을 기반으로 답변합니다",
+    placeholderKbAndWeb:
+      "질문을 입력하면 지식베이스와 웹 검색을 기반으로 답변합니다",
+    placeholderAgent: "{name}에게 질문하기",
     agentMode: "Agent 모드",
     normalMode: "일반 모드",
     normalModeDesc: "지식베이스 기반 RAG Q&A",
     agentModeDesc: "ReAct 추론 프레임워크, 다단계 사고",
-    agentNotReadyTooltip: "Agent가 준비되지 않았습니다. 먼저 설정에서 구성을 완료해주세요",
-    agentNotReadyDetail:
-      "Agent가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}",
+    agentNotReadyTooltip:
+      "Agent가 준비되지 않았습니다. 먼저 설정에서 구성을 완료해주세요",
     agentMissingAllowedTools: "허용된 도구",
     agentMissingSummaryModel: "대화 모델 (Summary Model)",
     agentMissingRerankModel: "재정렬 모델 (Rerank Model)",
     goToSettings: "설정으로 이동 →",
+    customAgentNotReadyTooltip: "에이전트가 준비되지 않았습니다. 먼저 설정을 완료해주세요",
+    customAgentNotReadyDetail: "에이전트가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}",
+    customAgentMissingSummaryModel: "대화 모델 (Summary Model)",
+    customAgentMissingRerankModel: "재정렬 모델 (Rerank Model)",
+    goToAgentEditor: "설정하러 가기 →",
+    agentNotReadyDetail: "에이전트「{agentName}」가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}",
+    builtinAgentNotReadyDetail: "내장 에이전트「{agentName}」가 준비되지 않았습니다. 다음 항목을 설정해야 합니다: {reasons}",
+    builtinAgentSettingName: "지능형 추론",
+    builtinNormalSettingName: "빠른 질의응답",
     webSearch: {
       toggleOn: "웹 검색 켜기",
       toggleOff: "웹 검색 끄기",
@@ -1563,6 +1835,7 @@ export default {
       replying: "응답 중입니다. 잠시 후 다시 시도해주세요!",
       agentSwitchedOn: "Agent 모드로 전환되었습니다",
       agentSwitchedOff: "일반 모드로 전환되었습니다",
+      agentSelected: "에이전트「{name}」가 선택되었습니다",
       agentEnabled: "Agent 모드가 활성화되었습니다",
       agentDisabled: "Agent 모드가 비활성화되었습니다",
       agentNotReadyDetail:
@@ -1572,10 +1845,19 @@ export default {
       webSearchEnabled: "웹 검색이 켜졌습니다",
       webSearchDisabled: "웹 검색이 꺼졌습니다",
       sessionMissing: "세션 ID가 존재하지 않습니다",
-      messageMissing: "메시지 ID를 가져올 수 없습니다. 페이지를 새로고침한 후 다시 시도해주세요",
+      messageMissing:
+        "메시지 ID를 가져올 수 없습니다. 페이지를 새로고침한 후 다시 시도해주세요",
       stopSuccess: "생성이 중지되었습니다",
       stopFailed: "중지 실패, 다시 시도해주세요",
     },
+    webSearchDisabledByAgent: "현재 에이전트가 웹 검색을 비활성화했습니다",
+    webSearchForcedByAgent: "현재 에이전트가 웹 검색을 활성화했으므로 끌 수 없습니다",
+    kbLockedByAgent: "현재 에이전트가 지식베이스 설정을 잠갔습니다",
+    kbDisabledByAgent: "현재 에이전트가 지식베이스 기능을 비활성화했습니다",
+    cannotRemoveAgentKb: "에이전트가 설정한 지식베이스는 제거할 수 없습니다",
+    agentConfiguredKb: "에이전트가 설정함, 삭제 불가",
+    modelLockedByAgent: "현재 에이전트가 모델 설정을 잠갔습니다",
+    goToAgentSettings: "에이전트 설정으로 이동",
   },
   agentSettings: {
     title: "Agent 설정",
@@ -1583,7 +1865,8 @@ export default {
       "AI Agent의 기본 동작과 파라미터를 설정합니다. 이 설정은 Agent 모드가 활성화된 모든 대화에 적용됩니다",
     modelRecommendation: {
       title: "모델 추천",
-      content: "더 나은 Agent 경험을 위해 FunctionCalling을 지원하는 장문 컨텍스트 대규모 언어 모델(예: deepseek-v3.1-terminus 등)을 사용하는 것을 권장합니다",
+      content:
+        "더 나은 Agent 경험을 위해 FunctionCalling을 지원하는 장문 컨텍스트 대규모 언어 모델(예: deepseek-v3.1-terminus 등)을 사용하는 것을 권장합니다",
     },
     status: {
       label: "Agent 상태",
@@ -1633,18 +1916,20 @@ export default {
       hintPrefix: "힌트: ",
       hintSuffix: "를 입력하면 사용 가능한 플레이스홀더가 자동으로 표시됩니다",
       custom: "사용자 정의 Prompt",
-      disabledHint: "현재 시스템 기본 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
-      placeholder: "시스템 Prompt를 입력하거나 비워두면 기본 Prompt가 사용됩니다...",
-      tabHint: "웹 검색 활성화 여부에 따라 시스템 Prompt를 개별적으로 설정합니다.",
-      tabWebOn: "웹 검색 활성화됨",
-      tabWebOff: "웹 검색 비활성화됨",
+      disabledHint:
+        "현재 시스템 기본 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
+      placeholder:
+        "시스템 Prompt를 입력하거나 비워두면 기본 Prompt가 사용됩니다...",
+      tabHint:
+        "통합 시스템 프롬프트입니다. {'{{'}web_search_status{'}}'} 플레이스홀더를 사용하여 웹 검색 동작을 동적으로 제어합니다",
     },
     reset: {
       header: "기본 Prompt 복원",
       body: "기본 Prompt로 복원하시겠습니까? 현재 사용자 정의 Prompt가 덮어씌워집니다.",
     },
     errors: {
-      selectThinkingModel: "Agent 모드를 활성화하기 전에 먼저 사고 모델을 선택해주세요",
+      selectThinkingModel:
+        "Agent 모드를 활성화하기 전에 먼저 사고 모델을 선택해주세요",
       selectAtLeastOneTool: "최소 하나의 허용된 도구를 선택해야 합니다",
       iterationsRange: "최대 반복 횟수는 1-20 사이여야 합니다",
       temperatureRange: "온도 파라미터는 0-2 사이여야 합니다",
@@ -1660,11 +1945,13 @@ export default {
       defaultPromptEnabled: "기본 Prompt로 전환되었습니다",
       resetToDefault: "기본 Prompt로 복원되었습니다",
       systemPromptSaved: "시스템 Prompt가 저장되었습니다",
-      autoDisabled: "Agent 설정이 불완전하여 Agent 모드가 자동으로 비활성화되었습니다",
+      autoDisabled:
+        "Agent 설정이 불완전하여 Agent 모드가 자동으로 비활성화되었습니다",
     },
   },
   conversationSettings: {
-    description: "대화 모드의 기본 동작과 파라미터를 설정합니다. Agent 모드와 일반 모드의 Prompt 설정을 포함합니다",
+    description:
+      "대화 모드의 기본 동작과 파라미터를 설정합니다. Agent 모드와 일반 모드의 Prompt 설정을 포함합니다",
     agentMode: "Agent 모드",
     normalMode: "일반 모드",
     menus: {
@@ -1674,9 +1961,11 @@ export default {
       advanced: "고급 설정",
     },
     models: {
-      description: "Agent 및 일반 모드에서 사용하는 대화/요약 모델과 ReRank 모델을 통합 관리합니다",
+      description:
+        "Agent 및 일반 모드에서 사용하는 대화/요약 모델과 ReRank 모델을 통합 관리합니다",
       chatGroupLabel: "사고 / 대화 모델",
-      chatGroupDesc: "Agent 추론 및 계획 모델과 일반 모드 기본 대화/요약 모델을 포함합니다",
+      chatGroupDesc:
+        "Agent 추론 및 계획 모델과 일반 모드 기본 대화/요약 모델을 포함합니다",
       chatModel: {
         label: "일반 모드 기본 대화 모델",
         desc: "일반 모드에서 기본으로 사용되는 대화/요약 모델, 세션에 모델이 지정되지 않은 경우 적용됩니다",
@@ -1688,10 +1977,12 @@ export default {
         placeholder: "기본 ReRank 모델을 선택해주세요",
       },
       rerankGroupLabel: "ReRank 모델",
-      rerankGroupDesc: "Agent에서 사용하는 재정렬 모델과 일반 모드 기본 ReRank 모델을 포함합니다",
+      rerankGroupDesc:
+        "Agent에서 사용하는 재정렬 모델과 일반 모드 기본 ReRank 모델을 포함합니다",
     },
     thresholds: {
-      description: "리콜 및 재정렬의 임계값과 TopK를 조정하여 정확도와 성능의 균형을 맞춥니다",
+      description:
+        "리콜 및 재정렬의 임계값과 TopK를 조정하여 정확도와 성능의 균형을 맞춥니다",
     },
     maxRounds: {
       label: "히스토리 보존 횟수",
@@ -1761,14 +2052,16 @@ export default {
       desc: "일반 모드에서 검색 결과를 기반으로 답변을 생성하는 Prompt 템플릿",
       placeholder: "검색 결과 요약을 위한 Prompt 템플릿을 입력해주세요...",
       custom: "사용자 정의 템플릿",
-      disabledHint: "현재 시스템 기본 요약 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
+      disabledHint:
+        "현재 시스템 기본 요약 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
     },
     systemPrompt: {
       label: "시스템 Prompt",
       desc: "일반 모드 대화를 위한 시스템 수준 Prompt",
       placeholder: "시스템 Prompt를 입력해주세요...",
       custom: "사용자 정의 Prompt",
-      disabledHint: "현재 시스템 기본 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
+      disabledHint:
+        "현재 시스템 기본 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
     },
     temperature: {
       label: "온도 파라미터",
@@ -1808,7 +2101,8 @@ export default {
       rewritePromptUserSaved: "재작성 User Prompt가 저장되었습니다",
       customPromptEnabled: "사용자 정의 Prompt가 활성화되었습니다",
       defaultPromptEnabled: "시스템 기본 Prompt가 사용됩니다",
-      customContextTemplateEnabled: "사용자 정의 요약 Prompt가 활성화되었습니다",
+      customContextTemplateEnabled:
+        "사용자 정의 요약 Prompt가 활성화되었습니다",
       defaultContextTemplateEnabled: "시스템 기본 요약 Prompt가 사용됩니다",
       resetSystemPromptSuccess: "시스템 기본 Prompt로 복원되었습니다",
       resetContextTemplateSuccess: "시스템 기본 요약 Prompt로 복원되었습니다",
@@ -1838,14 +2132,16 @@ export default {
       deleted: "MCP 서비스가 삭제되었습니다",
       deleteFailed: "MCP 서비스 삭제 실패",
     },
-    deleteConfirmBody: 'MCP 서비스 "{name}"을(를) 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.',
+    deleteConfirmBody:
+      'MCP 서비스 "{name}"을(를) 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.',
     unnamed: "이름 없음",
   },
 
   // 모델 설정
   modelSettings: {
     title: "모델 설정",
-    description: "다양한 유형의 AI 모델을 관리합니다. Ollama 로컬 모델과 원격 API를 지원합니다",
+    description:
+      "다양한 유형의 AI 모델을 관리합니다. Ollama 로컬 모델과 원격 API를 지원합니다",
     actions: {
       addModel: "모델 추가",
       setDefault: "기본값으로 설정",
@@ -1878,8 +2174,10 @@ export default {
       nameRequired: "모델 이름은 비워둘 수 없습니다",
       nameTooLong: "모델 이름은 100자를 초과할 수 없습니다",
       baseUrlRequired: "Remote API 유형은 Base URL이 필수입니다",
-      baseUrlInvalid: "Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요",
-      dimensionInvalid: "Embedding 모델은 유효한 벡터 차원(128-4096)을 입력해야 합니다",
+      baseUrlInvalid:
+        "Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요",
+      dimensionInvalid:
+        "Embedding 모델은 유효한 벡터 차원(128-4096)을 입력해야 합니다",
       updated: "모델이 업데이트되었습니다",
       added: "모델이 추가되었습니다",
       saveFailed: "모델 저장 실패",
@@ -1907,7 +2205,8 @@ export default {
       label: "서비스 주소",
       desc: "로컬 Ollama 서비스의 API 주소, 시스템에서 자동으로 감지됩니다. 수정이 필요하면 .env 설정 파일에서 설정해주세요",
       placeholder: "http://localhost:11434",
-      failed: "연결 실패, Ollama가 실행 중인지 또는 서비스 주소가 올바른지 확인해주세요",
+      failed:
+        "연결 실패, Ollama가 실행 중인지 또는 서비스 주소가 올바른지 확인해주세요",
     },
     download: {
       title: "새 모델 다운로드",
@@ -1978,6 +2277,95 @@ export default {
       updated: "MCP 서비스가 업데이트되었습니다",
       createFailed: "MCP 서비스 생성 실패",
       updateFailed: "MCP 서비스 업데이트 실패",
+    },
+  },
+  promptTemplate: {
+    noTemplates: "템플릿 없음",
+    selectTemplate: "템플릿 선택",
+    useTemplate: "템플릿 사용",
+    withKnowledgeBase: "지식베이스",
+    withWebSearch: "웹 검색",
+    systemPrompt: {
+      defaultKB: {
+        name: "지식베이스 Q&A 어시스턴트",
+        desc: "기본 지식베이스 Q&A 템플릿, 대부분의 시나리오에 적합",
+      },
+      expert: {
+        name: "도메인 전문가 어시스턴트",
+        desc: "전문적이고 심층적인 답변 스타일, 기술 또는 전문 분야에 적합",
+      },
+      customerService: {
+        name: "고객 서비스 어시스턴트",
+        desc: "친절하고 열정적인 서비스 스타일, 고객 서비스 시나리오에 적합",
+      },
+      techSupport: {
+        name: "기술 지원",
+        desc: "코드 예시를 포함한 전문적인 기술 문제 해결",
+      },
+      pureChat: {
+        name: "일반 대화",
+        desc: "지식베이스에 의존하지 않는 일반 대화 어시스턴트",
+      },
+      webSearch: {
+        name: "웹 검색 어시스턴트",
+        desc: "웹 검색을 결합하여 최신 정보 제공",
+      },
+    },
+    contextTemplate: {
+      default: {
+        name: "표준 템플릿",
+        desc: "기본 컨텍스트 템플릿, 참조 자료와 질문을 명확하게 표시",
+      },
+      detailed: {
+        name: "상세 템플릿",
+        desc: "상세한 설명과 답변 요구사항을 포함하는 완전한 템플릿",
+      },
+      simple: {
+        name: "간결 템플릿",
+        desc: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식",
+      },
+      qa: {
+        name: "Q&A 템플릿",
+        desc: "Q&A 시나리오에 최적화된 템플릿",
+      },
+    },
+    rewriteSystem: {
+      default: {
+        name: "표준 재작성",
+        desc: "대명사 해소, 생략 보완의 표준 재작성 규칙",
+      },
+      strict: {
+        name: "엄격한 재작성",
+        desc: "더 엄격한 재작성 요구사항, 질문의 완전한 독립성 보장",
+      },
+    },
+    rewriteUser: {
+      default: {
+        name: "표준 형식",
+        desc: "대화 히스토리와 현재 질문을 포함하는 표준 형식",
+      },
+      detailed: {
+        name: "상세 형식",
+        desc: "작업 설명을 포함하는 상세 형식",
+      },
+    },
+    fallback: {
+      default: {
+        name: "표준 폴백",
+        desc: "친절하게 답변 불가를 알리고 제안 제공",
+      },
+      polite: {
+        name: "정중한 폴백",
+        desc: "더 정중하고 상세한 답변 불가 안내",
+      },
+      brief: {
+        name: "간결한 폴백",
+        desc: "간단한 답변 불가 안내",
+      },
+      model: {
+        name: "모델 폴백 프롬프트",
+        desc: "모델이 일반 지식을 기반으로 답변하도록 유도하는 프롬프트",
+      },
     },
   },
 };
