@@ -21,9 +21,15 @@ func NewToolRegistry() *ToolRegistry {
 	}
 }
 
-// RegisterTool adds a tool to the registry
+// RegisterTool adds a tool to the registry.
+// If a tool with the same name is already registered, the existing one is kept
+// (first-wins) to prevent tool execution hijacking via name collision (GHSA-67q9-58vj-32qx).
 func (r *ToolRegistry) RegisterTool(tool types.Tool) {
-	r.tools[tool.Name()] = tool
+	name := tool.Name()
+	if _, exists := r.tools[name]; exists {
+		return
+	}
+	r.tools[name] = tool
 }
 
 // GetTool retrieves a tool by name
