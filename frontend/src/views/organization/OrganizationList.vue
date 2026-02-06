@@ -1202,7 +1202,7 @@ onUnmounted(() => {
 <style scoped lang="less">
 .org-list-container {
   padding: 24px 32px;
-  margin: 0 16px;
+  margin: 0 16px 0 4px;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
@@ -1215,7 +1215,7 @@ onUnmounted(() => {
   display: flex;
   flex: 1;
   min-height: 0;
-  background: #fff;
+  background: #fafbfc;
   border: 1px solid #e7ebf0;
   border-radius: 10px;
   overflow: hidden;
@@ -1227,26 +1227,27 @@ onUnmounted(() => {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px;
+  background: #fafbfc;
 }
 
 .header {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
+  flex-shrink: 0;
 
   .header-title {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
   }
 
   h2 {
     margin: 0;
-    color: #0f172a;
+    color: #000000e6;
     font-family: "PingFang SC", system-ui, sans-serif;
     font-size: 24px;
     font-weight: 600;
-    letter-spacing: -0.02em;
     line-height: 32px;
   }
 }

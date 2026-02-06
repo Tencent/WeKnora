@@ -1753,8 +1753,8 @@ async function createNewSession(value: string): Promise<void> {
 .knowledge-layout {
   display: flex;
   flex-direction: column;
-  margin: 0 16px;
-  gap: 16px;
+  margin: 0 16px 0 4px;
+  gap: 20px;
   height: 100%;
   flex: 1;
   width: 100%;
@@ -1763,22 +1763,23 @@ async function createNewSession(value: string): Promise<void> {
   box-sizing: border-box;
 }
 
-// 与列表页一致：整体一块白底圆角区，左侧标签栏为内部分区
+// 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
 .knowledge-main {
   display: flex;
   flex: 1;
   min-height: 0;
-  background: #fff;
+  background: #fafbfc;
   border: 1px solid #e7ebf0;
   border-radius: 10px;
   overflow: hidden;
 }
 
-// 与列表页左侧筛选栏协调：宽度、内边距、项间距
+// 与列表页筛选区一致：白底卡片感、细分界
 .tag-sidebar {
   width: 200px;
-  background: #fafbfc;
+  background: #fff;
   border-right: 1px solid #e7ebf0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1856,6 +1857,12 @@ async function createNewSession(value: string): Promise<void> {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
 
     .tag-load-more {
       padding: 8px 0 0;
@@ -1873,23 +1880,25 @@ async function createNewSession(value: string): Promise<void> {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px;
+      padding: 9px 12px;
       border-radius: 6px;
-      color: #4e5969;
+      color: #2d3139;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 13px;
+      font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
 
       .tag-list-left {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         min-width: 0;
         flex: 1;
 
         .t-icon {
           flex-shrink: 0;
-          color: #86909c;
+          color: #5c6470;
           font-size: 14px;
           transition: color 0.2s ease;
         }
@@ -1901,6 +1910,11 @@ async function createNewSession(value: string): Promise<void> {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+        font-weight: 450;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
       }
 
       .tag-list-right {
@@ -1913,43 +1927,47 @@ async function createNewSession(value: string): Promise<void> {
 
       .tag-count {
         font-size: 12px;
-        color: #86909c;
+        color: #5c6470;
         font-weight: 500;
         min-width: 28px;
-        padding: 3px 6px;
+        padding: 3px 7px;
         border-radius: 8px;
-        background: #f7f9fc;
+        background: #eef0f3;
         transition: all 0.2s ease;
         text-align: center;
         box-sizing: border-box;
       }
 
       &:hover {
-        background: #f7f9fc;
+        background: #f2f4f7;
         color: #1d2129;
 
         .tag-list-left .t-icon {
-          color: #4e5969;
+          color: #1d2129;
         }
 
         .tag-count {
           background: #e5e9f2;
-          color: #4e5969;
+          color: #1d2129;
         }
       }
 
       &.active {
         background: #e6f7ec;
-        color: #00a870;
+        color: #07c05f;
         font-weight: 500;
 
         .tag-list-left .t-icon {
-          color: #00a870;
+          color: #07c05f;
+        }
+
+        .tag-name {
+          font-weight: 500;
         }
 
         .tag-count {
           background: #b8f0d3;
-          color: #00a870;
+          color: #07c05f;
           font-weight: 600;
         }
       }
@@ -2138,6 +2156,7 @@ async function createNewSession(value: string): Promise<void> {
   min-height: 0;
   padding: 12px;
   overflow: hidden;
+  background: #fafbfc;
 }
 
 .doc-card-area {
@@ -2439,7 +2458,7 @@ async function createNewSession(value: string): Promise<void> {
   flex: 1;
   padding: 24px 32px;
   overflow-y: auto;
-  margin: 0 16px;
+  margin: 0 16px 0 4px;
 }
 
 @media (max-width: 1250px) and (min-width: 1045px) {

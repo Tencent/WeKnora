@@ -132,12 +132,13 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
-// 左侧筛选栏，与主内容区协调、不抢戏
+// 筛选区：白底卡片感（与右侧内容区风格对调），细分界保持统一
 .list-space-sidebar {
   width: 200px;
   flex-shrink: 0;
-  background: #fafbfc;
+  background: #fff;
   border-right: 1px solid #e7ebf0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -221,30 +222,37 @@ onMounted(() => {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .sidebar-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border-radius: 6px;
-  color: #4e5969;
+  color: #2d3139;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 13px;
+  font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 
   .item-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
     flex: 1;
   }
 
   .item-icon {
     flex-shrink: 0;
-    color: #86909c;
+    color: #5c6470;
     font-size: 14px;
     transition: color 0.2s ease;
   }
@@ -259,32 +267,36 @@ onMounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-weight: 400;
+    font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    font-weight: 450;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
   }
 
   .item-count {
     font-size: 12px;
-    color: #86909c;
+    color: #5c6470;
     font-weight: 500;
-    padding: 3px 6px;
+    padding: 3px 7px;
     border-radius: 8px;
-    background: #f7f9fc;
+    background: #eef0f3;
     margin-left: 6px;
     flex-shrink: 0;
     transition: all 0.2s ease;
   }
 
   &:hover {
-    background: #f7f9fc;
+    background: #f2f4f7;
     color: #1d2129;
 
     .item-icon {
-      color: #4e5969;
+      color: #1d2129;
     }
 
     .item-count {
       background: #e5e9f2;
-      color: #4e5969;
+      color: #1d2129;
     }
   }
 
@@ -295,6 +307,10 @@ onMounted(() => {
 
     .item-icon {
       color: #07c05f;
+    }
+
+    .item-label {
+      font-weight: 500;
     }
 
     .item-count {

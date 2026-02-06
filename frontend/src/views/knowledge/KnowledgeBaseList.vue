@@ -593,13 +593,16 @@ const sharedKbsByOrg = computed(() => {
   return sharedKbs.value.filter(s => s.organization_id === orgId)
 })
 
-// 各空间下的共享知识库数量（用于侧栏展示）
+// 各空间下的共享知识库数量（用于侧栏展示，含 0 的也显示）
 const sharedCountByOrg = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   sharedKbs.value.forEach(s => {
     const id = s.organization_id
     if (!id) return
     map[id] = (map[id] || 0) + 1
+  })
+  ;(orgStore.organizations || []).forEach(org => {
+    if (map[org.id] === undefined) map[org.id] = 0
   })
   return map
 })
@@ -1031,7 +1034,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 <style scoped lang="less">
 .kb-list-container {
   padding: 24px 32px;
-  margin: 0 16px;
+  margin: 0 16px 0 4px;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
@@ -1077,7 +1080,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex: 1;
   min-height: 0;
-  background: #fff;
+  background: #fafbfc;
   border: 1px solid #e7ebf0;
   border-radius: 10px;
   overflow: hidden;
@@ -1089,6 +1092,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px;
+  background: #fafbfc;
 }
 
 .header-subtitle {

@@ -550,6 +550,9 @@ const mouseleaveMenu = (path: string) => {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    /* 与右侧内容区统一的细分界，减少割裂感 */
+    border-right: 1px solid #e7ebf0;
+    box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
 
     .logo_box {
         height: 80px;

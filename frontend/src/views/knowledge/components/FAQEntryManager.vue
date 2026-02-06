@@ -3323,24 +3323,26 @@ watch(() => entries.value.map(e => ({
   display: flex;
   flex-direction: column;
   min-height: 0;
+  gap: 20px;
 }
 
-// 与列表页一致：整体一块白底圆角区，左侧标签栏为内部分区
+// 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
 .faq-main {
   display: flex;
   flex: 1;
   min-height: 0;
-  background: #fff;
+  background: #fafbfc;
   border: 1px solid #e7ebf0;
   border-radius: 10px;
   overflow: hidden;
 }
 
-// 与列表页左侧筛选栏、文档型知识库文档分类协调
+// 与列表页筛选区、文档型知识库标签栏一致：白底卡片感
 .faq-tag-panel {
   width: 200px;
-  background: #fafbfc;
+  background: #fff;
   border-right: 1px solid #e7ebf0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   padding: 16px;
   flex-shrink: 0;
   display: flex;
@@ -3453,6 +3455,11 @@ watch(() => entries.value.map(e => ({
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
 
     .tag-loading-more {
       padding: 8px 0;
@@ -3465,23 +3472,25 @@ watch(() => entries.value.map(e => ({
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px;
+      padding: 9px 12px;
       border-radius: 6px;
-      color: #4e5969;
+      color: #2d3139;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 13px;
+      font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
 
       .faq-tag-left {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         min-width: 0;
         flex: 1;
 
         .t-icon {
           flex-shrink: 0;
-          color: #86909c;
+          color: #5c6470;
           font-size: 14px;
           transition: color 0.2s ease;
         }
@@ -3493,7 +3502,11 @@ watch(() => entries.value.map(e => ({
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-weight: 400;
+        font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+        font-weight: 450;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
       }
 
       .faq-tag-right {
@@ -3506,43 +3519,47 @@ watch(() => entries.value.map(e => ({
 
       .faq-tag-count {
         font-size: 12px;
-        color: #86909c;
+        color: #5c6470;
         font-weight: 500;
         min-width: 28px;
-        padding: 3px 6px;
+        padding: 3px 7px;
         border-radius: 8px;
-        background: #f7f9fc;
+        background: #eef0f3;
         transition: all 0.2s ease;
         text-align: center;
         box-sizing: border-box;
       }
 
       &:hover {
-        background: #f7f9fc;
+        background: #f2f4f7;
         color: #1d2129;
 
         .faq-tag-left .t-icon {
-          color: #4e5969;
+          color: #1d2129;
         }
 
         .faq-tag-count {
           background: #e5e9f2;
-          color: #4e5969;
+          color: #1d2129;
         }
       }
 
       &.active {
         background: #e6f7ec;
-        color: #00a870;
+        color: #07c05f;
         font-weight: 500;
 
         .faq-tag-left .t-icon {
-          color: #00a870;
+          color: #07c05f;
+        }
+
+        .tag-name {
+          font-weight: 500;
         }
 
         .faq-tag-count {
           background: #b8f0d3;
-          color: #00a870;
+          color: #07c05f;
           font-weight: 600;
         }
 
@@ -3698,6 +3715,7 @@ watch(() => entries.value.map(e => ({
   flex-direction: column;
   padding: 12px;
   overflow: hidden;
+  background: #fafbfc;
 }
 
 .faq-search-bar {
@@ -3793,7 +3811,6 @@ watch(() => entries.value.map(e => ({
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 20px;
   flex-shrink: 0;
 
   .faq-header-title {

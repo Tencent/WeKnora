@@ -573,12 +573,16 @@ const sharedAgentsByOrg = computed(() => {
   return sharedAgents.value.filter(s => s.organization_id === orgId)
 })
 
+// 各空间下的共享智能体数量（用于侧栏展示，含 0 的也显示）
 const sharedCountByOrg = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   sharedAgents.value.forEach(s => {
     const id = s.organization_id
     if (!id) return
     map[id] = (map[id] || 0) + 1
+  })
+  ;(orgStore.organizations || []).forEach(org => {
+    if (map[org.id] === undefined) map[org.id] = 0
   })
   return map
 })
@@ -875,7 +879,7 @@ defineExpose({
 <style scoped lang="less">
 .agent-list-container {
   padding: 24px 32px;
-  margin: 0 16px;
+  margin: 0 16px 0 4px;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
@@ -888,7 +892,7 @@ defineExpose({
   display: flex;
   flex: 1;
   min-height: 0;
-  background: #fff;
+  background: #fafbfc;
   border: 1px solid #e7ebf0;
   border-radius: 10px;
   overflow: hidden;
@@ -900,6 +904,7 @@ defineExpose({
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px;
+  background: #fafbfc;
 }
 
 .header {
