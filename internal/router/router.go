@@ -48,6 +48,7 @@ type RouterParams struct {
 	FAQHandler            *handler.FAQHandler
 	TagHandler            *handler.TagHandler
 	CustomAgentHandler    *handler.CustomAgentHandler
+	SkillHandler          *handler.SkillHandler
 }
 
 // NewRouter 创建新的路由
@@ -112,6 +113,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
+		RegisterSkillRoutes(v1, params.SkillHandler)
 	}
 
 	return r
@@ -437,5 +439,14 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agents.DELETE("/:id", agentHandler.DeleteAgent)
 		// Copy agent
 		agents.POST("/:id/copy", agentHandler.CopyAgent)
+	}
+}
+
+// RegisterSkillRoutes registers skill routes
+func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler) {
+	skills := r.Group("/skills")
+	{
+		// List all preloaded skills
+		skills.GET("", skillHandler.ListSkills)
 	}
 }

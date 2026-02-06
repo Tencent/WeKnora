@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -193,6 +194,41 @@ func renderPromptPlaceholders(template string, knowledgeBases []*KnowledgeBaseIn
 	return result
 }
 
+// formatSkillsMetadata formats skills metadata for the system prompt (Level 1 - Progressive Disclosure)
+// This is a lightweight representation that only includes skill name and description
+func formatSkillsMetadata(skillsMetadata []*skills.SkillMetadata) string {
+	if len(skillsMetadata) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("\n### Available Skills (IMPORTANT - READ CAREFULLY)\n\n")
+	builder.WriteString("**You MUST actively consider using these skills for EVERY user request.**\n\n")
+
+	builder.WriteString("#### Skill Matching Protocol (MANDATORY)\n\n")
+	builder.WriteString("Before responding to ANY user query, follow this checklist:\n\n")
+	builder.WriteString("1. **SCAN**: Read each skill's description and trigger conditions below\n")
+	builder.WriteString("2. **MATCH**: Check if the user's intent matches ANY skill's triggers (keywords, scenarios, or task types)\n")
+	builder.WriteString("3. **LOAD**: If a match is found, call `read_skill(skill_name=\"...\")` BEFORE generating your response\n")
+	builder.WriteString("4. **APPLY**: Follow the skill's instructions to provide a higher-quality, structured response\n\n")
+
+	builder.WriteString("**⚠️ CRITICAL**: Skill usage is MANDATORY when applicable. Do NOT skip skills to save time or tokens.\n\n")
+
+	builder.WriteString("#### Available Skills\n\n")
+	for i, skill := range skillsMetadata {
+		builder.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, skill.Name))
+		builder.WriteString(fmt.Sprintf("   %s\n\n", skill.Description))
+	}
+
+	builder.WriteString("#### Tool Reference\n\n")
+	builder.WriteString("- `read_skill(skill_name)`: Load full skill instructions (MUST call before using a skill)\n")
+	builder.WriteString("- `execute_skill_script(skill_name, script_path, args, input)`: Run utility scripts bundled with a skill\n")
+	builder.WriteString("  - `input`: Pass data directly via stdin (use this when you have data in memory, e.g. JSON string)\n")
+	builder.WriteString("  - `args`: Command-line arguments (only use `--file` if you have an actual file path in the skill directory)\n")
+
+	return builder.String()
+}
+
 // formatSelectedDocuments formats selected documents for the prompt (summary only, no content)
 func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
 	if len(docs) == 0 {
@@ -230,6 +266,7 @@ func formatSelectedDocuments(docs []*SelectedDocumentInfo) string {
 //   - {{knowledge_bases}}
 //   - {{web_search_status}} -> "Enabled" or "Disabled"
 //   - {{current_time}} -> current time string
+//   - {{skills}} -> formatted skills metadata (if any)
 func renderPromptPlaceholdersWithStatus(
 	template string,
 	knowledgeBases []*KnowledgeBaseInfo,
@@ -246,6 +283,11 @@ func renderPromptPlaceholdersWithStatus(
 	}
 	if strings.Contains(result, "{{current_time}}") {
 		result = strings.ReplaceAll(result, "{{current_time}}", currentTime)
+	}
+	// Remove {{skills}} placeholder if present but no skills provided
+	// (it will be appended separately if skills exist)
+	if strings.Contains(result, "{{skills}}") {
+		result = strings.ReplaceAll(result, "{{skills}}", "")
 	}
 	return result
 }
@@ -298,12 +340,28 @@ func BuildPureAgentSystemPrompt(
 	return renderPromptPlaceholdersWithStatus(template, []*KnowledgeBaseInfo{}, webSearchEnabled, currentTime)
 }
 
+// BuildSystemPromptOptions contains optional parameters for BuildSystemPrompt
+type BuildSystemPromptOptions struct {
+	SkillsMetadata []*skills.SkillMetadata
+}
+
 // BuildSystemPrompt builds the progressive RAG system prompt
 // This is the main function to use - it uses a unified template with dynamic web search status
 func BuildSystemPrompt(
 	knowledgeBases []*KnowledgeBaseInfo,
 	webSearchEnabled bool,
 	selectedDocs []*SelectedDocumentInfo,
+	systemPromptTemplate ...string,
+) string {
+	return BuildSystemPromptWithOptions(knowledgeBases, webSearchEnabled, selectedDocs, nil, systemPromptTemplate...)
+}
+
+// BuildSystemPromptWithOptions builds the system prompt with additional options like skills
+func BuildSystemPromptWithOptions(
+	knowledgeBases []*KnowledgeBaseInfo,
+	webSearchEnabled bool,
+	selectedDocs []*SelectedDocumentInfo,
+	options *BuildSystemPromptOptions,
 	systemPromptTemplate ...string,
 ) string {
 	var basePrompt string
@@ -324,6 +382,11 @@ func BuildSystemPrompt(
 	// Append selected documents section if any
 	if len(selectedDocs) > 0 {
 		basePrompt += formatSelectedDocuments(selectedDocs)
+	}
+
+	// Append skills metadata if available (Level 1 - Progressive Disclosure)
+	if options != nil && len(options.SkillsMetadata) > 0 {
+		basePrompt += formatSkillsMetadata(options.SkillsMetadata)
 	}
 
 	return basePrompt

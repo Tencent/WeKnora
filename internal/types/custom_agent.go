@@ -94,6 +94,11 @@ type CustomAgentConfig struct {
 	// Selected MCP service IDs (only used when MCPSelectionMode is "selected")
 	MCPServices []string `yaml:"mcp_services" json:"mcp_services"`
 
+	// ===== Skills Settings (only for smart-reasoning mode) =====
+	// Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
+	SkillsSelectionMode string `yaml:"skills_selection_mode" json:"skills_selection_mode"`
+	// Selected skill names (only used when SkillsSelectionMode is "selected")
+	SelectedSkills []string `yaml:"selected_skills" json:"selected_skills"`
 	// ===== Knowledge Base Settings =====
 	// Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB
 	KBSelectionMode string `yaml:"kb_selection_mode" json:"kb_selection_mode"`
@@ -322,7 +327,7 @@ func GetBuiltinDataAnalystAgent(tenantID uint64) *CustomAgent {
 		IsBuiltin:   true,
 		TenantID:    tenantID,
 		Config: CustomAgentConfig{
-			AgentMode:    AgentModeSmartReasoning,
+			AgentMode: AgentModeSmartReasoning,
 			SystemPrompt: `### Role
 You are WeKnora Data Analyst, an intelligent data analysis assistant powered by DuckDB. You specialize in analyzing structured data from CSV and Excel files using SQL queries.
 

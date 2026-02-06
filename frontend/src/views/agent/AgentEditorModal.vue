@@ -574,6 +574,70 @@
                   </div>
                 </div>
 
+                <!-- Skills 配置（仅 Agent 模式） -->
+                <div v-show="currentSection === 'skills' && isAgentMode" class="section">
+                  <div class="section-header">
+                    <h2>{{ $t('agent.editor.skillsConfig') }}</h2>
+                    <p class="section-description">{{ $t('agent.editor.skillsConfigDesc') }}</p>
+                  </div>
+
+                  <div class="settings-group">
+                    <!-- Skills 选择模式 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.skillsSelection') }}</label>
+                        <p class="desc">{{ $t('agent.editor.skillsSelectionDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-radio-group v-model="skillsSelectionMode">
+                          <t-radio-button value="all">{{ $t('agent.editor.skillsAll') }}</t-radio-button>
+                          <t-radio-button value="selected">{{ $t('agent.editor.skillsSelected') }}</t-radio-button>
+                          <t-radio-button value="none">{{ $t('agent.editor.skillsNone') }}</t-radio-button>
+                        </t-radio-group>
+                      </div>
+                    </div>
+
+                    <!-- 选择指定 Skills -->
+                    <div v-if="skillsSelectionMode === 'selected' && skillOptions.length > 0" class="setting-row setting-row-vertical">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.selectSkills') }}</label>
+                        <p class="desc">{{ $t('agent.editor.selectSkillsDesc') }}</p>
+                      </div>
+                      <div class="setting-control setting-control-full">
+                        <t-checkbox-group v-model="formData.config.selected_skills" class="skills-checkbox-group">
+                          <t-checkbox
+                            v-for="skill in skillOptions"
+                            :key="skill.name"
+                            :value="skill.name"
+                            class="skill-checkbox-item"
+                          >
+                            <div class="skill-item-content">
+                              <span class="skill-name">{{ skill.name }}</span>
+                              <span class="skill-desc">{{ skill.description }}</span>
+                            </div>
+                          </t-checkbox>
+                        </t-checkbox-group>
+                      </div>
+                    </div>
+
+                    <!-- 无可用 Skills 提示 -->
+                    <div v-if="skillOptions.length === 0" class="setting-row">
+                      <div class="setting-info">
+                        <p class="desc empty-hint">{{ $t('agent.editor.noSkillsAvailable') }}</p>
+                      </div>
+                    </div>
+
+                    <!-- Skills 说明 -->
+                    <div class="skill-info-box">
+                      <t-icon name="lightbulb" class="info-icon" />
+                      <div class="info-content">
+                        <p><strong>{{ $t('agent.editor.skillsInfoTitle') }}</strong></p>
+                        <p>{{ $t('agent.editor.skillsInfoContent') }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- 知识库配置 -->
                 <div v-show="currentSection === 'knowledge'" class="section">
                   <div class="section-header">
@@ -976,6 +1040,7 @@ import { createAgent, updateAgent, getPlaceholders, type CustomAgent, type Place
 import { listModels, type ModelConfig } from '@/api/model';
 import { listKnowledgeBases } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
+import { listSkills, type SkillInfo } from '@/api/skill';
 import { getAgentConfig, getConversationConfig } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import AgentAvatar from '@/components/AgentAvatar.vue';
@@ -1003,6 +1068,9 @@ const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number }[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
+const skillOptions = ref<{ name: string; description: string }[]>([]);
+// 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
+const skillsAvailable = ref(false);
 
 // 系统默认配置（用于内置智能体显示默认提示词）
 const defaultAgentSystemPrompt = ref('');  // Agent 模式的默认系统提示词（来自 agent-config）
@@ -1032,6 +1100,9 @@ const kbSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
 // MCP 服务选择模式：all=全部, selected=指定, none=不使用
 const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
+
+// Skills 选择模式：all=全部, selected=指定, none=不使用
+const skillsSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
 // 可用工具列表 (与后台 definitions.go 保持一致)
 const allTools = [
@@ -1167,6 +1238,10 @@ const navItems = computed(() => {
   if (isAgentMode.value) {
     items.push({ key: 'tools', icon: 'tools', label: t('agent.editor.toolsConfig') || '工具配置' });
   }
+  // Agent 模式且沙箱已启用时才显示 Skills 配置（disabled 时无法启用 Skills）
+  if (isAgentMode.value && skillsAvailable.value) {
+    items.push({ key: 'skills', icon: 'lightbulb', label: t('agent.editor.skillsConfig') });
+  }
   // 有知识库能力时才显示检索策略
   if (hasKnowledgeBase.value) {
     items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') || '检索策略' });
@@ -1203,6 +1278,9 @@ const defaultFormData = {
     // MCP 服务设置
     mcp_selection_mode: 'none' as 'all' | 'selected' | 'none',
     mcp_services: [] as string[],
+    // Skills 设置
+    skills_selection_mode: 'none' as 'all' | 'selected' | 'none',
+    selected_skills: [] as string[],
     // 知识库设置
     kb_selection_mode: 'none' as 'all' | 'selected' | 'none',
     knowledge_bases: [] as string[],
@@ -1296,6 +1374,7 @@ watch(() => props.visible, async (val) => {
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
       if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
+      if (!agentData.config.selected_skills) agentData.config.selected_skills = [];
       if (!agentData.config.supported_file_types) agentData.config.supported_file_types = [];
 
       // 兼容旧数据：如果没有 agent_mode 字段，根据 allowed_tools 推断
@@ -1310,6 +1389,7 @@ watch(() => props.visible, async (val) => {
       // 初始化知识库选择模式
       initKbSelectionMode();
       initMcpSelectionMode();
+      initSkillsSelectionMode();
       // 初始化完成后重置标志
       nextTick(() => {
         isInitializing.value = false;
@@ -1336,6 +1416,7 @@ watch(() => props.visible, async (val) => {
       formData.value = newFormData;
       kbSelectionMode.value = 'none';
       mcpSelectionMode.value = 'none';
+      skillsSelectionMode.value = 'none';
     }
   }
 });
@@ -1363,6 +1444,19 @@ const initMcpSelectionMode = () => {
     mcpSelectionMode.value = 'selected';
   } else {
     mcpSelectionMode.value = 'none';
+  }
+};
+
+// 初始化 Skills 选择模式
+const initSkillsSelectionMode = () => {
+  if (formData.value.config.skills_selection_mode) {
+    // 如果有保存的模式，直接使用
+    skillsSelectionMode.value = formData.value.config.skills_selection_mode;
+  } else if (formData.value.config.selected_skills?.length > 0) {
+    // 有指定 Skills
+    skillsSelectionMode.value = 'selected';
+  } else {
+    skillsSelectionMode.value = 'none';
   }
 };
 
@@ -1425,6 +1519,19 @@ watch(mcpSelectionMode, (mode) => {
     formData.value.config.mcp_services = [];
   }
   // selected 模式保持 mcp_services 不变
+});
+
+// 监听 Skills 选择模式变化
+watch(skillsSelectionMode, (mode) => {
+  formData.value.config.skills_selection_mode = mode;
+  if (mode === 'none') {
+    // 不使用 Skills，清空相关配置
+    formData.value.config.selected_skills = [];
+  } else if (mode === 'all') {
+    // 全部 Skills，清空指定列表
+    formData.value.config.selected_skills = [];
+  }
+  // selected 模式保持 selected_skills 不变
 });
 
 // 监听模式变化，自动调整配置
@@ -1539,6 +1646,18 @@ const loadDependencies = async () => {
       }
     } catch (e) {
       console.warn('Failed to load MCP services', e);
+    }
+
+    // 加载预装 Skills 列表及沙箱可用性（skills_available=false 时前端不展示 Skills 配置）
+    try {
+      const skillsRes = await listSkills();
+      skillsAvailable.value = skillsRes.skills_available !== false;
+      if (skillsRes.data && skillsRes.data.length > 0) {
+        skillOptions.value = skillsRes.data;
+      }
+    } catch (e) {
+      console.warn('Failed to load skills', e);
+      skillsAvailable.value = false;
     }
 
     // 加载占位符定义（从统一 API）
@@ -2919,6 +3038,96 @@ const handleSave = async () => {
   .tool-name, .tool-desc {
     color: #999;
   }
+}
+
+// Skills 选择样式
+.skills-checkbox-group {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  width: 100%;
+}
+
+.skill-checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #07c05f;
+    background: #f0faf5;
+  }
+
+  :deep(.t-checkbox__input) {
+    margin-top: 2px;
+  }
+
+  :deep(.t-checkbox__label) {
+    flex: 1;
+  }
+}
+
+.skill-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skill-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
+.skill-desc {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+}
+
+.skill-info-box {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: 8px;
+  border: 1px solid #bae6fd;
+  margin-top: 16px;
+
+  .info-icon {
+    font-size: 20px;
+    color: #0ea5e9;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .info-content {
+    flex: 1;
+
+    p {
+      margin: 0;
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.6;
+
+      &:first-child {
+        margin-bottom: 4px;
+      }
+
+      strong {
+        color: #0369a1;
+      }
+    }
+  }
+}
+
+.empty-hint {
+  color: #999;
+  font-style: italic;
 }
 
 // Checkbox 选中样式

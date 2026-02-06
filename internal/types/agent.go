@@ -33,6 +33,11 @@ type AgentConfig struct {
 	Thinking *bool `json:"thinking"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
 	RetrieveKBOnlyWhenMentioned bool `json:"retrieve_kb_only_when_mentioned"`
+
+	// Skills configuration (Progressive Disclosure pattern)
+	SkillsEnabled  bool     `json:"skills_enabled"`   // Whether skills are enabled (default: false)
+	SkillDirs      []string `json:"skill_dirs"`       // Directories to search for skills
+	AllowedSkills  []string `json:"allowed_skills"`   // Skill names whitelist (empty = allow all)
 }
 
 // SessionAgentConfig represents session-level agent configuration

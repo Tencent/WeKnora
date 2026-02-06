@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -33,6 +34,7 @@ type AgentEngine struct {
 	contextManager       interfaces.ContextManager // Context manager for writing agent conversation to LLM context
 	sessionID            string                    // Session ID for context management
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
+	skillsManager        *skills.Manager           // Skills manager for Progressive Disclosure (optional)
 }
 
 // listToolNames returns tool.function names for logging
@@ -72,6 +74,44 @@ func NewAgentEngine(
 	}
 }
 
+// NewAgentEngineWithSkills creates a new agent engine with skills support
+func NewAgentEngineWithSkills(
+	config *types.AgentConfig,
+	chatModel chat.Chat,
+	toolRegistry *tools.ToolRegistry,
+	eventBus *event.EventBus,
+	knowledgeBasesInfo []*KnowledgeBaseInfo,
+	selectedDocs []*SelectedDocumentInfo,
+	contextManager interfaces.ContextManager,
+	sessionID string,
+	systemPromptTemplate string,
+	skillsManager *skills.Manager,
+) *AgentEngine {
+	engine := NewAgentEngine(
+		config,
+		chatModel,
+		toolRegistry,
+		eventBus,
+		knowledgeBasesInfo,
+		selectedDocs,
+		contextManager,
+		sessionID,
+		systemPromptTemplate,
+	)
+	engine.skillsManager = skillsManager
+	return engine
+}
+
+// SetSkillsManager sets the skills manager for the engine
+func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
+	e.skillsManager = manager
+}
+
+// GetSkillsManager returns the skills manager
+func (e *AgentEngine) GetSkillsManager() *skills.Manager {
+	return e.skillsManager
+}
+
 // Execute executes the agent with conversation history and streaming output
 // All events are emitted to EventBus and handled by subscribers (like Handler layer)
 func (e *AgentEngine) Execute(
@@ -102,12 +142,27 @@ func (e *AgentEngine) Execute(
 	}
 
 	// Build system prompt using progressive RAG prompt
-	systemPrompt := BuildSystemPrompt(
-		e.knowledgeBasesInfo,
-		e.config.WebSearchEnabled,
-		e.selectedDocs,
-		e.systemPromptTemplate,
-	)
+	// If skills are enabled, include skills metadata (Level 1 - Progressive Disclosure)
+	var systemPrompt string
+	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
+		skillsMetadata := e.skillsManager.GetAllMetadata()
+		systemPrompt = BuildSystemPromptWithOptions(
+			e.knowledgeBasesInfo,
+			e.config.WebSearchEnabled,
+			e.selectedDocs,
+			&BuildSystemPromptOptions{
+				SkillsMetadata: skillsMetadata,
+			},
+			e.systemPromptTemplate,
+		)
+	} else {
+		systemPrompt = BuildSystemPrompt(
+			e.knowledgeBasesInfo,
+			e.config.WebSearchEnabled,
+			e.selectedDocs,
+			e.systemPromptTemplate,
+		)
+	}
 	logger.Debugf(ctx, "[Agent] SystemPrompt Length: %d characters", len(systemPrompt))
 	logger.Debugf(ctx, "[Agent] SystemPrompt (stream)\n----\n%s\n----", systemPrompt)
 

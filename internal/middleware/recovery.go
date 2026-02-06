@@ -2,9 +2,10 @@ package middleware
 
 import (
 	"fmt"
-	"log"
 	"runtime/debug"
 
+	"github.com/sirupsen/logrus"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,13 +14,17 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				// Get request ID
+				// Get request ID from context
+				ctx := c.Request.Context()
 				requestID, _ := c.Get("RequestID")
 
 				// Print stacktrace
 				stacktrace := debug.Stack()
-				// Log error
-				log.Printf("[PANIC] %s | %v | %s", requestID, err, stacktrace)
+				// Log error with structured logger
+				logger.ErrorWithFields(ctx, fmt.Errorf("panic: %v", err), logrus.Fields{
+					"request_id": requestID,
+					"stacktrace": string(stacktrace),
+				})
 
 				// 返回500错误
 				c.AbortWithStatusJSON(500, gin.H{
