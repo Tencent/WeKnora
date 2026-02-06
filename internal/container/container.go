@@ -131,7 +131,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewUserService))
 
 	// Extract services - register individual extracters with names
-	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtracter")))
+	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
 
 	must(container.Provide(service.NewMessageService))
