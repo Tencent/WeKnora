@@ -10,6 +10,8 @@ services:
       - "${FRONTEND_PORT:-80}:80"
     environment:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - APP_HOST=${APP_HOST:-app}
+      - APP_PORT=${APP_PORT:-8080}
     depends_on:
       app:
         condition: service_healthy

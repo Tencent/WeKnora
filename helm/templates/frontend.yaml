@@ -41,6 +41,11 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          env:
+            - name: APP_HOST
+              value: {{ .Values.frontend.appHost | default (printf "%s-app" (include "weknora.fullname" .)) | quote }}
+            - name: APP_PORT
+              value: {{ .Values.frontend.appPort | default .Values.app.service.port | quote }}
           ports:
             - containerPort: 80
               name: http
