@@ -1,0 +1,53 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+# -----------------------------
+# Install LibreOffice + base fonts
+# -----------------------------
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    fontconfig \
+    fonts-dejavu \
+    fonts-liberation \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fonts-wqy-zenhei \
+    fonts-wqy-microhei \
+    fonts-freefont-ttf \
+    ttf-mscorefonts-installer \
+    ca-certificates \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------
+# Copy Windows fonts (custom)
+# -----------------------------
+COPY fonts/ /usr/share/fonts/truetype/windows/
+
+# -----------------------------
+# Rebuild font cache
+# -----------------------------
+RUN fc-cache -fv
+
+# -----------------------------
+# Working directory for files
+# -----------------------------
+WORKDIR /files
+
+# -----------------------------
+# Keep container alive
+# -----------------------------
+CMD ["bash", "-c", "while true; do sleep 3600; done"]
+
+
+# 构建镜像
+# docker build -f docker/libreoffice/Dockerfile.LibreOffice -t hyec/libreoffice-cn docker/libreoffice
+# 启动容器
+# docker run -d --name hyec-libreoffice -v D:/work/HYEC/26.01/HYEC-KBS/files:/files hyec/libreoffice-cn
+# 转换文件
+# docker exec -it hyec-libreoffice soffice --headless --convert-to pdf "/files/QTD-E-160-0-MC-SPC-0001.docx" --outdir /files
