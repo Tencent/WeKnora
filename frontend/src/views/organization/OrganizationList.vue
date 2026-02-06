@@ -1349,6 +1349,7 @@ onUnmounted(() => {
   grid-template-columns: 1fr;
 }
 
+/* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */
 .org-card {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -1363,6 +1364,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 160px;
+  min-height: 160px;
 
   &::before {
     content: '';
@@ -1410,18 +1412,18 @@ onUnmounted(() => {
   .card-content {
     position: relative;
     z-index: 1;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .card-bottom {
     position: relative;
     z-index: 1;
-    padding-top: 10px;
+    padding-top: 8px;
   }
 
   .card-description {
-    font-size: 13px;
-    line-height: 20px;
+    font-size: 12px;
+    line-height: 18px;
   }
 
   .more-wrap {
@@ -1532,23 +1534,29 @@ onUnmounted(() => {
   }
 }
 
+/* 与知识库卡片内容区一致 */
 .card-content {
   flex: 1;
+  min-height: 0;
   margin-bottom: 8px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
+/* 三个列表卡片统一：描述字体 */
 .card-description {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  color: #64748b;
-  font-family: "PingFang SC";
+  color: #666;
+  font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 18px;
 }
 
 .card-bottom {
@@ -1557,7 +1565,7 @@ onUnmounted(() => {
   justify-content: space-between;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid rgba(226, 232, 240, 0.8);
+  border-top: 1px solid #f0f0f0;
 }
 
 .bottom-left {

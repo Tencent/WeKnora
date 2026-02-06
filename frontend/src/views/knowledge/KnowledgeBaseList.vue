@@ -1392,6 +1392,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   flex-direction: column;
   height: 160px;
+  min-height: 160px;
 
   &:hover {
     border-color: #07c05f;
@@ -1475,12 +1476,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .card-description {
-    font-size: 13px;
-    line-height: 20px;
+    font-size: 12px;
+    line-height: 18px;
   }
 
   .card-bottom {
-    padding-top: 10px;
+    padding-top: 8px;
   }
 
   .more-wrap {
@@ -1590,6 +1591,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .card-content {
   flex: 1;
+  min-height: 0;
   margin-bottom: 8px;
   overflow: hidden;
   display: flex;
@@ -1597,6 +1599,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 6px;
 }
 
+/* 三个列表卡片统一：描述字体 */
 .card-description {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -1604,7 +1607,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   line-clamp: 2;
   overflow: hidden;
   color: #666;
-  font-family: "PingFang SC";
+  font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;

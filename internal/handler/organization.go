@@ -18,13 +18,13 @@ import (
 
 // OrganizationHandler implements HTTP request handlers for organization management
 type OrganizationHandler struct {
-	orgService           interfaces.OrganizationService
-	shareService         interfaces.KBShareService
-	agentShareService    interfaces.AgentShareService
-	customAgentService   interfaces.CustomAgentService
-	userService          interfaces.UserService
-	knowledgeRepo        interfaces.KnowledgeRepository
-	chunkRepo            interfaces.ChunkRepository
+	orgService         interfaces.OrganizationService
+	shareService       interfaces.KBShareService
+	agentShareService  interfaces.AgentShareService
+	customAgentService interfaces.CustomAgentService
+	userService        interfaces.UserService
+	knowledgeRepo      interfaces.KnowledgeRepository
+	chunkRepo          interfaces.ChunkRepository
 }
 
 // NewOrganizationHandler creates a new organization handler
@@ -62,8 +62,8 @@ func NewOrganizationHandler(
 func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.CreateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -72,7 +72,7 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 		return
 	}
 
-	org, err := h.orgService.CreateOrganization(ctx, userID.(string), tenantID.(uint64), &req)
+	org, err := h.orgService.CreateOrganization(ctx, userID, tenantID, &req)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
@@ -86,7 +86,7 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 	logger.Infof(ctx, "Organization created: %s", org.ID)
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+		"data":    h.toOrgResponse(ctx, org, userID),
 	})
 }
 
@@ -104,7 +104,7 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	org, err := h.orgService.GetOrganization(ctx, orgID)
 	if err != nil {
@@ -115,7 +115,7 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+		"data":    h.toOrgResponse(ctx, org, userID),
 	})
 }
 
@@ -130,9 +130,9 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
-	orgs, err := h.orgService.ListUserOrganizations(ctx, userID.(string))
+	orgs, err := h.orgService.ListUserOrganizations(ctx, userID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list organizations: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list organizations").WithDetails(err.Error()))
@@ -141,7 +141,7 @@ func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 
 	response := make([]types.OrganizationResponse, 0, len(orgs))
 	for _, org := range orgs {
-		response = append(response, h.toOrgResponse(ctx, org, userID.(string)))
+		response = append(response, h.toOrgResponse(ctx, org, userID))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -169,7 +169,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	var req types.UpdateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -177,7 +177,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 		return
 	}
 
-	org, err := h.orgService.UpdateOrganization(ctx, orgID, userID.(string), &req)
+	org, err := h.orgService.UpdateOrganization(ctx, orgID, userID, &req)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to update organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
@@ -194,7 +194,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+		"data":    h.toOrgResponse(ctx, org, userID),
 	})
 }
 
@@ -211,9 +211,9 @@ func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
-	if err := h.orgService.DeleteOrganization(ctx, orgID, userID.(string)); err != nil {
+	if err := h.orgService.DeleteOrganization(ctx, orgID, userID); err != nil {
 		logger.Errorf(ctx, "Failed to delete organization: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied or organization not found"))
 		return
@@ -290,7 +290,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 
 	orgID := c.Param("id")
 	memberUserID := c.Param("user_id")
-	operatorUserID, _ := c.Get(types.UserIDContextKey.String())
+	operatorUserID := c.GetString(types.UserIDContextKey.String())
 
 	var req types.UpdateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -298,7 +298,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 		return
 	}
 
-	if err := h.orgService.UpdateMemberRole(ctx, orgID, memberUserID, req.Role, operatorUserID.(string)); err != nil {
+	if err := h.orgService.UpdateMemberRole(ctx, orgID, memberUserID, req.Role, operatorUserID); err != nil {
 		logger.Errorf(ctx, "Failed to update member role: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
@@ -325,9 +325,9 @@ func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
 
 	orgID := c.Param("id")
 	memberUserID := c.Param("user_id")
-	operatorUserID, _ := c.Get(types.UserIDContextKey.String())
+	operatorUserID := c.GetString(types.UserIDContextKey.String())
 
-	if err := h.orgService.RemoveMember(ctx, orgID, memberUserID, operatorUserID.(string)); err != nil {
+	if err := h.orgService.RemoveMember(ctx, orgID, memberUserID, operatorUserID); err != nil {
 		logger.Errorf(ctx, "Failed to remove member: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
@@ -353,9 +353,9 @@ func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
-	code, err := h.orgService.GenerateInviteCode(ctx, orgID, userID.(string))
+	code, err := h.orgService.GenerateInviteCode(ctx, orgID, userID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate invite code: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
@@ -382,7 +382,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	inviteCode := c.Param("code")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Get organization by invite code
 	org, err := h.orgService.GetOrganizationByInviteCode(ctx, inviteCode)
@@ -403,7 +403,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 	agentShareCount := len(agentShares)
 
 	// Check if user is already a member
-	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID.(string))
+	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID)
 	isAlreadyMember := memberErr == nil
 
 	c.JSON(http.StatusOK, gin.H{
@@ -437,8 +437,8 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.JoinOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -446,7 +446,7 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 		return
 	}
 
-	org, err := h.orgService.JoinByInviteCode(ctx, req.InviteCode, userID.(string), tenantID.(uint64))
+	org, err := h.orgService.JoinByInviteCode(ctx, req.InviteCode, userID, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to join organization: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
@@ -457,10 +457,10 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "User %s joined organization %s", secutils.SanitizeForLog(userID.(string)), org.ID)
+	logger.Infof(ctx, "User %s joined organization %s", secutils.SanitizeForLog(userID), org.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+		"data":    h.toOrgResponse(ctx, org, userID),
 	})
 }
 
@@ -478,8 +478,8 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.SubmitJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -501,7 +501,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	}
 
 	// Check if user is already a member
-	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID.(string))
+	_, memberErr := h.orgService.GetMember(ctx, org.ID, userID)
 	if memberErr == nil {
 		c.Error(apperrors.NewValidationError("You are already a member of this organization"))
 		return
@@ -515,7 +515,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 	}
 
 	// Submit join request (service defaults to viewer if role empty)
-	request, err := h.orgService.SubmitJoinRequest(ctx, org.ID, userID.(string), tenantID.(uint64), req.Message, requestedRole)
+	request, err := h.orgService.SubmitJoinRequest(ctx, org.ID, userID, tenantID, req.Message, requestedRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to submit join request: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
@@ -530,7 +530,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "User %s submitted join request for organization %s", secutils.SanitizeForLog(userID.(string)), org.ID)
+	logger.Infof(ctx, "User %s submitted join request for organization %s", secutils.SanitizeForLog(userID), org.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    request,
@@ -549,7 +549,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 // @Router       /organizations/search [get]
 func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 	ctx := c.Request.Context()
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 	query := c.Query("q")
 	limit := 20
 	if l := c.Query("limit"); l != "" {
@@ -557,7 +557,7 @@ func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 			limit = n
 		}
 	}
-	resp, err := h.orgService.SearchSearchableOrganizations(ctx, userID.(string), query, limit)
+	resp, err := h.orgService.SearchSearchableOrganizations(ctx, userID, query, limit)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to search organizations: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to search organizations"))
@@ -583,8 +583,8 @@ func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 // @Router       /organizations/join-by-id [post]
 func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 	ctx := c.Request.Context()
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req types.JoinByOrganizationIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
@@ -596,7 +596,7 @@ func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("Invalid role; must be viewer, editor, or admin"))
 		return
 	}
-	org, err := h.orgService.JoinByOrganizationID(ctx, req.OrganizationID, userID.(string), tenantID.(uint64), req.Message, requestedRole)
+	org, err := h.orgService.JoinByOrganizationID(ctx, req.OrganizationID, userID, tenantID, req.Message, requestedRole)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to join organization by ID: %v", err)
 		if errors.Is(err, service.ErrOrgNotFound) {
@@ -618,10 +618,10 @@ func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError("Failed to join organization"))
 		return
 	}
-	logger.Infof(ctx, "User %s joined organization %s by ID", secutils.SanitizeForLog(userID.(string)), org.ID)
+	logger.Infof(ctx, "User %s joined organization %s by ID", secutils.SanitizeForLog(userID), org.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.toOrgResponse(ctx, org, userID.(string)),
+		"data":    h.toOrgResponse(ctx, org, userID),
 	})
 }
 
@@ -641,8 +641,8 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.RequestRoleUpgradeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -656,7 +656,7 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 		return
 	}
 
-	request, err := h.orgService.RequestRoleUpgrade(ctx, orgID, userID.(string), tenantID.(uint64), req.RequestedRole, req.Message)
+	request, err := h.orgService.RequestRoleUpgrade(ctx, orgID, userID, tenantID, req.RequestedRole, req.Message)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to submit role upgrade request: %v", err)
 		if err.Error() == "pending request already exists" {
@@ -679,7 +679,7 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "User %s submitted role upgrade request for organization %s", secutils.SanitizeForLog(userID.(string)), orgID)
+	logger.Infof(ctx, "User %s submitted role upgrade request for organization %s", secutils.SanitizeForLog(userID), orgID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    request,
@@ -699,7 +699,7 @@ func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Check if user is the owner
 	org, err := h.orgService.GetOrganization(ctx, orgID)
@@ -708,13 +708,13 @@ func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
 		return
 	}
 
-	if org.OwnerID == userID.(string) {
+	if org.OwnerID == userID {
 		c.Error(apperrors.NewForbiddenError("Organization owner cannot leave. Please transfer ownership or delete the organization."))
 		return
 	}
 
 	// Remove the user from the organization
-	if err := h.orgService.RemoveMember(ctx, orgID, userID.(string), userID.(string)); err != nil {
+	if err := h.orgService.RemoveMember(ctx, orgID, userID, userID); err != nil {
 		logger.Errorf(ctx, "Failed to leave organization: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to leave organization"))
 		return
@@ -740,10 +740,10 @@ func (h *OrganizationHandler) ListJoinRequests(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Check admin
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can view join requests"))
 		return
@@ -811,10 +811,10 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 
 	orgID := c.Param("id")
 	requestID := c.Param("request_id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Check admin
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can review join requests"))
 		return
@@ -834,7 +834,7 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 		assignRole = &req.Role
 	}
 
-	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID.(string), req.Message, assignRole); err != nil {
+	if err := h.orgService.ReviewJoinRequest(ctx, orgID, requestID, req.Approved, userID, req.Message, assignRole); err != nil {
 		logger.Errorf(ctx, "Failed to review join request: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
 			c.Error(apperrors.NewValidationError("空间成员已满，无法通过该加入申请"))
@@ -870,8 +870,8 @@ func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	kbID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.ShareKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -879,7 +879,7 @@ func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
 		return
 	}
 
-	share, err := h.shareService.ShareKnowledgeBase(ctx, kbID, req.OrganizationID, userID.(string), tenantID.(uint64), req.Permission)
+	share, err := h.shareService.ShareKnowledgeBase(ctx, kbID, req.OrganizationID, userID, tenantID, req.Permission)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to share knowledge base: %v", err)
 		if errors.Is(err, service.ErrOrgRoleCannotShare) {
@@ -909,13 +909,13 @@ func (h *OrganizationHandler) ListKBShares(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	kbID := c.Param("id")
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
-	if tenantID == nil {
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
 		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 		return
 	}
 
-	shares, err := h.shareService.ListSharesByKnowledgeBase(ctx, kbID, tenantID.(uint64))
+	shares, err := h.shareService.ListSharesByKnowledgeBase(ctx, kbID, tenantID)
 	if err != nil {
 		if errors.Is(err, service.ErrKBNotFound) {
 			c.Error(apperrors.NewNotFoundError("Knowledge base not found"))
@@ -973,7 +973,7 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	shareID := c.Param("share_id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	var req types.UpdateSharePermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -981,7 +981,7 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 		return
 	}
 
-	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID.(string)); err != nil {
+	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID); err != nil {
 		logger.Errorf(ctx, "Failed to update share permission: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
@@ -1007,9 +1007,9 @@ func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	shareID := c.Param("share_id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
-	if err := h.shareService.RemoveShare(ctx, shareID, userID.(string)); err != nil {
+	if err := h.shareService.RemoveShare(ctx, shareID, userID); err != nil {
 		logger.Errorf(ctx, "Failed to remove share: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
@@ -1034,10 +1034,10 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Check if user is a member and get their role for effective-permission calculation
-	member, err := h.orgService.GetMember(ctx, orgID, userID.(string))
+	member, err := h.orgService.GetMember(ctx, orgID, userID)
 	if err != nil {
 		c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
 		return
@@ -1108,10 +1108,10 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, userID.(string), tenantID)
+	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared knowledge bases: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
@@ -1129,8 +1129,8 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 	ctx := c.Request.Context()
 	agentID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	var req types.ShareKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1138,7 +1138,7 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 		return
 	}
 
-	share, err := h.agentShareService.ShareAgent(ctx, agentID, req.OrganizationID, userID.(string), tenantID.(uint64), req.Permission)
+	share, err := h.agentShareService.ShareAgent(ctx, agentID, req.OrganizationID, userID, tenantID, req.Permission)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to share agent: %v", err)
 		if errors.Is(err, service.ErrOrgRoleCannotShareAgent) {
@@ -1184,8 +1184,8 @@ func (h *OrganizationHandler) ListAgentShares(c *gin.Context) {
 func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	ctx := c.Request.Context()
 	shareID := c.Param("share_id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	if err := h.agentShareService.RemoveShare(ctx, shareID, userID.(string)); err != nil {
+	userID := c.GetString(types.UserIDContextKey.String())
+	if err := h.agentShareService.RemoveShare(ctx, shareID, userID); err != nil {
 		logger.Errorf(ctx, "Failed to remove agent share: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
 		return
@@ -1197,8 +1197,8 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	ctx := c.Request.Context()
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	member, err := h.orgService.GetMember(ctx, orgID, userID.(string))
+	userID := c.GetString(types.UserIDContextKey.String())
+	member, err := h.orgService.GetMember(ctx, orgID, userID)
 	if err != nil {
 		c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
 		return
@@ -1257,9 +1257,9 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 // ListSharedAgents lists agents shared to the current user
 func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 	ctx := c.Request.Context()
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
-	list, err := h.agentShareService.ListSharedAgents(ctx, userID.(string), tenantID.(uint64))
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	list, err := h.agentShareService.ListSharedAgents(ctx, userID, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared agents: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
@@ -1277,10 +1277,10 @@ type SetSharedAgentDisabledByMeRequest struct {
 // SetSharedAgentDisabledByMe sets whether the current tenant has disabled this shared agent for their conversation dropdown
 func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 	ctx := c.Request.Context()
-	userID, _ := c.Get(types.UserIDContextKey.String())
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
-	uid := userID.(string)
-	tid := tenantID.(uint64)
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	uid := userID
+	tid := tenantID
 
 	var req SetSharedAgentDisabledByMeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1378,10 +1378,10 @@ func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
 
 	orgID := c.Param("id")
 	query := c.Query("q")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Check admin permission
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
 		return
@@ -1458,10 +1458,10 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	orgID := c.Param("id")
-	userID, _ := c.Get(types.UserIDContextKey.String())
+	userID := c.GetString(types.UserIDContextKey.String())
 
 	// Check admin permission
-	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID.(string))
+	isAdmin, err := h.orgService.IsOrgAdmin(ctx, orgID, userID)
 	if err != nil || !isAdmin {
 		c.Error(apperrors.NewForbiddenError("Only organization admins can invite members"))
 		return
@@ -1505,7 +1505,7 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "User %s invited user %s to organization %s with role %s",
-		secutils.SanitizeForLog(userID.(string)),
+		secutils.SanitizeForLog(userID),
 		secutils.SanitizeForLog(req.UserID),
 		orgID,
 		req.Role)
