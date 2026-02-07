@@ -620,6 +620,8 @@ func (t *GrepChunksTool) applyMMR(
 		lambda, k, len(results))
 
 	selected := make([]chunkWithTitle, 0, k)
+	selectedTokenSets := make([]map[string]struct{}, 0, k) // cache of token sets
+
 	candidates := make([]chunkWithTitle, len(results))
 	copy(candidates, results)
 
@@ -639,9 +641,8 @@ func (t *GrepChunksTool) applyMMR(
 			redundancy := 0.0
 
 			// Calculate maximum redundancy with already selected results
-			for _, s := range selected {
-				selectedTokens := t.tokenizeSimple(s.Content)
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTokens))
+			for _, selectedTS := range selectedTokenSets {
+				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTS))
 			}
 
 			// MMR score: balance relevance and diversity
@@ -654,9 +655,14 @@ func (t *GrepChunksTool) applyMMR(
 
 		// Add best candidate to selected and remove from candidates
 		selected = append(selected, candidates[bestIdx])
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
+		selectedTokenSets = append(selectedTokenSets, tokenSets[bestIdx])
+
+		// Remove corresponding token set. Use swap deletion
+		last := len(candidates) - 1
+		candidates[bestIdx] = candidates[last]
+		tokenSets[bestIdx] = tokenSets[last]
+		candidates = candidates[:last]
+		tokenSets = tokenSets[:last]
 	}
 
 	// Compute average redundancy among selected results
@@ -665,9 +671,7 @@ func (t *GrepChunksTool) applyMMR(
 		pairs := 0
 		for i := 0; i < len(selected); i++ {
 			for j := i + 1; j < len(selected); j++ {
-				si := t.tokenizeSimple(selected[i].Content)
-				sj := t.tokenizeSimple(selected[j].Content)
-				avgRed += t.jaccard(si, sj)
+				avgRed += t.jaccard(selectedTokenSets[i], selectedTokenSets[j]) // read token from cache
 				pairs++
 			}
 		}
