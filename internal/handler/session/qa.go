@@ -18,19 +18,20 @@ import (
 
 // qaRequestContext holds all the common data needed for QA requests
 type qaRequestContext struct {
-	ctx              context.Context
-	c                *gin.Context
-	sessionID        string
-	requestID        string
-	query            string
-	session          *types.Session
-	customAgent      *types.CustomAgent
-	assistantMessage *types.Message
-	knowledgeBaseIDs []string
-	knowledgeIDs     []string
-	summaryModelID   string
-	webSearchEnabled bool
-	mentionedItems   types.MentionedItems
+	ctx               context.Context
+	c                 *gin.Context
+	sessionID         string
+	requestID         string
+	query             string
+	session           *types.Session
+	customAgent       *types.CustomAgent
+	assistantMessage  *types.Message
+	knowledgeBaseIDs  []string
+	knowledgeIDs      []string
+	summaryModelID    string
+	webSearchEnabled  bool
+	mentionedItems    types.MentionedItems
+	effectiveTenantID uint64 // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
 }
 
 // parseQARequest parses and validates a QA request, returns the request context
@@ -71,20 +72,80 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewNotFoundError("Session not found")
 	}
 
-	// Get custom agent if agent_id is provided
+	// Get custom agent if agent_id is provided. Backend resolves shared agent from share relation (no client-provided tenant).
 	var customAgent *types.CustomAgent
+	var effectiveTenantID uint64
 	if request.AgentID != "" {
-		logger.Infof(ctx, "Fetching custom agent, agent ID: %s", secutils.SanitizeForLog(request.AgentID))
-		agent, err := h.customAgentService.GetAgentByID(ctx, request.AgentID)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
-				secutils.SanitizeForLog(request.AgentID), err)
+		logger.Infof(ctx, "Resolving agent, agent ID: %s", secutils.SanitizeForLog(request.AgentID))
+		userIDVal, _ := c.Get(types.UserIDContextKey.String())
+		currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
+		if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
+			userID, _ := userIDVal.(string)
+			agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID, currentTenantID, request.AgentID)
+			if err == nil && agent != nil {
+				effectiveTenantID = agent.TenantID
+				customAgent = agent
+				logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
+					customAgent.ID, customAgent.Name, effectiveTenantID)
+			}
+		}
+		if customAgent == nil {
+			agent, err := h.customAgentService.GetAgentByID(ctx, request.AgentID)
+			if err == nil {
+				customAgent = agent
+				logger.Infof(ctx, "Using own agent: ID=%s, Name=%s, AgentMode=%s",
+					customAgent.ID, customAgent.Name, customAgent.Config.AgentMode)
+			} else {
+				logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
+					secutils.SanitizeForLog(request.AgentID), err)
+			}
 		} else {
-			customAgent = agent
-			logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s",
-				customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode)
+			logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
+				customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode, effectiveTenantID)
 		}
 	}
+
+	// Merge @mentioned items into knowledge_base_ids and knowledge_ids so that
+	// retrieval (quick-answer and agent mode) uses the same targets the user @mentioned.
+	// This fixes the case where user only @mentions a (shared) KB in the input but
+	// does not select it in the sidebar — without this merge, retrieval would not search those KBs.
+	kbIDs := make([]string, 0, len(request.KnowledgeBaseIDs)+len(request.MentionedItems))
+	kbIDSet := make(map[string]bool)
+	for _, id := range request.KnowledgeBaseIDs {
+		if id != "" && !kbIDSet[id] {
+			kbIDs = append(kbIDs, id)
+			kbIDSet[id] = true
+		}
+	}
+	knowledgeIDs := make([]string, 0, len(request.KnowledgeIds)+len(request.MentionedItems))
+	knowledgeIDSet := make(map[string]bool)
+	for _, id := range request.KnowledgeIds {
+		if id != "" && !knowledgeIDSet[id] {
+			knowledgeIDs = append(knowledgeIDs, id)
+			knowledgeIDSet[id] = true
+		}
+	}
+	for _, item := range request.MentionedItems {
+		if item.ID == "" {
+			continue
+		}
+		switch item.Type {
+		case "kb":
+			if !kbIDSet[item.ID] {
+				kbIDs = append(kbIDs, item.ID)
+				kbIDSet[item.ID] = true
+			}
+		case "file":
+			if !knowledgeIDSet[item.ID] {
+				knowledgeIDs = append(knowledgeIDs, item.ID)
+				knowledgeIDSet[item.ID] = true
+			}
+		}
+	}
+
+	// Log merge results for debugging
+	logger.Infof(ctx, "[%s] @mention merge: request.KnowledgeBaseIDs=%v, request.MentionedItems=%d, merged kbIDs=%v, merged knowledgeIDs=%v",
+		logPrefix, request.KnowledgeBaseIDs, len(request.MentionedItems), kbIDs, knowledgeIDs)
 
 	// Build request context
 	reqCtx := &qaRequestContext{
@@ -101,11 +162,12 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			RequestID:   c.GetString(types.RequestIDContextKey.String()),
 			IsCompleted: false,
 		},
-		knowledgeBaseIDs: secutils.SanitizeForLogArray(request.KnowledgeBaseIDs),
-		knowledgeIDs:     secutils.SanitizeForLogArray(request.KnowledgeIds),
-		summaryModelID:   secutils.SanitizeForLog(request.SummaryModelID),
-		webSearchEnabled: request.WebSearchEnabled,
-		mentionedItems:   convertMentionedItems(request.MentionedItems),
+		knowledgeBaseIDs:  secutils.SanitizeForLogArray(kbIDs),
+		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
+		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
+		webSearchEnabled:  request.WebSearchEnabled,
+		mentionedItems:    convertMentionedItems(request.MentionedItems),
+		effectiveTenantID: effectiveTenantID,
 	}
 
 	return reqCtx, &request, nil
@@ -127,9 +189,18 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	// Write initial agent_query event
 	h.writeAgentQueryEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID)
 
+	// Base context for async work: when using shared agent, use source tenant for model/KB/MCP resolution
+	baseCtx := reqCtx.ctx
+	if reqCtx.effectiveTenantID != 0 && h.tenantService != nil {
+		if tenant, err := h.tenantService.GetTenantByID(reqCtx.ctx, reqCtx.effectiveTenantID); err == nil && tenant != nil {
+			baseCtx = context.WithValue(context.WithValue(reqCtx.ctx, types.TenantIDContextKey, reqCtx.effectiveTenantID), types.TenantInfoContextKey, tenant)
+			logger.Infof(reqCtx.ctx, "Using effective tenant %d for shared agent (model/KB/MCP)", reqCtx.effectiveTenantID)
+		}
+	}
+
 	// Create EventBus and cancellable context
 	eventBus := event.NewEventBus()
-	asyncCtx, cancel := context.WithCancel(logger.CloneContext(reqCtx.ctx))
+	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
 
 	streamCtx := &sseStreamContext{
 		eventBus:         eventBus,
@@ -139,7 +210,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool) *
 	}
 
 	// Setup stop event handler
-	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.assistantMessage, cancel)
+	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.session.TenantID, reqCtx.assistantMessage, cancel)
 
 	// Setup stream handler
 	h.setupStreamHandler(asyncCtx, reqCtx.sessionID, reqCtx.assistantMessage.ID,
@@ -342,7 +413,9 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 
 			logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 			// Content already contains <think>...</think> tags from chat_completion_stream.go
-			h.completeAssistantMessage(streamCtx.asyncCtx, streamCtx.assistantMessage)
+			// Use session's tenant for message update (asyncCtx may have effectiveTenantID when using shared agent)
+			updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
+			h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage)
 			// Emit EventAgentComplete - this will trigger handleComplete which sends the SSE complete event
 			// Note: Don't cancel context here, let the SSE handler close naturally after receiving the complete event
 			streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
@@ -446,7 +519,9 @@ func (h *Handler) executeAgentModeQA(reqCtx *qaRequestContext) {
 					errors.NewInternalServerError(fmt.Sprintf("Agent QA service panicked: %v\n%s", r, string(buf))),
 					map[string]interface{}{"session_id": sessionID})
 			}
-			h.completeAssistantMessage(streamCtx.asyncCtx, streamCtx.assistantMessage)
+			// Use session's tenant for message update (session belongs to session.TenantID; asyncCtx may have effectiveTenantID when using shared agent)
+			updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
+			h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage)
 			logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 		}()
 

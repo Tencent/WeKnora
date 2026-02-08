@@ -49,6 +49,7 @@ type RouterParams struct {
 	TagHandler            *handler.TagHandler
 	CustomAgentHandler    *handler.CustomAgentHandler
 	SkillHandler          *handler.SkillHandler
+	OrganizationHandler   *handler.OrganizationHandler
 }
 
 // NewRouter 创建新的路由
@@ -114,6 +115,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
 		RegisterSkillRoutes(v1, params.SkillHandler)
+		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
 	}
 
 	return r
@@ -449,4 +451,87 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler)
 		// List all preloaded skills
 		skills.GET("", skillHandler.ListSkills)
 	}
+}
+
+// RegisterOrganizationRoutes registers organization and sharing routes
+func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler) {
+	// Organization routes
+	orgs := r.Group("/organizations")
+	{
+		// Create organization
+		orgs.POST("", orgHandler.CreateOrganization)
+		// List my organizations
+		orgs.GET("", orgHandler.ListMyOrganizations)
+		// Preview organization by invite code (without joining)
+		orgs.GET("/preview/:code", orgHandler.PreviewByInviteCode)
+		// Join organization by invite code
+		orgs.POST("/join", orgHandler.JoinByInviteCode)
+		// Submit join request (for organizations that require approval)
+		orgs.POST("/join-request", orgHandler.SubmitJoinRequest)
+		// Search searchable (discoverable) organizations
+		orgs.GET("/search", orgHandler.SearchOrganizations)
+		// Join searchable organization by ID (no invite code)
+		orgs.POST("/join-by-id", orgHandler.JoinByOrganizationID)
+		// Get organization by ID
+		orgs.GET("/:id", orgHandler.GetOrganization)
+		// Update organization
+		orgs.PUT("/:id", orgHandler.UpdateOrganization)
+		// Delete organization
+		orgs.DELETE("/:id", orgHandler.DeleteOrganization)
+		// Leave organization
+		orgs.POST("/:id/leave", orgHandler.LeaveOrganization)
+		// Request role upgrade (for existing members)
+		orgs.POST("/:id/request-upgrade", orgHandler.RequestRoleUpgrade)
+		// Generate invite code
+		orgs.POST("/:id/invite-code", orgHandler.GenerateInviteCode)
+		// Search users for invite (admin only)
+		orgs.GET("/:id/search-users", orgHandler.SearchUsersForInvite)
+		// Invite member directly (admin only)
+		orgs.POST("/:id/invite", orgHandler.InviteMember)
+		// List members
+		orgs.GET("/:id/members", orgHandler.ListMembers)
+		// Update member role
+		orgs.PUT("/:id/members/:user_id", orgHandler.UpdateMemberRole)
+		// Remove member
+		orgs.DELETE("/:id/members/:user_id", orgHandler.RemoveMember)
+		// List join requests (admin only)
+		orgs.GET("/:id/join-requests", orgHandler.ListJoinRequests)
+		// Review join request (admin only)
+		orgs.PUT("/:id/join-requests/:request_id/review", orgHandler.ReviewJoinRequest)
+		// List knowledge bases shared to this organization
+		orgs.GET("/:id/shares", orgHandler.ListOrgShares)
+		// List agents shared to this organization
+		orgs.GET("/:id/agent-shares", orgHandler.ListOrgAgentShares)
+		// List all knowledge bases in this organization (including mine) for list-page space view
+		orgs.GET("/:id/shared-knowledge-bases", orgHandler.ListOrganizationSharedKnowledgeBases)
+		// List all agents in this organization (including mine) for list-page space view
+		orgs.GET("/:id/shared-agents", orgHandler.ListOrganizationSharedAgents)
+	}
+
+	// Knowledge base sharing routes (add to existing kb routes)
+	kbShares := r.Group("/knowledge-bases/:id/shares")
+	{
+		// Share knowledge base
+		kbShares.POST("", orgHandler.ShareKnowledgeBase)
+		// List shares
+		kbShares.GET("", orgHandler.ListKBShares)
+		// Update share permission
+		kbShares.PUT("/:share_id", orgHandler.UpdateSharePermission)
+		// Remove share
+		kbShares.DELETE("/:share_id", orgHandler.RemoveShare)
+	}
+
+	// Agent sharing routes
+	agentShares := r.Group("/agents/:id/shares")
+	{
+		agentShares.POST("", orgHandler.ShareAgent)
+		agentShares.GET("", orgHandler.ListAgentShares)
+		agentShares.DELETE("/:share_id", orgHandler.RemoveAgentShare)
+	}
+
+	// Shared knowledge bases route
+	r.GET("/shared-knowledge-bases", orgHandler.ListSharedKnowledgeBases)
+	// Shared agents route
+	r.GET("/shared-agents", orgHandler.ListSharedAgents)
+	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
 }

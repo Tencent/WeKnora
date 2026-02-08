@@ -95,6 +95,28 @@ func (r *userRepository) ListUsers(ctx context.Context, offset, limit int) ([]*t
 	return users, nil
 }
 
+// SearchUsers searches users by username or email
+func (r *userRepository) SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error) {
+	var users []*types.User
+	searchPattern := "%" + query + "%"
+
+	dbQuery := r.db.WithContext(ctx).
+		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where("is_active = ?", true).
+		Order("username ASC")
+
+	if limit > 0 {
+		dbQuery = dbQuery.Limit(limit)
+	} else {
+		dbQuery = dbQuery.Limit(20) // default limit
+	}
+
+	if err := dbQuery.Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 // authTokenRepository implements auth token repository interface
 type authTokenRepository struct {
 	db *gorm.DB

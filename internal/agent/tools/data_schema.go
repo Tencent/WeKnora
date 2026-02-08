@@ -49,8 +49,8 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, err
 	}
 
-	// Get knowledge to get TenantID
-	knowledge, err := t.knowledgeService.GetKnowledgeByID(ctx, input.KnowledgeID)
+	// Get knowledge to get TenantID (use IDOnly to support cross-tenant shared KB)
+	knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, input.KnowledgeID)
 	if err != nil {
 		return &types.ToolResult{
 			Success: false,

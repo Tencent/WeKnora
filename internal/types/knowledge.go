@@ -147,6 +147,12 @@ type ManualKnowledgePayload struct {
 	TagID   string `json:"tag_id"`
 }
 
+// KnowledgeSearchScope defines a (tenant_id, knowledge_base_id) scope for knowledge search (e.g. own KBs + shared KBs).
+type KnowledgeSearchScope struct {
+	TenantID uint64
+	KBID     string
+}
+
 // NewManualKnowledgeMetadata creates a new ManualKnowledgeMetadata instance.
 func NewManualKnowledgeMetadata(content, status string, version int) *ManualKnowledgeMetadata {
 	if version <= 0 {

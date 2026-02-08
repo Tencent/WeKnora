@@ -1,8 +1,11 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
 
 // 知识库管理 API（列表、创建、获取、更新、删除、复制）
-export function listKnowledgeBases() {
-  return get(`/api/v1/knowledge-bases`);
+export function listKnowledgeBases(params?: { agent_id?: string }) {
+  const query = new URLSearchParams();
+  if (params?.agent_id) query.set('agent_id', params.agent_id);
+  const qs = query.toString();
+  return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
 }
 
 export function createKnowledgeBase(data: { 
@@ -23,8 +26,11 @@ export function createKnowledgeBase(data: {
   return post(`/api/v1/knowledge-bases`, data);
 }
 
-export function getKnowledgeBaseById(id: string) {
-  return get(`/api/v1/knowledge-bases/${id}`);
+export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }) {
+  const query = new URLSearchParams();
+  if (options?.agent_id) query.set('agent_id', options.agent_id);
+  const qs = query.toString();
+  return get(qs ? `/api/v1/knowledge-bases/${id}?${qs}` : `/api/v1/knowledge-bases/${id}`);
 }
 
 export function updateKnowledgeBase(id: string, data: { name: string; description?: string; config: any }) {
@@ -81,8 +87,11 @@ export function listKnowledgeFiles(
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge?${qs}`);
 }
 
-export function getKnowledgeDetails(id: string) {
-  return get(`/api/v1/knowledge/${id}`);
+export function getKnowledgeDetails(id: string, options?: { agent_id?: string }) {
+  const query = new URLSearchParams();
+  if (options?.agent_id) query.set('agent_id', options.agent_id);
+  const qs = query.toString();
+  return get(qs ? `/api/v1/knowledge/${id}?${qs}` : `/api/v1/knowledge/${id}`);
 }
 
 export function updateManualKnowledge(id: string, data: { title: string; content: string; status: string }) {
@@ -97,8 +106,12 @@ export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 
-export function batchQueryKnowledge(idsQueryString: string) {
-  return get(`/api/v1/knowledge/batch?${idsQueryString}`);
+/** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
+export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string) {
+  let qs = idsQueryString;
+  if (kbId) qs += `&kb_id=${encodeURIComponent(kbId)}`;
+  if (agentId) qs += `&agent_id=${encodeURIComponent(agentId)}`;
+  return get(`/api/v1/knowledge/batch?${qs}`);
 }
 
 export function getKnowledgeDetailsCon(id: string, page: number) {
@@ -265,10 +278,20 @@ export function updateFAQImportResultDisplayStatus(knowledgeBaseId: string, disp
   });
 }
 
-export function searchKnowledge(keyword: string, offset = 0, limit = 20, fileTypes?: string[]) {
-  let url = `/api/v1/knowledge/search?keyword=${encodeURIComponent(keyword)}&offset=${offset}&limit=${limit}`;
+export function searchKnowledge(
+  keyword: string,
+  offset = 0,
+  limit = 20,
+  fileTypes?: string[],
+  options?: { agent_id?: string }
+) {
+  const query = new URLSearchParams();
+  query.set('keyword', keyword);
+  query.set('offset', String(offset));
+  query.set('limit', String(limit));
   if (fileTypes && fileTypes.length > 0) {
-    url += `&file_types=${encodeURIComponent(fileTypes.join(','))}`;
+    query.set('file_types', fileTypes.join(','));
   }
-  return get(url);
+  if (options?.agent_id) query.set('agent_id', options.agent_id);
+  return get(`/api/v1/knowledge/search?${query.toString()}`);
 }

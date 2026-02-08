@@ -8,9 +8,13 @@ import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
 import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
+import { useOrganizationStore } from '@/stores/organization';
+import { useAuthStore } from '@/stores/auth';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
 const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
+const orgStore = useOrganizationStore();
+const authStore = useAuthStore();
 const router = useRouter();
 import {
   batchQueryKnowledge,
@@ -32,9 +36,62 @@ const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadInputRef = ref<HTMLInputElement | null>(null);
+const folderUploadInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const kbLoading = ref(false);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
+
+// Permission control: check if current user owns this KB or has edit/manage permission
+const isOwner = computed(() => {
+  if (!kbInfo.value) return false;
+  // Check if the current user's tenant ID matches the KB's tenant ID
+  const userTenantId = authStore.effectiveTenantId;
+  return kbInfo.value.tenant_id === userTenantId;
+});
+
+// Can edit: owner, admin, or editor
+const canEdit = computed(() => {
+  return orgStore.canEditKB(kbId.value, isOwner.value);
+});
+
+// Can manage (delete, settings, etc.): owner or admin
+const canManage = computed(() => {
+  return orgStore.canManageKB(kbId.value, isOwner.value);
+});
+
+// Current KB's shared record (when accessed via organization share)
+const currentSharedKb = computed(() =>
+  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
+);
+
+// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
+const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
+// Display role label: owner or org role (admin/editor/viewer)
+const accessRoleLabel = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
+  const perm = effectiveKBPermission.value;
+  if (perm) return t(`organization.role.${perm}`);
+  return '--';
+});
+
+// Permission summary text for current role
+const accessPermissionSummary = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
+  const perm = effectiveKBPermission.value;
+  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
+  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
+  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer');
+  return '--';
+});
+
+// Last updated time from kbInfo
+const kbLastUpdated = computed(() => {
+  const raw = kbInfo.value?.updated_at;
+  if (!raw) return null;
+  return formatStringDate(new Date(raw));
+});
+
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
 let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
 let isCardDetails = ref(false);
@@ -110,7 +167,7 @@ const editingTagName = ref('');
 const editingTagSubmitting = ref(false);
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-  const itemHeight = 174;
+  const itemHeight = 148;
   let itemsInView = Math.floor(viewportHeight / itemHeight) * 5;
   pageSize = Math.max(35, itemsInView);
 }
@@ -126,6 +183,16 @@ const formatDocTime = (time?: string) => {
   if (!time) return '--'
   const formatted = formatStringDate(new Date(time))
   return formatted.slice(2, 16) // "YY-MM-DD HH:mm"
+}
+
+// 格式化文件大小，用于气泡等展示
+const formatFileSize = (bytes?: number | string) => {
+  if (bytes == null || bytes === '') return ''
+  const n = typeof bytes === 'string' ? parseInt(bytes, 10) : bytes
+  if (Number.isNaN(n) || n <= 0) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 // 获取知识条目的显示类型
@@ -397,11 +464,26 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
 const loadKnowledgeList = async () => {
   try {
     const res: any = await listKnowledgeBases();
-    knowledgeList.value = (res?.data || []).map((item: any) => ({
+    const myKbs = (res?.data || []).map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type || 'document',
     }));
+    
+    // Also include shared knowledge bases from orgStore
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter(s => s.knowledge_base != null)
+      .map(s => ({
+        id: String(s.knowledge_base.id),
+        name: s.knowledge_base.name,
+        type: s.knowledge_base.type || 'document',
+      }));
+    
+    // Merge and deduplicate by id (my KBs take precedence)
+    const myKbIds = new Set(myKbs.map(kb => kb.id));
+    const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id));
+    
+    knowledgeList.value = [...myKbs, ...uniqueSharedKbs];
   } catch (error) {
     console.error('Failed to load knowledge list:', error);
   }
@@ -485,7 +567,9 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
 onMounted(() => {
   loadKnowledgeBaseInfo(kbId.value);
   loadKnowledgeList();
-  
+  // Load shared knowledge bases to get permission info
+  orgStore.fetchSharedKnowledgeBases();
+
   // 监听文件上传事件
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   // 监听URL导入对话框打开事件
@@ -568,6 +652,45 @@ const openCardDetails = (item: KnowledgeCard) => {
   getCardDetails(item);
 };
 
+// 悬停知识卡片时跟随鼠标显示详情气泡
+const hoveredCardItem = ref<KnowledgeCard | null>(null);
+const cardPopoverPos = ref({ x: 0, y: 0 });
+const CARD_POPOVER_OFFSET = 16;
+const cardHoverShowDelay = 300;
+let cardHoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+const onCardMouseEnter = (ev: MouseEvent, item: KnowledgeCard) => {
+  if (cardHoverTimer) {
+    clearTimeout(cardHoverTimer);
+    cardHoverTimer = null;
+  }
+  cardHoverTimer = setTimeout(() => {
+    cardHoverTimer = null;
+    hoveredCardItem.value = item;
+    cardPopoverPos.value = {
+      x: ev.clientX + CARD_POPOVER_OFFSET,
+      y: ev.clientY + CARD_POPOVER_OFFSET,
+    };
+  }, cardHoverShowDelay);
+};
+
+const onCardMouseMove = (ev: MouseEvent) => {
+  if (hoveredCardItem.value) {
+    cardPopoverPos.value = {
+      x: ev.clientX + CARD_POPOVER_OFFSET,
+      y: ev.clientY + CARD_POPOVER_OFFSET,
+    };
+  }
+};
+
+const onCardMouseLeave = () => {
+  if (cardHoverTimer) {
+    clearTimeout(cardHoverTimer);
+    cardHoverTimer = null;
+  }
+  hoveredCardItem.value = null;
+};
+
 const delCard = (index: number, item: KnowledgeCard) => {
   knowledgeIndex.value = index;
   knowledge.value = item;
@@ -586,6 +709,32 @@ const documentTitle = computed(() => {
   }
   return t('knowledgeEditor.document.title');
 });
+
+// 文档操作下拉菜单选项
+const documentActionOptions = computed(() => [
+  { content: t('upload.uploadDocument'), value: 'upload', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
+  { content: t('upload.uploadFolder'), value: 'uploadFolder', prefixIcon: () => h(TIcon, { name: 'folder-add', size: '16px' }) },
+  { content: t('knowledgeBase.importURL'), value: 'importURL', prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }) },
+  { content: t('upload.onlineEdit'), value: 'manualCreate', prefixIcon: () => h(TIcon, { name: 'edit', size: '16px' }) },
+]);
+
+// 处理文档操作下拉菜单选择
+const handleDocumentActionSelect = (data: { value: string }) => {
+  switch (data.value) {
+    case 'upload':
+      handleDocumentUploadClick();
+      break;
+    case 'uploadFolder':
+      handleFolderUploadClick();
+      break;
+    case 'importURL':
+      handleURLImportClick();
+      break;
+    case 'manualCreate':
+      handleManualCreate();
+      break;
+  }
+};
 
 const ensureDocumentKbReady = () => {
   if (isFAQ.value) {
@@ -607,6 +756,11 @@ const ensureDocumentKbReady = () => {
 const handleDocumentUploadClick = () => {
   if (!ensureDocumentKbReady()) return;
   uploadInputRef.value?.click();
+};
+
+const handleFolderUploadClick = () => {
+  if (!ensureDocumentKbReady()) return;
+  folderUploadInputRef.value?.click();
 };
 
 const resetUploadInput = () => {
@@ -705,6 +859,102 @@ const handleDocumentUpload = async (event: Event) => {
   resetUploadInput();
 };
 
+// 处理文件夹上传
+const handleFolderUpload = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const files = input?.files;
+  if (!files || files.length === 0) return;
+
+  if (!kbId.value) {
+    MessagePlugin.error("缺少知识库ID");
+    if (input) input.value = '';
+    return;
+  }
+
+  // 检查是否启用了VLM
+  const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
+
+  // 过滤有效文件
+  const validFiles: File[] = [];
+  let hiddenFileCount = 0;
+  let imageFilteredCount = 0;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    const relativePath = (file as any).webkitRelativePath || file.name;
+    
+    // 1. 过滤隐藏文件和隐藏文件夹
+    const pathParts = relativePath.split('/');
+    const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'));
+    if (hasHiddenComponent) {
+      hiddenFileCount++;
+      continue;
+    }
+    
+    // 2. 如果未启用VLM，过滤图片文件
+    if (!vlmEnabled) {
+      const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
+      const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+      if (imageTypes.includes(fileExt)) {
+        imageFilteredCount++;
+        continue;
+      }
+    }
+    
+    // 3. 文件类型验证
+    if (!kbFileTypeVerification(file, true)) {
+      validFiles.push(file);
+    }
+  }
+
+  if (validFiles.length === 0) {
+    MessagePlugin.warning(t('knowledgeBase.noValidFilesInFolder', { total: files.length }));
+    if (input) input.value = '';
+    return;
+  }
+
+  MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: validFiles.length }));
+
+  // 批量上传
+  let successCount = 0;
+  let failCount = 0;
+  const tagIdToUpload = selectedTagId.value !== '__untagged__' ? selectedTagId.value : undefined;
+
+  for (const file of validFiles) {
+    const relativePath = (file as any).webkitRelativePath;
+    let fileName = file.name;
+    if (relativePath) {
+      const pathParts = relativePath.split('/');
+      if (pathParts.length > 2) {
+        const subPath = pathParts.slice(1, -1).join('/');
+        fileName = `${subPath}/${file.name}`;
+      }
+    }
+
+    try {
+      await uploadKnowledgeFile(kbId.value, { file, fileName, tag_id: tagIdToUpload });
+      successCount++;
+    } catch (error: any) {
+      failCount++;
+    }
+  }
+
+  if (successCount > 0) {
+    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+      detail: { kbId: kbId.value }
+    }));
+  }
+
+  if (failCount === 0) {
+    MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
+  } else if (successCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
+  } else {
+    MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
+  }
+
+  if (input) input.value = '';
+};
 
 const handleManualCreate = () => {
   if (!ensureDocumentKbReady()) return;
@@ -939,7 +1189,32 @@ async function createNewSession(value: string): Promise<void> {
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
-            <t-tooltip :content="$t('knowledgeBase.settings')" placement="top">
+            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
+            <div v-if="kbInfo" class="kb-access-meta">
+              <t-tooltip :content="accessPermissionSummary" placement="top">
+                <span class="kb-access-meta-inner">
+                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
+                    {{ accessRoleLabel }}
+                  </t-tag>
+                  <template v-if="currentSharedKb">
+                    <span class="kb-access-meta-sep">·</span>
+                    <span class="kb-access-meta-text">
+                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
+                    </span>
+                  </template>
+                  <template v-else-if="effectiveKBPermission">
+                    <span class="kb-access-meta-sep">·</span>
+                    <span class="kb-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
+                  </template>
+                  <template v-else-if="kbLastUpdated">
+                    <span class="kb-access-meta-sep">·</span>
+                    <span class="kb-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+                  </template>
+                </span>
+              </t-tooltip>
+            </div>
+            <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
                 class="kb-settings-button"
@@ -962,6 +1237,13 @@ async function createNewSession(value: string): Promise<void> {
         multiple
         @change="handleDocumentUpload"
       />
+      <input
+        ref="folderUploadInputRef"
+        type="file"
+        class="document-upload-input"
+        webkitdirectory
+        @change="handleFolderUpload"
+      />
       <div class="knowledge-main">
         <aside class="tag-sidebar">
           <div class="sidebar-header">
@@ -969,7 +1251,7 @@ async function createNewSession(value: string): Promise<void> {
               <span>{{ $t('knowledgeBase.documentCategoryTitle') }}</span>
               <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
             </div>
-            <div class="sidebar-actions">
+            <div v-if="canEdit" class="sidebar-actions">
               <t-button
                 size="small"
                 variant="text"
@@ -1086,7 +1368,7 @@ async function createNewSession(value: string): Promise<void> {
                       </div>
                     </template>
                     <template v-else>
-                      <div class="tag-more" @click.stop>
+                      <div v-if="canEdit" class="tag-more" @click.stop>
                         <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
                           <div class="tag-more-btn">
                             <t-icon name="more" size="14px" />
@@ -1127,7 +1409,7 @@ async function createNewSession(value: string): Promise<void> {
         </aside>
         <div class="tag-content">
           <div class="doc-card-area">
-            <!-- 搜索栏和筛选 -->
+            <!-- 搜索栏、筛选与添加文档 -->
             <div class="doc-filter-bar">
               <t-input
                 v-model.trim="docSearchKeyword"
@@ -1148,6 +1430,20 @@ async function createNewSession(value: string): Promise<void> {
                 class="doc-type-select"
                 clearable
               />
+              <div v-if="canEdit" class="doc-filter-actions">
+                <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
+                  <t-dropdown
+                    :options="documentActionOptions"
+                    trigger="click"
+                    placement="bottom-right"
+                    @click="handleDocumentActionSelect"
+                  >
+                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                      <template #icon><t-icon name="file-add" size="16px" /></template>
+                    </t-button>
+                  </t-dropdown>
+                </t-tooltip>
+              </div>
             </div>
             <div
               class="doc-scroll-container"
@@ -1163,11 +1459,15 @@ async function createNewSession(value: string): Promise<void> {
                     v-for="(item, index) in cardList"
                     :key="index"
                     @click="openCardDetails(item)"
+                    @mouseenter="onCardMouseEnter($event, item)"
+                    @mousemove="onCardMouseMove($event)"
+                    @mouseleave="onCardMouseLeave"
                   >
                     <div class="card-content">
                       <div class="card-content-nav">
-                        <span class="card-content-title">{{ item.file_name }}</span>
+                        <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
                         <t-popup
+                          v-if="canEdit"
                           v-model="item.isMore"
                           overlayClassName="card-more"
                           :on-visible-change="onVisibleChange"
@@ -1232,6 +1532,7 @@ async function createNewSession(value: string): Promise<void> {
                       <div class="card-bottom-right">
                         <div v-if="tagList.length" class="card-tag-selector" @click.stop>
                           <t-dropdown
+                            v-if="canEdit"
                             :options="tagDropdownOptions"
                             trigger="click"
                             @click="(data: any) => handleKnowledgeTagChange(item.id, data.value as string)"
@@ -1240,6 +1541,9 @@ async function createNewSession(value: string): Promise<void> {
                               <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
                             </t-tag>
                           </t-dropdown>
+                          <t-tag v-else size="small" variant="light-outline">
+                            <span class="tag-text">{{ getTagName(item.tag_id) }}</span>
+                          </t-tag>
                         </div>
                         <div class="card-type">
                           <span>{{ getKnowledgeType(item) }}</span>
@@ -1248,6 +1552,48 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
+                <!-- 悬停卡片时跟随鼠标的详情气泡 -->
+                <Teleport to="body">
+                  <div
+                    v-show="hoveredCardItem"
+                    class="knowledge-card-hover-popover"
+                    :style="{ left: cardPopoverPos.x + 'px', top: cardPopoverPos.y + 'px' }"
+                  >
+                    <template v-if="hoveredCardItem">
+                      <div class="card-popover-title">{{ hoveredCardItem.file_name }}</div>
+                      <div v-if="hoveredCardItem.parse_status === 'processing' || hoveredCardItem.parse_status === 'pending'" class="card-popover-status parsing">
+                        <t-icon name="loading" size="14px" /> {{ t('knowledgeBase.parsingInProgress') }}
+                      </div>
+                      <div v-else-if="hoveredCardItem.parse_status === 'failed'" class="card-popover-status failure">
+                        <t-icon name="close-circle" size="14px" /> {{ t('knowledgeBase.parsingFailed') }}
+                        <span v-if="(hoveredCardItem as any).error_message" class="card-popover-error-msg">{{ (hoveredCardItem as any).error_message }}</span>
+                      </div>
+                      <div v-else-if="hoveredCardItem.parse_status === 'draft'" class="card-popover-status draft">
+                        {{ t('knowledgeBase.draft') }}
+                      </div>
+                      <template v-else>
+                        <div v-if="hoveredCardItem.description" class="card-popover-desc">{{ hoveredCardItem.description }}</div>
+                        <div v-if="(hoveredCardItem as any).source" class="card-popover-source" :title="(hoveredCardItem as any).source">
+                          <t-icon name="link" size="12px" /> {{ (hoveredCardItem as any).source }}
+                        </div>
+                        <div class="card-popover-extra">
+                          <span v-if="(hoveredCardItem as any).created_at" class="card-popover-created">
+                            {{ t('knowledgeBase.createdAt') || '创建' }}：{{ formatDocTime((hoveredCardItem as any).created_at) }}
+                          </span>
+                          <span v-if="formatFileSize((hoveredCardItem as any).file_size)" class="card-popover-size">
+                            {{ formatFileSize((hoveredCardItem as any).file_size) }}
+                          </span>
+                        </div>
+                      </template>
+                      <div class="card-popover-meta">
+                        <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') || '更新' }}：{{ formatDocTime(hoveredCardItem.updated_at) }}</span>
+                        <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{ getTagName(hoveredCardItem.tag_id) }}</span>
+                        <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
+                      </div>
+                      <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') || '点击卡片查看全文与分段' }}</div>
+                    </template>
+                  </div>
+                </Teleport>
               </template>
               <template v-else>
                 <div class="doc-empty-state">
@@ -1414,27 +1760,33 @@ async function createNewSession(value: string): Promise<void> {
 .knowledge-layout {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  margin: 0 16px 0 4px;
+  gap: 20px;
   height: 100%;
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 24px 44px 32px;
+  padding: 24px 32px 32px;
   box-sizing: border-box;
 }
 
+// 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
 .knowledge-main {
   display: flex;
-  gap: 12px;
   flex: 1;
   min-height: 0;
+  background: #fafbfc;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
+// 与列表页筛选区一致：白底卡片感、细分界
 .tag-sidebar {
-  width: 230px;
+  width: 200px;
   background: #fff;
-  border-radius: 12px;
-  border: 1px solid #e7ebf0;
+  border-right: 1px solid #e7ebf0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -1446,13 +1798,14 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     color: #1d2129;
 
     .sidebar-title {
       display: flex;
       align-items: baseline;
       gap: 4px;
+      font-size: 13px;
       font-weight: 600;
 
       .sidebar-count {
@@ -1463,19 +1816,19 @@ async function createNewSession(value: string): Promise<void> {
 
     .sidebar-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       color: #c9ced6;
       align-items: center;
 
       .create-tag-btn {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         padding: 0;
         border-radius: 6px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
         color: #00a870;
         line-height: 1;
@@ -1494,22 +1847,29 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .tag-search-bar {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 
     :deep(.t-input) {
-      font-size: 12px;
+      font-size: 13px;
       background-color: #f7f9fc;
       border-color: #e5e9f2;
+      border-radius: 6px;
     }
   }
 
   .tag-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
 
     .tag-load-more {
       padding: 8px 0 0;
@@ -1527,12 +1887,14 @@ async function createNewSession(value: string): Promise<void> {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px;
+      padding: 9px 12px;
       border-radius: 6px;
-      color: #4e5969;
+      color: #2d3139;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 13px;
+      font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
 
       .tag-list-left {
         display: flex;
@@ -1543,8 +1905,8 @@ async function createNewSession(value: string): Promise<void> {
 
         .t-icon {
           flex-shrink: 0;
-          color: #86909c;
-          font-size: 16px;
+          color: #5c6470;
+          font-size: 14px;
           transition: color 0.2s ease;
         }
       }
@@ -1555,6 +1917,11 @@ async function createNewSession(value: string): Promise<void> {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+        font-weight: 450;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
       }
 
       .tag-list-right {
@@ -1562,45 +1929,52 @@ async function createNewSession(value: string): Promise<void> {
         align-items: center;
         gap: 6px;
         margin-left: 8px;
-        min-width: 0;
+        flex-shrink: 0;
       }
 
       .tag-count {
         font-size: 12px;
-        color: #86909c;
+        color: #5c6470;
         font-weight: 500;
-        padding: 2px 6px;
-        border-radius: 10px;
-        background: #f7f9fc;
+        min-width: 28px;
+        padding: 3px 7px;
+        border-radius: 8px;
+        background: #eef0f3;
         transition: all 0.2s ease;
+        text-align: center;
+        box-sizing: border-box;
       }
 
       &:hover {
-        background: #f7f9fc;
+        background: #f2f4f7;
         color: #1d2129;
 
         .tag-list-left .t-icon {
-          color: #4e5969;
+          color: #1d2129;
         }
 
         .tag-count {
           background: #e5e9f2;
-          color: #4e5969;
+          color: #1d2129;
         }
       }
 
       &.active {
         background: #e6f7ec;
-        color: #00a870;
+        color: #07c05f;
         font-weight: 500;
 
         .tag-list-left .t-icon {
-          color: #00a870;
+          color: #07c05f;
+        }
+
+        .tag-name {
+          font-weight: 500;
         }
 
         .tag-count {
           background: #b8f0d3;
-          color: #00a870;
+          color: #07c05f;
           font-weight: 600;
         }
       }
@@ -1707,32 +2081,36 @@ async function createNewSession(value: string): Promise<void> {
       .tag-more {
         display: flex;
         align-items: center;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      &:hover .tag-more {
+        opacity: 1;
       }
 
       .tag-more-btn {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         display: flex;
         align-items: center;
         justify-content: center;
         border-radius: 4px;
         color: #86909c;
         transition: all 0.2s ease;
-        opacity: 0.6;
 
         &:hover {
           background: #f3f5f7;
           color: #4e5969;
-          opacity: 1;
         }
       }
     }
 
     .tag-empty-state {
       text-align: center;
-      padding: 12px 8px;
+      padding: 10px 6px;
       color: #a1a7b3;
-      font-size: 12px;
+      font-size: 11px;
     }
   }
 }
@@ -1779,9 +2157,13 @@ async function createNewSession(value: string): Promise<void> {
 
 .tag-content {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+  background: #fafbfc;
 }
 
 .doc-card-area {
@@ -1792,19 +2174,33 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .doc-filter-bar {
-  padding: 0px 0px 10px 0px;
+  padding: 0 0 12px 0;
   flex-shrink: 0;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 
   .doc-search-input {
     flex: 1;
+    min-width: 0;
   }
 
   .doc-type-select {
     width: 140px;
     flex-shrink: 0;
+  }
+
+  .doc-filter-actions {
+    flex-shrink: 0;
+    :deep(.content-bar-icon-btn) {
+      color: #86909c;
+      background: transparent;
+      border: none;
+      &:hover {
+        color: #4e5969;
+        background: #f2f3f5;
+      }
+    }
   }
 
   :deep(.t-input) {
@@ -1852,16 +2248,14 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
-// Header 样式
+// Header 样式（无底部分割线，留更多空间给下方内容区）
 .document-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 0 0 16px;
+  gap: 12px;
   flex-shrink: 0;
-  border-bottom: 1px solid #e7ebf0;
 
   .document-header-title {
     display: flex;
@@ -1874,6 +2268,33 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .kb-access-meta {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .kb-access-meta-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #86909c;
+    cursor: default;
+  }
+
+  .kb-access-role-tag {
+    flex-shrink: 0;
+  }
+
+  .kb-access-meta-sep {
+    color: #c9ced6;
+    user-select: none;
+  }
+
+  .kb-access-meta-text {
+    white-space: nowrap;
   }
 
   .document-breadcrumb {
@@ -1955,6 +2376,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
 }
+
 
 .document-upload-input {
   display: none;
@@ -2041,8 +2463,9 @@ async function createNewSession(value: string): Promise<void> {
 
 .faq-manager-wrapper {
   flex: 1;
-  padding: 24px 44px;
+  padding: 24px 32px;
   overflow-y: auto;
+  margin: 0 16px 0 4px;
 }
 
 @media (max-width: 1250px) and (min-width: 1045px) {
@@ -2088,7 +2511,8 @@ async function createNewSession(value: string): Promise<void> {
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 14px;
   align-content: flex-start;
   width: 100%;
 }
@@ -2209,47 +2633,49 @@ async function createNewSession(value: string): Promise<void> {
 .card-draft {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 0;
+  gap: 8px;
+  padding: 6px 0;
 }
 
 .card-draft-tip {
   color: #b05b00;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .knowledge-card {
-  border: 2px solid #fbfbfb;
-  height: 174px;
-  border-radius: 6px;
+  min-width: 248px;
+  border: 1px solid #e7e9eb;
+  height: 148px;
+  border-radius: 9px;
   overflow: hidden;
   box-sizing: border-box;
-  box-shadow: 0 0 8px 0 #00000005;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   background: #fff;
   position: relative;
   cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
   .card-content {
-    padding: 10px 20px 23px;
+    padding: 15px 17px 13px;
   }
 
   .card-analyze {
-    height: 66px;
+    height: 52px;
     display: flex;
   }
 
   .card-analyze-loading {
     display: block;
     color: #07c05f;
-    font-size: 15px;
+    font-size: 14px;
     margin-top: 2px;
   }
 
   .card-analyze-txt {
     color: #07c05f;
     font-family: "PingFang SC";
-    font-size: 12px;
-    margin-left: 9px;
+    font-size: 11px;
+    margin-left: 8px;
   }
 
   .failure {
@@ -2259,30 +2685,35 @@ async function createNewSession(value: string): Promise<void> {
   .card-content-nav {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 10px;
+    align-items: flex-start;
+    margin-bottom: 11px;
+    gap: 8px;
   }
 
   .card-content-title {
-    width: 200px;
-    height: 32px;
-    line-height: 32px;
+    flex: 1;
+    min-width: 0;
+    height: 29px;
+    line-height: 29px;
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #000000e6;
-    font-family: "PingFang SC";
-    font-size: 14px;
-    font-weight: 400;
+    color: #1d2129;
+    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
   }
 
   .more-wrap {
+    flex-shrink: 0;
     display: flex;
-    width: 32px;
-    height: 32px;
+    width: 25px;
+    height: 25px;
     justify-content: center;
     align-items: center;
-    border-radius: 3px;
+    border-radius: 5px;
     cursor: pointer;
   }
 
@@ -2291,8 +2722,8 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .more {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
 
   .active-more {
@@ -2302,49 +2733,180 @@ async function createNewSession(value: string): Promise<void> {
   .card-content-txt {
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     overflow: hidden;
-    color: #00000066;
+    color: #86909c;
     font-family: "PingFang SC";
     font-size: 12px;
     font-weight: 400;
-    line-height: 20px;
+    line-height: 19px;
   }
 
   .card-bottom {
     position: absolute;
     bottom: 0;
-    padding: 0 20px;
+    padding: 0 17px;
     box-sizing: border-box;
-    height: 32px;
+    height: 34px;
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: rgba(48, 50, 54, 0.02);
+    background: linear-gradient(to top, #f7f8fa 0%, #fafbfc 100%);
+    border-top: 1px solid #f0f1f3;
   }
 
   .card-time {
-    color: #00000066;
+    color: #86909c;
     font-family: "PingFang SC";
     font-size: 12px;
     font-weight: 400;
   }
 
   .card-type {
-    color: #00000066;
+    color: #4e5969;
     font-family: "PingFang SC";
-    font-size: 12px;
-    font-weight: 400;
-    padding: 2px 4px;
-    background: #3032360f;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    background: #e8e9eb;
     border-radius: 4px;
   }
 }
 
 .knowledge-card:hover {
-  border: 2px solid #07c05f;
+  border-color: #07c05f;
+  box-shadow: 0 2px 8px rgba(7, 192, 95, 0.12);
+}
+
+/* 悬停知识卡片时跟随鼠标的详情气泡 */
+.knowledge-card-hover-popover {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e7ebf0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  font-family: "PingFang SC", -apple-system, sans-serif;
+  transition: opacity 0.15s ease;
+
+  .card-popover-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d2129;
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .card-popover-status {
+    font-size: 12px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    &.parsing {
+      color: #07c05f;
+    }
+
+    &.failure {
+      color: #fa5151;
+    }
+
+    &.draft {
+      color: #b05b00;
+    }
+  }
+
+  .card-popover-desc {
+    font-size: 12px;
+    color: #4e5969;
+    line-height: 1.5;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
+    line-clamp: 5;
+    overflow: hidden;
+  }
+
+  .card-popover-error-msg {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: #fa5151;
+    opacity: 0.95;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 280px;
+  }
+
+  .card-popover-source {
+    font-size: 11px;
+    color: #0052d9;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .card-popover-extra {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 11px;
+    color: #86909c;
+    margin-bottom: 6px;
+  }
+
+  .card-popover-created,
+  .card-popover-size {
+    flex-shrink: 0;
+  }
+
+  .card-popover-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+    color: #86909c;
+  }
+
+  .card-popover-tag {
+    padding: 1px 6px;
+    background: #e6f7ec;
+    color: #07c05f;
+    border-radius: 4px;
+  }
+
+  .card-popover-type {
+    padding: 1px 6px;
+    background: #e8e9eb;
+    color: #4e5969;
+    border-radius: 4px;
+  }
+
+  .card-popover-hint {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #f0f1f3;
+    font-size: 11px;
+    color: #86909c;
+  }
 }
 
 .url-import-form {
@@ -2399,39 +2961,7 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 auto;
 }
 
-.doc-card-list {
-  grid-template-columns: 1fr;
-}
-
 .del-card {
   vertical-align: middle;
-}
-
-/* 小屏幕平板 - 2列 */
-@media (min-width: 900px) {
-  .doc-card-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-/* 中等屏幕 - 3列 */
-@media (min-width: 1250px) {
-  .doc-card-list {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-/* 中等屏幕 - 3列 */
-@media (min-width: 1600px) {
-  .doc-card-list {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-/* 大屏幕 - 4列 */
-@media (min-width: 2000px) {
-  .doc-card-list {
-    grid-template-columns: repeat(5, 1fr);
-  }
 }
 </style>

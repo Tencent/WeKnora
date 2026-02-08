@@ -14,13 +14,15 @@ import (
 
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
-	service interfaces.CustomAgentService
+	service     interfaces.CustomAgentService
+	disabledRepo interfaces.TenantDisabledSharedAgentRepository
 }
 
 // NewCustomAgentHandler creates a new custom agent handler instance
-func NewCustomAgentHandler(service interfaces.CustomAgentService) *CustomAgentHandler {
+func NewCustomAgentHandler(service interfaces.CustomAgentService, disabledRepo interfaces.TenantDisabledSharedAgentRepository) *CustomAgentHandler {
 	return &CustomAgentHandler{
-		service: service,
+		service:     service,
+		disabledRepo: disabledRepo,
 	}
 }
 
@@ -34,10 +36,10 @@ type CreateAgentRequest struct {
 
 // UpdateAgentRequest defines the request body for updating an agent
 type UpdateAgentRequest struct {
-	Name        string                   `json:"name"`
-	Description string                   `json:"description"`
-	Avatar      string                   `json:"avatar"`
-	Config      types.CustomAgentConfig  `json:"config"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Avatar      string                  `json:"avatar"`
+	Config      types.CustomAgentConfig `json:"config"`
 }
 
 // CreateAgent godoc
@@ -161,9 +163,14 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		return
 	}
 
+	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
+	tenantID, _ := c.Get(types.TenantIDContextKey.String())
+	disabledOwnIDs, _ := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID.(uint64))
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    agents,
+		"success":                true,
+		"data":                   agents,
+		"disabled_own_agent_ids": disabledOwnIDs,
 	})
 }
 

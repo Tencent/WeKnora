@@ -660,6 +660,12 @@ export default {
     knowledgeBase: 'База знаний',
     noResult: 'Нет результатов',
   },
+  mentionDetail: {
+    faqCount: '{count} вопросов и ответов',
+    kbCount: '{count} документов',
+    belongsToKb: 'База знаний: ',
+    belongsToOrg: 'Пространство: ',
+  },
   file: {
     upload: 'Загрузить файл',
     uploadSuccess: 'Файл успешно загружен',
@@ -1795,6 +1801,7 @@ export default {
     knowledgeBase: 'База знаний',
     knowledgeBaseWithCount: 'База знаний ({count})',
     notConfigured: 'Не настроено',
+    sharedAgentModelLabel: 'Модель из общего агента',
     model: 'Модель',
     remote: 'Удалённая',
     noModel: 'Нет доступных моделей',

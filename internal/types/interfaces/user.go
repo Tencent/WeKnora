@@ -36,6 +36,8 @@ type UserService interface {
 	RevokeToken(ctx context.Context, token string) error
 	// GetCurrentUser gets current user from context
 	GetCurrentUser(ctx context.Context) (*types.User, error)
+	// SearchUsers searches users by username or email
+	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
 }
 
 // UserRepository defines the user repository interface
@@ -54,6 +56,8 @@ type UserRepository interface {
 	DeleteUser(ctx context.Context, id string) error
 	// ListUsers lists users with pagination
 	ListUsers(ctx context.Context, offset, limit int) ([]*types.User, error)
+	// SearchUsers searches users by username or email
+	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
 }
 
 // AuthTokenRepository defines the auth token repository interface

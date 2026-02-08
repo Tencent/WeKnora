@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -29,6 +30,22 @@ func NewMessageService(messageRepo interfaces.MessageRepository,
 		messageRepo: messageRepo,
 		sessionRepo: sessionRepo,
 	}
+}
+
+// sessionTenantIDForLookup returns the tenant ID to use for session lookup.
+// When SessionTenantIDContextKey is set (e.g. pipeline with shared agent), use it so session/message belong to session owner.
+func sessionTenantIDForLookup(ctx context.Context) (uint64, bool) {
+	if v := ctx.Value(types.SessionTenantIDContextKey); v != nil {
+		if tid, ok := v.(uint64); ok && tid != 0 {
+			return tid, true
+		}
+	}
+	if v := ctx.Value(types.TenantIDContextKey); v != nil {
+		if tid, ok := v.(uint64); ok {
+			return tid, true
+		}
+	}
+	return 0, false
 }
 
 // CreateMessage creates a new message within an existing session
@@ -153,8 +170,12 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 	logger.Info(ctx, "Start getting recent messages by session")
 	logger.Infof(ctx, "Getting recent messages for session ID: %s, limit: %d", sessionID, limit)
 
-	// Verify the session exists before retrieving messages
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	// Verify the session exists before retrieving messages (use SessionTenantID when set, e.g. pipeline with shared agent)
+	tenantID, ok := sessionTenantIDForLookup(ctx)
+	if !ok {
+		logger.Error(ctx, "Tenant ID not found in context for session lookup")
+		return nil, errors.New("tenant ID not found in context")
+	}
 	logger.Infof(ctx, "Checking if session exists, tenant ID: %d", tenantID)
 	_, err := s.sessionRepo.Get(ctx, tenantID, sessionID)
 	if err != nil {
@@ -192,8 +213,12 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	logger.Info(ctx, "Start getting messages before time")
 	logger.Infof(ctx, "Getting messages before %v for session ID: %s, limit: %d", beforeTime, sessionID, limit)
 
-	// Verify the session exists before retrieving messages
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	// Verify the session exists before retrieving messages (use SessionTenantID when set, e.g. pipeline with shared agent)
+	tenantID, ok := sessionTenantIDForLookup(ctx)
+	if !ok {
+		logger.Error(ctx, "Tenant ID not found in context for session lookup")
+		return nil, errors.New("tenant ID not found in context")
+	}
 	logger.Infof(ctx, "Checking if session exists, tenant ID: %d", tenantID)
 	_, err := s.sessionRepo.Get(ctx, tenantID, sessionID)
 	if err != nil {

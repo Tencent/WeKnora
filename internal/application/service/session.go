@@ -43,6 +43,7 @@ type sessionService struct {
 	knowledgeService     interfaces.KnowledgeService      // Service for knowledge operations
 	chunkService         interfaces.ChunkService          // Service for chunk operations
 	webSearchStateRepo   interfaces.WebSearchStateService // Service for web search state
+	kbShareService       interfaces.KBShareService        // Service for KB sharing operations
 }
 
 // NewSessionService creates a new session service instance with all required dependencies
@@ -58,6 +59,7 @@ func NewSessionService(cfg *config.Config,
 	agentService interfaces.AgentService,
 	sessionStorage llmcontext.ContextStorage,
 	webSearchStateRepo interfaces.WebSearchStateService,
+	kbShareService interfaces.KBShareService,
 ) interfaces.SessionService {
 	return &sessionService{
 		cfg:                  cfg,
@@ -72,6 +74,7 @@ func NewSessionService(cfg *config.Config,
 		agentService:         agentService,
 		sessionStorage:       sessionStorage,
 		webSearchStateRepo:   webSearchStateRepo,
+		kbShareService:       kbShareService,
 	}
 }
 
@@ -301,7 +304,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 		chat.Message{Role: "system", Content: s.cfg.Conversation.GenerateSessionTitlePrompt},
 	)
 	chatMessages = append(chatMessages,
-		chat.Message{Role: "user", Content: message.Content + " /no_think"},
+		chat.Message{Role: "user", Content: message.Content},
 	)
 
 	// Call model to generate title
@@ -339,11 +342,11 @@ func (s *sessionService) GenerateTitleAsync(
 	modelID string,
 	eventBus *event.EventBus,
 ) {
-	// Extract values from context before cloning
+	// Use context tenant (effective tenant when using shared agent) so ListModels/GetChatModel find the agent's model.
+	// sessionRepo.Update uses session.TenantID in WHERE, so the session row is updated correctly regardless of ctx.
 	tenantID := ctx.Value(types.TenantIDContextKey)
 	requestID := ctx.Value(types.RequestIDContextKey)
 	go func() {
-		// Create new background context and copy values
 		bgCtx := context.Background()
 		if tenantID != nil {
 			bgCtx = context.WithValue(bgCtx, types.TenantIDContextKey, tenantID)
@@ -574,8 +577,20 @@ func (s *sessionService) KnowledgeQA(
 		}
 	}
 
+	// Retrieval scope: when agent is set, use agent's tenant (own or shared); otherwise session tenant or context
+	retrievalTenantID := session.TenantID
+	if customAgent != nil && customAgent.TenantID != 0 {
+		retrievalTenantID = customAgent.TenantID
+		logger.Infof(ctx, "Using agent tenant %d for retrieval scope", retrievalTenantID)
+	} else if v := ctx.Value(types.TenantIDContextKey); v != nil {
+		if tid, ok := v.(uint64); ok && tid != 0 {
+			retrievalTenantID = tid
+			logger.Infof(ctx, "Using effective tenant %d for retrieval from context", retrievalTenantID)
+		}
+	}
+
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, session.TenantID, knowledgeBaseIDs, knowledgeIDs)
+	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets: %v", err)
 	}
@@ -611,7 +626,7 @@ func (s *sessionService) KnowledgeQA(
 		FallbackPrompt:       fallbackPrompt,
 		EventBus:             eventBus.AsEventBusInterface(), // NEW: For pipeline to emit events directly
 		WebSearchEnabled:     webSearchEnabled,
-		TenantID:             session.TenantID,
+		TenantID:             retrievalTenantID, // Effective tenant for retrieval (shared agent = agent's tenant)
 		RewritePromptSystem:  rewritePromptSystem,
 		RewritePromptUser:    rewritePromptUser,
 		EnableRewrite:        enableRewrite,
@@ -648,7 +663,8 @@ func (s *sessionService) KnowledgeQA(
 		pipeline = types.Pipline["rag_stream"]
 	}
 
-	// Start knowledge QA event processing
+	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
+	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, session.TenantID)
 	logger.Info(ctx, "Triggering question answering event")
 	err = s.KnowledgeQAByEvent(ctx, chatManage, pipeline)
 	if err != nil {
@@ -729,10 +745,10 @@ func (s *sessionService) selectChatModelID(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 ) (string, error) {
-	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs
+	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
 		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
 		} else {
@@ -818,16 +834,38 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 
 	switch customAgent.Config.KBSelectionMode {
 	case "all":
+		// Get own knowledge bases
 		allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list all knowledge bases: %v", err)
-			return nil
 		}
+		kbIDSet := make(map[string]bool)
 		kbIDs := make([]string, 0, len(allKBs))
 		for _, kb := range allKBs {
 			kbIDs = append(kbIDs, kb.ID)
+			kbIDSet[kb.ID] = true
 		}
-		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases", len(kbIDs))
+
+		// Also include shared knowledge bases the user has access to
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+		userIDVal := ctx.Value(types.UserIDContextKey)
+		if userIDVal != nil {
+			if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
+				sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+				if err != nil {
+					logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
+				} else {
+					for _, info := range sharedList {
+						if info != nil && info.KnowledgeBase != nil && !kbIDSet[info.KnowledgeBase.ID] {
+							kbIDs = append(kbIDs, info.KnowledgeBase.ID)
+							kbIDSet[info.KnowledgeBase.ID] = true
+						}
+					}
+				}
+			}
+		}
+
+		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
 		return kbIDs
 	case "selected":
 		logger.Infof(ctx, "KBSelectionMode=selected: using %d configured knowledge bases", len(customAgent.Config.KnowledgeBases))
@@ -898,12 +936,12 @@ func (s *sessionService) configureSkillsFromAgent(
 
 }
 
-// buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs
-// This is called once at the request entry point to avoid repeated queries later in the pipeline
+// buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs.
+// tenantID is the retrieval scope: session.TenantID or effective tenant from shared agent (set by handler).
+// This is called once at the request entry point to avoid repeated queries later in the pipeline.
 // Logic:
-//   - For each knowledgeBaseID: create a SearchTargetTypeKnowledgeBase target
-//   - For each knowledgeID: find its knowledgeBaseID, if the KB is already in the list, skip (covered by full KB search)
-//     otherwise create a SearchTargetTypeKnowledge target grouped by KB
+//   - For each knowledgeBaseID: resolve actual TenantID (own, org-shared, or in retrieval-tenant scope for shared agent)
+//   - For each knowledgeID: find its knowledgeBaseID; if the KB is already in the list, skip; otherwise add SearchTargetTypeKnowledge
 func (s *sessionService) buildSearchTargets(
 	ctx context.Context,
 	tenantID uint64,
@@ -912,29 +950,65 @@ func (s *sessionService) buildSearchTargets(
 ) (types.SearchTargets, error) {
 	var targets types.SearchTargets
 
+	// Build a map from KB ID to TenantID for all KBs we need to process
+	kbTenantMap := make(map[string]uint64)
+
 	// Track which KBs are fully searched
 	fullKBSet := make(map[string]bool)
-	for _, kbID := range knowledgeBaseIDs {
-		fullKBSet[kbID] = true
-		targets = append(targets, &types.SearchTarget{
-			Type:            types.SearchTargetTypeKnowledgeBase,
-			KnowledgeBaseID: kbID,
-		})
+
+	// First pass: batch-fetch KBs, then resolve tenant per ID (tenant scope already set by caller)
+	if len(knowledgeBaseIDs) > 0 {
+		kbs, _ := s.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, knowledgeBaseIDs)
+		kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
+		for _, kb := range kbs {
+			if kb != nil {
+				kbByID[kb.ID] = kb
+			}
+		}
+		userID, _ := ctx.Value(types.UserIDContextKey).(string)
+		for _, kbID := range knowledgeBaseIDs {
+			fullKBSet[kbID] = true
+			kb := kbByID[kbID]
+			if kb == nil {
+				kbTenantMap[kbID] = tenantID
+			} else if kb.TenantID == tenantID {
+				kbTenantMap[kbID] = tenantID
+			} else if s.kbShareService != nil && userID != "" {
+				hasAccess, _ := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
+				if hasAccess {
+					kbTenantMap[kbID] = kb.TenantID
+				} else {
+					kbTenantMap[kbID] = tenantID
+				}
+			} else {
+				kbTenantMap[kbID] = tenantID
+			}
+			targets = append(targets, &types.SearchTarget{
+				Type:            types.SearchTargetTypeKnowledgeBase,
+				KnowledgeBaseID: kbID,
+				TenantID:        kbTenantMap[kbID],
+			})
+		}
 	}
 
-	// Process individual knowledge IDs
+	// Process individual knowledge IDs (include shared KB files the user has access to)
 	if len(knowledgeIDs) > 0 {
-		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
 			return targets, nil // Return what we have, don't fail
 		}
 
 		// Group knowledge IDs by their KB, excluding those already covered by full KB search
+		// Also track KB tenant IDs from knowledge items
 		kbToKnowledgeIDs := make(map[string][]string)
 		for _, k := range knowledgeList {
 			if k == nil || k.KnowledgeBaseID == "" {
 				continue
+			}
+			// Track KB -> TenantID mapping from knowledge items
+			if kbTenantMap[k.KnowledgeBaseID] == 0 {
+				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
 			}
 			// Skip if this KB is already fully searched
 			if fullKBSet[k.KnowledgeBaseID] {
@@ -945,16 +1019,21 @@ func (s *sessionService) buildSearchTargets(
 
 		// Create SearchTargetTypeKnowledge targets for each KB with specific files
 		for kbID, kidList := range kbToKnowledgeIDs {
+			kbTenant := kbTenantMap[kbID]
+			if kbTenant == 0 {
+				kbTenant = tenantID // fallback
+			}
 			targets = append(targets, &types.SearchTarget{
 				Type:            types.SearchTargetTypeKnowledge,
 				KnowledgeBaseID: kbID,
+				TenantID:        kbTenant,
 				KnowledgeIDs:    kidList,
 			})
 		}
 	}
 
-	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB",
-		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs))
+	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial KB, kbTenantMap=%v",
+		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
 
 	return targets, nil
 }
@@ -1146,24 +1225,42 @@ func (s *sessionService) AgentQA(
 	knowledgeIDs []string,
 ) error {
 	sessionID := session.ID
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	sessionJSON, err := json.Marshal(session)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal session, session ID: %s, error: %v", sessionID, err)
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
-	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, tenant ID: %d, query: %s, session: %s",
-		sessionID, tenantID, query, string(sessionJSON))
 
-	// Build effective agent configuration by merging session and tenant configs
-	// All config now comes from customAgent parameter
-
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-
-	// customAgent is required for AgentQA
+	// customAgent is required for AgentQA (handler has already done permission check for shared agent)
 	if customAgent == nil {
 		logger.Warnf(ctx, "Custom agent not provided for session: %s", sessionID)
 		return errors.New("custom agent configuration is required for agent QA")
+	}
+
+	// Use agent's tenant for retrieval and tenant-scoped config (handler has validated access)
+	agentTenantID := customAgent.TenantID
+	if agentTenantID == 0 {
+		agentTenantID = session.TenantID
+	}
+	logger.Infof(ctx, "Start agent-based question answering, session ID: %s, agent tenant ID: %d, query: %s, session: %s",
+		sessionID, agentTenantID, query, string(sessionJSON))
+
+	var tenantInfo *types.Tenant
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		tenantInfo, _ = v.(*types.Tenant)
+	}
+	// When agent belongs to another tenant (shared agent), use agent's tenant for KB/model scope; load tenantInfo if needed
+	if tenantInfo == nil || tenantInfo.ID != agentTenantID {
+		if s.tenantService != nil {
+			if agentTenant, err := s.tenantService.GetTenantByID(ctx, agentTenantID); err == nil && agentTenant != nil {
+				tenantInfo = agentTenant
+				logger.Infof(ctx, "Using agent tenant info for retrieval scope, tenant ID: %d", agentTenantID)
+			}
+		}
+	}
+	if tenantInfo == nil {
+		logger.Warnf(ctx, "Tenant info not available for agent tenant %d, proceeding with defaults", agentTenantID)
+		tenantInfo = &types.Tenant{ID: agentTenantID}
 	}
 
 	// Ensure defaults are set
@@ -1248,8 +1345,8 @@ func (s *sessionService) AgentQA(
 		logger.Infof(ctx, "No knowledge bases specified for agent, running in pure agent mode")
 	}
 
-	// Build search targets for agent (pre-compute once to avoid repeated queries)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantInfo.ID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
+	// Build search targets using agent's tenant (handler has validated access for shared agent)
+	searchTargets, err := s.buildSearchTargets(ctx, agentTenantID, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to build search targets for agent: %v", err)
 		// Continue without search targets, the tool will handle empty targets

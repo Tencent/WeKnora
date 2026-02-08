@@ -54,27 +54,25 @@ type GetDocumentInfoTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeService
 	chunkService     interfaces.ChunkService
+	searchTargets    types.SearchTargets // Pre-computed unified search targets with KB-tenant mapping
 }
 
 // NewGetDocumentInfoTool creates a new get document info tool
 func NewGetDocumentInfoTool(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
+	searchTargets types.SearchTargets,
 ) *GetDocumentInfoTool {
 	return &GetDocumentInfoTool{
 		BaseTool:         getDocumentInfoTool,
 		knowledgeService: knowledgeService,
 		chunkService:     chunkService,
+		searchTargets:    searchTargets,
 	}
 }
 
 // Execute retrieves document information with concurrent processing
 func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
-	tenantID := uint64(0)
-	if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
-		tenantID = tid
-	}
-
 	// Parse args from json.RawMessage
 	var input GetDocumentInfoInput
 	if err := json.Unmarshal(args, &input); err != nil {
@@ -118,8 +116,8 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		go func(id string) {
 			defer wg.Done()
 
-			// Get knowledge metadata
-			knowledge, err := t.knowledgeService.GetRepository().GetKnowledgeByID(ctx, tenantID, id)
+			// Get knowledge metadata without tenant filter to support shared KB
+			knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, id)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
@@ -129,9 +127,19 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				return
 			}
 
-			// Get chunk count
+			// Verify the knowledge's KB is in searchTargets (permission check)
+			if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
+				mu.Lock()
+				results[id] = &docInfo{
+					err: fmt.Errorf("知识库 %s 不可访问", knowledge.KnowledgeBaseID),
+				}
+				mu.Unlock()
+				return
+			}
+
+			// Use knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB)
 			_, total, err := t.chunkService.GetRepository().
-				ListPagedChunksByKnowledgeID(ctx, tenantID, id, &types.Pagination{
+				ListPagedChunksByKnowledgeID(ctx, knowledge.TenantID, id, &types.Pagination{
 					Page:     1,
 					PageSize: 1000,
 				}, []types.ChunkType{"text"}, "", "", "", "", "")

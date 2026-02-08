@@ -42,10 +42,14 @@ type KnowledgeService interface {
 		kbID string,
 		payload *types.ManualKnowledgePayload,
 	) (*types.Knowledge, error)
-	// GetKnowledgeByID retrieves knowledge by ID.
+	// GetKnowledgeByID retrieves knowledge by ID (uses tenant from context).
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)
+	// GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
+	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	// GetKnowledgeBatch retrieves a batch of knowledge by IDs.
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
+	// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs including items from shared KBs the user has access to.
+	GetKnowledgeBatchWithSharedAccess(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
 	// ListKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base.
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge under a knowledge base with pagination.
@@ -142,12 +146,16 @@ type KnowledgeService interface {
 	// SearchKnowledge searches knowledge items by keyword across the tenant.
 	// fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
 	SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)
+	// SearchKnowledgeForScopes searches knowledge within the given (tenant_id, kb_id) scopes (e.g. for shared agent context).
+	SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)
 }
 
 // KnowledgeRepository defines the interface for knowledge repositories.
 type KnowledgeRepository interface {
 	CreateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
 	GetKnowledgeByID(ctx context.Context, tenantID uint64, id string) (*types.Knowledge, error)
+	// GetKnowledgeByIDOnly returns knowledge by ID without tenant filter (for permission resolution).
+	GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error)
 	ListKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) ([]*types.Knowledge, error)
 	// ListPagedKnowledgeByKnowledgeBaseID lists all knowledge in a knowledge base with pagination.
 	// When tagID is non-empty, results are filtered by tag_id.
@@ -182,6 +190,8 @@ type KnowledgeRepository interface {
 	// SearchKnowledge searches knowledge items by keyword across the tenant.
 	// fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
 	SearchKnowledge(ctx context.Context, tenantID uint64, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)
+	// SearchKnowledgeInScopes searches knowledge items by keyword within the given (tenant_id, kb_id) scopes (own + shared).
+	SearchKnowledgeInScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error)
 	// ListIDsByTagID returns all knowledge IDs that have the specified tag ID.
 	ListIDsByTagID(ctx context.Context, tenantID uint64, kbID, tagID string) ([]string, error)
 }

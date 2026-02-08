@@ -20,6 +20,8 @@ type Handler struct {
 	config               *config.Config                  // Application configuration
 	knowledgebaseService interfaces.KnowledgeBaseService // Service for managing knowledge bases
 	customAgentService   interfaces.CustomAgentService   // Service for managing custom agents
+	tenantService        interfaces.TenantService        // Service for loading tenant (shared agent context)
+	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -30,6 +32,8 @@ func NewHandler(
 	config *config.Config,
 	knowledgebaseService interfaces.KnowledgeBaseService,
 	customAgentService interfaces.CustomAgentService,
+	tenantService interfaces.TenantService,
+	agentShareService interfaces.AgentShareService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -38,6 +42,8 @@ func NewHandler(
 		config:               config,
 		knowledgebaseService: knowledgebaseService,
 		customAgentService:   customAgentService,
+		tenantService:        tenantService,
+		agentShareService:    agentShareService,
 	}
 }
 

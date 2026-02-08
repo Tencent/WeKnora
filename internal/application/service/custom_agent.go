@@ -124,6 +124,22 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 	return agent, nil
 }
 
+// GetAgentByIDAndTenant retrieves an agent by ID and tenant (for shared agents; does not resolve built-in)
+func (s *customAgentService) GetAgentByIDAndTenant(ctx context.Context, id string, tenantID uint64) (*types.CustomAgent, error) {
+	if id == "" {
+		logger.Error(ctx, "Agent ID is empty")
+		return nil, errors.New("agent ID cannot be empty")
+	}
+	agent, err := s.repo.GetAgentByID(ctx, id, tenantID)
+	if err != nil {
+		if errors.Is(err, repository.ErrCustomAgentNotFound) {
+			return nil, ErrAgentNotFound
+		}
+		return nil, err
+	}
+	return agent, nil
+}
+
 // ListAgents lists all agents for the current tenant (including built-in agents)
 func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAgent, error) {
 	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)

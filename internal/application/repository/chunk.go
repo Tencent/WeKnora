@@ -44,6 +44,18 @@ func (r *chunkRepository) GetChunkByID(ctx context.Context, tenantID uint64, id 
 	return &chunk, nil
 }
 
+// GetChunkByIDOnly retrieves a chunk by ID without tenant filter (for permission resolution).
+func (r *chunkRepository) GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error) {
+	var chunk types.Chunk
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&chunk).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("chunk not found")
+		}
+		return nil, err
+	}
+	return &chunk, nil
+}
+
 // GetChunkBySeqID retrieves a chunk by its seq_id and tenant ID
 func (r *chunkRepository) GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error) {
 	var chunk types.Chunk
@@ -64,6 +76,18 @@ func (r *chunkRepository) ListChunksByID(
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id IN ?", tenantID, ids).
 		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListChunksByIDOnly retrieves multiple chunks by their IDs without tenant filter (for shared KB resolution).
+func (r *chunkRepository) ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&chunks).Error; err != nil {
 		return nil, err
 	}
 	return chunks, nil

@@ -1017,6 +1017,11 @@
                     </template>
                   </div>
                 </div>
+
+                <!-- 共享管理（仅编辑模式且非内置智能体） -->
+                <div v-if="props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin" v-show="currentSection === 'share'" class="section">
+                  <AgentShareSettings :agent-id="props.agent.id" :agent="props.agent" />
+                </div>
               </div>
 
               <!-- 底部操作栏 -->
@@ -1046,6 +1051,7 @@ import { useUIStore } from '@/stores/ui';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
+import AgentShareSettings from '@/components/AgentShareSettings.vue';
 
 const uiStore = useUIStore();
 
@@ -1251,6 +1257,10 @@ const navItems = computed(() => {
   // 多轮对话（仅普通模式显示，Agent模式内部自动控制）
   if (!isAgentMode.value) {
     items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') || '多轮对话' });
+  }
+  // 共享管理（仅编辑模式且非内置智能体）
+  if (props.mode === 'edit' && props.agent?.id && !props.agent?.is_builtin) {
+    items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') || '共享管理' });
   }
   return items;
 });

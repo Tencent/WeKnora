@@ -81,6 +81,8 @@ type KnowledgeBase struct {
 	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-"`
 	// ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)
 	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-"`
+	// ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)
+	ShareCount int64 `yaml:"share_count"             json:"share_count"             gorm:"-"`
 }
 
 // KnowledgeBaseConfig represents the knowledge base configuration

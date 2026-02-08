@@ -25,6 +25,8 @@ type knowledgeBaseService struct {
 	repo           interfaces.KnowledgeBaseRepository
 	kgRepo         interfaces.KnowledgeRepository
 	chunkRepo      interfaces.ChunkRepository
+	shareRepo      interfaces.KBShareRepository
+	kbShareService interfaces.KBShareService
 	modelService   interfaces.ModelService
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	tenantRepo     interfaces.TenantRepository
@@ -37,6 +39,8 @@ type knowledgeBaseService struct {
 func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	kgRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
+	shareRepo interfaces.KBShareRepository,
+	kbShareService interfaces.KBShareService,
 	modelService interfaces.ModelService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	tenantRepo interfaces.TenantRepository,
@@ -48,6 +52,8 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		repo:           repo,
 		kgRepo:         kgRepo,
 		chunkRepo:      chunkRepo,
+		shareRepo:      shareRepo,
+		kbShareService: kbShareService,
 		modelService:   modelService,
 		retrieveEngine: retrieveEngine,
 		tenantRepo:     tenantRepo,
@@ -113,6 +119,43 @@ func (s *knowledgeBaseService) GetKnowledgeBaseByID(ctx context.Context, id stri
 	return kb, nil
 }
 
+// GetKnowledgeBaseByIDOnly retrieves knowledge base by ID without tenant filter
+// Used for cross-tenant shared KB access where permission is checked elsewhere
+func (s *knowledgeBaseService) GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	if id == "" {
+		logger.Error(ctx, "Knowledge base ID is empty")
+		return nil, errors.New("knowledge base ID cannot be empty")
+	}
+
+	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": id,
+		})
+		return nil, err
+	}
+
+	kb.EnsureDefaults()
+	return kb, nil
+}
+
+// GetKnowledgeBasesByIDsOnly retrieves knowledge bases by IDs without tenant filter (batch).
+func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) ([]*types.KnowledgeBase, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, kb := range kbs {
+		if kb != nil {
+			kb.EnsureDefaults()
+		}
+	}
+	return kbs, nil
+}
+
 // ListKnowledgeBases returns all knowledge bases for a tenant
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
@@ -167,6 +210,59 @@ func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types
 		}
 	}
 	return kbs, nil
+}
+
+// ListKnowledgeBasesByTenantID returns all knowledge bases for the given tenant (e.g. for shared agent context).
+func (s *knowledgeBaseService) ListKnowledgeBasesByTenantID(ctx context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
+	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+	for _, kb := range kbs {
+		kb.EnsureDefaults()
+		switch kb.Type {
+		case types.KnowledgeBaseTypeDocument:
+			if cnt, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+				kb.KnowledgeCount = cnt
+			}
+		case types.KnowledgeBaseTypeFAQ:
+			if cnt, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+				kb.ChunkCount = cnt
+			}
+		}
+		if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
+			kb.IsProcessing = processingCount > 0
+			kb.ProcessingCount = processingCount
+		}
+	}
+	return kbs, nil
+}
+
+// FillKnowledgeBaseCounts fills KnowledgeCount, ChunkCount, IsProcessing, ProcessingCount for the given KB using kb.TenantID.
+func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *types.KnowledgeBase) error {
+	if kb == nil {
+		return nil
+	}
+	tenantID := kb.TenantID
+	kb.EnsureDefaults()
+	switch kb.Type {
+	case types.KnowledgeBaseTypeDocument:
+		if cnt, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+			kb.KnowledgeCount = cnt
+		}
+	case types.KnowledgeBaseTypeFAQ:
+		if cnt, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, tenantID, kb.ID); err == nil {
+			kb.ChunkCount = cnt
+		}
+	}
+	if processingCount, err := s.kgRepo.CountKnowledgeByStatus(ctx, tenantID, kb.ID, []string{"pending", "processing"}); err == nil {
+		kb.IsProcessing = processingCount > 0
+		kb.ProcessingCount = processingCount
+	}
+	return nil
 }
 
 // UpdateKnowledgeBase updates a knowledge base's properties
@@ -239,6 +335,11 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 			"knowledge_base_id": id,
 		})
 		return err
+	}
+
+	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
+	if delErr := s.shareRepo.DeleteByKnowledgeBaseID(ctx, id); delErr != nil {
+		logger.Warnf(ctx, "Failed to delete KB shares for knowledge base %s: %v", id, delErr)
 	}
 
 	// Step 2: Enqueue async task for heavy cleanup operations
@@ -493,6 +594,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base ID: %s, query text: %s", id, params.QueryText)
 
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	currentTenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
 	// Create a composite retrieval engine with tenant's configured retrievers
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
@@ -520,7 +622,16 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
 		logger.Infof(ctx, "Getting embedding model, model ID: %s", kb.EmbeddingModelID)
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+
+		// Check if this is a cross-tenant shared knowledge base
+		// For shared KB, we must use the source tenant's embedding model to ensure vector compatibility
+		if kb.TenantID != currentTenantID {
+			logger.Infof(ctx, "Cross-tenant knowledge base detected, using source tenant's embedding model. KB tenant: %d, current tenant: %d", kb.TenantID, currentTenantID)
+			embeddingModel, err = s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+		} else {
+			embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		}
+
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get embedding model, model ID: %s, error: %v", kb.EmbeddingModelID, err)
 			return nil, err
@@ -1016,16 +1127,16 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		chunkMatchedContents[chunk.ChunkID] = chunk.Content
 	}
 
-	// Batch fetch knowledge data
+	// Batch fetch knowledge data (include shared KB so cross-tenant retrieval works)
 	logger.Infof(ctx, "Fetching knowledge data for %d IDs", len(knowledgeIDs))
-	knowledgeMap, err := s.fetchKnowledgeData(ctx, tenantID, knowledgeIDs)
+	knowledgeMap, err := s.fetchKnowledgeDataWithShared(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	// Batch fetch all chunks in one go
+	// Batch fetch chunks (include shared KB chunks: first by tenant, then by ID-only for missing with permission check)
 	logger.Infof(ctx, "Fetching chunk data for %d IDs", len(chunkIDs))
-	allChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
+	allChunks, err := s.listChunksByIDWithShared(ctx, tenantID, chunkIDs)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
@@ -1077,10 +1188,10 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		}
 	}
 
-	// Fetch all additional chunks in one go if needed
+	// Fetch all additional chunks in one go if needed (include shared KB)
 	if len(additionalChunkIDs) > 0 {
 		logger.Infof(ctx, "Fetching %d additional chunks", len(additionalChunkIDs))
-		additionalChunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, additionalChunkIDs)
+		additionalChunks, err := s.listChunksByIDWithShared(ctx, tenantID, additionalChunkIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to fetch some additional chunks: %v", err)
 			// Continue with what we have
@@ -1225,4 +1336,137 @@ func (s *knowledgeBaseService) fetchKnowledgeData(ctx context.Context,
 	}
 
 	return knowledgeMap, nil
+}
+
+// fetchKnowledgeDataWithShared gets knowledge data in batch, including knowledge from shared KBs the user has access to.
+func (s *knowledgeBaseService) fetchKnowledgeDataWithShared(ctx context.Context,
+	tenantID uint64,
+	knowledgeIDs []string,
+) (map[string]*types.Knowledge, error) {
+	knowledges, err := s.kgRepo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id":     tenantID,
+			"knowledge_ids": knowledgeIDs,
+		})
+		return nil, err
+	}
+
+	knowledgeMap := make(map[string]*types.Knowledge, len(knowledges))
+	for _, k := range knowledges {
+		knowledgeMap[k.ID] = k
+	}
+
+	// Count how many IDs are missing (not found in current tenant)
+	var missingIDs []string
+	for _, id := range knowledgeIDs {
+		if knowledgeMap[id] == nil {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	if len(missingIDs) == 0 {
+		return knowledgeMap, nil
+	}
+	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] %d knowledge IDs not found in current tenant, attempting shared KB lookup", len(missingIDs))
+
+	userIDVal := ctx.Value(types.UserIDContextKey)
+	if userIDVal == nil {
+		logger.Warnf(ctx, "[fetchKnowledgeDataWithShared] userID not found in context, skipping shared KB lookup")
+		return knowledgeMap, nil
+	}
+	userID, ok := userIDVal.(string)
+	if !ok || userID == "" {
+		logger.Warnf(ctx, "[fetchKnowledgeDataWithShared] userID is empty, skipping shared KB lookup")
+		return knowledgeMap, nil
+	}
+
+	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] Looking up %d missing knowledge IDs with userID=%s", len(missingIDs), userID)
+	for _, id := range missingIDs {
+		k, err := s.kgRepo.GetKnowledgeByIDOnly(ctx, id)
+		if err != nil || k == nil || k.KnowledgeBaseID == "" {
+			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Knowledge %s not found or has no KB", id)
+			continue
+		}
+		hasPermission, err := s.kbShareService.HasKBPermission(ctx, k.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		if err != nil {
+			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Permission check error for KB %s: %v", k.KnowledgeBaseID, err)
+			continue
+		}
+		if !hasPermission {
+			logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] No permission for KB %s", k.KnowledgeBaseID)
+			continue
+		}
+		logger.Debugf(ctx, "[fetchKnowledgeDataWithShared] Found shared knowledge %s in KB %s", id, k.KnowledgeBaseID)
+		knowledgeMap[k.ID] = k
+	}
+
+	logger.Infof(ctx, "[fetchKnowledgeDataWithShared] After shared lookup, total knowledge found: %d", len(knowledgeMap))
+	return knowledgeMap, nil
+}
+
+// listChunksByIDWithShared fetches chunks by IDs, including chunks from shared KBs the user has access to.
+func (s *knowledgeBaseService) listChunksByIDWithShared(ctx context.Context,
+	tenantID uint64,
+	chunkIDs []string,
+) ([]*types.Chunk, error) {
+	chunks, err := s.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	foundSet := make(map[string]bool)
+	for _, c := range chunks {
+		if c != nil {
+			foundSet[c.ID] = true
+		}
+	}
+
+	var missing []string
+	for _, id := range chunkIDs {
+		if !foundSet[id] {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return chunks, nil
+	}
+	logger.Infof(ctx, "[listChunksByIDWithShared] %d chunks not found in current tenant, attempting shared KB lookup", len(missing))
+
+	userIDVal := ctx.Value(types.UserIDContextKey)
+	if userIDVal == nil {
+		logger.Warnf(ctx, "[listChunksByIDWithShared] userID not found in context, skipping shared KB lookup")
+		return chunks, nil
+	}
+	userID, ok := userIDVal.(string)
+	if !ok || userID == "" {
+		logger.Warnf(ctx, "[listChunksByIDWithShared] userID is empty, skipping shared KB lookup")
+		return chunks, nil
+	}
+
+	logger.Infof(ctx, "[listChunksByIDWithShared] Looking up %d missing chunks with userID=%s", len(missing), userID)
+	crossChunks, err := s.chunkRepo.ListChunksByIDOnly(ctx, missing)
+	if err != nil {
+		logger.Warnf(ctx, "[listChunksByIDWithShared] Failed to fetch chunks by ID only: %v", err)
+		return chunks, nil
+	}
+	logger.Infof(ctx, "[listChunksByIDWithShared] Found %d chunks without tenant filter", len(crossChunks))
+
+	for _, c := range crossChunks {
+		if c == nil || c.KnowledgeBaseID == "" {
+			continue
+		}
+		hasPermission, err := s.kbShareService.HasKBPermission(ctx, c.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		if err != nil {
+			logger.Debugf(ctx, "[listChunksByIDWithShared] Permission check error for KB %s: %v", c.KnowledgeBaseID, err)
+			continue
+		}
+		if !hasPermission {
+			logger.Debugf(ctx, "[listChunksByIDWithShared] No permission for KB %s", c.KnowledgeBaseID)
+			continue
+		}
+		chunks = append(chunks, c)
+	}
+
+	logger.Infof(ctx, "[listChunksByIDWithShared] After shared lookup, total chunks: %d", len(chunks))
+	return chunks, nil
 }

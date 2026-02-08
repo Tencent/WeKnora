@@ -70,6 +70,7 @@ type knowledgeService struct {
 	task            *asynq.Client
 	graphEngine     interfaces.RetrieveGraphRepository
 	redisClient     *redis.Client
+	kbShareService  interfaces.KBShareService
 }
 
 const (
@@ -95,6 +96,7 @@ func NewKnowledgeService(
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	redisClient *redis.Client,
+	kbShareService interfaces.KBShareService,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
 		config:          config,
@@ -112,6 +114,7 @@ func NewKnowledgeService(
 		graphEngine:     graphEngine,
 		retrieveEngine:  retrieveEngine,
 		redisClient:     redisClient,
+		kbShareService:  kbShareService,
 	}, nil
 }
 
@@ -711,6 +714,11 @@ func (s *knowledgeService) GetKnowledgeByID(ctx context.Context, id string) (*ty
 
 	logger.Infof(ctx, "Knowledge retrieved successfully, ID: %s, type: %s", knowledge.ID, knowledge.Type)
 	return knowledge, nil
+}
+
+// GetKnowledgeByIDOnly retrieves knowledge by ID without tenant filter (for permission resolution).
+func (s *knowledgeService) GetKnowledgeByIDOnly(ctx context.Context, id string) (*types.Knowledge, error) {
+	return s.repo.GetKnowledgeByIDOnly(ctx, id)
 }
 
 // ListKnowledgeByKnowledgeBaseID returns all knowledge entries in a knowledge base
@@ -2229,6 +2237,50 @@ func (s *knowledgeService) GetKnowledgeBatch(ctx context.Context,
 	return s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
 }
 
+// GetKnowledgeBatchWithSharedAccess retrieves knowledge by IDs, including items from shared KBs the user has access to.
+// Used when building search targets so that @mentioned files from shared KBs are included.
+func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context,
+	tenantID uint64, ids []string,
+) ([]*types.Knowledge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ownList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+	foundSet := make(map[string]bool)
+	for _, k := range ownList {
+		if k != nil {
+			foundSet[k.ID] = true
+		}
+	}
+	userIDVal := ctx.Value(types.UserIDContextKey)
+	if userIDVal == nil {
+		return ownList, nil
+	}
+	userID, ok := userIDVal.(string)
+	if !ok || userID == "" {
+		return ownList, nil
+	}
+	for _, id := range ids {
+		if foundSet[id] {
+			continue
+		}
+		k, err := s.repo.GetKnowledgeByIDOnly(ctx, id)
+		if err != nil || k == nil || k.KnowledgeBaseID == "" {
+			continue
+		}
+		hasPermission, err := s.kbShareService.HasKBPermission(ctx, k.KnowledgeBaseID, userID, types.OrgRoleViewer)
+		if err != nil || !hasPermission {
+			continue
+		}
+		foundSet[k.ID] = true
+		ownList = append(ownList, k)
+	}
+	return ownList, nil
+}
+
 // calculateFileHash calculates MD5 hash of a file
 func calculateFileHash(file *multipart.FileHeader) (string, error) {
 	f, err := file.Open()
@@ -2677,8 +2729,35 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+
+	// Check if this is a shared knowledge base access
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	faqKnowledge, err := s.findFAQKnowledge(ctx, tenantID, kb.ID)
+	effectiveTenantID := tenantID
+
+	// If the kb belongs to a different tenant, check for shared access
+	if kb.TenantID != tenantID {
+		// Get user ID from context
+		userIDVal := ctx.Value(types.UserIDContextKey)
+		if userIDVal == nil {
+			return nil, werrors.NewForbiddenError("无权访问该知识库")
+		}
+		userID := userIDVal.(string)
+
+		// Check if user has at least viewer permission through organization sharing
+		hasPermission, err := s.kbShareService.HasKBPermission(ctx, kbID, userID, types.OrgRoleViewer)
+		if err != nil || !hasPermission {
+			return nil, werrors.NewForbiddenError("无权访问该知识库")
+		}
+
+		// Use the source tenant ID for data access
+		sourceTenantID, err := s.kbShareService.GetKBSourceTenant(ctx, kbID)
+		if err != nil {
+			return nil, werrors.NewForbiddenError("无权访问该知识库")
+		}
+		effectiveTenantID = sourceTenantID
+	}
+
+	faqKnowledge, err := s.findFAQKnowledge(ctx, effectiveTenantID, kb.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -2689,7 +2768,7 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 	// Convert tagSeqID to tagID (UUID)
 	var tagID string
 	if tagSeqID > 0 {
-		tag, err := s.tagRepo.GetBySeqID(ctx, tenantID, tagSeqID)
+		tag, err := s.tagRepo.GetBySeqID(ctx, effectiveTenantID, tagSeqID)
 		if err != nil {
 			return nil, werrors.NewNotFoundError("标签不存在")
 		}
@@ -2698,7 +2777,7 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 
 	chunkType := []types.ChunkType{types.ChunkTypeFAQ}
 	chunks, total, err := s.chunkRepo.ListPagedChunksByKnowledgeID(
-		ctx, tenantID, faqKnowledge.ID, page, chunkType, tagID, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
+		ctx, effectiveTenantID, faqKnowledge.ID, page, chunkType, tagID, keyword, searchField, sortOrder, types.KnowledgeTypeFAQ,
 	)
 	if err != nil {
 		return nil, err
@@ -2718,7 +2797,7 @@ func (s *knowledgeService) ListFAQEntries(ctx context.Context,
 		}
 	}
 	if len(tagIDs) > 0 {
-		tags, err := s.tagRepo.GetByIDs(ctx, tenantID, tagIDs)
+		tags, err := s.tagRepo.GetByIDs(ctx, effectiveTenantID, tagIDs)
 		if err == nil {
 			for _, tag := range tags {
 				tagNameMap[tag.ID] = tag.Name
@@ -4562,7 +4641,14 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, updates 
 	if len(updates) == 0 {
 		return nil
 	}
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantIDVal := ctx.Value(types.TenantIDContextKey)
+	if tenantIDVal == nil {
+		return werrors.NewUnauthorizedError("tenant ID not found in context")
+	}
+	tenantID, ok := tenantIDVal.(uint64)
+	if !ok {
+		return werrors.NewUnauthorizedError("invalid tenant ID in context")
+	}
 
 	// Get all knowledge items in batch
 	knowledgeIDs := make([]string, 0, len(updates))
@@ -7456,14 +7542,55 @@ func (s *knowledgeService) getOrCreateTagInTarget(
 	return newTag.ID
 }
 
-// SearchKnowledge searches knowledge items by keyword across the tenant
+// SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
 // fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
 func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
 	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
 	if !ok {
 		return nil, false, werrors.NewUnauthorizedError("Tenant ID not found in context")
 	}
-	return s.repo.SearchKnowledge(ctx, tenantID, keyword, offset, limit, fileTypes)
+
+	scopes := make([]types.KnowledgeSearchScope, 0)
+
+	// Own tenant: document-type knowledge bases
+	ownKBs, err := s.kbService.ListKnowledgeBases(ctx)
+	if err == nil {
+		for _, kb := range ownKBs {
+			if kb != nil && kb.Type == types.KnowledgeBaseTypeDocument {
+				scopes = append(scopes, types.KnowledgeSearchScope{TenantID: tenantID, KBID: kb.ID})
+			}
+		}
+	}
+
+	// Shared knowledge bases (document type only)
+	if userIDVal := ctx.Value(types.UserIDContextKey); userIDVal != nil {
+		if userID, ok := userIDVal.(string); ok && userID != "" {
+			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+			if err == nil {
+				for _, info := range sharedList {
+					if info != nil && info.KnowledgeBase != nil && info.KnowledgeBase.Type == types.KnowledgeBaseTypeDocument {
+						scopes = append(scopes, types.KnowledgeSearchScope{
+							TenantID: info.SourceTenantID,
+							KBID:     info.KnowledgeBase.ID,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	if len(scopes) == 0 {
+		return nil, false, nil
+	}
+	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
+}
+
+// SearchKnowledgeForScopes searches knowledge within the given scopes (e.g. for shared agent context).
+func (s *knowledgeService) SearchKnowledgeForScopes(ctx context.Context, scopes []types.KnowledgeSearchScope, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, error) {
+	if len(scopes) == 0 {
+		return nil, false, nil
+	}
+	return s.repo.SearchKnowledgeInScopes(ctx, scopes, keyword, offset, limit, fileTypes)
 }
 
 // ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks

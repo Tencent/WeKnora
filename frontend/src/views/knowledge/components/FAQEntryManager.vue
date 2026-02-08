@@ -39,11 +39,35 @@
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.faq.title') }}</span>
             </h2>
-            <t-tooltip :content="$t('knowledgeBase.settings')" placement="top">
+            <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
+            <div v-if="kbInfo" class="faq-access-meta">
+              <t-tooltip :content="accessPermissionSummary" placement="top">
+                <span class="faq-access-meta-inner">
+                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="faq-access-role-tag">
+                    {{ accessRoleLabel }}
+                  </t-tag>
+                  <template v-if="currentSharedKb">
+                    <span class="faq-access-meta-sep">·</span>
+                    <span class="faq-access-meta-text">
+                      {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
+                      {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
+                    </span>
+                  </template>
+                  <template v-else-if="effectiveKBPermission">
+                    <span class="faq-access-meta-sep">·</span>
+                    <span class="faq-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
+                  </template>
+                  <template v-else-if="kbLastUpdated">
+                    <span class="faq-access-meta-sep">·</span>
+                    <span class="faq-access-meta-text">{{ $t('knowledgeBase.accessInfo.lastUpdated') }} {{ kbLastUpdated }}</span>
+                  </template>
+                </span>
+              </t-tooltip>
+            </div>
+            <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
               <button
                 type="button"
                 class="kb-settings-button"
-                :disabled="!props.kbId"
                 @click="handleOpenKBSettings"
               >
                 <t-icon name="setting" size="16px" />
@@ -173,7 +197,7 @@
               <span>{{ $t('knowledgeBase.faqCategoryTitle') }}</span>
               <span class="sidebar-count">({{ sidebarCategoryCount }})</span>
             </div>
-            <div class="sidebar-actions">
+            <div v-if="canEdit" class="sidebar-actions">
               <t-button
                 size="small"
                 variant="text"
@@ -290,7 +314,7 @@
                       </div>
                     </template>
                     <template v-else>
-                      <div class="tag-more" @click.stop>
+                      <div v-if="canEdit" class="tag-more" @click.stop>
                         <t-popup trigger="click" placement="top-right" overlayClassName="tag-more-popup">
                           <div class="tag-more-btn">
                             <t-icon name="more" size="14px" />
@@ -324,12 +348,13 @@
         </aside>
 
         <div class="faq-card-area">
-          <!-- 搜索栏 -->
+          <!-- 搜索栏与管理 FAQ -->
           <div class="faq-search-bar">
             <t-input
               v-model.trim="entrySearchKeyword"
               :placeholder="$t('knowledgeEditor.faq.searchPlaceholder')"
               clearable
+              class="faq-search-input"
               @clear="loadEntries()"
               @keydown.enter="loadEntries()"
             >
@@ -337,6 +362,35 @@
                 <t-icon name="search" size="16px" />
               </template>
             </t-input>
+            <div class="faq-search-actions">
+              <!-- 新建：新建条目 / 导入 -->
+              <template v-if="faqCreateOptions.length">
+                <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
+                  <t-dropdown
+                    :options="faqCreateOptions"
+                    trigger="click"
+                    placement="bottom-right"
+                    @click="handleFaqAction"
+                  >
+                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                      <template #icon><t-icon name="add" size="16px" /></template>
+                    </t-button>
+                  </t-dropdown>
+                </t-tooltip>
+              </template>
+              <!-- 导出 -->
+              <t-tooltip :content="$t('knowledgeEditor.faqExport.exportButton')" placement="top">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" @click="handleFaqAction({ value: 'export' })">
+                  <template #icon><t-icon name="download" size="16px" /></template>
+                </t-button>
+              </t-tooltip>
+              <!-- 检索 -->
+              <t-tooltip :content="$t('knowledgeEditor.faq.searchTest')" placement="top">
+                <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" @click="handleFaqAction({ value: 'search' })">
+                  <template #icon><t-icon name="search" size="16px" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
           </div>
           <!-- Card List Container with Scroll -->
           <div ref="scrollContainer" class="faq-scroll-container" @scroll="handleScroll">
@@ -359,6 +413,7 @@
                       </div>
                       <div class="faq-card-actions">
                         <t-popup
+                          v-if="canManage"
                           v-model="entry.showMore"
                           overlayClassName="faq-card-popup"
                           trigger="click"
@@ -502,7 +557,7 @@
                   <!-- Card Footer -->
                   <div class="faq-card-footer">
                     <div class="faq-card-tag" @click.stop>
-                      <template v-if="tagList.length">
+                      <template v-if="canEdit && tagList.length">
                         <t-dropdown
                           :options="tagDropdownOptions"
                           trigger="click"
@@ -539,22 +594,21 @@
                         </div>
                       </t-tooltip>
                       -->
-                      <t-tooltip
-                        :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
-                        placement="top"
-                      >
-                        <div class="status-item-compact">
-                          <t-switch
-                            :key="`${entry.id}-${entry.is_enabled}`"
-                            size="small"
-                            :value="entry.is_enabled"
-                            :loading="!!entryStatusLoading[entry.id]"
-                            :disabled="!!entryStatusLoading[entry.id]"
-                            @click.stop
-                            @change="(value: boolean) => handleEntryStatusChange(entry, value)"
-                          />
-                        </div>
-                      </t-tooltip>
+                                            <t-tooltip
+                                              :content="entry.is_enabled ? $t('knowledgeEditor.faq.statusEnabled') : $t('knowledgeEditor.faq.statusDisabled')"
+                                              placement="top"
+                                            >
+                                              <div class="status-item-compact">
+                                                <t-switch
+                                                  :key="`${entry.id}-${entry.is_enabled}`"
+                                                  size="small"
+                                                  :value="entry.is_enabled"
+                                                  :loading="!!entryStatusLoading[entry.id]"
+                                                  :disabled="!!entryStatusLoading[entry.id] || !canEdit"
+                                                  @click.stop @change="(value: boolean) => handleEntryStatusChange(entry, value)"
+                                                />
+                                              </div>
+                                            </t-tooltip>
                     </div>
                   </div>
                 </div>
@@ -1161,6 +1215,8 @@ import { MessagePlugin, DialogPlugin, Icon as TIcon } from 'tdesign-vue-next'
 import type { FormRules, FormInstanceFunctions } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+import { useOrganizationStore } from '@/stores/organization'
 import {
   listFAQEntries,
   upsertFAQEntries,
@@ -1226,6 +1282,86 @@ const props = defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
+const orgStore = useOrganizationStore()
+
+// Permission control: check if current user owns this KB or has edit/manage permission
+const isOwner = computed(() => {
+  if (!kbInfo.value) return false
+  // Check if the current user's tenant ID matches the KB's tenant ID
+  const userTenantId = authStore.effectiveTenantId
+  return kbInfo.value.tenant_id === userTenantId
+})
+
+// Can edit: owner, admin, or editor
+const canEdit = computed(() => {
+  return orgStore.canEditKB(props.kbId, isOwner.value)
+})
+
+// Can manage (delete, settings, etc.): owner or admin
+const canManage = computed(() => {
+  return orgStore.canManageKB(props.kbId, isOwner.value)
+})
+
+// Current KB's shared record (when accessed via organization share)
+const currentSharedKb = computed(() =>
+  orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === props.kbId) ?? null,
+)
+
+// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
+const effectiveKBPermission = computed(() => orgStore.getKBPermission(props.kbId) || kbInfo.value?.my_permission || '')
+
+// Display role label: owner or org role (admin/editor/viewer)
+const accessRoleLabel = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
+  const perm = effectiveKBPermission.value
+  if (perm) return t(`organization.role.${perm}`)
+  return '--'
+})
+
+// Permission summary text for current role
+const accessPermissionSummary = computed(() => {
+  if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
+  const perm = effectiveKBPermission.value
+  if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
+  if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor')
+  if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer')
+  return '--'
+})
+
+// Last updated time from kbInfo
+const kbLastUpdated = computed(() => {
+  const raw = kbInfo.value?.updated_at
+  if (!raw) return null
+  return formatImportTime(raw)
+})
+
+// FAQ 操作：新建组（新建条目 + 导入）
+const faqCreateOptions = computed(() => {
+  if (!canEdit.value) return []
+  return [
+    { content: t('knowledgeEditor.faq.editorCreate'), value: 'create', prefixIcon: () => h(TIcon, { name: 'add', size: '16px' }) },
+    { content: t('knowledgeEditor.faqImport.importButton'), value: 'import', prefixIcon: () => h(TIcon, { name: 'upload', size: '16px' }) },
+  ]
+})
+
+// 处理 FAQ 操作
+const handleFaqAction = (data: { value: string }) => {
+  switch (data.value) {
+    case 'create':
+      openEditor()
+      break
+    case 'import':
+      openImportDialog()
+      break
+    case 'search':
+      searchDrawerVisible.value = true
+      break
+    case 'export':
+      handleExportCSV()
+      break
+  }
+}
 
 const loading = ref(false)
 const loadingMore = ref(false)
@@ -1336,11 +1472,26 @@ const loadKnowledgeInfo = async (kbId: string) => {
 const loadKnowledgeList = async () => {
   try {
     const res: any = await listKnowledgeBases()
-    knowledgeList.value = (res?.data || []).map((item: any) => ({
+    const myKbs = (res?.data || []).map((item: any) => ({
       id: String(item.id),
       name: item.name,
       type: item.type,
     }))
+    
+    // Also include shared knowledge bases from orgStore
+    const sharedKbs = (orgStore.sharedKnowledgeBases || [])
+      .filter(s => s.knowledge_base != null)
+      .map(s => ({
+        id: String(s.knowledge_base.id),
+        name: s.knowledge_base.name,
+        type: s.knowledge_base.type,
+      }))
+    
+    // Merge and deduplicate by id (my KBs take precedence)
+    const myKbIds = new Set(myKbs.map(kb => kb.id))
+    const uniqueSharedKbs = sharedKbs.filter(kb => !myKbIds.has(kb.id))
+    
+    knowledgeList.value = [...myKbs, ...uniqueSharedKbs]
   } catch (error) {
     console.error('Failed to load knowledge bases:', error)
   }
@@ -1671,13 +1822,15 @@ const handleKnowledgeDropdownSelect = (data: { value: string }) => {
 const handleFaqMenuAction = (event: Event) => {
   const detail = (event as CustomEvent<{ action: string; kbId: string }>).detail
   if (!detail || detail.kbId !== props.kbId) return
+
   if (detail.action === 'create') {
-    openEditor()
+    if (canEdit.value) openEditor()
   } else if (detail.action === 'import') {
-    openImportDialog()
+    if (canEdit.value) openImportDialog()
   } else if (detail.action === 'search') {
     searchDrawerVisible.value = true
   } else if (detail.action === 'export') {
+    // Export is usually allowed for viewers as well
     handleExportCSV()
   } else if (detail.action === 'batch') {
     // 批量操作通过左侧菜单的下拉菜单处理
@@ -1685,19 +1838,19 @@ const handleFaqMenuAction = (event: Event) => {
       MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst') || '请先选中要操作的FAQ条目')
     }
   } else if (detail.action === 'batchTag') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       openBatchTagDialog()
     }
   } else if (detail.action === 'batchEnable') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       handleBatchStatusChange(true)
     }
   } else if (detail.action === 'batchDisable') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canEdit.value && selectedRowKeys.value.length > 0) {
       handleBatchStatusChange(false)
     }
   } else if (detail.action === 'batchDelete') {
-    if (selectedRowKeys.value.length > 0) {
+    if (canManage.value && selectedRowKeys.value.length > 0) {
       handleBatchDelete()
     }
   }
@@ -3021,6 +3174,8 @@ const handleResize = () => {
 }
 
 onMounted(async () => {
+  // Ensure shared knowledge bases are loaded before loading the knowledge list
+  orgStore.fetchSharedKnowledgeBases()
   loadKnowledgeList()
   window.addEventListener('resize', handleResize)
   window.addEventListener('faqMenuAction', handleFaqMenuAction as EventListener)
@@ -3175,20 +3330,26 @@ watch(() => entries.value.map(e => ({
   display: flex;
   flex-direction: column;
   min-height: 0;
+  gap: 20px;
 }
 
+// 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
 .faq-main {
   display: flex;
-  gap: 16px;
   flex: 1;
   min-height: 0;
+  background: #fafbfc;
+  border: 1px solid #e7ebf0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
+// 与列表页筛选区、文档型知识库标签栏一致：白底卡片感
 .faq-tag-panel {
-  width: 230px;
+  width: 200px;
   background: #fff;
-  border: 1px solid #e7ebf0;
-  border-radius: 12px;
+  border-right: 1px solid #e7ebf0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   padding: 16px;
   flex-shrink: 0;
   display: flex;
@@ -3211,13 +3372,14 @@ watch(() => entries.value.map(e => ({
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     color: #1d2129;
 
     .sidebar-title {
       display: flex;
       align-items: baseline;
       gap: 4px;
+      font-size: 13px;
       font-weight: 600;
 
       .sidebar-count {
@@ -3228,18 +3390,18 @@ watch(() => entries.value.map(e => ({
 
     .sidebar-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       color: #c9ced6;
 
       .create-tag-btn {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         padding: 0;
         border-radius: 6px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 600;
         color: #00a870;
         line-height: 1;
@@ -3256,8 +3418,8 @@ watch(() => entries.value.map(e => ({
       }
 
       .sidebar-action-icon {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         border-radius: 6px;
         display: flex;
         align-items: center;
@@ -3274,26 +3436,40 @@ watch(() => entries.value.map(e => ({
   }
 
   .tag-search-bar {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 
     :deep(.t-input) {
       font-size: 12px;
       background-color: #f7f9fc;
       border-color: #e5e9f2;
+      border-radius: 6px;
+    }
+
+    :deep(.t-input__inner) {
+      font-size: 13px;
+    }
+
+    :deep(.t-input__prefix-icon) {
+      margin-right: 0;
     }
   }
 
   .faq-tag-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
 
     .tag-loading-more {
-      padding: 12px 0;
+      padding: 8px 0;
       display: flex;
       justify-content: center;
       flex-shrink: 0;
@@ -3303,12 +3479,14 @@ watch(() => entries.value.map(e => ({
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px;
+      padding: 9px 12px;
       border-radius: 6px;
-      color: #4e5969;
+      color: #2d3139;
       cursor: pointer;
       transition: all 0.2s ease;
-      font-size: 13px;
+      font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
 
       .faq-tag-left {
         display: flex;
@@ -3319,8 +3497,8 @@ watch(() => entries.value.map(e => ({
 
         .t-icon {
           flex-shrink: 0;
-          color: #86909c;
-          font-size: 16px;
+          color: #5c6470;
+          font-size: 14px;
           transition: color 0.2s ease;
         }
       }
@@ -3331,7 +3509,11 @@ watch(() => entries.value.map(e => ({
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-weight: 400;
+        font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 14px;
+        font-weight: 450;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
       }
 
       .faq-tag-right {
@@ -3339,46 +3521,52 @@ watch(() => entries.value.map(e => ({
         align-items: center;
         gap: 6px;
         margin-left: 8px;
-        min-width: 0;
         flex-shrink: 0;
       }
 
       .faq-tag-count {
         font-size: 12px;
-        color: #86909c;
+        color: #5c6470;
         font-weight: 500;
-        padding: 2px 6px;
-        border-radius: 10px;
-        background: #f7f9fc;
+        min-width: 28px;
+        padding: 3px 7px;
+        border-radius: 8px;
+        background: #eef0f3;
         transition: all 0.2s ease;
+        text-align: center;
+        box-sizing: border-box;
       }
 
       &:hover {
-        background: #f7f9fc;
+        background: #f2f4f7;
         color: #1d2129;
 
         .faq-tag-left .t-icon {
-          color: #4e5969;
+          color: #1d2129;
         }
 
         .faq-tag-count {
           background: #e5e9f2;
-          color: #4e5969;
+          color: #1d2129;
         }
       }
 
       &.active {
         background: #e6f7ec;
-        color: #00a870;
+        color: #07c05f;
         font-weight: 500;
 
         .faq-tag-left .t-icon {
-          color: #00a870;
+          color: #07c05f;
+        }
+
+        .tag-name {
+          font-weight: 500;
         }
 
         .faq-tag-count {
           background: #b8f0d3;
-          color: #00a870;
+          color: #07c05f;
           font-weight: 600;
         }
 
@@ -3487,8 +3675,8 @@ watch(() => entries.value.map(e => ({
       }
 
       .tag-more-btn {
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -3511,17 +3699,17 @@ watch(() => entries.value.map(e => ({
       }
 
       .tag-more-placeholder {
-        width: 24px;  // Same width as tag-more-btn
-        height: 24px;
+        width: 22px;
+        height: 22px;
         flex-shrink: 0;
       }
     }
 
     .tag-empty-state {
       text-align: center;
-      padding: 12px 8px;
+      padding: 10px 6px;
       color: #a1a7b3;
-      font-size: 12px;
+      font-size: 11px;
     }
   }
 }
@@ -3532,11 +3720,38 @@ watch(() => entries.value.map(e => ({
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 12px;
+  overflow: hidden;
+  background: #fafbfc;
 }
 
 .faq-search-bar {
-  padding: 0px 0px 10px 0px;
+  padding: 0 0 12px 0;
   flex-shrink: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+
+  .faq-search-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .faq-search-actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    :deep(.content-bar-icon-btn) {
+      color: #86909c;
+      background: transparent;
+      border: none;
+      &:hover {
+        color: #4e5969;
+        background: #f2f3f5;
+      }
+    }
+  }
 
   :deep(.t-input) {
     font-size: 13px;
@@ -3550,6 +3765,10 @@ watch(() => entries.value.map(e => ({
       background-color: #fff;
       border-color: #00a870;
     }
+  }
+
+  :deep(.t-input__prefix-icon) {
+    margin-right: 0;
   }
 }
 
@@ -3595,15 +3814,130 @@ watch(() => entries.value.map(e => ({
 
 .faq-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 0 0 16px;
-  margin-bottom: 20px;
-  border-bottom: 1px solid #e7ebf0;
+  gap: 12px;
   flex-shrink: 0;
+
+  .faq-header-title {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .faq-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .faq-access-meta {
+    flex-shrink: 0;
+  }
+
+  .faq-access-meta-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #86909c;
+    cursor: default;
+  }
+
+  .faq-access-role-tag {
+    flex-shrink: 0;
+  }
+
+  .faq-access-meta-sep {
+    color: #c9ced6;
+    user-select: none;
+  }
+
+  .faq-access-meta-text {
+    white-space: nowrap;
+  }
+
+  .faq-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #1d2129;
+  }
+
+  .breadcrumb-link {
+    border: none;
+    background: transparent;
+    padding: 4px 8px;
+    margin: -4px -8px;
+    font: inherit;
+    color: #4e5969;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 6px;
+    transition: all 0.12s ease;
+
+    &:hover:not(:disabled) {
+      color: #10b981;
+      background: #f6f8f7;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      color: #c9ced6;
+    }
+
+    &.dropdown {
+      padding-right: 6px;
+      
+      :deep(.t-icon) {
+        font-size: 14px;
+        transition: transform 0.12s ease;
+      }
+
+      &:hover:not(:disabled) {
+        :deep(.t-icon) {
+          transform: translateY(1px);
+        }
+      }
+    }
+  }
+
+  .breadcrumb-separator {
+    font-size: 14px;
+    color: #c9ced6;
+  }
+
+  .breadcrumb-current {
+    color: #1d2129;
+    font-weight: 600;
+  }
+
+  h2 {
+    margin: 0;
+    color: #1d2129;
+    font-family: "PingFang SC";
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 32px;
+  }
+
+  .faq-subtitle {
+    margin: 0;
+    color: #00000099;
+    font-family: "PingFang SC";
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+  }
 }
+
 
 // 导入进度条样式（显示在列表页面顶部）
 .faq-import-progress-bar {
@@ -3850,97 +4184,6 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-  .faq-header-title {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .faq-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .faq-breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: #1d2129;
-  }
-
-  .breadcrumb-link {
-    border: none;
-    background: transparent;
-    padding: 4px 8px;
-    margin: -4px -8px;
-    font: inherit;
-    color: #4e5969;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border-radius: 6px;
-    transition: all 0.12s ease;
-
-    &:hover:not(:disabled) {
-      color: #10b981;
-      background: #f6f8f7;
-    }
-
-    &:disabled {
-      cursor: not-allowed;
-      color: #c9ced6;
-    }
-
-    &.dropdown {
-      padding-right: 6px;
-      
-      :deep(.t-icon) {
-        font-size: 14px;
-        transition: transform 0.12s ease;
-      }
-
-      &:hover:not(:disabled) {
-        :deep(.t-icon) {
-          transform: translateY(1px);
-        }
-      }
-    }
-  }
-
-  .breadcrumb-separator {
-    font-size: 14px;
-    color: #c9ced6;
-  }
-
-  .breadcrumb-current {
-    color: #1d2129;
-    font-weight: 600;
-  }
-
-  h2 {
-    margin: 0;
-    color: #1d2129;
-    font-family: "PingFang SC";
-    font-size: 24px;
-    font-weight: 600;
-    line-height: 32px;
-  }
-
-  .faq-subtitle {
-    margin: 0;
-    color: #00000099;
-    font-family: "PingFang SC";
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
-  }
-
 
 .tag-filter-bar {
   display: flex;
@@ -4001,21 +4244,20 @@ watch(() => entries.value.map(e => ({
 
 .faq-card {
   border: 1px solid #E7E7E7;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
-  padding: 12px;
+  padding: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
   box-sizing: border-box;
-  height: fit-content; // 高度根据内容自适应
-  // 注意：top 和 left 的 transition 由 JS 动态控制，避免与布局动画冲突
+  height: fit-content;
 
   &:hover {
     border-color: #07C05F;
@@ -4032,8 +4274,8 @@ watch(() => entries.value.map(e => ({
 .faq-card-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-bottom: 12px;
+  gap: 8px;
+  padding-bottom: 10px;
   border-bottom: 1px solid #F3F4F6;
   position: relative;
 }
@@ -4041,13 +4283,13 @@ watch(() => entries.value.map(e => ({
 .faq-header-top {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 
 .faq-card-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -4056,28 +4298,28 @@ watch(() => entries.value.map(e => ({
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding-top: 6px;
+  gap: 8px;
+  padding-top: 5px;
   border-top: 1px dashed #F3F4F6;
 }
 
 .faq-meta-item {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: #F9FAFB;
   border: 1px solid #EEF2F7;
 
   .meta-label {
-    font-size: 12px;
+    font-size: 11px;
     color: #6B7280;
     font-weight: 500;
   }
 
   .meta-value {
-    font-size: 13px;
+    font-size: 12px;
     color: #111827;
     font-weight: 600;
   }
@@ -4087,9 +4329,9 @@ watch(() => entries.value.map(e => ({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 16px;
-  margin: 0 -16px -12px;
+  gap: 6px;
+  padding: 8px 12px;
+  margin: 0 -10px -10px;
   background: rgba(48, 50, 54, 0.02);
   border-top: 1px solid #f5f5f5;
   flex-wrap: nowrap;
@@ -4098,7 +4340,7 @@ watch(() => entries.value.map(e => ({
 .faq-card-status {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
   margin-left: auto;
 }
@@ -4106,17 +4348,17 @@ watch(() => entries.value.map(e => ({
 .status-item {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: #F9FAFB;
   border: 1px solid #EEF2F7;
-  font-size: 12px;
+  font-size: 11px;
   color: #4B5563;
   font-family: "PingFang SC";
 
   .status-icon {
-    font-size: 14px;
+    font-size: 13px;
     color: #9CA3AF;
 
     &.warning {
@@ -4173,14 +4415,14 @@ watch(() => entries.value.map(e => ({
     display: inline-flex;
     align-items: center;
     cursor: pointer;
-    max-width: 140px;
-    height: 22px;
+    max-width: 120px;
+    height: 20px;
     border-radius: 4px;
     border-color: #e5e7eb;
     color: #00000066;
-    padding: 0 8px;
+    padding: 0 6px;
     background: #3032360f;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
     font-family: "PingFang SC";
     transition: all 0.2s ease;
@@ -4199,11 +4441,11 @@ watch(() => entries.value.map(e => ({
   cursor: pointer;
 
   .tag-text {
-    max-width: 120px;
+    max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 400;
     color: #00000066;
   }
@@ -4295,36 +4537,36 @@ watch(() => entries.value.map(e => ({
 .faq-card-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  contain: layout; // 优化渲染性能
+  contain: layout;
 }
 
 .faq-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
 
   .faq-section-label {
     color: #6B7280;
     font-family: "PingFang SC";
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 2px;
+    gap: 5px;
+    margin-bottom: 1px;
 
     &::before {
       content: '';
       width: 3px;
-      height: 12px;
+      height: 10px;
       background: #07C05F;
       border-radius: 2px;
       flex-shrink: 0;
@@ -4347,7 +4589,7 @@ watch(() => entries.value.map(e => ({
     }
 
     .collapse-icon {
-      font-size: 14px;
+      font-size: 13px;
       color: #9CA3AF;
       flex-shrink: 0;
       margin-left: auto; // 让箭头靠右对齐
@@ -4376,8 +4618,8 @@ watch(() => entries.value.map(e => ({
 .faq-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  min-height: 20px;
+  gap: 5px;
+  min-height: 18px;
   min-width: 0;
   width: 100%;
   overflow: hidden;
@@ -4397,11 +4639,11 @@ watch(() => entries.value.map(e => ({
 }
 
 .question-tag {
-  font-size: 12px;
-  padding: 4px 10px;
+  font-size: 11px;
+  padding: 3px 8px;
   max-width: 100%;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   font-family: "PingFang SC";
   flex: 0 1 auto;
   

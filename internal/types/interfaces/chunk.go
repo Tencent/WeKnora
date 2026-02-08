@@ -12,10 +12,14 @@ type ChunkRepository interface {
 	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
 	// GetChunkByID gets a chunk by id
 	GetChunkByID(ctx context.Context, tenantID uint64, id string) (*types.Chunk, error)
+	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)
+	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
 	// GetChunkBySeqID gets a chunk by seq_id
 	GetChunkBySeqID(ctx context.Context, tenantID uint64, seqID int64) (*types.Chunk, error)
 	// ListChunksByID lists chunks by ids
 	ListChunksByID(ctx context.Context, tenantID uint64, ids []string) ([]*types.Chunk, error)
+	// ListChunksByIDOnly lists chunks by ids without tenant filter (for shared KB resolution).
+	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
 	// ListChunksBySeqID lists chunks by seq_ids
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
@@ -84,8 +88,10 @@ type ChunkRepository interface {
 type ChunkService interface {
 	// CreateChunks creates chunks
 	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
-	// GetChunkByID gets a chunk by id
+	// GetChunkByID gets a chunk by id (uses tenant from context)
 	GetChunkByID(ctx context.Context, id string) (*types.Chunk, error)
+	// GetChunkByIDOnly gets a chunk by id without tenant filter (for permission resolution)
+	GetChunkByIDOnly(ctx context.Context, id string) (*types.Chunk, error)
 	// ListChunksByKnowledgeID lists chunks by knowledge id
 	ListChunksByKnowledgeID(ctx context.Context, knowledgeID string) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id

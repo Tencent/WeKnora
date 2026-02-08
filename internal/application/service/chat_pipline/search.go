@@ -448,7 +448,7 @@ func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint6
 
 	knowledgeMap := make(map[string]*types.Knowledge)
 	if len(uniqueKIDs) > 0 {
-		knowledges, err := p.knowledgeService.GetKnowledgeBatch(ctx, tenantID, uniqueKIDs)
+		knowledges, err := p.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, uniqueKIDs)
 		if err != nil {
 			logger.Warnf(ctx, "DirectLoad: Failed to fetch knowledge batch: %v", err)
 			// Continue without metadata

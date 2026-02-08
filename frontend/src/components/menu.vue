@@ -9,150 +9,16 @@
         
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
-            <div v-if="showKbActions" class="kb-action-wrapper">
-                <div class="kb-action-label">{{ t('knowledgeBase.quickActions') }}</div>
-                <div class="kb-action-menu">
-                    <template v-if="showCreateKbAction">
-                        <div class="menu_item kb-action-item" @click.stop="handleCreateKnowledgeBase">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M9 3.75V14.25M3.75 9H14.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('knowledgeList.create') }}</span>
-                            </div>
-                        </div>
-                    </template>
-                    <template v-else-if="showCreateAgentAction">
-                        <div class="menu_item kb-action-item" @click.stop="handleCreateAgent">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M9 3.75V14.25M3.75 9H14.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('agent.createAgent') }}</span>
-                            </div>
-                        </div>
-                    </template>
-                    <template v-else-if="showDocActions">
-                        <div class="menu_item kb-action-item" @click.stop="handleDocUploadClick">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M15.75 11.25V14.25C15.75 14.6478 15.592 15.0294 15.3107 15.3107C15.0294 15.592 14.6478 15.75 14.25 15.75H3.75C3.35218 15.75 2.97064 15.592 2.68934 15.3107C2.40804 15.0294 2.25 14.6478 2.25 14.25V11.25M12.75 6L9 2.25M9 2.25L5.25 6M9 2.25V11.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('upload.uploadDocument') }}</span>
-                            </div>
-                        </div>
-                        <div class="menu_item kb-action-item" @click.stop="handleDocFolderUploadClick">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
-                                    <path d="M22 19C22 19.5304 21.7893 20.0391 21.4142 20.4142C21.0391 20.7893 20.5304 21 20 21H4C3.46957 21 2.96086 20.7893 2.58579 20.4142C2.21071 20.0391 2 19.5304 2 19V5C2 4.46957 2.21071 3.96086 2.58579 3.58579C2.96086 3.21071 3.46957 3 4 3H9L11 6H20C20.5304 6 21.0391 6.21071 21.4142 6.58579C21.7893 6.96086 22 7.46957 22 8V19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <path d="M12 11V17M9 14H15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('upload.uploadFolder') }}</span>
-                            </div>
-                        </div>
-                        <div class="menu_item kb-action-item" @click.stop="handleDocURLImport">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none">
-                                    <path d="M10 13C10.4295 13.5741 10.9774 14.0491 11.6066 14.3929C12.2357 14.7367 12.9315 14.9411 13.6467 14.9923C14.3618 15.0435 15.0796 14.9403 15.7513 14.6897C16.4231 14.4392 17.0331 14.047 17.54 13.54L20.54 10.54C21.4508 9.59695 21.9548 8.33394 21.9434 7.02296C21.932 5.71198 21.4061 4.45791 20.4791 3.53087C19.5521 2.60383 18.298 2.07799 16.987 2.0666C15.676 2.0552 14.413 2.55918 13.47 3.46997L11.75 5.17997M14 11C13.5705 10.4258 13.0226 9.95078 12.3934 9.60703C11.7642 9.26327 11.0685 9.05885 10.3533 9.00763C9.63819 8.95641 8.92037 9.0596 8.24861 9.31018C7.57685 9.56077 6.96685 9.9529 6.45996 10.46L3.45996 13.46C2.54917 14.403 2.04519 15.666 2.05659 16.977C2.06798 18.288 2.59382 19.542 3.52086 20.4691C4.44791 21.3961 5.70197 21.9219 7.01295 21.9333C8.32393 21.9447 9.58694 21.4408 10.53 20.53L12.24 18.82" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('knowledgeBase.importURL') }}</span>
-                            </div>
-                        </div>
-                        <div class="menu_item kb-action-item" @click.stop="handleDocManualCreate">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M8.25 2.25H3.75C3.35218 2.25 2.97064 2.40804 2.68934 2.68934C2.40804 2.97064 2.25 3.35218 2.25 3.75V14.25C2.25 14.6478 2.40804 15.0294 2.68934 15.3107C2.97064 15.592 3.35218 15.75 3.75 15.75H14.25C14.6478 15.75 15.0294 15.592 15.3107 15.3107C15.592 15.0294 15.75 14.6478 15.75 14.25V9.75M13.875 3.375L5.625 11.625L5.25 12.75L6.375 12.375L14.625 4.125C14.7745 3.97554 14.8571 3.77516 14.8571 3.5625C14.8571 3.34984 14.7745 3.14946 14.625 3L15 2.625L14.625 3C14.4755 2.85054 14.2752 2.76786 14.0625 2.76786C13.8498 2.76786 13.6495 2.85054 13.5 3L13.875 3.375Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('upload.onlineEdit') }}</span>
-                            </div>
-                        </div>
-                    </template>
-                    <template v-else-if="showFaqActions">
-                        <div class="menu_item kb-action-item" @click.stop="handleFaqCreateFromMenu">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M9 3.75V14.25M3.75 9H14.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('knowledgeEditor.faq.editorCreate') }}</span>
-                            </div>
-                        </div>
-                        <div class="menu_item kb-action-item" @click.stop="handleFaqImportFromMenu">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M15.75 11.25V14.25C15.75 14.6478 15.592 15.0294 15.3107 15.3107C15.0294 15.592 14.6478 15.75 14.25 15.75H3.75C3.35218 15.75 2.97064 15.592 2.68934 15.3107C2.40804 15.0294 2.25 14.6478 2.25 14.25V11.25M5.25 7.5L9 11.25M9 11.25L12.75 7.5M9 11.25V2.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('knowledgeEditor.faqImport.importButton') }}</span>
-                            </div>
-                        </div>
-                        <div class="menu_item kb-action-item" @click.stop="handleFaqSearchTestFromMenu">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M8.25 15C11.9779 15 15 11.9779 15 8.25C15 4.52208 11.9779 1.5 8.25 1.5C4.52208 1.5 1.5 4.52208 1.5 8.25C1.5 11.9779 4.52208 15 8.25 15Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <path d="M16.5 16.5L12.4875 12.4875" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('knowledgeEditor.faq.searchTest') }}</span>
-                            </div>
-                        </div>
-                        <div class="menu_item kb-action-item" @click.stop="handleFaqExportFromMenu">
-                            <div class="kb-action-icon-wrapper">
-                                <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                    <path d="M15.75 11.25V14.25C15.75 14.6478 15.592 15.0294 15.3107 15.3107C15.0294 15.592 14.6478 15.75 14.25 15.75H3.75C3.35218 15.75 2.97064 15.592 2.68934 15.3107C2.40804 15.0294 2.25 14.6478 2.25 14.25V11.25M12.75 6L9 2.25M9 2.25L5.25 6M9 2.25V11.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </div>
-                            <div class="kb-action-content">
-                                <span class="kb-action-title">{{ t('knowledgeEditor.faqExport.exportButton') }}</span>
-                            </div>
-                        </div>
-                        <t-dropdown
-                          v-if="selectedFaqCount > 0"
-                          :options="faqBatchActionOptions"
-                          trigger="hover"
-                          placement="right"
-                          @click="handleFaqBatchActionFromMenu"
-                        >
-                          <div class="menu_item kb-action-item">
-                            <div class="kb-action-icon-wrapper">
-                              <svg class="kb-action-icon" width="18" height="18" viewBox="0 0 18 18" fill="none">
-                                <path d="M3.75 9H14.25M9 3.75V14.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                                <path d="M3.75 3.75H14.25V14.25H3.75V3.75Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                              </svg>
-                            </div>
-                            <div class="kb-action-content">
-                              <span class="kb-action-title">{{ t('knowledgeEditor.faq.batchOperations') }}</span>
-                              <span class="kb-action-count">({{ selectedFaqCount }})</span>
-                            </div>
-                          </div>
-                        </t-dropdown>
-                    </template>
-                </div>
-            </div>
             <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
                 <div @click="handleMenuClick(item.path)"
                     @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
                      :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                     <div class="menu_item-box">
                         <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
                         </div>
                         <span class="menu_title" :title="item.title">{{ item.title }}</span>
+                        <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0" class="menu-pending-badge" :title="t('organization.settings.pendingJoinRequestsBadge')">{{ orgStore.totalPendingJoinRequestCount }}</span>
                         <t-icon v-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
                     </div>
                 </div>
@@ -189,43 +55,29 @@
             <UserMenu />
         </div>
         
-        <input
-            ref="docUploadInput"
-            type="file"
-            class="kb-upload-input"
-            accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx"
-            multiple
-            @change="handleDocFileChange"
-        />
-        <input
-            ref="docFolderInput"
-            type="file"
-            class="kb-upload-input"
-            webkitdirectory
-            @change="handleDocFolderChange"
-        />
     </div>
 </template>
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia';
-import { onMounted, onUnmounted, watch, computed, ref, reactive } from 'vue';
+import { onMounted, watch, computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { getSessionsList, delSession } from "@/api/chat/index";
-import { getKnowledgeBaseById, uploadKnowledgeFile, createKnowledgeFromURL } from '@/api/knowledge-base';
+import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
 import { useAuthStore } from '@/stores/auth';
+import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
 import { MessagePlugin } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
-import { kbFileTypeVerification } from '@/utils';
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
 const authStore = useAuthStore();
+const orgStore = useOrganizationStore();
 const uiStore = useUIStore();
 const route = useRoute();
 const router = useRouter();
@@ -268,6 +120,9 @@ const isInChatDetail = computed<boolean>(() => route.name === 'chat');
 // 是否在智能体列表页面
 const isInAgentList = computed<boolean>(() => route.name === 'agentList');
 
+// 是否在组织列表页面
+const isInOrganizationList = computed<boolean>(() => route.name === 'organizationList');
+
 // 统一的菜单项激活状态判断
 const isMenuItemActive = (itemPath: string): boolean => {
     const currentRoute = route.name;
@@ -279,6 +134,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
                    currentRoute === 'knowledgeBaseSettings';
         case 'agents':
             return currentRoute === 'agentList';
+        case 'organizations':
+            return currentRoute === 'organizationList';
         case 'creatChat':
             return currentRoute === 'kbCreatChat' || currentRoute === 'globalCreatChat';
         case 'settings':
@@ -307,13 +164,13 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单
 const topMenuItems = computed<MenuItem[]>(() => {
     return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'creatChat'
+        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'creatChat') {
+        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
             return false;
         }
         return true;
@@ -323,33 +180,6 @@ const bottomMenuItems = computed<MenuItem[]>(() => {
 // 当前知识库信息
 const currentKbName = ref<string>('')
 const currentKbInfo = ref<any>(null)
-const docUploadInput = ref<HTMLInputElement | null>(null)
-const docFolderInput = ref<HTMLInputElement | null>(null)
-const pendingUploadKbId = ref<string | null>(null)
-const selectedFaqCount = ref<number>(0)
-const selectedFaqEnabledCount = ref<number>(0)
-const selectedFaqDisabledCount = ref<number>(0)
-
-// 监听FAQ选中数量变化
-const handleFaqSelectionChanged = ((event: CustomEvent<{ count: number; enabledCount?: number; disabledCount?: number }>) => {
-  const count = event.detail?.count || 0
-  selectedFaqCount.value = count
-  selectedFaqEnabledCount.value = event.detail?.enabledCount || 0
-  selectedFaqDisabledCount.value = event.detail?.disabledCount || 0
-}) as EventListener
-
-const showKbActions = computed(() => 
-    (isInKnowledgeBase.value && !!currentKbInfo.value) || 
-    isInKnowledgeBaseList.value || 
-    isInCreatChat.value ||
-    isInChatDetail.value ||
-    isInAgentList.value
-)
-const currentKbType = computed(() => currentKbInfo.value?.type || 'document')
-const showDocActions = computed(() => showKbActions.value && isInKnowledgeBase.value && currentKbType.value !== 'faq')
-const showFaqActions = computed(() => showKbActions.value && isInKnowledgeBase.value && currentKbType.value === 'faq')
-const showCreateKbAction = computed(() => showKbActions.value && (isInKnowledgeBaseList.value || isInCreatChat.value || isInChatDetail.value))
-const showCreateAgentAction = computed(() => showKbActions.value && isInAgentList.value)
 
 // 时间分组函数
 const getTimeCategory = (dateStr: string): string => {
@@ -538,20 +368,13 @@ onMounted(async () => {
     
     // 加载对话列表
     getMessageList();
-    
-    // 监听FAQ选中数量变化
-    window.addEventListener('faqSelectionChanged', handleFaqSelectionChanged)
+    // 若组织列表未加载则拉取一次，用于侧栏「待审批」角标
+    if (orgStore.organizations.length === 0) {
+        orgStore.fetchOrganizations();
+    }
 });
 
-onUnmounted(() => {
-    window.removeEventListener('faqSelectionChanged', handleFaqSelectionChanged)
-})
-
 watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
-    // 切换知识库时重置选中数量
-    if (newvalue[1].kbId !== oldvalue?.[1]?.kbId) {
-        selectedFaqCount.value = 0
-    }
     const nameStr = typeof newvalue[0] === 'string' ? (newvalue[0] as string) : (newvalue[0] ? String(newvalue[0]) : '')
     currentpath.value = nameStr;
     if (newvalue[1].chatid) {
@@ -599,6 +422,7 @@ let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg'); // 设置图标
 let agentIcon = ref('agent.svg'); // 智能体图标
+let organizationIcon = ref('organization.svg'); // 组织图标
 let pathPrefix = ref(route.name)
   const getIcon = (path: string) => {
       // 根据当前路由状态更新所有图标
@@ -606,12 +430,16 @@ let pathPrefix = ref(route.name)
       const creatChatActiveState = getIconActiveState('creatChat');
       const settingsActiveState = getIconActiveState('settings');
       const agentsActiveState = route.name === 'agentList';
+      const organizationsActiveState = route.name === 'organizationList';
       
       // 知识库图标：只在知识库页面显示绿色
       knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
       
       // 智能体图标：只在智能体页面显示绿色
       agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
+      
+      // 组织图标：只在组织页面显示绿色
+      organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
       
       // 对话图标：只在对话创建页面显示绿色，在知识库页面显示灰色，其他情况显示默认
       prefixIcon.value = creatChatActiveState.isCreatChatActive ? 'prefixIcon-green.svg' : 
@@ -637,6 +465,9 @@ const handleMenuClick = async (path: string) => {
     } else if (path === 'agents') {
         // 智能体菜单项：跳转到智能体列表
         router.push('/platform/agents')
+    } else if (path === 'organizations') {
+        // 组织菜单项：跳转到组织列表
+        router.push('/platform/organizations')
     } else if (path === 'settings') {
         // 设置菜单项：打开设置弹窗并跳转路由
         uiStore.openSettings()
@@ -707,583 +538,6 @@ const mouseleaveMenu = (path: string) => {
     }
 }
 
-const ensureDocKnowledgeBaseReady = async (): Promise<string | null> => {
-    const kbId = await getCurrentKbId()
-    if (!kbId) {
-        MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
-        return null
-    }
-    if (currentKbType.value === 'faq') {
-        MessagePlugin.warning(t('knowledgeBase.docActionUnsupported'))
-        return null
-    }
-    if (!currentKbInfo.value || !currentKbInfo.value.embedding_model_id || !currentKbInfo.value.summary_model_id) {
-        MessagePlugin.warning(t('knowledgeBase.notInitialized'))
-        return null
-    }
-    return kbId
-}
-
-const handleDocUploadClick = async () => {
-    const kbId = await ensureDocKnowledgeBaseReady()
-    if (!kbId) return
-    pendingUploadKbId.value = kbId
-    docUploadInput.value?.click()
-}
-
-const FAILED_FILES_PREVIEW_LIMIT = 10
-
-const summarizeFailedFiles = (failedFiles: Array<{ name: string; reason: string }>) => {
-    const duplicateLabel = t('knowledgeBase.fileExists')
-    let duplicateCount = 0
-    const nonDuplicate: Array<{ name: string; reason: string }> = []
-    failedFiles.forEach((file) => {
-        if (file.reason === duplicateLabel) {
-            duplicateCount++
-        } else {
-            nonDuplicate.push(file)
-        }
-    })
-
-    const previewList = nonDuplicate.slice(0, FAILED_FILES_PREVIEW_LIMIT).map(f => `• ${f.name}: ${f.reason}`)
-    let nonDuplicateText = ''
-    if (previewList.length) {
-        nonDuplicateText = previewList.join('\n')
-        if (nonDuplicate.length > FAILED_FILES_PREVIEW_LIMIT) {
-            nonDuplicateText += `\n${t('knowledgeBase.andMoreFiles', { count: nonDuplicate.length - FAILED_FILES_PREVIEW_LIMIT })}`
-        }
-    }
-
-    return {
-        duplicateCount,
-        nonDuplicateText,
-    }
-}
-
-const handleDocFileChange = async (event: Event) => {
-    const input = event.target as HTMLInputElement
-    const files = input?.files
-    if (!files || files.length === 0) {
-        pendingUploadKbId.value = null
-        return
-    }
-
-    const kbId = pendingUploadKbId.value || (await ensureDocKnowledgeBaseReady())
-    pendingUploadKbId.value = null
-    if (!kbId) {
-        input.value = ''
-        return
-    }
-
-    // 过滤有效文件
-    const validFiles: File[] = []
-    let invalidCount = 0
-    const isSingleFile = files.length === 1
-
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i]
-        // 单文件时显示错误，多文件时静默过滤
-        if (kbFileTypeVerification(file, !isSingleFile)) {
-            invalidCount++
-        } else {
-            validFiles.push(file)
-        }
-    }
-
-    // 如果没有有效文件，多文件时显示汇总提示
-    if (validFiles.length === 0) {
-        if (!isSingleFile && invalidCount > 0) {
-            MessagePlugin.error(t('knowledgeBase.noValidFilesSelected'))
-        }
-        // 单文件的错误已经在 kbFileTypeVerification 中显示了
-        input.value = ''
-        return
-    }
-
-    // 批量上传
-    let successCount = 0
-    let failCount = 0
-    const totalCount = validFiles.length
-    const failedFiles: Array<{ name: string; reason: string }> = []
-
-    // 为每个文件创建上传任务并发送事件通知
-    const uploadPromises = validFiles.map(async (file) => {
-        const uploadId = `${file.name}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        let progress = 0
-        let status: 'uploading' | 'success' | 'error' = 'uploading'
-        let error: string | undefined
-
-        // 发送开始上传事件
-        window.dispatchEvent(new CustomEvent('knowledgeFileUploadStart', {
-            detail: { 
-                kbId, 
-                uploadId, 
-                fileName: file.name
-            }
-        }))
-
-        try {
-            // 获取当前选中的分类ID
-            const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
-            await uploadKnowledgeFile(
-                kbId, 
-                { file, tag_id: tagIdToUpload },
-                (progressEvent: any) => {
-                    if (progressEvent.total) {
-                        progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-                        // 发送进度更新事件
-                        window.dispatchEvent(new CustomEvent('knowledgeFileUploadProgress', {
-                            detail: { 
-                                kbId, 
-                                uploadId, 
-                                progress 
-                            }
-                        }))
-                    }
-                }
-            )
-            successCount++
-            status = 'success'
-            progress = 100
-        } catch (error: any) {
-            failCount++
-            let errorReason = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed')
-            if (error?.code === 'duplicate_file' || error?.error?.code === 'duplicate_file') {
-                errorReason = t('knowledgeBase.fileExists')
-            }
-            status = 'error'
-            error = errorReason
-            failedFiles.push({ name: file.name, reason: errorReason })
-
-            // 只在单文件上传时显示详细错误
-            if (totalCount === 1) {
-                MessagePlugin.error(errorReason)
-            }
-        } finally {
-            // 发送上传完成事件
-            window.dispatchEvent(new CustomEvent('knowledgeFileUploadComplete', {
-                detail: { 
-                    kbId, 
-                    uploadId, 
-                    status,
-                    progress,
-                    error
-                }
-            }))
-        }
-    })
-
-    // 等待所有上传完成
-    await Promise.allSettled(uploadPromises)
-
-    // 显示上传结果
-    if (successCount > 0) {
-        window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-            detail: { kbId }
-        }))
-    }
-
-    if (totalCount === 1) {
-        if (successCount === 1) {
-            MessagePlugin.success(t('knowledgeBase.uploadSuccess'))
-        }
-        // 单文件失败时已经在上面显示了详细错误
-    } else {
-        if (failCount === 0) {
-            MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }))
-        } else if (successCount > 0) {
-            const { duplicateCount, nonDuplicateText } = summarizeFailedFiles(failedFiles)
-            const extraSections: string[] = []
-            if (duplicateCount > 0) {
-                extraSections.push(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }))
-            }
-            if (nonDuplicateText) {
-                extraSections.push(t('knowledgeBase.failedFilesList') + '\n' + nonDuplicateText)
-            }
-            const extraContent = extraSections.length ? '\n\n' + extraSections.join('\n\n') : ''
-            MessagePlugin.warning({
-                content: t('knowledgeBase.uploadPartialSuccess', {
-                    success: successCount,
-                    fail: failCount
-                }) + extraContent,
-                duration: 8000,
-                closeBtn: true
-            })
-        } else {
-            const { duplicateCount, nonDuplicateText } = summarizeFailedFiles(failedFiles)
-            const extraSections: string[] = []
-            if (duplicateCount > 0) {
-                extraSections.push(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }))
-            }
-            if (nonDuplicateText) {
-                extraSections.push(t('knowledgeBase.failedFilesList') + '\n' + nonDuplicateText)
-            }
-            const extraContent = extraSections.length ? '\n\n' + extraSections.join('\n\n') : ''
-            MessagePlugin.error({
-                content: t('knowledgeBase.uploadAllFailed') + extraContent,
-                duration: 8000,
-                closeBtn: true
-            })
-        }
-    }
-
-    input.value = ''
-}
-
-const handleDocFolderUploadClick = async () => {
-    const kbId = await ensureDocKnowledgeBaseReady()
-    if (!kbId) return
-    pendingUploadKbId.value = kbId
-    docFolderInput.value?.click()
-}
-
-const handleDocFolderChange = async (event: Event) => {
-    const input = event.target as HTMLInputElement
-    const files = input?.files
-    if (!files || files.length === 0) {
-        pendingUploadKbId.value = null
-        return
-    }
-
-    const kbId = pendingUploadKbId.value || (await ensureDocKnowledgeBaseReady())
-    pendingUploadKbId.value = null
-    if (!kbId) {
-        input.value = ''
-        return
-    }
-
-    // 检查是否启用了VLM
-    const vlmEnabled = currentKbInfo.value?.vlm_config?.enabled || false
-
-    // 过滤有效文件（文件夹上传始终使用静默模式）
-    const validFiles: File[] = []
-    let invalidCount = 0
-    let hiddenFileCount = 0
-    let imageFilteredCount = 0
-
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i]
-        const relativePath = (file as any).webkitRelativePath || file.name
-        
-        // 1. 过滤隐藏文件和隐藏文件夹
-        // 检查路径中是否包含以 . 开头的文件或文件夹
-        const pathParts = relativePath.split('/')
-        const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'))
-        if (hasHiddenComponent) {
-            hiddenFileCount++
-            continue
-        }
-        
-        // 2. 如果未启用VLM，过滤图片文件
-        if (!vlmEnabled) {
-            const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase()
-            const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
-            if (imageTypes.includes(fileExt)) {
-                imageFilteredCount++
-                continue
-            }
-        }
-        
-        // 3. 文件类型验证（文件夹上传时始终静默过滤）
-        if (kbFileTypeVerification(file, true)) {
-            invalidCount++
-        } else {
-            validFiles.push(file)
-        }
-    }
-
-    // 如果没有有效文件，直接返回
-    if (validFiles.length === 0) {
-        const totalFiltered = invalidCount + hiddenFileCount + imageFilteredCount
-        if (totalFiltered > 0) {
-            let filterReasons = []
-            if (hiddenFileCount > 0) {
-                filterReasons.push(t('knowledgeBase.hiddenFilesFiltered', { count: hiddenFileCount }))
-            }
-            if (imageFilteredCount > 0) {
-                filterReasons.push(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }))
-            }
-            if (invalidCount > 0) {
-                filterReasons.push(t('knowledgeBase.invalidFilesFiltered', { count: invalidCount }))
-            }
-            MessagePlugin.warning(t('knowledgeBase.noValidFilesInFolder', { total: files.length }) + '\n' + filterReasons.join('\n'))
-        } else {
-            MessagePlugin.error(t('knowledgeBase.noValidFiles'))
-        }
-        input.value = ''
-        return
-    }
-
-    // 显示过滤后的上传提示
-    const totalCount = validFiles.length
-    const totalFiltered = invalidCount + hiddenFileCount + imageFilteredCount
-    if (totalFiltered > 0) {
-        let filterInfo = []
-        if (hiddenFileCount > 0) {
-            filterInfo.push(t('knowledgeBase.hiddenFilesFiltered', { count: hiddenFileCount }))
-        }
-        if (imageFilteredCount > 0) {
-            filterInfo.push(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }))
-        }
-        if (invalidCount > 0) {
-            filterInfo.push(t('knowledgeBase.invalidFilesFiltered', { count: invalidCount }))
-        }
-        MessagePlugin.info(
-            t('knowledgeBase.uploadingValidFiles', {
-                valid: totalCount,
-                total: files.length
-            }) + '\n' + filterInfo.join(', ')
-        )
-    } else {
-        MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: totalCount }))
-    }
-
-    // 批量上传文件夹内容
-    let successCount = 0
-    let failCount = 0
-    const failedFiles: Array<{ name: string; reason: string }> = []
-
-    for (const file of validFiles) {
-        // 获取文件的相对路径(webkitRelativePath)，用于保留子目录结构
-        const relativePath = (file as any).webkitRelativePath
-        let fileName = file.name
-        if (relativePath) {
-            const pathParts = relativePath.split('/')
-            if (pathParts.length > 2) {
-                const subPath = pathParts.slice(1, -1).join('/')
-                fileName = `${subPath}/${file.name}`
-            }
-        }
-
-        const uploadId = `${file.name}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        let progress = 0
-        let status: 'uploading' | 'success' | 'error' = 'uploading'
-        let errorReason: string | undefined
-
-        window.dispatchEvent(new CustomEvent('knowledgeFileUploadStart', {
-            detail: {
-                kbId,
-                uploadId,
-                fileName
-            }
-        }))
-
-        try {
-            // 获取当前选中的分类ID
-            const tagIdToUpload = uiStore.selectedTagId !== '__untagged__' ? uiStore.selectedTagId : undefined
-            await uploadKnowledgeFile(
-                kbId,
-                { file, fileName, tag_id: tagIdToUpload },
-                (progressEvent: any) => {
-                    if (progressEvent?.total) {
-                        progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-                        window.dispatchEvent(new CustomEvent('knowledgeFileUploadProgress', {
-                            detail: {
-                                kbId,
-                                uploadId,
-                                progress
-                            }
-                        }))
-                    }
-                }
-            )
-            successCount++
-            status = 'success'
-            progress = 100
-        } catch (error: any) {
-            failCount++
-            errorReason = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed')
-            if (error?.code === 'duplicate_file' || error?.error?.code === 'duplicate_file') {
-                errorReason = t('knowledgeBase.fileExists')
-            }
-            failedFiles.push({ name: fileName, reason: errorReason })
-            status = 'error'
-        } finally {
-            window.dispatchEvent(new CustomEvent('knowledgeFileUploadComplete', {
-                detail: {
-                    kbId,
-                    uploadId,
-                    status,
-                    progress,
-                    error: errorReason,
-                    fileName
-                }
-            }))
-        }
-    }
-
-    if (successCount > 0) {
-        window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-            detail: { kbId }
-        }))
-    }
-
-    if (failCount === 0) {
-        MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }))
-    } else if (successCount > 0) {
-        const { duplicateCount, nonDuplicateText } = summarizeFailedFiles(failedFiles)
-        const extraSections: string[] = []
-        if (duplicateCount > 0) {
-            extraSections.push(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }))
-        }
-        if (nonDuplicateText) {
-            extraSections.push(t('knowledgeBase.failedFilesList') + '\n' + nonDuplicateText)
-        }
-        const extraContent = extraSections.length ? '\n\n' + extraSections.join('\n\n') : ''
-        MessagePlugin.warning({
-            content: t('knowledgeBase.uploadPartialSuccess', {
-                success: successCount,
-                fail: failCount
-            }) + extraContent,
-            duration: 8000,
-            closeBtn: true
-        })
-    } else {
-        const { duplicateCount, nonDuplicateText } = summarizeFailedFiles(failedFiles)
-        const extraSections: string[] = []
-        if (duplicateCount > 0) {
-            extraSections.push(t('knowledgeBase.duplicateFilesSkipped', { count: duplicateCount }))
-        }
-        if (nonDuplicateText) {
-            extraSections.push(t('knowledgeBase.failedFilesList') + '\n' + nonDuplicateText)
-        }
-        const extraContent = extraSections.length ? '\n\n' + extraSections.join('\n\n') : ''
-        MessagePlugin.error({
-            content: t('knowledgeBase.uploadAllFailed') + extraContent,
-            duration: 8000,
-            closeBtn: true
-        })
-    }
-
-    input.value = ''
-}
-
-const handleDocManualCreate = async () => {
-    const kbId = await ensureDocKnowledgeBaseReady()
-    if (!kbId) return
-    uiStore.openManualEditor({
-        mode: 'create',
-        kbId,
-        status: 'draft',
-        onSuccess: ({ kbId: savedKbId }) => {
-            if (savedKbId) {
-                window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', { detail: { kbId: savedKbId } }))
-            }
-        },
-    })
-}
-
-const handleDocURLImport = async () => {
-    const kbId = await ensureDocKnowledgeBaseReady()
-    if (!kbId) return
-    
-    window.dispatchEvent(new CustomEvent('openURLImportDialog', {
-        detail: { kbId }
-    }))
-}
-
-const dispatchFaqMenuAction = (action: 'create' | 'import' | 'search' | 'export' | 'batch' | 'batchTag' | 'batchEnable' | 'batchDisable' | 'batchDelete', kbId: string) => {
-    window.dispatchEvent(new CustomEvent('faqMenuAction', {
-        detail: { action, kbId }
-    }))
-}
-
-const handleFaqCreateFromMenu = async () => {
-    const kbId = await getCurrentKbId()
-    if (!kbId) {
-        MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
-        return
-    }
-    dispatchFaqMenuAction('create', kbId)
-}
-
-const handleFaqImportFromMenu = async () => {
-    const kbId = await getCurrentKbId()
-    if (!kbId) {
-        MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
-        return
-    }
-    dispatchFaqMenuAction('import', kbId)
-}
-
-const handleFaqSearchTestFromMenu = async () => {
-    const kbId = await getCurrentKbId()
-    if (!kbId) {
-        MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
-        return
-    }
-    dispatchFaqMenuAction('search', kbId)
-}
-
-const handleFaqExportFromMenu = async () => {
-    const kbId = await getCurrentKbId()
-    if (!kbId) {
-        MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
-        return
-    }
-    dispatchFaqMenuAction('export', kbId)
-}
-
-const faqBatchActionOptions = computed(() => {
-  if (selectedFaqCount.value === 0) {
-    return []
-  }
-  const options = [
-    { 
-      content: `${t('knowledgeEditor.faq.batchUpdateTag')} (${selectedFaqCount.value})`, 
-      value: 'batchTag', 
-      icon: 'folder'
-    }
-  ]
-  
-  // 根据选中条目的状态显示批量启用或禁用
-  if (selectedFaqDisabledCount.value > 0) {
-    options.push({
-      content: `${t('knowledgeEditor.faq.batchEnable')} (${selectedFaqDisabledCount.value})`,
-      value: 'batchEnable',
-      icon: 'check-circle',
-    })
-  }
-  if (selectedFaqEnabledCount.value > 0) {
-    options.push({
-      content: `${t('knowledgeEditor.faq.batchDisable')} (${selectedFaqEnabledCount.value})`,
-      value: 'batchDisable',
-      icon: 'close-circle',
-    })
-  }
-  
-  options.push({
-    content: `${t('knowledgeEditor.faqImport.deleteSelected')} (${selectedFaqCount.value})`,
-    value: 'batchDelete',
-    icon: 'delete',
-  })
-  
-  return options
-})
-
-const handleFaqBatchActionFromMenu = async (data: { value: string }) => {
-  const kbId = await getCurrentKbId()
-  if (!kbId) {
-    MessagePlugin.warning(t('knowledgeEditor.messages.missingId'))
-    return
-  }
-  if (selectedFaqCount.value === 0) {
-    MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst') || '请先选中要操作的FAQ条目')
-    return
-  }
-  dispatchFaqMenuAction(data.value as 'batchTag' | 'batchEnable' | 'batchDisable' | 'batchDelete', kbId)
-}
-
-const handleCreateKnowledgeBase = () => {
-    uiStore.openCreateKB()
-}
-
-const handleCreateAgent = () => {
-    // 触发创建智能体事件，由 AgentList 页面监听处理
-    window.dispatchEvent(new CustomEvent('openAgentEditor', {
-        detail: { mode: 'create' }
-    }))
-}
 
 </script>
 <style lang="less" scoped>
@@ -1296,6 +550,9 @@ const handleCreateAgent = () => {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    /* 与右侧内容区统一的细分界，减少割裂感 */
+    border-right: 1px solid #e7ebf0;
+    box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
 
     .logo_box {
         height: 80px;
@@ -1337,110 +594,6 @@ const handleCreateAgent = () => {
         flex-shrink: 0;
         display: flex;
         flex-direction: column;
-    }
-
-    .kb-action-wrapper {
-        border: 1px solid #e7e9eb;
-        border-radius: 8px;
-        padding: 8px;
-        margin-bottom: 12px;
-        background: #fafcfc;
-    }
-
-    .kb-action-label {
-        font-size: 11px;
-        font-weight: 600;
-        color: #8b9196;
-        margin-bottom: 6px;
-        padding: 0 4px;
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-    }
-
-    .kb-action-menu {
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-    }
-
-    .kb-action-item {
-        background: #fff;
-        border-radius: 6px;
-        border: 1px solid #eef1f2;
-        transition: background-color 0.08s ease, border-color 0.08s ease;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 10px;
-        cursor: pointer;
-
-        &:hover {
-            background: #f0fdf6;
-            border-color: #10b981;
-
-            .kb-action-icon {
-                color: #059669;
-            }
-
-            .kb-action-title {
-                color: #10b981;
-            }
-        }
-
-        &:active {
-            background: #e6f9f0;
-        }
-    }
-
-    .kb-action-icon-wrapper {
-        width: 28px;
-        height: 28px;
-        border-radius: 5px;
-        background: #f0fdf6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        transition: background-color 0.08s ease;
-    }
-
-    .kb-action-icon {
-        color: #10b981;
-        transition: color 0.08s ease;
-    }
-
-    .kb-action-item:hover .kb-action-icon-wrapper {
-        background: #d1fae5;
-    }
-
-    .kb-action-content {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        white-space: nowrap;
-    }
-
-    .kb-action-title {
-        font-size: 13px;
-        font-weight: 500;
-        color: #0f172a;
-        transition: color 0.08s ease;
-        display: inline;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        flex-shrink: 1;
-        min-width: 0;
-    }
-
-    .kb-action-count {
-        font-size: 12px;
-        color: #10b981;
-        font-weight: 600;
-        margin-left: 4px;
-        flex-shrink: 0;
-        white-space: nowrap;
     }
 
     .menu_box {
@@ -1763,12 +916,23 @@ const handleCreateAgent = () => {
     opacity: 1;
 }
 
-.menu_box {
-    position: relative;
+.menu-pending-badge {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: 6px;
+    border-radius: 9px;
+    background: rgba(250, 173, 20, 0.2);
+    color: #d48806;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+    flex-shrink: 0;
 }
 
-.kb-upload-input {
-    display: none;
+.menu_box {
+    position: relative;
 }
 </style>
 <style lang="less">

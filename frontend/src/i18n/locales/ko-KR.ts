@@ -752,6 +752,12 @@ export default {
     knowledgeBase: "지식베이스",
     noResult: "결과 없음",
   },
+  mentionDetail: {
+    faqCount: "Q&A {count}개",
+    kbCount: "문서 {count}개",
+    belongsToKb: "지식베이스: ",
+    belongsToOrg: "공간: ",
+  },
   file: {
     upload: "파일 업로드",
     uploadSuccess: "파일 업로드 성공",
@@ -1551,6 +1557,7 @@ export default {
     knowledgeBase: "지식베이스",
     knowledgeBaseWithCount: "지식베이스({count})",
     notConfigured: "구성되지 않음",
+    sharedAgentModelLabel: "공유 에이전트에 구성된 모델",
     model: "모델",
     remote: "원격",
     noModel: "사용 가능한 모델 없음",

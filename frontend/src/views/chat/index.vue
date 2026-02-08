@@ -320,13 +320,25 @@ const sendMsg = async (value, modelId = '', mentionedItems = []) => {
     const webSearchEnabled = useSettingsStoreInstance.isWebSearchEnabled;
     
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
-    const kbIds = useSettingsStoreInstance.settings.selectedKnowledgeBases || [];
-    const knowledgeIds = useSettingsStoreInstance.settings.selectedFiles || [];
-    
-    // Get selected agent ID
+    // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
+    const sidebarKbIds = useSettingsStoreInstance.settings.selectedKnowledgeBases || [];
+    const sidebarFileIds = useSettingsStoreInstance.settings.selectedFiles || [];
+    const kbIdSet = new Set(sidebarKbIds);
+    const fileIdSet = new Set(sidebarFileIds);
+    for (const item of mentionedItems || []) {
+      if (!item?.id) continue;
+      if (item.type === 'kb' && !kbIdSet.has(item.id)) {
+        kbIdSet.add(item.id);
+      } else if (item.type === 'file' && !fileIdSet.has(item.id)) {
+        fileIdSet.add(item.id);
+      }
+    }
+    const kbIds = [...kbIdSet];
+    const knowledgeIds = [...fileIdSet];
+
+    // Get selected agent ID (backend resolves shared agent and its tenant from share relation)
     const selectedAgentId = useSettingsStoreInstance.selectedAgentId || '';
 
-    
     // Use agent-chat endpoint when agent is enabled, otherwise use knowledge-chat
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
     
@@ -338,7 +350,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = []) => {
         knowledge_base_ids: kbIds,
         knowledge_ids: knowledgeIds,
         agent_enabled: agentEnabled,
-        agent_id: selectedAgentId,  // 传递选中的智能体 ID
+        agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
         summary_model_id: modelId,
         mcp_service_ids: mcpServiceIds,
@@ -868,6 +880,13 @@ const updateAssistantSession = (payload) => {
 }
 onMounted(async () => {
     messagesList.splice(0);
+    
+    // 若从智能体列表点击共享智能体进入，URL 带 agent_id 与 source_tenant_id，同步到 store
+    const agentIdFromQuery = route.query.agent_id && String(route.query.agent_id);
+    const sourceTenantIdFromQuery = route.query.source_tenant_id && String(route.query.source_tenant_id);
+    if (agentIdFromQuery && sourceTenantIdFromQuery) {
+        useSettingsStoreInstance.selectAgent(agentIdFromQuery, sourceTenantIdFromQuery);
+    }
     
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;

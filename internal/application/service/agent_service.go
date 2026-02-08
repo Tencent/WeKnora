@@ -366,14 +366,14 @@ func (s *agentService) registerTools(
 				s.cfg,
 			)
 		case tools.ToolGrepChunks:
-			toolToRegister = tools.NewGrepChunksTool(s.db, config.KnowledgeBases, config.KnowledgeIDs)
-			logger.Infof(ctx, "Registered grep_chunks tool, KBs: %d, KnowledgeIDs: %d", len(config.KnowledgeBases), len(config.KnowledgeIDs))
+			toolToRegister = tools.NewGrepChunksTool(s.db, config.SearchTargets)
+			logger.Infof(ctx, "Registered grep_chunks tool with searchTargets: %d targets", len(config.SearchTargets))
 		case tools.ToolListKnowledgeChunks:
-			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService)
+			toolToRegister = tools.NewListKnowledgeChunksTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService)
 		case tools.ToolGetDocumentInfo:
-			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService)
+			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db)
 		case tools.ToolWebSearch:
@@ -551,8 +551,8 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 		tenantID = tid
 	}
 
-	// Fetch knowledge metadata
-	knowledges, err := s.knowledgeService.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	// Fetch knowledge metadata (include docs from shared KBs the user has access to)
+	knowledges, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get knowledge batch: %w", err)
 	}

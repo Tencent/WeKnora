@@ -1,5 +1,6 @@
 -- Migration: Create "未分类" tag for each knowledge base that has untagged entries
 -- and update chunks, knowledges, and embeddings to reference the new tag
+ALTER EXTENSION pg_search UPDATE;
 
 DO $$
 DECLARE

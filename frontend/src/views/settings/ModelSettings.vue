@@ -228,6 +228,7 @@
       :model-data="editingModel"
       @confirm="handleModelSave"
     />
+
   </div>
 </template>
 
@@ -463,7 +464,7 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: 
     content: t('common.edit'),
     value: `edit-${type}-${model.id}`
   })
-  
+
   // 删除选项
   options.push({
     content: t('common.delete'),
