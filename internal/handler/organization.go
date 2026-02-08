@@ -23,7 +23,7 @@ type OrganizationHandler struct {
 	agentShareService  interfaces.AgentShareService
 	customAgentService interfaces.CustomAgentService
 	userService        interfaces.UserService
-	kbService         interfaces.KnowledgeBaseService
+	kbService          interfaces.KnowledgeBaseService
 	knowledgeRepo      interfaces.KnowledgeRepository
 	chunkRepo          interfaces.ChunkRepository
 }
@@ -122,9 +122,10 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 	})
 }
 
-// ListMyOrganizations lists organizations that the current user belongs to
+// ListMyOrganizations lists organizations that the current user belongs to.
+// Response includes resource_counts (per-org KB/agent counts) for list sidebar so frontend does not need a separate GET /me/resource-counts.
 // @Summary      获取我的组织列表
-// @Description  获取当前用户所属的所有组织
+// @Description  获取当前用户所属的所有组织，并附带各空间内知识库/智能体数量
 // @Tags         组织管理
 // @Produce      json
 // @Success      200  {object}  types.ListOrganizationsResponse
@@ -132,8 +133,8 @@ func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
 // @Router       /organizations [get]
 func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 	ctx := c.Request.Context()
-
 	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	orgs, err := h.orgService.ListUserOrganizations(ctx, userID)
 	if err != nil {
@@ -147,13 +148,125 @@ func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 		response = append(response, h.toOrgResponse(ctx, org, userID))
 	}
 
+	resp := types.ListOrganizationsResponse{
+		Organizations: response,
+		Total:         int64(len(response)),
+	}
+	// 附带各空间资源数量，供知识库/智能体列表页侧栏展示
+	resp.ResourceCounts = h.buildResourceCountsByOrg(ctx, orgs, userID, tenantID)
+	if resp.ResourceCounts != nil {
+		// 补齐未出现在 map 中的 org 为 0
+		for _, o := range orgs {
+			if _, ok := resp.ResourceCounts.KnowledgeBases.ByOrganization[o.ID]; !ok {
+				resp.ResourceCounts.KnowledgeBases.ByOrganization[o.ID] = 0
+			}
+			if _, ok := resp.ResourceCounts.Agents.ByOrganization[o.ID]; !ok {
+				resp.ResourceCounts.Agents.ByOrganization[o.ID] = 0
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data": types.ListOrganizationsResponse{
-			Organizations: response,
-			Total:         int64(len(response)),
-		},
+		"data":    resp,
 	})
+}
+
+// buildResourceCountsByOrg 返回各空间内知识库数与智能体数，供 ListMyOrganizations 和侧栏使用；失败时返回 nil。
+// 使用批量接口：一次拉取所有空间的直接共享 KB ID、一次拉取所有空间的智能体列表，再在内存中按空间合并计数。
+func (h *OrganizationHandler) buildResourceCountsByOrg(ctx context.Context, orgs []*types.Organization, userID string, tenantID uint64) *types.ResourceCountsByOrgResponse {
+	orgIDs := make([]string, 0, len(orgs))
+	for _, o := range orgs {
+		orgIDs = append(orgIDs, o.ID)
+	}
+	agentCounts, err := h.agentShareService.CountByOrganizations(ctx, orgIDs)
+	if err != nil {
+		logger.Warnf(ctx, "buildResourceCountsByOrg CountByOrganizations: %v", err)
+		return nil
+	}
+	directKBIDsByOrg, err := h.shareService.ListSharedKnowledgeBaseIDsByOrganizations(ctx, orgIDs, userID)
+	if err != nil {
+		logger.Warnf(ctx, "buildResourceCountsByOrg ListSharedKnowledgeBaseIDsByOrganizations: %v", err)
+		return nil
+	}
+	agentListByOrg, err := h.agentShareService.ListSharedAgentsInOrganizations(ctx, orgIDs, userID, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "buildResourceCountsByOrg ListSharedAgentsInOrganizations: %v", err)
+		return nil
+	}
+	byOrgKB := make(map[string]int)
+	tenantKBCache := make(map[uint64][]string) // cache ListKnowledgeBasesByTenantID by tenantID
+	for _, o := range orgs {
+		oid := o.ID
+		directIDs := directKBIDsByOrg[oid]
+		directSet := make(map[string]bool)
+		for _, id := range directIDs {
+			directSet[id] = true
+		}
+		count := len(directIDs)
+		for _, item := range agentListByOrg[oid] {
+			if item.Agent == nil {
+				continue
+			}
+			agent := item.Agent
+			mode := agent.Config.KBSelectionMode
+			if mode == "none" {
+				continue
+			}
+			var kbIDs []string
+			switch mode {
+			case "selected":
+				if len(agent.Config.KnowledgeBases) == 0 {
+					continue
+				}
+				kbIDs = agent.Config.KnowledgeBases
+			case "all":
+				tid := agent.TenantID
+				if _, ok := tenantKBCache[tid]; !ok {
+					kbs, err := h.kbService.ListKnowledgeBasesByTenantID(ctx, tid)
+					if err != nil {
+						logger.Warnf(ctx, "ListKnowledgeBasesByTenantID tenant %d: %v", tid, err)
+						tenantKBCache[tid] = nil
+						continue
+					}
+					ids := make([]string, 0, len(kbs))
+					for _, kb := range kbs {
+						if kb != nil && kb.ID != "" {
+							ids = append(ids, kb.ID)
+						}
+					}
+					tenantKBCache[tid] = ids
+				}
+				kbIDs = tenantKBCache[tid]
+			default:
+				if len(agent.Config.KnowledgeBases) > 0 {
+					kbIDs = agent.Config.KnowledgeBases
+				}
+			}
+			for _, kbID := range kbIDs {
+				if kbID != "" && !directSet[kbID] {
+					directSet[kbID] = true
+					count++
+				}
+			}
+		}
+		byOrgKB[oid] = count
+	}
+	byOrgAgent := make(map[string]int)
+	for _, o := range orgs {
+		byOrgAgent[o.ID] = 0
+	}
+	for id, n := range agentCounts {
+		byOrgAgent[id] = int(n)
+	}
+	return &types.ResourceCountsByOrgResponse{
+		KnowledgeBases: struct {
+			ByOrganization map[string]int `json:"by_organization"`
+		}{ByOrganization: byOrgKB},
+		Agents: struct {
+			ByOrganization map[string]int `json:"by_organization"`
+		}{ByOrganization: byOrgAgent},
+	}
 }
 
 // UpdateOrganization updates an organization
@@ -1255,73 +1368,6 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 		response = append(response, resp)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"shares": response, "total": len(response)}})
-}
-
-// GetMeResourceCounts returns per-organization resource counts for the list sidebar (one request instead of N).
-// 全部 total is not returned here; frontend keeps 全部 = 我的 + 他人共享给我（与「全部」Tab 一致）.
-// @Summary      获取各空间资源数量（侧栏用）
-// @Description  一次请求返回各空间内知识库/智能体数量（含我共享的），用于列表页侧栏展示
-// @Tags         组织管理
-// @Produce      json
-// @Success      200  {object}  types.ResourceCountsByOrgResponse
-// @Security     Bearer
-// @Router       /me/resource-counts [get]
-func (h *OrganizationHandler) GetMeResourceCounts(c *gin.Context) {
-	ctx := c.Request.Context()
-	userID := c.GetString(types.UserIDContextKey.String())
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-
-	orgs, err := h.orgService.ListUserOrganizations(ctx, userID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to list user organizations: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list organizations"))
-		return
-	}
-	orgIDs := make([]string, 0, len(orgs))
-	for _, o := range orgs {
-		orgIDs = append(orgIDs, o.ID)
-	}
-
-	agentCounts, err := h.agentShareService.CountByOrganizations(ctx, orgIDs)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to count agent shares by org: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to get counts"))
-		return
-	}
-
-	byOrgKB := make(map[string]int)
-	for _, o := range orgs {
-		list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, o.ID, userID, tenantID)
-		if err != nil {
-			if !errors.Is(err, service.ErrUserNotInOrg) {
-				logger.Warnf(ctx, "listSpaceKnowledgeBasesInOrganization org %s: %v", o.ID, err)
-			}
-			byOrgKB[o.ID] = 0
-			continue
-		}
-		byOrgKB[o.ID] = len(list)
-	}
-	byOrgAgent := make(map[string]int)
-	for id, n := range agentCounts {
-		byOrgAgent[id] = int(n)
-	}
-	for _, o := range orgs {
-		if _, ok := byOrgAgent[o.ID]; !ok {
-			byOrgAgent[o.ID] = 0
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data": types.ResourceCountsByOrgResponse{
-			KnowledgeBases: struct {
-				ByOrganization map[string]int `json:"by_organization"`
-			}{ByOrganization: byOrgKB},
-			Agents: struct {
-				ByOrganization map[string]int `json:"by_organization"`
-			}{ByOrganization: byOrgAgent},
-		},
-	})
 }
 
 // ListSharedAgents lists agents shared to the current user

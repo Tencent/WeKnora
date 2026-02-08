@@ -438,8 +438,9 @@ type AgentShareResponse struct {
 
 // ListOrganizationsResponse represents the response for listing organizations
 type ListOrganizationsResponse struct {
-	Organizations []OrganizationResponse `json:"organizations"`
-	Total         int64                  `json:"total"`
+	Organizations  []OrganizationResponse     `json:"organizations"`
+	Total          int64                      `json:"total"`
+	ResourceCounts *ResourceCountsByOrgResponse `json:"resource_counts,omitempty"` // 各空间内知识库/智能体数量，供列表侧栏展示
 }
 
 // ResourceCountsByOrgResponse is the response for GET /me/resource-counts (sidebar counts per space)

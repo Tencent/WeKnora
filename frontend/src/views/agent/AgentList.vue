@@ -540,7 +540,7 @@ import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
 import { useOrganizationStore } from '@/stores/organization'
-import { setSharedAgentDisabledByMe, listOrganizationSharedAgents, getMeResourceCounts } from '@/api/organization'
+import { setSharedAgentDisabledByMe, listOrganizationSharedAgents } from '@/api/organization'
 import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
@@ -674,12 +674,9 @@ const fetchList = () => {
     orgStore.fetchSharedAgents(),
     orgStore.fetchOrganizations()
   ]).finally(() => { loading.value = false }).then(() => {
-    // 一次请求拉取各空间内全部智能体数量（含我共享的），用于侧栏展示
-    getMeResourceCounts().then((res) => {
-      if (res.success && res.data?.agents?.by_organization) {
-        spaceAgentCountByOrg.value = { ...res.data.agents.by_organization }
-      }
-    })
+    // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
+    const counts = orgStore.resourceCounts?.agents?.by_organization
+    if (counts) spaceAgentCountByOrg.value = { ...counts }
   })
 }
 

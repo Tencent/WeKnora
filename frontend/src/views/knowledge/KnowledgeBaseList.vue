@@ -540,7 +540,7 @@ import { listKnowledgeBases, deleteKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useOrganizationStore } from '@/stores/organization'
-import { listOrganizationSharedKnowledgeBases, getMeResourceCounts, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
+import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
@@ -703,12 +703,9 @@ const fetchList = () => {
     orgStore.fetchSharedKnowledgeBases(),
     orgStore.fetchOrganizations()
   ]).finally(() => { loading.value = false }).then(() => {
-    // 一次请求拉取各空间内全部知识库数量（含我共享的），用于侧栏展示
-    getMeResourceCounts().then((res) => {
-      if (res.success && res.data?.knowledge_bases?.by_organization) {
-        spaceCountByOrg.value = { ...res.data.knowledge_bases.by_organization }
-      }
-    })
+    // 各空间知识库数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
+    const counts = orgStore.resourceCounts?.knowledge_bases?.by_organization
+    if (counts) spaceCountByOrg.value = { ...counts }
   })
 }
 

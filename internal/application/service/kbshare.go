@@ -348,6 +348,35 @@ func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Cont
 	return result, nil
 }
 
+// ListSharedKnowledgeBaseIDsByOrganizations returns per-org direct shared KB IDs (batch); only orgs where user is member.
+func (s *kbShareService) ListSharedKnowledgeBaseIDsByOrganizations(ctx context.Context, orgIDs []string, userID string) (map[string][]string, error) {
+	if len(orgIDs) == 0 {
+		return make(map[string][]string), nil
+	}
+	members, err := s.orgRepo.ListMembersByUserForOrgs(ctx, userID, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	shares, err := s.shareRepo.ListByOrganizations(ctx, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	byOrg := make(map[string][]string)
+	for _, share := range shares {
+		if share == nil || members[share.OrganizationID] == nil {
+			continue
+		}
+		kbID := share.KnowledgeBaseID
+		if kbID == "" && share.KnowledgeBase != nil {
+			kbID = share.KnowledgeBase.ID
+		}
+		if kbID != "" {
+			byOrg[share.OrganizationID] = append(byOrg[share.OrganizationID], kbID)
+		}
+	}
+	return byOrg, nil
+}
+
 // GetShare gets a share by ID
 func (s *kbShareService) GetShare(ctx context.Context, shareID string) (*types.KnowledgeBaseShare, error) {
 	share, err := s.shareRepo.GetByID(ctx, shareID)

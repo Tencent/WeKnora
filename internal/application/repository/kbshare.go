@@ -126,6 +126,25 @@ func (r *kbShareRepository) ListByOrganization(ctx context.Context, orgID string
 	return shares, nil
 }
 
+// ListByOrganizations lists all share records for the given organizations (batch).
+func (r *kbShareRepository) ListByOrganizations(ctx context.Context, orgIDs []string) ([]*types.KnowledgeBaseShare, error) {
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
+	var shares []*types.KnowledgeBaseShare
+	err := r.db.WithContext(ctx).
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = kb_shares.knowledge_base_id AND knowledge_bases.deleted_at IS NULL").
+		Preload("KnowledgeBase").
+		Preload("Organization").
+		Where("kb_shares.organization_id IN ? AND kb_shares.deleted_at IS NULL", orgIDs).
+		Order("kb_shares.created_at DESC").
+		Find(&shares).Error
+	if err != nil {
+		return nil, err
+	}
+	return shares, nil
+}
+
 // ListSharedKBsForUser lists all knowledge bases shared to organizations that the user belongs to.
 // Excludes shares for soft-deleted organizations and soft-deleted knowledge bases.
 func (r *kbShareRepository) ListSharedKBsForUser(ctx context.Context, userID string) ([]*types.KnowledgeBaseShare, error) {

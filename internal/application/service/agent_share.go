@@ -294,6 +294,76 @@ func (s *agentShareService) ListSharedAgentsInOrganization(ctx context.Context, 
 	return result, nil
 }
 
+// ListSharedAgentsInOrganizations returns per-org agent lists (batch); only orgs where user is member.
+func (s *agentShareService) ListSharedAgentsInOrganizations(ctx context.Context, orgIDs []string, userID string, currentTenantID uint64) (map[string][]*types.OrganizationSharedAgentItem, error) {
+	out := make(map[string][]*types.OrganizationSharedAgentItem)
+	if len(orgIDs) == 0 {
+		return out, nil
+	}
+	members, err := s.orgRepo.ListMembersByUserForOrgs(ctx, userID, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	shares, err := s.shareRepo.ListByOrganizations(ctx, orgIDs)
+	if err != nil {
+		return nil, err
+	}
+	byOrg := make(map[string][]*types.AgentShare)
+	for _, share := range shares {
+		if share != nil && members[share.OrganizationID] != nil {
+			byOrg[share.OrganizationID] = append(byOrg[share.OrganizationID], share)
+		}
+	}
+	disabledSet := make(map[string]bool)
+	if disabledList, err := s.disabledRepo.ListByTenantID(ctx, currentTenantID); err == nil {
+		for _, d := range disabledList {
+			disabledSet[fmt.Sprintf("%s_%d", d.AgentID, d.SourceTenantID)] = true
+		}
+	}
+	for orgID, list := range byOrg {
+		member := members[orgID]
+		result := make([]*types.OrganizationSharedAgentItem, 0, len(list))
+		for _, share := range list {
+			if share.Agent == nil {
+				continue
+			}
+			effectivePermission := share.Permission
+			if !member.Role.HasPermission(share.Permission) {
+				effectivePermission = member.Role
+			}
+			orgName := ""
+			if share.Organization != nil {
+				orgName = share.Organization.Name
+			}
+			info := &types.SharedAgentInfo{
+				Agent:          share.Agent,
+				ShareID:        share.ID,
+				OrganizationID: share.OrganizationID,
+				OrgName:        orgName,
+				Permission:     effectivePermission,
+				SourceTenantID: share.SourceTenantID,
+				SharedAt:       share.CreatedAt,
+				SharedByUserID: share.SharedByUserID,
+			}
+			if share.SharedByUserID != "" {
+				if u, err := s.userRepo.GetUserByID(ctx, share.SharedByUserID); err == nil && u != nil {
+					info.SharedByUsername = u.Username
+				}
+			}
+			item := &types.OrganizationSharedAgentItem{
+				SharedAgentInfo: *info,
+				IsMine:          share.SourceTenantID == currentTenantID,
+			}
+			if item.Agent != nil && !item.IsMine {
+				item.DisabledByMe = disabledSet[fmt.Sprintf("%s_%d", item.Agent.ID, item.SourceTenantID)]
+			}
+			result = append(result, item)
+		}
+		out[orgID] = result
+	}
+	return out, nil
+}
+
 // CountByOrganizations returns share counts per organization (for list sidebar); excludes deleted agents
 func (s *agentShareService) CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error) {
 	return s.shareRepo.CountByOrganizations(ctx, orgIDs)

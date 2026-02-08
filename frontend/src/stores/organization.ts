@@ -5,7 +5,8 @@ import type {
   OrganizationMember,
   SharedKnowledgeBase,
   SharedAgentInfo,
-  OrganizationPreview
+  OrganizationPreview,
+  ResourceCountsByOrg
 } from '@/api/organization'
 import {
   listMyOrganizations,
@@ -33,6 +34,10 @@ export const useOrganizationStore = defineStore('organization', () => {
   const previewData = ref<OrganizationPreview | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
+  /** 各空间内知识库/智能体数量（由 GET /organizations 的 resource_counts 填充，供列表侧栏使用） */
+  const resourceCounts = ref<ResourceCountsByOrg | null>(null)
+  /** 用于去重：同一时刻只允许一次 GET /organizations 请求 */
+  let fetchOrganizationsPromise: Promise<void> | null = null
 
   // Computed
   const myOrganizations = computed(() => organizations.value)
@@ -53,23 +58,32 @@ export const useOrganizationStore = defineStore('organization', () => {
   // Actions
 
   /**
-   * Fetch all organizations the user belongs to
+   * Fetch all organizations the user belongs to.
+   * 去重：并发调用只发一次请求，共用同一 Promise。
    */
   async function fetchOrganizations() {
+    if (fetchOrganizationsPromise) return fetchOrganizationsPromise
     loading.value = true
     error.value = null
-    try {
-      const response = await listMyOrganizations()
-      if (response.success && response.data) {
-        organizations.value = response.data.organizations
-      } else {
-        error.value = response.message || 'Failed to fetch organizations'
+    fetchOrganizationsPromise = (async () => {
+      try {
+        const response = await listMyOrganizations()
+        if (response.success && response.data) {
+          organizations.value = response.data.organizations
+          resourceCounts.value = response.data.resource_counts ?? null
+        } else {
+          resourceCounts.value = null
+          error.value = response.message || 'Failed to fetch organizations'
+        }
+      } catch (e: any) {
+        error.value = e.message || 'Failed to fetch organizations'
+        resourceCounts.value = null
+      } finally {
+        loading.value = false
+        fetchOrganizationsPromise = null
       }
-    } catch (e: any) {
-      error.value = e.message || 'Failed to fetch organizations'
-    } finally {
-      loading.value = false
-    }
+    })()
+    return fetchOrganizationsPromise
   }
 
   /**
@@ -413,6 +427,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     currentMembers.value = []
     sharedKnowledgeBases.value = []
     sharedAgents.value = []
+    resourceCounts.value = null
     previewData.value = null
     error.value = null
   }
@@ -424,6 +439,7 @@ export const useOrganizationStore = defineStore('organization', () => {
     currentMembers,
     sharedKnowledgeBases,
     sharedAgents,
+    resourceCounts,
     previewData,
     loading,
     error,

@@ -159,9 +159,16 @@ export interface ApiResponse<T> {
   message?: string
 }
 
+/** Per-org resource counts (included in list my organizations to avoid extra GET /me/resource-counts) */
+export interface ResourceCountsByOrg {
+  knowledge_bases: { by_organization: Record<string, number> }
+  agents: { by_organization: Record<string, number> }
+}
+
 export interface ListOrganizationsResponse {
   organizations: Organization[]
   total: number
+  resource_counts?: ResourceCountsByOrg
 }
 
 export interface ListMembersResponse {
@@ -639,25 +646,6 @@ export async function listSharedAgents(): Promise<ApiResponse<SharedAgentInfo[]>
     return response as unknown as ApiResponse<SharedAgentInfo[]>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to list shared agents' }
-  }
-}
-
-/** Response of GET /me/resource-counts: per-org counts for sidebar (one request instead of N). */
-export interface MeResourceCountsResponse {
-  knowledge_bases: { by_organization: Record<string, number> }
-  agents: { by_organization: Record<string, number> }
-}
-
-/**
- * Get per-organization resource counts for list sidebar (one request).
- * 全部 total is not included; frontend keeps 全部 = 我的 + 他人共享给我.
- */
-export async function getMeResourceCounts(): Promise<ApiResponse<MeResourceCountsResponse>> {
-  try {
-    const response = await get('/api/v1/me/resource-counts')
-    return response as unknown as ApiResponse<MeResourceCountsResponse>
-  } catch (error: any) {
-    return { success: false, message: error.message || 'Failed to get resource counts' }
   }
 }
 

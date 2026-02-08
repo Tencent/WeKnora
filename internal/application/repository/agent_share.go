@@ -118,6 +118,25 @@ func (r *agentShareRepository) ListByOrganization(ctx context.Context, orgID str
 	return shares, nil
 }
 
+// ListByOrganizations lists all share records for the given organizations (batch).
+func (r *agentShareRepository) ListByOrganizations(ctx context.Context, orgIDs []string) ([]*types.AgentShare, error) {
+	if len(orgIDs) == 0 {
+		return nil, nil
+	}
+	var shares []*types.AgentShare
+	err := r.db.WithContext(ctx).
+		Joins("JOIN custom_agents ON custom_agents.id = agent_shares.agent_id AND custom_agents.tenant_id = agent_shares.source_tenant_id AND custom_agents.deleted_at IS NULL").
+		Preload("Agent").
+		Preload("Organization").
+		Where("agent_shares.organization_id IN ? AND agent_shares.deleted_at IS NULL", orgIDs).
+		Order("agent_shares.created_at DESC").
+		Find(&shares).Error
+	if err != nil {
+		return nil, err
+	}
+	return shares, nil
+}
+
 // CountByOrganizations returns share counts per organization (only orgs in orgIDs). Excludes deleted agents.
 func (r *agentShareRepository) CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error) {
 	if len(orgIDs) == 0 {

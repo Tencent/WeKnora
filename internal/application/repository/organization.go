@@ -185,6 +185,27 @@ func (r *organizationRepository) GetMember(ctx context.Context, orgID string, us
 	return &member, nil
 }
 
+// ListMembersByUserForOrgs returns one member record per org where the user is a member (batch).
+func (r *organizationRepository) ListMembersByUserForOrgs(ctx context.Context, userID string, orgIDs []string) (map[string]*types.OrganizationMember, error) {
+	if len(orgIDs) == 0 {
+		return make(map[string]*types.OrganizationMember), nil
+	}
+	var members []*types.OrganizationMember
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND organization_id IN ?", userID, orgIDs).
+		Find(&members).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*types.OrganizationMember, len(members))
+	for _, m := range members {
+		if m != nil {
+			out[m.OrganizationID] = m
+		}
+	}
+	return out, nil
+}
+
 // CountMembers counts the number of members in an organization
 func (r *organizationRepository) CountMembers(ctx context.Context, orgID string) (int64, error) {
 	var count int64

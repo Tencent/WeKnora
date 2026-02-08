@@ -534,6 +534,4 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Shared agents route
 	r.GET("/shared-agents", orgHandler.ListSharedAgents)
 	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
-	// Per-org resource counts for list sidebar (one request)
-	r.GET("/me/resource-counts", orgHandler.GetMeResourceCounts)
 }
