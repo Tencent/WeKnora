@@ -64,10 +64,13 @@ const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === kbId.value) ?? null,
 );
 
+// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
+const effectiveKBPermission = computed(() => orgStore.getKBPermission(kbId.value) || kbInfo.value?.my_permission || '');
+
 // Display role label: owner or org role (admin/editor/viewer)
 const accessRoleLabel = computed(() => {
   if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner');
-  const perm = orgStore.getKBPermission(kbId.value);
+  const perm = effectiveKBPermission.value;
   if (perm) return t(`organization.role.${perm}`);
   return '--';
 });
@@ -75,7 +78,7 @@ const accessRoleLabel = computed(() => {
 // Permission summary text for current role
 const accessPermissionSummary = computed(() => {
   if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner');
-  const perm = orgStore.getKBPermission(kbId.value);
+  const perm = effectiveKBPermission.value;
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin');
   if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor');
   if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer');
@@ -1190,7 +1193,7 @@ async function createNewSession(value: string): Promise<void> {
             <div v-if="kbInfo" class="kb-access-meta">
               <t-tooltip :content="accessPermissionSummary" placement="top">
                 <span class="kb-access-meta-inner">
-                  <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
+                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
                     {{ accessRoleLabel }}
                   </t-tag>
                   <template v-if="currentSharedKb">
@@ -1199,6 +1202,10 @@ async function createNewSession(value: string): Promise<void> {
                       {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
                       {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatStringDate(new Date(currentSharedKb.shared_at)) }}
                     </span>
+                  </template>
+                  <template v-else-if="effectiveKBPermission">
+                    <span class="kb-access-meta-sep">·</span>
+                    <span class="kb-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
                   </template>
                   <template v-else-if="kbLastUpdated">
                     <span class="kb-access-meta-sep">·</span>

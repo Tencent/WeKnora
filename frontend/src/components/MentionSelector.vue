@@ -61,6 +61,9 @@
                     {{ detailCache[item.id].data.org_name || item.orgName }}
                   </span>
                 </span>
+                <span v-if="agentIdForDetail && (detailCache[item.id].data.org_name || item.orgName)" class="detail-readonly-hint">
+                  {{ $t('mentionDetail.readOnlyFromAgent') }}
+                </span>
               </div>
             </template>
           </div>
@@ -509,6 +512,14 @@ const scrollToItem = (index: number) => {
   gap: 6px;
   align-items: flex-start;
 }
+.mention-detail-content .detail-readonly-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--td-font-size-mark-small, 12px);
+  color: var(--td-text-color-placeholder, #999);
+  font-style: italic;
+}
+
 .mention-detail-content .detail-org,
 .mention-detail-content .detail-kb {
   display: inline-flex;

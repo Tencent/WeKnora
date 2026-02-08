@@ -16,11 +16,12 @@ import (
 
 // TagHandler handles knowledge base tag operations.
 type TagHandler struct {
-	tagService     interfaces.KnowledgeTagService
-	tagRepo        interfaces.KnowledgeTagRepository
-	chunkRepo      interfaces.ChunkRepository
-	kbService      interfaces.KnowledgeBaseService
-	kbShareService interfaces.KBShareService
+	tagService        interfaces.KnowledgeTagService
+	tagRepo           interfaces.KnowledgeTagRepository
+	chunkRepo         interfaces.ChunkRepository
+	kbService         interfaces.KnowledgeBaseService
+	kbShareService    interfaces.KBShareService
+	agentShareService interfaces.AgentShareService
 }
 
 // DeleteTagRequest represents the request body for deleting a tag
@@ -35,8 +36,9 @@ func NewTagHandler(
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
+	agentShareService interfaces.AgentShareService,
 ) *TagHandler {
-	return &TagHandler{tagService: tagService, tagRepo: tagRepo, chunkRepo: chunkRepo, kbService: kbService, kbShareService: kbShareService}
+	return &TagHandler{tagService: tagService, tagRepo: tagRepo, chunkRepo: chunkRepo, kbService: kbService, kbShareService: kbShareService, agentShareService: agentShareService}
 }
 
 // effectiveCtxForKB validates KB access (owner or shared) and returns context with effectiveTenantID for downstream service calls.
@@ -68,6 +70,13 @@ func (h *TagHandler) effectiveCtxForKB(c *gin.Context, kbID string) (context.Con
 					userID.(string), kbID, permission, sourceTenantID)
 				return context.WithValue(ctx, types.TenantIDContextKey, sourceTenantID), nil
 			}
+		}
+	}
+	if userExists && h.agentShareService != nil {
+		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
+		if err == nil && can {
+			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
+			return context.WithValue(ctx, types.TenantIDContextKey, kb.TenantID), nil
 		}
 	}
 	logger.Warnf(ctx, "Permission denied to access KB %s", kbID)

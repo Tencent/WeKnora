@@ -47,7 +47,7 @@
                         {{ org.share_count ?? 0 }}
                       </span>
                       <span class="org-meta-tag">
-                        <t-icon name="control-platform" class="org-meta-icon org-meta-icon-agent" />
+                        <img src="@/assets/img/agent.svg" class="org-meta-icon org-meta-icon-agent" alt="" aria-hidden="true" />
                         {{ org.agent_share_count ?? 0 }}
                       </span>
                     </div>
@@ -122,7 +122,7 @@
                   {{ getOrgForShare(share.organization_id)?.share_count ?? 0 }}
                 </span>
                 <span class="org-meta-tag">
-                  <t-icon name="control-platform" class="org-meta-icon org-meta-icon-agent" />
+                  <img src="@/assets/img/agent.svg" class="org-meta-icon org-meta-icon-agent" alt="" aria-hidden="true" />
                   {{ getOrgForShare(share.organization_id)?.agent_share_count ?? 0 }}
                 </span>
               </div>
@@ -504,7 +504,8 @@ onMounted(async () => {
     opacity: 0.75;
   }
   .org-meta-icon-agent {
-    font-size: 12px;
+    width: 12px;
+    height: 12px;
     opacity: 0.75;
   }
 }
@@ -640,7 +641,8 @@ onMounted(async () => {
     opacity: 0.75;
   }
   .org-meta-icon-agent {
-    font-size: 12px;
+    width: 12px;
+    height: 12px;
     opacity: 0.75;
   }
 }

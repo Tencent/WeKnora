@@ -7,8 +7,9 @@
       </div>
     </div>
     <nav class="sidebar-nav">
-      <!-- 全部 -->
+      <!-- 全部：仅组织模式显示；知识库/智能体列表不展示「全部」 -->
       <div
+        v-if="mode !== 'resource'"
         class="sidebar-item"
         :class="{ active: selected === 'all' }"
         @click="select('all')"
@@ -32,12 +33,12 @@
           </div>
           <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
         </div>
-        <template v-if="organizations.length">
+        <template v-if="organizationsWithCount.length">
           <div class="sidebar-section">
             <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
           </div>
           <div
-            v-for="org in organizations"
+            v-for="org in organizationsWithCount"
             :key="org.id"
             class="sidebar-item org-item"
             :class="{ active: selected === org.id }"
@@ -116,6 +117,12 @@ const selected = computed({
 })
 
 const organizations = computed(() => orgStore.organizations || [])
+
+/** 资源模式下只展示数量大于 0 的空间 */
+const organizationsWithCount = computed(() => {
+  if (props.mode !== 'resource') return organizations.value
+  return organizations.value.filter((org) => (props.countByOrg?.[org.id] ?? 0) > 0)
+})
 
 function select(value: string) {
   selected.value = value

@@ -502,6 +502,10 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.GET("/:id/shares", orgHandler.ListOrgShares)
 		// List agents shared to this organization
 		orgs.GET("/:id/agent-shares", orgHandler.ListOrgAgentShares)
+		// List all knowledge bases in this organization (including mine) for list-page space view
+		orgs.GET("/:id/shared-knowledge-bases", orgHandler.ListOrganizationSharedKnowledgeBases)
+		// List all agents in this organization (including mine) for list-page space view
+		orgs.GET("/:id/shared-agents", orgHandler.ListOrganizationSharedAgents)
 	}
 
 	// Knowledge base sharing routes (add to existing kb routes)
@@ -530,4 +534,6 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Shared agents route
 	r.GET("/shared-agents", orgHandler.ListSharedAgents)
 	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
+	// Per-org resource counts for list sidebar (one request)
+	r.GET("/me/resource-counts", orgHandler.GetMeResourceCounts)
 }

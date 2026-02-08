@@ -43,7 +43,7 @@
             <div v-if="kbInfo" class="faq-access-meta">
               <t-tooltip :content="accessPermissionSummary" placement="top">
                 <span class="faq-access-meta-inner">
-                  <t-tag size="small" :theme="isOwner ? 'success' : (currentSharedKb?.permission === 'admin' ? 'primary' : currentSharedKb?.permission === 'editor' ? 'warning' : 'default')" class="faq-access-role-tag">
+                  <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="faq-access-role-tag">
                     {{ accessRoleLabel }}
                   </t-tag>
                   <template v-if="currentSharedKb">
@@ -52,6 +52,10 @@
                       {{ $t('knowledgeBase.accessInfo.fromOrg') }}「{{ currentSharedKb.org_name }}」
                       {{ $t('knowledgeBase.accessInfo.sharedAt') }} {{ formatImportTime(currentSharedKb.shared_at) }}
                     </span>
+                  </template>
+                  <template v-else-if="effectiveKBPermission">
+                    <span class="faq-access-meta-sep">·</span>
+                    <span class="faq-access-meta-text">{{ $t('knowledgeList.detail.sourceTypeAgent') }}</span>
                   </template>
                   <template v-else-if="kbLastUpdated">
                     <span class="faq-access-meta-sep">·</span>
@@ -1304,10 +1308,13 @@ const currentSharedKb = computed(() =>
   orgStore.sharedKnowledgeBases.find((s) => s.knowledge_base?.id === props.kbId) ?? null,
 )
 
+// Effective permission: from direct org share list or from GET /knowledge-bases/:id (e.g. agent-visible KB)
+const effectiveKBPermission = computed(() => orgStore.getKBPermission(props.kbId) || kbInfo.value?.my_permission || '')
+
 // Display role label: owner or org role (admin/editor/viewer)
 const accessRoleLabel = computed(() => {
   if (isOwner.value) return t('knowledgeBase.accessInfo.roleOwner')
-  const perm = orgStore.getKBPermission(props.kbId)
+  const perm = effectiveKBPermission.value
   if (perm) return t(`organization.role.${perm}`)
   return '--'
 })
@@ -1315,7 +1322,7 @@ const accessRoleLabel = computed(() => {
 // Permission summary text for current role
 const accessPermissionSummary = computed(() => {
   if (isOwner.value) return t('knowledgeBase.accessInfo.permissionOwner')
-  const perm = orgStore.getKBPermission(props.kbId)
+  const perm = effectiveKBPermission.value
   if (perm === 'admin') return t('knowledgeBase.accessInfo.permissionAdmin')
   if (perm === 'editor') return t('knowledgeBase.accessInfo.permissionEditor')
   if (perm === 'viewer') return t('knowledgeBase.accessInfo.permissionViewer')

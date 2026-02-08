@@ -14,7 +14,7 @@
         v-model="spaceSelection"
         :count-all="allKnowledgeBases"
         :count-mine="kbs.length"
-        :count-by-org="sharedCountByOrg"
+        :count-by-org="effectiveSharedCountByOrg"
       >
         <template #actions>
           <t-tooltip :content="$t('knowledgeList.create')" placement="top">
@@ -340,11 +340,14 @@
       </div>
     </div>
 
-    <!-- 按空间筛选：该空间下共享给我的知识库 -->
-    <div v-if="spaceSelectionOrgId && sharedKbsByOrg.length > 0" class="kb-card-wrap">
+    <!-- 按空间筛选：该空间内全部知识库（含我共享的） -->
+    <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
+      <t-loading size="large" text="" />
+    </div>
+    <div v-else-if="spaceSelectionOrgId && spaceKbsList.length > 0" class="kb-card-wrap">
       <div
-        v-for="shared in sharedKbsByOrg"
-        :key="'shared-' + shared.share_id"
+        v-for="shared in spaceKbsList"
+        :key="'shared-' + (shared.share_id || `agent-${shared.knowledge_base?.id}-${shared.source_from_agent?.agent_id || ''}`)"
         class="kb-card shared-kb-card"
         :class="{
           'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
@@ -355,7 +358,10 @@
         <!-- 卡片头部 -->
         <div class="card-header">
           <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
-          <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+          <t-tooltip v-if="shared.is_mine" :content="$t('knowledgeList.myLabel')" placement="top">
+            <span class="shared-by-me-badge">{{ $t('knowledgeList.myLabel') }}</span>
+          </t-tooltip>
+          <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
             <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)" :aria-label="$t('knowledgeList.menu.viewDetails')">
               <t-icon name="info-circle" size="16px" />
             </button>
@@ -415,8 +421,8 @@
       </t-button>
     </div>
 
-    <!-- 空间下共享知识库空状态 -->
-    <div v-if="spaceSelectionOrgId && sharedKbsByOrg.length === 0 && !loading" class="empty-state">
+    <!-- 空间下知识库空状态 -->
+    <div v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') || '暂无共享知识库' }}</span>
       <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') || '您可以加入组织或请求他人共享知识库给您' }}</span>
@@ -482,10 +488,22 @@
                 <span class="shared-detail-value">{{ currentSharedKbForDetail.knowledge_base.name }}</span>
               </div>
               <div class="shared-detail-row">
-                <span class="shared-detail-label">{{ $t('knowledgeList.detail.sourceOrg') }}</span>
+                <span class="shared-detail-label">{{ $t('knowledgeList.detail.sourceType') }}</span>
+                <span class="shared-detail-value shared-detail-source-type">
+                  {{ currentSharedKbForDetail.source_from_agent ? $t('knowledgeList.detail.sourceTypeAgent') : $t('knowledgeList.detail.sourceTypeKbShare') }}
+                </span>
+              </div>
+              <div class="shared-detail-row">
+                <span class="shared-detail-label">{{ currentSharedKbForDetail.source_from_agent ? $t('knowledgeList.detail.sourceFromAgent') : $t('knowledgeList.detail.sourceOrg') }}</span>
                 <span class="shared-detail-value shared-detail-org">
                   <img src="@/assets/img/organization-green.svg" class="shared-detail-org-icon" alt="" aria-hidden="true" />
-                  {{ currentSharedKbForDetail.org_name }}
+                  {{ currentSharedKbForDetail.source_from_agent ? currentSharedKbForDetail.source_from_agent.agent_name : currentSharedKbForDetail.org_name }}
+                </span>
+              </div>
+              <div v-if="currentSharedKbForDetail.source_from_agent" class="shared-detail-row">
+                <span class="shared-detail-label">{{ $t('knowledgeList.detail.agentKbStrategy') }}</span>
+                <span class="shared-detail-value">
+                  {{ agentKbStrategyText(currentSharedKbForDetail.source_from_agent?.kb_selection_mode ?? '') }}
                 </span>
               </div>
               <div class="shared-detail-row">
@@ -522,7 +540,7 @@ import { listKnowledgeBases, deleteKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useOrganizationStore } from '@/stores/organization'
-import type { SharedKnowledgeBase } from '@/api/organization'
+import { listOrganizationSharedKnowledgeBases, getMeResourceCounts, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
@@ -534,8 +552,8 @@ const uiStore = useUIStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
 
-// 左侧空间选择：全部 / 我的 / 空间 ID
-const spaceSelection = ref<'all' | 'mine' | string>('all')
+// 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
+const spaceSelection = ref<'all' | 'mine' | string>('mine')
 
 interface KB { 
   id: string; 
@@ -586,14 +604,19 @@ const spaceSelectionOrgId = computed(() => {
   return s !== 'all' && s !== 'mine' && !!s
 })
 
-// 当前空间下共享给我的知识库
+// 当前空间下共享给我的知识库（旧：仅他人共享；保留用于兼容）
 const sharedKbsByOrg = computed(() => {
   const orgId = spaceSelection.value
   if (orgId === 'all' || orgId === 'mine') return []
   return sharedKbs.value.filter(s => s.organization_id === orgId)
 })
 
-// 各空间下的共享知识库数量（用于侧栏展示，含 0 的也显示）
+// 空间视角：该空间内全部知识库（含我共享的），选中空间时请求新接口
+const spaceKbsList = ref<OrganizationSharedKnowledgeBaseItem[]>([])
+const spaceKbsLoading = ref(false)
+const spaceCountByOrg = ref<Record<string, number>>({})
+
+// 各空间下的共享知识库数量（用于侧栏展示）：优先用接口返回的该空间总数，否则用「共享给我」数量
 const sharedCountByOrg = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   sharedKbs.value.forEach(s => {
@@ -605,6 +628,14 @@ const sharedCountByOrg = computed<Record<string, number>>(() => {
     if (map[org.id] === undefined) map[org.id] = 0
   })
   return map
+})
+const effectiveSharedCountByOrg = computed<Record<string, number>>(() => {
+  const base = sharedCountByOrg.value
+  const merged = { ...base }
+  Object.keys(spaceCountByOrg.value).forEach(orgId => {
+    merged[orgId] = spaceCountByOrg.value[orgId]
+  })
+  return merged
 })
 
 // Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
@@ -669,9 +700,36 @@ const fetchList = () => {
         processing_count: kb.processing_count || 0
       }))
     }),
-    orgStore.fetchSharedKnowledgeBases()
-  ]).finally(() => loading.value = false)
+    orgStore.fetchSharedKnowledgeBases(),
+    orgStore.fetchOrganizations()
+  ]).finally(() => { loading.value = false }).then(() => {
+    // 一次请求拉取各空间内全部知识库数量（含我共享的），用于侧栏展示
+    getMeResourceCounts().then((res) => {
+      if (res.success && res.data?.knowledge_bases?.by_organization) {
+        spaceCountByOrg.value = { ...res.data.knowledge_bases.by_organization }
+      }
+    })
+  })
 }
+
+// 选中空间时请求该空间内全部知识库（含我共享的）
+watch(spaceSelection, (val) => {
+  if (val === 'all' || val === 'mine' || !val) {
+    spaceKbsList.value = []
+    return
+  }
+  spaceKbsLoading.value = true
+  listOrganizationSharedKnowledgeBases(val).then((res) => {
+    if (res.success && res.data) {
+      spaceKbsList.value = res.data
+      spaceCountByOrg.value = { ...spaceCountByOrg.value, [val]: res.data.length }
+    } else {
+      spaceKbsList.value = []
+    }
+  }).finally(() => {
+    spaceKbsLoading.value = false
+  })
+}, { immediate: true })
 
 onMounted(() => {
   fetchList().then(() => {
@@ -768,9 +826,10 @@ const handleSharedKbClickFromAll = (kb: any) => {
   router.push(`/platform/knowledge-bases/${kb.id}`)
 }
 
-// 右侧详情面板：共享知识库详情
+// 右侧详情面板：共享知识库详情（含直接共享与来自智能体的）
+type SharedKbDetailItem = SharedKnowledgeBase & { is_mine?: boolean; source_from_agent?: SourceFromAgentInfo }
 const sharedDetailPanelVisible = ref(false)
-const currentSharedKbForDetail = ref<SharedKnowledgeBase | null>(null)
+const currentSharedKbForDetail = ref<SharedKbDetailItem | null>(null)
 
 const closeSharedDetailPanel = () => {
   sharedDetailPanelVisible.value = false
@@ -786,10 +845,17 @@ const openSharedDetailFromAll = (kb: any) => {
   }
 }
 
-// 打开右侧详情面板（共享给我 Tab）
-const openSharedDetail = (sharedKb: SharedKnowledgeBase) => {
+// 打开右侧详情面板（空间 Tab：直接共享或来自智能体）
+const openSharedDetail = (sharedKb: SharedKbDetailItem) => {
   currentSharedKbForDetail.value = sharedKb
   sharedDetailPanelVisible.value = true
+}
+
+// 智能体对知识库的策略文案（用于抽屉「来源方式」为智能体时）
+const agentKbStrategyText = (mode: string) => {
+  if (mode === 'all') return t('knowledgeList.detail.agentKbStrategyAll')
+  if (mode === 'selected') return t('knowledgeList.detail.agentKbStrategySelected')
+  return t('knowledgeList.detail.agentKbStrategyNone')
 }
 
 // 从右侧面板进入知识库
@@ -1093,6 +1159,26 @@ const handleUploadFinishedEvent = (event: Event) => {
   overflow-x: hidden;
   padding: 12px;
   background: #fafbfc;
+}
+
+.kb-list-main-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 12px;
+  background: #fafbfc;
+}
+
+.shared-by-me-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: rgba(7, 192, 95, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #07c05f;
+  margin-left: 6px;
 }
 
 .header-subtitle {
@@ -2118,6 +2204,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   color: #1d2129;
   line-height: 1.5;
   word-break: break-word;
+
+  &.shared-detail-source-type {
+    font-weight: 500;
+    color: #0d0d0d;
+  }
 
   &.shared-detail-org {
     display: inline-flex;

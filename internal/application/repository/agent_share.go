@@ -108,6 +108,7 @@ func (r *agentShareRepository) ListByOrganization(ctx context.Context, orgID str
 	err := r.db.WithContext(ctx).
 		Joins("JOIN custom_agents ON custom_agents.id = agent_shares.agent_id AND custom_agents.tenant_id = agent_shares.source_tenant_id AND custom_agents.deleted_at IS NULL").
 		Preload("Agent").
+		Preload("Organization").
 		Where("agent_shares.organization_id = ? AND agent_shares.deleted_at IS NULL", orgID).
 		Order("agent_shares.created_at DESC").
 		Find(&shares).Error
@@ -115,6 +116,35 @@ func (r *agentShareRepository) ListByOrganization(ctx context.Context, orgID str
 		return nil, err
 	}
 	return shares, nil
+}
+
+// CountByOrganizations returns share counts per organization (only orgs in orgIDs). Excludes deleted agents.
+func (r *agentShareRepository) CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error) {
+	if len(orgIDs) == 0 {
+		return make(map[string]int64), nil
+	}
+	type row struct {
+		OrgID string `gorm:"column:organization_id"`
+		Count int64  `gorm:"column:count"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Model(&types.AgentShare{}).
+		Joins("JOIN custom_agents ON custom_agents.id = agent_shares.agent_id AND custom_agents.tenant_id = agent_shares.source_tenant_id AND custom_agents.deleted_at IS NULL").
+		Select("agent_shares.organization_id as organization_id, COUNT(*) as count").
+		Where("agent_shares.organization_id IN ? AND agent_shares.deleted_at IS NULL", orgIDs).
+		Group("agent_shares.organization_id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64)
+	for _, o := range orgIDs {
+		out[o] = 0
+	}
+	for _, r := range rows {
+		out[r.OrgID] = r.Count
+	}
+	return out, nil
 }
 
 // ListSharedAgentsForUser lists all agents shared to organizations that the user belongs to

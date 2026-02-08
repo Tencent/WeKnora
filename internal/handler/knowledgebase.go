@@ -197,33 +197,38 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 		}
 	}
 
-	// Check 3: Shared agent — request has agent_id, verify user has that shared agent and the agent has access to this KB
+	// Check 3: Shared agent — allow if request has agent_id (and agent can access this KB) OR user has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list without agent_id)
 	if userExists && h.agentShareService != nil {
+		currentTenantID := tenantID.(uint64)
 		agentID := c.Query("agent_id")
 		if agentID != "" {
-			currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
-			if currentTenantID != 0 {
-				agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID.(string), currentTenantID, agentID)
-				if err == nil && agent != nil {
-					if kb.TenantID != agent.TenantID {
-						logger.Warnf(ctx, "Shared agent tenant mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
-					} else {
-						mode := agent.Config.KBSelectionMode
-						if mode == "none" {
-							// no-op, fall through to forbid
-						} else if mode == "all" {
-							logger.Infof(ctx, "User %s accessing KB %s via shared agent %s (mode=all)", userID.(string), id, agentID)
-							return kb, id, kb.TenantID, types.OrgRoleViewer, nil
-						} else if mode == "selected" {
-							for _, allowedID := range agent.Config.KnowledgeBases {
-								if allowedID == id {
-									logger.Infof(ctx, "User %s accessing KB %s via shared agent %s (mode=selected)", userID.(string), id, agentID)
-									return kb, id, kb.TenantID, types.OrgRoleViewer, nil
-								}
+			agent, err := h.agentShareService.GetSharedAgentForUser(ctx, userID.(string), currentTenantID, agentID)
+			if err == nil && agent != nil {
+				if kb.TenantID != agent.TenantID {
+					logger.Warnf(ctx, "Shared agent tenant mismatch, KB %s tenant: %d, agent tenant: %d", id, kb.TenantID, agent.TenantID)
+				} else {
+					mode := agent.Config.KBSelectionMode
+					if mode == "none" {
+						// no-op, fall through
+					} else if mode == "all" {
+						logger.Infof(ctx, "User %s accessing KB %s via shared agent %s (mode=all)", userID.(string), id, agentID)
+						return kb, id, kb.TenantID, types.OrgRoleViewer, nil
+					} else if mode == "selected" {
+						for _, allowedID := range agent.Config.KnowledgeBases {
+							if allowedID == id {
+								logger.Infof(ctx, "User %s accessing KB %s via shared agent %s (mode=selected)", userID.(string), id, agentID)
+								return kb, id, kb.TenantID, types.OrgRoleViewer, nil
 							}
 						}
 					}
 				}
+			}
+		} else {
+			// No agent_id in query: allow if user has any shared agent that can access this KB (e.g. from space list "通过智能体可见")
+			can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), currentTenantID, kb)
+			if err == nil && can {
+				logger.Infof(ctx, "User %s accessing KB %s via some shared agent (no agent_id in query)", userID.(string), id)
+				return kb, id, kb.TenantID, types.OrgRoleViewer, nil
 			}
 		}
 	}
@@ -254,7 +259,7 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(c *gin.Context) (*typ
 // @Router       /knowledge-bases/{id} [get]
 func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	// Validate and get the knowledge base
-	kb, _, _, _, err := h.validateAndGetKnowledgeBase(c)
+	kb, _, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -263,10 +268,19 @@ func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	if fillErr := h.service.FillKnowledgeBaseCounts(c.Request.Context(), kb); fillErr != nil {
 		logger.Warnf(c.Request.Context(), "Failed to fill KB counts for %s: %v", kb.ID, fillErr)
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    kb,
-	})
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	data := interface{}(kb)
+	if kb.TenantID != tenantID && permission != "" {
+		// Include my_permission in data so frontend can show role (e.g. "只读") instead of "--" for agent-visible KBs
+		var dataMap map[string]interface{}
+		b, _ := json.Marshal(kb)
+		_ = json.Unmarshal(b, &dataMap)
+		if dataMap != nil {
+			dataMap["my_permission"] = permission
+			data = dataMap
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
 
 // ListKnowledgeBases godoc

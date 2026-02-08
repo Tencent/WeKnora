@@ -90,6 +90,7 @@ type KBShareService interface {
 	ListSharesByKnowledgeBase(ctx context.Context, kbID string, tenantID uint64) ([]*types.KnowledgeBaseShare, error)
 	ListSharesByOrganization(ctx context.Context, orgID string) ([]*types.KnowledgeBaseShare, error)
 	ListSharedKnowledgeBases(ctx context.Context, userID string, currentTenantID uint64) ([]*types.SharedKnowledgeBaseInfo, error)
+	ListSharedKnowledgeBasesInOrganization(ctx context.Context, orgID string, userID string, currentTenantID uint64) ([]*types.OrganizationSharedKnowledgeBaseItem, error)
 	GetShare(ctx context.Context, shareID string) (*types.KnowledgeBaseShare, error)
 	GetShareByKBAndOrg(ctx context.Context, kbID string, orgID string) (*types.KnowledgeBaseShare, error)
 
@@ -102,6 +103,8 @@ type KBShareService interface {
 
 	// Count shares for knowledge bases
 	CountSharesByKnowledgeBaseIDs(ctx context.Context, kbIDs []string) (map[string]int64, error)
+	// CountByOrganizations returns share counts per organization (for sidebar); excludes deleted KBs
+	CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error)
 }
 
 // KBShareRepository defines the knowledge base sharing repository interface
@@ -120,6 +123,7 @@ type KBShareRepository interface {
 	// List
 	ListByKnowledgeBase(ctx context.Context, kbID string) ([]*types.KnowledgeBaseShare, error)
 	ListByOrganization(ctx context.Context, orgID string) ([]*types.KnowledgeBaseShare, error)
+	CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error)
 
 	// Query for user's accessible shared knowledge bases
 	ListSharedKBsForUser(ctx context.Context, userID string) ([]*types.KnowledgeBaseShare, error)
@@ -136,14 +140,19 @@ type AgentShareService interface {
 	ListSharesByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error)
 	ListSharesByOrganization(ctx context.Context, orgID string) ([]*types.AgentShare, error)
 	ListSharedAgents(ctx context.Context, userID string, currentTenantID uint64) ([]*types.SharedAgentInfo, error)
+	ListSharedAgentsInOrganization(ctx context.Context, orgID string, userID string, currentTenantID uint64) ([]*types.OrganizationSharedAgentItem, error)
 	// SetSharedAgentDisabledByMe sets whether the current tenant has "disabled" this shared agent for their conversation dropdown (per-user preference).
 	SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error
 	// GetSharedAgentForUser returns the shared agent by agentID if the user has access (source tenant is resolved from share); used to resolve KB scope for @ mention.
 	GetSharedAgentForUser(ctx context.Context, userID string, currentTenantID uint64, agentID string) (*types.CustomAgent, error)
+	// UserCanAccessKBViaSomeSharedAgent returns true if the user has at least one shared agent that can access the given KB (for opening KB detail from "通过智能体可见" list without passing agent_id).
+	UserCanAccessKBViaSomeSharedAgent(ctx context.Context, userID string, currentTenantID uint64, kb *types.KnowledgeBase) (bool, error)
 	GetShare(ctx context.Context, shareID string) (*types.AgentShare, error)
 	GetShareByAgentAndOrg(ctx context.Context, agentID string, orgID string) (*types.AgentShare, error)
 	// GetShareByAgentIDForUser returns one share for the given agentID that the user can access, excluding source_tenant_id == excludeTenantID (e.g. current tenant to get shared-from-other only).
 	GetShareByAgentIDForUser(ctx context.Context, userID, agentID string, excludeTenantID uint64) (*types.AgentShare, error)
+	// CountByOrganizations returns share counts per organization (for sidebar); excludes deleted agents
+	CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error)
 }
 
 // AgentShareRepository defines the agent sharing repository interface
@@ -158,6 +167,7 @@ type AgentShareRepository interface {
 	ListByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error)
 	ListByOrganization(ctx context.Context, orgID string) ([]*types.AgentShare, error)
 	ListSharedAgentsForUser(ctx context.Context, userID string) ([]*types.AgentShare, error)
+	CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error)
 	// GetShareByAgentIDForUser returns one share for the given agentID that the user can access (user in org), excluding source_tenant_id == excludeTenantID.
 	GetShareByAgentIDForUser(ctx context.Context, userID, agentID string, excludeTenantID uint64) (*types.AgentShare, error)
 }

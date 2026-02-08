@@ -14,7 +14,7 @@
         v-model="spaceSelection"
         :count-all="allAgentsCount"
         :count-mine="agents.length"
-        :count-by-org="sharedCountByOrg"
+        :count-by-org="effectiveSharedCountByOrg"
       >
         <template #actions>
           <t-tooltip :content="$t('agent.createAgent')" placement="top">
@@ -304,17 +304,20 @@
       </div>
     </div>
 
-    <!-- 按空间筛选：该空间下共享给我的智能体 -->
-    <div v-if="spaceSelectionOrgId && sharedAgentsByOrg.length > 0" class="agent-card-wrap">
+    <!-- 按空间筛选：该空间内全部智能体（含我共享的） -->
+    <div v-if="spaceSelectionOrgId && spaceAgentsLoading" class="agent-list-main-loading">
+      <t-loading size="large" text="" />
+    </div>
+    <div v-else-if="spaceSelectionOrgId && spaceAgentsList.length > 0" class="agent-card-wrap">
       <div
-        v-for="shared in sharedAgentsByOrg"
+        v-for="shared in spaceAgentsList"
         :key="'shared-' + shared.share_id"
         class="agent-card shared-agent-card"
         :class="{
           'agent-mode-normal': shared.agent?.config?.agent_mode === 'quick-answer',
           'agent-mode-agent': shared.agent?.config?.agent_mode === 'smart-reasoning'
         }"
-        @click="openSharedAgentDetail(shared)"
+        @click="handleSpaceAgentCardClick(shared)"
       >
         <div class="card-decoration">
           <svg class="star-icon" width="24" height="24" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -329,8 +332,10 @@
             <div v-if="shared.agent?.avatar" class="builtin-avatar agent-emoji">{{ shared.agent.avatar }}</div>
             <AgentAvatar v-else :name="shared.agent?.name" size="small" />
             <span class="card-title" :title="shared.agent?.name">{{ shared.agent?.name }}</span>
+            <span v-if="shared.is_mine" class="shared-by-me-badge">{{ $t('listSpaceSidebar.mine') }}</span>
           </div>
           <t-popup
+            v-if="!shared.is_mine"
             :visible="openMoreAgentId === 'shared-tab-' + shared.share_id"
             trigger="hover"
             overlayClassName="card-more-popup"
@@ -422,8 +427,8 @@
         <span>{{ $t('agent.createAgent') }}</span>
       </t-button>
     </div>
-    <!-- 空状态：空间下共享给我 -->
-    <div v-if="spaceSelectionOrgId && sharedAgentsByOrg.length === 0 && !loading" class="empty-state">
+    <!-- 空状态：空间下 -->
+    <div v-if="spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
       <span class="empty-txt">{{ $t('agent.empty.sharedTitle') }}</span>
       <span class="empty-desc">{{ $t('agent.empty.sharedDescription') }}</span>
@@ -527,7 +532,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { listAgents, deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
@@ -535,10 +540,10 @@ import { formatStringDate } from '@/utils/index'
 import { useI18n } from 'vue-i18n'
 import { createSessions } from '@/api/chat/index'
 import { useOrganizationStore } from '@/stores/organization'
-import { setSharedAgentDisabledByMe } from '@/api/organization'
+import { setSharedAgentDisabledByMe, listOrganizationSharedAgents, getMeResourceCounts } from '@/api/organization'
 import { useSettingsStore } from '@/stores/settings'
 import { useMenuStore } from '@/stores/menu'
-import type { SharedAgentInfo } from '@/api/organization'
+import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import AgentEditorModal from './AgentEditorModal.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
@@ -557,7 +562,8 @@ interface AgentWithUI extends CustomAgent {
 /** Merged agent for "all" tab: my agents (isMine: true) or shared (isMine: false, org_name, source_tenant_id, share_id, disabled_by_me?) */
 type DisplayAgent = (AgentWithUI & { isMine: true }) | (CustomAgent & { isMine: false; org_name: string; source_tenant_id: number; share_id: string; showMore?: boolean; disabled_by_me?: boolean })
 
-const spaceSelection = ref<'all' | 'mine' | string>('all')
+// 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
+const spaceSelection = ref<'all' | 'mine' | string>('mine')
 const agents = ref<AgentWithUI[]>([])
 const sharedAgents = computed<SharedAgentInfo[]>(() => orgStore.sharedAgents || [])
 const allAgentsCount = computed(() => agents.value.length + sharedAgents.value.length)
@@ -573,7 +579,12 @@ const sharedAgentsByOrg = computed(() => {
   return sharedAgents.value.filter(s => s.organization_id === orgId)
 })
 
-// 各空间下的共享智能体数量（用于侧栏展示，含 0 的也显示）
+// 空间视角：该空间内全部智能体（含我共享的），选中空间时请求新接口
+const spaceAgentsList = ref<OrganizationSharedAgentItem[]>([])
+const spaceAgentsLoading = ref(false)
+const spaceAgentCountByOrg = ref<Record<string, number>>({})
+
+// 各空间下的共享智能体数量（用于侧栏展示）：优先用接口返回的该空间总数
 const sharedCountByOrg = computed<Record<string, number>>(() => {
   const map: Record<string, number> = {}
   sharedAgents.value.forEach(s => {
@@ -585,6 +596,14 @@ const sharedCountByOrg = computed<Record<string, number>>(() => {
     if (map[org.id] === undefined) map[org.id] = 0
   })
   return map
+})
+const effectiveSharedCountByOrg = computed<Record<string, number>>(() => {
+  const base = sharedCountByOrg.value
+  const merged = { ...base }
+  Object.keys(spaceAgentCountByOrg.value).forEach(orgId => {
+    merged[orgId] = spaceAgentCountByOrg.value[orgId]
+  })
+  return merged
 })
 
 const filteredAgents = computed<DisplayAgent[]>(() => {
@@ -652,8 +671,16 @@ const fetchList = () => {
       }))
       checkAndOpenEditModal()
     }),
-    orgStore.fetchSharedAgents()
-  ]).finally(() => loading.value = false)
+    orgStore.fetchSharedAgents(),
+    orgStore.fetchOrganizations()
+  ]).finally(() => { loading.value = false }).then(() => {
+    // 一次请求拉取各空间内全部智能体数量（含我共享的），用于侧栏展示
+    getMeResourceCounts().then((res) => {
+      if (res.success && res.data?.agents?.by_organization) {
+        spaceAgentCountByOrg.value = { ...res.data.agents.by_organization }
+      }
+    })
+  })
 }
 
 // 检查 URL 参数并打开编辑模态框
@@ -679,6 +706,25 @@ const handleOpenAgentEditor = (event: CustomEvent) => {
     openCreateModal()
   }
 }
+
+// 选中空间时请求该空间内全部智能体（含我共享的）
+watch(spaceSelection, (val) => {
+  if (val === 'all' || val === 'mine' || !val) {
+    spaceAgentsList.value = []
+    return
+  }
+  spaceAgentsLoading.value = true
+  listOrganizationSharedAgents(val).then((res) => {
+    if (res.success && res.data) {
+      spaceAgentsList.value = res.data
+      spaceAgentCountByOrg.value = { ...spaceAgentCountByOrg.value, [val]: res.data.length }
+    } else {
+      spaceAgentsList.value = []
+    }
+  }).finally(() => {
+    spaceAgentsLoading.value = false
+  })
+}, { immediate: true })
 
 onMounted(() => {
   fetchList()
@@ -713,6 +759,15 @@ const handleCardClick = (agent: DisplayAgent | AgentWithUI) => {
 function openSharedAgentDetail(shared: SharedAgentInfo) {
   currentSharedAgent.value = shared
   sharedDetailVisible.value = true
+}
+
+/** 空间视角下点击卡片：我共享的进编辑，他人共享的打开详情抽屉 */
+function handleSpaceAgentCardClick(shared: OrganizationSharedAgentItem) {
+  if (shared.is_mine && shared.agent) {
+    handleEdit({ ...shared.agent, showMore: false, disabled_by_me: shared.disabled_by_me } as AgentWithUI)
+  } else {
+    openSharedAgentDetail(shared)
+  }
 }
 
 function closeSharedAgentDetail() {
@@ -905,6 +960,26 @@ defineExpose({
   overflow-x: hidden;
   padding: 12px;
   background: #fafbfc;
+}
+
+.agent-list-main-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 12px;
+  background: #fafbfc;
+}
+
+.shared-by-me-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: rgba(7, 192, 95, 0.1);
+  border-radius: 4px;
+  font-size: 12px;
+  color: #07c05f;
+  margin-left: 6px;
 }
 
 .header {

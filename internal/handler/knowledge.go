@@ -93,6 +93,15 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.K
 		}
 	}
 
+	// Check 3: If not owner and no direct share, allow if user has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list)
+	if userExists && h.agentShareService != nil {
+		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
+		if err == nil && can {
+			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
+			return kb, kbID, kb.TenantID, types.OrgRoleViewer, nil
+		}
+	}
+
 	// No permission: not owner and no shared access
 	logger.Warnf(
 		ctx,
@@ -137,6 +146,13 @@ func (h *KnowledgeHandler) validateKnowledgeBaseAccessWithKBID(c *gin.Context, k
 			}
 		}
 	}
+	if userExists && h.agentShareService != nil {
+		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
+		if err == nil && can {
+			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
+			return kb, kbID, kb.TenantID, types.OrgRoleViewer, nil
+		}
+	}
 	logger.Warnf(ctx, "Permission denied to access KB %s, tenant ID: %d, KB tenant: %d", kbID, tenantID, kb.TenantID)
 	return nil, kbID, 0, "", errors.NewForbiddenError("Permission denied to access this knowledge base")
 }
@@ -169,7 +185,7 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 			return knowledge, context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID), nil
 		}
 	}
-	// Shared agent: request passes agent_id, verify user has that shared agent and the agent has access to this knowledge/KB
+	// Shared agent: request passes agent_id, or user has any shared agent that can access this KB
 	if userExists && h.agentShareService != nil && requiredPermission == types.OrgRoleViewer {
 		agentID := c.Query("agent_id")
 		if agentID != "" {
@@ -193,6 +209,12 @@ func (h *KnowledgeHandler) resolveKnowledgeAndValidateKBAccess(c *gin.Context, k
 					}
 					return nil, ctx, errors.NewForbiddenError("Permission denied to access this knowledge")
 				}
+			}
+		} else {
+			kbRef := &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
+			can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kbRef)
+			if err == nil && can {
+				return knowledge, context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
 			}
 		}
 	}

@@ -115,6 +115,7 @@ func (r *kbShareRepository) ListByOrganization(ctx context.Context, orgID string
 	err := r.db.WithContext(ctx).
 		Joins("JOIN knowledge_bases ON knowledge_bases.id = kb_shares.knowledge_base_id AND knowledge_bases.deleted_at IS NULL").
 		Preload("KnowledgeBase").
+		Preload("Organization").
 		Where("kb_shares.organization_id = ? AND kb_shares.deleted_at IS NULL", orgID).
 		Order("kb_shares.created_at DESC").
 		Find(&shares).Error
@@ -187,4 +188,33 @@ func (r *kbShareRepository) CountSharesByKnowledgeBaseIDs(ctx context.Context, k
 		countMap[r.KnowledgeBaseID] = r.Count
 	}
 	return countMap, nil
+}
+
+// CountByOrganizations returns share counts per organization (only orgs in orgIDs). Excludes deleted KBs.
+func (r *kbShareRepository) CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error) {
+	if len(orgIDs) == 0 {
+		return make(map[string]int64), nil
+	}
+	type row struct {
+		OrgID string `gorm:"column:organization_id"`
+		Count int64  `gorm:"column:count"`
+	}
+	var rows []row
+	err := r.db.WithContext(ctx).Model(&types.KnowledgeBaseShare{}).
+		Joins("JOIN knowledge_bases ON knowledge_bases.id = kb_shares.knowledge_base_id AND knowledge_bases.deleted_at IS NULL").
+		Select("kb_shares.organization_id as organization_id, COUNT(*) as count").
+		Where("kb_shares.organization_id IN ? AND kb_shares.deleted_at IS NULL", orgIDs).
+		Group("kb_shares.organization_id").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64)
+	for _, o := range orgIDs {
+		out[o] = 0
+	}
+	for _, r := range rows {
+		out[r.OrgID] = r.Count
+	}
+	return out, nil
 }

@@ -15,14 +15,15 @@ import (
 
 // ChunkHandler defines HTTP handlers for chunk operations
 type ChunkHandler struct {
-	service        interfaces.ChunkService
-	kgService      interfaces.KnowledgeService
-	kbShareService interfaces.KBShareService
+	service           interfaces.ChunkService
+	kgService         interfaces.KnowledgeService
+	kbShareService    interfaces.KBShareService
+	agentShareService interfaces.AgentShareService
 }
 
 // NewChunkHandler creates a new chunk handler
-func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService, kbShareService interfaces.KBShareService) *ChunkHandler {
-	return &ChunkHandler{service: service, kgService: kgService, kbShareService: kbShareService}
+func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService, kbShareService interfaces.KBShareService, agentShareService interfaces.AgentShareService) *ChunkHandler {
+	return &ChunkHandler{service: service, kgService: kgService, kbShareService: kbShareService, agentShareService: agentShareService}
 }
 
 // effectiveCtxForKnowledge resolves knowledge by ID, validates KB access (owner or shared with required role), and returns context with effectiveTenantID for downstream service calls.
@@ -41,17 +42,26 @@ func (h *ChunkHandler) effectiveCtxForKnowledge(c *gin.Context, knowledgeID stri
 	if knowledge.TenantID == tenantID {
 		return context.WithValue(ctx, types.TenantIDContextKey, tenantID), nil
 	}
-	if !userExists || h.kbShareService == nil {
+	if !userExists {
 		return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
 	}
-	permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
-	if permErr != nil || !isShared {
-		return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
+	if h.kbShareService != nil {
+		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, knowledge.KnowledgeBaseID, userID.(string))
+		if permErr == nil && isShared {
+			if !permission.HasPermission(requiredPermission) {
+				return nil, errors.NewForbiddenError("Insufficient permission for this operation")
+			}
+			return context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
+		}
 	}
-	if !permission.HasPermission(requiredPermission) {
-		return nil, errors.NewForbiddenError("Insufficient permission for this operation")
+	if requiredPermission == types.OrgRoleViewer && h.agentShareService != nil {
+		kbRef := &types.KnowledgeBase{ID: knowledge.KnowledgeBaseID, TenantID: knowledge.TenantID}
+		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kbRef)
+		if err == nil && can {
+			return context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
+		}
 	}
-	return context.WithValue(ctx, types.TenantIDContextKey, knowledge.TenantID), nil
+	return nil, errors.NewForbiddenError("Permission denied to access this knowledge")
 }
 
 // GetChunkByIDOnly godoc

@@ -289,6 +289,65 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, userID st
 	return result, nil
 }
 
+// ListSharedKnowledgeBasesInOrganization returns all knowledge bases shared to the given organization (including those shared by the current tenant), for list-page display when a space is selected.
+func (s *kbShareService) ListSharedKnowledgeBasesInOrganization(ctx context.Context, orgID string, userID string, currentTenantID uint64) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+	member, err := s.orgRepo.GetMember(ctx, orgID, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrOrgMemberNotFound) {
+			return nil, ErrUserNotInOrg
+		}
+		return nil, err
+	}
+
+	shares, err := s.shareRepo.ListByOrganization(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*types.OrganizationSharedKnowledgeBaseItem, 0, len(shares))
+	for _, share := range shares {
+		if share.KnowledgeBase == nil {
+			continue
+		}
+
+		effectivePermission := share.Permission
+		if !member.Role.HasPermission(share.Permission) {
+			effectivePermission = member.Role
+		}
+
+		kb := share.KnowledgeBase
+		switch kb.Type {
+		case types.KnowledgeBaseTypeDocument:
+			if count, err := s.kgRepo.CountKnowledgeByKnowledgeBaseID(ctx, share.SourceTenantID, kb.ID); err == nil {
+				kb.KnowledgeCount = count
+			}
+		case types.KnowledgeBaseTypeFAQ:
+			if count, err := s.chunkRepo.CountChunksByKnowledgeBaseID(ctx, share.SourceTenantID, kb.ID); err == nil {
+				kb.ChunkCount = count
+			}
+		}
+
+		orgName := ""
+		if share.Organization != nil {
+			orgName = share.Organization.Name
+		}
+		item := &types.OrganizationSharedKnowledgeBaseItem{
+			SharedKnowledgeBaseInfo: types.SharedKnowledgeBaseInfo{
+				KnowledgeBase:  kb,
+				ShareID:        share.ID,
+				OrganizationID: share.OrganizationID,
+				OrgName:        orgName,
+				Permission:     effectivePermission,
+				SourceTenantID: share.SourceTenantID,
+				SharedAt:       share.CreatedAt,
+			},
+			IsMine: share.SourceTenantID == currentTenantID,
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
 // GetShare gets a share by ID
 func (s *kbShareService) GetShare(ctx context.Context, shareID string) (*types.KnowledgeBaseShare, error) {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
@@ -387,4 +446,9 @@ func (s *kbShareService) GetKBSourceTenant(ctx context.Context, kbID string) (ui
 // CountSharesByKnowledgeBaseIDs counts the number of shares for multiple knowledge bases
 func (s *kbShareService) CountSharesByKnowledgeBaseIDs(ctx context.Context, kbIDs []string) (map[string]int64, error) {
 	return s.shareRepo.CountSharesByKnowledgeBaseIDs(ctx, kbIDs)
+}
+
+// CountByOrganizations returns share counts per organization (for list sidebar); excludes deleted KBs
+func (s *kbShareService) CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error) {
+	return s.shareRepo.CountByOrganizations(ctx, orgIDs)
 }

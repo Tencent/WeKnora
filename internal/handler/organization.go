@@ -23,6 +23,7 @@ type OrganizationHandler struct {
 	agentShareService  interfaces.AgentShareService
 	customAgentService interfaces.CustomAgentService
 	userService        interfaces.UserService
+	kbService         interfaces.KnowledgeBaseService
 	knowledgeRepo      interfaces.KnowledgeRepository
 	chunkRepo          interfaces.ChunkRepository
 }
@@ -34,6 +35,7 @@ func NewOrganizationHandler(
 	agentShareService interfaces.AgentShareService,
 	customAgentService interfaces.CustomAgentService,
 	userService interfaces.UserService,
+	kbService interfaces.KnowledgeBaseService,
 	knowledgeRepo interfaces.KnowledgeRepository,
 	chunkRepo interfaces.ChunkRepository,
 ) *OrganizationHandler {
@@ -43,6 +45,7 @@ func NewOrganizationHandler(
 		agentShareService:  agentShareService,
 		customAgentService: customAgentService,
 		userService:        userService,
+		kbService:          kbService,
 		knowledgeRepo:      knowledgeRepo,
 		chunkRepo:          chunkRepo,
 	}
@@ -1254,6 +1257,73 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"shares": response, "total": len(response)}})
 }
 
+// GetMeResourceCounts returns per-organization resource counts for the list sidebar (one request instead of N).
+// 全部 total is not returned here; frontend keeps 全部 = 我的 + 他人共享给我（与「全部」Tab 一致）.
+// @Summary      获取各空间资源数量（侧栏用）
+// @Description  一次请求返回各空间内知识库/智能体数量（含我共享的），用于列表页侧栏展示
+// @Tags         组织管理
+// @Produce      json
+// @Success      200  {object}  types.ResourceCountsByOrgResponse
+// @Security     Bearer
+// @Router       /me/resource-counts [get]
+func (h *OrganizationHandler) GetMeResourceCounts(c *gin.Context) {
+	ctx := c.Request.Context()
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+
+	orgs, err := h.orgService.ListUserOrganizations(ctx, userID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list user organizations: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list organizations"))
+		return
+	}
+	orgIDs := make([]string, 0, len(orgs))
+	for _, o := range orgs {
+		orgIDs = append(orgIDs, o.ID)
+	}
+
+	agentCounts, err := h.agentShareService.CountByOrganizations(ctx, orgIDs)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to count agent shares by org: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to get counts"))
+		return
+	}
+
+	byOrgKB := make(map[string]int)
+	for _, o := range orgs {
+		list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, o.ID, userID, tenantID)
+		if err != nil {
+			if !errors.Is(err, service.ErrUserNotInOrg) {
+				logger.Warnf(ctx, "listSpaceKnowledgeBasesInOrganization org %s: %v", o.ID, err)
+			}
+			byOrgKB[o.ID] = 0
+			continue
+		}
+		byOrgKB[o.ID] = len(list)
+	}
+	byOrgAgent := make(map[string]int)
+	for id, n := range agentCounts {
+		byOrgAgent[id] = int(n)
+	}
+	for _, o := range orgs {
+		if _, ok := byOrgAgent[o.ID]; !ok {
+			byOrgAgent[o.ID] = 0
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": types.ResourceCountsByOrgResponse{
+			KnowledgeBases: struct {
+				ByOrganization map[string]int `json:"by_organization"`
+			}{ByOrganization: byOrgKB},
+			Agents: struct {
+				ByOrganization map[string]int `json:"by_organization"`
+			}{ByOrganization: byOrgAgent},
+		},
+	})
+}
+
 // ListSharedAgents lists agents shared to the current user
 func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1262,6 +1332,182 @@ func (h *OrganizationHandler) ListSharedAgents(c *gin.Context) {
 	list, err := h.agentShareService.ListSharedAgents(ctx, userID, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list shared agents: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
+}
+
+// listSpaceKnowledgeBasesInOrganization returns merged list of direct shared KBs and agent-carried KBs in the org (for list and count).
+func (h *OrganizationHandler) listSpaceKnowledgeBasesInOrganization(ctx context.Context, orgID string, userID string, tenantID uint64) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
+	directList, err := h.shareService.ListSharedKnowledgeBasesInOrganization(ctx, orgID, userID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	directKbIDs := make(map[string]bool)
+	for _, item := range directList {
+		if item.KnowledgeBase != nil && item.KnowledgeBase.ID != "" {
+			directKbIDs[item.KnowledgeBase.ID] = true
+		}
+	}
+
+	agentList, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, userID, tenantID)
+	if err != nil {
+		return directList, nil
+	}
+
+	orgName := ""
+	if len(agentList) > 0 && agentList[0].OrganizationID == orgID {
+		orgName = agentList[0].OrgName
+	}
+	if orgName == "" {
+		if org, err := h.orgService.GetOrganization(ctx, orgID); err == nil && org != nil {
+			orgName = org.Name
+		}
+	}
+
+	merged := make([]*types.OrganizationSharedKnowledgeBaseItem, 0, len(directList)+64)
+	merged = append(merged, directList...)
+
+	for _, agentItem := range agentList {
+		if agentItem.Agent == nil {
+			continue
+		}
+		agent := agentItem.Agent
+		mode := agent.Config.KBSelectionMode
+		if mode == "none" {
+			continue
+		}
+
+		var kbIDs []string
+		switch mode {
+		case "selected":
+			if len(agent.Config.KnowledgeBases) == 0 {
+				continue
+			}
+			kbIDs = agent.Config.KnowledgeBases
+		case "all":
+			kbs, err := h.kbService.ListKnowledgeBasesByTenantID(ctx, agent.TenantID)
+			if err != nil {
+				logger.Warnf(ctx, "ListKnowledgeBasesByTenantID for agent %s: %v", agent.ID, err)
+				continue
+			}
+			kbIDs = make([]string, 0, len(kbs))
+			for _, kb := range kbs {
+				if kb != nil && kb.ID != "" {
+					kbIDs = append(kbIDs, kb.ID)
+				}
+			}
+		default:
+			if len(agent.Config.KnowledgeBases) > 0 {
+				kbIDs = agent.Config.KnowledgeBases
+			}
+		}
+
+		agentName := agent.Name
+		if agentName == "" {
+			agentName = agent.ID
+		}
+		sourceTenantID := agent.TenantID
+
+		for _, kbID := range kbIDs {
+			if kbID == "" || directKbIDs[kbID] {
+				continue
+			}
+			kb, err := h.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
+			if err != nil || kb == nil {
+				continue
+			}
+			if kb.TenantID != sourceTenantID {
+				continue
+			}
+			directKbIDs[kbID] = true
+
+			switch kb.Type {
+			case types.KnowledgeBaseTypeDocument:
+				if count, err := h.knowledgeRepo.CountKnowledgeByKnowledgeBaseID(ctx, sourceTenantID, kb.ID); err == nil {
+					kb.KnowledgeCount = count
+				}
+			case types.KnowledgeBaseTypeFAQ:
+				if count, err := h.chunkRepo.CountChunksByKnowledgeBaseID(ctx, sourceTenantID, kb.ID); err == nil {
+					kb.ChunkCount = count
+				}
+			}
+
+			merged = append(merged, &types.OrganizationSharedKnowledgeBaseItem{
+				SharedKnowledgeBaseInfo: types.SharedKnowledgeBaseInfo{
+					KnowledgeBase:  kb,
+					ShareID:        "",
+					OrganizationID: orgID,
+					OrgName:        orgName,
+					Permission:     types.OrgRoleViewer,
+					SourceTenantID: sourceTenantID,
+					SharedAt:       agentItem.SharedAt,
+				},
+				IsMine: false,
+				SourceFromAgent: &types.SourceFromAgentInfo{
+					AgentID:         agent.ID,
+					AgentName:       agentName,
+					KBSelectionMode: agent.Config.KBSelectionMode,
+				},
+			})
+		}
+	}
+
+	return merged, nil
+}
+
+// ListOrganizationSharedKnowledgeBases lists all knowledge bases in the given organization (including those shared by the current tenant and those from shared agents), for the list page when a space is selected.
+// @Summary      获取空间内全部知识库（含我共享的、含智能体携带的）
+// @Description  获取指定空间下所有共享知识库，包含直接共享的与通过共享智能体可见的，用于列表页空间视角
+// @Tags         组织管理
+// @Produce      json
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /organizations/{id}/shared-knowledge-bases [get]
+func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Context) {
+	ctx := c.Request.Context()
+	orgID := c.Param("id")
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+
+	list, err := h.listSpaceKnowledgeBasesInOrganization(ctx, orgID, userID, tenantID)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotInOrg) {
+			c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+			return
+		}
+		logger.Errorf(ctx, "Failed to list organization shared knowledge bases: %v", err)
+		c.Error(apperrors.NewInternalServerError("Failed to list shared knowledge bases"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": list, "total": len(list)})
+}
+
+// ListOrganizationSharedAgents lists all agents in the given organization (including those shared by the current tenant), for the list page when a space is selected.
+// @Summary      获取空间内全部智能体（含我共享的）
+// @Description  获取指定空间下所有共享智能体，包含他人共享的与我共享的，用于列表页空间视角
+// @Tags         组织管理
+// @Produce      json
+// @Param        id  path  string  true  "组织ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /organizations/{id}/shared-agents [get]
+func (h *OrganizationHandler) ListOrganizationSharedAgents(c *gin.Context) {
+	ctx := c.Request.Context()
+	orgID := c.Param("id")
+	userID := c.GetString(types.UserIDContextKey.String())
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+
+	list, err := h.agentShareService.ListSharedAgentsInOrganization(ctx, orgID, userID, tenantID)
+	if err != nil {
+		if errors.Is(err, service.ErrUserNotInOrg) {
+			c.Error(apperrors.NewForbiddenError("You are not a member of this organization"))
+			return
+		}
+		logger.Errorf(ctx, "Failed to list organization shared agents: %v", err)
 		c.Error(apperrors.NewInternalServerError("Failed to list shared agents"))
 		return
 	}

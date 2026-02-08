@@ -556,6 +556,14 @@
                   <div class="section-header">
                     <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
                     <p class="section-description">{{ $t('organization.settings.sharedAgentsDesc') }}</p>
+                    <p class="section-description permission-calc-hint">
+                      <t-tooltip :content="$t('organization.settings.sharedAgentsKbHint')" placement="top" :show-delay="300">
+                        <span class="hint-inner">
+                          <t-icon name="info-circle" size="14px" />
+                          {{ $t('organization.settings.sharedAgentsKbHintShort') }}
+                        </span>
+                      </t-tooltip>
+                    </p>
                   </div>
                   <div class="settings-group">
                     <div v-if="sharedAgents.length === 0" class="empty-shared">

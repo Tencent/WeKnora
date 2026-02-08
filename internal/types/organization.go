@@ -245,6 +245,27 @@ type SharedAgentInfo struct {
 	DisabledByMe bool `json:"disabled_by_me"`
 }
 
+// SourceFromAgentInfo indicates the KB is visible in the space via a shared agent (read-only, no KB share record).
+type SourceFromAgentInfo struct {
+	AgentID         string `json:"agent_id"`
+	AgentName       string `json:"agent_name"`
+	KBSelectionMode string `json:"kb_selection_mode"` // "all" | "selected" | "none"; for drawer copy "该智能体对知识库的策略"
+}
+
+// OrganizationSharedKnowledgeBaseItem is used by GET /organizations/:id/shared-knowledge-bases (space-scoped list including mine).
+// When SourceFromAgent is set, the KB is from a shared agent's config (no direct KB share); show as read-only and "来自智能体 XXX".
+type OrganizationSharedKnowledgeBaseItem struct {
+	SharedKnowledgeBaseInfo
+	IsMine          bool                `json:"is_mine"`
+	SourceFromAgent *SourceFromAgentInfo `json:"source_from_agent,omitempty"`
+}
+
+// OrganizationSharedAgentItem is used by GET /organizations/:id/shared-agents (space-scoped list including mine).
+type OrganizationSharedAgentItem struct {
+	SharedAgentInfo
+	IsMine bool `json:"is_mine"`
+}
+
 // TenantDisabledSharedAgent records that a tenant has "disabled" a shared agent for their own dropdown
 type TenantDisabledSharedAgent struct {
 	TenantID       uint64    `json:"tenant_id" gorm:"primaryKey"`
@@ -419,6 +440,16 @@ type AgentShareResponse struct {
 type ListOrganizationsResponse struct {
 	Organizations []OrganizationResponse `json:"organizations"`
 	Total         int64                  `json:"total"`
+}
+
+// ResourceCountsByOrgResponse is the response for GET /me/resource-counts (sidebar counts per space)
+type ResourceCountsByOrgResponse struct {
+	KnowledgeBases struct {
+		ByOrganization map[string]int `json:"by_organization"`
+	} `json:"knowledge_bases"`
+	Agents struct {
+		ByOrganization map[string]int `json:"by_organization"`
+	} `json:"agents"`
 }
 
 // SearchableOrganizationItem is a searchable org item for discovery (no invite code)

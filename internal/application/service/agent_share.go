@@ -224,6 +224,81 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, userID string,
 	return result, nil
 }
 
+// ListSharedAgentsInOrganization returns all agents shared to the given organization (including those shared by the current tenant), for list-page display when a space is selected.
+func (s *agentShareService) ListSharedAgentsInOrganization(ctx context.Context, orgID string, userID string, currentTenantID uint64) ([]*types.OrganizationSharedAgentItem, error) {
+	member, err := s.orgRepo.GetMember(ctx, orgID, userID)
+	if err != nil {
+		if errors.Is(err, repository.ErrOrgMemberNotFound) {
+			return nil, ErrUserNotInOrg
+		}
+		return nil, err
+	}
+
+	shares, err := s.shareRepo.ListByOrganization(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*types.OrganizationSharedAgentItem, 0, len(shares))
+	for _, share := range shares {
+		if share.Agent == nil {
+			continue
+		}
+
+		effectivePermission := share.Permission
+		if !member.Role.HasPermission(share.Permission) {
+			effectivePermission = member.Role
+		}
+
+		orgName := ""
+		if share.Organization != nil {
+			orgName = share.Organization.Name
+		}
+		info := &types.SharedAgentInfo{
+			Agent:          share.Agent,
+			ShareID:        share.ID,
+			OrganizationID: share.OrganizationID,
+			OrgName:        orgName,
+			Permission:     effectivePermission,
+			SourceTenantID: share.SourceTenantID,
+			SharedAt:       share.CreatedAt,
+			SharedByUserID: share.SharedByUserID,
+		}
+		if share.SharedByUserID != "" {
+			if u, err := s.userRepo.GetUserByID(ctx, share.SharedByUserID); err == nil && u != nil {
+				info.SharedByUsername = u.Username
+			}
+		}
+
+		item := &types.OrganizationSharedAgentItem{
+			SharedAgentInfo: *info,
+			IsMine:          share.SourceTenantID == currentTenantID,
+		}
+		result = append(result, item)
+	}
+
+	// Set DisabledByMe for entries shared by others (mine entries stay false)
+	disabledList, err := s.disabledRepo.ListByTenantID(ctx, currentTenantID)
+	if err == nil {
+		disabledSet := make(map[string]bool)
+		for _, d := range disabledList {
+			disabledSet[fmt.Sprintf("%s_%d", d.AgentID, d.SourceTenantID)] = true
+		}
+		for _, item := range result {
+			if item.Agent != nil && !item.IsMine {
+				key := fmt.Sprintf("%s_%d", item.Agent.ID, item.SourceTenantID)
+				item.DisabledByMe = disabledSet[key]
+			}
+		}
+	}
+	return result, nil
+}
+
+// CountByOrganizations returns share counts per organization (for list sidebar); excludes deleted agents
+func (s *agentShareService) CountByOrganizations(ctx context.Context, orgIDs []string) (map[string]int64, error) {
+	return s.shareRepo.CountByOrganizations(ctx, orgIDs)
+}
+
 // SetSharedAgentDisabledByMe adds or removes (tenantID, agentID, sourceTenantID) from tenant_disabled_shared_agents.
 func (s *agentShareService) SetSharedAgentDisabledByMe(ctx context.Context, tenantID uint64, agentID string, sourceTenantID uint64, disabled bool) error {
 	if disabled {
@@ -252,6 +327,41 @@ func (s *agentShareService) GetSharedAgentForUser(ctx context.Context, userID st
 		return nil, err
 	}
 	return agent, nil
+}
+
+// UserCanAccessKBViaSomeSharedAgent returns true if the user has at least one shared agent that can access the given KB (used when opening KB detail from space list without agent_id).
+func (s *agentShareService) UserCanAccessKBViaSomeSharedAgent(ctx context.Context, userID string, currentTenantID uint64, kb *types.KnowledgeBase) (bool, error) {
+	if kb == nil || kb.ID == "" {
+		return false, nil
+	}
+	list, err := s.ListSharedAgents(ctx, userID, currentTenantID)
+	if err != nil || len(list) == 0 {
+		return false, err
+	}
+	for _, info := range list {
+		if info.Agent == nil {
+			continue
+		}
+		agent := info.Agent
+		if agent.TenantID != kb.TenantID {
+			continue
+		}
+		mode := agent.Config.KBSelectionMode
+		if mode == "none" {
+			continue
+		}
+		if mode == "all" {
+			return true, nil
+		}
+		if mode == "selected" {
+			for _, id := range agent.Config.KnowledgeBases {
+				if id == kb.ID {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 // GetShare gets an agent share by ID

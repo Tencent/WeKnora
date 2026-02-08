@@ -74,6 +74,21 @@ export interface SharedKnowledgeBase {
   shared_at: string
 }
 
+/** When set, this KB is visible in the space via a shared agent (read-only, no direct KB share) */
+export interface SourceFromAgentInfo {
+  agent_id: string
+  agent_name: string
+  /** "all" | "selected" | "none" — for showing agent's KB strategy in the drawer */
+  kb_selection_mode?: string
+}
+
+/** Item from GET /organizations/:id/shared-knowledge-bases (space-scoped list including mine and agent-carried) */
+export type OrganizationSharedKnowledgeBaseItem = SharedKnowledgeBase & {
+  is_mine: boolean
+  /** Present when the KB is from a shared agent's config (not directly shared to the space) */
+  source_from_agent?: SourceFromAgentInfo
+}
+
 export interface OrganizationPreview {
   id: string
   name: string
@@ -244,6 +259,9 @@ export interface SharedAgentInfo {
   /** 当前用户是否已停用该共享智能体（仅影响本人对话下拉显示） */
   disabled_by_me?: boolean
 }
+
+/** Item from GET /organizations/:id/shared-agents (space-scoped list including mine) */
+export type OrganizationSharedAgentItem = SharedAgentInfo & { is_mine: boolean }
 
 export interface ListAgentSharesResponse {
   shares: AgentShareResponse[]
@@ -555,6 +573,18 @@ export async function listSharedKnowledgeBases(): Promise<ApiResponse<SharedKnow
 }
 
 /**
+ * List all knowledge bases in an organization (including those shared by current tenant), for list page when a space is selected.
+ */
+export async function listOrganizationSharedKnowledgeBases(orgId: string): Promise<ApiResponse<OrganizationSharedKnowledgeBaseItem[]>> {
+  try {
+    const response = await get(`/api/v1/organizations/${orgId}/shared-knowledge-bases`)
+    return response as unknown as ApiResponse<OrganizationSharedKnowledgeBaseItem[]>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to list organization shared knowledge bases' }
+  }
+}
+
+/**
  * List knowledge bases shared to a specific organization
  */
 export async function listOrgShares(orgId: string): Promise<ApiResponse<ListSharesResponse>> {
@@ -609,6 +639,37 @@ export async function listSharedAgents(): Promise<ApiResponse<SharedAgentInfo[]>
     return response as unknown as ApiResponse<SharedAgentInfo[]>
   } catch (error: any) {
     return { success: false, message: error.message || 'Failed to list shared agents' }
+  }
+}
+
+/** Response of GET /me/resource-counts: per-org counts for sidebar (one request instead of N). */
+export interface MeResourceCountsResponse {
+  knowledge_bases: { by_organization: Record<string, number> }
+  agents: { by_organization: Record<string, number> }
+}
+
+/**
+ * Get per-organization resource counts for list sidebar (one request).
+ * 全部 total is not included; frontend keeps 全部 = 我的 + 他人共享给我.
+ */
+export async function getMeResourceCounts(): Promise<ApiResponse<MeResourceCountsResponse>> {
+  try {
+    const response = await get('/api/v1/me/resource-counts')
+    return response as unknown as ApiResponse<MeResourceCountsResponse>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to get resource counts' }
+  }
+}
+
+/**
+ * List all agents in an organization (including those shared by current tenant), for list page when a space is selected.
+ */
+export async function listOrganizationSharedAgents(orgId: string): Promise<ApiResponse<OrganizationSharedAgentItem[]>> {
+  try {
+    const response = await get(`/api/v1/organizations/${orgId}/shared-agents`)
+    return response as unknown as ApiResponse<OrganizationSharedAgentItem[]>
+  } catch (error: any) {
+    return { success: false, message: error.message || 'Failed to list organization shared agents' }
   }
 }
 
