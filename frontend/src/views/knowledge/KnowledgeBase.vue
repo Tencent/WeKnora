@@ -1233,7 +1233,7 @@ async function createNewSession(value: string): Promise<void> {
         ref="uploadInputRef"
         type="file"
         class="document-upload-input"
-        accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png"
+        accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.csv,.xlsx,.xls"
         multiple
         @change="handleDocumentUpload"
       />
