@@ -268,7 +268,16 @@ start_app() {
     
     log_info "环境变量已设置，启动应用..."
     log_info "数据库地址: $DB_HOST:${DB_PORT:-5432}"
-    
+
+    # 设置 macOS C++ 编译环境（修复 gojieba 编译问题）
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        export SDKROOT=$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || echo "")
+        if [ -n "$SDKROOT" ]; then
+            export CGO_CXXFLAGS="-I${SDKROOT}/usr/include/c++/v1"
+            export CGO_LDFLAGS="-L${SDKROOT}/usr/lib"
+        fi
+    fi
+
     # 检查是否安装了 Air（热重载工具）
     if command -v air &> /dev/null; then
         log_success "检测到 Air，使用热重载模式启动..."

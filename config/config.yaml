@@ -1,6 +1,6 @@
 # 服务器配置
 server:
-  port: 8080
+  port: ${APP_PORT}
   host: "0.0.0.0"
 
 # 对话服务配置
