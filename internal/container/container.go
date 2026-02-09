@@ -645,6 +645,12 @@ func NewDuckDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
 
+	// Try to install and load spatial extension
+	installSQL := "INSTALL spatial;"
+	if _, err := sqlDB.ExecContext(context.Background(), installSQL); err != nil {
+		logger.Warnf(context.Background(), "[DuckDB] Failed to install spatial extension: %v", err)
+	}
+
 	// Try to load spatial extension
 	loadSQL := "LOAD spatial;"
 	if _, err := sqlDB.ExecContext(context.Background(), loadSQL); err != nil {
