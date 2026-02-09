@@ -11,7 +11,13 @@ services:
     environment:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       - APP_HOST=${APP_HOST:-app}
-      - APP_PORT=${APP_PORT:-8080}
+      # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
+      # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.
+      # For remote deployment, set this to the remote App's service port.
+      - APP_PORT=${APP_BACKEND_PORT:-8080}
+      - APP_SCHEME=${APP_SCHEME:-http}
+    # NOTE: If using a remote App backend, comment out or remove the depends_on
+    # block below and set APP_HOST/APP_BACKEND_PORT/APP_SCHEME in your .env file.
     depends_on:
       app:
         condition: service_healthy
