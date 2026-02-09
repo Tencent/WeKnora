@@ -2547,7 +2547,7 @@ export default {
       sharedAgents: "共享智能体",
       noSharedAgents: "暂无共享的智能体",
       sharedAgentsDesc: "已共享到本空间的智能体，成员可在对话中使用",
-      sharedAgentsKbHint: "智能体绑定的知识库仅在成员使用该智能体对话时可 @ 使用（只读），不会出现在「知识库列表」中。若需成员在列表中看到或编辑知识库，请单独将知识库共享到本空间。",
+      sharedAgentsKbHint: "智能体绑定的知识库仅在成员使用该智能体对话时可 {'@'} 使用（只读），不会出现在「知识库列表」中。若需成员在列表中看到或编辑知识库，请单独将知识库共享到本空间。",
       sharedAgentsKbHintShort: "智能体绑定知识仅对话内只读；需在列表看到或编辑请单独共享知识库",
       noSharedAgentsTip: "管理员可将智能体从智能体设置中共享到本空间",
       sharePermissionLabel: "空间权限",

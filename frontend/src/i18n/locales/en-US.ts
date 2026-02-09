@@ -2542,7 +2542,7 @@ export default {
       sharedAgents: 'Shared Agents',
       noSharedAgents: 'No shared agents yet',
       sharedAgentsDesc: 'Agents shared to this space; members can use them in chat',
-      sharedAgentsKbHint: 'Knowledge bases linked to an agent are only available (read-only) when members use that agent in a conversation (via @). They do not appear in the Knowledge Base list. To let members see or edit a knowledge base in the list, share that knowledge base to this space separately.',
+      sharedAgentsKbHint: 'Knowledge bases linked to an agent are only available (read-only) when members use that agent in a conversation (via {\'@\'}). They do not appear in the Knowledge Base list. To let members see or edit a knowledge base in the list, share that knowledge base to this space separately.',
       sharedAgentsKbHintShort: 'Agent-linked knowledge is read-only in chat; share the KB to this space if members should see or edit it in the list.',
       noSharedAgentsTip: 'Admins can share agents to this space from agent settings',
       sharePermissionLabel: 'Space permission',
