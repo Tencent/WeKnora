@@ -27,15 +27,22 @@ type DataAnalysisInput struct {
 type DataAnalysisTool struct {
 	BaseTool
 	knowledgeService interfaces.KnowledgeService
+	fileService      interfaces.FileService
 	db               *sql.DB
 	sessionID        string
 	createdTables    []string // Track tables created in this session
 }
 
-func NewDataAnalysisTool(knowledgeService interfaces.KnowledgeService, db *sql.DB, sessionID string) *DataAnalysisTool {
+func NewDataAnalysisTool(
+	knowledgeService interfaces.KnowledgeService,
+	fileService interfaces.FileService,
+	db *sql.DB,
+	sessionID string,
+) *DataAnalysisTool {
 	return &DataAnalysisTool{
 		BaseTool:         dataAnalysisTool,
 		knowledgeService: knowledgeService,
+		fileService:      fileService,
 		db:               db,
 		sessionID:        sessionID,
 	}
@@ -347,11 +354,16 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading knowledge '%s' (type: %s) into table '%s' for session %s",
 		knowledge.ID, fileType, tableName, t.sessionID)
 
+	fileURL, err := t.fileService.GetFileURL(ctx, knowledge.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file URL for knowledge '%s': %w", knowledge.ID, err)
+	}
+
 	switch fileType {
 	case "csv":
-		return t.LoadFromCSV(ctx, knowledge.FilePath, tableName)
+		return t.LoadFromCSV(ctx, fileURL, tableName)
 	case "xlsx", "xls":
-		return t.LoadFromExcel(ctx, knowledge.FilePath, tableName)
+		return t.LoadFromExcel(ctx, fileURL, tableName)
 	default:
 		logger.Warnf(ctx, "[Tool][DataAnalysis] Unsupported file type '%s' for knowledge '%s' in session %s",
 			fileType, knowledge.ID, t.sessionID)

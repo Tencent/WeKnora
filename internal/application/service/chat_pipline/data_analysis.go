@@ -19,6 +19,7 @@ import (
 type PluginDataAnalysis struct {
 	modelService     interfaces.ModelService
 	knowledgeService interfaces.KnowledgeService
+	fileService      interfaces.FileService
 	chunkRepo        interfaces.ChunkRepository
 	db               *sql.DB
 }
@@ -27,12 +28,14 @@ func NewPluginDataAnalysis(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
 	knowledgeService interfaces.KnowledgeService,
+	fileService interfaces.FileService,
 	chunkRepo interfaces.ChunkRepository,
 	db *sql.DB,
 ) *PluginDataAnalysis {
 	p := &PluginDataAnalysis{
 		modelService:     modelService,
 		knowledgeService: knowledgeService,
+		fileService:      fileService,
 		chunkRepo:        chunkRepo,
 		db:               db,
 	}
@@ -77,7 +80,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Initialize DataAnalysisTool
-	tool := tools.NewDataAnalysisTool(p.knowledgeService, p.db, chatManage.SessionID)
+	tool := tools.NewDataAnalysisTool(p.knowledgeService, p.fileService, p.db, chatManage.SessionID)
 	defer tool.Cleanup(ctx)
 
 	// Load data into DuckDB

@@ -245,6 +245,7 @@ type DataTableSummaryPayload struct {
 type DataTableSummaryService struct {
 	modelService     interfaces.ModelService
 	knowledgeService interfaces.KnowledgeService
+	fileService      interfaces.FileService
 	chunkService     interfaces.ChunkService
 	tenantService    interfaces.TenantService
 	retrieveEngine   interfaces.RetrieveEngineRegistry
@@ -255,6 +256,7 @@ type DataTableSummaryService struct {
 func NewDataTableSummaryService(
 	modelService interfaces.ModelService,
 	knowledgeService interfaces.KnowledgeService,
+	fileService interfaces.FileService,
 	chunkService interfaces.ChunkService,
 	tenantService interfaces.TenantService,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
@@ -263,6 +265,7 @@ func NewDataTableSummaryService(
 	return &DataTableSummaryService{
 		modelService:     modelService,
 		knowledgeService: knowledgeService,
+		fileService:      fileService,
 		chunkService:     chunkService,
 		tenantService:    tenantService,
 		retrieveEngine:   retrieveEngine,
@@ -374,7 +377,7 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 func (s *DataTableSummaryService) processTableData(ctx context.Context, resources *extractionResources) ([]*types.Chunk, error) {
 	// 创建DuckDB会话并加载数据
 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
-	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, s.sqlDB, sessionID)
+	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, s.fileService, s.sqlDB, sessionID)
 	defer duckdbTool.Cleanup(ctx)
 
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据

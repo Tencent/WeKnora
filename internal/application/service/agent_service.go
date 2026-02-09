@@ -36,6 +36,7 @@ type agentService struct {
 	webSearchService      interfaces.WebSearchService
 	knowledgeBaseService  interfaces.KnowledgeBaseService
 	knowledgeService      interfaces.KnowledgeService
+	fileService           interfaces.FileService
 	chunkService          interfaces.ChunkService
 	duckdb                *sql.DB
 	webSearchStateService interfaces.WebSearchStateService
@@ -47,6 +48,7 @@ func NewAgentService(
 	modelService interfaces.ModelService,
 	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	fileService interfaces.FileService,
 	chunkService interfaces.ChunkService,
 	mcpServiceService interfaces.MCPServiceService,
 	mcpManager *mcp.MCPManager,
@@ -61,6 +63,7 @@ func NewAgentService(
 		modelService:          modelService,
 		knowledgeBaseService:  knowledgeBaseService,
 		knowledgeService:      knowledgeService,
+		fileService:           fileService,
 		chunkService:          chunkService,
 		mcpServiceService:     mcpServiceService,
 		mcpManager:            mcpManager,
@@ -392,7 +395,7 @@ func (s *agentService) registerTools(
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
-			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeService, s.duckdb, sessionID)
+			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeService, s.fileService, s.duckdb, sessionID)
 			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
 
 		case tools.ToolDataSchema:
