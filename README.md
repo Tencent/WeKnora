@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.2.10-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.3.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -49,6 +49,22 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 **Website:** https://weknora.weixin.qq.com
 
 ## ✨ Latest Updates
+
+**v0.3.0 Highlights:**
+
+- 🏢 **Shared Space**: Shared space with member invitations, shared knowledge bases and agents across members, tenant-isolated retrieval
+- 🧩 **Agent Skills**: Agent skills system with preloaded skills for smart-reasoning agent, sandboxed execution environment for security isolation
+- 🤖 **Custom Agents**: Support for creating, configuring, and selecting custom agents with knowledge base selection modes (all/specified/disabled)
+- 📊 **Data Analyst Agent**: Built-in Data Analyst agent with DataSchema tool for CSV/Excel analysis
+- 🧠 **Thinking Mode**: Support thinking mode for LLM and agents, intelligent filtering of thinking content
+- 🔍 **Web Search Providers**: Added Bing and Google search providers alongside DuckDuckGo
+- 📋 **Enhanced FAQ**: Batch import dry run, similar questions, matched question in search results, large imports offloaded to object storage
+- 🔑 **API Key Auth**: API Key authentication mechanism with Swagger documentation security
+- 📎 **In-Input Selection**: Select knowledge bases and files directly in the input box with @mention display
+- ☸️ **Helm Chart**: Complete Helm chart for Kubernetes deployment with Neo4j GraphRAG support
+- 🌍 **i18n**: Added Korean (한국어) language support
+- 🔒 **Security Hardening**: SSRF-safe HTTP client, enhanced SQL validation, MCP stdio transport security, sandbox-based execution
+- ⚡ **Infrastructure**: Qdrant vector DB support, Redis ACL, configurable log level, Ollama embedding optimization, `DISABLE_REGISTRATION` control
 
 **v0.2.0 Highlights:**
 

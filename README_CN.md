@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.2.10-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.3.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -49,6 +49,22 @@
 **官网：** https://weknora.weixin.qq.com
 
 ## ✨ 最新更新
+
+**v0.3.0 版本亮点：**
+
+- 🏢 **共享空间**：共享空间管理，支持成员邀请、知识库和Agent跨成员共享，租户隔离检索
+- 🧩 **Agent Skills**：Agent技能系统，预置智能推理技能，基于沙盒的安全隔离执行环境
+- 🤖 **自定义Agent**：支持创建、配置和选择自定义Agent，知识库选择模式（全部/指定/禁用）
+- 📊 **数据分析Agent**：内置数据分析Agent，DataSchema工具支持CSV/Excel分析
+- 🧠 **思考模式**：支持LLM和Agent思考模式，智能过滤思考内容
+- 🔍 **搜索引擎扩展**：新增Bing和Google搜索引擎，与DuckDuckGo并列可选
+- 📋 **FAQ增强**：批量导入预检、相似问题、搜索结果匹配问题字段、大批量导入卸载至对象存储
+- 🔑 **API Key认证**：API Key认证机制，Swagger文档安全配置
+- 📎 **输入框内选择**：输入框中直接选择知识库和文件，@提及显示
+- ☸️ **Helm Chart**：完整的Kubernetes部署Helm Chart，支持Neo4j图谱
+- 🌍 **国际化**：新增韩语（한국어）支持
+- 🔒 **安全加固**：SSRF安全HTTP客户端、增强SQL验证、MCP stdio传输安全、沙盒化执行
+- ⚡ **基础设施**：Qdrant向量数据库支持、Redis ACL、可配置日志级别、Ollama嵌入优化、`DISABLE_REGISTRATION`控制
 
 **v0.2.0 版本亮点：**
 

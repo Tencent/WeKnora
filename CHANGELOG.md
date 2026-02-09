@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-02-09
+
+### 🚀 New Features
+- **NEW**: Shared Space — shared space management with member invitations, shared knowledge bases and agents across members, tenant isolation for retrieval
+- **NEW**: Agent Skills — agent skills with preloaded skills for smart-reasoning agent, sandbox-based execution environment
+- **NEW**: Bing Search — added Bing as a new web search provider
+- **NEW**: Agent Thinking Mode — support thinking mode for agents, strip thinking content from output
+- **NEW**: Web Fetch DNS pinning and validation improvements
+- **NEW**: FAQ matched question field in search results
+- **NEW**: Knowledge base mentioned-only retrieval option
+
+### ⚡ Improvements
+- Redis ACL support with `REDIS_USERNAME` environment variable
+- Configurable global log level via environment variable
+- Use `num_ctx` instead of `truncate` for embedding truncation (Ollama compatibility)
+- Large FAQ imports offloaded to object storage
+- Unified card styles and layout consistency across components
+- OCR module restructured with centralized configuration
+- Enhanced MCP tool name and description handling for security
+- Structured logger replacing standard log in main and recovery middleware
+
+### 🐛 Bug Fixes
+- MCP Client connection state not marked as closed after SSE connection loss
+- Clear tag selection state when re-entering knowledge base
+- Rune handling for correct chunk merging
+- Host extraction from completion_url handling both v1 and non-v1 endpoints
+- SQL injection prevention via OR conditions with comprehensive validation
+- Switch to append mode on retry to prevent data loss
+- Parser file_extension for markitdown compatibility
+
+### 🔒 Security Enhancements
+- SSRF-safe HTTP client for URL imports and fetching
+- SQL validation logic centralized and simplified
+- Sandbox-based agent skills execution with security isolation
+
 ## [0.2.10] - 2026-01-16
 
 ### 🚀 New Features
@@ -555,6 +590,7 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.3.0]: https://github.com/Tencent/WeKnora/tree/v0.3.0
 [0.2.10]: https://github.com/Tencent/WeKnora/tree/v0.2.10
 [0.2.9]: https://github.com/Tencent/WeKnora/tree/v0.2.9
 [0.2.8]: https://github.com/Tencent/WeKnora/tree/v0.2.8

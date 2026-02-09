@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.2.10-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.3.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -49,6 +49,22 @@
 **公式サイト：** https://weknora.weixin.qq.com
 
 ## ✨ 最新アップデート
+
+**v0.3.0 バージョンのハイライト:**
+
+- 🏢 **共有スペース**：共有スペース管理、メンバー招待、メンバー間でのナレッジベースとAgentの共有、テナント分離検索
+- 🧩 **Agentスキル**：Agentスキルシステム、スマート推論向けプリロードスキル、サンドボックスベースのセキュリティ分離実行環境
+- 🤖 **カスタムAgent**：カスタムAgentの作成・設定・選択をサポート、ナレッジベース選択モード（全部/指定/無効）
+- 📊 **データアナリストAgent**：組み込みデータアナリストAgent、CSV/Excel分析用DataSchemaツール
+- 🧠 **思考モード**：LLMとAgentの思考モードをサポート、思考コンテンツのインテリジェントフィルタリング
+- 🔍 **検索エンジン拡張**：DuckDuckGoに加えてBingとGoogleの検索プロバイダーを追加
+- 📋 **FAQ強化**：バッチインポートドライラン、類似質問、検索結果のマッチ質問フィールド、大量インポートのオブジェクトストレージオフロード
+- 🔑 **API Key認証**：API Key認証メカニズム、Swaggerドキュメントセキュリティ設定
+- 📎 **入力内選択**：入力ボックスでナレッジベースとファイルを直接選択、@メンション表示
+- ☸️ **Helm Chart**：Kubernetesデプロイメント用の完全なHelm Chart、Neo4j GraphRAGサポート
+- 🌍 **国際化**：韓国語（한국어）サポートを追加
+- 🔒 **セキュリティ強化**：SSRF安全HTTPクライアント、強化されたSQLバリデーション、MCP stdio転送セキュリティ、サンドボックスベース実行
+- ⚡ **インフラストラクチャ**：Qdrantベクトルデータベースサポート、Redis ACL、設定可能なログレベル、Ollama埋め込み最適化、`DISABLE_REGISTRATION`制御
 
 **v0.2.0 バージョンのハイライト：**
 
