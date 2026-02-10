@@ -20,7 +20,7 @@
         </div>
         <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
       </div>
-      <!-- 资源列表模式：我的 + 空间列表 -->
+      <!-- 资源列表模式：我的 + 共享给我 + 空间列表 -->
       <template v-if="mode === 'resource'">
         <div
           class="sidebar-item"
@@ -32,6 +32,18 @@
             <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
           </div>
           <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
+        </div>
+        <div
+          v-if="countShared !== undefined && countShared > 0"
+          class="sidebar-item"
+          :class="{ active: selected === 'shared' }"
+          @click="select('shared')"
+        >
+          <div class="item-left">
+            <t-icon name="share" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+          </div>
+          <span class="item-count">{{ countShared }}</span>
         </div>
         <template v-if="organizationsWithCount.length">
           <div class="sidebar-section">
@@ -89,13 +101,15 @@ import { useOrganizationStore } from '@/stores/organization'
 
 const props = withDefaults(
   defineProps<{
-    /** resource = 知识库/智能体（全部+我的+空间列表）；organization = 共享空间（全部+我创建的+我加入的） */
+    /** resource = 知识库/智能体（全部+我的+共享给我+空间列表）；organization = 共享空间（全部+我创建的+我加入的） */
     mode?: 'resource' | 'organization'
     modelValue: string
     /** 全部数量（可选） */
     countAll?: number
     /** 我的数量（resource 模式） */
     countMine?: number
+    /** 共享给我的数量（resource 模式） */
+    countShared?: number
     /** 各空间下的数量（resource 模式），key 为 organization_id */
     countByOrg?: Record<string, number>
     /** 我创建的数量（organization 模式） */
@@ -103,7 +117,7 @@ const props = withDefaults(
     /** 我加入的数量（organization 模式） */
     countJoined?: number
   }>(),
-  { mode: 'resource', countAll: undefined, countMine: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
+  { mode: 'resource', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
 )
 
 const emit = defineEmits<{

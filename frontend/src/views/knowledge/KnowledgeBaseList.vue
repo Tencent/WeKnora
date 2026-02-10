@@ -14,6 +14,7 @@
         v-model="spaceSelection"
         :count-all="allKnowledgeBases"
         :count-mine="kbs.length"
+        :count-shared="sharedKbs.length"
         :count-by-org="effectiveSharedCountByOrg"
       >
         <template #actions>
@@ -340,6 +341,60 @@
       </div>
     </div>
 
+    <!-- 卡片网格：共享给我 -->
+    <div v-if="spaceSelection === 'shared' && sharedKbs.length > 0" class="kb-card-wrap">
+      <div
+        v-for="shared in sharedKbs"
+        :key="'shared-' + shared.share_id"
+        class="kb-card shared-kb-card"
+        :class="{
+          'kb-type-document': (shared.knowledge_base.type || 'document') === 'document',
+          'kb-type-faq': shared.knowledge_base.type === 'faq'
+        }"
+        @click="handleSharedKbClickFromAll(shared.knowledge_base)"
+      >
+        <div class="card-header">
+          <span class="card-title" :title="shared.knowledge_base.name">{{ shared.knowledge_base.name }}</span>
+          <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
+            <button type="button" class="shared-detail-trigger" @click.stop="openSharedDetail(shared)" :aria-label="$t('knowledgeList.menu.viewDetails')">
+              <t-icon name="info-circle" size="16px" />
+            </button>
+          </t-tooltip>
+        </div>
+        <div class="card-content">
+          <div class="card-description">
+            {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
+          </div>
+        </div>
+        <div class="card-bottom">
+          <div class="bottom-left">
+            <div class="feature-badges">
+              <t-tooltip :content="shared.knowledge_base.type === 'faq' ? $t('knowledgeEditor.basic.typeFAQ') : $t('knowledgeEditor.basic.typeDocument')" placement="top">
+                <div class="feature-badge" :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
+                  <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                  <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ? (shared.knowledge_base.chunk_count || '-') : (shared.knowledge_base.knowledge_count || '-') }}</span>
+                </div>
+              </t-tooltip>
+            </div>
+          </div>
+          <div class="bottom-right">
+            <t-tooltip :content="shared.org_name" placement="top">
+              <div class="org-source">
+                <img src="@/assets/img/organization-green.svg" class="org-source-icon" alt="" aria-hidden="true" />
+                <span>{{ shared.org_name }}</span>
+              </div>
+            </t-tooltip>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 共享给我空状态 -->
+    <div v-if="spaceSelection === 'shared' && sharedKbs.length === 0 && !loading" class="empty-state">
+      <t-icon name="share" size="48px" class="empty-icon" />
+      <p>{{ $t('knowledgeList.emptyShared') }}</p>
+    </div>
+
     <!-- 按空间筛选：该空间内全部知识库（含我共享的） -->
     <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
       <t-loading size="large" text="" />
@@ -553,7 +608,7 @@ const orgStore = useOrganizationStore()
 const { t } = useI18n()
 
 // 左侧空间选择：我的 / 空间 ID（已去掉「全部」）
-const spaceSelection = ref<'all' | 'mine' | string>('mine')
+const spaceSelection = ref<'all' | 'mine' | 'shared' | string>('mine')
 
 interface KB { 
   id: string; 
@@ -601,7 +656,7 @@ const allKnowledgeBases = computed(() => kbs.value.length + sharedKbs.value.leng
 // 当前选中的是空间 ID（非全部、非我的）
 const spaceSelectionOrgId = computed(() => {
   const s = spaceSelection.value
-  return s !== 'all' && s !== 'mine' && !!s
+  return s !== 'all' && s !== 'mine' && s !== 'shared' && !!s
 })
 
 // 当前空间下共享给我的知识库（旧：仅他人共享；保留用于兼容）
@@ -711,7 +766,7 @@ const fetchList = () => {
 
 // 选中空间时请求该空间内全部知识库（含我共享的）
 watch(spaceSelection, (val) => {
-  if (val === 'all' || val === 'mine' || !val) {
+  if (val === 'all' || val === 'mine' || val === 'shared' || !val) {
     spaceKbsList.value = []
     return
   }

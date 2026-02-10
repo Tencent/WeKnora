@@ -665,7 +665,7 @@
                     <div v-if="kbSelectionMode === 'selected'" class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.selectKnowledgeBases') }}</label>
-                        <p class="desc">选择要关联的知识库</p>
+                        <p class="desc">{{ $t('agent.editor.selectKnowledgeBasesDesc') }}</p>
                       </div>
                       <div class="setting-control">
                         <t-select 
@@ -673,21 +673,41 @@
                           multiple 
                           :placeholder="$t('agent.editor.selectKnowledgeBases')"
                           filterable
+                          :min-collapsed-num="3"
                         >
-                          <t-option 
-                            v-for="kb in kbOptions" 
-                            :key="kb.value" 
-                            :value="kb.value" 
-                            :label="kb.label"
-                          >
-                            <div class="kb-option-item">
-                              <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
-                                <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
-                              </span>
-                              <span class="kb-option-label">{{ kb.label }}</span>
-                              <span class="kb-option-count">({{ kb.count || 0 }})</span>
-                            </div>
-                          </t-option>
+                          <t-option-group v-if="myKbOptions.length" :label="$t('agent.editor.myKnowledgeBases')">
+                            <t-option 
+                              v-for="kb in myKbOptions" 
+                              :key="kb.value" 
+                              :value="kb.value" 
+                              :label="kb.label"
+                            >
+                              <div class="kb-option-item">
+                                <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
+                                  <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                                </span>
+                                <span class="kb-option-label">{{ kb.label }}</span>
+                                <span class="kb-option-count">{{ kb.count || 0 }}</span>
+                              </div>
+                            </t-option>
+                          </t-option-group>
+                          <t-option-group v-if="sharedKbOptions.length" :label="$t('agent.editor.sharedKnowledgeBases')">
+                            <t-option 
+                              v-for="kb in sharedKbOptions" 
+                              :key="kb.value" 
+                              :value="kb.value" 
+                              :label="kb.label"
+                            >
+                              <div class="kb-option-item">
+                                <span class="kb-option-icon" :class="kb.type === 'faq' ? 'faq-icon' : 'doc-icon'">
+                                  <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" />
+                                </span>
+                                <span class="kb-option-label">{{ kb.label }}</span>
+                                <span v-if="kb.orgName" class="kb-option-org">{{ kb.orgName }}</span>
+                                <span class="kb-option-count">{{ kb.count || 0 }}</span>
+                              </div>
+                            </t-option>
+                          </t-option-group>
                         </t-select>
                       </div>
                     </div>
@@ -1048,12 +1068,14 @@ import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { listSkills, type SkillInfo } from '@/api/skill';
 import { getAgentConfig, getConversationConfig } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
+import { useOrganizationStore } from '@/stores/organization';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 
 const uiStore = useUIStore();
+const orgStore = useOrganizationStore();
 
 const { t } = useI18n();
 
@@ -1072,7 +1094,7 @@ const emit = defineEmits<{
 const currentSection = ref(props.initialSection || 'basic');
 const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
-const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number }[]>([]);
+const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string }[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
@@ -1123,6 +1145,10 @@ const allTools = [
   { value: 'data_analysis', label: '数据分析', description: '理解数据文件并进行数据分析', requiresKB: true },
   { value: 'data_schema', label: '查看数据元信息', description: '获取表格文件的元信息', requiresKB: true },
 ];
+
+// 知识库分组：我的 vs 共享的
+const myKbOptions = computed(() => kbOptions.value.filter(kb => !kb.shared));
+const sharedKbOptions = computed(() => kbOptions.value.filter(kb => kb.shared));
 
 // 根据知识库配置动态计算是否有知识库能力
 const hasKnowledgeBase = computed(() => {
@@ -1635,16 +1661,45 @@ const loadDependencies = async () => {
       allModels.value = models;
     }
 
-    // 加载知识库列表
+    // 加载知识库列表（我的 + 共享的）
     const kbRes: any = await listKnowledgeBases();
+    const myKbs: typeof kbOptions.value = [];
     if (kbRes.data) {
-      kbOptions.value = kbRes.data.map((kb: any) => ({ 
-        label: kb.name, 
-        value: kb.id,
-        type: kb.type || 'document',
-        count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0)
-      }));
+      kbRes.data.forEach((kb: any) => {
+        myKbs.push({ 
+          label: kb.name, 
+          value: kb.id,
+          type: kb.type || 'document',
+          count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
+          shared: false,
+        });
+      });
     }
+
+    // 加载共享给我的知识库
+    const sharedKbs: typeof kbOptions.value = [];
+    try {
+      const sharedList = await orgStore.fetchSharedKnowledgeBases();
+      if (sharedList && sharedList.length > 0) {
+        const myKbIds = new Set(myKbs.map(kb => kb.value));
+        sharedList.forEach((shared: any) => {
+          const kb = shared.knowledge_base;
+          if (!kb || myKbIds.has(kb.id)) return;
+          sharedKbs.push({
+            label: kb.name,
+            value: kb.id,
+            type: kb.type || 'document',
+            count: kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count || 0),
+            shared: true,
+            orgName: shared.org_name,
+          });
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to load shared knowledge bases', e);
+    }
+
+    kbOptions.value = [...myKbs, ...sharedKbs];
 
     // 加载 MCP 服务列表（只加载启用的）
     try {
@@ -3404,7 +3459,8 @@ const handleSave = async () => {
 .kb-option-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 2px 0;
 }
 
 .kb-option-icon {
@@ -3412,15 +3468,20 @@ const handleSave = async () => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 16px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 14px;
   
-  // Document KB - Greenish
+  // Document KB
   &.doc-icon {
+    background: rgba(16, 185, 129, 0.1);
     color: #10b981;
   }
   
-  // FAQ KB - Blueish
+  // FAQ KB
   &.faq-icon {
+    background: rgba(0, 82, 217, 0.1);
     color: #0052d9;
   }
 }
@@ -3430,12 +3491,30 @@ const handleSave = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
+  color: #1d2129;
+}
+
+.kb-option-org {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #8c8c8c;
+  background: #f2f3f5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kb-option-count {
   flex-shrink: 0;
-  font-size: 12px;
-  color: #999;
+  font-size: 11px;
+  color: #8c8c8c;
+  background: #f2f3f5;
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 // FAQ 策略区域样式

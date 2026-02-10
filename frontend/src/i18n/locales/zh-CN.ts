@@ -18,6 +18,7 @@ export default {
     title: "筛选",
     all: "全部",
     mine: "我的",
+    sharedToMe: "协作",
     spaces: "空间",
   },
   knowledgeBase: {
@@ -926,6 +927,9 @@ export default {
       noKnowledgeBase: "不使用知识库",
       noKnowledgeBaseDesc: "纯模型对话，不检索知识库",
       selectKnowledgeBases: "选择知识库",
+      selectKnowledgeBasesDesc: "选择要关联的知识库（包括协作知识库）",
+      myKnowledgeBases: "我的知识库",
+      sharedKnowledgeBases: "协作知识库",
       retrieveKBOnlyWhenMentioned: "仅在 {'@'} 提及时检索",
       retrieveKBOnlyWhenMentionedDesc: "关闭：自动检索已配置的知识库，开启：仅当用户 {'@'} 提及时才检索",
       rerankModel: "ReRank 模型",
@@ -1517,6 +1521,7 @@ export default {
     },
     uninitializedBanner:
       "部分知识库尚未初始化，需要先在设置中配置模型信息才能添加知识文档",
+    emptyShared: "暂无协作知识库，可以加入共享空间获取他人共享的知识库",
     empty: {
       title: "暂无知识库",
       description: '点击左侧快捷操作"新建知识库"按钮创建第一个知识库',

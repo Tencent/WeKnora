@@ -18,6 +18,7 @@ export default {
     title: 'Filter',
     all: 'All',
     mine: 'Mine',
+    sharedToMe: 'Collaborative',
     spaces: 'Spaces'
   },
   knowledgeBase: {
@@ -387,6 +388,9 @@ export default {
       noKnowledgeBase: 'No Knowledge Base',
       noKnowledgeBaseDesc: 'Pure model conversation, no knowledge retrieval',
       selectKnowledgeBases: 'Select Knowledge Bases',
+      selectKnowledgeBasesDesc: 'Select knowledge bases to associate (including collaborative ones)',
+      myKnowledgeBases: 'My Knowledge Bases',
+      sharedKnowledgeBases: 'Collaborative Knowledge Bases',
       retrieveKBOnlyWhenMentioned: 'Retrieve Only When Mentioned',
       retrieveKBOnlyWhenMentionedDesc: "Off: auto-retrieve configured KBs; On: retrieve only when user {'@'} mentions",
       rerankModel: 'ReRank Model',
@@ -1124,6 +1128,7 @@ export default {
       sharedToMe: 'Shared with me',
     },
     uninitializedBanner: 'Some knowledge bases are not initialized. Configure model information in settings before adding documents.',
+    emptyShared: 'No collaborative knowledge bases yet. Join a shared space to access knowledge bases from others.',
     empty: {
       title: 'No knowledge bases yet',
       description: 'Click "Create Knowledge Base" in the top-right corner to add your first one.',
