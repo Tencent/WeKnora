@@ -46,10 +46,26 @@ const props = defineProps<{
 const { t } = useI18n();
 
 const copyToClipboard = () => {
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(props.data.content);
+  const text = props.data.content;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {
+      fallbackCopy(text);
+    });
+  } else {
+    fallbackCopy(text);
   }
 };
+
+function fallbackCopy(text: string) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.style.position = 'fixed';
+  textArea.style.opacity = '0';
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textArea);
+}
 </script>
 
 <style lang="less" scoped>

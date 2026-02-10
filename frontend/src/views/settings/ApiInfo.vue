@@ -173,6 +173,17 @@ const openApiDoc = () => {
   window.open('https://github.com/Tencent/WeKnora/blob/main/docs/api/README.md', '_blank')
 }
 
+const fallbackCopyText = (text: string) => {
+  const textArea = document.createElement('textarea')
+  textArea.value = text
+  textArea.style.position = 'fixed'
+  textArea.style.opacity = '0'
+  document.body.appendChild(textArea)
+  textArea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textArea)
+}
+
 const copyApiKey = async () => {
   if (!tenantInfo.value?.api_key) {
     MessagePlugin.warning(t('tenant.api.noKey'))
@@ -180,10 +191,15 @@ const copyApiKey = async () => {
   }
   
   try {
-    await navigator.clipboard.writeText(tenantInfo.value.api_key)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(tenantInfo.value.api_key)
+    } else {
+      fallbackCopyText(tenantInfo.value.api_key)
+    }
     MessagePlugin.success(t('tenant.api.copySuccess'))
   } catch (err) {
-    MessagePlugin.error(t('tenant.api.copyFailed'))
+    fallbackCopyText(tenantInfo.value.api_key)
+    MessagePlugin.success(t('tenant.api.copySuccess'))
   }
 }
 

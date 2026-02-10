@@ -1292,17 +1292,46 @@ const resetAddMemberDialog = () => {
   userSearchResults.value = []
 }
 
-const copyInviteCode = () => {
+const fallbackCopyText = (text: string) => {
+  const textArea = document.createElement('textarea')
+  textArea.value = text
+  textArea.style.position = 'fixed'
+  textArea.style.opacity = '0'
+  document.body.appendChild(textArea)
+  textArea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textArea)
+}
+
+const copyInviteCode = async () => {
   if (inviteCode.value) {
-    navigator.clipboard.writeText(inviteCode.value)
-    MessagePlugin.success(t('common.copied'))
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(inviteCode.value)
+      } else {
+        fallbackCopyText(inviteCode.value)
+      }
+      MessagePlugin.success(t('common.copied'))
+    } catch {
+      fallbackCopyText(inviteCode.value)
+      MessagePlugin.success(t('common.copied'))
+    }
   }
 }
 
-const copyInviteLink = () => {
+const copyInviteLink = async () => {
   if (inviteLink.value) {
-    navigator.clipboard.writeText(inviteLink.value)
-    MessagePlugin.success(t('common.copied'))
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(inviteLink.value)
+      } else {
+        fallbackCopyText(inviteLink.value)
+      }
+      MessagePlugin.success(t('common.copied'))
+    } catch {
+      fallbackCopyText(inviteLink.value)
+      MessagePlugin.success(t('common.copied'))
+    }
   }
 }
 

@@ -1128,11 +1128,33 @@ function viewOrganizationFromPreview() {
 // 复制预览中的空间 ID
 function copyPreviewSpaceId() {
   if (!invitePreviewData.value?.id) return
-  navigator.clipboard.writeText(invitePreviewData.value.id).then(() => {
-    MessagePlugin.success(t('common.copied'))
-  }).catch(() => {
+  const text = invitePreviewData.value.id
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        MessagePlugin.success(t('common.copied'))
+      }).catch(() => {
+        fallbackCopyText(text)
+        MessagePlugin.success(t('common.copied'))
+      })
+    } else {
+      fallbackCopyText(text)
+      MessagePlugin.success(t('common.copied'))
+    }
+  } catch {
     MessagePlugin.error('复制失败')
-  })
+  }
+}
+
+function fallbackCopyText(text: string) {
+  const textArea = document.createElement('textarea')
+  textArea.value = text
+  textArea.style.position = 'fixed'
+  textArea.style.opacity = '0'
+  document.body.appendChild(textArea)
+  textArea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textArea)
 }
 
 // 从搜索列表加入空间（通过空间 ID，无需邀请码）- 在预览确认后调用
