@@ -282,6 +282,43 @@ if err != nil {
 }
 ```
 
+### 示例：重新解析知识
+
+```go
+// 重新解析知识（删除现有内容并重新解析）
+// 适用场景：
+// 1. 原始解析失败，需要重试
+// 2. 更新了解析配置（如分块策略、多模态设置等），需要重新解析
+// 3. 知识内容已更新，需要刷新解析结果
+
+knowledge, err := apiClient.ReparseKnowledge(context.Background(), knowledgeID)
+if err != nil {
+    // 处理错误
+}
+
+// 知识将进入 "pending" 状态，异步重新解析
+fmt.Printf("Knowledge ID: %s\n", knowledge.ID)
+fmt.Printf("Parse Status: %s\n", knowledge.ParseStatus)      // "pending"
+fmt.Printf("Enable Status: %s\n", knowledge.EnableStatus)    // "disabled"
+
+// 可以轮询检查解析状态
+for {
+    time.Sleep(5 * time.Second)
+    knowledge, err := apiClient.GetKnowledge(context.Background(), knowledgeID)
+    if err != nil {
+        // 处理错误
+    }
+    
+    if knowledge.ParseStatus == "completed" {
+        fmt.Println("Knowledge re-parsing completed!")
+        break
+    } else if knowledge.ParseStatus == "failed" {
+        fmt.Printf("Knowledge re-parsing failed: %s\n", knowledge.ErrorMessage)
+        break
+    }
+}
+```
+
 ### 示例：获取会话消息
 
 ```go

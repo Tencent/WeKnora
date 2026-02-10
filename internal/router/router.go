@@ -169,6 +169,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/:id", handler.UpdateKnowledge)
 		// 更新手工 Markdown 知识
 		k.PUT("/manual/:id", handler.UpdateManualKnowledge)
+		// 重新解析知识
+		k.POST("/:id/reparse", handler.ReparseKnowledge)
 		// 获取知识文件
 		k.GET("/:id/download", handler.DownloadKnowledgeFile)
 		// 更新图像分块信息

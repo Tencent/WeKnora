@@ -78,6 +78,8 @@ type KnowledgeService interface {
 		knowledgeID string,
 		payload *types.ManualKnowledgePayload,
 	) (*types.Knowledge, error)
+	// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
+	ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error)
 	// CloneKnowledgeBase clones knowledge to another knowledge base.
 	CloneKnowledgeBase(ctx context.Context, srcID, dstID string) error
 	// UpdateImageInfo updates image information for a knowledge chunk.

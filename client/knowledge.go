@@ -356,6 +356,45 @@ func (c *Client) UpdateKnowledge(ctx context.Context, knowledge *Knowledge) erro
 	return parseResponse(resp, &response)
 }
 
+// ReparseKnowledge triggers re-parsing of a knowledge entry
+// This method deletes existing document content and re-parses the knowledge asynchronously.
+// It's useful when you want to refresh the knowledge content with updated parsing configurations
+// or when the original parsing failed and you want to retry.
+//
+// Parameters:
+//   - ctx: Context for the request
+//   - knowledgeID: The ID of the knowledge entry to reparse
+//
+// Returns:
+//   - *Knowledge: The updated knowledge entry with status set to "pending"
+//   - error: Error information if the request fails
+//
+// Example:
+//
+//	knowledge, err := client.ReparseKnowledge(ctx, "knowledge-id-123")
+//	if err != nil {
+//	    log.Fatalf("Failed to reparse knowledge: %v", err)
+//	}
+//	fmt.Printf("Knowledge reparse task submitted, status: %s\n", knowledge.ParseStatus)
+func (c *Client) ReparseKnowledge(ctx context.Context, knowledgeID string) (*Knowledge, error) {
+	if knowledgeID == "" {
+		return nil, fmt.Errorf("knowledge ID cannot be empty")
+	}
+
+	path := fmt.Sprintf("/api/v1/knowledge/%s/reparse", knowledgeID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // UpdateChunk updates a chunk's information
 // Updates information for a specific chunk under a knowledge document
 // Parameters:

@@ -2199,6 +2199,158 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	return existing, nil
 }
 
+// ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
+// This method reuses the logic from UpdateManualKnowledge for resource cleanup and async parsing.
+func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID string) (*types.Knowledge, error) {
+	logger.Info(ctx, "Start re-parsing knowledge")
+
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
+		return nil, err
+	}
+
+	// Get knowledge base configuration
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge base for reparse: %v", err)
+		return nil, err
+	}
+
+	// Step 1: Clean up existing resources (chunks, embeddings, graph data)
+	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
+	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": knowledgeID,
+		})
+		return nil, err
+	}
+
+	// Step 2: Update knowledge status and metadata
+	existing.ParseStatus = "pending"
+	existing.EnableStatus = "disabled"
+	existing.Description = ""
+	existing.ProcessedAt = nil
+	existing.EmbeddingModelID = kb.EmbeddingModelID
+
+	if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+		logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
+		return nil, err
+	}
+
+	// Step 3: Trigger async re-parsing based on knowledge type
+	logger.Infof(ctx, "Knowledge status updated, scheduling async reparse, ID: %s, Type: %s", existing.ID, existing.Type)
+
+	// For manual knowledge, extract content from metadata and trigger manual processing
+	if existing.IsManual() {
+		meta, err := existing.ManualMetadata()
+		if err != nil || meta == nil {
+			logger.Errorf(ctx, "Failed to get manual metadata for reparse: %v", err)
+			return nil, werrors.NewBadRequestError("无法获取手工知识内容")
+		}
+		s.triggerManualProcessing(ctx, kb, existing, meta.Content, false)
+		return existing, nil
+	}
+
+	// For file-based knowledge, enqueue document processing task
+	if existing.FilePath != "" {
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+		// Determine multimodal setting
+		enableMultimodel := kb.IsMultimodalEnabled()
+
+		// Check question generation config
+		enableQuestionGeneration := false
+		questionCount := 3 // default
+		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+			enableQuestionGeneration = true
+			if kb.QuestionGenerationConfig.QuestionCount > 0 {
+				questionCount = kb.QuestionGenerationConfig.QuestionCount
+			}
+		}
+
+		taskPayload := types.DocumentProcessPayload{
+			TenantID:                 tenantID,
+			KnowledgeID:              existing.ID,
+			KnowledgeBaseID:          existing.KnowledgeBaseID,
+			FilePath:                 existing.FilePath,
+			FileName:                 existing.FileName,
+			FileType:                 getFileType(existing.FileName),
+			EnableMultimodel:         enableMultimodel,
+			EnableQuestionGeneration: enableQuestionGeneration,
+			QuestionCount:            questionCount,
+		}
+
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal reparse task payload: %v", err)
+			return existing, nil
+		}
+
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		info, err := s.task.Enqueue(task)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
+			return existing, nil
+		}
+		logger.Infof(ctx, "Enqueued reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
+
+		// For data tables (csv, xlsx, xls), also enqueue summary task
+		if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(existing.FileName)) {
+			NewDataTableSummaryTask(ctx, s.task, tenantID, existing.ID, kb.SummaryModelID, kb.EmbeddingModelID)
+		}
+
+		return existing, nil
+	}
+
+	// For URL-based knowledge, enqueue URL processing task
+	if existing.Type == "url" && existing.Source != "" {
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+		enableMultimodel := kb.IsMultimodalEnabled()
+
+		// Check question generation config
+		enableQuestionGeneration := false
+		questionCount := 3
+		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+			enableQuestionGeneration = true
+			if kb.QuestionGenerationConfig.QuestionCount > 0 {
+				questionCount = kb.QuestionGenerationConfig.QuestionCount
+			}
+		}
+
+		taskPayload := types.DocumentProcessPayload{
+			TenantID:                 tenantID,
+			KnowledgeID:              existing.ID,
+			KnowledgeBaseID:          existing.KnowledgeBaseID,
+			URL:                      existing.Source,
+			EnableMultimodel:         enableMultimodel,
+			EnableQuestionGeneration: enableQuestionGeneration,
+			QuestionCount:            questionCount,
+		}
+
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal URL reparse task payload: %v", err)
+			return existing, nil
+		}
+
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		info, err := s.task.Enqueue(task)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
+			return existing, nil
+		}
+		logger.Infof(ctx, "Enqueued URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
+
+		return existing, nil
+	}
+
+	logger.Warnf(ctx, "Knowledge %s has no parseable content (no file, URL, or manual content)", knowledgeID)
+	return existing, nil
+}
+
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
@@ -3079,8 +3231,8 @@ func csvEscape(s string) string {
 
 // saveFAQImportResultToDatabase 保存FAQ导入结果统计到数据库
 func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
-	payload *types.FAQImportPayload, progress *types.FAQImportProgress, originalTotalEntries int) error {
-
+	payload *types.FAQImportPayload, progress *types.FAQImportProgress, originalTotalEntries int,
+) error {
 	// 获取FAQ知识库实例
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, payload.KnowledgeID)
@@ -6864,7 +7016,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 // finalizeFAQValidation 完成 FAQ 验证/导入任务，生成失败条目 CSV（如果有）
 func (s *knowledgeService) finalizeFAQValidation(ctx context.Context, payload *types.FAQImportPayload,
-	progress *types.FAQImportProgress, originalTotalEntries int) error {
+	progress *types.FAQImportProgress, originalTotalEntries int,
+) error {
 	// 清理对象存储中的 entries 文件（如果有）
 	if payload.EntriesURL != "" {
 		if err := s.fileSvc.DeleteFile(ctx, payload.EntriesURL); err != nil {

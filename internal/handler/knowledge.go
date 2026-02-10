@@ -9,10 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	goerrors "errors"
+
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	goerrors "errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -21,9 +22,9 @@ import (
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
 type KnowledgeHandler struct {
-	kgService        interfaces.KnowledgeService
-	kbService        interfaces.KnowledgeBaseService
-	kbShareService   interfaces.KBShareService
+	kgService         interfaces.KnowledgeService
+	kbService         interfaces.KnowledgeBaseService
+	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
 }
 
@@ -35,9 +36,9 @@ func NewKnowledgeHandler(
 	agentShareService interfaces.AgentShareService,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
-		kgService:        kgService,
-		kbService:        kbService,
-		kbShareService:   kbShareService,
+		kgService:         kgService,
+		kbService:         kbService,
+		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
 	}
 }
@@ -934,6 +935,59 @@ func (h *KnowledgeHandler) UpdateManualKnowledge(c *gin.Context) {
 	logger.Infof(ctx, "Manual knowledge updated successfully, knowledge ID: %s", id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
+		"data":    knowledge,
+	})
+}
+
+// ReparseKnowledge godoc
+// @Summary      重新解析知识
+// @Description  删除知识中现有的文档内容并重新解析，使用异步任务方式处理
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {object}  map[string]interface{}  "重新解析任务已提交"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/reparse [post]
+func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+	logger.Info(ctx, "Start re-parsing knowledge")
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Knowledge ID is empty")
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	// Validate KB access with editor permission (reparse requires write access)
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleEditor)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	// Call service to reparse knowledge
+	knowledge, err := h.kgService.ReparseKnowledge(effCtx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_id": id,
+		})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Knowledge reparse task submitted successfully, knowledge ID: %s", id)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Knowledge reparse task submitted",
 		"data":    knowledge,
 	})
 }
