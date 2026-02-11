@@ -341,6 +341,8 @@ Troubleshooting FAQ: [Troubleshooting FAQ](./docs/QA.md)
 
 Detailed API documentation is available at: [API Docs](./docs/api/README.md)
 
+Product plans and upcoming features: [Roadmap](./docs/ROADMAP.md)
+
 ## 🧭 Developer Guide
 
 ### ⚡ Fast Development Mode (Recommended)
