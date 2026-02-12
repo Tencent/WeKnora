@@ -489,6 +489,8 @@ export default {
     conversationConfig: 'Conversation Settings',
     conversationStrategy: 'Conversation Strategy',
     webSearchConfig: 'Web Search',
+    enableMemory: 'Enable Memory',
+    enableMemoryDesc: 'When enabled, the system will record your conversation history and automatically recall relevant content in future conversations to provide more personalized answers.',
     mcpService: 'MCP Service',
     systemSettings: 'System Settings',
     tenantInfo: 'Tenant Info',

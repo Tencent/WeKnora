@@ -4,8 +4,10 @@ package types
 // including query processing, search parameters, and model configurations
 type ChatManage struct {
 	SessionID    string     `json:"session_id"`              // Unique identifier for the chat session
+	UserID       string     `json:"user_id"`                 // Unique identifier for the user
 	Query        string     `json:"query,omitempty"`         // Original user query
 	RewriteQuery string     `json:"rewrite_query,omitempty"` // Query after rewriting for better retrieval
+	EnableMemory bool       `json:"enable_memory"`           // Whether memory feature is enabled
 	History      []*History `json:"history,omitempty"`       // Chat history for context
 
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`      // IDs of knowledge bases to search (multi-KB support)
@@ -147,6 +149,8 @@ const (
 	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream" // Stream chat completion
 	STREAM_FILTER          EventType = "stream_filter"          // Filter streaming output
 	FILTER_TOP_K           EventType = "filter_top_k"           // Keep only top K results
+	MEMORY_RETRIEVAL       EventType = "memory_retrieval"       // Retrieve memory context
+	MEMORY_STORAGE         EventType = "memory_storage"         // Store conversation to memory
 )
 
 // Pipline defines the sequence of events for different chat modes
@@ -160,8 +164,10 @@ var Pipline = map[string][]EventType{
 	},
 	"chat_history_stream": { // Streaming chat with conversation history
 		LOAD_HISTORY,
+		MEMORY_RETRIEVAL,
 		CHAT_COMPLETION_STREAM,
 		STREAM_FILTER,
+		MEMORY_STORAGE,
 	},
 	"rag": { // Retrieval Augmented Generation
 		CHUNK_SEARCH,

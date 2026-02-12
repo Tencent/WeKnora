@@ -319,6 +319,9 @@ const sendMsg = async (value, modelId = '', mentionedItems = []) => {
     // Get web search status from settings store
     const webSearchEnabled = useSettingsStoreInstance.isWebSearchEnabled;
     
+    // Get memory status from settings store
+    const enableMemory = useSettingsStoreInstance.isMemoryEnabled;
+    
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
     const sidebarKbIds = useSettingsStoreInstance.settings.selectedKnowledgeBases || [];
@@ -352,6 +355,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = []) => {
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         web_search_enabled: webSearchEnabled,
+        enable_memory: enableMemory,
         summary_model_id: modelId,
         mcp_service_ids: mcpServiceIds,
         mentioned_items: mentionedItems,

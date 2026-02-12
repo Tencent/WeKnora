@@ -331,6 +331,8 @@ export default {
     conversationConfig: "对话设置",
     conversationStrategy: "对话策略",
     webSearchConfig: "网络搜索",
+    enableMemory: "开启记忆功能",
+    enableMemoryDesc: "开启后，系统将记录您的对话历史，并在后续对话中自动回忆相关内容，提供更个性化的回答。",
     mcpService: "MCP服务",
     systemSettings: "系统设置",
     tenantInfo: "租户信息",

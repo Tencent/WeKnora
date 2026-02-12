@@ -34,11 +34,12 @@ type SessionService interface {
 	// summaryModelID: optional summary model ID override (if empty, uses session/KB default)
 	// webSearchEnabled: whether to enable web search to supplement knowledge base results
 	// customAgent: optional custom agent for config override (multiTurnEnabled, historyTurns)
+	// enableMemory: whether to enable memory feature for this request
 	// Events are emitted through eventBus (references, answer chunks, completion)
 	KnowledgeQA(ctx context.Context,
 		session *types.Session, query string, knowledgeBaseIDs []string, knowledgeIDs []string,
 		assistantMessageID string, summaryModelID string, webSearchEnabled bool, eventBus *event.EventBus,
-		customAgent *types.CustomAgent,
+		customAgent *types.CustomAgent, enableMemory bool,
 	) error
 	// KnowledgeQAByEvent performs knowledge-based question answering by event
 	KnowledgeQAByEvent(ctx context.Context, chatManage *types.ChatManage, eventList []types.EventType) error

@@ -38,6 +38,7 @@ type CreateKnowledgeQARequest struct {
 	SummaryModelID   string                 `json:"summary_model_id"`                      // Optional summary model ID for this request (overrides session default)
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // @mentioned knowledge bases and files
 	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
+	EnableMemory     bool                   `json:"enable_memory"`                         // Whether memory feature is enabled for this request
 }
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization
