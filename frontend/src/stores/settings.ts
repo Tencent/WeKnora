@@ -14,6 +14,7 @@ interface Settings {
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   webSearchEnabled: boolean;  // 网络搜索是否启用
+  enableMemory: boolean;      // 是否开启记忆功能
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
   selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源租户 ID（用于后端 model/KB/MCP 解析）
@@ -86,6 +87,7 @@ const defaultSettings: Settings = {
     enabled: true
   },
   webSearchEnabled: false,  // 默认关闭网络搜索
+  enableMemory: false,       // 默认关闭记忆功能
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
@@ -138,6 +140,9 @@ export const useSettingsStore = defineStore("settings", {
     // 网络搜索是否启用
     isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
     
+    // 记忆功能是否启用
+    isMemoryEnabled: (state) => state.settings.enableMemory || false,
+
     // 当前选中的智能体ID
     selectedAgentId: (state) => state.settings.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
     // 共享智能体来源租户 ID（可选）
@@ -293,6 +298,12 @@ export const useSettingsStore = defineStore("settings", {
     // 启用/禁用网络搜索
     toggleWebSearch(enabled: boolean) {
       this.settings.webSearchEnabled = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // 启用/禁用记忆功能
+    toggleMemory(enabled: boolean) {
+      this.settings.enableMemory = enabled;
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 

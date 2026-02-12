@@ -26,6 +26,17 @@
           </t-select>
         </div>
       </div>
+
+      <!-- 记忆功能开关 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('settings.enableMemory') }}</label>
+          <p class="desc">{{ $t('settings.enableMemoryDesc') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch v-model="isMemoryEnabled" @change="handleMemoryChange" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -34,12 +45,20 @@
 import { ref, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
+import { useSettingsStore } from '@/stores/settings'
 
 const { t, locale } = useI18n()
+const settingsStore = useSettingsStore()
 
 // 本地状态
 const localLanguage = ref('zh-CN')
 const localTheme = ref('light')
+
+// 记忆功能状态
+const isMemoryEnabled = computed({
+  get: () => settingsStore.isMemoryEnabled,
+  set: (val) => settingsStore.toggleMemory(val)
+})
 
 // 初始化加载
 onMounted(() => {
@@ -59,6 +78,12 @@ const handleLanguageChange = () => {
   localStorage.setItem('locale', localLanguage.value)
   MessagePlugin.success(t('language.languageSaved'))
     }
+
+// 处理记忆功能变化
+const handleMemoryChange = (val: boolean) => {
+  settingsStore.toggleMemory(val)
+  MessagePlugin.success(t('common.success'))
+}
 
 // 处理主题变化
 const handleThemeChange = () => {
@@ -141,4 +166,3 @@ const handleThemeChange = () => {
   align-items: center;
 }
 </style>
-

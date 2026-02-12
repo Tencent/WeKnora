@@ -30,6 +30,7 @@ type qaRequestContext struct {
 	knowledgeIDs      []string
 	summaryModelID    string
 	webSearchEnabled  bool
+	enableMemory      bool // Whether memory feature is enabled
 	mentionedItems    types.MentionedItems
 	effectiveTenantID uint64 // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
 }
@@ -166,6 +167,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		knowledgeIDs:      secutils.SanitizeForLogArray(knowledgeIDs),
 		summaryModelID:    secutils.SanitizeForLog(request.SummaryModelID),
 		webSearchEnabled:  request.WebSearchEnabled,
+		enableMemory:      request.EnableMemory,
 		mentionedItems:    convertMentionedItems(request.MentionedItems),
 		effectiveTenantID: effectiveTenantID,
 	}
@@ -449,6 +451,7 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 			reqCtx.webSearchEnabled,
 			streamCtx.eventBus,
 			reqCtx.customAgent,
+			reqCtx.enableMemory,
 		)
 		if err != nil {
 			logger.ErrorWithFields(streamCtx.asyncCtx, err, nil)

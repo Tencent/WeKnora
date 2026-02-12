@@ -8,24 +8,24 @@ import "context"
 type Entity struct {
 	ID          string   // Unique identifier for the entity
 	ChunkIDs    []string // References to document chunks where this entity appears
-	Frequency   int      `json:"-"`           // Number of occurrences in the corpus
-	Degree      int      `json:"-"`           // Number of connections to other entities
-	Title       string   `json:"title"`       // Display name of the entity
-	Type        string   `json:"type"`        // Classification of the entity (e.g., person, concept, organization)
-	Description string   `json:"description"` // Brief explanation or context about the entity
+	Frequency   int      `json:"-"`                                                                      // Number of occurrences in the corpus
+	Degree      int      `json:"-"`                                                                      // Number of connections to other entities
+	Title       string   `json:"title" jsonschema:"display name of the entity"`                          // Display name of the entity
+	Type        string   `json:"type" jsonschema:"type of the entity"`                                   // Classification of the entity (e.g., person, concept, organization)
+	Description string   `json:"description" jsonschema:"brief explanation or context about the entity"` // Brief explanation or context about the entity
 }
 
 // Relationship represents a connection between two entities in the knowledge graph.
 // It captures the semantic connection between entities identified in the document chunks.
 type Relationship struct {
-	ID             string   `json:"-"`           // Unique identifier for the relationship
-	ChunkIDs       []string `json:"-"`           // References to document chunks where this relationship is established
-	CombinedDegree int      `json:"-"`           // Sum of degrees of the connected entities, used for ranking
-	Weight         float64  `json:"-"`           // Strength of the relationship based on textual evidence
-	Source         string   `json:"source"`      // ID of the entity where the relationship starts
-	Target         string   `json:"target"`      // ID of the entity where the relationship ends
-	Description    string   `json:"description"` // Description of how these entities are related
-	Strength       int      `json:"strength"`    // Normalized measure of relationship importance (1-10)
+	ID             string   `json:"-"`                                                                          // Unique identifier for the relationship
+	ChunkIDs       []string `json:"-"`                                                                          // References to document chunks where this relationship is established
+	CombinedDegree int      `json:"-"`                                                                          // Sum of degrees of the connected entities, used for ranking
+	Weight         float64  `json:"-"`                                                                          // Strength of the relationship based on textual evidence
+	Source         string   `json:"source" jsonschema:"ID of the entity where the relationship starts"`         // ID of the entity where the relationship starts
+	Target         string   `json:"target" jsonschema:"ID of the entity where the relationship ends"`           // ID of the entity where the relationship ends
+	Description    string   `json:"description" jsonschema:"description of how these entities are related"`     // Description of how these entities are related
+	Strength       int      `json:"strength" jsonschema:"normalized measure of relationship importance (1-10)"` // Normalized measure of relationship importance (1-10)
 }
 
 // GraphBuilder defines the interface for building and querying the knowledge graph.
