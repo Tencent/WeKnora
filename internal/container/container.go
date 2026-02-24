@@ -414,6 +414,24 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("COS_TEMP_BUCKET_NAME"), // 可选：临时桶名称（桶需配置生命周期规则自动过期）
 			os.Getenv("COS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
 		)
+	case "tos":
+		if os.Getenv("TOS_ENDPOINT") == "" ||
+			os.Getenv("TOS_REGION") == "" ||
+			os.Getenv("TOS_ACCESS_KEY") == "" ||
+			os.Getenv("TOS_SECRET_KEY") == "" ||
+			os.Getenv("TOS_BUCKET_NAME") == "" {
+			return nil, fmt.Errorf("missing TOS configuration")
+		}
+		return file.NewTosFileServiceWithTempBucket(
+			os.Getenv("TOS_ENDPOINT"),
+			os.Getenv("TOS_REGION"),
+			os.Getenv("TOS_ACCESS_KEY"),
+			os.Getenv("TOS_SECRET_KEY"),
+			os.Getenv("TOS_BUCKET_NAME"),
+			os.Getenv("TOS_PATH_PREFIX"),
+			os.Getenv("TOS_TEMP_BUCKET_NAME"), // 可选：临时桶名称（桶需配置生命周期规则自动过期）
+			os.Getenv("TOS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
+		)
 	case "local":
 		return file.NewLocalFileService(os.Getenv("LOCAL_STORAGE_BASE_DIR")), nil
 	case "dummy":

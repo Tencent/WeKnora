@@ -90,7 +90,7 @@ app:
     GIN_MODE: release
     # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
     RETRIEVE_DRIVER: postgres
-    # -- Storage type: local, minio, cos
+    # -- Storage type: local, minio, cos, tos
     STORAGE_TYPE: local
     LOCAL_STORAGE_BASE_DIR: /data/files
     AUTO_RECOVER_DIRTY: "true"

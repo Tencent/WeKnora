@@ -36,6 +36,7 @@ require (
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.65
+	github.com/volcengine/ve-tos-golang-sdk/v2 v2.7.23
 	github.com/yanyiwu/gojieba v1.4.5
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.37.0

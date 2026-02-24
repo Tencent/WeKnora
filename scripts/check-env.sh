@@ -89,6 +89,14 @@ if [ "$STORAGE_TYPE" = "minio" ]; then
     check_var "MINIO_BUCKET_NAME"
 fi
 
+if [ "$STORAGE_TYPE" = "tos" ]; then
+    check_var "TOS_ENDPOINT"
+    check_var "TOS_REGION"
+    check_var "TOS_ACCESS_KEY"
+    check_var "TOS_SECRET_KEY"
+    check_var "TOS_BUCKET_NAME"
+fi
+
 echo ""
 log_info "Redis 配置:"
 check_var "REDIS_ADDR"
@@ -193,4 +201,3 @@ printf "%b\n" "${GREEN}========================================${NC}"
 echo ""
 
 exit $errors
-
