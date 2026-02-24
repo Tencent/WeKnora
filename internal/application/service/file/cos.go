@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/tencentyun/cos-go-sdk-v5"
 )
@@ -99,6 +100,9 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 // GetFile retrieves a file from COS storage by its path URL
 func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.ReadCloser, error) {
 	objectName := strings.TrimPrefix(filePathUrl, s.bucketURL)
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return nil, fmt.Errorf("invalid file path: %w", err)
+	}
 	resp, err := s.client.Object.Get(ctx, objectName, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file from COS: %w", err)
@@ -109,6 +113,9 @@ func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.Re
 // DeleteFile removes a file from COS storage
 func (s *cosFileService) DeleteFile(ctx context.Context, filePath string) error {
 	objectName := strings.TrimPrefix(filePath, s.bucketURL)
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return fmt.Errorf("invalid file path: %w", err)
+	}
 	_, err := s.client.Object.Delete(ctx, objectName)
 	if err != nil {
 		return fmt.Errorf("failed to delete file: %w", err)
@@ -120,7 +127,11 @@ func (s *cosFileService) DeleteFile(ctx context.Context, filePath string) error 
 // If temp is true and temp bucket is configured, saves to temp bucket (with lifecycle auto-expiration)
 // Otherwise saves to main bucket
 func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	ext := filepath.Ext(fileName)
+	safeName, err := utils.SafeFileName(fileName)
+	if err != nil {
+		return "", fmt.Errorf("invalid file name: %w", err)
+	}
+	ext := filepath.Ext(safeName)
 	reader := bytes.NewReader(data)
 
 	// 如果请求写入临时桶且临时桶已配置
@@ -135,7 +146,7 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 
 	// 写入主桶
 	objectName := fmt.Sprintf("%s/%d/exports/%s%s", s.cosPathPrefix, tenantID, uuid.New().String(), ext)
-	_, err := s.client.Object.Put(ctx, objectName, reader, nil)
+	_, err = s.client.Object.Put(ctx, objectName, reader, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload bytes to COS: %w", err)
 	}
@@ -148,6 +159,9 @@ func (s *cosFileService) GetFileURL(ctx context.Context, filePath string) (strin
 	// 判断文件属于哪个桶
 	if s.tempClient != nil && strings.HasPrefix(filePath, s.tempBucketURL) {
 		objectName := strings.TrimPrefix(filePath, s.tempBucketURL)
+		if err := utils.SafeObjectKey(objectName); err != nil {
+			return "", fmt.Errorf("invalid file path: %w", err)
+		}
 		// Generate presigned URL (valid for 24 hours)
 		presignedURL, err := s.tempClient.Object.GetPresignedURL(ctx, http.MethodGet, objectName, s.tempClient.GetCredential().SecretID, s.tempClient.GetCredential().SecretKey, 24*time.Hour, nil)
 		if err != nil {
@@ -157,6 +171,9 @@ func (s *cosFileService) GetFileURL(ctx context.Context, filePath string) (strin
 	}
 
 	objectName := strings.TrimPrefix(filePath, s.bucketURL)
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
 	// Generate presigned URL (valid for 24 hours)
 	presignedURL, err := s.client.Object.GetPresignedURL(ctx, http.MethodGet, objectName, s.client.GetCredential().SecretID, s.client.GetCredential().SecretKey, 24*time.Hour, nil)
 	if err != nil {

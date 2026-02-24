@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -93,6 +94,57 @@ func ValidateInput(input string) (string, bool) {
 	}
 
 	return strings.TrimSpace(input), true
+}
+
+// SafePathUnderBase 校验 filePath 是否落在 baseDir 下，防止路径遍历（如 ../../）。
+// 返回规范化的绝对路径；若路径逃逸出 baseDir 则返回错误。
+func SafePathUnderBase(baseDir, filePath string) (string, error) {
+	if baseDir == "" || filePath == "" {
+		return "", fmt.Errorf("baseDir and filePath cannot be empty")
+	}
+	absBase, err := filepath.Abs(filepath.Clean(baseDir))
+	if err != nil {
+		return "", fmt.Errorf("invalid base dir: %w", err)
+	}
+	absPath, err := filepath.Abs(filepath.Clean(filePath))
+	if err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
+	sep := string(filepath.Separator)
+	if absPath != absBase && !strings.HasPrefix(absPath, absBase+sep) {
+		return "", fmt.Errorf("path traversal denied: path is outside base directory")
+	}
+	return absPath, nil
+}
+
+// SafeFileName 校验并返回安全的“仅文件名”部分，防止路径遍历。
+// 仅保留最后一个路径成分，禁止 ".."、空名或仅含点，用于 SaveBytes 等场景。
+func SafeFileName(fileName string) (string, error) {
+	if fileName == "" {
+		return "", fmt.Errorf("fileName cannot be empty")
+	}
+	base := filepath.Base(filepath.Clean(fileName))
+	if base == "" || base == "." || base == ".." {
+		return "", fmt.Errorf("invalid fileName: path traversal or empty name")
+	}
+	if strings.Contains(base, "..") {
+		return "", fmt.Errorf("invalid fileName: contains path traversal")
+	}
+	if len(base) > 255 {
+		return "", fmt.Errorf("fileName too long")
+	}
+	return base, nil
+}
+
+// SafeObjectKey 校验对象存储的 key（如 COS/MinIO objectName），禁止包含 ".." 等路径遍历
+func SafeObjectKey(objectKey string) error {
+	if objectKey == "" {
+		return fmt.Errorf("object key cannot be empty")
+	}
+	if strings.Contains(objectKey, "..") {
+		return fmt.Errorf("object key contains path traversal")
+	}
+	return nil
 }
 
 // IsValidURL 验证 URL 是否安全

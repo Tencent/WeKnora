@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -90,8 +91,11 @@ func (s *minioFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 
 	// Extract object name
 	objectName := filePath[9+len(s.bucketName):]
-	if objectName[0] == '/' {
+	if len(objectName) > 0 && objectName[0] == '/' {
 		objectName = objectName[1:]
+	}
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return nil, fmt.Errorf("invalid file path: %w", err)
 	}
 
 	// Get object
@@ -113,8 +117,11 @@ func (s *minioFileService) DeleteFile(ctx context.Context, filePath string) erro
 
 	// Extract object name
 	objectName := filePath[9+len(s.bucketName):]
-	if objectName[0] == '/' {
+	if len(objectName) > 0 && objectName[0] == '/' {
 		objectName = objectName[1:]
+	}
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return fmt.Errorf("invalid file path: %w", err)
 	}
 
 	// Delete object
@@ -131,12 +138,16 @@ func (s *minioFileService) DeleteFile(ctx context.Context, filePath string) erro
 // SaveBytes saves bytes data to MinIO and returns the file path
 // temp parameter is ignored for MinIO (no auto-expiration support in this implementation)
 func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	ext := filepath.Ext(fileName)
+	safeName, err := utils.SafeFileName(fileName)
+	if err != nil {
+		return "", fmt.Errorf("invalid file name: %w", err)
+	}
+	ext := filepath.Ext(safeName)
 	objectName := fmt.Sprintf("%d/exports/%s%s", tenantID, uuid.New().String(), ext)
 
 	// Upload bytes to MinIO
 	reader := bytes.NewReader(data)
-	_, err := s.client.PutObject(ctx, s.bucketName, objectName, reader, int64(len(data)), minio.PutObjectOptions{
+	_, err = s.client.PutObject(ctx, s.bucketName, objectName, reader, int64(len(data)), minio.PutObjectOptions{
 		ContentType: "text/csv; charset=utf-8",
 	})
 	if err != nil {
@@ -155,8 +166,11 @@ func (s *minioFileService) GetFileURL(ctx context.Context, filePath string) (str
 
 	// Extract object name
 	objectName := filePath[9+len(s.bucketName):]
-	if objectName[0] == '/' {
+	if len(objectName) > 0 && objectName[0] == '/' {
 		objectName = objectName[1:]
+	}
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
 	}
 
 	// Generate presigned URL (valid for 24 hours)
