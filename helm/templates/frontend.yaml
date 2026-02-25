@@ -43,7 +43,7 @@ spec:
           {{- end }}
           env:
             - name: APP_HOST
-              value: {{ .Values.frontend.appHost | default (printf "%s-app" (include "weknora.fullname" .)) | quote }}
+              value: {{ .Values.frontend.appHost | default "app" | quote }}
             - name: APP_PORT
               value: {{ .Values.frontend.appPort | default .Values.app.service.port | quote }}
           ports:
