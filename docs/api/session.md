@@ -9,6 +9,7 @@
 | GET    | `/sessions`                             | 获取租户的会话列表    |
 | PUT    | `/sessions/:id`                         | 更新会话              |
 | DELETE | `/sessions/:id`                         | 删除会话              |
+| DELETE | `/sessions/batch`                       | 批量删除会话          |
 | POST   | `/sessions/:session_id/generate_title`  | 生成会话标题          |
 | POST   | `/sessions/:session_id/stop`            | 停止会话              |
 | GET    | `/sessions/continue-stream/:session_id` | 继续未完成的会话      |
@@ -311,6 +312,31 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/411d6b70
 ```json
 {
     "message": "Session deleted successfully",
+    "success": true
+}
+```
+
+## DELETE `/sessions/batch` - 批量删除会话
+
+**请求**:
+
+```curl
+curl --location --request DELETE 'http://localhost:8080/api/v1/sessions/batch' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "ids": [
+        "411d6b70-9a85-4d03-bb74-aab0fd8bd12f",
+        "ceb9babb-1e30-41d7-817d-fd584954304b"
+    ]
+}'
+```
+
+**响应**:
+
+```json
+{
+    "message": "Sessions deleted successfully",
     "success": true
 }
 ```

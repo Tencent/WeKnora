@@ -8,9 +8,21 @@ export default {
     logout: 'Выход',
     uploadKnowledge: 'Загрузить знания',
     deleteRecord: 'Удалить запись',
+    batchManage: 'Пакетное управление',
     newSession: 'Новый диалог',
     confirmLogout: 'Вы уверены, что хотите выйти?',
     systemInfo: 'Информация о системе'
+  },
+  batchManage: {
+    title: 'Управление диалогами',
+    selectAll: 'Выбрать все',
+    cancel: 'Отмена',
+    delete: 'Удалить диалоги',
+    deleteConfirmTitle: 'Удалить диалоги',
+    deleteConfirmBody: 'Вы уверены, что хотите удалить выбранные {count} диалог(ов)? Это действие необратимо.',
+    deleteSuccess: 'Успешно удалено',
+    deleteFailed: 'Ошибка удаления, попробуйте позже',
+    noSelection: 'Выберите хотя бы один диалог',
   },
   knowledgeBase: {
     title: 'База знаний',

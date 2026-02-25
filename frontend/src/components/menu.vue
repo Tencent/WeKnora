@@ -34,7 +34,7 @@
                                     {{ subitem.title }}
                                 </span>
                                 <t-dropdown 
-                                    :options="[{ content: t('upload.deleteRecord'), value: 'delete' }]"
+                                    :options="[{ content: t('upload.deleteRecord'), value: 'delete' }, { content: t('menu.batchManage'), value: 'batchManage' }]"
                                     @click="handleSessionMenuClick($event, subitem.originalIndex, subitem)"
                                     placement="bottom-right"
                                     trigger="click">
@@ -54,6 +54,13 @@
         <div class="menu_bottom">
             <UserMenu />
         </div>
+
+        <!-- 批量管理对话框 -->
+        <BatchManageDialog
+            v-model:visible="batchManageVisible"
+            :sessions="allSessions"
+            @deleted="handleBatchDeleted"
+        />
         
     </div>
 </template>
@@ -72,6 +79,7 @@ import { useUIStore } from '@/stores/ui';
 import { MessagePlugin } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
+import BatchManageDialog from '@/components/BatchManageDialog.vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -93,6 +101,21 @@ const hasMore = computed(() => currentPage.value < totalPages.value);
 type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[] };
 const { menuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
+
+// 批量管理状态
+const batchManageVisible = ref(false);
+
+// 所有会话列表（用于批量管理对话框）
+const allSessions = computed(() => {
+    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'creatChat');
+    if (!chatMenu || !chatMenu.children) return [];
+    return chatMenu.children.map((s: any) => ({
+        id: s.id,
+        title: s.title,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+    }));
+});
 
 // 是否可以访问所有租户
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
@@ -256,6 +279,8 @@ const mouseleaveBotDown = () => {
 const handleSessionMenuClick = (data: { value: string }, index: number, item: any) => {
     if (data?.value === 'delete') {
         delCard(index, item);
+    } else if (data?.value === 'batchManage') {
+        batchManageVisible.value = true;
     }
 };
 
@@ -288,6 +313,24 @@ const delCard = (index: number, item: any) => {
         }
     })
 }
+
+const handleBatchDeleted = (ids: string[]) => {
+    const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
+    if (chatMenuItem && chatMenuItem.children) {
+        const children = chatMenuItem.children;
+        for (const id of ids) {
+            const idx = children.findIndex((s: any) => s.id === id);
+            if (idx !== -1) children.splice(idx, 1);
+        }
+    }
+    total.value = Math.max(0, total.value - ids.length);
+    // 如果当前会话被删除，跳转到创建页
+    const currentChatId = route.params.chatid as string;
+    if (currentChatId && ids.includes(currentChatId)) {
+        router.push('/platform/creatChat');
+    }
+}
+
 const debounce = (fn: (...args: any[]) => void, delay: number) => {
     let timer: ReturnType<typeof setTimeout>
     return (...args: any[]) => {

@@ -10,9 +10,21 @@ export default {
     logout: 'Logout',
     uploadKnowledge: 'Upload Knowledge',
     deleteRecord: 'Delete Record',
+    batchManage: 'Batch Manage',
     newSession: 'New Chat',
     confirmLogout: 'Are you sure you want to logout?',
     systemInfo: 'System Information'
+  },
+  batchManage: {
+    title: 'Manage Conversations',
+    selectAll: 'Select All',
+    cancel: 'Cancel',
+    delete: 'Delete Conversations',
+    deleteConfirmTitle: 'Delete Conversations',
+    deleteConfirmBody: 'Are you sure you want to delete the selected {count} conversation(s)? This action cannot be undone.',
+    deleteSuccess: 'Deleted successfully',
+    deleteFailed: 'Delete failed, please try again later',
+    noSelection: 'Please select at least one conversation',
   },
   listSpaceSidebar: {
     title: 'Filter',

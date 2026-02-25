@@ -266,6 +266,7 @@ func RegisterSessionRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	sessions := r.Group("/sessions")
 	{
 		sessions.POST("", handler.CreateSession)
+		sessions.DELETE("/batch", handler.BatchDeleteSessions)
 		sessions.GET("/:id", handler.GetSession)
 		sessions.GET("", handler.GetSessionsByTenant)
 		sessions.PUT("/:id", handler.UpdateSession)

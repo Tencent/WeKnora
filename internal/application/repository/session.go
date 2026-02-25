@@ -87,3 +87,11 @@ func (r *sessionRepository) Update(ctx context.Context, session *types.Session) 
 func (r *sessionRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&types.Session{}, "id = ?", id).Error
 }
+
+// BatchDelete deletes multiple sessions by IDs
+func (r *sessionRepository) BatchDelete(ctx context.Context, tenantID uint64, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids).Delete(&types.Session{}).Error
+}
