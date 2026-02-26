@@ -17,11 +17,13 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
+	"google.golang.org/grpc"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -30,6 +32,7 @@ import (
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
+	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
@@ -559,6 +562,43 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 				log.Errorf("Register qdrant retrieve engine failed: %v", err)
 			} else {
 				log.Infof("Register qdrant retrieve engine success")
+			}
+		}
+	}
+	if slices.Contains(retrieveDriver, "milvus") {
+		milvusCfg := milvusclient.ClientConfig{
+			DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)},
+		}
+		milvusAddress := os.Getenv("MILVUS_ADDRESS")
+		if milvusAddress == "" {
+			milvusAddress = "localhost:19530"
+		}
+		milvusCfg.Address = milvusAddress
+		milvusUsername := os.Getenv("MILVUS_USERNAME")
+		if milvusUsername != "" {
+			milvusCfg.Username = milvusUsername
+		}
+		milvusPassword := os.Getenv("MILVUS_PASSWORD")
+		if milvusPassword != "" {
+			milvusCfg.Password = milvusPassword
+		}
+		milvusDBName := os.Getenv("MILVUS_DB_NAME")
+		if milvusDBName != "" {
+			milvusCfg.DBName = milvusDBName
+		}
+		milvusCli, err := milvusclient.New(context.Background(), &milvusCfg)
+		if err != nil {
+			log.Errorf("Create milvus client failed: %v", err)
+		} else {
+			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli)
+			if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(
+					milvusRepository, types.MilvusRetrieverEngineType,
+				),
+			); err != nil {
+				log.Errorf("Register milvus retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register milvus retrieve engine success")
 			}
 		}
 	}

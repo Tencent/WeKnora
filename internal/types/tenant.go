@@ -27,6 +27,10 @@ var retrieverEngineMapping = map[string][]RetrieverEngineParams{
 		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: QdrantRetrieverEngineType},
 		{RetrieverType: VectorRetrieverType, RetrieverEngineType: QdrantRetrieverEngineType},
 	},
+	"milvus": {
+		{RetrieverType: VectorRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
+		{RetrieverType: KeywordsRetrieverType, RetrieverEngineType: MilvusRetrieverEngineType},
+	},
 }
 
 // GetRetrieverEngineMapping returns the retriever engine mapping

@@ -81,6 +81,8 @@ services:
       - QDRANT_COLLECTION=${QDRANT_COLLECTION:-weknora_embeddings}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
       - QDRANT_USE_TLS=${QDRANT_USE_TLS:-false}
+      - MILVUS_ADDRESS=milvus:19530
+      - MILVUS_COLLECTION=${MILVUS_COLLECTION:-weknora_embeddings}
       - DOCREADER_ADDR=docreader:50051
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
@@ -275,6 +277,34 @@ services:
       - qdrant
       - full
 
+  milvus:
+    image: milvusdb/milvus:v2.6.11
+    container_name: WeKnora-milvus
+    security_opt:
+      - seccomp:unconfined
+    command: ["milvus", "run", "standalone"]
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+      - DEPLOY_MODE=STANDALONE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - milvus
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -286,3 +316,4 @@ volumes:
   minio_data:
   neo4j-data:
   qdrant_data:
+  milvus_data:
