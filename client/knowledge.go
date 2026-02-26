@@ -226,6 +226,51 @@ func (c *Client) CreateKnowledgeFromURL(
 	return &response.Data, nil
 }
 
+// CreateKnowledgeFromFileURLRequest contains the parameters for creating a knowledge entry from a remote file URL
+type CreateKnowledgeFromFileURLRequest struct {
+	// URL is the remote file URL to download (must be http/https, required)
+	URL string `json:"url"`
+	// FileName is the optional file name; if empty, the server resolves it from Content-Disposition or URL path
+	FileName string `json:"file_name,omitempty"`
+	// FileType is the optional file type (e.g. "pdf"); if empty, the server resolves it from the file name
+	FileType string `json:"file_type,omitempty"`
+	// EnableMultimodel is the optional flag to enable multimodal processing
+	EnableMultimodel *bool `json:"enable_multimodel,omitempty"`
+	// Title is the optional title for the knowledge entry
+	Title string `json:"title,omitempty"`
+	// TagID is the optional tag ID to associate with the knowledge entry
+	TagID string `json:"tag_id,omitempty"`
+}
+
+// CreateKnowledgeFromFileURL creates a knowledge entry from a remote file URL.
+// The server downloads the file (.txt/.md/.pdf/.docx/.doc) and parses it asynchronously.
+func (c *Client) CreateKnowledgeFromFileURL(
+	ctx context.Context,
+	knowledgeBaseID string,
+	req CreateKnowledgeFromFileURLRequest,
+) (*Knowledge, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/file-url", knowledgeBaseID)
+
+	reqBody := req
+
+	resp, err := c.doRequest(ctx, http.MethodPost, path, reqBody, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeResponse
+	if resp.StatusCode == http.StatusConflict {
+		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+			return nil, fmt.Errorf("failed to parse response: %w", err)
+		}
+		return &response.Data, ErrDuplicateURL
+	} else if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // GetKnowledge retrieves a knowledge entry by its ID
 func (c *Client) GetKnowledge(ctx context.Context, knowledgeID string) (*Knowledge, error) {
 	path := fmt.Sprintf("/api/v1/knowledge/%s", knowledgeID)

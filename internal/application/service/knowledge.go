@@ -9,6 +9,10 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"regexp"
 	"runtime"
 	"slices"
@@ -491,6 +495,216 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	logger.Infof(ctx, "Enqueued URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
 
 	logger.Infof(ctx, "Knowledge from URL created successfully, ID: %s", knowledge.ID)
+	return knowledge, nil
+}
+
+// allowedFileURLExtensions defines the supported file extensions for file URL import
+var allowedFileURLExtensions = map[string]bool{
+	"txt":  true,
+	"md":   true,
+	"pdf":  true,
+	"docx": true,
+	"doc":  true,
+}
+
+// maxFileURLSize is the maximum allowed file size for file URL import (10MB)
+const maxFileURLSize = 10 * 1024 * 1024
+
+// extractFileNameFromURL extracts the filename from a URL path
+func extractFileNameFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	base := path.Base(u.Path)
+	if base == "." || base == "/" {
+		return ""
+	}
+	return base
+}
+
+// extractFileNameFromContentDisposition extracts filename from Content-Disposition header
+func extractFileNameFromContentDisposition(header string) string {
+	// e.g. attachment; filename="document.pdf" or filename*=UTF-8''document.pdf
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(strings.ToLower(part), "filename=") {
+			name := strings.TrimPrefix(part, "filename=")
+			name = strings.TrimPrefix(part[len("filename="):], "")
+			name = strings.Trim(name, `"'`)
+			if name != "" {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// CreateKnowledgeFromFileURL creates a knowledge entry by downloading a file from a remote URL.
+// Sync phase: URL format + SSRF validation only (no HEAD request).
+// Async phase: download file to temp dir, pass binary to docreader.
+func (s *knowledgeService) CreateKnowledgeFromFileURL(
+	ctx context.Context,
+	kbID string,
+	fileURL string,
+	fileName string,
+	fileType string,
+	enableMultimodel *bool,
+	title string,
+	tagID string,
+) (*types.Knowledge, error) {
+	logger.Info(ctx, "Start creating knowledge from file URL")
+	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
+
+	// Get knowledge base configuration
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		return nil, err
+	}
+
+	// Validate URL format and security (static check only, no HEAD request)
+	if !isValidURL(fileURL) || !secutils.IsValidURL(fileURL) {
+		logger.Error(ctx, "Invalid or unsafe file URL format")
+		return nil, ErrInvalidURL
+	}
+	if safe, reason := secutils.IsSSRFSafeURL(fileURL); !safe {
+		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, reason: %s", fileURL, reason)
+		return nil, ErrInvalidURL
+	}
+
+	// Resolve fileName: user-provided > extracted from URL path
+	if fileName == "" {
+		fileName = extractFileNameFromURL(fileURL)
+	}
+
+	// Resolve fileType: user-provided > inferred from fileName
+	if fileType == "" && fileName != "" {
+		fileType = getFileType(fileName)
+	}
+
+	// Validate file extension against whitelist (if we can determine it)
+	if fileType != "" {
+		if !allowedFileURLExtensions[strings.ToLower(fileType)] {
+			logger.Errorf(ctx, "Unsupported file type for file URL import: %s", fileType)
+			return nil, werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s，仅支持 txt, md, pdf, docx, doc", fileType))
+		}
+	}
+
+	// Use title as display name if fileName is still empty
+	displayName := fileName
+	if displayName == "" {
+		displayName = title
+	}
+	if displayName == "" {
+		// Fallback: use last segment of URL
+		displayName = extractFileNameFromURL(fileURL)
+	}
+	if displayName == "" {
+		displayName = fileURL
+	}
+
+	// Check for duplicate (by URL hash)
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	fileHash := calculateStr(fileURL)
+	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+		Type:     "file_url",
+		URL:      fileURL,
+		FileHash: fileHash,
+	})
+	if err != nil {
+		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
+		return nil, err
+	}
+	if exists {
+		logger.Infof(ctx, "File URL already exists: %s", fileURL)
+		existingKnowledge.CreatedAt = time.Now()
+		existingKnowledge.UpdatedAt = time.Now()
+		if err := s.repo.UpdateKnowledge(ctx, existingKnowledge); err != nil {
+			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+			return nil, err
+		}
+		return existingKnowledge, types.NewDuplicateURLError(existingKnowledge)
+	}
+
+	// Check storage quota
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+		logger.Error(ctx, "Storage quota exceeded")
+		return nil, types.NewStorageQuotaExceededError()
+	}
+
+	// Create knowledge record
+	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
+		TenantID:         tenantID,
+		KnowledgeBaseID:  kbID,
+		Type:             "file_url",
+		Title:            title,
+		FileName:         displayName,
+		FileType:         fileType,
+		Source:           fileURL,
+		FileHash:         fileHash,
+		ParseStatus:      "pending",
+		EnableStatus:     "disabled",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		EmbeddingModelID: kb.EmbeddingModelID,
+		TagID:            tagID,
+	}
+	if knowledge.Title == "" {
+		knowledge.Title = displayName
+	}
+
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
+		return nil, err
+	}
+
+	// Build async task payload
+	enableMultimodelValue := false
+	if enableMultimodel != nil {
+		enableMultimodelValue = *enableMultimodel
+	} else {
+		enableMultimodelValue = kb.IsMultimodalEnabled()
+	}
+
+	enableQuestionGeneration := false
+	questionCount := 3
+	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+		enableQuestionGeneration = true
+		if kb.QuestionGenerationConfig.QuestionCount > 0 {
+			questionCount = kb.QuestionGenerationConfig.QuestionCount
+		}
+	}
+
+	taskPayload := types.DocumentProcessPayload{
+		TenantID:                 tenantID,
+		KnowledgeID:              knowledge.ID,
+		KnowledgeBaseID:          kbID,
+		FileURL:                  fileURL,
+		FileName:                 fileName,
+		FileType:                 fileType,
+		EnableMultimodel:         enableMultimodelValue,
+		EnableQuestionGeneration: enableQuestionGeneration,
+		QuestionCount:            questionCount,
+	}
+
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
+		return knowledge, nil
+	}
+
+	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	info, err := s.task.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
+		return knowledge, nil
+	}
+	logger.Infof(ctx, "Enqueued file URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+
+	logger.Infof(ctx, "Knowledge from file URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
 }
 
@@ -2300,6 +2514,51 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(existing.FileName)) {
 			NewDataTableSummaryTask(ctx, s.task, tenantID, existing.ID, kb.SummaryModelID, kb.EmbeddingModelID)
 		}
+
+		return existing, nil
+	}
+
+	// For file-URL-based knowledge, enqueue document processing task with FileURL field
+	if existing.Type == "file_url" && existing.Source != "" {
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+		enableMultimodel := kb.IsMultimodalEnabled()
+
+		// Check question generation config
+		enableQuestionGeneration := false
+		questionCount := 3
+		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+			enableQuestionGeneration = true
+			if kb.QuestionGenerationConfig.QuestionCount > 0 {
+				questionCount = kb.QuestionGenerationConfig.QuestionCount
+			}
+		}
+
+		taskPayload := types.DocumentProcessPayload{
+			TenantID:                 tenantID,
+			KnowledgeID:              existing.ID,
+			KnowledgeBaseID:          existing.KnowledgeBaseID,
+			FileURL:                  existing.Source,
+			FileName:                 existing.FileName,
+			FileType:                 existing.FileType,
+			EnableMultimodel:         enableMultimodel,
+			EnableQuestionGeneration: enableQuestionGeneration,
+			QuestionCount:            questionCount,
+		}
+
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal file URL reparse task payload: %v", err)
+			return existing, nil
+		}
+
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		info, err := s.task.Enqueue(task)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
+			return existing, nil
+		}
+		logger.Infof(ctx, "Enqueued file URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
 
 		return existing, nil
 	}
@@ -6512,6 +6771,70 @@ func IsImageType(fileType string) bool {
 	}
 }
 
+// downloadFileFromURL downloads a remote file to a temp file and returns its binary content.
+// payloadFileName and payloadFileType are in/out pointers: if they point to an empty string,
+// the function resolves the value from Content-Disposition / URL path and writes it back.
+// It does NOT perform SSRF validation — callers are responsible for that.
+func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, payloadFileType *string) ([]byte, error) {
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request for file URL: %w", err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download file from URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("remote server returned status %d", resp.StatusCode)
+	}
+
+	// Reject oversized files early via Content-Length
+	if contentLength := resp.ContentLength; contentLength > maxFileURLSize {
+		return nil, fmt.Errorf("file size %d bytes exceeds limit of %d bytes (10MB)", contentLength, maxFileURLSize)
+	}
+
+	// Resolve fileName: payload > Content-Disposition > URL path
+	if *payloadFileName == "" {
+		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+			*payloadFileName = extractFileNameFromContentDisposition(cd)
+		}
+	}
+	if *payloadFileName == "" {
+		*payloadFileName = extractFileNameFromURL(fileURL)
+	}
+	if *payloadFileType == "" && *payloadFileName != "" {
+		*payloadFileType = getFileType(*payloadFileName)
+	}
+
+	// Stream response body into a temp file, capped at maxFileURLSize
+	tmpFile, err := os.CreateTemp("", "weknora-fileurl-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	limiter := &io.LimitedReader{R: resp.Body, N: maxFileURLSize + 1}
+	written, err := io.Copy(tmpFile, limiter)
+	tmpFile.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if written > maxFileURLSize {
+		return nil, fmt.Errorf("file size exceeds limit of 10MB")
+	}
+
+	contentBytes, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read temp file: %w", err)
+	}
+
+	return contentBytes, nil
+}
+
 // ProcessDocument handles Asynq document processing tasks
 func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) error {
 	var payload types.DocumentProcessPayload
@@ -6626,7 +6949,86 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// 处理不同类型的导入：文件、URL、文本段落
 	var chunks []*proto.Chunk
-	if payload.URL != "" {
+	if payload.FileURL != "" {
+		// file_url 导入：再次 SSRF 校验（防 DNS 重绑定），下载到临时文件，传二进制给 docreader
+		if safe, reason := secutils.IsSSRFSafeURL(payload.FileURL); !safe {
+			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.FileURL, reason)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+
+		// Download the remote file (SSRF already validated above).
+		// payloadFileName/payloadFileType are in/out: resolved values are written back if empty.
+		resolvedFileName := payload.FileName
+		resolvedFileType := payload.FileType
+		contentBytes, err := downloadFileFromURL(ctx, payload.FileURL, &resolvedFileName, &resolvedFileType)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to download file from URL: %s, error: %v", payload.FileURL, err)
+			if isLastRetry {
+				knowledge.ParseStatus = "failed"
+				knowledge.ErrorMessage = err.Error()
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+			}
+			return fmt.Errorf("failed to download file from URL: %w", err)
+		}
+
+		// Validate resolved file type against whitelist
+		if resolvedFileType != "" && !allowedFileURLExtensions[strings.ToLower(resolvedFileType)] {
+			logger.Errorf(ctx, "Unsupported file type resolved from file URL: %s", resolvedFileType)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = fmt.Sprintf("unsupported file type: %s", resolvedFileType)
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+
+		// Persist resolved metadata back to the knowledge record
+		if resolvedFileName != "" && knowledge.FileName == "" {
+			knowledge.FileName = resolvedFileName
+		}
+		if resolvedFileType != "" && knowledge.FileType == "" {
+			knowledge.FileType = resolvedFileType
+			s.repo.UpdateKnowledge(ctx, knowledge)
+		}
+
+		fileResp, err := s.docReaderClient.ReadFromFile(ctx, &proto.ReadFromFileRequest{
+			FileContent: contentBytes,
+			FileName:    resolvedFileName,
+			FileType:    resolvedFileType,
+			ReadConfig: &proto.ReadConfig{
+				ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
+				ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
+				Separators:       kb.ChunkingConfig.Separators,
+				EnableMultimodal: payload.EnableMultimodel,
+				StorageConfig: &proto.StorageConfig{
+					Provider:        proto.StorageProvider(proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)]),
+					Region:          kb.StorageConfig.Region,
+					BucketName:      kb.StorageConfig.BucketName,
+					AccessKeyId:     kb.StorageConfig.SecretID,
+					SecretAccessKey: kb.StorageConfig.SecretKey,
+					AppId:           kb.StorageConfig.AppID,
+					PathPrefix:      kb.StorageConfig.PathPrefix,
+				},
+				VlmConfig: vlmConfig,
+			},
+			RequestId: payload.RequestId,
+		})
+		if err != nil {
+			logger.Errorf(ctx, "Failed to read file from docreader (file_url): %v", err)
+			if isLastRetry {
+				knowledge.ParseStatus = "failed"
+				knowledge.ErrorMessage = err.Error()
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+			}
+			return fmt.Errorf("failed to read file from docreader: %w", err)
+		}
+		chunks = fileResp.Chunks
+	} else if payload.URL != "" {
 		// URL导入 - 再次进行 SSRF 验证（防止 DNS 重绑定攻击）
 		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
 			logger.Errorf(ctx, "URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.URL, reason)

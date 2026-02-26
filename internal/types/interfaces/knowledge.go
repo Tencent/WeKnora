@@ -32,6 +32,19 @@ type KnowledgeService interface {
 		title string,
 		tagID string,
 	) (*types.Knowledge, error)
+	// CreateKnowledgeFromFileURL creates knowledge by downloading a file from a remote URL.
+	// fileName and fileType are optional - when not provided, they will be inferred from the URL or Content-Disposition header.
+	// tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
+	CreateKnowledgeFromFileURL(
+		ctx context.Context,
+		kbID string,
+		fileURL string,
+		fileName string,
+		fileType string,
+		enableMultimodel *bool,
+		title string,
+		tagID string,
+	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassageSync creates knowledge from text passages and waits until chunks are indexed.

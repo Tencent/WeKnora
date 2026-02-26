@@ -150,6 +150,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/file", handler.CreateKnowledgeFromFile)
 		// 从URL创建知识
 		kb.POST("/url", handler.CreateKnowledgeFromURL)
+		// 从文件资源链接创建知识
+		kb.POST("/file-url", handler.CreateKnowledgeFromFileURL)
 		// 手工 Markdown 录入
 		kb.POST("/manual", handler.CreateManualKnowledge)
 		// 获取知识库下的知识列表

@@ -30,6 +30,7 @@ type DocumentProcessPayload struct {
 	FileName                 string   `json:"file_name,omitempty"` // 文件名（文件导入时使用）
 	FileType                 string   `json:"file_type,omitempty"` // 文件类型（文件导入时使用）
 	URL                      string   `json:"url,omitempty"`       // URL（URL导入时使用）
+	FileURL                  string   `json:"file_url,omitempty"`  // 文件资源链接（file_url导入时使用）
 	Passages                 []string `json:"passages,omitempty"`  // 文本段落（文本导入时使用）
 	EnableMultimodel         bool     `json:"enable_multimodel"`
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
