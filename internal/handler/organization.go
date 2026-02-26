@@ -59,7 +59,7 @@ func NewOrganizationHandler(
 // @Produce      json
 // @Param        request  body      types.CreateOrganizationRequest  true  "组织信息"
 // @Success      201      {object}  map[string]interface{}
-// @Failure      400      {object}  errors.AppError
+// @Failure      400      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations [post]
 func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
@@ -100,7 +100,7 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 // @Produce      json
 // @Param        id   path      string  true  "组织ID"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      404  {object}  errors.AppError
+// @Failure      404  {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id} [get]
 func (h *OrganizationHandler) GetOrganization(c *gin.Context) {
@@ -278,7 +278,7 @@ func (h *OrganizationHandler) buildResourceCountsByOrg(ctx context.Context, orgs
 // @Param        id       path      string                           true  "组织ID"
 // @Param        request  body      types.UpdateOrganizationRequest  true  "更新信息"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      403      {object}  errors.AppError
+// @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id} [put]
 func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
@@ -320,7 +320,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 // @Tags         组织管理
 // @Param        id  path  string  true  "组织ID"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      403  {object}  errors.AppError
+// @Failure      403  {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id} [delete]
 func (h *OrganizationHandler) DeleteOrganization(c *gin.Context) {
@@ -398,7 +398,7 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 // @Param        user_id  path      string                       true  "用户ID"
 // @Param        request  body      types.UpdateMemberRoleRequest  true  "角色信息"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      403      {object}  errors.AppError
+// @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/members/{user_id} [put]
 func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
@@ -433,7 +433,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 // @Param        id       path  string  true  "组织ID"
 // @Param        user_id  path  string  true  "用户ID"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      403      {object}  errors.AppError
+// @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/members/{user_id} [delete]
 func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
@@ -462,7 +462,7 @@ func (h *OrganizationHandler) RemoveMember(c *gin.Context) {
 // @Produce      json
 // @Param        id  path  string  true  "组织ID"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      403  {object}  errors.AppError
+// @Failure      403  {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/invite-code [post]
 func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
@@ -491,7 +491,7 @@ func (h *OrganizationHandler) GenerateInviteCode(c *gin.Context) {
 // @Produce      json
 // @Param        code  path  string  true  "邀请码"
 // @Success      200   {object}  map[string]interface{}
-// @Failure      404   {object}  errors.AppError
+// @Failure      404   {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/preview/{code} [get]
 func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
@@ -547,7 +547,7 @@ func (h *OrganizationHandler) PreviewByInviteCode(c *gin.Context) {
 // @Produce      json
 // @Param        request  body      types.JoinOrganizationRequest  true  "邀请码"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      404      {object}  errors.AppError
+// @Failure      404      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/join [post]
 func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
@@ -588,7 +588,7 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 // @Produce      json
 // @Param        request  body      types.SubmitJoinRequestRequest  true  "申请信息"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      400      {object}  errors.AppError
+// @Failure      400      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/join-request [post]
 func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
@@ -694,7 +694,7 @@ func (h *OrganizationHandler) SearchOrganizations(c *gin.Context) {
 // @Produce      json
 // @Param        request  body      types.JoinByOrganizationIDRequest  true  "空间 ID"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      403      {object}  errors.AppError
+// @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/join-by-id [post]
 func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
@@ -750,7 +750,7 @@ func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 // @Param        id       path      string                          true  "组织ID"
 // @Param        request  body      types.RequestRoleUpgradeRequest  true  "申请信息"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      400      {object}  errors.AppError
+// @Failure      400      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/request-upgrade [post]
 func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
@@ -808,7 +808,7 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 // @Tags         组织管理
 // @Param        id  path  string  true  "组织ID"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      403  {object}  errors.AppError
+// @Failure      403  {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/leave [post]
 func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
@@ -849,7 +849,7 @@ func (h *OrganizationHandler) LeaveOrganization(c *gin.Context) {
 // @Produce      json
 // @Param        id   path  string  true  "组织ID"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      403  {object}  errors.AppError
+// @Failure      403  {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/join-requests [get]
 func (h *OrganizationHandler) ListJoinRequests(c *gin.Context) {
@@ -919,7 +919,7 @@ func (h *OrganizationHandler) ListJoinRequests(c *gin.Context) {
 // @Param        request_id  path  string  true  "申请ID"
 // @Param        request    body  types.ReviewJoinRequestRequest  true  "审核结果"
 // @Success      200  {object}  map[string]interface{}
-// @Failure      403  {object}  errors.AppError
+// @Failure      403  {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/join-requests/{request_id}/review [put]
 func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
@@ -979,7 +979,7 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 // @Param        id       path      string                         true  "知识库ID"
 // @Param        request  body      types.ShareKnowledgeBaseRequest  true  "共享信息"
 // @Success      201      {object}  map[string]interface{}
-// @Failure      403      {object}  errors.AppError
+// @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /knowledge-bases/{id}/shares [post]
 func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
@@ -1082,7 +1082,7 @@ func (h *OrganizationHandler) ListKBShares(c *gin.Context) {
 // @Param        share_id  path      string                          true  "共享记录ID"
 // @Param        request   body      types.UpdateSharePermissionRequest  true  "权限信息"
 // @Success      200       {object}  map[string]interface{}
-// @Failure      403       {object}  errors.AppError
+// @Failure      403       {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /knowledge-bases/{id}/shares/{share_id} [put]
 func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
@@ -1116,7 +1116,7 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 // @Param        id        path  string  true  "知识库ID"
 // @Param        share_id  path  string  true  "共享记录ID"
 // @Success      200       {object}  map[string]interface{}
-// @Failure      403       {object}  errors.AppError
+// @Failure      403       {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /knowledge-bases/{id}/shares/{share_id} [delete]
 func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
@@ -1662,7 +1662,7 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 // @Param        q      query  string  true   "搜索关键词（用户名或邮箱）"
 // @Param        limit  query  int     false  "返回数量限制" default(10)
 // @Success      200    {object}  map[string]interface{}
-// @Failure      403    {object}  errors.AppError
+// @Failure      403    {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/search-users [get]
 func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
@@ -1742,8 +1742,8 @@ func (h *OrganizationHandler) SearchUsersForInvite(c *gin.Context) {
 // @Param        id       path      string                         true  "组织ID"
 // @Param        request  body      types.InviteMemberRequest      true  "邀请信息"
 // @Success      200      {object}  map[string]interface{}
-// @Failure      400      {object}  errors.AppError
-// @Failure      403      {object}  errors.AppError
+// @Failure      400      {object}  apperrors.AppError
+// @Failure      403      {object}  apperrors.AppError
 // @Security     Bearer
 // @Router       /organizations/{id}/invite [post]
 func (h *OrganizationHandler) InviteMember(c *gin.Context) {

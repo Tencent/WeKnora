@@ -65,7 +65,7 @@ type CustomAgentConfig struct {
 	// ===== Basic Settings =====
 	// Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
 	AgentMode string `yaml:"agent_mode" json:"agent_mode"`
-	// System prompt for the agent (unified prompt, uses {{web_search_status}} placeholder for dynamic behavior)
+	// System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)
 	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
 	// Context template for normal mode (how to format retrieved chunks)
 	ContextTemplate string `yaml:"context_template" json:"context_template"`
