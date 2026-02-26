@@ -608,7 +608,7 @@ onBeforeUnmount(() => {
 const handleLogin = async () => {
   try {
     const valid = await formRef.value?.validate()
-    if (!valid) return
+    if (valid !== true) return
 
     loading.value = true
     
@@ -664,7 +664,7 @@ const handleLogin = async () => {
 const handleRegister = async () => {
   try {
     const valid = await registerFormRef.value?.validate()
-    if (!valid) return
+    if (valid !== true) return
 
     loading.value = true
     
