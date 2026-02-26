@@ -188,51 +188,15 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	return &response.Data, nil
 }
 
-// CreateKnowledgeFromURL creates a knowledge entry from a web URL
-func (c *Client) CreateKnowledgeFromURL(
-	ctx context.Context,
-	knowledgeBaseID string,
-	url string,
-	enableMultimodel *bool,
-	title string,
-) (*Knowledge, error) {
-	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/url", knowledgeBaseID)
-
-	reqBody := struct {
-		URL              string `json:"url"`
-		EnableMultimodel *bool  `json:"enable_multimodel"`
-		Title            string `json:"title"`
-	}{
-		URL:              url,
-		EnableMultimodel: enableMultimodel,
-		Title:            title,
-	}
-
-	resp, err := c.doRequest(ctx, http.MethodPost, path, reqBody, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var response KnowledgeResponse
-	if resp.StatusCode == http.StatusConflict {
-		if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-			return nil, fmt.Errorf("failed to parse response: %w", err)
-		}
-		return &response.Data, ErrDuplicateURL
-	} else if err := parseResponse(resp, &response); err != nil {
-		return nil, err
-	}
-
-	return &response.Data, nil
-}
-
-// CreateKnowledgeFromFileURLRequest contains the parameters for creating a knowledge entry from a remote file URL
-type CreateKnowledgeFromFileURLRequest struct {
-	// URL is the remote file URL to download (must be http/https, required)
+// CreateKnowledgeFromURLRequest contains the parameters for creating a knowledge entry from a URL.
+// When FileName or FileType is provided (or the URL path has a known file extension such as .pdf/.docx/.doc/.txt/.md),
+// the server automatically switches to file-download mode instead of web-page crawling.
+type CreateKnowledgeFromURLRequest struct {
+	// URL is the target URL (required)
 	URL string `json:"url"`
-	// FileName is the optional file name; if empty, the server resolves it from Content-Disposition or URL path
+	// FileName is the optional file name; used to hint file-download mode when URL has no extension
 	FileName string `json:"file_name,omitempty"`
-	// FileType is the optional file type (e.g. "pdf"); if empty, the server resolves it from the file name
+	// FileType is the optional file type (e.g. "pdf"); used to hint file-download mode
 	FileType string `json:"file_type,omitempty"`
 	// EnableMultimodel is the optional flag to enable multimodal processing
 	EnableMultimodel *bool `json:"enable_multimodel,omitempty"`
@@ -242,14 +206,15 @@ type CreateKnowledgeFromFileURLRequest struct {
 	TagID string `json:"tag_id,omitempty"`
 }
 
-// CreateKnowledgeFromFileURL creates a knowledge entry from a remote file URL.
-// The server downloads the file (.txt/.md/.pdf/.docx/.doc) and parses it asynchronously.
-func (c *Client) CreateKnowledgeFromFileURL(
+// CreateKnowledgeFromURL creates a knowledge entry from a URL.
+// When req.FileName or req.FileType is provided (or the URL path has a known file extension),
+// the server automatically switches to file-download mode instead of web-page crawling.
+func (c *Client) CreateKnowledgeFromURL(
 	ctx context.Context,
 	knowledgeBaseID string,
-	req CreateKnowledgeFromFileURLRequest,
+	req CreateKnowledgeFromURLRequest,
 ) (*Knowledge, error) {
-	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/file-url", knowledgeBaseID)
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/url", knowledgeBaseID)
 
 	reqBody := req
 

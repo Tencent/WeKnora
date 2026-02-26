@@ -366,12 +366,12 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 // CreateKnowledgeFromURL godoc
 // @Summary      从URL创建知识
-// @Description  从指定URL抓取内容并创建知识条目
+// @Description  从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,enable_multimodel=bool,title=string,tag_id=string}  true  "URL请求"
+// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_id=string}  true  "URL请求"
 // @Success      201      {object}  map[string]interface{}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
@@ -399,6 +399,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	// Parse URL from request body
 	var req struct {
 		URL              string `json:"url" binding:"required"`
+		FileName         string `json:"file_name"`
+		FileType         string `json:"file_type"`
 		EnableMultimodel *bool  `json:"enable_multimodel"`
 		Title            string `json:"title"`
 		TagID            string `json:"tag_id"`
@@ -409,96 +411,22 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Received URL request: %s", secutils.SanitizeForLog(req.URL))
-	logger.Infof(
-		ctx,
+	logger.Infof(ctx, "Received URL request: %s, file_name: %s, file_type: %s",
+		secutils.SanitizeForLog(req.URL),
+		secutils.SanitizeForLog(req.FileName),
+		secutils.SanitizeForLog(req.FileType),
+	)
+	logger.Infof(ctx,
 		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(req.URL),
 	)
 
 	// Create knowledge entry from the URL
-	knowledge, err := h.kgService.CreateKnowledgeFromURL(ctx, kbID, req.URL, req.EnableMultimodel, req.Title, req.TagID)
+	knowledge, err := h.kgService.CreateKnowledgeFromURL(ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagID)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
-			return
-		}
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
-		return
-	}
-
-	logger.Infof(
-		ctx,
-		"Knowledge created successfully from URL, ID: %s, title: %s",
-		secutils.SanitizeForLog(knowledge.ID),
-		secutils.SanitizeForLog(knowledge.Title),
-	)
-	c.JSON(http.StatusCreated, gin.H{
-		"success": true,
-		"data":    knowledge,
-	})
-}
-
-// CreateKnowledgeFromFileURL godoc
-// @Summary      从文件资源链接创建知识
-// @Description  提供远程文件链接（.txt/.md/.pdf/.docx/.doc），后台下载并解析创建知识条目
-// @Tags         知识管理
-// @Accept       json
-// @Produce      json
-// @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_id=string}  true  "文件URL请求"
-// @Success      201      {object}  map[string]interface{}  "创建的知识"
-// @Failure      400      {object}  errors.AppError         "请求参数错误"
-// @Failure      409      {object}  map[string]interface{}  "文件重复"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /knowledge-bases/{id}/knowledge/file-url [post]
-func (h *KnowledgeHandler) CreateKnowledgeFromFileURL(c *gin.Context) {
-	ctx := c.Request.Context()
-	logger.Info(ctx, "Start creating knowledge from file URL")
-
-	// Validate access to the knowledge base (only owner or admin/editor can create)
-	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
-	if err != nil {
-		c.Error(err)
-		return
-	}
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
-
-	// Check write permission
-	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
-		c.Error(errors.NewForbiddenError("No permission to create knowledge"))
-		return
-	}
-
-	// Parse request body
-	var req struct {
-		URL              string `json:"url" binding:"required"`
-		FileName         string `json:"file_name"`
-		FileType         string `json:"file_type"`
-		EnableMultimodel *bool  `json:"enable_multimodel"`
-		Title            string `json:"title"`
-		TagID            string `json:"tag_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse file URL request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
-		return
-	}
-
-	logger.Infof(ctx, "Received file URL request: %s, file_name: %s, file_type: %s",
-		secutils.SanitizeForLog(req.URL),
-		secutils.SanitizeForLog(req.FileName),
-		secutils.SanitizeForLog(req.FileType),
-	)
-
-	knowledge, err := h.kgService.CreateKnowledgeFromFileURL(
-		ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagID,
-	)
-	if err != nil {
-		if h.handleDuplicateKnowledgeError(c, err, knowledge, "file_url") {
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
@@ -510,7 +438,9 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFileURL(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Knowledge created successfully from file URL, ID: %s, title: %s",
+	logger.Infof(
+		ctx,
+		"Knowledge created successfully from URL, ID: %s, title: %s",
 		secutils.SanitizeForLog(knowledge.ID),
 		secutils.SanitizeForLog(knowledge.Title),
 	)

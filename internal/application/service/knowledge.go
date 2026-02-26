@@ -367,11 +367,32 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL source
 // tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
+// isFileURL reports whether the given URL should be treated as a direct file download.
+// Priority: URL path has a known file extension first, then fall back to user-provided fileName/fileType hints.
+func isFileURL(rawURL, fileName, fileType string) bool {
+	u, err := url.Parse(rawURL)
+	if err == nil {
+		ext := strings.ToLower(strings.TrimPrefix(path.Ext(u.Path), "."))
+		if ext != "" && allowedFileURLExtensions[ext] {
+			return true
+		}
+	}
+	// Fall back to user-provided hints
+	return fileName != "" || fileType != ""
+}
+
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, url string, enableMultimodel *bool, title string, tagID string,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
-	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, url)
+	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
+
+	// Route to file_url logic when the URL points to a downloadable file
+	if isFileURL(rawURL, fileName, fileType) {
+		return s.createKnowledgeFromFileURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID)
+	}
+
+	url := rawURL
 
 	// Get knowledge base configuration
 	logger.Info(ctx, "Getting knowledge base configuration")
@@ -540,10 +561,9 @@ func extractFileNameFromContentDisposition(header string) string {
 	return ""
 }
 
-// CreateKnowledgeFromFileURL creates a knowledge entry by downloading a file from a remote URL.
-// Sync phase: URL format + SSRF validation only (no HEAD request).
-// Async phase: download file to temp dir, pass binary to docreader.
-func (s *knowledgeService) CreateKnowledgeFromFileURL(
+// createKnowledgeFromFileURL is the internal implementation for file URL knowledge creation.
+// Called by CreateKnowledgeFromURL when the URL is detected as a direct file download.
+func (s *knowledgeService) createKnowledgeFromFileURL(
 	ctx context.Context,
 	kbID string,
 	fileURL string,
