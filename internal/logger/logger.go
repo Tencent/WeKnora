@@ -13,6 +13,9 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// appLogger 使用私有实例，避免外部依赖改写 logrus 全局状态导致日志丢失
+var appLogger = logrus.New()
+
 // LogLevel 日志级别类型
 type LogLevel string
 
@@ -129,11 +132,20 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 func init() {
 	// 根据环境变量设置全局日志级别
 	logLevel := getLogLevelFromEnv()
-	logrus.SetLevel(logLevel)
+	appLogger.SetLevel(logLevel)
+
+	// 统一输出到 stdout，确保在 Docker 容器中与 GORM/GIN 日志合并展示
+	appLogger.SetOutput(os.Stdout)
+
+	// 非终端（如 Docker 日志采集）禁用 ANSI 颜色，避免日志聚合/检索异常
+	forceColor := false
+	if fi, err := os.Stdout.Stat(); err == nil {
+		forceColor = (fi.Mode() & os.ModeCharDevice) != 0
+	}
 
 	// 设置日志格式而不修改全局时区
-	logrus.SetFormatter(&CustomFormatter{ForceColor: true})
-	logrus.SetReportCaller(false)
+	appLogger.SetFormatter(&CustomFormatter{ForceColor: forceColor})
+	appLogger.SetReportCaller(false)
 }
 
 // GetLogger 获取日志实例
@@ -141,8 +153,7 @@ func GetLogger(c context.Context) *logrus.Entry {
 	if logger := c.Value(types.LoggerContextKey); logger != nil {
 		return logger.(*logrus.Entry)
 	}
-	// 使用全局logrus实例，确保日志级别设置正确生效
-	return logrus.NewEntry(logrus.StandardLogger())
+	return logrus.NewEntry(appLogger)
 }
 
 // SetLogLevel 设置日志级别
@@ -164,7 +175,7 @@ func SetLogLevel(level LogLevel) {
 		logLevel = logrus.InfoLevel
 	}
 
-	logrus.SetLevel(logLevel)
+	appLogger.SetLevel(logLevel)
 }
 
 // getLogLevelFromEnv 从环境变量读取日志级别配置

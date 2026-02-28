@@ -13,8 +13,8 @@ import { knowledgeStore } from "@/stores/knowledge";
 import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 
-const usemenuStore = knowledgeStore();
 export default function (knowledgeBaseId?: string) {
+  const usemenuStore = knowledgeStore();
   const route = useRoute();
   const { cardList, total } = storeToRefs(usemenuStore);
   let moreIndex = ref(-1);
@@ -26,7 +26,9 @@ export default function (knowledgeBaseId?: string) {
     total: 0,
     type: "",
     source: "",
-    file_type: ""
+    file_type: "",
+    chunkLoading: false,
+    chunkLoadError: "",
   });
   const getKnowled = (
     query: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string } = { page: 1, page_size: 35 },
@@ -147,7 +149,8 @@ export default function (knowledgeBaseId?: string) {
       id: "",
       type: "",
       source: "",
-      file_type: ""
+      file_type: "",
+      chunkLoadError: "",
     });
     getKnowledgeDetails(item.id)
       .then((result: any) => {
@@ -168,6 +171,8 @@ export default function (knowledgeBaseId?: string) {
   };
   
   const getfDetails = (id: string, page: number) => {
+    details.chunkLoading = true;
+    details.chunkLoadError = "";
     getKnowledgeDetailsCon(id, page)
       .then((result: any) => {
         if (result.success && result.data) {
@@ -180,7 +185,17 @@ export default function (knowledgeBaseId?: string) {
           details.total = totalResult;
         }
       })
-      .catch(() => {});
+      .catch((err: any) => {
+        details.chunkLoadError = err?.message || "分块加载失败";
+        console.error("[ChunkLoad] failed", {
+          knowledgeId: id,
+          page,
+          error: err,
+        });
+      })
+      .finally(() => {
+        details.chunkLoading = false;
+      });
   };
   return {
     cardList,

@@ -61,6 +61,7 @@ type RouterParams struct {
 // NewRouter 创建新的路由
 func NewRouter(params RouterParams) *gin.Engine {
 	r := gin.New()
+	r.ContextWithFallback = true
 
 	// CORS 中间件应放在最前面
 	r.Use(cors.New(cors.Config{

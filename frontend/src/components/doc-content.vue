@@ -57,6 +57,8 @@ marked.use({
 const renderer = new marked.Renderer();
 let page = 1;
 let loadingChunks = false;
+let pendingRequestedPage: number | null = null;
+let pendingChunksBeforeLoad = 0;
 let doc = null;
 let down = ref()
 let mdContentWrap = ref()
@@ -142,9 +144,23 @@ onMounted(() => {
 watch(() => props.details?.id, () => {
   page = 1;
   loadingChunks = false;
+  pendingRequestedPage = null;
+  pendingChunksBeforeLoad = 0;
 });
-watch(() => props.details?.md?.length, () => {
-  loadingChunks = false;
+watch(() => props.details?.chunkLoading, (val) => {
+  if (val === false) {
+    if (pendingRequestedPage !== null) {
+      const currentLength = props.details?.md?.length || 0;
+      const hasError = Boolean(props.details?.chunkLoadError);
+      if (hasError && currentLength <= pendingChunksBeforeLoad) {
+        page = Math.max(1, pendingRequestedPage - 1);
+        MessagePlugin.warning(props.details?.chunkLoadError || '分块加载失败，请继续下滑重试');
+      }
+    }
+    pendingRequestedPage = null;
+    pendingChunksBeforeLoad = 0;
+    loadingChunks = false;
+  }
 });
 onUnmounted(() => {
   doc.removeEventListener('scroll', handleDetailsScroll);
@@ -566,10 +582,12 @@ const handleDetailsScroll = () => {
   if (doc && !loadingChunks) {
     let pageNum = Math.ceil(props.details.total / 25);
     const { scrollTop, scrollHeight, clientHeight } = doc;
-    if (scrollTop + clientHeight >= scrollHeight) {
+    if (scrollTop + clientHeight >= scrollHeight - 8) {
       if (props.details.md.length < props.details.total && page + 1 <= pageNum) {
         page++;
         loadingChunks = true;
+        pendingRequestedPage = page;
+        pendingChunksBeforeLoad = props.details.md.length;
         emit("getDoc", page);
       }
     }
