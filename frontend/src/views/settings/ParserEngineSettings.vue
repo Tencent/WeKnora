@@ -21,39 +21,41 @@
     </div>
 
     <template v-else>
-      <!-- 引擎列表 -->
-      <div class="engine-section">
-        <div v-if="engines.length === 0" class="empty-state">
-          <p class="empty-text">未检测到解析引擎，请确认 DocReader 服务正常运行。</p>
-        </div>
+      <div v-if="engines.length === 0 && !hasBuiltinEngine" class="empty-state">
+        <p class="empty-text">未检测到解析引擎，请确认 DocReader 服务正常运行。</p>
+      </div>
 
-        <div v-else class="engine-grid">
-          <!-- DocReader 未连接时显示占位卡片 -->
-          <div v-if="!hasBuiltinEngine" class="engine-card unavailable">
-            <div class="card-header">
-              <span class="card-name">builtin</span>
+      <template v-else>
+        <!-- DocReader 未连接时显示占位 -->
+        <div v-if="!hasBuiltinEngine" class="engine-item first" data-model-type="builtin">
+          <div class="engine-item-header">
+            <div class="engine-title-row">
+              <h3>builtin</h3>
               <t-tag theme="danger" variant="light" size="small">未连接</t-tag>
             </div>
-            <p class="card-desc">DocReader 内置解析引擎（docx/pdf/xlsx 等复杂格式）</p>
-            <div class="docreader-inline">
-              <div class="status-line">
-                <t-tag theme="danger" variant="light" size="small">未连接</t-tag>
-                <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-                <span v-if="docreaderAddrEnv" class="env-hint">当前: {{ docreaderAddrEnv }}</span>
-              </div>
-              <p class="desc docreader-desc">
-                修改请设置环境变量 <code>DOCREADER_ADDR</code>、<code>DOCREADER_TRANSPORT</code>（grpc/http），重启服务生效。
-              </p>
-            </div>
+            <p>DocReader 内置解析引擎（docx/pdf/xlsx 等复杂格式）</p>
           </div>
+          <div class="docreader-inline">
+            <div class="status-line">
+              <t-tag theme="danger" variant="light" size="small">未连接</t-tag>
+              <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
+              <span v-if="docreaderAddrEnv" class="env-hint">当前: {{ docreaderAddrEnv }}</span>
+            </div>
+            <p class="docreader-desc">
+              修改请设置环境变量 <code>DOCREADER_ADDR</code>、<code>DOCREADER_TRANSPORT</code>（grpc/http），重启服务生效。
+            </p>
+          </div>
+        </div>
 
-          <div
-            v-for="engine in sortedEngines"
-            :key="engine.Name"
-            :class="['engine-card', { unavailable: !engine.Available }]"
-          >
-            <div class="card-header">
-              <span class="card-name">{{ engine.Name }}</span>
+        <div
+          v-for="(engine, idx) in sortedEngines"
+          :key="engine.Name"
+          :class="['engine-item', { first: idx === 0 && hasBuiltinEngine }]"
+          :data-model-type="engine.Name"
+        >
+          <div class="engine-item-header">
+            <div class="engine-title-row">
+              <h3>{{ engine.Name }}</h3>
               <t-tag v-if="engine.Available" theme="success" variant="light" size="small">可用</t-tag>
               <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
                 <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">不可用</t-tag>
@@ -64,119 +66,113 @@
                 :href="engineDocLink(engine.Name)"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="card-doc-link"
+                class="engine-doc-link"
               >{{ engineDocLabel(engine.Name) }} ↗</a>
             </div>
+            <p>{{ engine.Description }}</p>
+          </div>
 
-            <p class="card-desc">{{ engine.Description }}</p>
-
-            <!-- builtin 引擎：内嵌 DocReader 连接信息 -->
-            <div v-if="engine.Name === 'builtin'" class="docreader-inline">
-              <div class="status-line">
-                <t-tag v-if="connected" theme="success" variant="light" size="small">已连接</t-tag>
-                <t-tag v-else theme="danger" variant="light" size="small">未连接</t-tag>
-                <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-                <span v-if="docreaderAddrEnv" class="env-hint">当前: {{ docreaderAddrEnv }}</span>
-              </div>
-              <p class="desc docreader-desc">
-                修改请设置环境变量 <code>DOCREADER_ADDR</code>、<code>DOCREADER_TRANSPORT</code>（grpc/http），重启服务生效。
-              </p>
+          <!-- builtin: DocReader 连接信息 -->
+          <div v-if="engine.Name === 'builtin'" class="docreader-inline">
+            <div class="status-line">
+              <t-tag v-if="connected" theme="success" variant="light" size="small">已连接</t-tag>
+              <t-tag v-else theme="danger" variant="light" size="small">未连接</t-tag>
+              <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
+              <span v-if="docreaderAddrEnv" class="env-hint">当前: {{ docreaderAddrEnv }}</span>
             </div>
+            <p class="docreader-desc">
+              修改请设置环境变量 <code>DOCREADER_ADDR</code>、<code>DOCREADER_TRANSPORT</code>（grpc/http），重启服务生效。
+            </p>
+          </div>
 
-            <div class="card-types">
-              <t-tag
-                v-for="ft in (engine.FileTypes || [])"
-                :key="ft"
-                size="small"
-                variant="light"
-                theme="default"
-              >{{ ft }}</t-tag>
+          <div v-if="engine.FileTypes && engine.FileTypes.length" class="file-types">
+            <t-tag
+              v-for="ft in engine.FileTypes"
+              :key="ft"
+              size="small"
+              variant="light"
+              theme="default"
+            >{{ ft }}</t-tag>
+          </div>
+
+          <!-- mineru 自建配置 -->
+          <div v-if="engine.Name === 'mineru'" class="engine-form">
+            <div class="form-field">
+              <label>自建端点</label>
+              <t-input
+                v-model="config.mineru_endpoint"
+                placeholder="如 https://your-mineru.example.com"
+                clearable
+              />
             </div>
-
-            <!-- mineru 自建配置 -->
-            <div v-if="engine.Name === 'mineru'" class="card-config">
-              <div class="config-item">
-                <label>自建端点</label>
-                <t-input
-                  v-model="config.mineru_endpoint"
-                  size="small"
-                  placeholder="如 https://your-mineru.example.com"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Backend</label>
-                <t-select v-model="config.mineru_model" size="small" placeholder="默认 pipeline" clearable>
-                  <t-option value="pipeline" label="pipeline" />
-                  <t-option value="vlm-auto-engine" label="vlm-auto-engine" />
-                  <t-option value="vlm-http-client" label="vlm-http-client" />
-                  <t-option value="hybrid-auto-engine" label="hybrid-auto-engine" />
-                  <t-option value="hybrid-http-client" label="hybrid-http-client" />
-                </t-select>
-              </div>
-              <div class="config-toggles">
-                <t-checkbox v-model="config.mineru_enable_formula">公式识别</t-checkbox>
-                <t-checkbox v-model="config.mineru_enable_table">表格识别</t-checkbox>
-                <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
-              </div>
-              <div class="config-item">
-                <label>语言</label>
-                <t-input
-                  v-model="config.mineru_language"
-                  size="small"
-                  placeholder="如 ch、en、ja（默认 ch）"
-                  clearable
-                />
-              </div>
+            <div class="form-field">
+              <label>Backend</label>
+              <t-select v-model="config.mineru_model" placeholder="默认 pipeline" clearable>
+                <t-option value="pipeline" label="pipeline" />
+                <t-option value="vlm-auto-engine" label="vlm-auto-engine" />
+                <t-option value="vlm-http-client" label="vlm-http-client" />
+                <t-option value="hybrid-auto-engine" label="hybrid-auto-engine" />
+                <t-option value="hybrid-http-client" label="hybrid-http-client" />
+              </t-select>
             </div>
+            <div class="form-toggles">
+              <t-checkbox v-model="config.mineru_enable_formula">公式识别</t-checkbox>
+              <t-checkbox v-model="config.mineru_enable_table">表格识别</t-checkbox>
+              <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
+            </div>
+            <div class="form-field">
+              <label>语言</label>
+              <t-input
+                v-model="config.mineru_language"
+                placeholder="如 ch、en、ja（默认 ch）"
+                clearable
+              />
+            </div>
+          </div>
 
-            <!-- mineru_cloud 云 API 配置 -->
-            <div v-if="engine.Name === 'mineru_cloud'" class="card-config">
-              <div class="config-item">
-                <label>API Key</label>
-                <t-input
-                  v-model="config.mineru_api_key"
-                  size="small"
-                  type="password"
-                  placeholder="MinerU 云服务 API Key"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>API 地址</label>
-                <t-input
-                  v-model="config.mineru_api_base_url"
-                  size="small"
-                  placeholder="如 https://api.mineru.net"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Model Version</label>
-                <t-select v-model="config.mineru_cloud_model" size="small" placeholder="默认 pipeline" clearable>
-                  <t-option value="pipeline" label="pipeline" />
-                  <t-option value="vlm" label="vlm（视觉语言模型）" />
-                  <t-option value="MinerU-HTML" label="MinerU-HTML（HTML 解析）" />
-                </t-select>
-              </div>
-              <div class="config-toggles">
-                <t-checkbox v-model="config.mineru_cloud_enable_formula">公式识别</t-checkbox>
-                <t-checkbox v-model="config.mineru_cloud_enable_table">表格识别</t-checkbox>
-                <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
-              </div>
-              <div class="config-item">
-                <label>语言</label>
-                <t-input
-                  v-model="config.mineru_cloud_language"
-                  size="small"
-                  placeholder="如 ch、en、ja（默认 ch）"
-                  clearable
-                />
-              </div>
+          <!-- mineru_cloud 云 API 配置 -->
+          <div v-if="engine.Name === 'mineru_cloud'" class="engine-form">
+            <div class="form-field">
+              <label>API Key</label>
+              <t-input
+                v-model="config.mineru_api_key"
+                type="password"
+                placeholder="MinerU 云服务 API Key"
+                clearable
+              />
+            </div>
+            <div class="form-field">
+              <label>API 地址</label>
+              <t-input
+                v-model="config.mineru_api_base_url"
+                placeholder="如 https://api.mineru.net"
+                clearable
+              />
+            </div>
+            <div class="form-field">
+              <label>Model Version</label>
+              <t-select v-model="config.mineru_cloud_model" placeholder="默认 pipeline" clearable>
+                <t-option value="pipeline" label="pipeline" />
+                <t-option value="vlm" label="vlm（视觉语言模型）" />
+                <t-option value="MinerU-HTML" label="MinerU-HTML（HTML 解析）" />
+              </t-select>
+            </div>
+            <div class="form-toggles">
+              <t-checkbox v-model="config.mineru_cloud_enable_formula">公式识别</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_table">表格识别</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
+            </div>
+            <div class="form-field">
+              <label>语言</label>
+              <t-input
+                v-model="config.mineru_cloud_language"
+                placeholder="如 ch、en、ja（默认 ch）"
+                clearable
+              />
             </div>
           </div>
         </div>
-      </div>
+      </template>
 
       <!-- 检测与保存 -->
       <div class="save-bar">
@@ -389,14 +385,13 @@ onMounted(loadAll)
   width: 100%;
 }
 
-// ---- 页面标题 ----
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333;
+    color: #1a1a1a;
     margin: 0 0 8px 0;
   }
 
@@ -404,11 +399,10 @@ onMounted(loadAll)
     font-size: 14px;
     color: #666;
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 }
 
-// ---- 加载 / 错误 ----
 .loading-state {
   display: flex;
   align-items: center;
@@ -423,10 +417,73 @@ onMounted(loadAll)
   padding: 16px 0;
 }
 
+.empty-state {
+  padding: 48px 0;
+  text-align: center;
+
+  .empty-text {
+    font-size: 14px;
+    color: #999;
+    margin: 0;
+  }
+}
+
+// ---- 引擎条目 ----
+.engine-item {
+  padding-top: 24px;
+  margin-top: 24px;
+  border-top: 1px solid #e5e7eb;
+
+  &.first {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+}
+
+.engine-item-header {
+  margin-bottom: 16px;
+
+  p {
+    font-size: 13px;
+    color: #888;
+    margin: 6px 0 0 0;
+    line-height: 1.5;
+  }
+}
+
+.engine-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0;
+    font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+  }
+}
+
+.engine-doc-link {
+  margin-left: auto;
+  font-size: 12px;
+  color: #999;
+  text-decoration: none;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--td-brand-color, #0052d9);
+  }
+}
+
+// ---- DocReader 连接信息 ----
 .docreader-inline {
-  padding: 10px 12px;
+  padding: 10px 14px;
   background: #f7f8fa;
-  border-radius: 6px;
+  border-radius: 8px;
+  margin-bottom: 12px;
 
   .status-line {
     margin-bottom: 6px;
@@ -447,18 +504,6 @@ onMounted(loadAll)
   }
 }
 
-.card-doc-link {
-  margin-left: auto;
-  font-size: 12px;
-  color: #999;
-  text-decoration: none;
-  white-space: nowrap;
-
-  &:hover {
-    color: var(--td-brand-color, #0052d9);
-  }
-}
-
 .status-line {
   display: flex;
   align-items: center;
@@ -471,121 +516,53 @@ onMounted(loadAll)
   color: #999;
 }
 
-// ---- 引擎列表 ----
-.engine-section {
-  margin-top: 0;
-}
-
-.engine-grid {
-  columns: 2;
-  column-gap: 12px;
-
-  @media (max-width: 860px) {
-    columns: 1;
-  }
-}
-
-.engine-card {
-  break-inside: avoid;
-  margin-bottom: 12px;
-  padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
-  transition: border-color 0.2s;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-
-  &:hover {
-    border-color: #c0c4cc;
-  }
-
-  &.unavailable {
-    background: #fafafa;
-  }
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.card-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: #333;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
-}
-
-.card-desc {
-  font-size: 13px;
-  color: #666;
-  margin: 0;
-  line-height: 1.5;
-}
-
-.card-types {
+// ---- 文件类型标签 ----
+.file-types {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
+  margin-bottom: 4px;
 }
 
-.card-reason {
-  font-size: 12px;
-  color: #e34d59;
-  margin: 0;
-}
-
-// ---- 卡片内配置区 ----
-.card-config {
-  margin-top: 4px;
-  padding-top: 12px;
+// ---- 配置表单 ----
+.engine-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px dashed #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
-.config-item {
+.form-field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 
   label {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     color: #555;
   }
 }
 
-.config-toggles {
+.form-toggles {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 16px;
 }
 
-// ---- 空状态 ----
-.empty-state {
-  padding: 48px 0;
-  text-align: center;
-
-  .empty-text {
-    font-size: 14px;
-    color: #999;
-    margin: 0;
-  }
-}
-
-// ---- 保存栏 ----
+// ---- 保存栏（sticky） ----
 .save-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid #e5e7eb;
+  position: sticky;
+  bottom: 0;
+  margin-top: 32px;
+  padding: 16px 0 4px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, #ffffff 12%);
+  z-index: 10;
 }
 
 .save-msg {

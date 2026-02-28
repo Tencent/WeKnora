@@ -3,7 +3,7 @@
     <div class="section-header">
       <h2>存储引擎</h2>
       <p class="section-description">
-        配置文档与图片的存储方式。此处设置各引擎参数，知识库中仅选择使用哪个引擎。存储引擎会影响文档上传存储以及文档内图片的存储。
+        配置文档与图片的存储方式。此处设置各引擎参数，知识库中仅选择使用哪个引擎。
       </p>
     </div>
 
@@ -21,344 +21,338 @@
     </div>
 
     <template v-else>
-      <div class="engine-section">
-        <div class="section-title-row">
-          <div class="section-title-info">
-            <h3>引擎配置</h3>
-            <p>为每种存储引擎配置参数，知识库创建或编辑时选择使用哪个引擎。</p>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-info">
+            <label>默认引擎</label>
+            <p class="desc">新建知识库时默认选用的存储引擎</p>
           </div>
-        </div>
-
-        <div class="engine-list">
-          <!-- Local -->
-          <div class="engine-block">
-            <div class="block-header">
-              <span class="block-name">Local（本地存储）</span>
-              <t-tag theme="success" variant="light" size="small">可用</t-tag>
-            </div>
-            <p class="block-desc">使用服务器本地文件系统存储文件，仅适合单机部署。</p>
-            <div class="block-config">
-              <div class="config-item">
-                <label>路径前缀（可选）</label>
-                <t-input
-                  v-model="config.local.path_prefix"
-                  size="small"
-                  placeholder="如 weknora/images"
-                  clearable
-                />
-              </div>
-            </div>
-          </div>
-
-          <!-- MinIO -->
-          <div class="engine-block">
-            <div class="block-header">
-              <span class="block-name">MinIO</span>
-              <t-tag v-if="minioAvailable" theme="success" variant="light" size="small">可用</t-tag>
-              <t-tag v-else theme="default" variant="light" size="small">需要配置</t-tag>
-            </div>
-            <p class="block-desc">S3 兼容的自托管对象存储，适合内网和私有云部署。</p>
-
-            <div class="minio-mode-tabs">
-              <div
-                :class="['mode-tab', { active: config.minio.mode !== 'remote' }]"
-                @click="config.minio.mode = 'docker'"
-              >
-                <span class="tab-label">Docker 部署</span>
-                <t-tag v-if="minioEnvAvailable" theme="success" variant="light" size="small">已检测</t-tag>
-                <t-tag v-else theme="default" variant="light" size="small">未检测到</t-tag>
-              </div>
-              <div
-                :class="['mode-tab', { active: config.minio.mode === 'remote' }]"
-                @click="config.minio.mode = 'remote'"
-              >
-                <span class="tab-label">远程 MinIO</span>
-              </div>
-            </div>
-
-            <!-- Docker mode -->
-            <div v-if="config.minio.mode !== 'remote'" class="minio-mode-content">
-              <p v-if="minioEnvAvailable" class="mode-hint success">
-                已检测到 Docker 部署的 MinIO 环境变量，连接信息（Endpoint、Access Key）由环境变量提供，无需手动填写。
-              </p>
-              <p v-else class="mode-hint warning">
-                未检测到 MinIO 环境变量（MINIO_ENDPOINT、MINIO_ACCESS_KEY_ID、MINIO_SECRET_ACCESS_KEY），请确认 Docker Compose 配置正确。
-              </p>
-              <div class="block-config">
-                <div class="config-item">
-                  <label>Bucket 名称</label>
-                  <t-select
-                    v-model="config.minio.bucket_name"
-                    size="small"
-                    filterable
-                    creatable
-                    placeholder="选择或输入 Bucket"
-                    :loading="loadingBuckets"
-                    :disabled="!minioEnvAvailable"
-                    @focus="loadMinioBuckets"
-                    style="width: 100%;"
-                  >
-                    <t-option
-                      v-for="b in minioBuckets"
-                      :key="b.name"
-                      :value="b.name"
-                      :label="b.name"
-                    />
-                  </t-select>
-                </div>
-                <div class="config-item config-item--inline">
-                  <label>Use SSL</label>
-                  <t-switch v-model="config.minio.use_ssl" size="small" />
-                </div>
-                <div class="config-item">
-                  <label>路径前缀（可选）</label>
-                  <t-input
-                    v-model="config.minio.path_prefix"
-                    size="small"
-                    placeholder="如 weknora"
-                    clearable
-                  />
-                </div>
-              </div>
-              <div v-if="minioEnvAvailable" class="check-bar">
-                <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
-                <span v-if="minioCheckResult" :class="['check-msg', minioCheckResult.ok ? 'success' : 'error']">
-                  {{ minioCheckResult.message }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Remote mode -->
-            <div v-else class="minio-mode-content">
-              <p class="mode-hint">连接到远程 MinIO 服务，需要手动填写连接信息。</p>
-              <div class="block-config">
-                <div class="config-item">
-                  <label>Endpoint</label>
-                  <t-input
-                    v-model="config.minio.endpoint"
-                    size="small"
-                    placeholder="如 minio.example.com:9000"
-                    clearable
-                  />
-                </div>
-                <div class="config-item">
-                  <label>Access Key ID</label>
-                  <t-input
-                    v-model="config.minio.access_key_id"
-                    size="small"
-                    placeholder="MinIO Access Key"
-                    clearable
-                  />
-                </div>
-                <div class="config-item">
-                  <label>Secret Access Key</label>
-                  <t-input
-                    v-model="config.minio.secret_access_key"
-                    size="small"
-                    type="password"
-                    placeholder="MinIO Secret Key"
-                    clearable
-                  />
-                </div>
-                <div class="config-item">
-                  <label>Bucket 名称</label>
-                  <t-input
-                    v-model="config.minio.bucket_name"
-                    size="small"
-                    placeholder="存储桶名称"
-                    clearable
-                  />
-                </div>
-                <div class="config-item config-item--inline">
-                  <label>Use SSL</label>
-                  <t-switch v-model="config.minio.use_ssl" size="small" />
-                </div>
-                <div class="config-item">
-                  <label>路径前缀（可选）</label>
-                  <t-input
-                    v-model="config.minio.path_prefix"
-                    size="small"
-                    placeholder="如 weknora"
-                    clearable
-                  />
-                </div>
-              </div>
-              <div class="check-bar">
-                <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
-                <span v-if="minioCheckResult" :class="['check-msg', minioCheckResult.ok ? 'success' : 'error']">
-                  {{ minioCheckResult.message }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <!-- COS -->
-          <div class="engine-block">
-            <div class="block-header">
-              <span class="block-name">腾讯云 COS</span>
-              <t-tag theme="success" variant="light" size="small">可配置</t-tag>
-            </div>
-            <p class="block-desc">腾讯云对象存储服务，适合公有云部署，支持 CDN 加速。<a class="engine-link" href="https://console.cloud.tencent.com/cos" target="_blank" rel="noopener">控制台</a> · <a class="engine-link" href="https://cloud.tencent.com/document/product/436" target="_blank" rel="noopener">文档</a></p>
-            <div class="block-config">
-              <div class="config-item">
-                <label>Secret ID</label>
-                <t-input
-                  v-model="config.cos.secret_id"
-                  size="small"
-                  placeholder="腾讯云 API 密钥 SecretId"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Secret Key</label>
-                <t-input
-                  v-model="config.cos.secret_key"
-                  size="small"
-                  type="password"
-                  placeholder="腾讯云 API 密钥 SecretKey"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Region</label>
-                <t-input
-                  v-model="config.cos.region"
-                  size="small"
-                  placeholder="如 ap-guangzhou"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Bucket 名称</label>
-                <t-input
-                  v-model="config.cos.bucket_name"
-                  size="small"
-                  placeholder="存储桶名称"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>App ID</label>
-                <t-input
-                  v-model="config.cos.app_id"
-                  size="small"
-                  placeholder="腾讯云账号 AppID"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>路径前缀（可选）</label>
-                <t-input
-                  v-model="config.cos.path_prefix"
-                  size="small"
-                  placeholder="如 weknora"
-                  clearable
-                />
-              </div>
-            </div>
-            <div class="check-bar">
-              <t-button size="small" variant="outline" :loading="checkingCos" @click="onCheckCos">测试连接</t-button>
-              <span v-if="cosCheckResult" :class="['check-msg', cosCheckResult.ok ? 'success' : 'error']">
-                {{ cosCheckResult.message }}
-              </span>
-            </div>
-          </div>
-
-          <!-- TOS -->
-          <div class="engine-block">
-            <div class="block-header">
-              <span class="block-name">火山引擎 TOS</span>
-              <t-tag theme="success" variant="light" size="small">可配置</t-tag>
-            </div>
-            <p class="block-desc">火山引擎对象存储服务（TOS），适合公有云部署。<a class="engine-link" href="https://console.volcengine.com/tos" target="_blank" rel="noopener">控制台</a> · <a class="engine-link" href="https://www.volcengine.com/docs/6349" target="_blank" rel="noopener">文档</a></p>
-            <div class="block-config">
-              <div class="config-item">
-                <label>Endpoint</label>
-                <t-input
-                  v-model="config.tos.endpoint"
-                  size="small"
-                  placeholder="如 https://tos-cn-beijing.volces.com"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Region</label>
-                <t-input
-                  v-model="config.tos.region"
-                  size="small"
-                  placeholder="如 cn-beijing"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Access Key</label>
-                <t-input
-                  v-model="config.tos.access_key"
-                  size="small"
-                  placeholder="火山引擎 Access Key"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Secret Key</label>
-                <t-input
-                  v-model="config.tos.secret_key"
-                  size="small"
-                  type="password"
-                  placeholder="火山引擎 Secret Key"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>Bucket 名称</label>
-                <t-input
-                  v-model="config.tos.bucket_name"
-                  size="small"
-                  placeholder="存储桶名称"
-                  clearable
-                />
-              </div>
-              <div class="config-item">
-                <label>路径前缀（可选）</label>
-                <t-input
-                  v-model="config.tos.path_prefix"
-                  size="small"
-                  placeholder="如 weknora"
-                  clearable
-                />
-              </div>
-            </div>
-            <div class="check-bar">
-              <t-button size="small" variant="outline" :loading="checkingTos" @click="onCheckTos">测试连接</t-button>
-              <span v-if="tosCheckResult" :class="['check-msg', tosCheckResult.ok ? 'success' : 'error']">
-                {{ tosCheckResult.message }}
-              </span>
-            </div>
+          <div class="setting-control">
+            <t-select v-model="config.default_provider" style="width: 280px;">
+              <t-option value="local" label="Local（本地）" />
+              <t-option value="minio" label="MinIO" />
+              <t-option value="cos" label="腾讯云 COS" />
+              <t-option value="tos" label="火山引擎 TOS" />
+            </t-select>
           </div>
         </div>
       </div>
 
-      <div class="default-and-save">
-        <div class="default-row">
-          <label>默认引擎</label>
-          <t-select
-            v-model="config.default_provider"
-            size="small"
-            style="width: 200px;"
-          >
-            <t-option value="local" label="Local（本地）" />
-            <t-option value="minio" label="MinIO" />
-            <t-option value="cos" label="腾讯云 COS" />
-            <t-option value="tos" label="火山引擎 TOS" />
-          </t-select>
-          <span class="hint">新建知识库时默认选用的存储引擎</span>
+      <!-- Local -->
+      <div class="engine-section" data-model-type="local">
+        <div class="engine-header">
+          <div class="engine-header-info">
+            <div class="engine-title-row">
+              <h3>Local（本地存储）</h3>
+              <t-tag theme="success" variant="light" size="small">可用</t-tag>
+            </div>
+            <p>使用服务器本地文件系统存储文件，仅适合单机部署。</p>
+          </div>
         </div>
-        <div class="save-bar">
-          <t-button theme="primary" :loading="saving" @click="onSave">保存配置</t-button>
-          <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
-            {{ saveMessage }}
+        <div class="engine-form">
+          <div class="form-field">
+            <label>路径前缀（可选）</label>
+            <t-input
+              v-model="config.local.path_prefix"
+              placeholder="如 weknora/images"
+              clearable
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- MinIO -->
+      <div class="engine-section" data-model-type="minio">
+        <div class="engine-header">
+          <div class="engine-header-info">
+            <div class="engine-title-row">
+              <h3>MinIO</h3>
+              <t-tag v-if="minioAvailable" theme="success" variant="light" size="small">可用</t-tag>
+              <t-tag v-else theme="default" variant="light" size="small">需要配置</t-tag>
+            </div>
+            <p>S3 兼容的自托管对象存储，适合内网和私有云部署。</p>
+          </div>
+        </div>
+
+        <div class="mode-selector">
+          <div
+            :class="['mode-option', { active: config.minio.mode !== 'remote' }]"
+            @click="config.minio.mode = 'docker'"
+          >
+            <span class="mode-label">Docker 部署</span>
+            <t-tag v-if="minioEnvAvailable" theme="success" variant="light" size="small">已检测</t-tag>
+            <t-tag v-else theme="default" variant="light" size="small">未检测到</t-tag>
+          </div>
+          <div
+            :class="['mode-option', { active: config.minio.mode === 'remote' }]"
+            @click="config.minio.mode = 'remote'"
+          >
+            <span class="mode-label">远程 MinIO</span>
+          </div>
+        </div>
+
+        <!-- Docker mode -->
+        <div v-if="config.minio.mode !== 'remote'">
+          <div v-if="minioEnvAvailable" class="engine-hint success">
+            已检测到 Docker 部署的 MinIO 环境变量，连接信息由环境变量提供，无需手动填写。
+          </div>
+          <div v-else class="engine-hint warning">
+            未检测到 MinIO 环境变量（MINIO_ENDPOINT 等），请确认 Docker Compose 配置正确。
+          </div>
+          <div class="engine-form">
+            <div class="form-field">
+              <label>Bucket 名称</label>
+              <t-select
+                v-model="config.minio.bucket_name"
+                filterable
+                creatable
+                placeholder="选择或输入 Bucket"
+                :loading="loadingBuckets"
+                :disabled="!minioEnvAvailable"
+                @focus="loadMinioBuckets"
+              >
+                <t-option
+                  v-for="b in minioBuckets"
+                  :key="b.name"
+                  :value="b.name"
+                  :label="b.name"
+                />
+              </t-select>
+            </div>
+            <div class="form-field form-field--inline">
+              <label>Use SSL</label>
+              <t-switch v-model="config.minio.use_ssl" size="small" />
+            </div>
+            <div class="form-field">
+              <label>路径前缀（可选）</label>
+              <t-input
+                v-model="config.minio.path_prefix"
+                placeholder="如 weknora"
+                clearable
+              />
+            </div>
+          </div>
+          <div v-if="minioEnvAvailable" class="test-bar">
+            <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
+            <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? 'success' : 'error']">
+              {{ minioCheckResult.message }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Remote mode -->
+        <div v-else>
+          <div class="engine-hint">连接到远程 MinIO 服务，需要手动填写连接信息。</div>
+          <div class="engine-form">
+            <div class="form-field">
+              <label>Endpoint</label>
+              <t-input
+                v-model="config.minio.endpoint"
+                placeholder="如 minio.example.com:9000"
+                clearable
+              />
+            </div>
+            <div class="form-field">
+              <label>Access Key ID</label>
+              <t-input
+                v-model="config.minio.access_key_id"
+                placeholder="MinIO Access Key"
+                clearable
+              />
+            </div>
+            <div class="form-field">
+              <label>Secret Access Key</label>
+              <t-input
+                v-model="config.minio.secret_access_key"
+                type="password"
+                placeholder="MinIO Secret Key"
+                clearable
+              />
+            </div>
+            <div class="form-field">
+              <label>Bucket 名称</label>
+              <t-input
+                v-model="config.minio.bucket_name"
+                placeholder="存储桶名称"
+                clearable
+              />
+            </div>
+            <div class="form-field form-field--inline">
+              <label>Use SSL</label>
+              <t-switch v-model="config.minio.use_ssl" size="small" />
+            </div>
+            <div class="form-field">
+              <label>路径前缀（可选）</label>
+              <t-input
+                v-model="config.minio.path_prefix"
+                placeholder="如 weknora"
+                clearable
+              />
+            </div>
+          </div>
+          <div class="test-bar">
+            <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
+            <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? 'success' : 'error']">
+              {{ minioCheckResult.message }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- COS -->
+      <div class="engine-section" data-model-type="cos">
+        <div class="engine-header">
+          <div class="engine-header-info">
+            <div class="engine-title-row">
+              <h3>腾讯云 COS</h3>
+              <t-tag theme="success" variant="light" size="small">可配置</t-tag>
+            </div>
+            <p>
+              腾讯云对象存储服务，适合公有云部署，支持 CDN 加速。
+              <a class="engine-link" href="https://console.cloud.tencent.com/cos" target="_blank" rel="noopener">控制台 ↗</a>
+              <a class="engine-link" href="https://cloud.tencent.com/document/product/436" target="_blank" rel="noopener">文档 ↗</a>
+            </p>
+          </div>
+        </div>
+        <div class="engine-form">
+          <div class="form-field">
+            <label>Secret ID</label>
+            <t-input
+              v-model="config.cos.secret_id"
+              placeholder="腾讯云 API 密钥 SecretId"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Secret Key</label>
+            <t-input
+              v-model="config.cos.secret_key"
+              type="password"
+              placeholder="腾讯云 API 密钥 SecretKey"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Region</label>
+            <t-input
+              v-model="config.cos.region"
+              placeholder="如 ap-guangzhou"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Bucket 名称</label>
+            <t-input
+              v-model="config.cos.bucket_name"
+              placeholder="存储桶名称"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>App ID</label>
+            <t-input
+              v-model="config.cos.app_id"
+              placeholder="腾讯云账号 AppID"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>路径前缀（可选）</label>
+            <t-input
+              v-model="config.cos.path_prefix"
+              placeholder="如 weknora"
+              clearable
+            />
+          </div>
+        </div>
+        <div class="test-bar">
+          <t-button size="small" variant="outline" :loading="checkingCos" @click="onCheckCos">测试连接</t-button>
+          <span v-if="cosCheckResult" :class="['test-msg', cosCheckResult.ok ? 'success' : 'error']">
+            {{ cosCheckResult.message }}
           </span>
         </div>
+      </div>
+
+      <!-- TOS -->
+      <div class="engine-section" data-model-type="tos">
+        <div class="engine-header">
+          <div class="engine-header-info">
+            <div class="engine-title-row">
+              <h3>火山引擎 TOS</h3>
+              <t-tag theme="success" variant="light" size="small">可配置</t-tag>
+            </div>
+            <p>
+              火山引擎对象存储服务（TOS），适合公有云部署。
+              <a class="engine-link" href="https://console.volcengine.com/tos" target="_blank" rel="noopener">控制台 ↗</a>
+              <a class="engine-link" href="https://www.volcengine.com/docs/6349" target="_blank" rel="noopener">文档 ↗</a>
+            </p>
+          </div>
+        </div>
+        <div class="engine-form">
+          <div class="form-field">
+            <label>Endpoint</label>
+            <t-input
+              v-model="config.tos.endpoint"
+              placeholder="如 https://tos-cn-beijing.volces.com"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Region</label>
+            <t-input
+              v-model="config.tos.region"
+              placeholder="如 cn-beijing"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Access Key</label>
+            <t-input
+              v-model="config.tos.access_key"
+              placeholder="火山引擎 Access Key"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Secret Key</label>
+            <t-input
+              v-model="config.tos.secret_key"
+              type="password"
+              placeholder="火山引擎 Secret Key"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Bucket 名称</label>
+            <t-input
+              v-model="config.tos.bucket_name"
+              placeholder="存储桶名称"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>路径前缀（可选）</label>
+            <t-input
+              v-model="config.tos.path_prefix"
+              placeholder="如 weknora"
+              clearable
+            />
+          </div>
+        </div>
+        <div class="test-bar">
+          <t-button size="small" variant="outline" :loading="checkingTos" @click="onCheckTos">测试连接</t-button>
+          <span v-if="tosCheckResult" :class="['test-msg', tosCheckResult.ok ? 'success' : 'error']">
+            {{ tosCheckResult.message }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Save -->
+      <div class="save-bar">
+        <t-button theme="primary" :loading="saving" @click="onSave">保存配置</t-button>
+        <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
+          {{ saveMessage }}
+        </span>
       </div>
     </template>
   </div>
@@ -624,121 +618,143 @@ onMounted(loadAll)
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333;
+    color: #333333;
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666;
+    color: #666666;
     margin: 0;
     line-height: 1.5;
   }
-}
-
-.loading-state,
-.error-inline {
-  padding: 24px 0;
 }
 
 .loading-state {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  color: #999;
+  padding: 48px 0;
+  color: #999999;
+  font-size: 14px;
 }
 
-.engine-section {
-  margin-top: 0;
+.error-inline {
+  padding: 16px 0;
 }
 
-.section-title-row {
-  margin-bottom: 20px;
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
 
-  h3 {
-    font-size: 17px;
-    font-weight: 600;
-    color: #333;
-    margin: 0 0 6px 0;
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 0;
+  border-bottom: 1px solid #e5e7eb;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.setting-info {
+  flex: 1;
+  max-width: 65%;
+  padding-right: 24px;
+
+  label {
+    font-size: 15px;
+    font-weight: 500;
+    color: #333333;
+    display: block;
+    margin-bottom: 4px;
   }
 
-  p {
+  .desc {
     font-size: 13px;
-    color: #999;
+    color: #666666;
     margin: 0;
     line-height: 1.5;
   }
 }
 
-.engine-list {
+.setting-control {
+  flex-shrink: 0;
+  min-width: 280px;
   display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.engine-block {
-  padding: 20px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fff;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.block-header {
-  display: flex;
+  justify-content: flex-end;
   align-items: center;
-  gap: 10px;
 }
 
-.block-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
+.engine-section {
+  margin-top: 32px;
+  padding-top: 32px;
+  border-top: 1px solid #e5e7eb;
 }
 
-.block-desc {
-  font-size: 13px;
-  color: #666;
-  margin: 0;
-  line-height: 1.5;
+.engine-header {
+  margin-bottom: 16px;
+}
+
+.engine-header-info {
+  .engine-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+
+    h3 {
+      font-size: 17px;
+      font-weight: 600;
+      color: #333333;
+      margin: 0;
+    }
+  }
+
+  p {
+    font-size: 13px;
+    color: #999999;
+    margin: 0;
+    line-height: 1.5;
+  }
 }
 
 .engine-link {
-  color: var(--td-brand-color, #0052d9);
+  color: #999999;
   text-decoration: none;
   margin-left: 4px;
 
   &:hover {
-    text-decoration: underline;
+    color: #07C05F;
   }
 }
 
-.block-config {
-  margin-top: 6px;
-  padding-top: 14px;
-  border-top: 1px dashed #e5e7eb;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px 24px;
-}
-
-.config-item {
+.engine-form {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 16px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 
   label {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
-    color: #555;
+    color: #555555;
   }
 
   &--inline {
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
 
     label {
       flex-shrink: 0;
@@ -746,22 +762,21 @@ onMounted(loadAll)
   }
 }
 
-// ---- MinIO mode tabs ----
-.minio-mode-tabs {
+.mode-selector {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+  margin-bottom: 16px;
 }
 
-.mode-tab {
+.mode-option {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s;
   background: #fafafa;
 
   &:hover {
@@ -769,67 +784,50 @@ onMounted(loadAll)
   }
 
   &.active {
-    border-color: var(--td-brand-color, #0052d9);
-    background: var(--td-brand-color-light, #f0f5ff);
+    border-color: #07C05F;
+    background: rgba(7, 192, 95, 0.06);
   }
 
-  .tab-label {
+  .mode-label {
     font-size: 13px;
     font-weight: 500;
-    color: #333;
+    color: #333333;
   }
 }
 
-.minio-mode-content {
-  margin-top: 4px;
-}
-
-.mode-hint {
+.engine-hint {
   font-size: 13px;
-  color: #666;
-  margin: 0 0 4px 0;
-  line-height: 1.5;
+  color: #666666;
+  line-height: 1.6;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  background: #f8f9fa;
+  border: 1px solid #e5e7eb;
 
   &.success {
-    color: #52c41a;
+    color: #333333;
+    background: #f0fdf6;
+    border-color: #d1fae5;
   }
 
   &.warning {
-    color: #e6a23c;
+    color: #333333;
+    background: #fffbeb;
+    border-color: #fde68a;
   }
 }
 
-.default-and-save {
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.default-row {
+.test-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
-
-  label {
-    font-size: 14px;
-    font-weight: 500;
-    color: #333;
-  }
-
-  .hint {
-    font-size: 13px;
-    color: #999;
-  }
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f0f0f0;
 }
 
-.save-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.save-msg {
+.test-msg {
   font-size: 13px;
 
   &.success {
@@ -841,16 +839,19 @@ onMounted(loadAll)
   }
 }
 
-.check-bar {
+.save-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed #f0f0f0;
+  gap: 12px;
+  position: sticky;
+  bottom: 0;
+  margin-top: 32px;
+  padding: 16px 0 4px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, #ffffff 12%);
+  z-index: 10;
 }
 
-.check-msg {
+.save-msg {
   font-size: 13px;
 
   &.success {

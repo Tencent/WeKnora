@@ -172,8 +172,29 @@ const navItems = computed(() => [
   },
   { key: 'ollama', icon: 'server', label: 'Ollama' },
   { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
-  { key: 'parser', icon: 'file-search', label: '解析引擎' },
-  { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
+  {
+    key: 'parser',
+    icon: 'file-search',
+    label: '解析引擎',
+    children: [
+      { key: 'builtin', label: 'Builtin (DocReader)' },
+      { key: 'simple', label: 'Simple' },
+      { key: 'markitdown', label: 'Markitdown' },
+      { key: 'mineru', label: 'MinerU' },
+      { key: 'mineru_cloud', label: 'MinerU Cloud' },
+    ]
+  },
+  {
+    key: 'storage',
+    icon: 'cloud',
+    label: t('settings.storageEngine'),
+    children: [
+      { key: 'local', label: 'Local' },
+      { key: 'minio', label: 'MinIO' },
+      { key: 'cos', label: '腾讯云 COS' },
+      { key: 'tos', label: '火山引擎 TOS' },
+    ]
+  },
   { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
   { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
   { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
