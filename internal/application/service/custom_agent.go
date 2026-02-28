@@ -46,7 +46,7 @@ func (s *customAgentService) CreateAgent(ctx context.Context, agent *types.Custo
 	}
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil, ErrInvalidTenantID
 	}
@@ -90,7 +90,7 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 	}
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil, ErrInvalidTenantID
 	}
@@ -142,7 +142,7 @@ func (s *customAgentService) GetAgentByIDAndTenant(ctx context.Context, id strin
 
 // ListAgents lists all agents for the current tenant (including built-in agents)
 func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAgent, error) {
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil, ErrInvalidTenantID
 	}
@@ -204,7 +204,7 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	}
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil, ErrInvalidTenantID
 	}
@@ -330,7 +330,7 @@ func (s *customAgentService) DeleteAgent(ctx context.Context, id string) error {
 	}
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return ErrInvalidTenantID
 	}
@@ -370,7 +370,7 @@ func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.C
 	}
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil, ErrInvalidTenantID
 	}

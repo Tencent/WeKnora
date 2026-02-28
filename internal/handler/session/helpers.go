@@ -215,7 +215,7 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 // It prioritizes tenant-level ConversationConfig, then falls back to config.yaml defaults
 func (h *Handler) createDefaultSummaryConfig(ctx context.Context) *types.SummaryConfig {
 	// Try to get tenant from context
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 
 	// Initialize with config.yaml defaults
 	cfg := &types.SummaryConfig{
@@ -259,7 +259,7 @@ func (h *Handler) createDefaultSummaryConfig(ctx context.Context) *types.Summary
 // It prioritizes tenant-level ConversationConfig, then falls back to config.yaml defaults
 func (h *Handler) fillSummaryConfigDefaults(ctx context.Context, config *types.SummaryConfig) {
 	// Try to get tenant from context
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 
 	// Determine default values: tenant config first, then config.yaml
 	var defaultPrompt, defaultContextTemplate, defaultNoMatchPrefix string

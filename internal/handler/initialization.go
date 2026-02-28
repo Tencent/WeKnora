@@ -1912,7 +1912,7 @@ func (h *InitializationHandler) testMultimodalWithDocReader(
 		return nil, fmt.Errorf("DocReader service not configured")
 	}
 
-	requestID, _ := ctx.Value(types.RequestIDContextKey).(string)
+	requestID, _ := types.RequestIDFromContext(ctx)
 
 	readResult, err := h.documentReader.Read(ctx, &types.ReadRequest{
 		FileContent: imageContent,

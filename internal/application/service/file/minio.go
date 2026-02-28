@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -89,6 +90,27 @@ func CheckMinioConnectivity(ctx context.Context, endpoint, accessKeyID, secretAc
 	return svc.CheckConnectivity(ctx)
 }
 
+// parseMinioFilePath extracts the object name from a "minio://bucket/key" path,
+// validates the bucket matches this service instance, and checks for path traversal.
+func (s *minioFileService) parseMinioFilePath(filePath string) (string, error) {
+	const prefix = "minio://"
+	if !strings.HasPrefix(filePath, prefix) {
+		return "", fmt.Errorf("invalid MinIO file path: %s", filePath)
+	}
+	rest := strings.TrimPrefix(filePath, prefix)
+	parts := strings.SplitN(rest, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", fmt.Errorf("invalid MinIO file path: %s", filePath)
+	}
+	if parts[0] != s.bucketName {
+		return "", fmt.Errorf("bucket mismatch in path: got %s, want %s", parts[0], s.bucketName)
+	}
+	if err := utils.SafeObjectKey(parts[1]); err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
+	}
+	return parts[1], nil
+}
+
 // SaveFile saves a file to MinIO
 func (s *minioFileService) SaveFile(ctx context.Context,
 	file *multipart.FileHeader, tenantID uint64, knowledgeID string,
@@ -118,55 +140,28 @@ func (s *minioFileService) SaveFile(ctx context.Context,
 
 // GetFile gets a file from MinIO
 func (s *minioFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	// Parse MinIO path
-	// Format: minio://bucketName/objectName
-	if len(filePath) < 9 || filePath[:8] != "minio://" {
-		return nil, fmt.Errorf("invalid MinIO file path: %s", filePath)
+	objectName, err := s.parseMinioFilePath(filePath)
+	if err != nil {
+		return nil, err
 	}
-
-	// Extract object name
-	objectName := filePath[9+len(s.bucketName):]
-	if len(objectName) > 0 && objectName[0] == '/' {
-		objectName = objectName[1:]
-	}
-	if err := utils.SafeObjectKey(objectName); err != nil {
-		return nil, fmt.Errorf("invalid file path: %w", err)
-	}
-
-	// Get object
 	obj, err := s.client.GetObject(ctx, s.bucketName, objectName, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file from MinIO: %w", err)
 	}
-
 	return obj, nil
 }
 
 // DeleteFile deletes a file
 func (s *minioFileService) DeleteFile(ctx context.Context, filePath string) error {
-	// Parse MinIO path
-	// Format: minio://bucketName/objectName
-	if len(filePath) < 9 || filePath[:8] != "minio://" {
-		return fmt.Errorf("invalid MinIO file path: %s", filePath)
-	}
-
-	// Extract object name
-	objectName := filePath[9+len(s.bucketName):]
-	if len(objectName) > 0 && objectName[0] == '/' {
-		objectName = objectName[1:]
-	}
-	if err := utils.SafeObjectKey(objectName); err != nil {
-		return fmt.Errorf("invalid file path: %w", err)
-	}
-
-	// Delete object
-	err := s.client.RemoveObject(ctx, s.bucketName, objectName, minio.RemoveObjectOptions{
-		GovernanceBypass: true,
-	})
+	objectName, err := s.parseMinioFilePath(filePath)
 	if err != nil {
+		return err
+	}
+	if err := s.client.RemoveObject(ctx, s.bucketName, objectName, minio.RemoveObjectOptions{
+		GovernanceBypass: true,
+	}); err != nil {
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
-
 	return nil
 }
 
@@ -194,25 +189,13 @@ func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 
 // GetFileURL returns a presigned download URL for the file
 func (s *minioFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	// Parse MinIO path
-	if len(filePath) < 9 || filePath[:8] != "minio://" {
-		return "", fmt.Errorf("invalid MinIO file path: %s", filePath)
+	objectName, err := s.parseMinioFilePath(filePath)
+	if err != nil {
+		return "", err
 	}
-
-	// Extract object name
-	objectName := filePath[9+len(s.bucketName):]
-	if len(objectName) > 0 && objectName[0] == '/' {
-		objectName = objectName[1:]
-	}
-	if err := utils.SafeObjectKey(objectName); err != nil {
-		return "", fmt.Errorf("invalid file path: %w", err)
-	}
-
-	// Generate presigned URL (valid for 24 hours)
 	presignedURL, err := s.client.PresignedGetObject(ctx, s.bucketName, objectName, 24*time.Hour, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
 	}
-
 	return presignedURL.String(), nil
 }

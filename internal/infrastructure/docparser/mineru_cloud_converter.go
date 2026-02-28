@@ -297,7 +297,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	// Pretty-print the structure to reveal all available fields
 	var rawObj interface{}
 	if err := json.Unmarshal(pollResp.Data.ExtractResult, &rawObj); err == nil {
-		logCloudResponseStructure(rawObj, "extract_result")
+		logResponseStructure("MinerUCloud", rawObj, "extract_result")
 	}
 
 	// The extract_result can be either a single object or an array
@@ -472,68 +472,7 @@ func readZipEntryBytes(f *zip.File) ([]byte, error) {
 	return io.ReadAll(rc)
 }
 
-// logCloudResponseStructure recursively logs the structure of the Cloud API response,
-// truncating large string values to reveal all available fields (e.g. caption, bbox, etc.).
-func logCloudResponseStructure(obj interface{}, prefix string) {
-	switch v := obj.(type) {
-	case map[string]interface{}:
-		keys := make([]string, 0, len(v))
-		for k := range v {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		logger.Printf("DEBUG: [MinerUCloud] %s = {object with %d keys: %s}", prefix, len(v), strings.Join(keys, ", "))
-		for _, key := range keys {
-			val := v[key]
-			path := prefix + "." + key
-			switch inner := val.(type) {
-			case map[string]interface{}:
-				logCloudResponseStructure(inner, path)
-			case []interface{}:
-				logger.Printf("DEBUG: [MinerUCloud] %s = [array with %d items]", path, len(inner))
-				if len(inner) > 0 {
-					logger.Printf("DEBUG: [MinerUCloud] %s[0] type=%T", path, inner[0])
-					if len(inner) <= 3 {
-						for i, item := range inner {
-							logCloudResponseStructure(item, fmt.Sprintf("%s[%d]", path, i))
-						}
-					} else {
-						logCloudResponseStructure(inner[0], path+"[0]")
-						logger.Printf("DEBUG: [MinerUCloud] ... and %d more items in %s", len(inner)-1, path)
-					}
-				}
-			case string:
-				if len(inner) > 200 {
-					logger.Printf("DEBUG: [MinerUCloud] %s = string(%d chars): %.200s...", path, len(inner), inner)
-				} else {
-					logger.Printf("DEBUG: [MinerUCloud] %s = %q", path, inner)
-				}
-			case float64:
-				logger.Printf("DEBUG: [MinerUCloud] %s = %v (number)", path, inner)
-			case bool:
-				logger.Printf("DEBUG: [MinerUCloud] %s = %v (bool)", path, inner)
-			case nil:
-				logger.Printf("DEBUG: [MinerUCloud] %s = null", path)
-			default:
-				logger.Printf("DEBUG: [MinerUCloud] %s = %v (%T)", path, val, val)
-			}
-		}
-	case []interface{}:
-		logger.Printf("DEBUG: [MinerUCloud] %s = [array with %d items]", prefix, len(v))
-		if len(v) > 0 {
-			if len(v) <= 3 {
-				for i, item := range v {
-					logCloudResponseStructure(item, fmt.Sprintf("%s[%d]", prefix, i))
-				}
-			} else {
-				logCloudResponseStructure(v[0], prefix+"[0]")
-				logger.Printf("DEBUG: [MinerUCloud] ... and %d more items in %s", len(v)-1, prefix)
-			}
-		}
-	default:
-		logger.Printf("DEBUG: [MinerUCloud] %s = %v (%T)", prefix, v, v)
-	}
-}
+// logCloudResponseStructure is now unified in helpers.go as logResponseStructure("MinerUCloud", ...)
 
 // PingMinerUCloud checks if the MinerU Cloud API is reachable with the given API key.
 func PingMinerUCloud(apiKey, baseURL string) (bool, string) {
@@ -568,22 +507,4 @@ func PingMinerUCloud(apiKey, baseURL string) (bool, string) {
 	return true, ""
 }
 
-// --- helpers ---
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func sleepCtx(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
-	}
-}
+// firstNonEmpty, sleepCtx are defined in helpers.go

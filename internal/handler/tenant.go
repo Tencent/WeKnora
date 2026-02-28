@@ -439,7 +439,7 @@ type AgentConfigRequest struct {
 // @Router       /tenants/kv/agent-config [get]
 func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -529,7 +529,7 @@ func (h *TenantHandler) updateTenantAgentConfigInternal(c *gin.Context) {
 	}
 
 	// Get existing tenant
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -670,7 +670,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 		return
 	}
 
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -711,7 +711,7 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	logger.Info(ctx, "Start getting tenant web search config")
 	// Get tenant
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -728,7 +728,7 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 // GetTenantParserEngineConfig returns the tenant's parser engine config (MinerU endpoint, API key, etc.).
 func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -753,7 +753,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -780,7 +780,7 @@ func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
 // GetTenantStorageEngineConfig returns the tenant's storage engine config (Local, MinIO, COS parameters).
 func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -805,7 +805,7 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -897,7 +897,7 @@ func validateConversationConfig(req *types.ConversationConfig) error {
 // @Router       /tenants/kv/conversation-config [get]
 func (h *TenantHandler) GetTenantConversationConfig(c *gin.Context) {
 	ctx := c.Request.Context()
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))
@@ -934,7 +934,7 @@ func (h *TenantHandler) updateTenantConversationInternal(c *gin.Context) {
 	}
 
 	// Get existing tenant
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
 		c.Error(errors.NewBadRequestError("Tenant is empty"))

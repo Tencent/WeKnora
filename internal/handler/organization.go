@@ -1225,7 +1225,7 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	userID := c.GetString(types.UserIDContextKey.String())
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	sharedKBs, err := h.shareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
 	if err != nil {

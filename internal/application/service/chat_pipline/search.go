@@ -503,7 +503,7 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil {
 		return nil
 	}
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil || tenant.WebSearchConfig == nil || tenant.WebSearchConfig.Provider == "" {
 		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,

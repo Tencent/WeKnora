@@ -114,7 +114,7 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	}
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Retrieving session, ID: %s, tenant ID: %d", id, tenantID)
 
 	// Get session from repository
@@ -134,7 +134,7 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 // GetSessionsByTenant retrieves all sessions for the current tenant
 func (s *sessionService) GetSessionsByTenant(ctx context.Context) ([]*types.Session, error) {
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Retrieving all sessions for tenant, tenant ID: %d", tenantID)
 
 	// Get sessions from repository
@@ -157,7 +157,7 @@ func (s *sessionService) GetPagedSessionsByTenant(ctx context.Context,
 	pagination *types.Pagination,
 ) (*types.PageResult, error) {
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	// Get paged sessions from repository
 	sessions, total, err := s.sessionRepo.GetPagedByTenantID(ctx, tenantID, pagination)
 	if err != nil {
@@ -203,7 +203,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	}
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Cleanup temporary KB stored in Redis for this session
 	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
@@ -236,7 +236,7 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Cleanup associated resources for each session
 	for _, id := range ids {
@@ -643,7 +643,7 @@ func (s *sessionService) KnowledgeQA(
 	)
 
 	// Get UserID from context
-	userID, _ := ctx.Value(types.UserIDContextKey).(string)
+	userID, _ := types.UserIDFromContext(ctx)
 
 	chatManage := &types.ChatManage{
 		Query:                query,
@@ -790,7 +790,7 @@ func (s *sessionService) selectChatModelID(
 ) (string, error) {
 	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
-		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+		tenantID := types.MustTenantIDFromContext(ctx)
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
@@ -899,7 +899,7 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 		// unrelated KBs from other organisations into the agent's retrieval scope.
 		isSharedAgent := sessionTenantID != 0 && sessionTenantID != customAgent.TenantID
 		if !isSharedAgent {
-			tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+			tenantID := types.MustTenantIDFromContext(ctx)
 			userIDVal := ctx.Value(types.UserIDContextKey)
 			if userIDVal != nil {
 				if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
@@ -1021,7 +1021,7 @@ func (s *sessionService) buildSearchTargets(
 				kbByID[kb.ID] = kb
 			}
 		}
-		userID, _ := ctx.Value(types.UserIDContextKey).(string)
+		userID, _ := types.UserIDFromContext(ctx)
 		for _, kbID := range knowledgeBaseIDs {
 			fullKBSet[kbID] = true
 			kb := kbByID[kbID]
@@ -1114,7 +1114,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	// Set up tracing attributes
 	logger.Infof(ctx, "Trigger event list: %v", methods)
 	span.SetAttributes(
-		attribute.String("request_id", ctx.Value(types.RequestIDContextKey).(string)),
+		attribute.String("request_id", func() string { id, _ := types.RequestIDFromContext(ctx); return id }()),
 		attribute.String("query", chatManage.Query),
 		attribute.String("method", strings.Join(methods, ",")),
 	)
@@ -1163,7 +1163,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		knowledgeBaseIDs, knowledgeIDs, query)
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		logger.Error(ctx, "Failed to get tenant ID from context")
 		return nil, fmt.Errorf("tenant ID not found in context")
@@ -1181,7 +1181,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Create default retrieval parameters
-	userID, _ := ctx.Value(types.UserIDContextKey).(string)
+	userID, _ := types.UserIDFromContext(ctx)
 	chatManage := &types.ChatManage{
 		Query:            query,
 		RewriteQuery:     query,
@@ -1528,7 +1528,7 @@ func (s *sessionService) getContextManagerForSession(
 	chatModel chat.Chat,
 ) interfaces.ContextManager {
 	// Get tenant to access global context configuration
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	// Determine which context config to use: tenant-level or default
 	var contextConfig *types.ContextConfig
 	if tenant != nil && tenant.ContextConfig != nil {

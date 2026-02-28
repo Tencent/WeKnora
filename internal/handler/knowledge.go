@@ -44,74 +44,10 @@ func NewKnowledgeHandler(
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
-// Returns the knowledge base, the knowledge base ID, effective tenant ID, permission level, and any errors encountered
-// For owned KBs, effectiveTenantID is the caller's tenant ID
-// For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
+// using the ":id" URL path parameter. It delegates to validateKnowledgeBaseAccessWithKBID.
 func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
-	ctx := c.Request.Context()
-
-	// Get tenant ID from context
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Failed to get tenant ID")
-		return nil, "", 0, "", errors.NewUnauthorizedError("Unauthorized")
-	}
-
-	// Get user ID from context (needed for shared KB permission check)
-	userID, userExists := c.Get(types.UserIDContextKey.String())
-
-	// Get knowledge base ID from URL path parameter
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	if kbID == "" {
-		logger.Error(ctx, "Knowledge base ID is empty")
-		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
-	}
-
-	// Get knowledge base details
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		return nil, kbID, 0, "", errors.NewInternalServerError(err.Error())
-	}
-
-	// Check 1: Verify tenant ownership (owner has full access)
-	if kb.TenantID == tenantID {
-		return kb, kbID, tenantID, types.OrgRoleAdmin, nil
-	}
-
-	// Check 2: If not owner, check organization shared access
-	if userExists && h.kbShareService != nil {
-		// Check if user has shared access through organization
-		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
-		if permErr == nil && isShared {
-			// User has shared access, get the source tenant ID for queries
-			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
-			if srcErr == nil {
-				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
-					userID.(string), kbID, permission, sourceTenantID)
-				return kb, kbID, sourceTenantID, permission, nil
-			}
-		}
-	}
-
-	// Check 3: If not owner and no direct share, allow if user has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list)
-	if userExists && h.agentShareService != nil {
-		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
-		if err == nil && can {
-			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
-			return kb, kbID, kb.TenantID, types.OrgRoleViewer, nil
-		}
-	}
-
-	// No permission: not owner and no shared access
-	logger.Warnf(
-		ctx,
-		"Permission denied to access this knowledge base, tenant ID mismatch, "+
-			"requested tenant ID: %d, knowledge base tenant ID: %d",
-		tenantID,
-		kb.TenantID,
-	)
-	return nil, kbID, 0, "", errors.NewForbiddenError("Permission denied to access this knowledge base")
+	return h.validateKnowledgeBaseAccessWithKBID(c, kbID)
 }
 
 // validateKnowledgeBaseAccessWithKBID validates access to the given knowledge base ID (e.g. from query or body).

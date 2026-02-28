@@ -2,19 +2,15 @@ package docparser
 
 import (
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 )
-
-var httpImageClient = &http.Client{Timeout: 60 * time.Second}
 
 // StoredImage describes an image that has been saved to local storage.
 type StoredImage struct {
@@ -179,19 +175,7 @@ func (r *ImageResolver) readImageBytes(
 }
 
 func downloadImage(url string) ([]byte, error) {
-	resp, err := httpImageClient.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP GET: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	return data, nil
+	return utils.DownloadBytes(url)
 }
 
 func extFromMime(mime string) string {

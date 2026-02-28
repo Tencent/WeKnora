@@ -25,12 +25,12 @@ var b64DataURIPattern = regexp.MustCompile(`^data:image/(\w+);base64,(.+)$`)
 
 // MinerUReader calls a self-hosted MinerU API to read/convert documents.
 type MinerUReader struct {
-	endpoint       string
-	backend        string // "pipeline", "vlm-*", "hybrid-*"
-	formulaEnable  bool
-	tableEnable    bool
-	ocrEnable      bool
-	language       string
+	endpoint      string
+	backend       string // "pipeline", "vlm-*", "hybrid-*"
+	formulaEnable bool
+	tableEnable   bool
+	ocrEnable     bool
+	language      string
 }
 
 // NewMinerUReader creates a reader from ParserEngineOverrides.
@@ -95,18 +95,18 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 
 	// Form fields
 	fields := map[string]string{
-		"return_md":            "true",
-		"return_images":        "true",
-		"table_enable":         fmt.Sprintf("%v", c.tableEnable),
-		"formula_enable":       fmt.Sprintf("%v", c.formulaEnable),
-		"parse_method":         "ocr",
-		"start_page_id":        "0",
-		"end_page_id":          "99999",
-		"backend":              c.backend,
-		"response_format_zip":  "false",
-		"return_middle_json":   "false",
-		"return_model_output":  "false",
-		"return_content_list":  "true",
+		"return_md":           "true",
+		"return_images":       "true",
+		"table_enable":        fmt.Sprintf("%v", c.tableEnable),
+		"formula_enable":      fmt.Sprintf("%v", c.formulaEnable),
+		"parse_method":        "ocr",
+		"start_page_id":       "0",
+		"end_page_id":         "99999",
+		"backend":             c.backend,
+		"response_format_zip": "false",
+		"return_middle_json":  "false",
+		"return_model_output": "false",
+		"return_content_list": "true",
 	}
 	if !c.ocrEnable {
 		fields["parse_method"] = "txt"
@@ -162,7 +162,7 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	// Also pretty-print the top-level structure (without large base64 blobs)
 	var rawMap map[string]interface{}
 	if err := json.Unmarshal(respBody, &rawMap); err == nil {
-		c.logResponseStructure(rawMap, "")
+		c.logMinerUResponseStructure(rawMap, "")
 	}
 
 	var result mineruFileParseResponse
@@ -225,60 +225,9 @@ func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]stri
 	return refs, mdContent
 }
 
-// logResponseStructure recursively logs the structure of the API response,
-// truncating large string values to reveal all available fields.
-func (c *MinerUReader) logResponseStructure(obj interface{}, prefix string) {
-	switch v := obj.(type) {
-	case map[string]interface{}:
-		for key, val := range v {
-			path := prefix + "." + key
-			if path[0] == '.' {
-				path = path[1:]
-			}
-			switch inner := val.(type) {
-			case map[string]interface{}:
-				logger.Printf("DEBUG: [MinerU] Response field: %s = {object with %d keys: %s}", path, len(inner), mapKeys(inner))
-				c.logResponseStructure(inner, path)
-			case []interface{}:
-				logger.Printf("DEBUG: [MinerU] Response field: %s = [array with %d items]", path, len(inner))
-				if len(inner) > 0 {
-					logger.Printf("DEBUG: [MinerU] Response field: %s[0] type=%T", path, inner[0])
-					if len(inner) <= 3 {
-						for i, item := range inner {
-							c.logResponseStructure(item, fmt.Sprintf("%s[%d]", path, i))
-						}
-					} else {
-						c.logResponseStructure(inner[0], path+"[0]")
-						logger.Printf("DEBUG: [MinerU] ... and %d more items in %s", len(inner)-1, path)
-					}
-				}
-			case string:
-				if len(inner) > 200 {
-					logger.Printf("DEBUG: [MinerU] Response field: %s = string(%d chars): %.200s...", path, len(inner), inner)
-				} else {
-					logger.Printf("DEBUG: [MinerU] Response field: %s = %q", path, inner)
-				}
-			case float64:
-				logger.Printf("DEBUG: [MinerU] Response field: %s = %v (number)", path, inner)
-			case bool:
-				logger.Printf("DEBUG: [MinerU] Response field: %s = %v (bool)", path, inner)
-			case nil:
-				logger.Printf("DEBUG: [MinerU] Response field: %s = null", path)
-			default:
-				logger.Printf("DEBUG: [MinerU] Response field: %s = %v (%T)", path, inner, inner)
-			}
-		}
-	default:
-		logger.Printf("DEBUG: [MinerU] Value at %s: %v (%T)", prefix, v, v)
-	}
-}
-
-func mapKeys(m map[string]interface{}) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return strings.Join(keys, ", ")
+// logMinerUResponseStructure logs the structure of the MinerU API response.
+func (c *MinerUReader) logMinerUResponseStructure(obj interface{}, prefix string) {
+	logResponseStructure("MinerU", obj, prefix)
 }
 
 // PingMinerU checks if the self-hosted MinerU service is reachable.
@@ -308,22 +257,4 @@ func htmlToMarkdown(content string) string {
 		return content
 	}
 	return md
-}
-
-// --- helpers ---
-
-func stringOr(val, fallback string) string {
-	val = strings.TrimSpace(val)
-	if val == "" {
-		return fallback
-	}
-	return val
-}
-
-func parseBoolOr(val string, fallback bool) bool {
-	val = strings.ToLower(strings.TrimSpace(val))
-	if val == "" {
-		return fallback
-	}
-	return val == "true" || val == "1" || val == "yes"
 }

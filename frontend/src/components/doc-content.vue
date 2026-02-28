@@ -54,6 +54,7 @@ marked.use({
 });
 const renderer = new marked.Renderer();
 let page = 1;
+let loadingChunks = false;
 let doc = null;
 let down = ref()
 let mdContentWrap = ref()
@@ -136,9 +137,13 @@ onMounted(() => {
     doc.addEventListener('scroll', handleDetailsScroll);
   })
 })
-onUpdated(() => {
-  page = 1
-})
+watch(() => props.details?.id, () => {
+  page = 1;
+  loadingChunks = false;
+});
+watch(() => props.details?.md?.length, () => {
+  loadingChunks = false;
+});
 onUnmounted(() => {
   doc.removeEventListener('scroll', handleDetailsScroll);
 })
@@ -559,12 +564,13 @@ const downloadFile = () => {
     });
 };
 const handleDetailsScroll = () => {
-  if (doc) {
-    let pageNum = Math.ceil(props.details.total / 20);
+  if (doc && !loadingChunks) {
+    let pageNum = Math.ceil(props.details.total / 25);
     const { scrollTop, scrollHeight, clientHeight } = doc;
     if (scrollTop + clientHeight >= scrollHeight) {
-      page++;
-      if (props.details.md.length < props.details.total && page <= pageNum) {
+      if (props.details.md.length < props.details.total && page + 1 <= pageNum) {
+        page++;
+        loadingChunks = true;
         emit("getDoc", page);
       }
     }

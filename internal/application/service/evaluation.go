@@ -109,7 +109,7 @@ func (e *EvaluationService) EvaluationResult(ctx context.Context, taskID string)
 		return nil, err
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(
 		ctx,
 		"Checking tenant ID match, task tenant ID: %d, current tenant ID: %d",
@@ -138,7 +138,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		datasetID, knowledgeBaseID, chatModelID, rerankModelID)
 
 	// Get tenant ID from context for multi-tenancy support
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	// Handle knowledge base creation if not provided

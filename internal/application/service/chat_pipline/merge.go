@@ -220,7 +220,7 @@ func (p *PluginMerge) populateFAQAnswers(
 		return results
 	}
 
-	tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	if tenantID == 0 && chatManage != nil {
 		tenantID = chatManage.TenantID
 	}
@@ -351,7 +351,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 		return results
 	}
 
-	tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, _ := types.TenantIDFromContext(ctx)
 	if tenantID == 0 && chatManage != nil {
 		tenantID = chatManage.TenantID
 	}

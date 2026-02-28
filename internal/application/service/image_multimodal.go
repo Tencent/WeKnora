@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
@@ -355,17 +354,5 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 
 // downloadImageFromURL downloads image bytes from an HTTP(S) URL.
 func downloadImageFromURL(imageURL string) ([]byte, error) {
-	if !strings.HasPrefix(imageURL, "http://") && !strings.HasPrefix(imageURL, "https://") {
-		return nil, fmt.Errorf("unsupported URL scheme: %s", imageURL)
-	}
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Get(imageURL)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP GET: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, imageURL)
-	}
-	return io.ReadAll(resp.Body)
+	return secutils.DownloadBytes(imageURL)
 }

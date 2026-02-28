@@ -82,7 +82,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.ID = uuid.New().String()
 	}
 	kb.CreatedAt = time.Now()
-	kb.TenantID = ctx.Value(types.TenantIDContextKey).(uint64)
+	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
 
@@ -158,7 +158,7 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 
 // ListKnowledgeBases returns all knowledge bases for a tenant
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 	if err != nil {
@@ -324,8 +324,8 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	logger.Infof(ctx, "Deleting knowledge base, ID: %s", id)
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
 	// Step 1: Delete the knowledge base record first (mark as deleted)
 	logger.Infof(ctx, "Deleting knowledge base from database")
@@ -543,7 +543,7 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	srcKB string, dstKB string,
 ) (*types.KnowledgeBase, *types.KnowledgeBase, error) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	// Load source KB with tenant scope to prevent cross-tenant cloning
 	sourceKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, srcKB, tenantID)
 	if err != nil {
@@ -593,8 +593,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 ) ([]*types.SearchResult, error) {
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base ID: %s, query text: %s", id, params.QueryText)
 
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	currentTenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
+	currentTenantID := types.MustTenantIDFromContext(ctx)
 
 	// Create a composite retrieval engine with tenant's configured retrievers
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
@@ -880,7 +880,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	filteredOutChunks := make(map[string]struct{})
 
 	queryTextLower := strings.ToLower(strings.TrimSpace(queryText))
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	for i := 0; i < maxIterations; i++ {
 		// Update TopK in retrieve params
@@ -1017,7 +1017,7 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 		return chunks
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Collect chunk IDs
 	chunkIDs := make([]string, 0, len(chunks))
@@ -1104,7 +1104,7 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		return nil, nil
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Prepare data structures for efficient processing
 	var knowledgeIDs []string
