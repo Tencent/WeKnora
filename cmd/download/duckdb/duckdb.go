@@ -14,6 +14,7 @@ func downloadSpatial() {
 	if err != nil {
 		panic(err)
 	}
+	defer sqlDB.Close()
 
 	// Try to install spatial extension (may already be installed or network unavailable)
 	installSQL := "INSTALL spatial;"

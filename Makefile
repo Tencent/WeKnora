@@ -248,8 +248,9 @@ build-lite:
 	else \
 		echo ">> No frontend/package.json, skipping frontend"; \
 	fi
-	EDITION=lite eval "$$(./scripts/get_version.sh env)"; \
-	LDFLAGS="$$(EDITION=lite ./scripts/get_version.sh ldflags)"; \
+	export EDITION=lite; \
+	eval "$$(./scripts/get_version.sh env)"; \
+	LDFLAGS="$$(./scripts/get_version.sh ldflags)"; \
 	CGO_ENABLED=1 \
 	CGO_CFLAGS="-Wno-deprecated-declarations" \
 	CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" \
