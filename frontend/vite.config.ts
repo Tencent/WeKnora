@@ -1,7 +1,10 @@
 import { fileURLToPath, URL } from 'node:url'
+import { createRequire } from 'node:module'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueJsx from '@vitejs/plugin-vue-jsx'
+
+const require = createRequire(import.meta.url)
 
 export default defineConfig({
   plugins: [
@@ -11,7 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      '@vue-office/pptx': '@vue-office/pptx/lib/index.js',
+      '@vue-office/pptx': require.resolve('@vue-office/pptx/lib/index.js'),
     },
   },
   server: {
