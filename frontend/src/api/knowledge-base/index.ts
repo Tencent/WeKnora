@@ -106,6 +106,10 @@ export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 
+export function previewKnowledgeFile(id: string) {
+  return getDown(`/api/v1/knowledge/${id}/preview`);
+}
+
 /** @param idsQueryString - query string with ids (e.g. ids=xxx&ids=yyy) */
 export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agentId?: string) {
   let qs = idsQueryString;

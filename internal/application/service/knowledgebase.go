@@ -32,7 +32,7 @@ type knowledgeBaseService struct {
 	tenantRepo     interfaces.TenantRepository
 	fileSvc        interfaces.FileService
 	graphEngine    interfaces.RetrieveGraphRepository
-	asynqClient    *asynq.Client
+	asynqClient    interfaces.TaskEnqueuer
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -46,7 +46,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
 	graphEngine interfaces.RetrieveGraphRepository,
-	asynqClient *asynq.Client,
+	asynqClient interfaces.TaskEnqueuer,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:           repo,

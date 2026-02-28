@@ -82,24 +82,13 @@ export interface KBModelConfigRequest {
         chunkSize: number
         chunkOverlap: number
         separators: string[]
+        parserEngineRules?: { file_types: string[]; engine: string }[]
     }
     multimodal: {
         enabled: boolean
-        storageType?: 'cos' | 'minio'
-        cos?: {
-            secretId: string
-            secretKey: string
-            region: string
-            bucketName: string
-            appId: string
-            pathPrefix: string
-        }
-        minio?: {
-            bucketName: string
-            useSSL: boolean
-            pathPrefix: string
-        }
     }
+    /** 存储引擎选择："local" | "minio" | "cos"，影响文档上传与文档内图片存储 */
+    storageProvider?: string
     nodeExtract: {
         enabled: boolean
         text: string

@@ -94,6 +94,16 @@
                   <WebSearchSettings />
                 </div>
 
+                <!-- 解析引擎 -->
+                <div v-if="currentSection === 'parser'" class="section">
+                  <ParserEngineSettings />
+                </div>
+
+                <!-- 存储引擎 -->
+                <div v-if="currentSection === 'storage'" class="section">
+                  <StorageEngineSettings />
+                </div>
+
                 <!-- 系统信息 -->
                 <div v-if="currentSection === 'system'" class="section">
                   <SystemInfo />
@@ -135,6 +145,8 @@ import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
+import ParserEngineSettings from './ParserEngineSettings.vue'
+import StorageEngineSettings from './StorageEngineSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -160,6 +172,8 @@ const navItems = computed(() => [
   },
   { key: 'ollama', icon: 'server', label: 'Ollama' },
   { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
+  { key: 'parser', icon: 'file-search', label: '解析引擎' },
+  { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
   { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
   { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
   { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },

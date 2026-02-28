@@ -37,6 +37,7 @@ services:
       - "${APP_PORT:-8080}:8080"
     volumes:
       - data-files:/data/files
+      - docreader-tmp:/tmp/docreader:ro
       # Optional: mount custom config file
       # - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
@@ -83,7 +84,8 @@ services:
       - QDRANT_USE_TLS=${QDRANT_USE_TLS:-false}
       - MILVUS_ADDRESS=milvus:19530
       - MILVUS_COLLECTION=${MILVUS_COLLECTION:-weknora_embeddings}
-      - DOCREADER_ADDR=docreader:50051
+      - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
+      - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -146,10 +148,10 @@ services:
     container_name: WeKnora-docreader
     ports:
       - "${DOCREADER_PORT:-50051}:50051"
+    volumes:
+      - docreader-tmp:/tmp/docreader
     environment:
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_PUBLIC_ENDPOINT=http://localhost:${MINIO_PORT:-9000}
-      - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
+      - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
@@ -312,6 +314,7 @@ networks:
 volumes:
   postgres-data:
   data-files:
+  docreader-tmp:
   jaeger_data:
   minio_data:
   neo4j-data:

@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite
 
 # Show help
 help:
@@ -56,6 +56,11 @@ help:
 	@echo "  dev-status        查看开发环境状态"
 	@echo "  dev-app           启动后端应用（本地运行，需先运行 dev-start）"
 	@echo "  dev-frontend      启动前端（本地运行，需先运行 dev-start）"
+	@echo ""
+	@echo "Lite 模式（零外部依赖）:"
+	@echo "  build-lite        构建 Lite 版本（先构建前端到 web/，再构建 Go；SKIP_FRONTEND=1 跳过前端）"
+	@echo "  run-lite          构建并启动 Lite 版本"
+	@echo "  package-lite      构建并打包 Lite 发行包（tarball）"
 
 # Go related variables
 BINARY_NAME=WeKnora
@@ -223,10 +228,41 @@ deps:
 build-prod:
 	VERSION=$$(git describe --tags --abbrev=0 2>/dev/null || echo "$${VERSION:-unknown}"); \
 	COMMIT_ID=$${COMMIT_ID:-unknown}; \
+	CGO_ENABLED=1 \
+	CGO_CFLAGS="-Wno-deprecated-declarations" \
+	CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" \
 	BUILD_TIME=$${BUILD_TIME:-unknown}; \
 	GO_VERSION=$${GO_VERSION:-unknown}; \
-	LDFLAGS="-X 'github.com/Tencent/WeKnora/internal/handler.Version=$$VERSION' -X 'github.com/Tencent/WeKnora/internal/handler.CommitID=$$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/handler.BuildTime=$$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/handler.GoVersion=$$GO_VERSION' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"; \
+	LDFLAGS="-X 'github.com/Tencent/WeKnora/internal/handler.Version=$$VERSION' -X 'github.com/Tencent/WeKnora/internal/handler.Edition=standard' -X 'github.com/Tencent/WeKnora/internal/handler.CommitID=$$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/handler.BuildTime=$$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/handler.GoVersion=$$GO_VERSION' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"; \
 	go build -ldflags="-w -s $$LDFLAGS" -o $(BINARY_NAME) $(MAIN_PATH)
+
+# Build Lite version (single binary, SQLite + in-memory queue)
+# 会先构建前端到 web/，再构建 Go 二进制；SKIP_FRONTEND=1 可跳过前端
+build-lite:
+	@if [ -f frontend/package.json ] && [ "$${SKIP_FRONTEND:-}" != "1" ]; then \
+		echo ">> Building frontend for Lite..."; \
+		(cd frontend && npm ci --prefer-offline && npm run build) && \
+		rm -rf web && cp -r frontend/dist web; \
+	elif [ "$${SKIP_FRONTEND:-}" = "1" ]; then \
+		echo ">> Skipping frontend (SKIP_FRONTEND=1)"; \
+	else \
+		echo ">> No frontend/package.json, skipping frontend"; \
+	fi
+	EDITION=lite eval "$$(./scripts/get_version.sh env)"; \
+	LDFLAGS="$$(EDITION=lite ./scripts/get_version.sh ldflags)"; \
+	CGO_ENABLED=1 \
+	CGO_CFLAGS="-Wno-deprecated-declarations" \
+	CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" \
+	go build -tags "sqlite_fts5" -ldflags="-w -s $$LDFLAGS" -o $(BINARY_NAME)-lite $(MAIN_PATH)
+
+# Run Lite version with .env.lite defaults
+run-lite: build-lite
+	@if [ ! -f .env.lite ]; then echo "Error: .env.lite not found"; exit 1; fi
+	@set -a && . ./.env.lite && set +a && ./$(BINARY_NAME)-lite
+
+# Package Lite version into distributable tarball
+package-lite:
+	./scripts/package-lite.sh
 
 download_spatial:
 	go run cmd/download/duckdb/duckdb.go

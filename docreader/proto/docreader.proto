@@ -4,86 +4,56 @@ package docreader;
 
 option go_package = "github.com/Tencent/WeKnora/internal/docreader/proto";
 
-// 文档读取服务
 service DocReader {
-  // 从文件读取文档
-  rpc ReadFromFile(ReadFromFileRequest) returns (ReadResponse) {}
-  // 从URL读取文档
-  rpc ReadFromURL(ReadFromURLRequest) returns (ReadResponse) {}
-}
-
-// 对象存储提供方
-enum StorageProvider {
-  STORAGE_PROVIDER_UNSPECIFIED = 0;
-  COS = 1;     // 腾讯云 COS
-  MINIO = 2;   // MinIO/S3 兼容
-}
-
-// 通用对象存储配置，兼容 COS 与 MinIO
-message StorageConfig {
-  StorageProvider provider = 1;   // 存储提供方
-  string region = 2;              // 区域（COS 使用）
-  string bucket_name = 3;         // 桶名
-  string access_key_id = 4;       // 访问密钥 ID（MinIO/S3 使用）
-  string secret_access_key = 5;   // 访问密钥 Secret（MinIO/S3 使用）
-  string app_id = 6;              // 应用 ID（COS 使用）
-  string path_prefix = 7;         // 路径前缀
-}
-
-// VLM 配置
-message VLMConfig {
-  string model_name = 1;     // VLM Model Name
-  string base_url = 2;       // VLM Base URL
-  string api_key = 3;        // VLM API Key
-  string interface_type = 4; // VLM Interface Type: "ollama" or "openai"
+  rpc Read(ReadRequest) returns (ReadResponse) {}
+  rpc ListEngines(ListEnginesRequest) returns (ListEnginesResponse) {}
 }
 
 message ReadConfig {
-  int32 chunk_size = 1;    // 分块大小
-  int32 chunk_overlap = 2; // 分块重叠
-  repeated string separators = 3;    // 分隔符
-  bool enable_multimodal = 4; // 多模态处理
-  StorageConfig storage_config = 5;   // 对象存储配置（通用）
-  VLMConfig vlm_config = 6;   // VLM 配置
+  string parser_engine = 1;
+  map<string, string> parser_engine_overrides = 2;
+  map<string, string> image_storage = 3;  // storage provider config (provider, endpoint, bucket, ...)
 }
 
-// 从文件读取文档请求
-message ReadFromFileRequest {
-  bytes file_content = 1;  // 文件内容
-  string file_name = 2;    // 文件名
-  string file_type = 3;    // 文件类型
-  ReadConfig read_config = 4; 
-  string request_id = 5;
+// Unified read request: set file_content for file mode, url for URL mode.
+message ReadRequest {
+  bytes  file_content = 1;
+  string file_name = 2;
+  string file_type = 3;
+  string url = 4;
+  string title = 5;
+  ReadConfig config = 6;
+  string request_id = 7;
 }
 
-// 从URL读取文档请求
-message ReadFromURLRequest {
-  string url = 1;          // 文档URL
-  string title = 2;        // 标题
-  ReadConfig read_config = 3; 
-  string request_id = 4;
+message ImageRef {
+  string filename = 1;
+  string original_ref = 2;
+  string mime_type = 3;
+  string storage_key = 4;    // download URL from shared storage
+  bytes  image_data = 5;     // inline bytes fallback
 }
 
-// 图片信息
-message Image {
-  string url = 1;           // 图片URL
-  string caption = 2;       // 图片描述
-  string ocr_text = 3;      // OCR提取的文本内容
-  string original_url = 4;  // 原始图片URL
-  int32 start = 5;          // 图片在文本中的开始位置
-  int32 end = 6;            // 图片在文本中的结束位置
-}
-
-message Chunk {
-  string content = 1;     // 块内容
-  int32 seq = 2;          // 块在文档中的次序
-  int32 start = 3;        // 块在文档中的起始位置
-  int32 end = 4;          // 块在文档中的结束位置
-  repeated Image images = 5; // 块中包含的图片信息
-}
-
-// 从URL读取文档响应
 message ReadResponse {
-  repeated Chunk chunks = 1; // 文档分块
-  string error = 2;          // 错误信息
-} 
+  string markdown_content = 1;
+  repeated ImageRef image_refs = 2;
+  string image_dir_path = 3;
+  map<string, string> metadata = 4;
+  string error = 5;
+}
+
+message ListEnginesRequest {
+  map<string, string> config_overrides = 1;
+}
+
+message ParserEngineInfo {
+  string name = 1;
+  string description = 2;
+  repeated string file_types = 3;
+  bool available = 4;
+  string unavailable_reason = 5;
+}
+
+message ListEnginesResponse {
+  repeated ParserEngineInfo engines = 1;
+}

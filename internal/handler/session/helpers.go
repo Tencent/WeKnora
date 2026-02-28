@@ -84,6 +84,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 						ImageInfo:         getString(refMap, "image_info"),
 						KnowledgeFilename: getString(refMap, "knowledge_filename"),
 						KnowledgeSource:   getString(refMap, "knowledge_source"),
+						KnowledgeBaseID:   getString(refMap, "knowledge_base_id"),
 					}
 					searchResults = append(searchResults, sr)
 				}

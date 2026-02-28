@@ -246,11 +246,11 @@ func (r *chunkRepository) ListChunkByParentID(
 	return chunks, nil
 }
 
-// UpdateChunk updates a chunk using GORM Save, which updates ALL fields.
-// Note: This will update all fields including metadata and content_hash.
+// UpdateChunk updates a chunk using GORM Save, which updates ALL fields
+// except SeqID (auto-increment, must not be overwritten).
 // Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
 func (r *chunkRepository) UpdateChunk(ctx context.Context, chunk *types.Chunk) error {
-	return r.db.WithContext(ctx).Save(chunk).Error
+	return r.db.WithContext(ctx).Omit("SeqID").Save(chunk).Error
 }
 
 // UpdateChunks updates chunks in batch using raw SQL for efficiency.
@@ -332,23 +332,46 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 		args = append(args, id)
 	}
 
-	sql := fmt.Sprintf(`
-		UPDATE chunks SET
-			content = CASE %s END,
-			is_enabled = (CASE %s END)::boolean,
-			tag_id = CASE %s END,
-			flags = (CASE %s END)::integer,
-			status = (CASE %s END)::integer,
-			updated_at = NOW()
-		WHERE id IN (%s)
-	`,
-		strings.Join(contentCases, " "),
-		strings.Join(isEnabledCases, " "),
-		strings.Join(tagIDCases, " "),
-		strings.Join(flagsCases, " "),
-		strings.Join(statusCases, " "),
-		strings.Join(inPlaceholders, ","),
-	)
+	isPostgres := r.db.Dialector.Name() == "postgres"
+
+	var sql string
+	if isPostgres {
+		sql = fmt.Sprintf(`
+			UPDATE chunks SET
+				content = CASE %s END,
+				is_enabled = (CASE %s END)::boolean,
+				tag_id = CASE %s END,
+				flags = (CASE %s END)::integer,
+				status = (CASE %s END)::integer,
+				updated_at = NOW()
+			WHERE id IN (%s)
+		`,
+			strings.Join(contentCases, " "),
+			strings.Join(isEnabledCases, " "),
+			strings.Join(tagIDCases, " "),
+			strings.Join(flagsCases, " "),
+			strings.Join(statusCases, " "),
+			strings.Join(inPlaceholders, ","),
+		)
+	} else {
+		sql = fmt.Sprintf(`
+			UPDATE chunks SET
+				content = CASE %s END,
+				is_enabled = CASE %s END,
+				tag_id = CASE %s END,
+				flags = CASE %s END,
+				status = CASE %s END,
+				updated_at = datetime('now')
+			WHERE id IN (%s)
+		`,
+			strings.Join(contentCases, " "),
+			strings.Join(isEnabledCases, " "),
+			strings.Join(tagIDCases, " "),
+			strings.Join(flagsCases, " "),
+			strings.Join(statusCases, " "),
+			strings.Join(inPlaceholders, ","),
+		)
+	}
 
 	return r.db.WithContext(ctx).Exec(sql, args...).Error
 }

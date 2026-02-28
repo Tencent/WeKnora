@@ -26,7 +26,7 @@ type KnowledgeBaseHandler struct {
 	knowledgeService  interfaces.KnowledgeService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
-	asynqClient       *asynq.Client
+	asynqClient       interfaces.TaskEnqueuer
 }
 
 // NewKnowledgeBaseHandler creates a new knowledge base handler instance
@@ -35,7 +35,7 @@ func NewKnowledgeBaseHandler(
 	knowledgeService interfaces.KnowledgeService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
-	asynqClient *asynq.Client,
+	asynqClient interfaces.TaskEnqueuer,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		service:           service,

@@ -1,5 +1,4 @@
 from google.protobuf.internal import containers as _containers
-from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from collections.abc import Iterable as _Iterable, Mapping as _Mapping
@@ -7,121 +6,130 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
-class StorageProvider(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
-    __slots__ = ()
-    STORAGE_PROVIDER_UNSPECIFIED: _ClassVar[StorageProvider]
-    COS: _ClassVar[StorageProvider]
-    MINIO: _ClassVar[StorageProvider]
-STORAGE_PROVIDER_UNSPECIFIED: StorageProvider
-COS: StorageProvider
-MINIO: StorageProvider
-
-class StorageConfig(_message.Message):
-    __slots__ = ("provider", "region", "bucket_name", "access_key_id", "secret_access_key", "app_id", "path_prefix")
-    PROVIDER_FIELD_NUMBER: _ClassVar[int]
-    REGION_FIELD_NUMBER: _ClassVar[int]
-    BUCKET_NAME_FIELD_NUMBER: _ClassVar[int]
-    ACCESS_KEY_ID_FIELD_NUMBER: _ClassVar[int]
-    SECRET_ACCESS_KEY_FIELD_NUMBER: _ClassVar[int]
-    APP_ID_FIELD_NUMBER: _ClassVar[int]
-    PATH_PREFIX_FIELD_NUMBER: _ClassVar[int]
-    provider: StorageProvider
-    region: str
-    bucket_name: str
-    access_key_id: str
-    secret_access_key: str
-    app_id: str
-    path_prefix: str
-    def __init__(self, provider: _Optional[_Union[StorageProvider, str]] = ..., region: _Optional[str] = ..., bucket_name: _Optional[str] = ..., access_key_id: _Optional[str] = ..., secret_access_key: _Optional[str] = ..., app_id: _Optional[str] = ..., path_prefix: _Optional[str] = ...) -> None: ...
-
-class VLMConfig(_message.Message):
-    __slots__ = ("model_name", "base_url", "api_key", "interface_type")
-    MODEL_NAME_FIELD_NUMBER: _ClassVar[int]
-    BASE_URL_FIELD_NUMBER: _ClassVar[int]
-    API_KEY_FIELD_NUMBER: _ClassVar[int]
-    INTERFACE_TYPE_FIELD_NUMBER: _ClassVar[int]
-    model_name: str
-    base_url: str
-    api_key: str
-    interface_type: str
-    def __init__(self, model_name: _Optional[str] = ..., base_url: _Optional[str] = ..., api_key: _Optional[str] = ..., interface_type: _Optional[str] = ...) -> None: ...
-
 class ReadConfig(_message.Message):
-    __slots__ = ("chunk_size", "chunk_overlap", "separators", "enable_multimodal", "storage_config", "vlm_config")
-    CHUNK_SIZE_FIELD_NUMBER: _ClassVar[int]
-    CHUNK_OVERLAP_FIELD_NUMBER: _ClassVar[int]
-    SEPARATORS_FIELD_NUMBER: _ClassVar[int]
-    ENABLE_MULTIMODAL_FIELD_NUMBER: _ClassVar[int]
-    STORAGE_CONFIG_FIELD_NUMBER: _ClassVar[int]
-    VLM_CONFIG_FIELD_NUMBER: _ClassVar[int]
-    chunk_size: int
-    chunk_overlap: int
-    separators: _containers.RepeatedScalarFieldContainer[str]
-    enable_multimodal: bool
-    storage_config: StorageConfig
-    vlm_config: VLMConfig
-    def __init__(self, chunk_size: _Optional[int] = ..., chunk_overlap: _Optional[int] = ..., separators: _Optional[_Iterable[str]] = ..., enable_multimodal: bool = ..., storage_config: _Optional[_Union[StorageConfig, _Mapping]] = ..., vlm_config: _Optional[_Union[VLMConfig, _Mapping]] = ...) -> None: ...
+    __slots__ = ("parser_engine", "parser_engine_overrides", "image_storage")
+    class ParserEngineOverridesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    class ImageStorageEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    PARSER_ENGINE_FIELD_NUMBER: _ClassVar[int]
+    PARSER_ENGINE_OVERRIDES_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_STORAGE_FIELD_NUMBER: _ClassVar[int]
+    parser_engine: str
+    parser_engine_overrides: _containers.ScalarMap[str, str]
+    image_storage: _containers.ScalarMap[str, str]
+    def __init__(self, parser_engine: _Optional[str] = ..., parser_engine_overrides: _Optional[_Mapping[str, str]] = ..., image_storage: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
-class ReadFromFileRequest(_message.Message):
-    __slots__ = ("file_content", "file_name", "file_type", "read_config", "request_id")
+class ReadRequest(_message.Message):
+    __slots__ = ("file_content", "file_name", "file_type", "url", "title", "config", "request_id")
     FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
     FILE_NAME_FIELD_NUMBER: _ClassVar[int]
     FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
-    READ_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    URL_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
     REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     file_content: bytes
     file_name: str
     file_type: str
-    read_config: ReadConfig
-    request_id: str
-    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ..., read_config: _Optional[_Union[ReadConfig, _Mapping]] = ..., request_id: _Optional[str] = ...) -> None: ...
-
-class ReadFromURLRequest(_message.Message):
-    __slots__ = ("url", "title", "read_config", "request_id")
-    URL_FIELD_NUMBER: _ClassVar[int]
-    TITLE_FIELD_NUMBER: _ClassVar[int]
-    READ_CONFIG_FIELD_NUMBER: _ClassVar[int]
-    REQUEST_ID_FIELD_NUMBER: _ClassVar[int]
     url: str
     title: str
-    read_config: ReadConfig
+    config: ReadConfig
     request_id: str
-    def __init__(self, url: _Optional[str] = ..., title: _Optional[str] = ..., read_config: _Optional[_Union[ReadConfig, _Mapping]] = ..., request_id: _Optional[str] = ...) -> None: ...
+    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ..., url: _Optional[str] = ..., title: _Optional[str] = ..., config: _Optional[_Union[ReadConfig, _Mapping]] = ..., request_id: _Optional[str] = ...) -> None: ...
 
-class Image(_message.Message):
-    __slots__ = ("url", "caption", "ocr_text", "original_url", "start", "end")
-    URL_FIELD_NUMBER: _ClassVar[int]
-    CAPTION_FIELD_NUMBER: _ClassVar[int]
-    OCR_TEXT_FIELD_NUMBER: _ClassVar[int]
-    ORIGINAL_URL_FIELD_NUMBER: _ClassVar[int]
-    START_FIELD_NUMBER: _ClassVar[int]
-    END_FIELD_NUMBER: _ClassVar[int]
-    url: str
-    caption: str
-    ocr_text: str
-    original_url: str
-    start: int
-    end: int
-    def __init__(self, url: _Optional[str] = ..., caption: _Optional[str] = ..., ocr_text: _Optional[str] = ..., original_url: _Optional[str] = ..., start: _Optional[int] = ..., end: _Optional[int] = ...) -> None: ...
-
-class Chunk(_message.Message):
-    __slots__ = ("content", "seq", "start", "end", "images")
-    CONTENT_FIELD_NUMBER: _ClassVar[int]
-    SEQ_FIELD_NUMBER: _ClassVar[int]
-    START_FIELD_NUMBER: _ClassVar[int]
-    END_FIELD_NUMBER: _ClassVar[int]
-    IMAGES_FIELD_NUMBER: _ClassVar[int]
-    content: str
-    seq: int
-    start: int
-    end: int
-    images: _containers.RepeatedCompositeFieldContainer[Image]
-    def __init__(self, content: _Optional[str] = ..., seq: _Optional[int] = ..., start: _Optional[int] = ..., end: _Optional[int] = ..., images: _Optional[_Iterable[_Union[Image, _Mapping]]] = ...) -> None: ...
+class ImageRef(_message.Message):
+    __slots__ = ("filename", "original_ref", "mime_type", "storage_key", "image_data")
+    FILENAME_FIELD_NUMBER: _ClassVar[int]
+    ORIGINAL_REF_FIELD_NUMBER: _ClassVar[int]
+    MIME_TYPE_FIELD_NUMBER: _ClassVar[int]
+    STORAGE_KEY_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_DATA_FIELD_NUMBER: _ClassVar[int]
+    filename: str
+    original_ref: str
+    mime_type: str
+    storage_key: str
+    image_data: bytes
+    def __init__(self, filename: _Optional[str] = ..., original_ref: _Optional[str] = ..., mime_type: _Optional[str] = ..., storage_key: _Optional[str] = ..., image_data: _Optional[bytes] = ...) -> None: ...
 
 class ReadResponse(_message.Message):
-    __slots__ = ("chunks", "error")
-    CHUNKS_FIELD_NUMBER: _ClassVar[int]
+    __slots__ = ("markdown_content", "image_refs", "image_dir_path", "metadata", "error")
+    class MetadataEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    MARKDOWN_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_REFS_FIELD_NUMBER: _ClassVar[int]
+    IMAGE_DIR_PATH_FIELD_NUMBER: _ClassVar[int]
+    METADATA_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
-    chunks: _containers.RepeatedCompositeFieldContainer[Chunk]
+    markdown_content: str
+    image_refs: _containers.RepeatedCompositeFieldContainer[ImageRef]
+    image_dir_path: str
+    metadata: _containers.ScalarMap[str, str]
     error: str
-    def __init__(self, chunks: _Optional[_Iterable[_Union[Chunk, _Mapping]]] = ..., error: _Optional[str] = ...) -> None: ...
+    def __init__(self, markdown_content: _Optional[str] = ..., image_refs: _Optional[_Iterable[_Union[ImageRef, _Mapping]]] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ...) -> None: ...
+
+class ListEnginesRequest(_message.Message):
+    __slots__ = ("config_overrides",)
+    class ConfigOverridesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    CONFIG_OVERRIDES_FIELD_NUMBER: _ClassVar[int]
+    config_overrides: _containers.ScalarMap[str, str]
+    def __init__(self, config_overrides: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class ParserEngineInfo(_message.Message):
+    __slots__ = ("name", "description", "file_types", "available", "unavailable_reason")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    FILE_TYPES_FIELD_NUMBER: _ClassVar[int]
+    AVAILABLE_FIELD_NUMBER: _ClassVar[int]
+    UNAVAILABLE_REASON_FIELD_NUMBER: _ClassVar[int]
+    name: str
+    description: str
+    file_types: _containers.RepeatedScalarFieldContainer[str]
+    available: bool
+    unavailable_reason: str
+    def __init__(self, name: _Optional[str] = ..., description: _Optional[str] = ..., file_types: _Optional[_Iterable[str]] = ..., available: bool = ..., unavailable_reason: _Optional[str] = ...) -> None: ...
+
+class ListEnginesResponse(_message.Message):
+    __slots__ = ("engines",)
+    ENGINES_FIELD_NUMBER: _ClassVar[int]
+    engines: _containers.RepeatedCompositeFieldContainer[ParserEngineInfo]
+    def __init__(self, engines: _Optional[_Iterable[_Union[ParserEngineInfo, _Mapping]]] = ...) -> None: ...
+
+class ConvertToPDFRequest(_message.Message):
+    __slots__ = ("file_content", "file_name", "file_type")
+    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
+    FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
+    file_content: bytes
+    file_name: str
+    file_type: str
+    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ...) -> None: ...
+
+class ConvertToPDFResponse(_message.Message):
+    __slots__ = ("pdf_content", "error")
+    PDF_CONTENT_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    pdf_content: bytes
+    error: str
+    def __init__(self, pdf_content: _Optional[bytes] = ..., error: _Optional[str] = ...) -> None: ...

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
@@ -30,8 +32,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	// Use versioned migrations directory
 	migrationsPath := "file://migrations/versioned"
+	if strings.HasPrefix(dsn, "sqlite3://") {
+		migrationsPath = "file://migrations/sqlite"
+	}
 
 	m, err := migrate.New(migrationsPath, dsn)
 	if err != nil {

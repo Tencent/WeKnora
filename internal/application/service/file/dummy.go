@@ -14,6 +14,11 @@ import (
 // used for testing or when file storage is not required
 type DummyFileService struct{}
 
+// CheckConnectivity always succeeds for the dummy service.
+func (s *DummyFileService) CheckConnectivity(ctx context.Context) error {
+	return nil
+}
+
 // NewDummyFileService creates a new instance of DummyFileService
 func NewDummyFileService() interfaces.FileService {
 	return &DummyFileService{}

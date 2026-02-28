@@ -89,11 +89,33 @@ class DocxParser(BaseParser):
         logger.info(f"Setting max_workers to {max_workers} for document processing")
 
         try:
+            inline_images: Dict[str, str] = {}
+
+            def _inline_upload(local_path: str) -> str:
+                """Read temp image file, base64-encode, and return a ref path.
+
+                The Go-side ImageResolver (or main.py _resolve_images) handles
+                actual storage upload from Document.images.
+                """
+                import base64
+                import uuid as _uuid
+
+                try:
+                    with open(local_path, "rb") as f:
+                        raw = f.read()
+                    ext = os.path.splitext(local_path)[1].lower() or ".png"
+                    ref = f"images/{_uuid.uuid4().hex}{ext}"
+                    inline_images[ref] = base64.b64encode(raw).decode()
+                    return ref
+                except Exception as exc:
+                    logger.warning("Failed to read temp image %s: %s", local_path, exc)
+                    return ""
+
             logger.info(f"Starting Docx processing with max_pages={self.max_pages}")
             docx_processor = Docx(
-                max_image_size=self.max_image_size,
-                enable_multimodal=self.enable_multimodal,
-                upload_file=self.storage.upload_file,
+                max_image_size=1920,
+                enable_multimodal=True,
+                upload_file=_inline_upload,
             )
             all_lines, tables = docx_processor(
                 binary=content,
@@ -153,6 +175,7 @@ class DocxParser(BaseParser):
                 f"generated {len(text)} characters of text"
             )
 
+            image_parts.update(inline_images)
             return DocumentModel(content=text, images=image_parts)
         except Exception as e:
             logger.error(f"Error parsing DOCX document: {str(e)}")

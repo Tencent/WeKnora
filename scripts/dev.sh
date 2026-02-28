@@ -254,6 +254,7 @@ start_app() {
     # 设置本地开发环境变量（覆盖 Docker 容器地址）
     export DB_HOST=localhost
     export DOCREADER_ADDR=localhost:50051
+    export DOCREADER_TRANSPORT=grpc
     export MINIO_ENDPOINT=localhost:9000
     export REDIS_ADDR=localhost:6379
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317

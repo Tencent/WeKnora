@@ -1,6 +1,5 @@
 from docreader.parser.chain_parser import FirstParser
 from docreader.parser.markitdown_parser import MarkitdownParser
-from docreader.parser.mineru_parser import MinerUParser
 
 
 class PDFParser(FirstParser):
@@ -13,4 +12,4 @@ class PDFParser(FirstParser):
     The first successful parser result will be returned.
     """
     # Parser classes to try in order (chain of responsibility pattern)
-    _parser_cls = (MinerUParser, MarkitdownParser)
+    _parser_cls = (MarkitdownParser,)

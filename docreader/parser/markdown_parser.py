@@ -348,23 +348,11 @@ class MarkdownImageUtil:
 
 
 class MarkdownImageBase64(BaseParser):
-    """Parser for extracting and uploading base64 images from Markdown.
+    """Parser for extracting base64 images from Markdown.
 
-    This parser:
-    1. Extracts base64-encoded images from Markdown content
-    2. Uploads the decoded images to storage
-    3. Replaces base64 data with uploaded URLs
-    4. Returns a Document with clean Markdown and image mappings
-
-    Requires:
-        - self.storage: Storage backend for uploading images
-
-    Example:
-        >>> parser = MarkdownImageBase64(storage=my_storage)
-        >>> content = b"![logo](data:image/png;base64,iVBORw0...)"
-        >>> doc = parser.parse_into_text(content)
-        >>> print(doc.content)
-        ![logo](https://storage.com/uuid.png)
+    Extracts base64-encoded images, replaces them with path references,
+    and returns the raw image data in Document.images for the Go-side
+    ImageResolver (or main.py _resolve_images) to handle storage.
     """
 
     def __init__(self, **kwargs):
@@ -372,41 +360,14 @@ class MarkdownImageBase64(BaseParser):
         self.image_helper = MarkdownImageUtil()
 
     def parse_into_text(self, content: bytes) -> Document:
-        """Parse Markdown and process base64 images.
-
-        Args:
-            content: Raw Markdown content as bytes
-
-        Returns:
-            Document with:
-                - content: Markdown with base64 replaced by URLs
-                - images: Dict mapping URLs to base64 strings
-        """
-        # Convert byte content to string using universal decoding method
         text = endecode.decode_bytes(content)
-        # Extract base64 images and replace with temporary paths
         text, img_b64 = self.image_helper.extract_base64(text, path_prefix="images")
 
-        # Final image mapping: URL -> base64 string (for Document)
         images: Dict[str, str] = {}
-        # Temporary mapping: temp_path -> uploaded_URL (for replacement)
-        image_replace: Dict[str, str] = {}
+        for ipath, raw_bytes in img_b64.items():
+            images[ipath] = base64.b64encode(raw_bytes).decode()
 
-        logger.debug(f"Uploading {len(img_b64)} images from markdown")
-        # Upload each extracted image to storage
-        for ipath, b64_bytes in img_b64.items():
-            # Get file extension for proper MIME type
-            ext = os.path.splitext(ipath)[1].lower()
-            # Upload binary data and get back URL
-            image_url = self.storage.upload_bytes(b64_bytes, ext)
-
-            # Map temp path to uploaded URL for replacement
-            image_replace[ipath] = image_url
-            # Store base64 string in final images dict
-            images[image_url] = base64.b64encode(b64_bytes).decode()
-
-        # Replace temporary paths with actual uploaded URLs
-        text = self.image_helper.replace_path(text, image_replace)
+        logger.debug("Extracted %d base64 images from markdown", len(images))
         return Document(content=text, images=images)
 
 

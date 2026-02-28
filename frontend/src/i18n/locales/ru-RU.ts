@@ -77,6 +77,8 @@ export default {
     imagesFilteredNoVLM: 'Отфильтровано {count} изображений (VLM не включен)',
     invalidFilesFiltered: 'Отфильтровано {count} неподдерживаемых файлов',
     unsupportedFileType: 'Неподдерживаемый тип файла',
+    unsupportedTypesHint: 'Некоторые типы документов ({types}) не имеют доступного парсера и не могут быть обработаны',
+    goToParserSettings: 'Настроить',
     failedFilesList: 'Неудавшиеся файлы:',
     andMoreFiles: '...и ещё {count} файлов',
     duplicateFilesSkipped: 'Пропущено {count} повторяющихся файлов',
@@ -1331,6 +1333,11 @@ export default {
     unableToGetKnowledgeBaseId: 'Невозможно получить ID базы знаний',
     summaryInProgress: 'Идёт подготовка ответа…',
     referencesTitle: 'Использовано {count} связанного материала',
+    referencesDocCount: 'Использовано {count} документ(ов)',
+    referencesDocAndWebCount: 'Использовано {docCount} документ(ов) и {webCount} веб-страниц(ы)',
+    referenceChunkCount: '{count} фрагмент(ов)',
+    chunkLabel: 'Фрагмент {index}:',
+    navigateToDocument: 'Просмотр документа',
     referenceIconAlt: 'Иконка ссылок на материалы',
     chunkIdLabel: 'ID фрагмента:',
     documentIdLabel: 'ID документа:',
@@ -1841,5 +1848,13 @@ export default {
       stopSuccess: 'Генерация остановлена',
       stopFailed: 'Не удалось остановить. Попробуйте ещё раз.'
     }
-  }
+  },
+  preview: {
+    tab: 'Предпросмотр',
+    loading: 'Загрузка предпросмотра документа...',
+    loadFailed: 'Не удалось загрузить предпросмотр документа',
+    retry: 'Повторить',
+    unsupported: 'Этот тип файла не поддерживает онлайн-просмотр',
+    unsupportedHint: 'Скачайте файл и откройте локально',
+  },
 }

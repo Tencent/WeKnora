@@ -140,10 +140,14 @@ export function isValidURL(url: string): boolean {
   if (!url || typeof url !== 'string') {
     return false;
   }
+
+  // 允许以 / 开头的站内相对路径（如本地存储 /files/images/xxx.jpg）
+  if (url.startsWith('/') && !url.startsWith('//')) {
+    return true;
+  }
   
   try {
     const urlObj = new URL(url);
-    // 只允许 http 和 https 协议
     return ['http:', 'https:'].includes(urlObj.protocol);
   } catch {
     return false;

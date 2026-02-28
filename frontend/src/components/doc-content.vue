@@ -10,6 +10,7 @@ import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
+import DocumentPreview from '@/components/document-preview.vue';
 
 const { t } = useI18n();
 
@@ -57,10 +58,9 @@ let doc = null;
 let down = ref()
 let mdContentWrap = ref()
 let url = ref('')
-// 视图模式：chunks / original / merged
-const viewMode = ref<'chunks' | 'original' | 'merged'>('merged');
-const originalContent = ref<string>('');
-const loadingOriginal = ref(false);
+// 视图模式：chunks / merged / preview
+// file 类型默认「预览」，URL / 手动创建 默认「全文」
+const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
 
 // 合并后的文档内容
 const mergedContent = ref<string>('');
@@ -212,6 +212,31 @@ watch(() => props.details?.md, (newChunks) => {
   }
 }, { immediate: true, deep: true });
 
+const previewSupportedTypes = new Set([
+  'pdf', 'docx', 'pptx', 'ppt', 'xlsx', 'xls', 'csv',
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg',
+  'txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts',
+  'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml',
+  'ini', 'conf', 'log', 'sql', 'rs', 'rb', 'php', 'swift', 'kt',
+  'scala', 'r', 'lua', 'pl', 'toml',
+]);
+
+const canPreview = (): boolean => {
+  if (props.details?.type !== 'file') return false;
+  const ft = props.details?.file_type?.toLowerCase();
+  return !!ft && previewSupportedTypes.has(ft);
+};
+
+// 当文档详情加载完成时，file 类型自动切换到「预览」
+watch(() => props.details?.id, (newId) => {
+  if (!newId) return;
+  if (props.details?.type === 'file' && canPreview()) {
+    viewMode.value = 'preview';
+  } else {
+    viewMode.value = 'merged';
+  }
+});
+
 const isTextFile = (fileType?: string): boolean => {
   if (!fileType) return false;
   const textTypes = ['txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts', 'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml', 'ini', 'conf', 'log'];
@@ -221,25 +246,6 @@ const isMarkdownFile = (fileType?: string): boolean => {
   if (!fileType) return false;
   const markdownTypes = ['md', 'markdown'];
   return markdownTypes.includes(fileType.toLowerCase());
-};
-const loadOriginalContent = async () => {
-  if (!props.details.id || !props.details.type || props.details.type !== 'file') return;
-  const fileType = props.details.file_type?.toLowerCase();
-  if (!isTextFile(fileType)) {
-    MessagePlugin.warning(t('knowledgeBase.originalFileNotSupported') || '该文件类型不支持原文件展示，请下载查看');
-    return;
-  }
-  loadingOriginal.value = true;
-  try {
-    const blob = await downKnowledgeDetails(props.details.id);
-    const text = await blob.text();
-    originalContent.value = text;
-  } catch (error: any) {
-    console.error('Failed to load original content:', error);
-    MessagePlugin.error(error?.message || t('knowledgeBase.loadOriginalFailed') || '加载原文件内容失败');
-  } finally {
-    loadingOriginal.value = false;
-  }
 };
 watch(() => props.details.md, (newVal) => {
   nextTick(async () => {
@@ -346,7 +352,6 @@ const handleClose = () => {
   emit("closeDoc", false);
   doc.scrollTop = 0;
   viewMode.value = 'merged';
-  originalContent.value = '';
 };
 
 // 获取显示标题
@@ -622,6 +627,17 @@ const handleDetailsScroll = () => {
             <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
             <div class="view-mode-buttons">
               <t-button 
+                v-if="canPreview()"
+                size="small" 
+                :variant="viewMode === 'preview' ? 'base' : 'outline'" 
+                :theme="viewMode === 'preview' ? 'primary' : 'default'"
+                @click="viewMode = 'preview'"
+                class="view-mode-btn"
+              >
+                {{ $t('preview.tab') || '预览' }}
+              </t-button>
+              <t-button 
+                v-if="!canPreview()"
                 size="small" 
                 :variant="viewMode === 'merged' ? 'base' : 'outline'" 
                 :theme="viewMode === 'merged' ? 'primary' : 'default'"
@@ -639,7 +655,6 @@ const handleDetailsScroll = () => {
               >
                 {{ $t('knowledgeBase.viewChunks') || '分块' }}
               </t-button>
-
             </div>
           </div>
         </div>
@@ -707,6 +722,16 @@ const handleDetailsScroll = () => {
             </div>
           </div>
         </div>
+      </div>
+      
+      <!-- 文档预览视图 -->
+      <div v-else-if="viewMode === 'preview'">
+        <DocumentPreview
+          :knowledgeId="details.id"
+          :fileType="details.file_type"
+          :fileName="details.title"
+          :active="viewMode === 'preview'"
+        />
       </div>
       
       <template #footer>

@@ -19,6 +19,18 @@ type localFileService struct {
 	baseDir string // Base directory for file storage
 }
 
+// CheckConnectivity verifies the local storage directory exists and is accessible.
+func (s *localFileService) CheckConnectivity(ctx context.Context) error {
+	info, err := os.Stat(s.baseDir)
+	if err != nil {
+		return fmt.Errorf("storage directory not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("storage path is not a directory: %s", s.baseDir)
+	}
+	return nil
+}
+
 // NewLocalFileService creates a new local file service instance
 func NewLocalFileService(baseDir string) interfaces.FileService {
 	return &localFileService{

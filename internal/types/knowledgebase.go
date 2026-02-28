@@ -95,6 +95,12 @@ type KnowledgeBaseConfig struct {
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
 }
 
+// ParserEngineRule maps a set of file types to a specific parser engine.
+type ParserEngineRule struct {
+	FileTypes []string `yaml:"file_types" json:"file_types"`
+	Engine    string   `yaml:"engine"     json:"engine"`
+}
+
 // ChunkingConfig represents the document splitting configuration
 type ChunkingConfig struct {
 	// Chunk size
@@ -105,6 +111,23 @@ type ChunkingConfig struct {
 	Separators []string `yaml:"separators"    json:"separators"`
 	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
 	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
+	// ParserEngineRules configures which parser engine to use for each file type.
+	// When empty, the builtin engine is used for all types.
+	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
+}
+
+// ResolveParserEngine returns the engine name for the given file type
+// based on the configured rules. Returns empty string (builtin) when
+// no rule matches.
+func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
+	for _, rule := range c.ParserEngineRules {
+		for _, ft := range rule.FileTypes {
+			if ft == fileType {
+				return rule.Engine
+			}
+		}
+	}
+	return ""
 }
 
 // COSConfig represents the COS configuration

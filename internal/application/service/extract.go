@@ -79,7 +79,7 @@ const (
 // NewChunkExtractTask creates a new chunk extract task
 func NewChunkExtractTask(
 	ctx context.Context,
-	client *asynq.Client,
+	client interfaces.TaskEnqueuer,
 	tenantID uint64,
 	chunkID string,
 	modelID string,
@@ -109,7 +109,7 @@ func NewChunkExtractTask(
 // NewTableExtractTask creates a new table extract task
 func NewDataTableSummaryTask(
 	ctx context.Context,
-	client *asynq.Client,
+	client interfaces.TaskEnqueuer,
 	tenantID uint64,
 	knowledgeID string,
 	summaryModel string,

@@ -119,6 +119,22 @@
                   </div>
                 </div>
 
+                <!-- 解析引擎 -->
+                <div v-if="!isFAQ && formData" v-show="currentSection === 'parser'" class="section">
+                  <KBParserSettings
+                    :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
+                    @update:parser-engine-rules="handleParserEngineRulesUpdate"
+                  />
+                </div>
+
+                <!-- 存储引擎 -->
+                <div v-if="!isFAQ && formData" v-show="currentSection === 'storage'" class="section">
+                  <KBStorageSettings
+                    :storage-provider="formData.storageProvider"
+                    @update:storage-provider="handleStorageProviderUpdate"
+                  />
+                </div>
+
                 <!-- 分块设置 -->
                 <div v-if="!isFAQ" v-show="currentSection === 'chunking'" class="section">
                   <KBChunkingSettings
@@ -182,6 +198,8 @@ import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { listModels } from '@/api/model'
 import { useUIStore } from '@/stores/ui'
 import KBModelConfig from './settings/KBModelConfig.vue'
+import KBParserSettings from './settings/KBParserSettings.vue'
+import KBStorageSettings from './settings/KBStorageSettings.vue'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import GraphSettings from './settings/GraphSettings.vue'
@@ -220,6 +238,8 @@ const navItems = computed(() => {
     items.push({ key: 'faq', icon: 'help-circle', label: t('knowledgeEditor.sidebar.faq') })
   } else {
     items.push(
+      { key: 'parser', icon: 'file-search', label: '解析引擎' },
+      { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
       { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
@@ -274,25 +294,13 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     chunkingConfig: {
       chunkSize: 512,
       chunkOverlap: 100,
-      separators: ['\n\n', '\n', '。', '！', '？', ';', '；']
+      separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
+      parserEngineRules: undefined as any
     },
+    storageProvider: 'local' as string,
     multimodalConfig: {
       enabled: false,
-      storageType: 'minio' as 'minio' | 'cos',
-      vllmModelId: '',
-      minio: {
-        bucketName: '',
-        useSSL: false,
-        pathPrefix: ''
-      },
-      cos: {
-        secretId: '',
-        secretKey: '',
-        region: '',
-        bucketName: '',
-        appId: '',
-        pathPrefix: ''
-      }
+      vllmModelId: ''
     },
     nodeExtractConfig: {
       enabled: false,
@@ -363,25 +371,13 @@ const loadKBData = async () => {
       chunkingConfig: {
         chunkSize: kb.chunking_config?.chunk_size || 512,
         chunkOverlap: kb.chunking_config?.chunk_overlap || 100,
-        separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；']
+        separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
+        parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined
       },
+      storageProvider: (kb.cos_config?.provider || 'local') as string,
       multimodalConfig: {
-        enabled: !!(kb.vlm_config?.enabled || (kb.cos_config?.provider && kb.cos_config?.bucket_name)),
-        storageType: (kb.cos_config?.provider || 'minio') as 'minio' | 'cos',
-        vllmModelId: kb.vlm_config?.model_id || '',
-        minio: {
-          bucketName: kb.cos_config?.bucket_name || '',
-          useSSL: kb.cos_config?.use_ssl || false,
-          pathPrefix: kb.cos_config?.path_prefix || ''
-        },
-        cos: {
-          secretId: kb.cos_config?.secret_id || '',
-          secretKey: kb.cos_config?.secret_key || '',
-          region: kb.cos_config?.region || '',
-          bucketName: kb.cos_config?.bucket_name || '',
-          appId: kb.cos_config?.app_id || '',
-          pathPrefix: kb.cos_config?.path_prefix || ''
-        }
+        enabled: !!kb.vlm_config?.enabled,
+        vllmModelId: kb.vlm_config?.model_id || ''
       },
       nodeExtractConfig: {
         enabled: kb.extract_config?.enabled || false,
@@ -420,9 +416,21 @@ const handleChunkingConfigUpdate = (config: any) => {
   }
 }
 
+const handleParserEngineRulesUpdate = (rules: any[]) => {
+  if (formData.value) {
+    formData.value.chunkingConfig.parserEngineRules = rules?.length ? rules : undefined
+  }
+}
+
 const handleMultimodalUpdate = (config: any) => {
   if (formData.value) {
     formData.value.multimodalConfig = { ...config }
+  }
+}
+
+const handleStorageProviderUpdate = (value: string) => {
+  if (formData.value) {
+    formData.value.storageProvider = value || 'local'
   }
 }
 
@@ -493,7 +501,10 @@ const buildSubmitData = () => {
       chunk_size: formData.value.chunkingConfig.chunkSize,
       chunk_overlap: formData.value.chunkingConfig.chunkOverlap,
       separators: formData.value.chunkingConfig.separators,
-      enable_multimodal: formData.value.multimodalConfig.enabled
+      enable_multimodal: formData.value.multimodalConfig.enabled,
+      ...(formData.value.chunkingConfig.parserEngineRules?.length
+        ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
+        : {})
     },
     embedding_model_id: formData.value.modelConfig.embeddingModelId,
     summary_model_id: formData.value.modelConfig.llmModelId
@@ -507,26 +518,9 @@ const buildSubmitData = () => {
       : ''
   }
 
-  if (formData.value.multimodalConfig.enabled) {
-    const storageType = formData.value.multimodalConfig.storageType
-    if (storageType === 'minio') {
-      data.cos_config = {
-        provider: 'minio',
-        bucket_name: formData.value.multimodalConfig.minio.bucketName,
-        use_ssl: formData.value.multimodalConfig.minio.useSSL,
-        path_prefix: formData.value.multimodalConfig.minio.pathPrefix || undefined
-      }
-    } else {
-      data.cos_config = {
-        provider: 'cos',
-        secret_id: formData.value.multimodalConfig.cos.secretId,
-        secret_key: formData.value.multimodalConfig.cos.secretKey,
-        region: formData.value.multimodalConfig.cos.region,
-        bucket_name: formData.value.multimodalConfig.cos.bucketName,
-        app_id: formData.value.multimodalConfig.cos.appId,
-        path_prefix: formData.value.multimodalConfig.cos.pathPrefix || undefined
-      }
-    }
+  // 存储引擎：仅传 provider，参数从全局设置读取
+  data.cos_config = {
+    provider: formData.value.storageProvider || 'local'
   }
 
   // 添加知识图谱配置
@@ -599,7 +593,7 @@ const handleSubmit = async () => {
         config: updateConfig
       })
 
-      // 2. 更新完整配置（模型、分块、多模态、知识图谱等）
+      // 2. 更新完整配置（模型、分块、多模态、存储引擎、知识图谱等）
       const config: KBModelConfigRequest = {
         llmModelId: data.summary_model_id,
         embeddingModelId: data.embedding_model_id,
@@ -607,25 +601,13 @@ const handleSubmit = async () => {
         documentSplitting: {
           chunkSize: data.chunking_config.chunk_size,
           chunkOverlap: data.chunking_config.chunk_overlap,
-          separators: data.chunking_config.separators
+          separators: data.chunking_config.separators,
+          parserEngineRules: data.chunking_config.parser_engine_rules || undefined
         },
         multimodal: {
-          enabled: !!data.cos_config || !!data.vlm_config?.enabled,
-          storageType: data.cos_config?.provider || 'minio',
-          cos: data.cos_config?.provider === 'cos' ? {
-            secretId: data.cos_config.secret_id,
-            secretKey: data.cos_config.secret_key,
-            region: data.cos_config.region,
-            bucketName: data.cos_config.bucket_name,
-            appId: data.cos_config.app_id,
-            pathPrefix: data.cos_config.path_prefix || ''
-          } : undefined,
-          minio: data.cos_config?.provider === 'minio' ? {
-            bucketName: data.cos_config.bucket_name,
-            useSSL: data.cos_config.use_ssl || false,
-            pathPrefix: data.cos_config.path_prefix || ''
-          } : undefined
+          enabled: !!data.vlm_config?.enabled
         },
+        storageProvider: data.cos_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',

@@ -77,10 +77,16 @@
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+interface ParserEngineRule {
+  file_types: string[]
+  engine: string
+}
+
 interface ChunkingConfig {
   chunkSize: number
   chunkOverlap: number
   separators: string[]
+  parserEngineRules?: ParserEngineRule[]
 }
 
 interface Props {
@@ -98,7 +104,6 @@ const localChunkOverlap = ref(props.config.chunkOverlap)
 const localSeparators = ref([...props.config.separators])
 const { t } = useI18n()
 
-// Separator options
 const separatorOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.separators.doubleNewline'), value: '\n\n' },
   { label: t('knowledgeEditor.chunking.separators.singleNewline'), value: '\n' },
@@ -110,34 +115,22 @@ const separatorOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.separators.space'), value: ' ' }
 ])
 
-// Watch for prop changes
 watch(() => props.config, (newConfig) => {
   localChunkSize.value = newConfig.chunkSize
   localChunkOverlap.value = newConfig.chunkOverlap
   localSeparators.value = [...newConfig.separators]
 }, { deep: true })
 
-// Handle chunk size change
-const handleChunkSizeChange = () => {
-  emitUpdate()
-}
+const handleChunkSizeChange = () => { emitUpdate() }
+const handleChunkOverlapChange = () => { emitUpdate() }
+const handleSeparatorsChange = () => { emitUpdate() }
 
-// Handle chunk overlap change
-const handleChunkOverlapChange = () => {
-  emitUpdate()
-}
-
-// Handle separator change
-const handleSeparatorsChange = () => {
-  emitUpdate()
-}
-
-// Emit update event
 const emitUpdate = () => {
   emit('update:config', {
     chunkSize: localChunkSize.value,
     chunkOverlap: localChunkOverlap.value,
-    separators: localSeparators.value
+    separators: localSeparators.value,
+    parserEngineRules: props.config.parserEngineRules
   })
 }
 </script>
@@ -228,4 +221,3 @@ const emitUpdate = () => {
   text-align: right;
 }
 </style>
-

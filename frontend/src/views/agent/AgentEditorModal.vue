@@ -890,7 +890,7 @@
                       </div>
                       <div class="setting-control">
                         <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.keyword_threshold" :min="0" :max="1" :step="0.05" />
+                          <t-slider v-model="formData.config.keyword_threshold" :min="0" :max="1" :step="0.01" />
                           <span class="slider-value">{{ formData.config.keyword_threshold?.toFixed(2) }}</span>
                         </div>
                       </div>
@@ -904,7 +904,7 @@
                       </div>
                       <div class="setting-control">
                         <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.vector_threshold" :min="0" :max="1" :step="0.05" />
+                          <t-slider v-model="formData.config.vector_threshold" :min="0" :max="1" :step="0.01" />
                           <span class="slider-value">{{ formData.config.vector_threshold?.toFixed(2) }}</span>
                         </div>
                       </div>
@@ -929,7 +929,7 @@
                       </div>
                       <div class="setting-control">
                         <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.rerank_threshold" :min="0" :max="1" :step="0.05" />
+                          <t-slider v-model="formData.config.rerank_threshold" :min="0" :max="1" :step="0.01" />
                           <span class="slider-value">{{ formData.config.rerank_threshold?.toFixed(2) }}</span>
                         </div>
                       </div>

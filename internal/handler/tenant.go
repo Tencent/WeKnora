@@ -599,6 +599,12 @@ func (h *TenantHandler) GetTenantKV(c *gin.Context) {
 	case "prompt-templates":
 		h.GetPromptTemplates(c)
 		return
+	case "parser-engine-config":
+		h.GetTenantParserEngineConfig(c)
+		return
+	case "storage-engine-config":
+		h.GetTenantStorageEngineConfig(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -632,6 +638,12 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 		return
 	case "conversation-config":
 		h.updateTenantConversationInternal(c)
+		return
+	case "parser-engine-config":
+		h.updateTenantParserEngineConfigInternal(c)
+		return
+	case "storage-engine-config":
+		h.updateTenantStorageEngineConfigInternal(c)
 		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
@@ -710,6 +722,110 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    tenant.WebSearchConfig,
+	})
+}
+
+// GetTenantParserEngineConfig returns the tenant's parser engine config (MinerU endpoint, API key, etc.).
+func (h *TenantHandler) GetTenantParserEngineConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		logger.Error(ctx, "Tenant is empty")
+		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+	data := tenant.ParserEngineConfig
+	if data == nil {
+		data = &types.ParserEngineConfig{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantParserEngineConfigInternal updates the tenant's parser engine config.
+func (h *TenantHandler) updateTenantParserEngineConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+	var cfg types.ParserEngineConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		logger.Error(ctx, "Tenant is empty")
+		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+	tenant.ParserEngineConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to update tenant parser engine config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.ParserEngineConfig,
+		"message": "解析引擎配置已更新",
+	})
+}
+
+// GetTenantStorageEngineConfig returns the tenant's storage engine config (Local, MinIO, COS parameters).
+func (h *TenantHandler) GetTenantStorageEngineConfig(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		logger.Error(ctx, "Tenant is empty")
+		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+	data := tenant.StorageEngineConfig
+	if data == nil {
+		data = &types.StorageEngineConfig{}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    data,
+	})
+}
+
+// updateTenantStorageEngineConfigInternal updates the tenant's storage engine config.
+func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+	var cfg types.StorageEngineConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		logger.Error(ctx, "Tenant is empty")
+		c.Error(errors.NewBadRequestError("Tenant is empty"))
+		return
+	}
+	tenant.StorageEngineConfig = &cfg
+	updatedTenant, err := h.service.UpdateTenant(ctx, tenant)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to update tenant storage engine config").WithDetails(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    updatedTenant.StorageEngineConfig,
+		"message": "存储引擎配置已更新",
 	})
 }
 

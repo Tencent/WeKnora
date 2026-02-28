@@ -11,6 +11,7 @@ const (
 	ElasticFaissRetrieverEngineType  RetrieverEngineType = "elasticfaiss"
 	QdrantRetrieverEngineType        RetrieverEngineType = "qdrant"
 	MilvusRetrieverEngineType        RetrieverEngineType = "milvus"
+	SQLiteRetrieverEngineType        RetrieverEngineType = "sqlite"
 )
 
 // RetrieverType represents the type of retriever

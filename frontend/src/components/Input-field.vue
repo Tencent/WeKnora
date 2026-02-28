@@ -97,6 +97,9 @@ const agentKBSelectionMode = computed(() => {
   return currentAgentConfig.value?.kb_selection_mode || 'all';
 });
 
+// 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
+const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
+
 // 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
@@ -204,9 +207,6 @@ const sharedAgentOrgName = computed(() => {
   );
   return shared?.org_name || shared?.shared_by_username || '';
 });
-
-// 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
-const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
 const props = defineProps({
   isReplying: {

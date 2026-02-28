@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -21,11 +22,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/docreader/client"
-	"github.com/Tencent/WeKnora/docreader/proto"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -59,22 +61,23 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
-	config          *config.Config
-	retrieveEngine  interfaces.RetrieveEngineRegistry
-	repo            interfaces.KnowledgeRepository
-	kbService       interfaces.KnowledgeBaseService
-	tenantRepo      interfaces.TenantRepository
-	docReaderClient *client.Client
-	chunkService    interfaces.ChunkService
-	chunkRepo       interfaces.ChunkRepository
-	tagRepo         interfaces.KnowledgeTagRepository
-	tagService      interfaces.KnowledgeTagService
-	fileSvc         interfaces.FileService
-	modelService    interfaces.ModelService
-	task            *asynq.Client
-	graphEngine     interfaces.RetrieveGraphRepository
-	redisClient     *redis.Client
-	kbShareService  interfaces.KBShareService
+	config         *config.Config
+	retrieveEngine interfaces.RetrieveEngineRegistry
+	repo           interfaces.KnowledgeRepository
+	kbService      interfaces.KnowledgeBaseService
+	tenantRepo     interfaces.TenantRepository
+	documentReader interfaces.DocumentReader
+	chunkService   interfaces.ChunkService
+	chunkRepo      interfaces.ChunkRepository
+	tagRepo        interfaces.KnowledgeTagRepository
+	tagService     interfaces.KnowledgeTagService
+	fileSvc        interfaces.FileService
+	modelService   interfaces.ModelService
+	task           interfaces.TaskEnqueuer
+	graphEngine    interfaces.RetrieveGraphRepository
+	redisClient    *redis.Client
+	kbShareService interfaces.KBShareService
+	imageResolver  *docparser.ImageResolver
 }
 
 const (
@@ -87,7 +90,7 @@ const (
 func NewKnowledgeService(
 	config *config.Config,
 	repo interfaces.KnowledgeRepository,
-	docReaderClient *client.Client,
+	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
 	chunkService interfaces.ChunkService,
@@ -96,30 +99,43 @@ func NewKnowledgeService(
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
-	task *asynq.Client,
+	task interfaces.TaskEnqueuer,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	redisClient *redis.Client,
 	kbShareService interfaces.KBShareService,
+	imageResolver *docparser.ImageResolver,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
-		config:          config,
-		repo:            repo,
-		kbService:       kbService,
-		tenantRepo:      tenantRepo,
-		docReaderClient: docReaderClient,
-		chunkService:    chunkService,
-		chunkRepo:       chunkRepo,
-		tagRepo:         tagRepo,
-		tagService:      tagService,
-		fileSvc:         fileSvc,
-		modelService:    modelService,
-		task:            task,
-		graphEngine:     graphEngine,
-		retrieveEngine:  retrieveEngine,
-		redisClient:     redisClient,
-		kbShareService:  kbShareService,
+		config:         config,
+		repo:           repo,
+		kbService:      kbService,
+		tenantRepo:     tenantRepo,
+		documentReader: documentReader,
+		chunkService:   chunkService,
+		chunkRepo:      chunkRepo,
+		tagRepo:        tagRepo,
+		tagService:     tagService,
+		fileSvc:        fileSvc,
+		modelService:   modelService,
+		task:           task,
+		graphEngine:    graphEngine,
+		retrieveEngine: retrieveEngine,
+		redisClient:    redisClient,
+		kbShareService: kbShareService,
+		imageResolver:  imageResolver,
 	}, nil
+}
+
+// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
+// Used when building document ReadRequest so UI-configured values take precedence over env.
+func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			return tenant.ParserEngineConfig.ToOverridesMap()
+		}
+	}
+	return nil
 }
 
 // GetRepository gets the knowledge repository
@@ -171,23 +187,40 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 
 	// 检查多模态配置完整性 - 只在图片文件时校验
-	// 检查是否为图片文件
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 检查COS配置
-		switch kb.StorageConfig.Provider {
+		// 解析有效 provider：优先 KB 级别，其次租户默认
+		provider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		}
+
+		// 根据 provider 校验租户级存储引擎配置
+		switch provider {
 		case "cos":
-			if kb.StorageConfig.SecretID == "" || kb.StorageConfig.SecretKey == "" ||
-				kb.StorageConfig.Region == "" || kb.StorageConfig.BucketName == "" ||
-				kb.StorageConfig.AppID == "" {
+			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
+				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
+				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		case "minio":
-			if kb.StorageConfig.BucketName == "" {
+			ok := false
+			if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
+				m := tenant.StorageEngineConfig.MinIO
+				if m.Mode == "remote" {
+					ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
+				} else {
+					ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
+						os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
+						(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
+				}
+			}
+			if !ok {
 				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		}
 
@@ -288,9 +321,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
-	// Save the file to storage
+	// Save the file to storage (use KB-level storage engine if configured)
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.fileSvc.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
@@ -342,7 +375,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
@@ -507,7 +540,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
@@ -921,7 +954,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			return knowledge, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
@@ -995,6 +1028,10 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 	}
 
+	// Resolve file service for this KB before spawning goroutines
+	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	kbFileSvc := s.resolveFileService(ctx, kb)
+
 	wg := errgroup.Group{}
 	// Delete knowledge embeddings from vector store
 	wg.Go(func() error {
@@ -1031,7 +1068,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// Delete the physical file if it exists
 	wg.Go(func() error {
 		if knowledge.FilePath != "" {
-			if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+			if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
 			}
 		}
@@ -1083,6 +1120,15 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		}
 	}
 	logger.Infof(ctx, "Marked %d knowledge entries as deleting", len(knowledgeList))
+
+	// Pre-resolve file services per KB so goroutines don't need DB access
+	kbFileServices := make(map[string]interfaces.FileService)
+	for _, knowledge := range knowledgeList {
+		if _, ok := kbFileServices[knowledge.KnowledgeBaseID]; !ok {
+			kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			kbFileServices[knowledge.KnowledgeBaseID] = s.resolveFileService(ctx, kb)
+		}
+	}
 
 	wg := errgroup.Group{}
 	// 2. Delete knowledge embeddings from vector store
@@ -1136,7 +1182,8 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
 			if knowledge.FilePath != "" {
-				if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+				fSvc := kbFileServices[knowledge.KnowledgeBaseID]
+				if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
 					logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
 				}
 			}
@@ -1244,21 +1291,20 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	}
 
 	// Convert passages to chunks
-	chunks := make([]*proto.Chunk, 0, len(passage))
+	chunks := make([]types.ParsedChunk, 0, len(passage))
 	start, end := 0, 0
 	for i, p := range passage {
 		if p == "" {
 			continue
 		}
 		end += len([]rune(p))
-		chunk := &proto.Chunk{
+		chunks = append(chunks, types.ParsedChunk{
 			Content: p,
-			Seq:     int32(i),
-			Start:   int32(start),
-			End:     int32(end),
-		}
+			Seq:     i,
+			Start:   start,
+			End:     end,
+		})
 		start = end
-		chunks = append(chunks, chunk)
 	}
 	// Process and store chunks
 	s.processChunks(ctx, kb, knowledge, chunks)
@@ -1268,11 +1314,13 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 type ProcessChunksOptions struct {
 	EnableQuestionGeneration bool
 	QuestionCount            int
+	EnableMultimodel         bool
+	StoredImages             []docparser.StoredImage
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
-	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []*proto.Chunk,
+	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
 ) {
 	// Get options
@@ -1364,8 +1412,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 打印图片详细信息
 		for imgIdx, img := range chunkData.Images {
-			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.Url)
-			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalUrl)
+			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.URL)
+			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalURL)
 			if img.Caption != "" {
 				captionPreview := img.Caption
 				if len(captionPreview) > 100 {
@@ -1373,8 +1421,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				}
 				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
 			}
-			if img.OcrText != "" {
-				ocrPreview := img.OcrText
+			if img.OCRText != "" {
+				ocrPreview := img.OCRText
 				if len(ocrPreview) > 100 {
 					ocrPreview = ocrPreview[:100] + "..."
 				}
@@ -1403,7 +1451,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// 重新分配容量，考虑图片相关的Chunk
 	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount)
 
-	for _, chunkData := range chunks {
+	for idx, chunkData := range chunks {
 		if strings.TrimSpace(chunkData.Content) == "" {
 			continue
 		}
@@ -1423,84 +1471,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
 		}
-		var chunkImages []types.ImageInfo
+		chunks[idx].ChunkID = textChunk.ID
 		insertChunks = append(insertChunks, textChunk)
-
-		// 处理图片信息
-		if len(chunkData.Images) > 0 {
-			logger.GetLogger(ctx).Infof("Processing %d images in chunk #%d", len(chunkData.Images), chunkData.Seq)
-
-			for i, img := range chunkData.Images {
-				// 保存图片信息到文本Chunk
-				imageInfo := types.ImageInfo{
-					URL:         img.Url,
-					OriginalURL: img.OriginalUrl,
-					StartPos:    int(img.Start),
-					EndPos:      int(img.End),
-					OCRText:     img.OcrText,
-					Caption:     img.Caption,
-				}
-				chunkImages = append(chunkImages, imageInfo)
-
-				// 将ImageInfo序列化为JSON
-				imageInfoJSON, err := json.Marshal([]types.ImageInfo{imageInfo})
-				if err != nil {
-					logger.GetLogger(ctx).WithField("error", err).Errorf("Failed to marshal image info to JSON")
-					continue
-				}
-
-				// 如果有OCR文本，创建OCR Chunk
-				if img.OcrText != "" {
-					ocrChunk := &types.Chunk{
-						ID:              uuid.New().String(),
-						TenantID:        knowledge.TenantID,
-						KnowledgeID:     knowledge.ID,
-						KnowledgeBaseID: knowledge.KnowledgeBaseID,
-						Content:         img.OcrText,
-						ChunkIndex:      maxSeq + i*100 + 1, // 使用不冲突的索引方式
-						IsEnabled:       true,
-						CreatedAt:       time.Now(),
-						UpdatedAt:       time.Now(),
-						StartAt:         int(img.Start),
-						EndAt:           int(img.End),
-						ChunkType:       types.ChunkTypeImageOCR,
-						ParentChunkID:   textChunk.ID,
-						ImageInfo:       string(imageInfoJSON),
-					}
-					insertChunks = append(insertChunks, ocrChunk)
-					logger.GetLogger(ctx).Infof("Created OCR chunk for image %d in chunk #%d", i, chunkData.Seq)
-				}
-
-				// 如果有图片描述，创建Caption Chunk
-				if img.Caption != "" {
-					captionChunk := &types.Chunk{
-						ID:              uuid.New().String(),
-						TenantID:        knowledge.TenantID,
-						KnowledgeID:     knowledge.ID,
-						KnowledgeBaseID: knowledge.KnowledgeBaseID,
-						Content:         img.Caption,
-						ChunkIndex:      maxSeq + i*100 + 2, // 使用不冲突的索引方式
-						IsEnabled:       true,
-						CreatedAt:       time.Now(),
-						UpdatedAt:       time.Now(),
-						StartAt:         int(img.Start),
-						EndAt:           int(img.End),
-						ChunkType:       types.ChunkTypeImageCaption,
-						ParentChunkID:   textChunk.ID,
-						ImageInfo:       string(imageInfoJSON),
-					}
-					insertChunks = append(insertChunks, captionChunk)
-					logger.GetLogger(ctx).Infof("Created caption chunk for image %d in chunk #%d", i, chunkData.Seq)
-				}
-			}
-
-			imageInfoJSON, err := json.Marshal(chunkImages)
-			if err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("Failed to marshal image info to JSON")
-				continue
-			}
-			textChunk.ImageInfo = string(imageInfoJSON)
-		}
 	}
 
 	// Sort chunks by index for proper ordering
@@ -1645,8 +1617,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return
 	}
 
-	// Update knowledge status to completed
-	knowledge.ParseStatus = types.ParseStatusCompleted
+	// Skip summary/question generation for image-type knowledge — the text chunk
+	// is just a markdown image reference, so LLM summary would be useless.
+	// The multimodal task will provide a caption as the description instead.
+	isImage := IsImageType(knowledge.FileType)
+	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
+
+	// For image files with pending multimodal processing, keep "processing" status
+	// so the frontend waits until the description is ready before showing "completed".
+	if pendingMultimodal {
+		knowledge.ParseStatus = types.ParseStatusProcessing
+	} else {
+		knowledge.ParseStatus = types.ParseStatusCompleted
+	}
 	knowledge.EnableStatus = "enabled"
 	knowledge.StorageSize = totalStorageSize
 	now := time.Now()
@@ -1654,7 +1637,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	knowledge.UpdatedAt = now
 
 	// Set summary status based on whether summary generation will be triggered
-	if len(textChunks) > 0 {
+	if len(textChunks) > 0 && !isImage {
 		knowledge.SummaryStatus = types.SummaryStatusPending
 	} else {
 		knowledge.SummaryStatus = types.SummaryStatusNone
@@ -1665,7 +1648,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue question generation task if enabled (async, non-blocking)
-	if options.EnableQuestionGeneration && len(textChunks) > 0 {
+	if options.EnableQuestionGeneration && len(textChunks) > 0 && !isImage {
 		questionCount := options.QuestionCount
 		if questionCount <= 0 {
 			questionCount = 3
@@ -1677,8 +1660,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue summary generation task (async, non-blocking)
-	if len(textChunks) > 0 {
+	if len(textChunks) > 0 && !isImage {
 		s.enqueueSummaryGenerationTask(ctx, knowledge.KnowledgeBaseID, knowledge.ID)
+	}
+
+	// Enqueue multimodal tasks for images (async, non-blocking)
+	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks)
 	}
 
 	// Update tenant's storage usage
@@ -2298,8 +2286,9 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return nil, "", err
 	}
 
-	// Get the file from storage
-	file, err := s.fileSvc.GetFile(ctx, knowledge.FilePath)
+	// Resolve KB-level file service
+	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	file, err := s.resolveFileService(ctx, kb).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -2522,7 +2511,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
@@ -2615,7 +2604,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
@@ -2633,7 +2622,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
-	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls":
+	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt":
 		return true
 	default:
 		return false
@@ -2766,7 +2755,7 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 		g.Go(func() error {
 			err := s.DeleteKnowledgeList(gctx, ids)
 			if err != nil {
-				logger.Errorf(gctx, "delete partial knowledge %v: %w", ids, err)
+				logger.Errorf(gctx, "delete partial knowledge %v: %v", ids, err)
 				return err
 			}
 			return nil
@@ -2785,12 +2774,12 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 		g.Go(func() error {
 			srcKn, err := s.repo.GetKnowledgeByID(gctx, srcKB.TenantID, knowledge)
 			if err != nil {
-				logger.Errorf(gctx, "get knowledge %s: %w", knowledge, err)
+				logger.Errorf(gctx, "get knowledge %s: %v", knowledge, err)
 				return err
 			}
 			err = s.cloneKnowledge(gctx, srcKn, dstKB)
 			if err != nil {
-				logger.Errorf(gctx, "clone knowledge %s: %w", knowledge, err)
+				logger.Errorf(gctx, "clone knowledge %s: %v", knowledge, err)
 				return err
 			}
 			return nil
@@ -6608,82 +6597,47 @@ func ensureManualFileName(title string) string {
 }
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
-	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, sync bool,
+	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
 ) {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
 		return
 	}
 
-	// 使用 docreader 按照 MD 格式处理，并使用知识库配置的分隔符
-	contentBytes := []byte(clean)
-	fileName := ensureManualFileName(knowledge.Title)
-	fileType := "md"
-
-	// 检查是否需要启用多模态（对于手动内容通常不需要，但保持一致性）
-	enableMultimodel := kb.IsMultimodalEnabled() && kb.StorageConfig.Provider != ""
-
-	var vlmConfig *proto.VLMConfig
-	if enableMultimodel {
-		cfg, cfgErr := s.getVLMProtoConfig(ctx, kb)
-		if cfgErr != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", cfgErr).Errorf("triggerManualProcessing build VLM config failed")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = cfgErr.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return
-		}
-		if cfg == nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				Error("triggerManualProcessing enable multimodal but VLM config missing")
-		}
-		vlmConfig = cfg
+	// Manual content is markdown - chunk directly with Go chunker
+	chunkCfg := chunker.SplitterConfig{
+		ChunkSize:    kb.ChunkingConfig.ChunkSize,
+		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
+		Separators:   kb.ChunkingConfig.Separators,
+	}
+	if chunkCfg.ChunkSize <= 0 {
+		chunkCfg.ChunkSize = 512
+	}
+	if chunkCfg.ChunkOverlap <= 0 {
+		chunkCfg.ChunkOverlap = 50
+	}
+	if len(chunkCfg.Separators) == 0 {
+		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
 	}
 
-	// 调用 docreader 解析 markdown 内容
-	resp, err := s.docReaderClient.ReadFromFile(ctx, &proto.ReadFromFileRequest{
-		FileContent: contentBytes,
-		FileName:    fileName,
-		FileType:    fileType,
-		ReadConfig: &proto.ReadConfig{
-			ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-			ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-			Separators:       kb.ChunkingConfig.Separators,
-			EnableMultimodal: enableMultimodel,
-			StorageConfig: &proto.StorageConfig{
-				Provider: proto.StorageProvider(
-					proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)],
-				),
-				Region:          kb.StorageConfig.Region,
-				BucketName:      kb.StorageConfig.BucketName,
-				AccessKeyId:     kb.StorageConfig.SecretID,
-				SecretAccessKey: kb.StorageConfig.SecretKey,
-				AppId:           kb.StorageConfig.AppID,
-				PathPrefix:      kb.StorageConfig.PathPrefix,
-			},
-			VlmConfig: vlmConfig,
-		},
-		RequestId: ctx.Value(types.RequestIDContextKey).(string),
-	})
-	if err != nil {
-		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-			WithField("error", err).Errorf("triggerManualProcessing read file failed")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		return
+	splitChunks := chunker.SplitText(clean, chunkCfg)
+	parsed := make([]types.ParsedChunk, len(splitChunks))
+	for i, c := range splitChunks {
+		parsed[i] = types.ParsedChunk{
+			Content: c.Content,
+			Seq:     c.Seq,
+			Start:   c.Start,
+			End:     c.End,
+		}
 	}
 
-	if sync {
-		s.processChunks(ctx, kb, knowledge, resp.Chunks)
+	if doSync {
+		s.processChunks(ctx, kb, knowledge, parsed)
 		return
 	}
 
 	newCtx := logger.CloneContext(ctx)
-	go s.processChunks(newCtx, kb, knowledge, resp.Chunks)
+	go s.processChunks(newCtx, kb, knowledge, parsed)
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
@@ -6745,16 +6699,16 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	return cleanupErr
 }
 
-func (s *knowledgeService) getVLMProtoConfig(ctx context.Context, kb *types.KnowledgeBase) (*proto.VLMConfig, error) {
+func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.KnowledgeBase) (*types.DocParserVLMConfig, error) {
 	if kb == nil {
 		return nil, nil
 	}
 	// 兼容老版本：直接使用 ModelName 和 BaseURL
 	if kb.VLMConfig.ModelName != "" && kb.VLMConfig.BaseURL != "" {
-		return &proto.VLMConfig{
+		return &types.DocParserVLMConfig{
 			ModelName:     kb.VLMConfig.ModelName,
-			BaseUrl:       kb.VLMConfig.BaseURL,
-			ApiKey:        kb.VLMConfig.APIKey,
+			BaseURL:       kb.VLMConfig.BaseURL,
+			APIKey:        kb.VLMConfig.APIKey,
 			InterfaceType: kb.VLMConfig.InterfaceType,
 		}, nil
 	}
@@ -6774,12 +6728,165 @@ func (s *knowledgeService) getVLMProtoConfig(ctx context.Context, kb *types.Know
 		interfaceType = "openai"
 	}
 
-	return &proto.VLMConfig{
+	return &types.DocParserVLMConfig{
 		ModelName:     model.Name,
-		BaseUrl:       model.Parameters.BaseURL,
-		ApiKey:        model.Parameters.APIKey,
+		BaseURL:       model.Parameters.BaseURL,
+		APIKey:        model.Parameters.APIKey,
 		InterfaceType: interfaceType,
 	}, nil
+}
+
+func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
+	sc := &kb.StorageConfig
+	provider := strings.ToLower(strings.TrimSpace(sc.Provider))
+	if provider == "" {
+		provider = "local"
+	}
+
+	// Backward compatibility: if KB has full params for the chosen provider, use them.
+	hasKBFull := false
+	switch provider {
+	case "cos":
+		hasKBFull = sc.SecretID != "" && sc.BucketName != ""
+	case "minio":
+		hasKBFull = sc.BucketName != ""
+	case "local":
+		// Local has no credentials; always merge from tenant if available
+		hasKBFull = false
+	}
+
+	if hasKBFull {
+		return &types.DocParserStorageConfig{
+			Provider:        strings.ToUpper(provider),
+			Region:          sc.Region,
+			BucketName:      sc.BucketName,
+			AccessKeyID:     sc.SecretID,
+			SecretAccessKey: sc.SecretKey,
+			AppID:           sc.AppID,
+			PathPrefix:      sc.PathPrefix,
+		}
+	}
+
+	// Otherwise merge from tenant's StorageEngineConfig.
+	var out types.DocParserStorageConfig
+	out.Provider = strings.ToUpper(provider)
+
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant != nil && tenant.StorageEngineConfig != nil {
+		sec := tenant.StorageEngineConfig
+		if sec.DefaultProvider != "" && provider == "" {
+			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
+			out.Provider = strings.ToUpper(provider)
+		}
+		switch provider {
+		case "local":
+			if sec.Local != nil {
+				out.PathPrefix = sec.Local.PathPrefix
+			}
+		case "minio":
+			if sec.MinIO != nil {
+				out.BucketName = sec.MinIO.BucketName
+				out.PathPrefix = sec.MinIO.PathPrefix
+				if sec.MinIO.Mode == "remote" {
+					out.Endpoint = sec.MinIO.Endpoint
+					out.AccessKeyID = sec.MinIO.AccessKeyID
+					out.SecretAccessKey = sec.MinIO.SecretAccessKey
+				} else {
+					out.Endpoint = os.Getenv("MINIO_ENDPOINT")
+					out.AccessKeyID = os.Getenv("MINIO_ACCESS_KEY_ID")
+					out.SecretAccessKey = os.Getenv("MINIO_SECRET_ACCESS_KEY")
+				}
+			}
+		case "cos":
+			if sec.COS != nil {
+				out.Region = sec.COS.Region
+				out.BucketName = sec.COS.BucketName
+				out.AccessKeyID = sec.COS.SecretID
+				out.SecretAccessKey = sec.COS.SecretKey
+				out.AppID = sec.COS.AppID
+				out.PathPrefix = sec.COS.PathPrefix
+			}
+		}
+	}
+
+	return &out
+}
+
+// resolveFileService returns the FileService for the given knowledge base,
+// based on the KB's StorageConfig.Provider and the tenant's StorageEngineConfig.
+// Falls back to the global fileSvc when no tenant-level storage config is found.
+func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.KnowledgeBase) interfaces.FileService {
+	if kb == nil {
+		return s.fileSvc
+	}
+
+	provider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+
+	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
+		return s.fileSvc
+	}
+
+	sec := tenant.StorageEngineConfig
+	var svc interfaces.FileService
+	var err error
+
+	switch provider {
+	case "local":
+		baseDir := "/data/files"
+		if sec.Local != nil && sec.Local.PathPrefix != "" {
+			baseDir = sec.Local.PathPrefix
+		}
+		return filesvc.NewLocalFileService(baseDir)
+
+	case "minio":
+		if sec.MinIO == nil {
+			return s.fileSvc
+		}
+		var endpoint, accessKeyID, secretAccessKey string
+		if sec.MinIO.Mode == "remote" {
+			endpoint = sec.MinIO.Endpoint
+			accessKeyID = sec.MinIO.AccessKeyID
+			secretAccessKey = sec.MinIO.SecretAccessKey
+		} else {
+			endpoint = os.Getenv("MINIO_ENDPOINT")
+			accessKeyID = os.Getenv("MINIO_ACCESS_KEY_ID")
+			secretAccessKey = os.Getenv("MINIO_SECRET_ACCESS_KEY")
+		}
+		bucketName := sec.MinIO.BucketName
+		if bucketName == "" {
+			bucketName = os.Getenv("MINIO_BUCKET_NAME")
+		}
+		if endpoint == "" || accessKeyID == "" || secretAccessKey == "" || bucketName == "" {
+			logger.Warnf(ctx, "Incomplete MinIO config for KB storage, falling back to default")
+			return s.fileSvc
+		}
+		svc, err = filesvc.NewMinioFileService(endpoint, accessKeyID, secretAccessKey, bucketName, sec.MinIO.UseSSL)
+
+	case "cos":
+		if sec.COS == nil || sec.COS.SecretID == "" || sec.COS.BucketName == "" || sec.COS.Region == "" {
+			logger.Warnf(ctx, "Incomplete COS config for KB storage, falling back to default")
+			return s.fileSvc
+		}
+		pathPrefix := sec.COS.PathPrefix
+		if pathPrefix == "" {
+			pathPrefix = "weknora"
+		}
+		svc, err = filesvc.NewCosFileService(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix)
+
+	default:
+		return s.fileSvc
+	}
+
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create %s file service from tenant config: %v, falling back to default", provider, err)
+		return s.fileSvc
+	}
+	return svc
 }
 
 func IsImageType(fileType string) bool {
@@ -6942,20 +7049,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 构建VLM配置（如果需要）
-	var vlmConfig *proto.VLMConfig
-	if payload.EnableMultimodel {
-		vlmConfig, err = s.getVLMProtoConfig(ctx, kb)
-		if err != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", err).Errorf("processDocument build VLM config failed")
-		}
-		if vlmConfig == nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				Warn("processDocument enable multimodal but VLM config missing")
-		}
-	}
-
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
@@ -6967,10 +7060,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 处理不同类型的导入：文件、URL、文本段落
-	var chunks []*proto.Chunk
+	// New pipeline: convert -> store images -> chunk -> vectorize -> multimodal tasks
+	var convertResult *types.ReadResult
+	var chunks []types.ParsedChunk
+
 	if payload.FileURL != "" {
-		// file_url 导入：再次 SSRF 校验（防 DNS 重绑定），下载到临时文件，传二进制给 docreader
+		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
 		if safe, reason := secutils.IsSSRFSafeURL(payload.FileURL); !safe {
 			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.FileURL, reason)
 			knowledge.ParseStatus = "failed"
@@ -6980,8 +7075,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return nil
 		}
 
-		// Download the remote file (SSRF already validated above).
-		// payloadFileName/payloadFileType are in/out: resolved values are written back if empty.
 		resolvedFileName := payload.FileName
 		resolvedFileType := payload.FileType
 		contentBytes, err := downloadFileFromURL(ctx, payload.FileURL, &resolvedFileName, &resolvedFileType)
@@ -6996,7 +7089,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return fmt.Errorf("failed to download file from URL: %w", err)
 		}
 
-		// Validate resolved file type against whitelist
 		if resolvedFileType != "" && !allowedFileURLExtensions[strings.ToLower(resolvedFileType)] {
 			logger.Errorf(ctx, "Unsupported file type resolved from file URL: %s", resolvedFileType)
 			knowledge.ParseStatus = "failed"
@@ -7006,7 +7098,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return nil
 		}
 
-		// Persist resolved metadata back to the knowledge record
 		if resolvedFileName != "" && knowledge.FileName == "" {
 			knowledge.FileName = resolvedFileName
 		}
@@ -7015,180 +7106,482 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			s.repo.UpdateKnowledge(ctx, knowledge)
 		}
 
-		fileResp, err := s.docReaderClient.ReadFromFile(ctx, &proto.ReadFromFileRequest{
-			FileContent: contentBytes,
-			FileName:    resolvedFileName,
-			FileType:    resolvedFileType,
-			ReadConfig: &proto.ReadConfig{
-				ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-				ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-				Separators:       kb.ChunkingConfig.Separators,
-				EnableMultimodal: payload.EnableMultimodel,
-				StorageConfig: &proto.StorageConfig{
-					Provider:        proto.StorageProvider(proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)]),
-					Region:          kb.StorageConfig.Region,
-					BucketName:      kb.StorageConfig.BucketName,
-					AccessKeyId:     kb.StorageConfig.SecretID,
-					SecretAccessKey: kb.StorageConfig.SecretKey,
-					AppId:           kb.StorageConfig.AppID,
-					PathPrefix:      kb.StorageConfig.PathPrefix,
-				},
-				VlmConfig: vlmConfig,
-			},
-			RequestId: payload.RequestId,
-		})
+		fileSvc := s.resolveFileService(ctx, kb)
+		filePath, err := fileSvc.SaveBytes(ctx, contentBytes, payload.TenantID, resolvedFileName, true)
 		if err != nil {
-			logger.Errorf(ctx, "Failed to read file from docreader (file_url): %v", err)
 			if isLastRetry {
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
 			}
-			return fmt.Errorf("failed to read file from docreader: %w", err)
-		}
-		chunks = fileResp.Chunks
-	} else if payload.URL != "" {
-		// URL导入 - 再次进行 SSRF 验证（防止 DNS 重绑定攻击）
-		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
-			logger.Errorf(ctx, "URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.URL, reason)
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "URL is not allowed for security reasons"
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return nil
+			return fmt.Errorf("failed to save downloaded file: %w", err)
 		}
 
-		urlResp, err := s.docReaderClient.ReadFromURL(ctx, &proto.ReadFromURLRequest{
-			Url:   payload.URL,
-			Title: knowledge.Title,
-			ReadConfig: &proto.ReadConfig{
-				ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-				ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-				Separators:       kb.ChunkingConfig.Separators,
-				EnableMultimodal: payload.EnableMultimodel,
-				StorageConfig: &proto.StorageConfig{
-					Provider: proto.StorageProvider(
-						proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)],
-					),
-					Region:          kb.StorageConfig.Region,
-					BucketName:      kb.StorageConfig.BucketName,
-					AccessKeyId:     kb.StorageConfig.SecretID,
-					SecretAccessKey: kb.StorageConfig.SecretKey,
-					AppId:           kb.StorageConfig.AppID,
-					PathPrefix:      kb.StorageConfig.PathPrefix,
-				},
-				VlmConfig: vlmConfig,
-			},
-			RequestId: payload.RequestId,
-		})
+		payload.FilePath = filePath
+		payload.FileName = resolvedFileName
+		payload.FileType = resolvedFileType
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
 		if err != nil {
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to read from URL: %w", err)
+			return err
 		}
-		chunks = urlResp.Chunks
+		if convertResult == nil {
+			return nil
+		}
+	} else if payload.URL != "" {
+		// URL import
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		if err != nil {
+			return err
+		}
+		if convertResult == nil {
+			return nil
+		}
 	} else if len(payload.Passages) > 0 {
-		// 文本段落导入
-		chunks := make([]*proto.Chunk, 0, len(payload.Passages))
+		// Text passage import - direct chunking, no conversion needed
+		passageChunks := make([]types.ParsedChunk, 0, len(payload.Passages))
 		start, end := 0, 0
 		for i, p := range payload.Passages {
 			if p == "" {
 				continue
 			}
 			end += len([]rune(p))
-			chunk := &proto.Chunk{
+			passageChunks = append(passageChunks, types.ParsedChunk{
 				Content: p,
-				Seq:     int32(i),
-				Start:   int32(start),
-				End:     int32(end),
-			}
+				Seq:     i,
+				Start:   start,
+				End:     end,
+			})
 			start = end
-			chunks = append(chunks, chunk)
 		}
-		// 直接处理chunks，不需要调用docReader
-		s.processChunks(ctx, kb, knowledge, chunks)
+		s.processChunks(ctx, kb, knowledge, passageChunks)
 		return nil
 	} else {
-		// 文件导入
-		fileReader, err := s.fileSvc.GetFile(ctx, payload.FilePath)
+		// File import
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
 		if err != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", err).Errorf("processDocument get file failed")
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to get file: %w", err)
+			return err
 		}
-		defer fileReader.Close()
-
-		// 读取文件内容
-		contentBytes, err := io.ReadAll(fileReader)
-		if err != nil {
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to read file: %w", err)
+		if convertResult == nil {
+			return nil
 		}
-
-		// 调用docReader处理文件
-		fileResp, err := s.docReaderClient.ReadFromFile(ctx, &proto.ReadFromFileRequest{
-			FileContent: contentBytes,
-			FileName:    payload.FileName,
-			FileType:    payload.FileType,
-			ReadConfig: &proto.ReadConfig{
-				ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-				ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-				Separators:       kb.ChunkingConfig.Separators,
-				EnableMultimodal: payload.EnableMultimodel,
-				StorageConfig: &proto.StorageConfig{
-					Provider:        proto.StorageProvider(proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)]),
-					Region:          kb.StorageConfig.Region,
-					BucketName:      kb.StorageConfig.BucketName,
-					AccessKeyId:     kb.StorageConfig.SecretID,
-					SecretAccessKey: kb.StorageConfig.SecretKey,
-					AppId:           kb.StorageConfig.AppID,
-					PathPrefix:      kb.StorageConfig.PathPrefix,
-				},
-				VlmConfig: vlmConfig,
-			},
-			RequestId: payload.RequestId,
-		})
-		if err != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", err).Errorf("processDocument read file failed")
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to read file from docreader: %w", err)
-		}
-		chunks = fileResp.Chunks
 	}
 
-	// 处理chunks（这会更新状态为completed）
+	// Step 2: Store images and update markdown references
+	var storedImages []docparser.StoredImage
+	if s.imageResolver != nil && convertResult != nil {
+		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(convertResult)
+		if resolveErr != nil {
+			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
+		}
+		if updatedMarkdown != "" {
+			convertResult.MarkdownContent = updatedMarkdown
+		}
+		storedImages = images
+		logger.Infof(ctx, "Resolved %d images for knowledge %s", len(storedImages), knowledge.ID)
+
+		// If KB uses object storage (COS/MinIO), re-upload images from local to object storage
+		if len(storedImages) > 0 {
+			fileSvc := s.resolveFileService(ctx, kb)
+			reuploadedMd, reuploadedImages := s.reuploadImagesToStorage(ctx, kb, fileSvc, storedImages, convertResult.MarkdownContent)
+			convertResult.MarkdownContent = reuploadedMd
+			storedImages = reuploadedImages
+		}
+	}
+
+	// Step 3: Split into chunks using Go chunker
+	chunkCfg := chunker.SplitterConfig{
+		ChunkSize:    kb.ChunkingConfig.ChunkSize,
+		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
+		Separators:   kb.ChunkingConfig.Separators,
+	}
+	if chunkCfg.ChunkSize <= 0 {
+		chunkCfg.ChunkSize = 512
+	}
+	if chunkCfg.ChunkOverlap <= 0 {
+		chunkCfg.ChunkOverlap = 50
+	}
+	if len(chunkCfg.Separators) == 0 {
+		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+
+	splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
+	chunks = make([]types.ParsedChunk, len(splitChunks))
+	for i, c := range splitChunks {
+		chunks[i] = types.ParsedChunk{
+			Content: c.Content,
+			Seq:     c.Seq,
+			Start:   c.Start,
+			End:     c.End,
+		}
+	}
+	logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
+
+	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	s.processChunks(ctx, kb, knowledge, chunks, ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
+		EnableMultimodel:         payload.EnableMultimodel,
+		StoredImages:             storedImages,
 	})
 
+	// Step 5: Clean up temp dir
+	if convertResult.ImageDirPath != "" {
+		if removeErr := os.RemoveAll(convertResult.ImageDirPath); removeErr != nil {
+			logger.Warnf(ctx, "Failed to clean up temp image dir %s: %v", convertResult.ImageDirPath, removeErr)
+		}
+	}
+
 	return nil
+}
+
+// convert handles both file and URL reading using a unified ReadRequest.
+func (s *knowledgeService) convert(
+	ctx context.Context,
+	payload types.DocumentProcessPayload,
+	kb *types.KnowledgeBase,
+	knowledge *types.Knowledge,
+	isLastRetry bool,
+) (*types.ReadResult, error) {
+	isURL := payload.URL != ""
+	fileType := payload.FileType
+	overrides := s.getParserEngineOverridesFromContext(ctx)
+
+	if isURL {
+		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
+			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, reason: %s", payload.URL, reason)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = "URL is not allowed for security reasons"
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil, nil
+		}
+	}
+
+	parserEngine := kb.ChunkingConfig.ResolveParserEngine(fileType)
+	if isURL {
+		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
+	}
+
+	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
+		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
+
+	var reader interfaces.DocReader = s.resolveDocReader(parserEngine, fileType, isURL, overrides)
+	if reader == nil {
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil, nil
+	}
+
+	req := &types.ReadRequest{
+		URL:                   payload.URL,
+		Title:                 knowledge.Title,
+		ParserEngine:          parserEngine,
+		RequestID:             payload.RequestId,
+		ParserEngineOverrides: overrides,
+		ImageStorage:          s.buildImageStorageConfig(ctx, kb),
+	}
+
+	if !isURL {
+		fileReader, err := s.resolveFileService(ctx, kb).GetFile(ctx, payload.FilePath)
+		if err != nil {
+			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
+		}
+		defer fileReader.Close()
+		contentBytes, err := io.ReadAll(fileReader)
+		if err != nil {
+			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
+		}
+		req.FileContent = contentBytes
+		req.FileName = payload.FileName
+		req.FileType = fileType
+	}
+
+	result, err := reader.Read(ctx, req)
+	if err != nil {
+		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
+	}
+	if result.Error != "" {
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = result.Error
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil, nil
+	}
+	return result, nil
+}
+
+// resolveDocReader returns the appropriate DocReader for the given engine.
+// Returns nil when the required service is unavailable.
+func (s *knowledgeService) resolveDocReader(engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
+	switch engine {
+	case docparser.SimpleEngineName:
+		return &docparser.SimpleFormatReader{}
+	case "mineru":
+		return docparser.NewMinerUReader(overrides)
+	case "mineru_cloud":
+		return docparser.NewMinerUCloudReader(overrides)
+	default:
+		if !isURL && docparser.IsSimpleFormat(fileType) {
+			return &docparser.SimpleFormatReader{}
+		}
+		return s.documentReader
+	}
+}
+
+// failKnowledge marks knowledge as failed (only on last retry) and returns an error.
+func (s *knowledgeService) failKnowledge(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	isLastRetry bool,
+	format string,
+	args ...interface{},
+) (*types.ReadResult, error) {
+	errMsg := fmt.Sprintf(format, args...)
+	if isLastRetry {
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = errMsg
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+	}
+	return nil, fmt.Errorf(format, args...)
+}
+
+// reuploadImagesToStorage re-uploads locally stored images to the KB's object storage
+// (COS/MinIO) when the KB is not using local storage. It updates the serving URLs in
+// both the markdown content and the StoredImage list.
+// Local copies are intentionally kept because async tasks (e.g. image:multimodal)
+// may still need to read them; they are cleaned up after those tasks complete.
+// Returns the original inputs unchanged when the storage provider is "local" or empty.
+func (s *knowledgeService) reuploadImagesToStorage(
+	ctx context.Context,
+	kb *types.KnowledgeBase,
+	fileSvc interfaces.FileService,
+	images []docparser.StoredImage,
+	markdown string,
+) (string, []docparser.StoredImage) {
+	provider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+	if provider == "" || provider == "local" {
+		return markdown, images
+	}
+
+	tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+	updated := make([]docparser.StoredImage, len(images))
+	copy(updated, images)
+
+	for i, img := range updated {
+		data, err := os.ReadFile(img.LocalPath)
+		if err != nil {
+			logger.Warnf(ctx, "reuploadImagesToStorage: cannot read local image %s: %v", img.LocalPath, err)
+			continue
+		}
+
+		storagePath, err := fileSvc.SaveBytes(ctx, data, tenantID, filepath.Base(img.LocalPath), false)
+		if err != nil {
+			logger.Warnf(ctx, "reuploadImagesToStorage: failed to upload image to %s: %v", provider, err)
+			continue
+		}
+
+		// For COS, SaveBytes returns a direct public URL (https://bucket.cos...).
+		// Use it directly instead of GetFileURL which returns a presigned URL that
+		// expires after 24h — unsuitable for permanent markdown image references.
+		// For MinIO, SaveBytes returns minio://... which is not a usable URL, so
+		// keep the local /files/images/... serving URL (the app proxies MinIO files).
+		storageURL := storagePath
+		if provider == "minio" {
+			storageURL = img.ServingURL
+		}
+
+		if storageURL != img.ServingURL {
+			logger.Infof(ctx, "reuploadImagesToStorage: uploaded %s -> %s", img.ServingURL, storageURL)
+			markdown = strings.ReplaceAll(markdown, img.ServingURL, storageURL)
+			updated[i].ServingURL = storageURL
+		} else {
+			logger.Infof(ctx, "reuploadImagesToStorage: uploaded %s to %s storage (serving via local URL)", img.ServingURL, provider)
+		}
+	}
+
+	return markdown, updated
+}
+
+// buildImageStorageConfig returns storage config map to pass to DocReader so it can
+// upload images to shared storage. Returns nil for local storage (use temp dir / inline bytes).
+// Prioritises KB/tenant-level StorageEngineConfig; falls back to environment variables.
+func (s *knowledgeService) buildImageStorageConfig(ctx context.Context, kb *types.KnowledgeBase) map[string]string {
+	provider := ""
+	if kb != nil {
+		provider = strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+	}
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+
+	// Try tenant-level StorageEngineConfig first
+	if tenant != nil && tenant.StorageEngineConfig != nil {
+		sec := tenant.StorageEngineConfig
+		switch provider {
+		case "cos":
+			if sec.COS != nil && sec.COS.SecretID != "" && sec.COS.BucketName != "" && sec.COS.Region != "" {
+				m := map[string]string{
+					"provider":          "cos",
+					"bucket_name":       sec.COS.BucketName,
+					"access_key_id":     sec.COS.SecretID,
+					"secret_access_key": sec.COS.SecretKey,
+					"region":            sec.COS.Region,
+				}
+				if sec.COS.AppID != "" {
+					m["app_id"] = sec.COS.AppID
+				}
+				if sec.COS.PathPrefix != "" {
+					m["path_prefix"] = sec.COS.PathPrefix
+				}
+				return m
+			}
+		case "minio":
+			if sec.MinIO != nil {
+				var endpoint, accessKey, secretKey, bucket string
+				if sec.MinIO.Mode == "remote" {
+					endpoint = sec.MinIO.Endpoint
+					accessKey = sec.MinIO.AccessKeyID
+					secretKey = sec.MinIO.SecretAccessKey
+				} else {
+					endpoint = os.Getenv("MINIO_ENDPOINT")
+					accessKey = os.Getenv("MINIO_ACCESS_KEY_ID")
+					secretKey = os.Getenv("MINIO_SECRET_ACCESS_KEY")
+				}
+				bucket = sec.MinIO.BucketName
+				if bucket == "" {
+					bucket = os.Getenv("MINIO_BUCKET_NAME")
+				}
+				if endpoint != "" && accessKey != "" && secretKey != "" && bucket != "" {
+					m := map[string]string{
+						"provider":          "minio",
+						"endpoint":          endpoint,
+						"bucket_name":       bucket,
+						"access_key_id":     accessKey,
+						"secret_access_key": secretKey,
+					}
+					if sec.MinIO.UseSSL {
+						m["use_ssl"] = "true"
+					}
+					if sec.MinIO.PathPrefix != "" {
+						m["path_prefix"] = sec.MinIO.PathPrefix
+					}
+					return m
+				}
+			}
+		}
+	}
+
+	// Fallback: read from environment variables
+	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
+	switch storageType {
+	case "minio":
+		endpoint := os.Getenv("MINIO_ENDPOINT")
+		accessKey := os.Getenv("MINIO_ACCESS_KEY_ID")
+		secretKey := os.Getenv("MINIO_SECRET_ACCESS_KEY")
+		bucket := os.Getenv("MINIO_BUCKET_NAME")
+		if endpoint == "" || accessKey == "" || secretKey == "" || bucket == "" {
+			return nil
+		}
+		m := map[string]string{
+			"provider":          "minio",
+			"endpoint":          endpoint,
+			"bucket_name":       bucket,
+			"access_key_id":     accessKey,
+			"secret_access_key": secretKey,
+		}
+		if v := os.Getenv("MINIO_USE_SSL"); v != "" {
+			m["use_ssl"] = v
+		}
+		if v := os.Getenv("MINIO_PATH_PREFIX"); v != "" {
+			m["path_prefix"] = v
+		}
+		return m
+	case "cos":
+		secretID := os.Getenv("COS_SECRET_ID")
+		secretKey := os.Getenv("COS_SECRET_KEY")
+		region := os.Getenv("COS_REGION")
+		bucket := os.Getenv("COS_BUCKET_NAME")
+		if secretID == "" || secretKey == "" || region == "" || bucket == "" {
+			return nil
+		}
+		m := map[string]string{
+			"provider":          "cos",
+			"bucket_name":       bucket,
+			"access_key_id":     secretID,
+			"secret_access_key": secretKey,
+			"region":            region,
+		}
+		if v := os.Getenv("COS_APP_ID"); v != "" {
+			m["app_id"] = v
+		}
+		if v := os.Getenv("COS_PATH_PREFIX"); v != "" {
+			m["path_prefix"] = v
+		}
+		return m
+	default:
+		return nil
+	}
+}
+
+// enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
+func (s *knowledgeService) enqueueImageMultimodalTasks(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	kb *types.KnowledgeBase,
+	images []docparser.StoredImage,
+	chunks []types.ParsedChunk,
+) {
+	if s.task == nil || len(images) == 0 {
+		return
+	}
+
+	for _, img := range images {
+		// Match image to the ParsedChunk whose content contains the image URL.
+		// ChunkID was populated by processChunks with the real DB UUID.
+		chunkID := ""
+		for _, c := range chunks {
+			if strings.Contains(c.Content, img.ServingURL) {
+				chunkID = c.ChunkID
+				break
+			}
+		}
+		if chunkID == "" && len(chunks) > 0 {
+			chunkID = chunks[0].ChunkID
+		}
+
+		payload := types.ImageMultimodalPayload{
+			TenantID:        knowledge.TenantID,
+			KnowledgeID:     knowledge.ID,
+			KnowledgeBaseID: kb.ID,
+			ChunkID:         chunkID,
+			ImageURL:        img.ServingURL,
+			ImageLocalPath:  img.LocalPath,
+			EnableOCR:       true,
+			EnableCaption:   true,
+		}
+
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to marshal image multimodal payload: %v", err)
+			continue
+		}
+
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes)
+		if _, err := s.task.Enqueue(task); err != nil {
+			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
+		} else {
+			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+		}
+	}
 }
 
 // ProcessFAQImport handles Asynq FAQ import tasks (including dry run mode)

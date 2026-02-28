@@ -3,7 +3,9 @@ module github.com/Tencent/WeKnora
 go 1.24.11
 
 require (
+	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/PuerkitoBio/goquery v1.10.3
+	github.com/asg017/sqlite-vec-go-bindings v0.1.6
 	github.com/chromedp/chromedp v0.14.2
 	github.com/duckdb/duckdb-go/v2 v2.5.4
 	github.com/elastic/go-elasticsearch/v7 v7.17.10
@@ -12,7 +14,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
-	github.com/golang-migrate/migrate/v4 v4.19.0
+	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/jsonschema-go v0.4.2
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.25.1
@@ -51,13 +53,15 @@ require (
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.5.11
-	gorm.io/gorm v1.25.12
+	gorm.io/driver/sqlite v1.6.0
+	gorm.io/gorm v1.30.0
 )
 
 require (
 	cloud.google.com/go/auth v0.18.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/JohannesKaufmann/dom v0.2.0 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
@@ -133,8 +137,6 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.1 // indirect
-	github.com/hashicorp/errwrap v1.1.0 // indirect
-	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -155,6 +157,7 @@ require (
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.8-0.20251223041313-25746c47c1a7 // indirect
 	github.com/milvus-io/milvus/pkg/v2 v2.6.7-0.20251201120310-af64f2acba38 // indirect
 	github.com/minio/crc64nvme v1.0.1 // indirect

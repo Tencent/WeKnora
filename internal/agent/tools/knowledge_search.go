@@ -470,9 +470,10 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 					return
 				}
 
-				// Wrap results with metadata
+				// Wrap results with metadata and write back KB ID
 				mu.Lock()
 				for _, r := range kbResults {
+					r.KnowledgeBaseID = st.KnowledgeBaseID
 					allResults = append(allResults, &searchResultWithMeta{
 						SearchResult:      r,
 						SourceQuery:       q,

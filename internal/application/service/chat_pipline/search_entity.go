@@ -222,5 +222,6 @@ func chunk2SearchResult(chunk *types.Chunk, knowledge *types.Knowledge) *types.S
 		KnowledgeFilename: knowledge.FileName,
 		KnowledgeSource:   knowledge.Source,
 		ChunkMetadata:     chunk.Metadata,
+		KnowledgeBaseID:   knowledge.KnowledgeBaseID,
 	}
 }

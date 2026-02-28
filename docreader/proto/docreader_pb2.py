@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x64ocreader.proto\x12\tdocreader\"\xb9\x01\n\rStorageConfig\x12,\n\x08provider\x18\x01 \x01(\x0e\x32\x1a.docreader.StorageProvider\x12\x0e\n\x06region\x18\x02 \x01(\t\x12\x13\n\x0b\x62ucket_name\x18\x03 \x01(\t\x12\x15\n\raccess_key_id\x18\x04 \x01(\t\x12\x19\n\x11secret_access_key\x18\x05 \x01(\t\x12\x0e\n\x06\x61pp_id\x18\x06 \x01(\t\x12\x13\n\x0bpath_prefix\x18\x07 \x01(\t\"Z\n\tVLMConfig\x12\x12\n\nmodel_name\x18\x01 \x01(\t\x12\x10\n\x08\x62\x61se_url\x18\x02 \x01(\t\x12\x0f\n\x07\x61pi_key\x18\x03 \x01(\t\x12\x16\n\x0einterface_type\x18\x04 \x01(\t\"\xc2\x01\n\nReadConfig\x12\x12\n\nchunk_size\x18\x01 \x01(\x05\x12\x15\n\rchunk_overlap\x18\x02 \x01(\x05\x12\x12\n\nseparators\x18\x03 \x03(\t\x12\x19\n\x11\x65nable_multimodal\x18\x04 \x01(\x08\x12\x30\n\x0estorage_config\x18\x05 \x01(\x0b\x32\x18.docreader.StorageConfig\x12(\n\nvlm_config\x18\x06 \x01(\x0b\x32\x14.docreader.VLMConfig\"\x91\x01\n\x13ReadFromFileRequest\x12\x14\n\x0c\x66ile_content\x18\x01 \x01(\x0c\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x11\n\tfile_type\x18\x03 \x01(\t\x12*\n\x0bread_config\x18\x04 \x01(\x0b\x32\x15.docreader.ReadConfig\x12\x12\n\nrequest_id\x18\x05 \x01(\t\"p\n\x12ReadFromURLRequest\x12\x0b\n\x03url\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12*\n\x0bread_config\x18\x03 \x01(\x0b\x32\x15.docreader.ReadConfig\x12\x12\n\nrequest_id\x18\x04 \x01(\t\"i\n\x05Image\x12\x0b\n\x03url\x18\x01 \x01(\t\x12\x0f\n\x07\x63\x61ption\x18\x02 \x01(\t\x12\x10\n\x08ocr_text\x18\x03 \x01(\t\x12\x14\n\x0coriginal_url\x18\x04 \x01(\t\x12\r\n\x05start\x18\x05 \x01(\x05\x12\x0b\n\x03\x65nd\x18\x06 \x01(\x05\"c\n\x05\x43hunk\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x0b\n\x03seq\x18\x02 \x01(\x05\x12\r\n\x05start\x18\x03 \x01(\x05\x12\x0b\n\x03\x65nd\x18\x04 \x01(\x05\x12 \n\x06images\x18\x05 \x03(\x0b\x32\x10.docreader.Image\"?\n\x0cReadResponse\x12 \n\x06\x63hunks\x18\x01 \x03(\x0b\x32\x10.docreader.Chunk\x12\r\n\x05\x65rror\x18\x02 \x01(\t*G\n\x0fStorageProvider\x12 \n\x1cSTORAGE_PROVIDER_UNSPECIFIED\x10\x00\x12\x07\n\x03\x43OS\x10\x01\x12\t\n\x05MINIO\x10\x02\x32\x9f\x01\n\tDocReader\x12I\n\x0cReadFromFile\x12\x1e.docreader.ReadFromFileRequest\x1a\x17.docreader.ReadResponse\"\x00\x12G\n\x0bReadFromURL\x12\x1d.docreader.ReadFromURLRequest\x1a\x17.docreader.ReadResponse\"\x00\x42\x35Z3github.com/Tencent/WeKnora/internal/docreader/protob\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x64ocreader.proto\x12\tdocreader\"\xa9\x02\n\nReadConfig\x12\x15\n\rparser_engine\x18\x01 \x01(\t\x12Q\n\x17parser_engine_overrides\x18\x02 \x03(\x0b\x32\x30.docreader.ReadConfig.ParserEngineOverridesEntry\x12>\n\rimage_storage\x18\x03 \x03(\x0b\x32\'.docreader.ReadConfig.ImageStorageEntry\x1a<\n\x1aParserEngineOverridesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a\x33\n\x11ImageStorageEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xa0\x01\n\x0bReadRequest\x12\x14\n\x0c\x66ile_content\x18\x01 \x01(\x0c\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x11\n\tfile_type\x18\x03 \x01(\t\x12\x0b\n\x03url\x18\x04 \x01(\t\x12\r\n\x05title\x18\x05 \x01(\t\x12%\n\x06\x63onfig\x18\x06 \x01(\x0b\x32\x15.docreader.ReadConfig\x12\x12\n\nrequest_id\x18\x07 \x01(\t\"n\n\x08ImageRef\x12\x10\n\x08\x66ilename\x18\x01 \x01(\t\x12\x14\n\x0coriginal_ref\x18\x02 \x01(\t\x12\x11\n\tmime_type\x18\x03 \x01(\t\x12\x13\n\x0bstorage_key\x18\x04 \x01(\t\x12\x12\n\nimage_data\x18\x05 \x01(\x0c\"\xe2\x01\n\x0cReadResponse\x12\x18\n\x10markdown_content\x18\x01 \x01(\t\x12\'\n\nimage_refs\x18\x02 \x03(\x0b\x32\x13.docreader.ImageRef\x12\x16\n\x0eimage_dir_path\x18\x03 \x01(\t\x12\x37\n\x08metadata\x18\x04 \x03(\x0b\x32%.docreader.ReadResponse.MetadataEntry\x12\r\n\x05\x65rror\x18\x05 \x01(\t\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x9a\x01\n\x12ListEnginesRequest\x12L\n\x10\x63onfig_overrides\x18\x01 \x03(\x0b\x32\x32.docreader.ListEnginesRequest.ConfigOverridesEntry\x1a\x36\n\x14\x43onfigOverridesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"x\n\x10ParserEngineInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x02 \x01(\t\x12\x12\n\nfile_types\x18\x03 \x03(\t\x12\x11\n\tavailable\x18\x04 \x01(\x08\x12\x1a\n\x12unavailable_reason\x18\x05 \x01(\t\"C\n\x13ListEnginesResponse\x12,\n\x07\x65ngines\x18\x01 \x03(\x0b\x32\x1b.docreader.ParserEngineInfo\"Q\n\x13\x43onvertToPDFRequest\x12\x14\n\x0c\x66ile_content\x18\x01 \x01(\x0c\x12\x11\n\tfile_name\x18\x02 \x01(\t\x12\x11\n\tfile_type\x18\x03 \x01(\t\":\n\x14\x43onvertToPDFResponse\x12\x13\n\x0bpdf_content\x18\x01 \x01(\x0c\x12\r\n\x05\x65rror\x18\x02 \x01(\t2\xe9\x01\n\tDocReader\x12\x39\n\x04Read\x12\x16.docreader.ReadRequest\x1a\x17.docreader.ReadResponse\"\x00\x12N\n\x0bListEngines\x12\x1d.docreader.ListEnginesRequest\x1a\x1e.docreader.ListEnginesResponse\"\x00\x12Q\n\x0c\x43onvertToPDF\x12\x1e.docreader.ConvertToPDFRequest\x1a\x1f.docreader.ConvertToPDFResponse\"\x00\x42\x35Z3github.com/Tencent/WeKnora/internal/docreader/protob\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,24 +32,40 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'docreader_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z3github.com/Tencent/WeKnora/internal/docreader/proto'
-  _globals['_STORAGEPROVIDER']._serialized_start=1042
-  _globals['_STORAGEPROVIDER']._serialized_end=1113
-  _globals['_STORAGECONFIG']._serialized_start=31
-  _globals['_STORAGECONFIG']._serialized_end=216
-  _globals['_VLMCONFIG']._serialized_start=218
-  _globals['_VLMCONFIG']._serialized_end=308
-  _globals['_READCONFIG']._serialized_start=311
-  _globals['_READCONFIG']._serialized_end=505
-  _globals['_READFROMFILEREQUEST']._serialized_start=508
-  _globals['_READFROMFILEREQUEST']._serialized_end=653
-  _globals['_READFROMURLREQUEST']._serialized_start=655
-  _globals['_READFROMURLREQUEST']._serialized_end=767
-  _globals['_IMAGE']._serialized_start=769
-  _globals['_IMAGE']._serialized_end=874
-  _globals['_CHUNK']._serialized_start=876
-  _globals['_CHUNK']._serialized_end=975
-  _globals['_READRESPONSE']._serialized_start=977
-  _globals['_READRESPONSE']._serialized_end=1040
-  _globals['_DOCREADER']._serialized_start=1116
-  _globals['_DOCREADER']._serialized_end=1275
+  _globals['_READCONFIG_PARSERENGINEOVERRIDESENTRY']._loaded_options = None
+  _globals['_READCONFIG_PARSERENGINEOVERRIDESENTRY']._serialized_options = b'8\001'
+  _globals['_READCONFIG_IMAGESTORAGEENTRY']._loaded_options = None
+  _globals['_READCONFIG_IMAGESTORAGEENTRY']._serialized_options = b'8\001'
+  _globals['_READRESPONSE_METADATAENTRY']._loaded_options = None
+  _globals['_READRESPONSE_METADATAENTRY']._serialized_options = b'8\001'
+  _globals['_LISTENGINESREQUEST_CONFIGOVERRIDESENTRY']._loaded_options = None
+  _globals['_LISTENGINESREQUEST_CONFIGOVERRIDESENTRY']._serialized_options = b'8\001'
+  _globals['_READCONFIG']._serialized_start=31
+  _globals['_READCONFIG']._serialized_end=328
+  _globals['_READCONFIG_PARSERENGINEOVERRIDESENTRY']._serialized_start=215
+  _globals['_READCONFIG_PARSERENGINEOVERRIDESENTRY']._serialized_end=275
+  _globals['_READCONFIG_IMAGESTORAGEENTRY']._serialized_start=277
+  _globals['_READCONFIG_IMAGESTORAGEENTRY']._serialized_end=328
+  _globals['_READREQUEST']._serialized_start=331
+  _globals['_READREQUEST']._serialized_end=491
+  _globals['_IMAGEREF']._serialized_start=493
+  _globals['_IMAGEREF']._serialized_end=603
+  _globals['_READRESPONSE']._serialized_start=606
+  _globals['_READRESPONSE']._serialized_end=832
+  _globals['_READRESPONSE_METADATAENTRY']._serialized_start=785
+  _globals['_READRESPONSE_METADATAENTRY']._serialized_end=832
+  _globals['_LISTENGINESREQUEST']._serialized_start=835
+  _globals['_LISTENGINESREQUEST']._serialized_end=989
+  _globals['_LISTENGINESREQUEST_CONFIGOVERRIDESENTRY']._serialized_start=935
+  _globals['_LISTENGINESREQUEST_CONFIGOVERRIDESENTRY']._serialized_end=989
+  _globals['_PARSERENGINEINFO']._serialized_start=991
+  _globals['_PARSERENGINEINFO']._serialized_end=1111
+  _globals['_LISTENGINESRESPONSE']._serialized_start=1113
+  _globals['_LISTENGINESRESPONSE']._serialized_end=1180
+  _globals['_CONVERTTOPDFREQUEST']._serialized_start=1182
+  _globals['_CONVERTTOPDFREQUEST']._serialized_end=1263
+  _globals['_CONVERTTOPDFRESPONSE']._serialized_start=1265
+  _globals['_CONVERTTOPDFRESPONSE']._serialized_end=1323
+  _globals['_DOCREADER']._serialized_start=1326
+  _globals['_DOCREADER']._serialized_end=1559
 # @@protoc_insertion_point(module_scope)

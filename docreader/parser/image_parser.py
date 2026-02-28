@@ -5,44 +5,24 @@ import os
 from docreader.models.document import Document
 from docreader.parser.base_parser import BaseParser
 
-# Set up logger for this module
 logger = logging.getLogger(__name__)
 
 
 class ImageParser(BaseParser):
-    """
-    Parser for image files with OCR capability.
-    Extracts text from images and generates captions.
+    """Parser for standalone image files.
 
-    This parser handles image processing by:
-    1. Uploading the image to storage
-    2. Generating a descriptive caption
-    3. Performing OCR to extract text content
-    4. Returning a combined result with both text and image reference
+    Returns the image as a markdown reference with the raw image data
+    in Document.images so that the Go-side ImageResolver (or main.py's
+    _resolve_images) can handle storage upload.
     """
 
     def parse_into_text(self, content: bytes) -> Document:
-        """
-        Parse image content into markdown text
-        :param content: bytes content of the image
-        :return: Document object
-        """
-        logger.info(f"Parsing image content, size: {len(content)} bytes")
+        logger.info("Parsing image file=%s, size=%d bytes", self.file_name, len(content))
 
-        # Get file extension
-        ext = os.path.splitext(self.file_name)[1].lower()
+        ext = os.path.splitext(self.file_name)[1].lower() or ".png"
+        ref_path = f"images/{self.file_name}"
 
-        # Upload image to storage
-        image_url = self.storage.upload_bytes(content, file_ext=ext)
-        logger.info(f"Successfully uploaded image, URL: {image_url[:50]}...")
+        text = f"![{self.file_name}]({ref_path})"
+        images = {ref_path: base64.b64encode(content).decode()}
 
-        if not image_url:
-            logger.warning(f"Failed to upload image: {self.file_name}")
-            return Document(content=f"{self.file_name}", images={})
-
-        # Generate markdown text
-        text = f"![{self.file_name}]({image_url})"
-        images = {image_url: base64.b64encode(content).decode()}
-
-        # Create image object and add to map
         return Document(content=text, images=images)

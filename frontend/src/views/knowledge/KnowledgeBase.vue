@@ -31,6 +31,7 @@ import {
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
+import { getParserEngines, type ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
@@ -40,6 +41,62 @@ const folderUploadInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const kbLoading = ref(false);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
+const parserEngines = ref<ParserEngineInfo[]>([]);
+
+const supportedFileTypes = computed<Set<string>>(() => {
+  const engines = parserEngines.value
+  if (!engines.length) return new Set<string>()
+
+  const rules: { file_types: string[]; engine: string }[] =
+    kbInfo.value?.chunking_config?.parser_engine_rules || []
+
+  const ruleMap = new Map<string, string>()
+  for (const r of rules) {
+    for (const ft of r.file_types) ruleMap.set(ft, r.engine)
+  }
+
+  const available = new Set<string>()
+  const availableEngineNames = new Set(
+    engines.filter(e => e.Available !== false).map(e => e.Name)
+  )
+
+  for (const engine of engines) {
+    for (const ft of engine.FileTypes || []) {
+      if (available.has(ft)) continue
+
+      const explicitEngine = ruleMap.get(ft)
+      if (explicitEngine) {
+        if (availableEngineNames.has(explicitEngine)) available.add(ft)
+      } else {
+        if (engine.Available !== false) available.add(ft)
+      }
+    }
+  }
+  return available
+})
+
+const acceptFileTypes = computed(() =>
+  [...supportedFileTypes.value].map(t => '.' + t).join(',')
+)
+
+const unsupportedFileTypes = computed<string[]>(() => {
+  const engines = parserEngines.value
+  if (!engines.length) return []
+
+  const allTypes = new Set<string>()
+  for (const engine of engines) {
+    for (const ft of engine.FileTypes || []) allTypes.add(ft)
+  }
+
+  const supported = supportedFileTypes.value
+  return [...allTypes].filter(ft => !supported.has(ft)).sort()
+})
+
+const goToParserSettings = () => {
+  if (kbId.value) {
+    uiStore.openKBSettings(kbId.value, 'parser')
+  }
+}
 
 // Permission control: check if current user owns this KB or has edit/manage permission
 const isOwner = computed(() => {
@@ -121,6 +178,8 @@ const fileTypeOptions = computed(() => [
   { content: 'PDF', value: 'pdf' },
   { content: 'DOCX', value: 'docx' },
   { content: 'DOC', value: 'doc' },
+  { content: 'PPTX', value: 'pptx' },
+  { content: 'PPT', value: 'ppt' },
   { content: 'TXT', value: 'txt' },
   { content: 'MD', value: 'md' },
   { content: 'URL', value: 'url' },
@@ -564,15 +623,35 @@ const handleOpenURLImportDialog = (event: CustomEvent) => {
   }
 };
 
+// Auto-open document detail when navigated with ?knowledge_id=xxx
+const pendingKnowledgeId = ref<string | null>(
+  (route.query.knowledge_id as string) || null
+);
+
+const tryAutoOpenDocument = () => {
+  if (!pendingKnowledgeId.value || !cardList.value?.length) return;
+  const targetId = pendingKnowledgeId.value;
+  pendingKnowledgeId.value = null;
+  const card = cardList.value.find((c: KnowledgeCard) => c.id === targetId);
+  if (card) {
+    nextTick(() => openCardDetails(card));
+  } else {
+    nextTick(() => {
+      openCardDetails({ id: targetId } as KnowledgeCard);
+    });
+  }
+};
+
 onMounted(() => {
   loadKnowledgeBaseInfo(kbId.value);
   loadKnowledgeList();
-  // Load shared knowledge bases to get permission info
   orgStore.fetchSharedKnowledgeBases();
 
-  // 监听文件上传事件
+  getParserEngines()
+    .then(res => { parserEngines.value = res?.data || [] })
+    .catch(() => { parserEngines.value = [] })
+
   window.addEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
-  // 监听URL导入对话框打开事件
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
 });
 
@@ -582,6 +661,12 @@ onUnmounted(() => {
 });
 watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
+
+  // Auto-open document if navigated with ?knowledge_id=xxx
+  if (pendingKnowledgeId.value && newValue?.length) {
+    tryAutoOpenDocument();
+  }
+
   let analyzeList = [];
   // Filter items that need polling: parsing in progress OR summary generation in progress
   analyzeList = newValue.filter(item => {
@@ -780,21 +865,29 @@ const handleDocumentUpload = async (event: Event) => {
     return;
   }
 
-  // 过滤有效文件
+  const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
   const validFiles: File[] = [];
+  let skippedCount = 0;
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    if (!kbFileTypeVerification(file, files.length > 1)) {
+    if (!kbFileTypeVerification(file, files.length > 1, dynamicTypes)) {
       validFiles.push(file);
+    } else {
+      skippedCount++;
     }
   }
 
   if (validFiles.length === 0) {
+    if (skippedCount > 0) {
+      MessagePlugin.warning(`所选文件类型暂无可用解析引擎，已全部跳过`);
+    }
     resetUploadInput();
     return;
   }
+  if (skippedCount > 0) {
+    MessagePlugin.warning(`${skippedCount} 个文件因无可用解析引擎被跳过`);
+  }
 
-  // 批量上传
   let successCount = 0;
   let failCount = 0;
   const totalCount = validFiles.length;
@@ -871,10 +964,9 @@ const handleFolderUpload = async (event: Event) => {
     return;
   }
 
-  // 检查是否启用了VLM
   const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
+  const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
 
-  // 过滤有效文件
   const validFiles: File[] = [];
   let hiddenFileCount = 0;
   let imageFilteredCount = 0;
@@ -883,7 +975,6 @@ const handleFolderUpload = async (event: Event) => {
     const file = files[i];
     const relativePath = (file as any).webkitRelativePath || file.name;
     
-    // 1. 过滤隐藏文件和隐藏文件夹
     const pathParts = relativePath.split('/');
     const hasHiddenComponent = pathParts.some((part: string) => part.startsWith('.'));
     if (hasHiddenComponent) {
@@ -891,7 +982,6 @@ const handleFolderUpload = async (event: Event) => {
       continue;
     }
     
-    // 2. 如果未启用VLM，过滤图片文件
     if (!vlmEnabled) {
       const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
       const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
@@ -901,8 +991,7 @@ const handleFolderUpload = async (event: Event) => {
       }
     }
     
-    // 3. 文件类型验证
-    if (!kbFileTypeVerification(file, true)) {
+    if (!kbFileTypeVerification(file, true, dynamicTypes)) {
       validFiles.push(file);
     }
   }
@@ -1111,9 +1200,8 @@ const delCardConfirm = () => {
 
 // 处理知识库编辑成功后的回调
 const handleKBEditorSuccess = (kbIdValue: string) => {
-  // 如果编辑的是当前知识库，刷新文件列表
   if (kbIdValue === kbId.value) {
-    loadKnowledgeFiles(kbIdValue);
+    loadKnowledgeBaseInfo(kbIdValue);
   }
 };
 
@@ -1226,6 +1314,11 @@ async function createNewSession(value: string): Promise<void> {
             </t-tooltip>
           </div>
           <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
+          <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
+            <t-icon name="info-circle" class="parser-hint-icon" />
+            <span>{{ $t('knowledgeBase.unsupportedTypesHint', { types: unsupportedFileTypes.map(t => '.' + t).join('、') }) }}</span>
+            <span class="parser-hint-link">{{ $t('knowledgeBase.goToParserSettings') }} →</span>
+          </p>
         </div>
       </div>
       
@@ -1233,7 +1326,7 @@ async function createNewSession(value: string): Promise<void> {
         ref="uploadInputRef"
         type="file"
         class="document-upload-input"
-        accept=".pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.csv,.xlsx,.xls"
+        :accept="acceptFileTypes || '.pdf,.docx,.doc,.txt,.md,.jpg,.jpeg,.png,.csv,.xlsx,.xls,.pptx,.ppt'"
         multiple
         @change="handleDocumentUpload"
       />
@@ -2197,7 +2290,7 @@ async function createNewSession(value: string): Promise<void> {
       background: transparent;
       border: none;
       &:hover {
-        color: #4e5969;
+        color: #07C05F;
         background: #f2f3f5;
       }
     }
@@ -2212,7 +2305,7 @@ async function createNewSession(value: string): Promise<void> {
     &:hover,
     &:focus,
     &.t-is-focused {
-      border-color: #4080ff;
+      border-color: #07C05F;
       background-color: #fff;
     }
   }
@@ -2226,7 +2319,7 @@ async function createNewSession(value: string): Promise<void> {
 
       &:hover,
       &.t-is-focused {
-        border-color: #4080ff;
+        border-color: #07C05F;
         background-color: #fff;
       }
     }
@@ -2375,6 +2468,36 @@ async function createNewSession(value: string): Promise<void> {
     line-height: 20px;
   }
 
+  .parser-hint {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 2px 0 0;
+    color: #b08000;
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: color 0.15s ease;
+
+    &:hover {
+      color: #8a6300;
+
+      .parser-hint-link {
+        text-decoration: underline;
+      }
+    }
+
+    .parser-hint-icon {
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .parser-hint-link {
+      color: #07C05F;
+      margin-left: 2px;
+      white-space: nowrap;
+    }
+  }
 }
 
 

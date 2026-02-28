@@ -126,6 +126,9 @@ type SearchResult struct {
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`
+
+	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }
 
 // SearchParams represents the search parameters

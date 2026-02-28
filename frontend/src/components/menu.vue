@@ -2,6 +2,7 @@
     <div class="aside_box">
         <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
             <img class="logo" src="@/assets/img/weknora.png" alt="">
+            <span v-if="isLiteEdition" class="lite-badge">Lite</span>
         </div>
         
         <!-- 租户选择器：仅在用户可切换租户时显示 -->
@@ -80,6 +81,7 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import BatchManageDialog from '@/components/BatchManageDialog.vue';
 import { useI18n } from 'vue-i18n';
+import { getSystemInfo } from '@/api/system';
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -100,6 +102,7 @@ const hasMore = computed(() => currentPage.value < totalPages.value);
 type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[] };
 const { menuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
+const isLiteEdition = ref(false);
 
 // 批量管理状态
 const batchManageVisible = ref(false);
@@ -380,6 +383,10 @@ onMounted(async () => {
     if (route.params.chatid) {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
+
+    getSystemInfo().then(res => {
+        isLiteEdition.value = res.data?.edition === 'lite'
+    }).catch(() => {})
     
     // 初始化知识库信息
     const kbId = (route.params as any)?.kbId as string
@@ -593,6 +600,19 @@ const mouseleaveMenu = (path: string) => {
             height: auto;
             margin-left: 24px;
         }
+        .lite-badge {
+            margin-left: 4px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 18px;
+            color: #07c05f;
+            background: #07c05f1a;
+            border: 1px solid #07c05f40;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+            user-select: none;
+        }
     }
 
     .logo_img {
@@ -699,6 +719,8 @@ const mouseleaveMenu = (path: string) => {
         padding: 13px 8px 13px 16px;
         box-sizing: border-box;
         margin-bottom: 4px;
+        border-radius: 4px;
+        transition: background-color 0.2s ease;
 
         .menu_item-box {
             display: flex;
@@ -707,12 +729,11 @@ const mouseleaveMenu = (path: string) => {
 
         &:hover {
             border-radius: 4px;
-            background: #30323605;
-            color: #00000099;
+            background: rgba(0, 0, 0, 0.04);
 
             .menu_icon,
             .menu_title {
-                color: #00000099;
+                color: #000000b3;
             }
         }
     }
@@ -812,12 +833,12 @@ const mouseleaveMenu = (path: string) => {
         }
 
         &:hover {
-            background: #30323605;
-            color: #00000099;
+            background: rgba(0, 0, 0, 0.04);
+            color: #000000b3;
             border-radius: 3px;
 
             .menu-more {
-                color: #00000099;
+                color: #000000b3;
             }
 
             .menu-more-wrap {

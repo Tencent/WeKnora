@@ -738,6 +738,102 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	})
 }
 
+// mimeTypeByExt returns the MIME type for a given file extension.
+func mimeTypeByExt(filename string) string {
+	ext := strings.ToLower(filename)
+	if idx := strings.LastIndex(ext, "."); idx >= 0 {
+		ext = ext[idx:]
+	} else {
+		ext = ""
+	}
+	m := map[string]string{
+		".pdf":      "application/pdf",
+		".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".doc":      "application/msword",
+		".pptx":     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		".ppt":      "application/vnd.ms-powerpoint",
+		".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		".xls":      "application/vnd.ms-excel",
+		".csv":      "text/csv",
+		".jpg":      "image/jpeg",
+		".jpeg":     "image/jpeg",
+		".png":      "image/png",
+		".gif":      "image/gif",
+		".bmp":      "image/bmp",
+		".webp":     "image/webp",
+		".svg":      "image/svg+xml",
+		".tiff":     "image/tiff",
+		".txt":      "text/plain; charset=utf-8",
+		".md":       "text/markdown; charset=utf-8",
+		".markdown": "text/markdown; charset=utf-8",
+		".json":     "application/json; charset=utf-8",
+		".xml":      "application/xml; charset=utf-8",
+		".html":     "text/html; charset=utf-8",
+		".css":      "text/css; charset=utf-8",
+		".js":       "text/javascript; charset=utf-8",
+		".ts":       "text/typescript; charset=utf-8",
+		".py":       "text/x-python; charset=utf-8",
+		".go":       "text/x-go; charset=utf-8",
+		".java":     "text/x-java; charset=utf-8",
+		".yaml":     "text/yaml; charset=utf-8",
+		".yml":      "text/yaml; charset=utf-8",
+		".sh":       "text/x-shellscript; charset=utf-8",
+	}
+	if ct, ok := m[ext]; ok {
+		return ct
+	}
+	return "application/octet-stream"
+}
+
+// PreviewKnowledgeFile godoc
+// @Summary      预览知识文件
+// @Description  返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览
+// @Tags         知识管理
+// @Accept       json
+// @Produce      application/pdf,image/jpeg,image/png,text/plain
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {file}    file    "文件内容"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/preview [get]
+func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))
+		return
+	}
+	defer file.Close()
+
+	contentType := mimeTypeByExt(filename)
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", filename))
+	c.Header("Cache-Control", "private, max-age=3600")
+
+	c.Stream(func(w io.Writer) bool {
+		if _, err := io.Copy(w, file); err != nil {
+			logger.Errorf(ctx, "Failed to stream preview: %v", err)
+			return false
+		}
+		return false
+	})
+}
+
 // GetKnowledgeBatchRequest defines parameters for batch knowledge retrieval
 type GetKnowledgeBatchRequest struct {
 	IDs     []string `form:"ids" binding:"required"` // List of knowledge IDs

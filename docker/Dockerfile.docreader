@@ -1,5 +1,5 @@
 # =========================
-# 构建阶段
+# 构建阶段（轻量化：仅文档解析 + 图片提取，无 OCR/VLM）
 # =========================
 FROM python:3.10.18-bookworm AS builder
 
@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     libjpeg-dev \
     zlib1g-dev \
-    libpq-dev \
     libffi-dev \
     libgl1 \
     libglib2.0-0 \
@@ -25,11 +24,10 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 检查是否存在本地protoc安装包，如果存在则离线安装，否则在线安装,其他安装包按需求添加
+# 检查是否存在本地protoc安装包，如果存在则离线安装，否则在线安装
 ARG TARGETARCH
 COPY packages/ /app/packages/
 RUN echo "检查本地protoc安装包..." && \
-    # 根据目标架构选择正确的protoc包名
     case ${TARGETARCH} in \
         "amd64") PROTOC_ARCH="x86_64" ;; \
         "arm64") PROTOC_ARCH="aarch_64" ;; \
@@ -39,40 +37,17 @@ RUN echo "检查本地protoc安装包..." && \
     PROTOC_PACKAGE="protoc-3.19.4-linux-${PROTOC_ARCH}.zip" && \
     if [ -f "/app/packages/${PROTOC_PACKAGE}" ]; then \
         echo "发现本地protoc安装包，将进行离线安装"; \
-        # 离线安装：使用本地包（精确路径避免歧义）
         cp /app/packages/${PROTOC_PACKAGE} /app/ && \
         unzip -o /app/${PROTOC_PACKAGE} -d /usr/local && \
         chmod +x /usr/local/bin/protoc && \
         rm -f /app/${PROTOC_PACKAGE}; \
     else \
         echo "未发现本地protoc安装包，将进行在线安装"; \
-        # 在线安装：从网络下载
         curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/${PROTOC_PACKAGE} && \
         unzip -o ${PROTOC_PACKAGE} -d /usr/local && \
         chmod +x /usr/local/bin/protoc && \
         rm -f ${PROTOC_PACKAGE}; \
     fi
-
-# 预下载 PP-OCRv4 模型
-RUN mkdir -p /root/.paddleocr/whl/det/ch && \
-    mkdir -p /root/.paddleocr/whl/rec/ch && \
-    mkdir -p /root/.paddleocr/whl/cls/ch && \
-    # 下载检测模型
-    wget https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_det_infer.tar \
-        -O /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar && \
-    tar -xf /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar -C /root/.paddleocr/whl/det/ch/ && \
-    # 下载识别模型
-    wget https://paddleocr.bj.bcebos.com/PP-OCRv4/chinese/ch_PP-OCRv4_rec_infer.tar \
-        -O /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar && \
-    tar -xf /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar -C /root/.paddleocr/whl/rec/ch/ && \
-    # 下载文本方向分类模型（用于判断文本是否需要旋转）
-    wget https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar \
-        -O /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar && \
-    tar -xf /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar -C /root/.paddleocr/whl/cls/ && \
-    # 清理压缩包
-    rm -f /root/.paddleocr/whl/det/ch/ch_PP-OCRv4_det_infer.tar && \
-    rm -f /root/.paddleocr/whl/rec/ch/ch_PP-OCRv4_rec_infer.tar && \
-    rm -f /root/.paddleocr/whl/cls/ch_ppocr_mobile_v2.0_cls_infer.tar
 
 # 复制依赖文件
 COPY docreader/pyproject.toml docreader/uv.lock ./
@@ -82,15 +57,13 @@ RUN pip install uv --break-system-packages && \
 # 复制源代码和生成脚本
 COPY docreader docreader
 
-# 生成 protobuf 代码
+# 生成 protobuf 代码（使用 venv 中的 grpc_tools）
+ENV PATH="/app/.venv/bin:${PATH}"
 RUN chmod +x docreader/scripts/generate_proto.sh && \
     bash docreader/scripts/generate_proto.sh
 
-# 确保模型目录存在
-RUN ls -la /root/.paddleocr/whl/
-
 # =========================
-# 运行阶段
+# 运行阶段（轻量化）
 # =========================
 FROM python:3.10.18-bookworm AS runner
 
@@ -100,16 +73,14 @@ RUN sed -i 's@http://deb.debian.org@https://mirrors.tuna.tsinghua.edu.cn@g' /etc
 
 WORKDIR /app
 
-# 安装运行时依赖
+# 安装运行时依赖（已移除 OCR/PaddleOCR 相关依赖）
 RUN apt-get update && apt-get install -y \
     libjpeg62-turbo \
-    libpq5 \
     wget \
     gnupg \
     libgl1 \
     libglib2.0-0 \
     antiword \
-    vim \
     tar \
     dpkg \
     libxinerama1 \
@@ -126,7 +97,6 @@ RUN apt-get update && apt-get install -y \
 # 安装 grpc_health_probe
 ARG TARGETARCH
 RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
-    # 根据目标架构选择正确的二进制文件
     case ${TARGETARCH} in \
         "amd64") ARCH="amd64" ;; \
         "arm64") ARCH="arm64" ;; \
@@ -135,24 +105,23 @@ RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
     esac && \
     wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH} && \
     chmod +x /bin/grpc_health_probe
-    
+
 # 从构建阶段复制已安装的依赖和生成的代码
 ENV VIRTUAL_ENV=/app/.venv
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=builder /root/.paddleocr /root/.paddleocr
 
-# 安装 Playwright 浏览器
+# 安装 Playwright 浏览器（网页解析）
 RUN python -m playwright install webkit
 RUN python -m playwright install-deps webkit
 
-# COPY docreader/scripts/download_deps.py download_deps.py
-# RUN python -m download_deps
-
 COPY docreader/pyproject.toml docreader/uv.lock ./
 COPY --from=builder /app/docreader docreader
+
+# 创建共享临时图片目录
+RUN mkdir -p /tmp/docreader
 
 # 暴露 gRPC 端口
 EXPOSE 50051

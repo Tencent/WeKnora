@@ -11,6 +11,7 @@ const (
 	TypeKBDelete            = "kb:delete"             // 知识库删除任务
 	TypeKnowledgeListDelete = "knowledge:list_delete" // 批量删除知识任务
 	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
+	TypeImageMultimodal     = "image:multimodal"      // 图片多模态处理任务（OCR + VLM Caption）
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -95,6 +96,18 @@ type KBDeletePayload struct {
 type KnowledgeListDeletePayload struct {
 	TenantID     uint64   `json:"tenant_id"`
 	KnowledgeIDs []string `json:"knowledge_ids"`
+}
+
+// ImageMultimodalPayload represents the image multimodal processing task payload.
+type ImageMultimodalPayload struct {
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	ChunkID         string `json:"chunk_id"`          // parent text chunk
+	ImageURL        string `json:"image_url"`          // serving URL (/files/images/xxx.png)
+	ImageLocalPath  string `json:"image_local_path"`   // absolute path on disk
+	EnableOCR       bool   `json:"enable_ocr"`
+	EnableCaption   bool   `json:"enable_caption"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

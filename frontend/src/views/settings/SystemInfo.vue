@@ -31,6 +31,13 @@
         <div class="setting-control">
           <span class="info-value">
               {{ systemInfo?.version || $t('system.unknown') }}
+              <t-tag
+                v-if="systemInfo?.edition"
+                :theme="systemInfo.edition === 'lite' ? 'primary' : 'default'"
+                variant="light"
+                size="small"
+                style="margin-left: 8px;"
+              >{{ systemInfo.edition === 'lite' ? 'Lite' : 'Standard' }}</t-tag>
               <span v-if="systemInfo?.commit_id" class="commit-info">
                 ({{ systemInfo.commit_id }})
               </span>

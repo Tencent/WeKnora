@@ -25,7 +25,7 @@ type knowledgeTagService struct {
 	chunkRepo      interfaces.ChunkRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	modelService   interfaces.ModelService
-	task           *asynq.Client
+	task           interfaces.TaskEnqueuer
 	kbShareService interfaces.KBShareService
 }
 
@@ -37,7 +37,7 @@ func NewKnowledgeTagService(
 	chunkRepo interfaces.ChunkRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	modelService interfaces.ModelService,
-	task *asynq.Client,
+	task interfaces.TaskEnqueuer,
 	kbShareService interfaces.KBShareService,
 ) (interfaces.KnowledgeTagService, error) {
 	return &knowledgeTagService{
