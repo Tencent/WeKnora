@@ -1,147 +1,153 @@
 <template>
-  <aside class="list-space-sidebar" :class="{ collapsed }">
-    <!-- 折叠/展开按钮：浮在右侧边缘垂直居中 -->
-    <div class="sidebar-toggle" @click="toggleCollapse">
-      <t-icon :name="collapsed ? 'chevron-right' : 'chevron-left'" size="14px" />
-    </div>
-
-    <!-- ========== 折叠态：44px 图标工具条 ========== -->
-    <template v-if="collapsed">
-      <div class="icon-strip">
-        <!-- 组织模式：全部 -->
-        <t-tooltip v-if="mode !== 'resource'" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right">
+  <div
+    class="list-space-sidebar"
+    :class="{ pinned }"
+    @mouseenter="onMouseEnter"
+    @mouseleave="onMouseLeave"
+  >
+    <!-- Icon strip: hidden when pinned (panel takes over) -->
+    <div v-show="!pinned" class="icon-strip">
+      <template v-if="mode !== 'resource'">
+        <t-tooltip :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
           <div class="icon-item" :class="{ active: selected === 'all' }" @click="select('all')">
             <t-icon name="layers" size="16px" />
           </div>
         </t-tooltip>
+      </template>
 
-        <!-- 资源模式：我的 + 共享给我 + 空间 -->
-        <template v-if="mode === 'resource'">
-          <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right">
-            <div class="icon-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
-              <t-icon name="user" size="16px" />
-            </div>
-          </t-tooltip>
-          <t-tooltip v-if="countShared !== undefined && countShared > 0" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right">
-            <div class="icon-item" :class="{ active: selected === 'shared' }" @click="select('shared')">
-              <t-icon name="share" size="16px" />
-            </div>
-          </t-tooltip>
-          <template v-if="organizationsWithCount.length">
-            <div class="icon-strip-divider" />
-            <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right">
-              <div class="icon-item" :class="{ active: selected === org.id }" @click="select(org.id)">
-                <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
-              </div>
-            </t-tooltip>
-          </template>
-        </template>
-
-        <!-- 组织模式：我创建的 + 我加入的 -->
-        <template v-else>
-          <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right">
-            <div class="icon-item" :class="{ active: selected === 'created' }" @click="select('created')">
-              <t-icon name="usergroup-add" size="16px" />
-            </div>
-          </t-tooltip>
-          <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right">
-            <div class="icon-item" :class="{ active: selected === 'joined' }" @click="select('joined')">
-              <t-icon name="usergroup" size="16px" />
-            </div>
-          </t-tooltip>
-        </template>
-      </div>
-    </template>
-
-    <!-- ========== 展开态：200px 完整侧边栏 ========== -->
-    <template v-else>
-      <nav class="sidebar-nav">
-      <div
-        v-if="mode !== 'resource'"
-        class="sidebar-item"
-        :class="{ active: selected === 'all' }"
-        @click="select('all')"
-      >
-        <div class="item-left">
-          <t-icon name="layers" class="item-icon" />
-          <span class="item-label">{{ $t('listSpaceSidebar.all') }}</span>
-        </div>
-        <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
-      </div>
       <template v-if="mode === 'resource'">
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'mine' }"
-          @click="select('mine')"
-        >
-          <div class="item-left">
-            <t-icon name="user" class="item-icon" />
-            <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
+        <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right" :show-arrow="false">
+          <div class="icon-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
+            <t-icon name="user" size="16px" />
           </div>
-          <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
-        </div>
-        <div
-          v-if="countShared !== undefined && countShared > 0"
-          class="sidebar-item"
-          :class="{ active: selected === 'shared' }"
-          @click="select('shared')"
-        >
-          <div class="item-left">
-            <t-icon name="share" class="item-icon" />
-            <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+        </t-tooltip>
+        <t-tooltip v-if="countShared !== undefined && countShared > 0" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right" :show-arrow="false">
+          <div class="icon-item" :class="{ active: selected === 'shared' }" @click="select('shared')">
+            <t-icon name="share" size="16px" />
           </div>
-          <span class="item-count">{{ countShared }}</span>
-        </div>
+        </t-tooltip>
         <template v-if="organizationsWithCount.length">
-          <div class="sidebar-section">
-            <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
+          <div class="icon-strip-divider" />
+          <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
+            <div class="icon-item" :class="{ active: selected === org.id }" @click="select(org.id)">
+              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+            </div>
+          </t-tooltip>
+        </template>
+      </template>
+
+      <template v-else>
+        <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right" :show-arrow="false">
+          <div class="icon-item" :class="{ active: selected === 'created' }" @click="select('created')">
+            <t-icon name="usergroup-add" size="16px" />
           </div>
+        </t-tooltip>
+        <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right" :show-arrow="false">
+          <div class="icon-item" :class="{ active: selected === 'joined' }" @click="select('joined')">
+            <t-icon name="usergroup" size="16px" />
+          </div>
+        </t-tooltip>
+      </template>
+    </div>
+
+    <!-- Expanded panel: floats over content on hover, or stays when pinned -->
+    <Transition name="sb-expand">
+      <aside v-if="expanded || pinned" class="expanded-panel" :class="{ pinned }">
+        <div class="panel-pin" @click.stop="togglePin">
+          <t-tooltip :content="pinned ? $t('listSpaceSidebar.unpin', 'Unpin') : $t('listSpaceSidebar.pin', 'Pin')" placement="right" :show-arrow="false">
+            <t-icon :name="pinned ? 'pin-filled' : 'pin'" size="14px" />
+          </t-tooltip>
+        </div>
+        <nav class="sidebar-nav">
           <div
-            v-for="org in organizationsWithCount"
-            :key="org.id"
-            class="sidebar-item org-item"
-            :class="{ active: selected === org.id }"
-            @click="select(org.id)"
+            v-if="mode !== 'resource'"
+            class="sidebar-item"
+            :class="{ active: selected === 'all' }"
+            @click="select('all')"
           >
             <div class="item-left">
-              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
-              <span class="item-label" :title="org.name">{{ org.name }}</span>
+              <t-icon name="layers" class="item-icon" />
+              <span class="item-label">{{ $t('listSpaceSidebar.all') }}</span>
             </div>
-            <span v-if="getOrgCount(org.id) !== undefined" class="item-count">{{ getOrgCount(org.id) }}</span>
+            <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
           </div>
-        </template>
-      </template>
-      <template v-else>
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'created' }"
-          @click="select('created')"
-        >
-          <div class="item-left">
-            <t-icon name="usergroup-add" class="item-icon" />
-            <span class="item-label">{{ $t('organization.createdByMe') }}</span>
-          </div>
-          <span v-if="countCreated !== undefined" class="item-count">{{ countCreated }}</span>
-        </div>
-        <div
-          class="sidebar-item"
-          :class="{ active: selected === 'joined' }"
-          @click="select('joined')"
-        >
-          <div class="item-left">
-            <t-icon name="usergroup" class="item-icon" />
-            <span class="item-label">{{ $t('organization.joinedByMe') }}</span>
-          </div>
-          <span v-if="countJoined !== undefined" class="item-count">{{ countJoined }}</span>
-        </div>
-      </template>
-      </nav>
-    </template>
-  </aside>
+
+          <template v-if="mode === 'resource'">
+            <div
+              class="sidebar-item"
+              :class="{ active: selected === 'mine' }"
+              @click="select('mine')"
+            >
+              <div class="item-left">
+                <t-icon name="user" class="item-icon" />
+                <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
+              </div>
+              <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
+            </div>
+            <div
+              v-if="countShared !== undefined && countShared > 0"
+              class="sidebar-item"
+              :class="{ active: selected === 'shared' }"
+              @click="select('shared')"
+            >
+              <div class="item-left">
+                <t-icon name="share" class="item-icon" />
+                <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+              </div>
+              <span class="item-count">{{ countShared }}</span>
+            </div>
+            <template v-if="organizationsWithCount.length">
+              <div class="sidebar-section">
+                <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
+              </div>
+              <div
+                v-for="org in organizationsWithCount"
+                :key="org.id"
+                class="sidebar-item org-item"
+                :class="{ active: selected === org.id }"
+                @click="select(org.id)"
+              >
+                <div class="item-left">
+                  <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
+                  <span class="item-label" :title="org.name">{{ org.name }}</span>
+                </div>
+                <span v-if="getOrgCount(org.id) !== undefined" class="item-count">{{ getOrgCount(org.id) }}</span>
+              </div>
+            </template>
+          </template>
+
+          <template v-else>
+            <div
+              class="sidebar-item"
+              :class="{ active: selected === 'created' }"
+              @click="select('created')"
+            >
+              <div class="item-left">
+                <t-icon name="usergroup-add" class="item-icon" />
+                <span class="item-label">{{ $t('organization.createdByMe') }}</span>
+              </div>
+              <span v-if="countCreated !== undefined" class="item-count">{{ countCreated }}</span>
+            </div>
+            <div
+              class="sidebar-item"
+              :class="{ active: selected === 'joined' }"
+              @click="select('joined')"
+            >
+              <div class="item-left">
+                <t-icon name="usergroup" class="item-icon" />
+                <span class="item-label">{{ $t('organization.joinedByMe') }}</span>
+              </div>
+              <span v-if="countJoined !== undefined" class="item-count">{{ countJoined }}</span>
+            </div>
+          </template>
+        </nav>
+      </aside>
+    </Transition>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Icon as TIcon } from 'tdesign-vue-next'
 import SpaceAvatar from './SpaceAvatar.vue'
 import { useOrganizationStore } from '@/stores/organization'
@@ -161,12 +167,36 @@ const props = withDefaults(
   { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
 )
 
-const collapsed = ref(localStorage.getItem(props.collapsedKey) === 'true')
+const pinStorageKey = props.collapsedKey + '-pinned'
+const pinned = ref(localStorage.getItem(pinStorageKey) === 'true')
+const expanded = ref(pinned.value)
+let enterTimer: ReturnType<typeof setTimeout> | null = null
+let leaveTimer: ReturnType<typeof setTimeout> | null = null
 
-function toggleCollapse() {
-  collapsed.value = !collapsed.value
-  localStorage.setItem(props.collapsedKey, String(collapsed.value))
+function togglePin() {
+  pinned.value = !pinned.value
+  localStorage.setItem(pinStorageKey, String(pinned.value))
+  if (pinned.value) {
+    expanded.value = true
+  }
 }
+
+function onMouseEnter() {
+  if (pinned.value) return
+  if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null }
+  enterTimer = setTimeout(() => { expanded.value = true }, 180)
+}
+
+function onMouseLeave() {
+  if (pinned.value) return
+  if (enterTimer) { clearTimeout(enterTimer); enterTimer = null }
+  leaveTimer = setTimeout(() => { expanded.value = false }, 250)
+}
+
+onBeforeUnmount(() => {
+  if (enterTimer) clearTimeout(enterTimer)
+  if (leaveTimer) clearTimeout(leaveTimer)
+})
 
 function tooltipText(name: string, count?: number): string {
   return count !== undefined ? `${name} (${count})` : name
@@ -205,63 +235,29 @@ onMounted(() => {
 
 <style scoped lang="less">
 .list-space-sidebar {
-  position: relative;
-  width: 200px;
+  width: 44px;
   flex-shrink: 0;
-  background: #fff;
-  padding: 24px 16px 16px;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: visible;
-  transition: width 0.2s ease, padding 0.2s ease;
+  z-index: 10;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 
-  &.collapsed {
-    width: 44px;
-    padding: 24px 0 8px;
-    align-items: center;
+  &.pinned {
+    width: 208px;
+    margin-right: 16px;
   }
 }
 
-/* 浮动折叠/展开按钮 */
-.sidebar-toggle {
-  position: absolute;
-  top: 50%;
-  right: -10px;
-  transform: translateY(-50%);
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  border: 1px solid #e5e9f2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  z-index: 2;
-  color: #86909c;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  transition: all 0.2s ease;
-  opacity: 0;
-
-  .list-space-sidebar:hover & {
-    opacity: 1;
-  }
-
-  &:hover {
-    background: #f2f4f7;
-    color: #1d2129;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-  }
-}
-
-/* ========== 折叠态图标工具条 ========== */
+/* ========== Icon strip (always visible, 44px) ========== */
 .icon-strip {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  width: 100%;
+  gap: 2px;
+  width: 44px;
+  padding: 20px 0 8px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -276,26 +272,26 @@ onMounted(() => {
 .icon-item {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: #5c6470;
+  color: #6b7482;
   transition: all 0.15s ease;
   flex-shrink: 0;
 
   &:hover {
-    background: #f2f4f7;
+    background: #f5f7fa;
     color: #1d2129;
   }
 
   &.active {
-    background: #e6f7ec;
+    background: #eef9f2;
     color: #07c05f;
 
     &:hover {
-      background: #d4f4e3;
+      background: #e4f5ea;
     }
   }
 
@@ -307,21 +303,25 @@ onMounted(() => {
 }
 
 .icon-strip-divider {
-  width: 20px;
+  width: 18px;
   height: 1px;
   background: #e7ebf0;
   margin: 4px 0;
   flex-shrink: 0;
 }
 
-/* ========== 展开态 ========== */
-
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  flex: 1;
-  min-height: 0;
+/* ========== Expanded floating panel ========== */
+.expanded-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 208px;
+  background: #fff;
+  box-shadow: 3px 0 18px rgba(0, 0, 0, 0.07), 1px 0 0 #e7ebf0;
+  border-radius: 0 10px 10px 0;
+  padding: 30px 10px 16px 10px;
+  z-index: 11;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
@@ -329,17 +329,83 @@ onMounted(() => {
   &::-webkit-scrollbar {
     display: none;
   }
+
+  &.pinned {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    box-shadow: none;
+    border-right: 1px solid #eef1f5;
+    border-radius: 0;
+  }
+}
+
+/* Pin button */
+.panel-pin {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #b0b7c0;
+  transition: all 0.15s ease;
+  z-index: 1;
+
+  &:hover {
+    background: #f5f7fa;
+    color: #4e5662;
+  }
+
+  .pinned & {
+    color: #07c05f;
+
+    &:hover {
+      background: #eef9f2;
+      color: #059b4c;
+    }
+  }
+}
+
+/* ========== Transition ========== */
+.sb-expand-enter-active {
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sb-expand-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.sb-expand-enter-from {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
+.sb-expand-leave-to {
+  opacity: 0;
+  transform: translateX(-6px);
+}
+
+/* ========== Nav items inside expanded panel ========== */
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .sidebar-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 12px;
-  border-radius: 6px;
-  color: #2d3139;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: #3f4652;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -356,7 +422,7 @@ onMounted(() => {
     flex-shrink: 0;
     color: #5c6470;
     font-size: 14px;
-    transition: color 0.2s ease;
+    transition: color 0.15s ease;
   }
 
   .item-avatar {
@@ -369,27 +435,26 @@ onMounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14px;
-    font-weight: 450;
+    font-size: 13px;
+    font-weight: 430;
     line-height: 1.4;
     letter-spacing: 0.01em;
   }
 
   .item-count {
     font-size: 12px;
-    color: #5c6470;
+    color: #6b7482;
     font-weight: 500;
-    padding: 3px 7px;
+    padding: 2px 7px;
     border-radius: 8px;
-    background: #eef0f3;
+    background: #f4f6f8;
     margin-left: 6px;
     flex-shrink: 0;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
   }
 
   &:hover {
-    background: #f2f4f7;
+    background: #f5f7fa;
     color: #1d2129;
 
     .item-icon {
@@ -397,15 +462,14 @@ onMounted(() => {
     }
 
     .item-count {
-      background: #e5e9f2;
+      background: #edf1f5;
       color: #1d2129;
     }
   }
 
   &.active {
-    background: #e6f7ec;
+    background: #eef9f2;
     color: #07c05f;
-    font-weight: 500;
 
     .item-icon {
       color: #07c05f;
@@ -416,21 +480,21 @@ onMounted(() => {
     }
 
     .item-count {
-      background: #b8f0d3;
-      color: #07c05f;
-      font-weight: 600;
+      background: #e4f5ea;
+      color: #2f9d67;
+      font-weight: 520;
     }
 
     &:hover {
-      background: #d4f4e3;
+      background: #e4f5ea;
     }
   }
 }
 
 .sidebar-section {
-  padding: 10px 8px 2px;
-  margin-top: 4px;
-  border-top: 1px solid #e7ebf0;
+  padding: 10px 8px 3px;
+  margin-top: 2px;
+  border-top: 1px solid #eef1f5;
 
   .section-title {
     font-size: 12px;

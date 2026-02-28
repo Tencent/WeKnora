@@ -1224,6 +1224,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   flex: 1;
   display: flex;
+  position: relative;
   min-height: 0;
 }
 
