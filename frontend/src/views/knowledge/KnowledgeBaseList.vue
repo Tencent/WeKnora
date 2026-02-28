@@ -1,37 +1,32 @@
 <template>
   <div class="kb-list-container">
-    <!-- 头部：仅标题与副标题 -->
-    <div class="header">
-      <div class="header-title">
-        <h2>{{ $t('knowledgeBase.title') }}</h2>
-        <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
+    <ListSpaceSidebar
+      v-model="spaceSelection"
+      :count-all="allKnowledgeBases"
+      :count-mine="kbs.length"
+      :count-shared="sharedKbs.length"
+      :count-by-org="effectiveSharedCountByOrg"
+    />
+    <div class="kb-list-content">
+      <div class="header">
+        <div class="header-title">
+          <div class="title-row">
+            <h2>{{ $t('knowledgeBase.title') }}</h2>
+            <t-tooltip :content="$t('knowledgeList.create')" placement="bottom">
+              <t-button
+                variant="text"
+                theme="default"
+                size="small"
+                class="header-action-btn"
+                @click="handleCreateKnowledgeBase"
+              >
+                <template #icon><t-icon name="folder-add" size="16px" /></template>
+              </t-button>
+            </t-tooltip>
+          </div>
+          <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
+        </div>
       </div>
-    </div>
-
-    <!-- 左侧菜单 + 主内容 -->
-    <div class="kb-list-body">
-      <ListSpaceSidebar
-        v-model="spaceSelection"
-        :count-all="allKnowledgeBases"
-        :count-mine="kbs.length"
-        :count-shared="sharedKbs.length"
-        :count-by-org="effectiveSharedCountByOrg"
-      >
-        <template #actions>
-          <t-tooltip :content="$t('knowledgeList.create')" placement="top">
-            <t-button
-              variant="text"
-              theme="default"
-              class="sidebar-action-btn"
-              size="small"
-              :aria-label="$t('knowledgeList.create')"
-              @click="handleCreateKnowledgeBase"
-            >
-              <template #icon><t-icon name="folder-add" size="16px" /></template>
-            </t-button>
-          </t-tooltip>
-        </template>
-      </ListSpaceSidebar>
       <div class="kb-list-main">
     <!-- 未初始化知识库提示 -->
     <div v-if="hasUninitializedKbs" class="warning-banner">
@@ -1151,14 +1146,20 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  padding: 24px 32px;
-  margin: 0 16px 0 4px;
+  margin: 0 16px 0 0;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
   display: flex;
-  flex-direction: column;
   min-height: 0;
+}
+
+.kb-list-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 24px 32px 0 32px;
 }
 
 .header {
@@ -1171,6 +1172,12 @@ const handleUploadFinishedEvent = (event: Event) => {
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   h2 {
@@ -1194,23 +1201,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-.kb-list-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  background: #fafbfc;
-  border: 1px solid #e7ebf0;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
 .kb-list-main {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
-  background: #fafbfc;
+  padding: 12px 0;
 }
 
 .kb-list-main-loading {
@@ -1240,6 +1236,33 @@ const handleUploadFinishedEvent = (event: Event) => {
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
+}
+
+.header-action-btn {
+  padding: 0 !important;
+  min-width: 28px !important;
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #f2f3f5 !important;
+  border: 1px solid #e5e9f2 !important;
+  border-radius: 6px !important;
+  color: #4e5969;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+
+  &:hover {
+    background: #e5e9f2 !important;
+    border-color: #c9cdd4 !important;
+    color: #1d2129;
+  }
+
+  :deep(.t-icon),
+  :deep(.btn-icon-wrapper) {
+    color: #07c05f;
+  }
 }
 
 // Tab 切换样式（已由左侧菜单替代，保留以备兼容）

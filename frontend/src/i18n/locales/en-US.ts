@@ -506,6 +506,8 @@ export default {
     webSearchConfig: 'Web Search',
     enableMemory: 'Enable Memory',
     enableMemoryDesc: 'When enabled, the system will record your conversation history and automatically recall relevant content in future conversations to provide more personalized answers.',
+    memoryRequiresNeo4j: 'Memory feature requires Neo4j graph database. Please configure and enable Neo4j (set NEO4J_ENABLE=true) before enabling this feature.',
+    memoryHowToEnable: 'View Neo4j Configuration Guide',
     storageEngine: 'Storage Engine',
     mcpService: 'MCP Service',
     systemSettings: 'System Settings',

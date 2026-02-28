@@ -1,49 +1,45 @@
 <template>
   <div class="org-list-container">
-    <!-- 头部：仅标题与副标题 -->
-    <div class="header">
-      <div class="header-title">
-        <h2>{{ $t('organization.title') }}</h2>
-        <p class="header-subtitle">{{ $t('organization.subtitle') }}</p>
+    <ListSpaceSidebar
+      mode="organization"
+      v-model="spaceSelection"
+      :count-all="organizations.length"
+      :count-created="createdCount"
+      :count-joined="joinedCount"
+    />
+    <div class="org-list-content">
+      <div class="header">
+        <div class="header-title">
+          <div class="title-row">
+            <h2>{{ $t('organization.title') }}</h2>
+            <div class="header-actions">
+              <t-tooltip :content="$t('organization.joinOrg')" placement="bottom">
+                <t-button
+                  variant="text"
+                  theme="default"
+                  size="small"
+                  class="header-action-btn"
+                  @click="handleJoinOrganization"
+                >
+                  <template #icon><t-icon name="enter" size="16px" /></template>
+                </t-button>
+              </t-tooltip>
+              <t-tooltip :content="$t('organization.createOrg')" placement="bottom">
+                <t-button
+                  variant="text"
+                  theme="default"
+                  size="small"
+                  class="header-action-btn"
+                  @click="handleCreateOrganization"
+                >
+                  <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt="" aria-hidden="true" /></template>
+                </t-button>
+              </t-tooltip>
+            </div>
+          </div>
+          <p class="header-subtitle">{{ $t('organization.subtitle') }}</p>
+        </div>
       </div>
-    </div>
-
-    <!-- 左侧筛选 + 主内容 -->
-    <div class="org-list-body">
-      <ListSpaceSidebar
-        mode="organization"
-        v-model="spaceSelection"
-        :count-all="organizations.length"
-        :count-created="createdCount"
-        :count-joined="joinedCount"
-      >
-        <template #actions>
-          <t-tooltip :content="$t('organization.joinOrg')" placement="top">
-            <t-button
-              variant="text"
-              theme="default"
-              class="sidebar-action-btn"
-              size="small"
-              :aria-label="$t('organization.joinOrg')"
-              @click="handleJoinOrganization"
-            >
-              <template #icon><t-icon name="enter" size="16px" /></template>
-            </t-button>
-          </t-tooltip>
-          <t-tooltip :content="$t('organization.createOrg')" placement="top">
-            <t-button
-              variant="text"
-              theme="default"
-              class="sidebar-action-btn"
-              size="small"
-              :aria-label="$t('organization.createOrg')"
-              @click="handleCreateOrganization"
-            >
-              <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon sidebar-org-icon" alt="" aria-hidden="true" /></template>
-            </t-button>
-          </t-tooltip>
-        </template>
-      </ListSpaceSidebar>
       <div class="org-list-main">
     <!-- 卡片网格 -->
     <div v-if="filteredOrganizations.length > 0" class="org-card-wrap">
@@ -1223,24 +1219,20 @@ onUnmounted(() => {
 
 <style scoped lang="less">
 .org-list-container {
-  padding: 24px 32px;
-  margin: 0 16px 0 4px;
+  margin: 0 16px 0 0;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
   display: flex;
-  flex-direction: column;
   min-height: 0;
 }
 
-.org-list-body {
-  display: flex;
+.org-list-content {
   flex: 1;
-  min-height: 0;
-  background: #fafbfc;
-  border: 1px solid #e7ebf0;
-  border-radius: 10px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 24px 32px 0 32px;
 }
 
 .org-list-main {
@@ -1248,13 +1240,13 @@ onUnmounted(() => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
-  background: #fafbfc;
+  padding: 12px 0;
 }
 
 .header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 20px;
   flex-shrink: 0;
 
@@ -1262,6 +1254,12 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   h2 {
@@ -1272,6 +1270,13 @@ onUnmounted(() => {
     font-weight: 600;
     line-height: 32px;
   }
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .org-join-btn {
@@ -1322,6 +1327,39 @@ onUnmounted(() => {
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
+}
+
+.header-action-btn {
+  padding: 0 !important;
+  min-width: 28px !important;
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #f2f3f5 !important;
+  border: 1px solid #e5e9f2 !important;
+  border-radius: 6px !important;
+  color: #4e5969;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+
+  &:hover {
+    background: #e5e9f2 !important;
+    border-color: #c9cdd4 !important;
+    color: #1d2129;
+  }
+
+  :deep(.t-icon),
+  :deep(.btn-icon-wrapper),
+  :deep(.org-create-icon) {
+    color: #07c05f;
+  }
+
+  :deep(.org-create-icon) {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 // Tab 切换样式（下划线式，与整体协作感一致）

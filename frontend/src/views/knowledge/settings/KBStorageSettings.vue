@@ -95,6 +95,13 @@ const engineOptions = computed(() => {
       available: statusMap.cos,
       disabled: statusMap.cos === false,
     },
+    {
+      value: 'tos',
+      label: '火山引擎 TOS',
+      desc: '火山引擎对象存储，适合公有云部署',
+      available: statusMap.tos,
+      disabled: statusMap.tos === false,
+    },
   ]
 })
 
@@ -126,7 +133,7 @@ async function load() {
     engineStatus.value = engines
     defaultProvider.value = configRes?.data?.default_provider || 'local'
     const d = configRes?.data
-    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name)
+    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name)
     if (!localProvider.value || localProvider.value === '') {
       localProvider.value = defaultProvider.value
       emit('update:storageProvider', localProvider.value)

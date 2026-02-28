@@ -1,13 +1,61 @@
 <template>
-  <aside class="list-space-sidebar">
-    <div class="sidebar-header-row">
-      <span class="sidebar-title">{{ $t('listSpaceSidebar.title') }}</span>
-      <div v-if="$slots.actions" class="sidebar-actions">
-        <slot name="actions" />
-      </div>
+  <aside class="list-space-sidebar" :class="{ collapsed }">
+    <!-- 折叠/展开按钮：浮在右侧边缘垂直居中 -->
+    <div class="sidebar-toggle" @click="toggleCollapse">
+      <t-icon :name="collapsed ? 'chevron-right' : 'chevron-left'" size="14px" />
     </div>
-    <nav class="sidebar-nav">
-      <!-- 全部：仅组织模式显示；知识库/智能体列表不展示「全部」 -->
+
+    <!-- ========== 折叠态：44px 图标工具条 ========== -->
+    <template v-if="collapsed">
+      <div class="icon-strip">
+        <!-- 组织模式：全部 -->
+        <t-tooltip v-if="mode !== 'resource'" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right">
+          <div class="icon-item" :class="{ active: selected === 'all' }" @click="select('all')">
+            <t-icon name="layers" size="16px" />
+          </div>
+        </t-tooltip>
+
+        <!-- 资源模式：我的 + 共享给我 + 空间 -->
+        <template v-if="mode === 'resource'">
+          <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right">
+            <div class="icon-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
+              <t-icon name="user" size="16px" />
+            </div>
+          </t-tooltip>
+          <t-tooltip v-if="countShared !== undefined && countShared > 0" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right">
+            <div class="icon-item" :class="{ active: selected === 'shared' }" @click="select('shared')">
+              <t-icon name="share" size="16px" />
+            </div>
+          </t-tooltip>
+          <template v-if="organizationsWithCount.length">
+            <div class="icon-strip-divider" />
+            <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right">
+              <div class="icon-item" :class="{ active: selected === org.id }" @click="select(org.id)">
+                <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+              </div>
+            </t-tooltip>
+          </template>
+        </template>
+
+        <!-- 组织模式：我创建的 + 我加入的 -->
+        <template v-else>
+          <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right">
+            <div class="icon-item" :class="{ active: selected === 'created' }" @click="select('created')">
+              <t-icon name="usergroup-add" size="16px" />
+            </div>
+          </t-tooltip>
+          <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right">
+            <div class="icon-item" :class="{ active: selected === 'joined' }" @click="select('joined')">
+              <t-icon name="usergroup" size="16px" />
+            </div>
+          </t-tooltip>
+        </template>
+      </div>
+    </template>
+
+    <!-- ========== 展开态：200px 完整侧边栏 ========== -->
+    <template v-else>
+      <nav class="sidebar-nav">
       <div
         v-if="mode !== 'resource'"
         class="sidebar-item"
@@ -20,7 +68,6 @@
         </div>
         <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
       </div>
-      <!-- 资源列表模式：我的 + 共享给我 + 空间列表 -->
       <template v-if="mode === 'resource'">
         <div
           class="sidebar-item"
@@ -64,7 +111,6 @@
           </div>
         </template>
       </template>
-      <!-- 共享空间列表模式：我创建的 + 我加入的 -->
       <template v-else>
         <div
           class="sidebar-item"
@@ -89,7 +135,8 @@
           <span v-if="countJoined !== undefined" class="item-count">{{ countJoined }}</span>
         </div>
       </template>
-    </nav>
+      </nav>
+    </template>
   </aside>
 </template>
 
@@ -101,24 +148,29 @@ import { useOrganizationStore } from '@/stores/organization'
 
 const props = withDefaults(
   defineProps<{
-    /** resource = 知识库/智能体（全部+我的+共享给我+空间列表）；organization = 共享空间（全部+我创建的+我加入的） */
     mode?: 'resource' | 'organization'
     modelValue: string
-    /** 全部数量（可选） */
+    collapsedKey?: string
     countAll?: number
-    /** 我的数量（resource 模式） */
     countMine?: number
-    /** 共享给我的数量（resource 模式） */
     countShared?: number
-    /** 各空间下的数量（resource 模式），key 为 organization_id */
     countByOrg?: Record<string, number>
-    /** 我创建的数量（organization 模式） */
     countCreated?: number
-    /** 我加入的数量（organization 模式） */
     countJoined?: number
   }>(),
-  { mode: 'resource', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
+  { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
 )
+
+const collapsed = ref(localStorage.getItem(props.collapsedKey) === 'true')
+
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(props.collapsedKey, String(collapsed.value))
+}
+
+function tooltipText(name: string, count?: number): string {
+  return count !== undefined ? `${name} (${count})` : name
+}
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -132,7 +184,6 @@ const selected = computed({
 
 const organizations = computed(() => orgStore.organizations || [])
 
-/** 资源模式下只展示数量大于 0 的空间 */
 const organizationsWithCount = computed(() => {
   if (props.mode !== 'resource') return organizations.value
   return organizations.value.filter((org) => (props.countByOrg?.[org.id] ?? 0) > 0)
@@ -153,87 +204,117 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
-// 筛选区：白底卡片感（与右侧内容区风格对调），细分界保持统一
 .list-space-sidebar {
+  position: relative;
   width: 200px;
   flex-shrink: 0;
   background: #fff;
-  border-right: 1px solid #e7ebf0;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
-  padding: 16px;
+  padding: 24px 16px 16px;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
+  transition: width 0.2s ease, padding 0.2s ease;
+
+  &.collapsed {
+    width: 44px;
+    padding: 24px 0 8px;
+    align-items: center;
+  }
 }
 
-.sidebar-header-row {
+/* 浮动折叠/展开按钮 */
+.sidebar-toggle {
+  position: absolute;
+  top: 50%;
+  right: -10px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #e5e9f2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-  min-height: 28px;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  color: #86909c;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  transition: all 0.2s ease;
+  opacity: 0;
 
-  .sidebar-title {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.4;
+  .list-space-sidebar:hover & {
+    opacity: 1;
+  }
+
+  &:hover {
+    background: #f2f4f7;
+    color: #1d2129;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* ========== 折叠态图标工具条 ========== */
+.icon-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.icon-item {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #5c6470;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: #f2f4f7;
     color: #1d2129;
   }
-}
 
-.sidebar-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  &.active {
+    background: #e6f7ec;
+    color: #07c05f;
 
-  :deep(.t-button) {
-    padding: 0;
-    min-width: 24px;
-    width: 24px;
-    height: 24px;
-    font-size: 12px;
-    gap: 0;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    background: #f2f3f5 !important;
-    border: 1px solid #e5e9f2 !important;
-    color: #4e5969;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
     &:hover {
-      background: #e5e9f2 !important;
-      border-color: #c9cdd4 !important;
-      color: #1d2129;
+      background: #d4f4e3;
     }
   }
-  :deep(.t-button .t-button__icon),
-  :deep(.t-button .btn-icon-wrapper) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  :deep(.t-button .t-icon),
-  :deep(.t-button .btn-icon-wrapper) {
-    color: #07c05f;
-  }
-  :deep(.t-button:hover .t-icon),
-  :deep(.t-button:hover .btn-icon-wrapper) {
-    color: #07c05f;
-  }
-  :deep(.t-button .t-icon + .t-button__text:not(:empty)) {
-    margin-left: 0;
-  }
-  :deep(.sidebar-org-icon) {
-    width: 16px;
-    height: 16px;
+
+  :deep(.space-avatar) {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
   }
 }
+
+.icon-strip-divider {
+  width: 20px;
+  height: 1px;
+  background: #e7ebf0;
+  margin: 4px 0;
+  flex-shrink: 0;
+}
+
+/* ========== 展开态 ========== */
 
 .sidebar-nav {
   display: flex;

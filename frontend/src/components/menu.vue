@@ -20,21 +20,28 @@
                         </div>
                         <span class="menu_title" :title="item.title">{{ item.title }}</span>
                         <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0" class="menu-pending-badge" :title="t('organization.settings.pendingJoinRequestsBadge')">{{ orgStore.totalPendingJoinRequestCount }}</span>
-                        <t-icon v-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
+                        <span v-if="item.path === 'creatChat' && batchMode" class="batch-cancel-hint" @click.stop="exitBatchMode">{{ t('batchManage.cancel') }}</span>
+                        <t-icon v-else-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
                     </div>
                 </div>
                 <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children">
                     <template v-for="(group, groupIndex) in groupedSessions" :key="groupIndex">
                         <div class="timeline_header">{{ group.label }}</div>
                         <div class="submenu_item_p" v-for="(subitem, subindex) in group.items" :key="subitem.id">
-                            <div :class="['submenu_item', currentSecondpath == subitem.path ? 'submenu_item_active' : '']"
+                            <div :class="['submenu_item', !batchMode && currentSecondpath == subitem.path ? 'submenu_item_active' : '', batchMode && batchSelectedIds.includes(subitem.id) ? 'submenu_item_selected' : '', batchMode ? 'submenu_item_batch' : '']"
                                 @mouseenter="mouseenteBotDownr(subitem.id)" @mouseleave="mouseleaveBotDown"
-                                @click="gotopage(subitem.path)">
+                                @click="batchMode ? toggleBatchSelect(subitem.id) : gotopage(subitem.path)">
+                                <t-checkbox v-if="batchMode"
+                                    class="batch-checkbox"
+                                    :checked="batchSelectedIds.includes(subitem.id)"
+                                    @click.stop
+                                    @change="toggleBatchSelect(subitem.id)"
+                                />
                                 <span class="submenu_title"
-                                    :style="currentSecondpath == subitem.path ? 'margin-left:18px;max-width:160px;' : 'margin-left:18px;max-width:185px;'">
+                                    :style="batchMode ? 'margin-left:4px;max-width:170px;' : (currentSecondpath == subitem.path ? 'margin-left:18px;max-width:160px;' : 'margin-left:18px;max-width:185px;')">
                                     {{ subitem.title }}
                                 </span>
-                                <t-dropdown 
+                                <t-dropdown v-if="!batchMode"
                                     :options="[{ content: t('upload.deleteRecord'), value: 'delete' }, { content: t('menu.batchManage'), value: 'batchManage' }]"
                                     @click="handleSessionMenuClick($event, subitem.originalIndex, subitem)"
                                     placement="bottom-right"
@@ -46,6 +53,27 @@
                             </div>
                         </div>
                     </template>
+                </div>
+                <div v-if="batchMode && item.path === 'creatChat'" class="batch-inline-footer">
+                    <div class="batch-footer-left">
+                        <t-checkbox
+                            :checked="isAllBatchSelected"
+                            :indeterminate="isBatchIndeterminate"
+                            @change="toggleBatchSelectAll"
+                        >
+                            {{ t('batchManage.selectAll') }}
+                        </t-checkbox>
+                    </div>
+                    <t-button
+                        size="small"
+                        theme="danger"
+                        variant="base"
+                        :disabled="batchSelectedIds.length === 0"
+                        :loading="batchDeleting"
+                        @click="handleInlineBatchDelete"
+                    >
+                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchSelectedIds.length})` : '' }}
+                    </t-button>
                 </div>
             </div>
         </div>
@@ -69,17 +97,16 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, watch, computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession } from "@/api/chat/index";
+import { getSessionsList, delSession, batchDelSessions } from "@/api/chat/index";
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
 import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import { useUIStore } from '@/stores/ui';
-import { MessagePlugin } from "tdesign-vue-next";
+import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
-import BatchManageDialog from '@/components/BatchManageDialog.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
 
@@ -105,7 +132,9 @@ let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
 
 // 批量管理状态
-const batchManageVisible = ref(false);
+const batchMode = ref(false)
+const batchSelectedIds = ref<string[]>([])
+const batchDeleting = ref(false)
 
 // 是否可以访问所有租户
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
@@ -266,11 +295,77 @@ const mouseleaveBotDown = () => {
     activeSubmenu.value = '';
 }
 
+const enterBatchMode = () => {
+    batchMode.value = true
+    batchSelectedIds.value = []
+}
+
+const exitBatchMode = () => {
+    batchMode.value = false
+    batchSelectedIds.value = []
+}
+
+const toggleBatchSelect = (id: string) => {
+    const idx = batchSelectedIds.value.indexOf(id)
+    if (idx > -1) {
+        batchSelectedIds.value.splice(idx, 1)
+    } else {
+        batchSelectedIds.value.push(id)
+    }
+}
+
+const toggleBatchSelectAll = (checked: boolean) => {
+    batchSelectedIds.value = checked ? [...allSessionIds.value] : []
+}
+
+const handleInlineBatchDelete = () => {
+    if (batchSelectedIds.value.length === 0) return
+    const confirmDialog = DialogPlugin.confirm({
+        header: t('batchManage.deleteConfirmTitle'),
+        body: t('batchManage.deleteConfirmBody', { count: batchSelectedIds.value.length }),
+        confirmBtn: { content: t('batchManage.delete'), theme: 'danger' as const },
+        cancelBtn: t('batchManage.cancel'),
+        theme: 'warning',
+        onConfirm: async () => {
+            batchDeleting.value = true
+            try {
+                const ids = [...batchSelectedIds.value]
+                const res: any = await batchDelSessions(ids)
+                if (res && res.success === true) {
+                    const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
+                    if (chatMenuItem && chatMenuItem.children) {
+                        for (const id of ids) {
+                            const idx = chatMenuItem.children.findIndex((s: any) => s.id === id);
+                            if (idx !== -1) chatMenuItem.children.splice(idx, 1);
+                        }
+                    }
+                    total.value = Math.max(0, total.value - ids.length);
+                    const currentChatId = route.params.chatid as string;
+                    if (currentChatId && ids.includes(currentChatId)) {
+                        router.push('/platform/creatChat');
+                    }
+                    batchSelectedIds.value = []
+                    MessagePlugin.success(t('batchManage.deleteSuccess'))
+                    if (!chatMenuItem?.children?.length) {
+                        exitBatchMode()
+                    }
+                } else {
+                    MessagePlugin.error(t('batchManage.deleteFailed'))
+                }
+            } catch {
+                MessagePlugin.error(t('batchManage.deleteFailed'))
+            }
+            batchDeleting.value = false
+            confirmDialog.destroy()
+        },
+    })
+}
+
 const handleSessionMenuClick = (data: { value: string }, index: number, item: any) => {
     if (data?.value === 'delete') {
         delCard(index, item);
     } else if (data?.value === 'batchManage') {
-        batchManageVisible.value = true;
+        enterBatchMode()
     }
 };
 
@@ -304,22 +399,6 @@ const delCard = (index: number, item: any) => {
     })
 }
 
-const handleBatchDeleted = (ids: string[]) => {
-    const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
-    if (chatMenuItem && chatMenuItem.children) {
-        const children = chatMenuItem.children;
-        for (const id of ids) {
-            const idx = children.findIndex((s: any) => s.id === id);
-            if (idx !== -1) children.splice(idx, 1);
-        }
-    }
-    total.value = Math.max(0, total.value - ids.length);
-    // 如果当前会话被删除，跳转到创建页
-    const currentChatId = route.params.chatid as string;
-    if (currentChatId && ids.includes(currentChatId)) {
-        router.push('/platform/creatChat');
-    }
-}
 
 const debounce = (fn: (...args: any[]) => void, delay: number) => {
     let timer: ReturnType<typeof setTimeout>
@@ -868,6 +947,53 @@ const mouseleaveMenu = (path: string) => {
         .submenu_title {
             max-width: 160px !important;
         }
+    }
+
+    .submenu_item_batch {
+        padding-left: 10px;
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .submenu_item_selected {
+        background: #07c05f0d !important;
+        border-radius: 3px;
+    }
+
+    .batch-checkbox {
+        flex-shrink: 0;
+    }
+}
+
+.batch-cancel-hint {
+    margin-left: auto;
+    margin-right: 8px;
+    font-size: 13px;
+    color: #00000066;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.2s ease;
+    font-weight: 400;
+
+    &:hover {
+        color: #000000b3;
+    }
+}
+
+.batch-inline-footer {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-top: 1px solid #e7ebf0;
+    background: #fff;
+
+    .batch-footer-left {
+        display: flex;
+        align-items: center;
+        font-size: 13px;
+        color: #00000099;
     }
 }
 

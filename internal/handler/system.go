@@ -342,6 +342,26 @@ func (h *SystemHandler) isCOSConfigured(c *gin.Context) bool {
 	return false
 }
 
+// isTOSConfigured checks whether TOS connection info is available from tenant config or env.
+func (h *SystemHandler) isTOSConfigured(c *gin.Context) bool {
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.TOS != nil {
+			tosConf := tenant.StorageEngineConfig.TOS
+			return tosConf.Endpoint != "" && tosConf.Region != "" && tosConf.AccessKey != "" && tosConf.SecretKey != "" && tosConf.BucketName != ""
+		}
+	}
+	return h.isTOSEnvAvailable()
+}
+
+// isTOSEnvAvailable checks whether TOS env vars are set.
+func (h *SystemHandler) isTOSEnvAvailable() bool {
+	return os.Getenv("TOS_ENDPOINT") != "" &&
+		os.Getenv("TOS_REGION") != "" &&
+		os.Getenv("TOS_ACCESS_KEY") != "" &&
+		os.Getenv("TOS_SECRET_KEY") != "" &&
+		os.Getenv("TOS_BUCKET_NAME") != ""
+}
+
 // MinioBucketInfo represents bucket information with access policy
 type MinioBucketInfo struct {
 	Name      string `json:"name"`
@@ -356,7 +376,7 @@ type ListMinioBucketsResponse struct {
 
 // StorageEngineStatusItem describes one storage engine's availability and description.
 type StorageEngineStatusItem struct {
-	Name        string `json:"name"`        // "local", "minio", "cos"
+	Name        string `json:"name"`        // "local", "minio", "cos", "tos"
 	Available   bool   `json:"available"`   // whether the engine can be used
 	Description string `json:"description"` // short description for UI
 }
@@ -378,10 +398,12 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	minioConfigured := h.isMinioConfigured(c)
 	minioEnvAvailable := h.isMinioEnvAvailable()
 	cosConfigured := h.isCOSConfigured(c)
+	tosConfigured := h.isTOSConfigured(c)
 	engines := []StorageEngineStatusItem{
 		{Name: "local", Available: true, Description: "本地文件系统存储，仅适合单机部署"},
 		{Name: "minio", Available: minioConfigured || minioEnvAvailable, Description: "S3 兼容的自托管对象存储，适合内网和私有云部署"},
 		{Name: "cos", Available: cosConfigured, Description: "腾讯云对象存储服务，适合公有云部署，支持 CDN 加速"},
+		{Name: "tos", Available: tosConfigured, Description: "火山引擎对象存储服务，适合公有云部署"},
 	}
 	c.JSON(200, gin.H{
 		"code": 0,
@@ -654,9 +676,10 @@ func isBlockedStorageEndpoint(endpoint string) (bool, string) {
 
 // StorageCheckRequest is the body for POST /system/storage-engine-check.
 type StorageCheckRequest struct {
-	Provider string                   `json:"provider"` // "minio" or "cos"
+	Provider string                   `json:"provider"` // "minio", "cos", or "tos"
 	MinIO    *types.MinIOEngineConfig `json:"minio,omitempty"`
 	COS      *types.COSEngineConfig   `json:"cos,omitempty"`
+	TOS      *types.TOSEngineConfig   `json:"tos,omitempty"`
 }
 
 // StorageCheckResponse is the response for a single-engine connectivity check.
@@ -688,6 +711,8 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 		h.checkMinio(c, ctx, req.MinIO)
 	case "cos":
 		h.checkCOS(c, ctx, req.COS)
+	case "tos":
+		h.checkTOS(c, ctx, req.TOS)
 	default:
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: "本地存储无需检测"}})
 	}
@@ -764,6 +789,40 @@ func (h *SystemHandler) checkCOS(c *gin.Context, ctx context.Context, cfg *types
 			return
 		}
 		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NoSuchBucket") {
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在，请检查名称和 Region", cfg.BucketName)}})
+			return
+		}
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: sanitizeStorageCheckError(err)}})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: fmt.Sprintf("连接成功，Bucket「%s」已确认存在", cfg.BucketName)}})
+}
+
+func (h *SystemHandler) checkTOS(c *gin.Context, ctx context.Context, cfg *types.TOSEngineConfig) {
+	if cfg == nil {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 TOS 配置"}})
+		return
+	}
+	if cfg.Endpoint == "" || cfg.Region == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Region、Access Key、Secret Key、Bucket 名称不能为空"}})
+		return
+	}
+
+	if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
+		logger.Warnf(ctx, "Storage check: TOS endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+		return
+	}
+
+	err := file.CheckTosConnectivity(ctx, cfg.Endpoint, cfg.Region, cfg.AccessKey, cfg.SecretKey, cfg.BucketName)
+	if err != nil {
+		logger.Errorf(ctx, "Storage check: TOS connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "403") {
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			return
+		}
+		if strings.Contains(errMsg, "404") {
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在，请检查名称和 Region", cfg.BucketName)}})
 			return
 		}

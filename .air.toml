@@ -5,7 +5,7 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   bin = "./tmp/main"
-  cmd = "go build -o ./tmp/main ./cmd/server"
+  cmd = "CGO_CFLAGS='-Wno-deprecated-declarations -Wno-gnu-folding-constant' CGO_LDFLAGS='-Wl,-no_warn_duplicate_libraries' go build -ldflags=\"-X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'\" -o ./tmp/main ./cmd/server"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "frontend", "migrations", "node_modules", "docs"]
   exclude_file = []

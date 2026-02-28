@@ -473,7 +473,7 @@ func (s *sessionService) KnowledgeQA(
 		knowledgeIDs = nil
 		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
 	} else {
-		knowledgeBaseIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)
+		knowledgeBaseIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, session.TenantID)
 	}
 
 	// Determine chat model ID: prioritize request's summaryModelID, then Remote models
@@ -861,7 +861,11 @@ func (s *sessionService) selectChatModelID(
 	return "", errors.New("no chat model ID available: no knowledge bases configured and no available models")
 }
 
-// resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode
+// resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode.
+// sessionTenantID is the tenant of the current session (caller); it is compared with
+// customAgent.TenantID to detect the shared-agent scenario and avoid leaking the
+// current user's personal shared KBs into the agent's retrieval scope.
+//
 // Returns the resolved knowledge base IDs based on the selection mode:
 //   - "all": fetches all knowledge bases for the tenant
 //   - "selected": uses the explicitly configured knowledge bases
@@ -870,6 +874,7 @@ func (s *sessionService) selectChatModelID(
 func (s *sessionService) resolveKnowledgeBasesFromAgent(
 	ctx context.Context,
 	customAgent *types.CustomAgent,
+	sessionTenantID uint64,
 ) []string {
 	if customAgent == nil {
 		return nil
@@ -877,7 +882,7 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 
 	switch customAgent.Config.KBSelectionMode {
 	case "all":
-		// Get own knowledge bases
+		// Get own knowledge bases (uses ctx TenantID = agent's tenant)
 		allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list all knowledge bases: %v", err)
@@ -889,23 +894,31 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 			kbIDSet[kb.ID] = true
 		}
 
-		// Also include shared knowledge bases the user has access to
-		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-		userIDVal := ctx.Value(types.UserIDContextKey)
-		if userIDVal != nil {
-			if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
-				sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
-				if err != nil {
-					logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
-				} else {
-					for _, info := range sharedList {
-						if info != nil && info.KnowledgeBase != nil && !kbIDSet[info.KnowledgeBase.ID] {
-							kbIDs = append(kbIDs, info.KnowledgeBase.ID)
-							kbIDSet[info.KnowledgeBase.ID] = true
+		// For shared agents (session tenant != agent tenant), only use the agent
+		// tenant's own KBs. Including the current user's shared KBs would leak
+		// unrelated KBs from other organisations into the agent's retrieval scope.
+		isSharedAgent := sessionTenantID != 0 && sessionTenantID != customAgent.TenantID
+		if !isSharedAgent {
+			tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+			userIDVal := ctx.Value(types.UserIDContextKey)
+			if userIDVal != nil {
+				if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
+					sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+					if err != nil {
+						logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
+					} else {
+						for _, info := range sharedList {
+							if info != nil && info.KnowledgeBase != nil && !kbIDSet[info.KnowledgeBase.ID] {
+								kbIDs = append(kbIDs, info.KnowledgeBase.ID)
+								kbIDSet[info.KnowledgeBase.ID] = true
+							}
 						}
 					}
 				}
 			}
+		} else {
+			logger.Infof(ctx, "Shared agent detected (session tenant %d != agent tenant %d): skipping user's shared KBs",
+				sessionTenantID, customAgent.TenantID)
 		}
 
 		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
@@ -1352,7 +1365,7 @@ func (s *sessionService) AgentQA(
 		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
 	} else {
 		// Use agent's configured knowledge bases based on KBSelectionMode
-		agentConfig.KnowledgeBases = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)
+		agentConfig.KnowledgeBases = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, session.TenantID)
 	}
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults

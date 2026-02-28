@@ -354,9 +354,10 @@ export default {
     conversationConfig: "대화 설정",
     conversationStrategy: "대화 전략",
     webSearchConfig: "웹 검색",
-    enableMemory: "메모리 기능 활성화",
-    enableMemoryDesc:
-      "일단 켜면 시스템은 대화 기록을 기록하고 이후 대화에서 관련 내용을 자동으로 불러와 보다 개인화된 답변을 제공합니다.",
+    enableMemory: "기억 기능 활성화",
+    enableMemoryDesc: "활성화하면 시스템이 대화 기록을 저장하고 향후 대화에서 관련 내용을 자동으로 회상하여 더 개인화된 답변을 제공합니다.",
+    memoryRequiresNeo4j: "기억 기능은 Neo4j 그래프 데이터베이스가 필요합니다. 이 기능을 활성화하기 전에 Neo4j를 구성하고 활성화해 주세요 (NEO4J_ENABLE=true 설정).",
+    memoryHowToEnable: "Neo4j 구성 가이드 보기",
     mcpService: "MCP 서비스",
     systemSettings: "시스템 설정",
     tenantInfo: "테넌트 정보",
