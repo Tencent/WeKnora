@@ -19,7 +19,7 @@ export function createKnowledgeBase(data: {
     enabled: boolean;
     model_id?: string;
   };
-  cos_config?: any;
+  storage_config?: any;
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
 }) {

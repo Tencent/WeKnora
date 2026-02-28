@@ -6,6 +6,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -25,7 +26,7 @@ type KnowledgeBase struct {
 	EmbeddingModelID      string                `json:"embedding_model_id"`
 	SummaryModelID        string                `json:"summary_model_id"`
 	VLMConfig             VLMConfig             `json:"vlm_config"`
-	StorageConfig         StorageConfig         `json:"cos_config"`
+	StorageConfig         StorageConfig         `json:"storage_config"`
 	ExtractConfig         *ExtractConfig        `json:"extract_config"`
 	CreatedAt             time.Time             `json:"created_at"`
 	UpdatedAt             time.Time             `json:"updated_at"`
@@ -97,6 +98,25 @@ type GraphRelation struct {
 	Node1 string `json:"node1"`
 	Node2 string `json:"node2"`
 	Type  string `json:"type"`
+}
+
+// UnmarshalJSON keeps backward compatibility for legacy responses that still
+// use `cos_config` instead of `storage_config`.
+func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
+	type alias KnowledgeBase
+	aux := struct {
+		*alias
+		LegacyStorageConfig *StorageConfig `json:"cos_config"`
+	}{
+		alias: (*alias)(kb),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.LegacyStorageConfig != nil && kb.StorageConfig == (StorageConfig{}) {
+		kb.StorageConfig = *aux.LegacyStorageConfig
+	}
+	return nil
 }
 
 // KnowledgeBaseResponse knowledge base response

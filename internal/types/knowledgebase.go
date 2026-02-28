@@ -60,7 +60,7 @@ type KnowledgeBase struct {
 	// VLM config
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
 	// Storage config
-	StorageConfig StorageConfig `yaml:"cos_config"              json:"cos_config"              gorm:"column:cos_config;type:json"`
+	StorageConfig StorageConfig `yaml:"storage_config"          json:"storage_config"          gorm:"column:cos_config;type:json"`
 	// Extract config
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
@@ -161,6 +161,25 @@ func (c *StorageConfig) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, c)
+}
+
+// UnmarshalJSON keeps backward compatibility for legacy clients that still send
+// `cos_config`, while standardizing the API field as `storage_config`.
+func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
+	type alias KnowledgeBase
+	aux := struct {
+		*alias
+		LegacyStorageConfig *StorageConfig `json:"cos_config"`
+	}{
+		alias: (*alias)(kb),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.LegacyStorageConfig != nil && kb.StorageConfig == (StorageConfig{}) {
+		kb.StorageConfig = *aux.LegacyStorageConfig
+	}
+	return nil
 }
 
 // ImageProcessingConfig represents the image processing configuration

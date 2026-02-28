@@ -92,7 +92,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx, "[ImageMultimodal] Image downloaded from URL, len=%d", len(imgBytes))
 	} else {
 		logger.Infof(ctx, "[ImageMultimodal] Image bytes read from %s, len=%d", payload.ImageLocalPath, len(imgBytes))
-		defer os.Remove(payload.ImageLocalPath)
+		// Only clean up the local file when images have been re-uploaded to
+		// external object storage (COS/TOS) — the serving URL will be an
+		// absolute http(s) URL in that case. For local and MinIO storage the
+		// local file IS the serving file and must be kept.
+		if strings.HasPrefix(payload.ImageURL, "http://") || strings.HasPrefix(payload.ImageURL, "https://") {
+			defer os.Remove(payload.ImageLocalPath)
+		}
 	}
 
 	imageInfo := types.ImageInfo{

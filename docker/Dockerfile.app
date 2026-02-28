@@ -19,7 +19,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y git build-essential
+    apt-get install -y git build-essential libsqlite3-dev
 
 # Install migrate tool
 RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
@@ -63,6 +63,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential postgresql-client default-mysql-client ca-certificates tzdata sed curl bash vim wget \
+        libsqlite3-0 \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
         nodejs npm && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \

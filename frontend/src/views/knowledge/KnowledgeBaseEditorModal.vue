@@ -131,6 +131,7 @@
                 <div v-if="!isFAQ && formData" v-show="currentSection === 'storage'" class="section">
                   <KBStorageSettings
                     :storage-provider="formData.storageProvider"
+                    :has-files="mode === 'edit' && hasFiles"
                     @update:storage-provider="handleStorageProviderUpdate"
                   />
                 </div>
@@ -374,7 +375,7 @@ const loadKBData = async () => {
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined
       },
-      storageProvider: (kb.cos_config?.provider || 'local') as string,
+      storageProvider: (kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
         enabled: !!kb.vlm_config?.enabled,
         vllmModelId: kb.vlm_config?.model_id || ''
@@ -519,7 +520,7 @@ const buildSubmitData = () => {
   }
 
   // 存储引擎：仅传 provider，参数从全局设置读取
-  data.cos_config = {
+  data.storage_config = {
     provider: formData.value.storageProvider || 'local'
   }
 
@@ -607,7 +608,7 @@ const handleSubmit = async () => {
         multimodal: {
           enabled: !!data.vlm_config?.enabled
         },
-        storageProvider: data.cos_config?.provider || 'local',
+        storageProvider: data.storage_config?.provider || 'local',
         nodeExtract: {
           enabled: data.extract_config?.enabled || false,
           text: data.extract_config?.text || '',

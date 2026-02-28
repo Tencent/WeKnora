@@ -302,6 +302,19 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if provider == "" {
 		provider = "local"
 	}
+	oldProvider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+	if oldProvider == "" {
+		oldProvider = "local"
+	}
+	if oldProvider != provider {
+		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
+			kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, "", "", "")
+		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
+			logger.Error(ctx, "Cannot change storage engine when files exist")
+			c.Error(errors.NewBadRequestError("知识库中已有文件，无法切换存储引擎"))
+			return
+		}
+	}
 	kb.StorageConfig = types.StorageConfig{Provider: provider}
 
 	// 更新知识图谱配置

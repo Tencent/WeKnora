@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -101,7 +102,8 @@ func (s *localFileService) SaveFile(ctx context.Context,
 func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	logger.Infof(ctx, "Getting file: %s", filePath)
 
-	resolved, err := secutils.SafePathUnderBase(s.baseDir, filePath)
+	candidate := s.normalizePathForBase(filePath)
+	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
 		logger.Errorf(ctx, "Path traversal denied for GetFile: %v", err)
 		return nil, fmt.Errorf("invalid file path: %w", err)
@@ -123,7 +125,8 @@ func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.Rea
 func (s *localFileService) DeleteFile(ctx context.Context, filePath string) error {
 	logger.Infof(ctx, "Deleting file: %s", filePath)
 
-	resolved, err := secutils.SafePathUnderBase(s.baseDir, filePath)
+	candidate := s.normalizePathForBase(filePath)
+	resolved, err := secutils.SafePathUnderBase(s.baseDir, candidate)
 	if err != nil {
 		logger.Errorf(ctx, "Path traversal denied for DeleteFile: %v", err)
 		return fmt.Errorf("invalid file path: %w", err)
@@ -179,4 +182,27 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
 	// Local storage doesn't support URLs, return the path
 	return filePath, nil
+}
+
+// normalizePathForBase keeps backward compatibility for legacy file paths:
+// - absolute path: "/data/files/tenant/.."
+// - path under base dir: "tenant/.."
+// - legacy relative with base prefix: "data/files/tenant/.."
+func (s *localFileService) normalizePathForBase(filePath string) string {
+	clean := filepath.Clean(strings.TrimSpace(filePath))
+	if clean == "." || clean == "" {
+		return clean
+	}
+	if filepath.IsAbs(clean) {
+		return clean
+	}
+
+	// Strip duplicated base prefix in legacy relative paths, e.g. "data/files/..."
+	baseClean := filepath.Clean(s.baseDir)
+	baseNoSlash := strings.Trim(baseClean, string(filepath.Separator))
+	cleanNoDot := strings.TrimPrefix(clean, "."+string(filepath.Separator))
+	if strings.HasPrefix(cleanNoDot, baseNoSlash+string(filepath.Separator)) {
+		cleanNoDot = strings.TrimPrefix(cleanNoDot, baseNoSlash+string(filepath.Separator))
+	}
+	return filepath.Join(baseClean, cleanNoDot)
 }

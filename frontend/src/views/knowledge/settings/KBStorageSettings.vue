@@ -24,6 +24,7 @@
             size="medium"
             placeholder="请选择存储引擎"
             style="width: 100%; min-width: 220px;"
+            :disabled="props.hasFiles"
             @change="handleChange"
           >
             <t-option
@@ -40,7 +41,8 @@
               </span>
             </t-option>
           </t-select>
-          <p v-if="selectedOption?.desc" class="option-hint">{{ selectedOption.desc }}</p>
+          <p v-if="props.hasFiles" class="option-hint locked-hint">知识库中已有文件，无法切换存储引擎。如需更换，请先清空知识库中的所有文件。</p>
+          <p v-else-if="selectedOption?.desc" class="option-hint">{{ selectedOption.desc }}</p>
           <a v-if="showGoSettings" href="javascript:void(0)" class="go-settings" @click.prevent="goToStorageSettings">去全局设置中配置</a>
         </div>
       </div>
@@ -55,6 +57,7 @@ import { useUIStore } from '@/stores/ui'
 
 const props = defineProps<{
   storageProvider: string
+  hasFiles?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -236,6 +239,10 @@ onMounted(load)
   color: #999;
   margin: 0;
   line-height: 1.4;
+
+  &.locked-hint {
+    color: #e6a23c;
+  }
 }
 
 .go-settings {

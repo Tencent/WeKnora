@@ -619,18 +619,28 @@ func serveLocalFiles(r *gin.Engine) {
 	logger.Infof(context.Background(), "[Router] Serving local storage files from %s at /files/", absDir)
 
 	r.GET("/files/*filepath", func(c *gin.Context) {
-		reqPath := c.Param("filepath")
-		fullPath := filepath.Join(absDir, filepath.Clean(reqPath))
-
-		if !strings.HasPrefix(fullPath, absDir) {
+		reqPath := strings.TrimPrefix(c.Param("filepath"), "/")
+		cleanPath := filepath.Clean(reqPath)
+		if cleanPath == "." || strings.HasPrefix(cleanPath, "..") {
+			logger.Warnf(context.Background(), "[Router] Reject invalid /files path: raw=%q clean=%q", c.Param("filepath"), cleanPath)
 			c.Status(http.StatusForbidden)
 			return
 		}
+
+		fullPath := filepath.Join(absDir, cleanPath)
+		if !strings.HasPrefix(fullPath, absDir) {
+			logger.Warnf(context.Background(), "[Router] Reject escaped /files path: raw=%q full=%q base=%q", c.Param("filepath"), fullPath, absDir)
+			c.Status(http.StatusForbidden)
+			return
+		}
+
 		info, err := os.Stat(fullPath)
 		if err != nil || info.IsDir() {
+			logger.Warnf(context.Background(), "[Router] /files not found: raw=%q full=%q err=%v", c.Param("filepath"), fullPath, err)
 			c.Status(http.StatusNotFound)
 			return
 		}
+		logger.Infof(context.Background(), "[Router] /files hit: raw=%q full=%q", c.Param("filepath"), fullPath)
 		c.File(fullPath)
 	})
 }

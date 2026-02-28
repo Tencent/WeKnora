@@ -6756,6 +6756,8 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 	}
 
 	if hasKBFull {
+		logger.Infof(ctx, "[storage] buildStorageConfig use kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
+			kb.ID, provider, sc.BucketName, sc.PathPrefix)
 		return &types.DocParserStorageConfig{
 			Provider:        strings.ToUpper(provider),
 			Region:          sc.Region,
@@ -6809,6 +6811,8 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		}
 	}
 
+	logger.Infof(ctx, "[storage] buildStorageConfig use merged tenant/global config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
+		kb.ID, strings.ToLower(out.Provider), out.BucketName, out.PathPrefix, out.Endpoint)
 	return &out
 }
 
@@ -6817,6 +6821,7 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 // Falls back to the global fileSvc when no tenant-level storage config is found.
 func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.KnowledgeBase) interfaces.FileService {
 	if kb == nil {
+		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=nil")
 		return s.fileSvc
 	}
 
@@ -6828,6 +6833,8 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 	}
 
 	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
+		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=%s provider=%q tenant_cfg=%v",
+			kb.ID, provider, tenant != nil && tenant.StorageEngineConfig != nil)
 		return s.fileSvc
 	}
 
@@ -6837,10 +6844,28 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 
 	switch provider {
 	case "local":
-		baseDir := "/data/files"
-		if sec.Local != nil && sec.Local.PathPrefix != "" {
-			baseDir = sec.Local.PathPrefix
+		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+		if baseDir == "" {
+			baseDir = "/data/files"
 		}
+		if sec.Local != nil && sec.Local.PathPrefix != "" {
+			// path_prefix is a subdirectory under local storage base dir, not a replacement.
+			// Validate it cannot escape baseDir (e.g. path traversal via "..").
+			rawPrefix := strings.TrimSpace(sec.Local.PathPrefix)
+			prefix := strings.Trim(rawPrefix, "/\\")
+			if prefix != "" {
+				candidate := filepath.Join(baseDir, prefix)
+				safeBaseDir, pathErr := secutils.SafePathUnderBase(baseDir, candidate)
+				if pathErr != nil {
+					logger.Warnf(ctx,
+						"[storage] invalid local path_prefix ignored: kb=%s raw_prefix=%q err=%v",
+						kb.ID, rawPrefix, pathErr)
+				} else {
+					baseDir = safeBaseDir
+				}
+			}
+		}
+		logger.Infof(ctx, "[storage] resolveFileService local: kb=%s base_dir=%s", kb.ID, baseDir)
 		return filesvc.NewLocalFileService(baseDir)
 
 	case "minio":
@@ -6886,6 +6911,7 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 		logger.Errorf(ctx, "Failed to create %s file service from tenant config: %v, falling back to default", provider, err)
 		return s.fileSvc
 	}
+	logger.Infof(ctx, "[storage] resolveFileService selected: kb=%s provider=%s", kb.ID, provider)
 	return svc
 }
 
@@ -7275,13 +7301,27 @@ func (s *knowledgeService) convert(
 		return nil, nil
 	}
 
+	imageStorage := s.buildImageStorageConfig(ctx, kb)
+	if imageStorage == nil {
+		logger.Infof(ctx, "[storage] chunk image storage: kb=%s provider=%s image_storage=nil(use local temp/files)",
+			kb.ID, strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider)))
+	} else {
+		logger.Infof(ctx, "[storage] chunk image storage: kb=%s provider=%s bucket=%s endpoint=%s path_prefix=%s",
+			kb.ID,
+			imageStorage["provider"],
+			imageStorage["bucket_name"],
+			imageStorage["endpoint"],
+			imageStorage["path_prefix"],
+		)
+	}
+
 	req := &types.ReadRequest{
 		URL:                   payload.URL,
 		Title:                 knowledge.Title,
 		ParserEngine:          parserEngine,
 		RequestID:             payload.RequestId,
 		ParserEngineOverrides: overrides,
-		ImageStorage:          s.buildImageStorageConfig(ctx, kb),
+		ImageStorage:          imageStorage,
 	}
 
 	if !isURL {
