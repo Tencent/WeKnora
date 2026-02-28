@@ -45,6 +45,8 @@ mermaid.initialize({
     topPadding: 50
   }
 });
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 marked.use({
   mangle: false,
@@ -205,9 +207,6 @@ renderer.code = function (code, infostring) {
     </div>
   `;
 };
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
-
 // 监听 chunks 变化，自动更新合并内容
 watch(() => props.details?.md, (newChunks) => {
   if (newChunks && newChunks.length > 0) {
