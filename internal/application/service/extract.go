@@ -487,6 +487,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			IsEnabled:       true,
 		})
 	}
 

@@ -1509,6 +1509,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			ChunkID:         chunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			IsEnabled:       true,
 		})
 	}
 
@@ -1996,6 +1997,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ChunkID:         summaryChunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			IsEnabled:       true,
 		}}
 
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
@@ -2163,6 +2165,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				IsEnabled:       true,
 			})
 		}
 		logger.Debugf(ctx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
@@ -2819,6 +2822,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			IsEnabled:       true,
 		})
 		ids = append(ids, chunk.ID)
 	}
