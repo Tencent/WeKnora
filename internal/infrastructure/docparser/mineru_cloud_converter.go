@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 )
 
@@ -39,9 +40,14 @@ type MinerUCloudReader struct {
 
 // NewMinerUCloudReader creates a reader from ParserEngineOverrides.
 func NewMinerUCloudReader(overrides map[string]string) *MinerUCloudReader {
+	baseURL := strings.TrimRight(stringOr(overrides["mineru_api_base_url"], defaultBaseURL), "/")
+	if safe, reason := utils.IsSSRFSafeURL(baseURL); !safe {
+		logger.Printf("WARN: [MinerUCloud] baseURL rejected by SSRF check (%s), falling back to default", reason)
+		baseURL = defaultBaseURL
+	}
 	return &MinerUCloudReader{
 		apiKey:        strings.TrimSpace(overrides["mineru_api_key"]),
-		baseURL:       strings.TrimRight(stringOr(overrides["mineru_api_base_url"], defaultBaseURL), "/"),
+		baseURL:       baseURL,
 		model:         stringOr(overrides["mineru_cloud_model"], "pipeline"),
 		formulaEnable: parseBoolOr(overrides["mineru_cloud_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_cloud_enable_table"], true),
@@ -134,7 +140,7 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 30 * time.Second, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", "", fmt.Errorf("HTTP request: %w", err)
@@ -167,7 +173,7 @@ func (c *MinerUCloudReader) uploadFile(ctx context.Context, uploadURL string, co
 		return fmt.Errorf("create PUT request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("PUT upload: %w", err)
@@ -262,7 +268,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 		httpReq.Header.Set(k, v)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 30 * time.Second, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, err
@@ -344,7 +350,10 @@ func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractRe
 var imgRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
 
 func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
-	client := &http.Client{Timeout: 120 * time.Second}
+	if safe, reason := utils.IsSSRFSafeURL(zipURL); !safe {
+		return "", nil, fmt.Errorf("zip URL blocked by SSRF check: %s", reason)
+	}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
 	resp, err := client.Get(zipURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("download zip: %w", err)
@@ -485,16 +494,23 @@ func PingMinerUCloud(apiKey, baseURL string) (bool, string) {
 		baseURL = defaultBaseURL
 	}
 
-	// Light probe: request an empty batch to verify credentials
+	targetURL := baseURL + "/file-urls/batch"
+	if safe, reason := utils.IsSSRFSafeURL(targetURL); !safe {
+		return false, fmt.Sprintf("baseURL 不安全: %s", reason)
+	}
+
 	payload := []byte(`{"files":[],"model_version":"pipeline"}`)
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/file-urls/batch", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewReader(payload))
 	if err != nil {
 		return false, fmt.Sprintf("构建请求失败: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
+		Timeout:      10 * time.Second,
+		MaxRedirects: 5,
+	})
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Sprintf("MinerU Cloud 不可达: %v", err)

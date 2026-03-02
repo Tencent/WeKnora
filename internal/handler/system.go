@@ -646,7 +646,6 @@ func isBlockedStorageEndpoint(endpoint string) (bool, string) {
 		"metadata.google.internal",
 		"metadata.tencentyun.com",
 		"metadata.aws.internal",
-		"169.254.169.254",
 	}
 	for _, bh := range blockedHosts {
 		if hostLower == bh {
