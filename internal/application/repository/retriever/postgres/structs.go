@@ -66,7 +66,7 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
 		TagID:           indexInfo.TagID,
 		Content:         common.CleanInvalidUTF8(indexInfo.Content),
-		IsEnabled:       true, // Default to enabled
+		IsEnabled:       indexInfo.IsEnabled,
 	}
 	// Add embedding data if available in additionalParams
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {

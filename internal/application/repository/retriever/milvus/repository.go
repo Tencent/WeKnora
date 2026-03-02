@@ -592,6 +592,11 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 			Value:    params.ExcludeChunkIDs,
 		})
 	}
+	filters = append(filters, &universalFilterCondition{
+		Field:    fieldIsEnabled,
+		Operator: operatorEqual,
+		Value:    true,
+	})
 	if len(filters) == 0 {
 		return "", nil, nil
 	}
@@ -919,7 +924,7 @@ func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
-		IsEnabled:       true, // Default to enabled
+		IsEnabled:       embedding.IsEnabled,
 	}
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
 		if embeddingMap, ok := additionalParams[fieldEmbedding].(map[string][]float32); ok {

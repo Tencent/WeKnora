@@ -6224,6 +6224,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 				KnowledgeType:   types.KnowledgeTypeFAQ,
 				TagID:           chunk.TagID,
 				IsEnabled:       chunk.IsEnabled,
+				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 			},
 		}, nil
 	}
@@ -6252,6 +6253,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 		KnowledgeType:   types.KnowledgeTypeFAQ,
 		TagID:           chunk.TagID,
 		IsEnabled:       chunk.IsEnabled,
+		IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 	})
 
 	// 每个相似问创建一个索引项
@@ -6277,6 +6279,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			KnowledgeType:   types.KnowledgeTypeFAQ,
 			TagID:           chunk.TagID,
 			IsEnabled:       chunk.IsEnabled,
+			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 		})
 	}
 

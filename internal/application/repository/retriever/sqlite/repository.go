@@ -437,7 +437,7 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 // --- Internal helpers ---
 
 func toSQLiteEmbedding(info *types.IndexInfo) *sqliteEmbedding {
-	enabled := true
+	enabled := info.IsEnabled
 	return &sqliteEmbedding{
 		SourceID:        info.SourceID,
 		SourceType:      int(info.SourceType),

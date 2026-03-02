@@ -15,8 +15,10 @@ type VectorEmbedding struct {
 	ChunkID         string    `json:"chunk_id"          gorm:"column:chunk_id"`             // Unique ID of the text chunk
 	KnowledgeID     string    `json:"knowledge_id"      gorm:"column:knowledge_id"`         // ID of the knowledge item
 	KnowledgeBaseID string    `json:"knowledge_base_id" gorm:"column:knowledge_base_id"`    // ID of the knowledge base
+	TagID           string    `json:"tag_id"            gorm:"column:tag_id"`               // Tag ID for categorization
 	Embedding       []float32 `json:"embedding"         gorm:"column:embedding;not null"`   // Vector embedding of the content
 	IsEnabled       bool      `json:"is_enabled"`                                           // Whether the chunk is enabled
+	IsRecommended   bool      `json:"is_recommended"`                                       // Whether the chunk is recommended
 }
 
 // VectorEmbeddingWithScore extends VectorEmbedding with similarity score
@@ -34,7 +36,9 @@ func ToDBVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
-		IsEnabled:       true, // Default to enabled
+		TagID:           embedding.TagID,
+		IsEnabled:       embedding.IsEnabled,
+		IsRecommended:   embedding.IsRecommended,
 	}
 	// Add embedding data if available in additionalParams
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
@@ -65,8 +69,10 @@ func FromDBVectorEmbeddingWithScore(id string,
 		ChunkID:         embedding.ChunkID,
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
+		TagID:           embedding.TagID,
 		Content:         embedding.Content,
 		Score:           embedding.Score,
 		MatchType:       matchType,
+		IsEnabled:       embedding.IsEnabled,
 	}
 }
