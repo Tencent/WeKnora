@@ -5,6 +5,8 @@
       :count-all="allAgentsCount"
       :count-mine="agents.length"
       :count-by-org="effectiveSharedCountByOrg"
+      hide-all
+      hide-shared
     />
     <div class="agent-list-content">
       <div class="header">

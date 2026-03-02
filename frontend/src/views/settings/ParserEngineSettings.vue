@@ -145,7 +145,7 @@
               <label>API 地址</label>
               <t-input
                 v-model="config.mineru_api_base_url"
-                placeholder="如 https://api.mineru.net"
+                placeholder="默认 https://mineru.net/api/v4"
                 clearable
               />
             </div>

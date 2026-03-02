@@ -1,148 +1,156 @@
 <template>
   <div
+    ref="sidebarRef"
     class="list-space-sidebar"
-    :class="{ pinned }"
-    @mouseenter="onMouseEnter"
-    @mouseleave="onMouseLeave"
+    :class="{ expanded: isExpanded, dragging: isDragging }"
+    :style="{ width: isDragging ? `${dragWidth}px` : undefined }"
   >
-    <!-- Icon strip: hidden when pinned (panel takes over) -->
-    <div v-show="!pinned" class="icon-strip">
-      <template v-if="mode !== 'resource'">
-        <t-tooltip :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
-          <div class="icon-item" :class="{ active: selected === 'all' }" @click="select('all')">
-            <t-icon name="layers" size="16px" />
-          </div>
-        </t-tooltip>
-      </template>
-
+    <!-- Collapsed: icon strip -->
+    <div v-if="!isExpanded" class="icon-strip">
       <template v-if="mode === 'resource'">
-        <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right" :show-arrow="false">
-          <div class="icon-item" :class="{ active: selected === 'mine' }" @click="select('mine')">
-            <t-icon name="user" size="16px" />
+        <t-tooltip v-if="!hideAll" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'all' }" @click="select('all')">
+            <t-icon name="layers" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
           </div>
         </t-tooltip>
-        <t-tooltip v-if="countShared !== undefined && countShared > 0" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right" :show-arrow="false">
-          <div class="icon-item" :class="{ active: selected === 'shared' }" @click="select('shared')">
+        <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'mine' }" @click="select('mine')">
+            <t-icon name="user" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.mine') }}</span>
+          </div>
+        </t-tooltip>
+        <t-tooltip v-if="!hideShared" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'shared' }" @click="select('shared')">
             <t-icon name="share" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
           </div>
         </t-tooltip>
         <template v-if="organizationsWithCount.length">
           <div class="icon-strip-divider" />
           <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
-            <div class="icon-item" :class="{ active: selected === org.id }" @click="select(org.id)">
+            <div class="icon-item-labeled" :class="{ active: selected === org.id }" @click="select(org.id)">
               <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+              <span class="icon-label">{{ truncateLabel(org.name) }}</span>
             </div>
           </t-tooltip>
         </template>
       </template>
 
       <template v-else>
+        <t-tooltip :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'all' }" @click="select('all')">
+            <t-icon name="layers" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
+          </div>
+        </t-tooltip>
         <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right" :show-arrow="false">
-          <div class="icon-item" :class="{ active: selected === 'created' }" @click="select('created')">
+          <div class="icon-item-labeled" :class="{ active: selected === 'created' }" @click="select('created')">
             <t-icon name="usergroup-add" size="16px" />
+            <span class="icon-label">{{ $t('organization.createdByMe') }}</span>
           </div>
         </t-tooltip>
         <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right" :show-arrow="false">
-          <div class="icon-item" :class="{ active: selected === 'joined' }" @click="select('joined')">
+          <div class="icon-item-labeled" :class="{ active: selected === 'joined' }" @click="select('joined')">
             <t-icon name="usergroup" size="16px" />
+            <span class="icon-label">{{ $t('organization.joinedByMe') }}</span>
           </div>
         </t-tooltip>
       </template>
     </div>
 
-    <!-- Expanded panel: floats over content on hover, or stays when pinned -->
-    <Transition name="sb-expand">
-      <aside v-if="expanded || pinned" class="expanded-panel" :class="{ pinned }">
-        <div class="panel-pin" @click.stop="togglePin">
-          <t-tooltip :content="pinned ? $t('listSpaceSidebar.unpin', 'Unpin') : $t('listSpaceSidebar.pin', 'Pin')" placement="right" :show-arrow="false">
-            <t-icon :name="pinned ? 'pin-filled' : 'pin'" size="14px" />
-          </t-tooltip>
+    <!-- Expanded: full nav panel -->
+    <nav v-else class="expanded-panel">
+      <div
+        v-if="!hideAll"
+        class="sidebar-item"
+        :class="{ active: selected === 'all' }"
+        @click="select('all')"
+      >
+        <div class="item-left">
+          <t-icon name="layers" class="item-icon" />
+          <span class="item-label">{{ $t('listSpaceSidebar.all') }}</span>
         </div>
-        <nav class="sidebar-nav">
+        <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
+      </div>
+
+      <template v-if="mode === 'resource'">
+        <div
+          class="sidebar-item"
+          :class="{ active: selected === 'mine' }"
+          @click="select('mine')"
+        >
+          <div class="item-left">
+            <t-icon name="user" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
+          </div>
+          <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
+        </div>
+        <div
+          v-if="!hideShared"
+          class="sidebar-item"
+          :class="{ active: selected === 'shared' }"
+          @click="select('shared')"
+        >
+          <div class="item-left">
+            <t-icon name="share" class="item-icon" />
+            <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+          </div>
+          <span v-if="countShared !== undefined && countShared > 0" class="item-count">{{ countShared }}</span>
+        </div>
+        <template v-if="organizationsWithCount.length">
+          <div class="sidebar-section">
+            <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
+          </div>
           <div
-            v-if="mode !== 'resource'"
-            class="sidebar-item"
-            :class="{ active: selected === 'all' }"
-            @click="select('all')"
+            v-for="org in organizationsWithCount"
+            :key="org.id"
+            class="sidebar-item org-item"
+            :class="{ active: selected === org.id }"
+            @click="select(org.id)"
           >
             <div class="item-left">
-              <t-icon name="layers" class="item-icon" />
-              <span class="item-label">{{ $t('listSpaceSidebar.all') }}</span>
+              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
+              <span class="item-label" :title="org.name">{{ org.name }}</span>
             </div>
-            <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
+            <span v-if="getOrgCount(org.id) !== undefined" class="item-count">{{ getOrgCount(org.id) }}</span>
           </div>
+        </template>
+      </template>
 
-          <template v-if="mode === 'resource'">
-            <div
-              class="sidebar-item"
-              :class="{ active: selected === 'mine' }"
-              @click="select('mine')"
-            >
-              <div class="item-left">
-                <t-icon name="user" class="item-icon" />
-                <span class="item-label">{{ $t('listSpaceSidebar.mine') }}</span>
-              </div>
-              <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
-            </div>
-            <div
-              v-if="countShared !== undefined && countShared > 0"
-              class="sidebar-item"
-              :class="{ active: selected === 'shared' }"
-              @click="select('shared')"
-            >
-              <div class="item-left">
-                <t-icon name="share" class="item-icon" />
-                <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
-              </div>
-              <span class="item-count">{{ countShared }}</span>
-            </div>
-            <template v-if="organizationsWithCount.length">
-              <div class="sidebar-section">
-                <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
-              </div>
-              <div
-                v-for="org in organizationsWithCount"
-                :key="org.id"
-                class="sidebar-item org-item"
-                :class="{ active: selected === org.id }"
-                @click="select(org.id)"
-              >
-                <div class="item-left">
-                  <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
-                  <span class="item-label" :title="org.name">{{ org.name }}</span>
-                </div>
-                <span v-if="getOrgCount(org.id) !== undefined" class="item-count">{{ getOrgCount(org.id) }}</span>
-              </div>
-            </template>
-          </template>
+      <template v-else>
+        <div
+          class="sidebar-item"
+          :class="{ active: selected === 'created' }"
+          @click="select('created')"
+        >
+          <div class="item-left">
+            <t-icon name="usergroup-add" class="item-icon" />
+            <span class="item-label">{{ $t('organization.createdByMe') }}</span>
+          </div>
+          <span v-if="countCreated !== undefined" class="item-count">{{ countCreated }}</span>
+        </div>
+        <div
+          class="sidebar-item"
+          :class="{ active: selected === 'joined' }"
+          @click="select('joined')"
+        >
+          <div class="item-left">
+            <t-icon name="usergroup" class="item-icon" />
+            <span class="item-label">{{ $t('organization.joinedByMe') }}</span>
+          </div>
+          <span v-if="countJoined !== undefined" class="item-count">{{ countJoined }}</span>
+        </div>
+      </template>
+    </nav>
 
-          <template v-else>
-            <div
-              class="sidebar-item"
-              :class="{ active: selected === 'created' }"
-              @click="select('created')"
-            >
-              <div class="item-left">
-                <t-icon name="usergroup-add" class="item-icon" />
-                <span class="item-label">{{ $t('organization.createdByMe') }}</span>
-              </div>
-              <span v-if="countCreated !== undefined" class="item-count">{{ countCreated }}</span>
-            </div>
-            <div
-              class="sidebar-item"
-              :class="{ active: selected === 'joined' }"
-              @click="select('joined')"
-            >
-              <div class="item-left">
-                <t-icon name="usergroup" class="item-icon" />
-                <span class="item-label">{{ $t('organization.joinedByMe') }}</span>
-              </div>
-              <span v-if="countJoined !== undefined" class="item-count">{{ countJoined }}</span>
-            </div>
-          </template>
-        </nav>
-      </aside>
-    </Transition>
+    <!-- Drag handle on the right edge -->
+    <div
+      class="resize-handle"
+      @mousedown.prevent="onDragStart"
+    >
+      <div class="resize-handle-line" />
+    </div>
   </div>
 </template>
 
@@ -151,6 +159,10 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Icon as TIcon } from 'tdesign-vue-next'
 import SpaceAvatar from './SpaceAvatar.vue'
 import { useOrganizationStore } from '@/stores/organization'
+
+const COLLAPSED_WIDTH = 56
+const EXPANDED_WIDTH = 208
+const SNAP_THRESHOLD = 120
 
 const props = withDefaults(
   defineProps<{
@@ -163,43 +175,57 @@ const props = withDefaults(
     countByOrg?: Record<string, number>
     countCreated?: number
     countJoined?: number
+    hideAll?: boolean
+    hideShared?: boolean
   }>(),
-  { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
+  { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined, hideAll: false, hideShared: false }
 )
 
-const pinStorageKey = props.collapsedKey + '-pinned'
-const pinned = ref(localStorage.getItem(pinStorageKey) === 'true')
-const expanded = ref(pinned.value)
-let enterTimer: ReturnType<typeof setTimeout> | null = null
-let leaveTimer: ReturnType<typeof setTimeout> | null = null
+const storageKey = props.collapsedKey + '-expanded'
+const sidebarRef = ref<HTMLElement | null>(null)
+const isExpanded = ref(localStorage.getItem(storageKey) === 'true')
+const isDragging = ref(false)
+const dragWidth = ref(isExpanded.value ? EXPANDED_WIDTH : COLLAPSED_WIDTH)
 
-function togglePin() {
-  pinned.value = !pinned.value
-  localStorage.setItem(pinStorageKey, String(pinned.value))
-  if (pinned.value) {
-    expanded.value = true
-  }
+let startX = 0
+let startWidth = 0
+
+function onDragStart(e: MouseEvent) {
+  isDragging.value = true
+  startX = e.clientX
+  startWidth = isExpanded.value ? EXPANDED_WIDTH : COLLAPSED_WIDTH
+  dragWidth.value = startWidth
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', onDragEnd)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
 }
 
-function onMouseEnter() {
-  if (pinned.value) return
-  if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null }
-  enterTimer = setTimeout(() => { expanded.value = true }, 180)
+function onDragMove(e: MouseEvent) {
+  const delta = e.clientX - startX
+  const newWidth = Math.max(COLLAPSED_WIDTH, Math.min(EXPANDED_WIDTH + 20, startWidth + delta))
+  dragWidth.value = newWidth
 }
 
-function onMouseLeave() {
-  if (pinned.value) return
-  if (enterTimer) { clearTimeout(enterTimer); enterTimer = null }
-  leaveTimer = setTimeout(() => { expanded.value = false }, 250)
-}
+function onDragEnd() {
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
 
-onBeforeUnmount(() => {
-  if (enterTimer) clearTimeout(enterTimer)
-  if (leaveTimer) clearTimeout(leaveTimer)
-})
+  const shouldExpand = dragWidth.value >= SNAP_THRESHOLD
+  isExpanded.value = shouldExpand
+  localStorage.setItem(storageKey, String(shouldExpand))
+  isDragging.value = false
+  dragWidth.value = shouldExpand ? EXPANDED_WIDTH : COLLAPSED_WIDTH
+}
 
 function tooltipText(name: string, count?: number): string {
   return count !== undefined ? `${name} (${count})` : name
+}
+
+function truncateLabel(text: string, max = 4): string {
+  return text.length > max ? text.slice(0, max) : text
 }
 
 const emit = defineEmits<{
@@ -231,11 +257,16 @@ function getOrgCount(orgId: string): number | undefined {
 onMounted(() => {
   orgStore.fetchOrganizations()
 })
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+})
 </script>
 
 <style scoped lang="less">
 .list-space-sidebar {
-  width: 44px;
+  width: 56px;
   flex-shrink: 0;
   position: relative;
   display: flex;
@@ -244,20 +275,53 @@ onMounted(() => {
   z-index: 10;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 
-  &.pinned {
+  &.expanded {
     width: 208px;
-    margin-right: 16px;
+    margin-right: 0;
+  }
+
+  &.dragging {
+    transition: none;
   }
 }
 
-/* ========== Icon strip (always visible, 44px) ========== */
+/* ========== Drag handle ========== */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover .resize-handle-line,
+  .dragging & .resize-handle-line {
+    opacity: 1;
+    background: #07c05f;
+  }
+}
+
+.resize-handle-line {
+  width: 2px;
+  height: 32px;
+  border-radius: 1px;
+  background: #c5cad1;
+  opacity: 0;
+  transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+/* ========== Icon strip (collapsed) ========== */
 .icon-strip {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  width: 44px;
-  padding: 20px 0 8px;
+  gap: 4px;
+  width: 56px;
+  padding: 16px 0 8px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -269,13 +333,15 @@ onMounted(() => {
   }
 }
 
-.icon-item {
-  width: 32px;
-  height: 32px;
-  border-radius: 7px;
+.icon-item-labeled {
+  width: 46px;
+  padding: 6px 0 3px;
+  border-radius: 8px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
   cursor: pointer;
   color: #6b7482;
   transition: all 0.15s ease;
@@ -293,6 +359,11 @@ onMounted(() => {
     &:hover {
       background: #e4f5ea;
     }
+
+    .icon-label {
+      color: #07c05f;
+      font-weight: 520;
+    }
   }
 
   :deep(.space-avatar) {
@@ -302,101 +373,45 @@ onMounted(() => {
   }
 }
 
+.icon-label {
+  font-size: 10px;
+  line-height: 1.2;
+  color: #86909c;
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  transition: color 0.15s ease;
+}
+
 .icon-strip-divider {
-  width: 18px;
+  width: 24px;
   height: 1px;
   background: #e7ebf0;
   margin: 4px 0;
   flex-shrink: 0;
 }
 
-/* ========== Expanded floating panel ========== */
+/* ========== Expanded panel ========== */
 .expanded-panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 208px;
-  background: #fff;
-  box-shadow: 3px 0 18px rgba(0, 0, 0, 0.07), 1px 0 0 #e7ebf0;
-  border-radius: 0 10px 10px 0;
-  padding: 30px 10px 16px 10px;
-  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
+  border-right: 1px solid #eef1f5;
 
   &::-webkit-scrollbar {
     display: none;
   }
-
-  &.pinned {
-    position: relative;
-    width: 100%;
-    flex: 1;
-    box-shadow: none;
-    border-right: 1px solid #eef1f5;
-    border-radius: 0;
-  }
-}
-
-/* Pin button */
-.panel-pin {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 24px;
-  height: 24px;
-  border-radius: 5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: #b0b7c0;
-  transition: all 0.15s ease;
-  z-index: 1;
-
-  &:hover {
-    background: #f5f7fa;
-    color: #4e5662;
-  }
-
-  .pinned & {
-    color: #07c05f;
-
-    &:hover {
-      background: #eef9f2;
-      color: #059b4c;
-    }
-  }
-}
-
-/* ========== Transition ========== */
-.sb-expand-enter-active {
-  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.sb-expand-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.sb-expand-enter-from {
-  opacity: 0;
-  transform: translateX(-8px);
-}
-
-.sb-expand-leave-to {
-  opacity: 0;
-  transform: translateX(-6px);
 }
 
 /* ========== Nav items inside expanded panel ========== */
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .sidebar-item {
   display: flex;
   align-items: center;
