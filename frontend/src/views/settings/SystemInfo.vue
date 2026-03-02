@@ -67,6 +67,17 @@
         </div>
       </div>
 
+      <!-- DB Version -->
+      <div v-if="systemInfo?.db_version" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('system.dbVersionLabel') }}</label>
+          <p class="desc">{{ $t('system.dbVersionDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <span class="info-value">{{ systemInfo.db_version }}</span>
+        </div>
+      </div>
+
       <!-- Keyword Index Engine -->
       <div class="setting-row">
         <div class="setting-info">

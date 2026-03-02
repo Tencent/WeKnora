@@ -10,6 +10,7 @@ export interface SystemInfo {
   vector_store_engine?: string
   graph_database_engine?: string
   minio_enabled?: boolean
+  db_version?: string
 }
 
 export interface ToolDefinition {

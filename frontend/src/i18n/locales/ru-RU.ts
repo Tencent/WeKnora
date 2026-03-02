@@ -815,6 +815,8 @@ export default {
     buildTimeDescription: 'Время, когда система была собрана',
     goVersionLabel: 'Версия Go',
     goVersionDescription: 'Версия языка Go, используемая backend',
+    dbVersionLabel: 'Версия базы данных',
+    dbVersionDescription: 'Текущая версия миграции базы данных',
     keywordIndexEngineLabel: 'Движок индексации ключевых слов',
     keywordIndexEngineDescription: 'Используемый в настоящее время движок индексации ключевых слов',
     vectorStoreEngineLabel: 'Движок векторного хранилища',

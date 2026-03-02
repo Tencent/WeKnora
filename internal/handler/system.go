@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -48,6 +49,7 @@ type GetSystemInfoResponse struct {
 	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
 	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
 	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
+	DBVersion           string `json:"db_version,omitempty"`
 }
 
 // 编译时注入的版本信息
@@ -82,6 +84,14 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 	// Get MinIO enabled status
 	minioEnabled := h.isMinioConfigured(c)
 
+	var dbVersion string
+	if ver, dirty, ok := database.CachedMigrationVersion(); ok {
+		dbVersion = fmt.Sprintf("%d", ver)
+		if dirty {
+			dbVersion += " (dirty)"
+		}
+	}
+
 	response := GetSystemInfoResponse{
 		Version:             Version,
 		Edition:             Edition,
@@ -92,6 +102,7 @@ func (h *SystemHandler) GetSystemInfo(c *gin.Context) {
 		VectorStoreEngine:   vectorStoreEngine,
 		GraphDatabaseEngine: graphDatabaseEngine,
 		MinioEnabled:        minioEnabled,
+		DBVersion:           dbVersion,
 	}
 
 	logger.Info(ctx, "System info retrieved successfully")

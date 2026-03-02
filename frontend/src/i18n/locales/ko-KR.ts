@@ -1194,6 +1194,8 @@ export default {
     buildTimeDescription: "시스템이 빌드된 시간",
     goVersionLabel: "Go 버전",
     goVersionDescription: "백엔드에서 사용하는 Go 언어 버전",
+    dbVersionLabel: "데이터베이스 버전",
+    dbVersionDescription: "현재 데이터베이스 마이그레이션 버전",
     keywordIndexEngineLabel: "키워드 인덱스 엔진",
     keywordIndexEngineDescription: "현재 사용 중인 키워드 인덱스 엔진",
     vectorStoreEngineLabel: "벡터 저장소 엔진",
