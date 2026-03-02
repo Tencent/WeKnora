@@ -58,7 +58,6 @@
         <!-- 批量管理对话框 -->
         <BatchManageDialog
             v-model:visible="batchManageVisible"
-            :sessions="allSessions"
             @deleted="handleBatchDeleted"
         />
         
@@ -104,18 +103,6 @@ let activeSubmenu = ref<string>('');
 
 // 批量管理状态
 const batchManageVisible = ref(false);
-
-// 所有会话列表（用于批量管理对话框）
-const allSessions = computed(() => {
-    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'creatChat');
-    if (!chatMenu || !chatMenu.children) return [];
-    return chatMenu.children.map((s: any) => ({
-        id: s.id,
-        title: s.title,
-        created_at: s.created_at,
-        updated_at: s.updated_at,
-    }));
-});
 
 // 是否可以访问所有租户
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);

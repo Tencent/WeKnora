@@ -15,7 +15,10 @@
 
           <!-- 会话列表 -->
           <div class="batch-body">
-            <div class="session-list" v-if="sessions.length > 0">
+            <div v-if="loading" class="empty-state">
+              <t-loading />
+            </div>
+            <div class="session-list" v-else-if="sessions.length > 0">
               <div
                 class="session-item"
                 v-for="item in sessions"
@@ -74,18 +77,12 @@
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
-import { batchDelSessions, delSession } from '@/api/chat/index'
+import { batchDelSessions, delSession, getSessionsList } from '@/api/chat/index'
 
 const { t } = useI18n()
 
 const props = defineProps<{
   visible: boolean
-  sessions: Array<{
-    id: string
-    title: string
-    created_at?: string
-    updated_at?: string
-  }>
 }>()
 
 const emit = defineEmits<{
@@ -95,16 +92,50 @@ const emit = defineEmits<{
 
 const selectedIds = ref<string[]>([])
 const deleting = ref(false)
+const loading = ref(false)
+const sessions = ref<Array<{ id: string; title: string; created_at?: string; updated_at?: string }>>([])
 
 const isAllSelected = computed(() =>
-  props.sessions.length > 0 && selectedIds.value.length === props.sessions.length
+  sessions.value.length > 0 && selectedIds.value.length === sessions.value.length
 )
 const isIndeterminate = computed(() =>
-  selectedIds.value.length > 0 && selectedIds.value.length < props.sessions.length
+  selectedIds.value.length > 0 && selectedIds.value.length < sessions.value.length
 )
 
+// 打开弹窗时拉取全量会话列表
+const fetchAllSessions = async () => {
+  loading.value = true
+  try {
+    const allItems: any[] = []
+    let page = 1
+    const pageSize = 100
+    let hasMore = true
+    while (hasMore) {
+      const res: any = await getSessionsList(page, pageSize)
+      const items = res?.data?.items || res?.data || []
+      allItems.push(...items)
+      const total = res?.data?.total ?? items.length
+      hasMore = allItems.length < total
+      page++
+    }
+    sessions.value = allItems.map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      created_at: s.created_at,
+      updated_at: s.updated_at,
+    }))
+  } catch {
+    sessions.value = []
+    MessagePlugin.error(t('batchManage.loadFailed') || 'Failed to load sessions')
+  }
+  loading.value = false
+}
+
 watch(() => props.visible, (val) => {
-  if (val) selectedIds.value = []
+  if (val) {
+    selectedIds.value = []
+    fetchAllSessions()
+  }
 })
 
 const toggleSelect = (id: string) => {
@@ -117,7 +148,7 @@ const toggleSelect = (id: string) => {
 }
 
 const toggleSelectAll = (checked: boolean) => {
-  selectedIds.value = checked ? props.sessions.map(s => s.id) : []
+  selectedIds.value = checked ? sessions.value.map(s => s.id) : []
 }
 
 const formatTime = (dateStr?: string) => {
@@ -138,6 +169,8 @@ const handleDeleteSingle = (item: { id: string; title: string }) => {
       try {
         const res: any = await delSession(item.id)
         if (res && res.success === true) {
+          sessions.value = sessions.value.filter(s => s.id !== item.id)
+          selectedIds.value = selectedIds.value.filter(id => id !== item.id)
           emit('deleted', [item.id])
           MessagePlugin.success(t('batchManage.deleteSuccess'))
         } else {
@@ -168,6 +201,7 @@ const handleBatchDelete = () => {
         const ids = [...selectedIds.value]
         const res: any = await batchDelSessions(ids)
         if (res && res.success === true) {
+          sessions.value = sessions.value.filter(s => !ids.includes(s.id))
           emit('deleted', ids)
           selectedIds.value = []
           MessagePlugin.success(t('batchManage.deleteSuccess'))

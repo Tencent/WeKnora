@@ -25,6 +25,7 @@ export default {
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Delete failed, please try again later',
     noSelection: 'Please select at least one conversation',
+    loadFailed: 'Failed to load conversations',
   },
   listSpaceSidebar: {
     title: 'Filter',

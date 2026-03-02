@@ -23,6 +23,7 @@ export default {
     deleteSuccess: 'Успешно удалено',
     deleteFailed: 'Ошибка удаления, попробуйте позже',
     noSelection: 'Выберите хотя бы один диалог',
+    loadFailed: 'Не удалось загрузить список диалогов',
   },
   knowledgeBase: {
     title: 'База знаний',

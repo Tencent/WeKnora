@@ -25,6 +25,7 @@ export default {
     deleteSuccess: "삭제 성공",
     deleteFailed: "삭제 실패, 나중에 다시 시도해 주세요",
     noSelection: "최소 하나의 대화를 선택해 주세요",
+    loadFailed: "대화 목록 로드 실패",
   },
   listSpaceSidebar: {
     title: "필터",

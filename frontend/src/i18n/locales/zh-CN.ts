@@ -25,6 +25,7 @@ export default {
     deleteSuccess: "删除成功",
     deleteFailed: "删除失败，请稍后再试",
     noSelection: "请至少选择一条对话",
+    loadFailed: "加载会话列表失败",
   },
   listSpaceSidebar: {
     title: "筛选",
