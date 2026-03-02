@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -59,8 +60,10 @@ type KnowledgeBase struct {
 	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id"`
 	// VLM config
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
-	// Storage config
-	StorageConfig StorageConfig `yaml:"storage_config"          json:"storage_config"          gorm:"column:cos_config;type:json"`
+	// Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig
+	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
+	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
+	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
 	// Extract config
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
@@ -130,22 +133,37 @@ func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 	return ""
 }
 
-// COSConfig represents the COS configuration
+// StorageProviderConfig stores the KB-level storage provider selection.
+// Credentials are managed at the tenant level (StorageEngineConfig).
+type StorageProviderConfig struct {
+	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos"
+}
+
+func (c StorageProviderConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+func (c *StorageProviderConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+// Deprecated: StorageConfig is the legacy COS configuration stored in the cos_config column.
+// New code should use StorageProviderConfig. Kept for backward compatibility with old data.
 type StorageConfig struct {
-	// Secret ID
-	SecretID string `yaml:"secret_id"   json:"secret_id"`
-	// Secret Key
-	SecretKey string `yaml:"secret_key"  json:"secret_key"`
-	// Region
-	Region string `yaml:"region"      json:"region"`
-	// Bucket Name
+	SecretID   string `yaml:"secret_id"   json:"secret_id"`
+	SecretKey  string `yaml:"secret_key"  json:"secret_key"`
+	Region     string `yaml:"region"      json:"region"`
 	BucketName string `yaml:"bucket_name" json:"bucket_name"`
-	// App ID
-	AppID string `yaml:"app_id"      json:"app_id"`
-	// Path Prefix
+	AppID      string `yaml:"app_id"      json:"app_id"`
 	PathPrefix string `yaml:"path_prefix" json:"path_prefix"`
-	// Provider
-	Provider string `yaml:"provider"    json:"provider"`
+	Provider   string `yaml:"provider"    json:"provider"`
 }
 
 func (c StorageConfig) Value() (driver.Value, error) {
@@ -164,7 +182,7 @@ func (c *StorageConfig) Scan(value interface{}) error {
 }
 
 // UnmarshalJSON keeps backward compatibility for legacy clients that still send
-// `cos_config`, while standardizing the API field as `storage_config`.
+// `cos_config` or `storage_config`, while migrating to `storage_provider_config`.
 func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
 	type alias KnowledgeBase
 	aux := struct {
@@ -176,10 +194,55 @@ func (kb *KnowledgeBase) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	// Backward compat: populate legacy StorageConfig from cos_config
 	if aux.LegacyStorageConfig != nil && kb.StorageConfig == (StorageConfig{}) {
 		kb.StorageConfig = *aux.LegacyStorageConfig
 	}
+	// Auto-populate StorageProviderConfig from legacy StorageConfig if not set
+	if kb.StorageProviderConfig == nil && kb.StorageConfig.Provider != "" {
+		kb.StorageProviderConfig = &StorageProviderConfig{Provider: kb.StorageConfig.Provider}
+	}
 	return nil
+}
+
+// GetStorageProvider returns the effective storage provider for this KB.
+// Priority: StorageProviderConfig (new) > StorageConfig.Provider (legacy cos_config).
+func (kb *KnowledgeBase) GetStorageProvider() string {
+	if kb == nil {
+		return ""
+	}
+	if kb.StorageProviderConfig != nil {
+		p := strings.ToLower(strings.TrimSpace(kb.StorageProviderConfig.Provider))
+		if p != "" && p != "__pending_env__" {
+			return p
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+}
+
+// SetStorageProvider writes the provider to the new StorageProviderConfig field.
+func (kb *KnowledgeBase) SetStorageProvider(provider string) {
+	if kb == nil {
+		return
+	}
+	kb.StorageProviderConfig = &StorageProviderConfig{Provider: provider}
+}
+
+// InferStorageFromFilePath deduces the storage provider from a file path format.
+// Used as a safety fallback when the KB's configured provider doesn't match the data.
+func InferStorageFromFilePath(filePath string) string {
+	switch {
+	case strings.HasPrefix(filePath, "minio://"):
+		return "minio"
+	case strings.HasPrefix(filePath, "tos://"):
+		return "tos"
+	case strings.HasPrefix(filePath, "https://") && strings.Contains(filePath, ".cos."):
+		return "cos"
+	case strings.HasPrefix(filePath, "/"):
+		return "local"
+	default:
+		return ""
+	}
 }
 
 // ImageProcessingConfig represents the image processing configuration

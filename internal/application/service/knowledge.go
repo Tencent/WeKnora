@@ -190,8 +190,8 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 解析有效 provider：优先 KB 级别，其次租户默认
-		provider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
+		provider := kb.GetStorageProvider()
 		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
 			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
@@ -2286,9 +2286,9 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return nil, "", err
 	}
 
-	// Resolve KB-level file service
+	// Resolve KB-level file service with FilePath fallback protection
 	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
-	file, err := s.resolveFileService(ctx, kb).GetFile(ctx, knowledge.FilePath)
+	file, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -6737,13 +6737,13 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 }
 
 func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
-	sc := &kb.StorageConfig
-	provider := strings.ToLower(strings.TrimSpace(sc.Provider))
+	provider := kb.GetStorageProvider()
 	if provider == "" {
 		provider = "local"
 	}
 
-	// Backward compatibility: if KB has full params for the chosen provider, use them.
+	// Backward compatibility: if legacy cos_config has full params for the chosen provider, use them.
+	sc := &kb.StorageConfig
 	hasKBFull := false
 	switch provider {
 	case "cos":
@@ -6751,12 +6751,11 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 	case "minio":
 		hasKBFull = sc.BucketName != ""
 	case "local":
-		// Local has no credentials; always merge from tenant if available
 		hasKBFull = false
 	}
 
 	if hasKBFull {
-		logger.Infof(ctx, "[storage] buildStorageConfig use kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
+		logger.Infof(ctx, "[storage] buildStorageConfig use legacy kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
 			kb.ID, provider, sc.BucketName, sc.PathPrefix)
 		return &types.DocParserStorageConfig{
 			Provider:        strings.ToUpper(provider),
@@ -6769,7 +6768,7 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 		}
 	}
 
-	// Otherwise merge from tenant's StorageEngineConfig.
+	// Merge from tenant's StorageEngineConfig.
 	var out types.DocParserStorageConfig
 	out.Provider = strings.ToUpper(provider)
 
@@ -6817,7 +6816,7 @@ func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.Kno
 }
 
 // resolveFileService returns the FileService for the given knowledge base,
-// based on the KB's StorageConfig.Provider and the tenant's StorageEngineConfig.
+// based on the KB's StorageProviderConfig (or legacy StorageConfig.Provider) and the tenant's StorageEngineConfig.
 // Falls back to the global fileSvc when no tenant-level storage config is found.
 func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.KnowledgeBase) interfaces.FileService {
 	if kb == nil {
@@ -6825,7 +6824,7 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 		return s.fileSvc
 	}
 
-	provider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+	provider := kb.GetStorageProvider()
 
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
@@ -6912,6 +6911,40 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 		return s.fileSvc
 	}
 	logger.Infof(ctx, "[storage] resolveFileService selected: kb=%s provider=%s", kb.ID, provider)
+	return svc
+}
+
+// resolveFileServiceForPath is like resolveFileService but adds a safety check:
+// if the resolved provider doesn't match what the filePath implies, fall back to
+// the provider inferred from the file path. This protects historical data when
+// tenant/KB config changes but files were stored under the old provider.
+func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *types.KnowledgeBase, filePath string) interfaces.FileService {
+	svc := s.resolveFileService(ctx, kb)
+	if filePath == "" {
+		return svc
+	}
+
+	inferred := types.InferStorageFromFilePath(filePath)
+	if inferred == "" {
+		return svc
+	}
+
+	configured := kb.GetStorageProvider()
+	if configured == "" {
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant != nil && tenant.StorageEngineConfig != nil {
+			configured = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		}
+	}
+	if configured == "" {
+		configured = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+	}
+
+	if configured != "" && configured != inferred {
+		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
+			configured, inferred, filePath)
+		return s.fileSvc
+	}
 	return svc
 }
 
@@ -7304,7 +7337,7 @@ func (s *knowledgeService) convert(
 	imageStorage := s.buildImageStorageConfig(ctx, kb)
 	if imageStorage == nil {
 		logger.Infof(ctx, "[storage] chunk image storage: kb=%s provider=%s image_storage=nil(use local temp/files)",
-			kb.ID, strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider)))
+			kb.ID, kb.GetStorageProvider())
 	} else {
 		logger.Infof(ctx, "[storage] chunk image storage: kb=%s provider=%s bucket=%s endpoint=%s path_prefix=%s",
 			kb.ID,
@@ -7325,7 +7358,7 @@ func (s *knowledgeService) convert(
 	}
 
 	if !isURL {
-		fileReader, err := s.resolveFileService(ctx, kb).GetFile(ctx, payload.FilePath)
+		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
 		if err != nil {
 			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
 		}
@@ -7402,7 +7435,7 @@ func (s *knowledgeService) reuploadImagesToStorage(
 	images []docparser.StoredImage,
 	markdown string,
 ) (string, []docparser.StoredImage) {
-	provider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+	provider := kb.GetStorageProvider()
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
 		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
@@ -7456,7 +7489,7 @@ func (s *knowledgeService) reuploadImagesToStorage(
 func (s *knowledgeService) buildImageStorageConfig(ctx context.Context, kb *types.KnowledgeBase) map[string]string {
 	provider := ""
 	if kb != nil {
-		provider = strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+		provider = kb.GetStorageProvider()
 	}
 	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {

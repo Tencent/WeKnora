@@ -413,6 +413,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 				"Continuing with application startup. Please run migrations manually if needed.",
 			)
 		}
+
+		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
+		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
+		// we replace that with the actual STORAGE_TYPE from the environment.
+		resolveStorageProviderPending(db)
 	} else {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
@@ -435,6 +440,27 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
 	return db, nil
+}
+
+// resolveStorageProviderPending replaces the "__pending_env__" sentinel in
+// knowledge_bases.storage_provider_config with the actual STORAGE_TYPE from the environment.
+// This runs once after SQL migrations to bind historical KBs to their real storage provider.
+func resolveStorageProviderPending(db *gorm.DB) {
+	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
+	if storageType == "" {
+		storageType = "local"
+	}
+	storageType = strings.ToLower(storageType)
+
+	result := db.Exec(
+		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		fmt.Sprintf(`{"provider":"%s"}`, storageType),
+	)
+	if result.Error != nil {
+		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
+	}
 }
 
 // initFileService initializes file storage service

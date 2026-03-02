@@ -575,6 +575,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			EmbeddingModelID:      sourceKB.EmbeddingModelID,
 			SummaryModelID:        sourceKB.SummaryModelID,
 			VLMConfig:             sourceKB.VLMConfig,
+			StorageProviderConfig: sourceKB.StorageProviderConfig,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
 		}

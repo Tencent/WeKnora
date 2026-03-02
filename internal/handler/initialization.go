@@ -297,12 +297,12 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.VLMConfig.ModelID = ""
 	}
 
-	// 存储引擎：仅写入 provider，参数从租户全局 StorageEngineConfig 读取
+	// 存储引擎：仅写入 provider 到新字段，参数从租户全局 StorageEngineConfig 读取
 	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
 	if provider == "" {
 		provider = "local"
 	}
-	oldProvider := strings.ToLower(strings.TrimSpace(kb.StorageConfig.Provider))
+	oldProvider := kb.GetStorageProvider()
 	if oldProvider == "" {
 		oldProvider = "local"
 	}
@@ -315,7 +315,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			return
 		}
 	}
-	kb.StorageConfig = types.StorageConfig{Provider: provider}
+	kb.SetStorageProvider(provider)
 
 	// 更新知识图谱配置
 	if req.NodeExtract.Enabled {
@@ -711,6 +711,8 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 		switch req.Multimodal.StorageType {
 		case "cos":
 			if req.Multimodal.COS != nil {
+				kb.SetStorageProvider("cos")
+				// Legacy: also write to cos_config for backward compat with old code paths
 				kb.StorageConfig = types.StorageConfig{
 					Provider:   req.Multimodal.StorageType,
 					BucketName: req.Multimodal.COS.BucketName,
@@ -723,6 +725,8 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 			}
 		case "minio":
 			if req.Multimodal.Minio != nil {
+				kb.SetStorageProvider("minio")
+				// Legacy: also write to cos_config for backward compat with old code paths
 				kb.StorageConfig = types.StorageConfig{
 					Provider:   req.Multimodal.StorageType,
 					BucketName: req.Multimodal.Minio.BucketName,
@@ -734,6 +738,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 		}
 	} else {
 		kb.VLMConfig = types.VLMConfig{}
+		kb.SetStorageProvider("")
 		kb.StorageConfig = types.StorageConfig{}
 	}
 
@@ -1333,15 +1338,16 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 	}
 
-	// 判断多模态是否启用：有VLM模型ID或有存储配置
+	// 判断多模态是否启用：有VLM模型ID或有存储配置（兼容新旧字段）
+	storageProvider := kb.GetStorageProvider()
 	hasMultimodal := (kb.VLMConfig.IsEnabled() ||
-		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "")
+		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "" ||
+		(storageProvider != "" && storageProvider != "local"))
 	if config["multimodal"] == nil {
 		config["multimodal"] = map[string]interface{}{
 			"enabled": hasMultimodal,
 		}
 	} else {
-		// 如果已经设置过 multimodal，更新 enabled 状态
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
 
@@ -1363,16 +1369,17 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"separators":   kb.ChunkingConfig.Separators,
 		}
 
-		// 添加多模态的COS配置信息
-		if kb.StorageConfig.SecretID != "" {
+		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
+		effectiveProvider := kb.GetStorageProvider()
+		if kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
 			if config["multimodal"] == nil {
 				config["multimodal"] = map[string]interface{}{
 					"enabled": true,
 				}
 			}
 			multimodal := config["multimodal"].(map[string]interface{})
-			multimodal["storageType"] = kb.StorageConfig.Provider
-			switch kb.StorageConfig.Provider {
+			multimodal["storageType"] = effectiveProvider
+			switch effectiveProvider {
 			case "cos":
 				multimodal["cos"] = map[string]interface{}{
 					"secretId":   kb.StorageConfig.SecretID,
