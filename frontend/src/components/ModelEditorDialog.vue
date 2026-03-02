@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="dialogVisible" class="model-editor-overlay" @click.self="handleCancel">
+      <div v-if="dialogVisible" class="model-editor-overlay" @mousedown.self="handleOverlayMouseDown" @mouseup.self="handleOverlayMouseUp">
         <div class="model-editor-modal">
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleCancel" :aria-label="$t('common.close')">
@@ -991,6 +991,19 @@ watch(() => formData.value.modelName, () => {
 // 取消
 const handleCancel = () => {
   dialogVisible.value = false
+}
+
+// 遮罩层点击关闭：只有 mousedown 和 mouseup 都发生在遮罩层上才关闭，
+// 防止在输入框中拖选文字时鼠标滑出弹窗导致误关闭
+let overlayMouseDownFired = false
+const handleOverlayMouseDown = () => {
+  overlayMouseDownFired = true
+}
+const handleOverlayMouseUp = () => {
+  if (overlayMouseDownFired) {
+    handleCancel()
+  }
+  overlayMouseDownFired = false
 }
 </script>
 
