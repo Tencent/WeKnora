@@ -19,6 +19,7 @@
     "dompurify": "^3.2.6",
     "highlight.js": "^11.11.1",
     "marked": "^5.1.2",
+    "mermaid": "^11.4.1",
     "pagefind": "^1.1.1",
     "papaparse": "^5.5.3",
     "pinia": "^3.0.1",

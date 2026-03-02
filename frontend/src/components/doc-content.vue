@@ -3,6 +3,7 @@
 import { marked } from "marked";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
+import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
 import { downKnowledgeDetails, deleteGeneratedQuestion } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
@@ -10,6 +11,38 @@ import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } fr
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
+
+// Mermaid 初始化计数器，用于生成唯一ID
+let mermaidRenderCount = 0;
+
+// 初始化 Mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'strict',
+  fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: true,
+    curve: 'basis'
+  },
+  sequence: {
+    useMaxWidth: true,
+    diagramMarginX: 8,
+    diagramMarginY: 8,
+    actorMargin: 50,
+    width: 150,
+    height: 65
+  },
+  gantt: {
+    useMaxWidth: true,
+    leftPadding: 75,
+    gridLineStartPadding: 35,
+    barHeight: 20,
+    barGap: 4,
+    topPadding: 50
+  }
+});
 
 marked.use({
   mangle: false,
@@ -133,6 +166,15 @@ renderer.image = function (href, title, text) {
 // 自定义代码块渲染器，只显示语言标签
 renderer.code = function (code, infostring) {
   const lang = (infostring || '').trim();
+
+  // Mermaid 图表处理
+  if (lang === 'mermaid') {
+    // 生成唯一ID
+    const id = `mermaid-${++mermaidRenderCount}`;
+    // 返回带有 mermaid 类的 div，后续由 mermaid.run() 处理
+    return `<div class="mermaid" id="${id}">${code}</div>`;
+  }
+
   let detectedLang = lang;
   let highlighted = '';
   if (lang && hljs.getLanguage(lang)) {
@@ -209,8 +251,24 @@ watch(() => props.details.md, (newVal) => {
         }
       })
     }
+    // 渲染 Mermaid 图表
+    await renderMermaidDiagrams();
   })
 }, { immediate: true, deep: true })
+
+// 渲染 Mermaid 图表的函数
+const renderMermaidDiagrams = async () => {
+  try {
+    const mermaidElements = mdContentWrap.value?.querySelectorAll('.mermaid');
+    if (mermaidElements && mermaidElements.length > 0) {
+      await mermaid.run({
+        nodes: mermaidElements
+      });
+    }
+  } catch (error) {
+    console.error('Mermaid rendering error:', error);
+  }
+};
 
 // 安全地处理 Markdown 内容（使用 marked）
 const processMarkdown = (markdownText) => {

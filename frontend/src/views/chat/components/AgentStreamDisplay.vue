@@ -219,6 +219,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import mermaid from 'mermaid';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { getChunkByIdOnly } from '@/api/knowledge-base';
@@ -229,6 +230,71 @@ import { useI18n } from 'vue-i18n';
 const router = useRouter();
 const uiStore = useUIStore();
 const { t } = useI18n();
+
+// Mermaid 初始化计数器
+let agentMermaidCount = 0;
+
+// 初始化 Mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'strict',
+  fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: true,
+    curve: 'basis'
+  },
+  sequence: {
+    useMaxWidth: true,
+    diagramMarginX: 8,
+    diagramMarginY: 8,
+    actorMargin: 50,
+    width: 150,
+    height: 65
+  },
+  gantt: {
+    useMaxWidth: true,
+    leftPadding: 75,
+    gridLineStartPadding: 35,
+    barHeight: 20,
+    barGap: 4,
+    topPadding: 50
+  }
+});
+
+// DOMPurify 配置 - 支持 Mermaid SVG 标签
+const DOMPurifyConfig = {
+  ALLOWED_TAGS: [
+    'p', 'br', 'strong', 'em', 'u', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'span', 'table', 'thead', 'tbody',
+    'tr', 'th', 'td', 'img', 'figure', 'figcaption', 'div',
+    // Mermaid SVG 支持的标签
+    'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
+    'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
+    'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern',
+    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask'
+  ],
+  ALLOWED_ATTR: [
+    'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
+    'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt',
+    'width', 'height', 'style', 'id',
+    // Mermaid SVG 支持的属性
+    'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+    'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',
+    'fill-opacity', 'opacity', 'transform', 'viewbox', 'preserveaspectratio',
+    'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'rx', 'ry', 'r',
+    'dx', 'dy', 'text-anchor', 'dominant-baseline', 'font-family', 'font-size',
+    'font-weight', 'font-style', 'letter-spacing', 'word-spacing',
+    'marker-start', 'marker-mid', 'marker-end', 'markerunits', 'markerwidth',
+    'markerheight', 'refx', 'refy', 'orient', 'points', 'offset',
+    'gradientunits', 'gradienttransform', 'spreadmethod', 'stop-color', 'stop-opacity',
+    'patternunits', 'patterntransform', 'clippathunits', 'maskunits',
+    'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
+    'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
+    'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
+  ]
+};
 
 const TOOL_NAME_I18N: Record<string, string> = {
   search_knowledge: '知识库检索',
@@ -386,11 +452,16 @@ const expandedEvents = ref<Set<string>>(new Set());
 // Watch event stream to auto-expand thinking tools
 watch(eventStream, (stream) => {
   if (!stream || !Array.isArray(stream)) return;
-  
+
   stream.forEach((event: any) => {
     if (event?.type === 'tool_call' && event?.tool_name === 'thinking' && event?.tool_call_id) {
       expandedEvents.value.add(event.tool_call_id);
     }
+  });
+
+  // 渲染 Mermaid 图表
+  nextTick(() => {
+    renderMermaidDiagrams();
   });
 }, { immediate: true, deep: true });
 
@@ -1150,19 +1221,33 @@ const preprocessMarkdown = (contentStr: string): string => {
 const getTokens = (content: any) => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   if (!contentStr.trim()) return [];
-  
+
   const processed = preprocessMarkdown(contentStr);
   return marked.lexer(processed);
+};
+
+// 自定义渲染器 - 支持 Mermaid
+const agentRenderer = new marked.Renderer();
+agentRenderer.code = function(code, infostring) {
+  const lang = (infostring || '').trim();
+
+  // Mermaid 图表处理
+  if (lang === 'mermaid') {
+    const id = `mermaid-agent-${++agentMermaidCount}`;
+    return `<div class="mermaid" id="${id}">${code}</div>`;
+  }
+
+  // 普通代码块
+  const displayLang = lang || 'Code';
+  const escapedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<pre><code class="language-${displayLang}">${escapedCode}</code></pre>`;
 };
 
 // Render HTML from a single token
 const getTokenHTML = (token: any): string => {
   try {
-    const html = marked.parser([token]);
-    return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'span', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'figure', 'figcaption'],
-      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id', 'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt', 'width', 'height', 'style']
-    });
+    const html = marked.parser([token], { renderer: agentRenderer });
+    return DOMPurify.sanitize(html, DOMPurifyConfig);
   } catch (e) {
     console.error('Token rendering error:', e);
     return '';
@@ -1173,19 +1258,32 @@ const getTokenHTML = (token: any): string => {
 const renderMarkdown = (content: any): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
   if (!contentStr.trim()) return '';
-  
+
   try {
     const processed = preprocessMarkdown(contentStr);
-    const html = marked.parse(processed) as string;
+    const html = marked.parse(processed, { renderer: agentRenderer }) as string;
     if (!html) return '';
-    
-    return DOMPurify.sanitize(html, {
-      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'code', 'pre', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'span', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'figure', 'figcaption'],
-      ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id', 'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt', 'width', 'height', 'style']
-    });
+
+    return DOMPurify.sanitize(html, DOMPurifyConfig);
   } catch (e) {
     console.error('Markdown rendering error:', e, 'Content:', contentStr.substring(0, 100));
     return contentStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+};
+
+// 渲染 Mermaid 图表的函数
+const renderMermaidDiagrams = async () => {
+  try {
+    if (rootElement.value) {
+      const mermaidElements = rootElement.value.querySelectorAll<HTMLElement>('.mermaid');
+      if (mermaidElements && mermaidElements.length > 0) {
+        await mermaid.run({
+          nodes: mermaidElements
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Mermaid rendering error:', error);
   }
 };
 
@@ -2063,18 +2161,18 @@ const handleAddToKnowledge = (answerEvent: any) => {
         border-collapse: collapse;
         margin: 6px 0;
         font-size: 11px;
-        
+
         th, td {
           border: 1px solid #e5e7eb;
           padding: 5px 8px;
         }
-        
+
         th {
           background: #f9fafb;
           font-weight: 600;
         }
       }
-      
+
       :deep(img) {
         max-width: 80%;
         max-height: 300px;
@@ -2089,9 +2187,24 @@ const handleAddToKnowledge = (answerEvent: any) => {
         cursor: pointer;
         transition: transform 0.2s ease;
         background-color: #f9fafb; /* 加载时的占位背景色 */
-        
+
         &:hover {
           transform: scale(1.02);
+        }
+      }
+
+      // Mermaid 图表样式
+      :deep(.mermaid) {
+        margin: 16px 0;
+        padding: 16px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        overflow-x: auto;
+        text-align: center;
+
+        svg {
+          max-width: 100%;
+          height: auto;
         }
       }
     }

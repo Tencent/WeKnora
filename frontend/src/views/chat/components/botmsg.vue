@@ -48,6 +48,7 @@
 <script setup>
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick } from 'vue';
 import { marked } from 'marked';
+import mermaid from 'mermaid';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
@@ -62,6 +63,39 @@ marked.use({
     headerIds: false,
     breaks: true,  // 全局启用单个换行支持
 });
+
+// Mermaid 初始化计数器
+let botmsgMermaidCount = 0;
+
+// 初始化 Mermaid
+mermaid.initialize({
+    startOnLoad: false,
+    theme: 'default',
+    securityLevel: 'strict',
+    fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+    flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        curve: 'basis'
+    },
+    sequence: {
+        useMaxWidth: true,
+        diagramMarginX: 8,
+        diagramMarginY: 8,
+        actorMargin: 50,
+        width: 150,
+        height: 65
+    },
+    gantt: {
+        useMaxWidth: true,
+        leftPadding: 75,
+        gridLineStartPadding: 35,
+        barHeight: 20,
+        barGap: 4,
+        topPadding: 50
+    }
+});
+
 const emit = defineEmits(['scroll-bottom'])
 const { t } = useI18n()
 const uiStore = useUIStore();
@@ -113,6 +147,22 @@ customRenderer.image = function(href, title, text) {
     }
     // 使用安全的图片创建函数
     return createSafeImage(href, text || '', title || '');
+};
+
+// 覆盖代码块渲染方法，支持 Mermaid
+customRenderer.code = function(code, infostring) {
+    const lang = (infostring || '').trim();
+
+    // Mermaid 图表处理
+    if (lang === 'mermaid') {
+        const id = `mermaid-botmsg-${++botmsgMermaidCount}`;
+        return `<div class="mermaid" id="${id}">${code}</div>`;
+    }
+
+    // 普通代码块
+    const displayLang = lang || 'Code';
+    const escapedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<pre><code class="language-${displayLang}">${escapedCode}</code></pre>`;
 };
 
 // 计算属性：将 Markdown 文本转换为 tokens
@@ -247,12 +297,37 @@ const handleMarkdownImageClick = (e) => {
     }
 };
 
+// 渲染 Mermaid 图表的函数
+const renderMermaidDiagrams = async () => {
+    try {
+        if (parentMd.value) {
+            const mermaidElements = parentMd.value.querySelectorAll('.mermaid');
+            if (mermaidElements && mermaidElements.length > 0) {
+                await mermaid.run({
+                    nodes: mermaidElements
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Mermaid rendering error:', error);
+    }
+};
+
+// 监听内容变化并渲染 Mermaid
+watch(() => [props.content, props.session?.content], () => {
+    nextTick(() => {
+        renderMermaidDiagrams();
+    });
+}, { immediate: true });
+
 onMounted(async () => {
     // 为 markdown-content 中的图片添加点击事件
     nextTick(() => {
         if (parentMd.value) {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
         }
+        // 初始渲染 Mermaid 图表
+        renderMermaidDiagrams();
     });
 });
 
@@ -387,6 +462,21 @@ onBeforeUnmount(() => {
 
         &:hover {
             transform: scale(1.02);
+        }
+    }
+
+    // Mermaid 图表样式
+    :deep(.mermaid) {
+        margin: 16px 0;
+        padding: 16px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        overflow-x: auto;
+        text-align: center;
+
+        svg {
+            max-width: 100%;
+            height: auto;
         }
     }
 }

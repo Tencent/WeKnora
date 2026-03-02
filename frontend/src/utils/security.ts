@@ -12,12 +12,31 @@ const DOMPurifyConfig = {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
     'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
     'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-    'div', 'span', 'figure', 'figcaption', 'think'
+    'div', 'span', 'figure', 'figcaption', 'think',
+    // Mermaid SVG 支持的标签
+    'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
+    'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
+    'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern',
+    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask'
   ],
   // 允许的属性
   ALLOWED_ATTR: [
     'href', 'title', 'alt', 'src', 'class', 'id', 'style',
-    'target', 'rel', 'width', 'height'
+    'target', 'rel', 'width', 'height',
+    // Mermaid SVG 支持的属性
+    'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
+    'stroke-dasharray', 'stroke-dashoffset', 'stroke-miterlimit', 'stroke-opacity',
+    'fill-opacity', 'opacity', 'transform', 'viewbox', 'preserveaspectratio',
+    'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'rx', 'ry', 'r',
+    'dx', 'dy', 'text-anchor', 'dominant-baseline', 'font-family', 'font-size',
+    'font-weight', 'font-style', 'letter-spacing', 'word-spacing',
+    'marker-start', 'marker-mid', 'marker-end', 'markerunits', 'markerwidth',
+    'markerheight', 'refx', 'refy', 'orient', 'points', 'offset',
+    'gradientunits', 'gradienttransform', 'spreadmethod', 'stop-color', 'stop-opacity',
+    'patternunits', 'patterntransform', 'clippathunits', 'maskunits',
+    'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
+    'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
+    'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
   ],
   // 允许的协议
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
