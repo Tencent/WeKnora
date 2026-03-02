@@ -2,7 +2,6 @@
     <div class="aside_box">
         <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
             <img class="logo" src="@/assets/img/weknora.png" alt="">
-            <span v-if="isLiteEdition" class="lite-badge">Lite</span>
         </div>
         
         <!-- 租户选择器：仅在用户可切换租户时显示 -->
@@ -108,7 +107,6 @@ import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
-import { getSystemInfo } from '@/api/system';
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -129,7 +127,6 @@ const hasMore = computed(() => currentPage.value < totalPages.value);
 type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[] };
 const { menuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
-const isLiteEdition = ref(false);
 
 // 批量管理状态
 const batchMode = ref(false)
@@ -465,10 +462,6 @@ onMounted(async () => {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
 
-    getSystemInfo().then(res => {
-        isLiteEdition.value = res.data?.edition === 'lite'
-    }).catch(() => {})
-    
     // 初始化知识库信息
     const kbId = (route.params as any)?.kbId as string
     if (kbId && isInKnowledgeBase.value) {
@@ -686,19 +679,6 @@ const mouseleaveMenu = (path: string) => {
             width: 134px;
             height: auto;
             margin-left: 24px;
-        }
-        .lite-badge {
-            margin-left: 4px;
-            padding: 1px 6px;
-            font-size: 11px;
-            font-weight: 600;
-            line-height: 18px;
-            color: #07c05f;
-            background: #07c05f1a;
-            border: 1px solid #07c05f40;
-            border-radius: 4px;
-            letter-spacing: 0.5px;
-            user-select: none;
         }
     }
 
