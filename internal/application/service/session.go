@@ -260,6 +260,36 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	return nil
 }
 
+// DeleteAllSessions deletes all sessions for the current tenant
+func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	logger.Infof(ctx, "Deleting all sessions for tenant %d", tenantID)
+
+	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
+	} else {
+		for _, session := range sessions {
+			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
+			}
+			if err := s.sessionStorage.Delete(ctx, session.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup conversation context for session %s: %v", session.ID, err)
+			}
+		}
+	}
+
+	if err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		return err
+	}
+
+	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
+	return nil
+}
+
 // GenerateTitle generates a title for the current conversation content
 // modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 func (s *sessionService) GenerateTitle(ctx context.Context,

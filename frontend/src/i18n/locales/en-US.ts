@@ -23,6 +23,7 @@ export default {
     delete: 'Delete Conversations',
     deleteConfirmTitle: 'Delete Conversations',
     deleteConfirmBody: 'Are you sure you want to delete the selected {count} conversation(s)? This action cannot be undone.',
+    deleteAllConfirmBody: 'Are you sure you want to delete all conversations? This action cannot be undone.',
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Delete failed, please try again later',
     noSelection: 'Please select at least one conversation',

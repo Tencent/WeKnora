@@ -95,3 +95,8 @@ func (r *sessionRepository) BatchDelete(ctx context.Context, tenantID uint64, id
 	}
 	return r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids).Delete(&types.Session{}).Error
 }
+
+// DeleteAllByTenantID deletes all sessions for a tenant
+func (r *sessionRepository) DeleteAllByTenantID(ctx context.Context, tenantID uint64) error {
+	return r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&types.Session{}).Error
+}

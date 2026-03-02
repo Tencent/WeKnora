@@ -71,7 +71,7 @@
                         :loading="batchDeleting"
                         @click="handleInlineBatchDelete"
                     >
-                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchSelectedIds.length})` : '' }}
+                        {{ t('batchManage.delete') }}{{ batchSelectedIds.length > 0 ? `(${batchDisplayCount})` : '' }}
                     </t-button>
                 </div>
             </div>
@@ -83,12 +83,6 @@
             <UserMenu />
         </div>
 
-        <!-- 批量管理对话框 -->
-        <BatchManageDialog
-            v-model:visible="batchManageVisible"
-            @deleted="handleBatchDeleted"
-        />
-        
     </div>
 </template>
 
@@ -96,7 +90,7 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, watch, computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession, batchDelSessions } from "@/api/chat/index";
+import { getSessionsList, delSession, batchDelSessions, deleteAllSessions } from "@/api/chat/index";
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
@@ -132,6 +126,24 @@ let activeSubmenu = ref<string>('');
 const batchMode = ref(false)
 const batchSelectedIds = ref<string[]>([])
 const batchDeleting = ref(false)
+
+const allSessionIds = computed(() => {
+    const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'creatChat');
+    if (!chatMenu?.children) return [];
+    return (chatMenu.children as any[]).map((s: any) => s.id);
+})
+
+const isAllBatchSelected = computed(() =>
+    allSessionIds.value.length > 0 && batchSelectedIds.value.length === allSessionIds.value.length
+)
+
+const isBatchIndeterminate = computed(() =>
+    batchSelectedIds.value.length > 0 && batchSelectedIds.value.length < allSessionIds.value.length
+)
+
+const batchDisplayCount = computed(() =>
+    isAllBatchSelected.value ? total.value : batchSelectedIds.value.length
+)
 
 // 是否可以访问所有租户
 const canAccessAllTenants = computed(() => authStore.canAccessAllTenants);
@@ -319,35 +331,47 @@ const toggleBatchSelectAll = (checked: boolean) => {
 
 const handleInlineBatchDelete = () => {
     if (batchSelectedIds.value.length === 0) return
+    const isDeleteAll = isAllBatchSelected.value
+    const displayCount = batchDisplayCount.value
     const confirmDialog = DialogPlugin.confirm({
         header: t('batchManage.deleteConfirmTitle'),
-        body: t('batchManage.deleteConfirmBody', { count: batchSelectedIds.value.length }),
+        body: isDeleteAll
+            ? t('batchManage.deleteAllConfirmBody') || t('batchManage.deleteConfirmBody', { count: displayCount })
+            : t('batchManage.deleteConfirmBody', { count: displayCount }),
         confirmBtn: { content: t('batchManage.delete'), theme: 'danger' as const },
         cancelBtn: t('batchManage.cancel'),
         theme: 'warning',
         onConfirm: async () => {
             batchDeleting.value = true
             try {
-                const ids = [...batchSelectedIds.value]
-                const res: any = await batchDelSessions(ids)
+                let res: any
+                if (isDeleteAll) {
+                    res = await deleteAllSessions()
+                } else {
+                    res = await batchDelSessions([...batchSelectedIds.value])
+                }
                 if (res && res.success === true) {
                     const chatMenuItem = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
-                    if (chatMenuItem && chatMenuItem.children) {
-                        for (const id of ids) {
-                            const idx = chatMenuItem.children.findIndex((s: any) => s.id === id);
-                            if (idx !== -1) chatMenuItem.children.splice(idx, 1);
+                    if (isDeleteAll) {
+                        if (chatMenuItem) chatMenuItem.children = [];
+                        total.value = 0;
+                    } else {
+                        const ids = [...batchSelectedIds.value]
+                        if (chatMenuItem && chatMenuItem.children) {
+                            for (const id of ids) {
+                                const idx = chatMenuItem.children.findIndex((s: any) => s.id === id);
+                                if (idx !== -1) chatMenuItem.children.splice(idx, 1);
+                            }
                         }
+                        total.value = Math.max(0, total.value - ids.length);
                     }
-                    total.value = Math.max(0, total.value - ids.length);
                     const currentChatId = route.params.chatid as string;
-                    if (currentChatId && ids.includes(currentChatId)) {
+                    if (currentChatId && (isDeleteAll || batchSelectedIds.value.includes(currentChatId))) {
                         router.push('/platform/creatChat');
                     }
                     batchSelectedIds.value = []
                     MessagePlugin.success(t('batchManage.deleteSuccess'))
-                    if (!chatMenuItem?.children?.length) {
-                        exitBatchMode()
-                    }
+                    exitBatchMode()
                 } else {
                     MessagePlugin.error(t('batchManage.deleteFailed'))
                 }

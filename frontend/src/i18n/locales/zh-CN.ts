@@ -23,6 +23,7 @@ export default {
     delete: "删除对话",
     deleteConfirmTitle: "删除对话",
     deleteConfirmBody: "确定要删除选中的 {count} 条对话吗？删除后无法恢复。",
+    deleteAllConfirmBody: "确定要删除所有对话吗？此操作无法恢复。",
     deleteSuccess: "删除成功",
     deleteFailed: "删除失败，请稍后再试",
     noSelection: "请至少选择一条对话",

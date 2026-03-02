@@ -23,6 +23,7 @@ export default {
     delete: "대화 삭제",
     deleteConfirmTitle: "대화 삭제",
     deleteConfirmBody: "선택한 {count}개의 대화를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.",
+    deleteAllConfirmBody: "모든 대화를 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.",
     deleteSuccess: "삭제 성공",
     deleteFailed: "삭제 실패, 나중에 다시 시도해 주세요",
     noSelection: "최소 하나의 대화를 선택해 주세요",
