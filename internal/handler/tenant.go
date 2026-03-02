@@ -25,6 +25,31 @@ type TenantHandler struct {
 	config      *config.Config
 }
 
+// authorizeTenantAccess checks that the authenticated user owns the target tenant
+// or has cross-tenant access privileges. Returns the current user on success.
+func (h *TenantHandler) authorizeTenantAccess(c *gin.Context, targetTenantID uint64) (*types.User, bool) {
+	ctx := c.Request.Context()
+
+	user, ok := ctx.Value(types.UserContextKey).(*types.User)
+	if !ok || user == nil {
+		c.Error(errors.NewUnauthorizedError("Authentication required"))
+		return nil, false
+	}
+
+	if user.TenantID == targetTenantID {
+		return user, true
+	}
+
+	if h.config != nil && h.config.Tenant != nil && h.config.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
+		return user, true
+	}
+
+	logger.Warnf(ctx, "User %s (tenant %d) attempted to access tenant %d without permission",
+		user.ID, user.TenantID, targetTenantID)
+	c.Error(errors.NewForbiddenError("Access denied: you do not have permission to access this tenant"))
+	return nil, false
+}
+
 // NewTenantHandler creates a new tenant handler instance with the provided service
 // Parameters:
 //   - service: An implementation of the TenantService interface for business logic
@@ -114,9 +139,12 @@ func (h *TenantHandler) GetTenant(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.authorizeTenantAccess(c, id); !ok {
+		return
+	}
+
 	tenant, err := h.service.GetTenantByID(ctx, id)
 	if err != nil {
-		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to retrieve tenant: application error", appErr)
 			c.Error(appErr)
@@ -157,6 +185,10 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.authorizeTenantAccess(c, id); !ok {
+		return
+	}
+
 	var tenantData types.Tenant
 	if err := c.ShouldBindJSON(&tenantData); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
@@ -169,7 +201,6 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	tenantData.ID = id
 	updatedTenant, err := h.service.UpdateTenant(ctx, &tenantData)
 	if err != nil {
-		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to update tenant: application error", appErr)
 			c.Error(appErr)
@@ -215,10 +246,13 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.authorizeTenantAccess(c, id); !ok {
+		return
+	}
+
 	logger.Infof(ctx, "Deleting tenant, ID: %d", id)
 
 	if err := h.service.DeleteTenant(ctx, id); err != nil {
-		// Check if this is an application-specific error
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to delete tenant: application error", appErr)
 			c.Error(appErr)
@@ -249,23 +283,16 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 func (h *TenantHandler) ListTenants(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	tenants, err := h.service.ListTenants(ctx)
-	if err != nil {
-		// Check if this is an application-specific error
-		if appErr, ok := errors.IsAppError(err); ok {
-			logger.Error(ctx, "Failed to retrieve tenant list: application error", appErr)
-			c.Error(appErr)
-		} else {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Failed to retrieve tenant list").WithDetails(err.Error()))
-		}
+	tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if !ok || tenant == nil {
+		c.Error(errors.NewUnauthorizedError("Authentication required"))
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"items": tenants,
+			"items": []*types.Tenant{tenant},
 		},
 	})
 }
