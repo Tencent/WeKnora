@@ -8,6 +8,7 @@ import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
 import { downKnowledgeDetails, deleteGeneratedQuestion } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -260,14 +261,49 @@ watch(() => props.details.md, (newVal) => {
 const renderMermaidDiagrams = async () => {
   try {
     const mermaidElements = mdContentWrap.value?.querySelectorAll('.mermaid');
+    console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
     if (mermaidElements && mermaidElements.length > 0) {
       await mermaid.run({
         nodes: mermaidElements
+      });
+      console.log('[Mermaid] Rendering complete');
+      // 渲染完成后绑定点击事件
+      nextTick(() => {
+        bindMermaidClickEvents();
       });
     }
   } catch (error) {
     console.error('Mermaid rendering error:', error);
   }
+};
+
+// Mermaid 点击处理函数 - 必须在 bindMermaidClickEvents 之前定义
+const handleMermaidClick = (e: Event) => {
+  e.stopPropagation();
+  const target = e.currentTarget as HTMLElement;
+  const svg = target.querySelector('svg');
+  if (svg) {
+    openMermaidFullscreen(svg.outerHTML);
+  }
+};
+
+// 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
+const bindMermaidClickEvents = () => {
+  if (!mdContentWrap.value) {
+    console.log('[Mermaid] mdContentWrap is null');
+    return;
+  }
+  // 绑定在 .mermaid div 上，而不是 SVG 上
+  const mermaidDivs = mdContentWrap.value.querySelectorAll('.mermaid');
+  console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
+  mermaidDivs.forEach((div, index) => {
+    const divEl = div as HTMLElement;
+    divEl.style.cursor = 'pointer';
+    // 移除旧的事件监听器（避免重复绑定）
+    divEl.removeEventListener('click', handleMermaidClick);
+    divEl.addEventListener('click', handleMermaidClick);
+    console.log(`[Mermaid] Bound click event to div ${index}`);
+  });
 };
 
 // 安全地处理 Markdown 内容（使用 marked）

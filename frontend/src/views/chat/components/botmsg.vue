@@ -54,6 +54,7 @@ import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -302,9 +303,15 @@ const renderMermaidDiagrams = async () => {
     try {
         if (parentMd.value) {
             const mermaidElements = parentMd.value.querySelectorAll('.mermaid');
+            console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
             if (mermaidElements && mermaidElements.length > 0) {
                 await mermaid.run({
                     nodes: mermaidElements
+                });
+                console.log('[Mermaid] Rendering complete');
+                // 渲染完成后绑定点击事件
+                nextTick(() => {
+                    bindMermaidClickEvents();
                 });
             }
         }
@@ -313,11 +320,46 @@ const renderMermaidDiagrams = async () => {
     }
 };
 
-// 监听内容变化并渲染 Mermaid
-watch(() => [props.content, props.session?.content], () => {
-    nextTick(() => {
-        renderMermaidDiagrams();
+// 已渲染的 mermaid 元素 ID 集合
+const renderedMermaidIds = new Set();
+
+// Mermaid 点击处理函数 - 必须在 bindMermaidClickEvents 之前定义
+const handleMermaidClick = (e) => {
+    e.stopPropagation();
+    const target = e.currentTarget;
+    const svg = target.querySelector('svg');
+    if (svg) {
+        openMermaidFullscreen(svg.outerHTML);
+    }
+};
+
+// 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
+const bindMermaidClickEvents = () => {
+    if (!parentMd.value) {
+        console.log('[Mermaid] parentMd is null');
+        return;
+    }
+    // 绑定在 .mermaid div 上，而不是 SVG 上
+    const mermaidDivs = parentMd.value.querySelectorAll('.mermaid');
+    console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
+    mermaidDivs.forEach((div, index) => {
+        const divEl = div;
+        divEl.style.cursor = 'pointer';
+        // 移除旧的事件监听器（避免重复绑定）
+        divEl.removeEventListener('click', handleMermaidClick);
+        divEl.addEventListener('click', handleMermaidClick);
+        console.log(`[Mermaid] Bound click event to div ${index}`);
     });
+};
+
+// 监听内容变化并渲染 Mermaid - 只在会话完成后渲染
+watch(() => [props.content, props.session?.content, props.session?.is_completed], () => {
+    // 只在会话完成后渲染 mermaid
+    if (props.session?.is_completed) {
+        nextTick(() => {
+            renderMermaidDiagrams();
+        });
+    }
 }, { immediate: true });
 
 onMounted(async () => {

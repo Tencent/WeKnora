@@ -226,6 +226,7 @@ import { getChunkByIdOnly } from '@/api/knowledge-base';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
 import { useI18n } from 'vue-i18n';
+import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 
 const router = useRouter();
 const uiStore = useUIStore();
@@ -459,10 +460,12 @@ watch(eventStream, (stream) => {
     }
   });
 
-  // 渲染 Mermaid 图表
-  nextTick(() => {
-    renderMermaidDiagrams();
-  });
+  // 只在会话完成后渲染 Mermaid 图表
+  if (props.session?.is_completed) {
+    nextTick(() => {
+      renderMermaidDiagrams();
+    });
+  }
 }, { immediate: true, deep: true });
 
 // State for intermediate steps collapse
@@ -1271,20 +1274,71 @@ const renderMarkdown = (content: any): string => {
   }
 };
 
+// 已渲染的 mermaid 元素 ID 集合
+const renderedMermaidIds = new Set<string>();
+
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
   try {
     if (rootElement.value) {
       const mermaidElements = rootElement.value.querySelectorAll<HTMLElement>('.mermaid');
-      if (mermaidElements && mermaidElements.length > 0) {
+      console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
+
+      // 过滤出未渲染的元素
+      const unrenderedElements: HTMLElement[] = [];
+      mermaidElements.forEach((el) => {
+        const id = el.id || `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        if (!el.id) {
+          el.id = id;
+        }
+        if (!renderedMermaidIds.has(el.id) && !el.querySelector('svg')) {
+          renderedMermaidIds.add(el.id);
+          unrenderedElements.push(el);
+        }
+      });
+
+      if (unrenderedElements.length > 0) {
         await mermaid.run({
-          nodes: mermaidElements
+          nodes: unrenderedElements
+        });
+        console.log('[Mermaid] Rendering complete for', unrenderedElements.length, 'elements');
+        // 渲染完成后绑定点击事件
+        nextTick(() => {
+          bindMermaidClickEvents();
         });
       }
     }
   } catch (error) {
     console.error('Mermaid rendering error:', error);
   }
+};
+
+// Mermaid 点击处理函数 - 必须在 bindMermaidClickEvents 之前定义
+const handleMermaidClick = (e: Event) => {
+  e.stopPropagation();
+  const target = e.currentTarget as HTMLElement;
+  const svg = target.querySelector('svg');
+  if (svg) {
+    openMermaidFullscreen(svg.outerHTML);
+  }
+};
+
+// 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
+const bindMermaidClickEvents = () => {
+  if (!rootElement.value) {
+    console.log('[Mermaid] rootElement is null');
+    return;
+  }
+  // 绑定在 .mermaid div 上，而不是 SVG 上
+  const mermaidDivs = rootElement.value.querySelectorAll<HTMLElement>('.mermaid');
+  console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
+  mermaidDivs.forEach((div, index) => {
+    div.style.cursor = 'pointer';
+    // 移除旧的事件监听器（避免重复绑定）
+    div.removeEventListener('click', handleMermaidClick);
+    div.addEventListener('click', handleMermaidClick);
+    console.log(`[Mermaid] Bound click event to div ${index}`);
+  });
 };
 
 // Tool summary - extract key info to display externally
