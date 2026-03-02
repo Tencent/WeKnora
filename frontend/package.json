@@ -51,10 +51,12 @@
   },
   "overrides": {
     "lightningcss": "none",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "serialize-javascript": "^7.0.3"
   },
   "resolutions": {
     "lightningcss": "none",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "serialize-javascript": "^7.0.3"
   }
 }
