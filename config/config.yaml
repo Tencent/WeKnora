@@ -7,10 +7,10 @@ server:
 conversation:
   max_rounds: 5
   keyword_threshold: 0.3
-  embedding_top_k: 10
-  vector_threshold: 0.5
-  rerank_threshold: 0.5
-  rerank_top_k: 5
+  embedding_top_k: 30
+  vector_threshold: 0.2
+  rerank_threshold: 0.3
+  rerank_top_k: 30
   fallback_strategy: "model"
   fallback_response: "抱歉，我无法回答这个问题。"
   fallback_prompt: |

@@ -5,6 +5,7 @@ import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
+import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge } from '@/api/knowledge-base';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -23,6 +24,7 @@ const router = useRouter();
 const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
+const menuStore = useMenuStore();
 const { t } = useI18n();
 
 let query = ref("");
@@ -1214,6 +1216,15 @@ onMounted(() => {
   const kbId = (route.params as any)?.kbId as string;
   if (kbId && !selectedKbIds.value.includes(kbId)) {
     settingsStore.addKnowledgeBase(kbId);
+  }
+
+  const prefill = menuStore.consumePrefillQuery();
+  if (prefill) {
+    query.value = prefill;
+    nextTick(() => {
+      const textarea = getTextareaEl();
+      if (textarea) textarea.focus();
+    });
   }
 
   // 监听点击外部关闭下拉菜单

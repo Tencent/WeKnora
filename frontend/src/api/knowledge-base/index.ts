@@ -299,3 +299,11 @@ export function searchKnowledge(
   if (options?.agent_id) query.set('agent_id', options.agent_id);
   return get(`/api/v1/knowledge/search?${query.toString()}`);
 }
+
+export function knowledgeSemanticSearch(data: {
+  query: string;
+  knowledge_base_ids?: string[];
+  knowledge_ids?: string[];
+}) {
+  return post('/api/v1/knowledge-search', data);
+}

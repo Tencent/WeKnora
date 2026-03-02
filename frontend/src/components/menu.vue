@@ -16,7 +16,7 @@
                      :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                     <div class="menu_item-box">
                         <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
                         </div>
                         <span class="menu_title" :title="item.title">{{ item.title }}</span>
                         <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0" class="menu-pending-badge" :title="t('organization.settings.pendingJoinRequestsBadge')">{{ orgStore.totalPendingJoinRequestCount }}</span>
@@ -174,6 +174,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'knowledgeBaseList' || 
                    currentRoute === 'knowledgeBaseDetail' || 
                    currentRoute === 'knowledgeBaseSettings';
+        case 'knowledge-search':
+            return currentRoute === 'knowledgeSearch';
         case 'agents':
             return currentRoute === 'agentList';
         case 'organizations':
@@ -206,13 +208,13 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单
 const topMenuItems = computed<MenuItem[]>(() => {
     return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
+        item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
     return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
-        if (item.path === 'knowledge-bases' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
+        if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
             return false;
         }
         return true;
@@ -534,11 +536,12 @@ watch([() => route.name, () => route.params], (newvalue, oldvalue) => {
     }
 });
 let knowledgeIcon = ref('zhishiku-green.svg');
+let searchIcon = ref('search.svg');
 let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
-let settingIcon = ref('setting.svg'); // 设置图标
-let agentIcon = ref('agent.svg'); // 智能体图标
-let organizationIcon = ref('organization.svg'); // 组织图标
+let settingIcon = ref('setting.svg');
+let agentIcon = ref('agent.svg');
+let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
   const getIcon = (path: string) => {
       // 根据当前路由状态更新所有图标
@@ -547,9 +550,13 @@ let pathPrefix = ref(route.name)
       const settingsActiveState = getIconActiveState('settings');
       const agentsActiveState = route.name === 'agentList';
       const organizationsActiveState = route.name === 'organizationList';
+      const knowledgeSearchActiveState = route.name === 'knowledgeSearch';
       
       // 知识库图标：只在知识库页面显示绿色
       knowledgeIcon.value = kbActiveState.isKbActive ? 'zhishiku-green.svg' : 'zhishiku.svg';
+      
+      // 知识搜索图标：只在知识搜索页面显示绿色
+      searchIcon.value = knowledgeSearchActiveState ? 'search-green.svg' : 'search.svg';
       
       // 智能体图标：只在智能体页面显示绿色
       agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
@@ -578,8 +585,9 @@ const handleMenuClick = async (path: string) => {
         } else {
             router.push('/platform/knowledge-bases')
         }
+    } else if (path === 'knowledge-search') {
+        router.push('/platform/knowledge-search')
     } else if (path === 'agents') {
-        // 智能体菜单项：跳转到智能体列表
         router.push('/platform/agents')
     } else if (path === 'organizations') {
         // 组织菜单项：跳转到组织列表
