@@ -112,6 +112,9 @@ type Knowledge struct {
 // GetMetadata returns the metadata as a map[string]string.
 func (k *Knowledge) GetMetadata() map[string]string {
 	metadata := make(map[string]string)
+	if len(k.Metadata) == 0 {
+		return metadata
+	}
 	metadataMap, err := k.Metadata.Map()
 	if err != nil {
 		return nil
