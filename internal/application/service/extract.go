@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -314,6 +315,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 // extractionResources 封装提取过程所需的所有资源
 type extractionResources struct {
 	knowledge      *types.Knowledge
+	tenant         *types.Tenant
 	chatModel      chat.Chat
 	embeddingModel embedding.Embedder
 	retrieveEngine *retriever.CompositeRetrieveEngine
@@ -366,10 +368,43 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 
 	return &extractionResources{
 		knowledge:      knowledge,
+		tenant:         tenantInfo,
 		chatModel:      chatModel,
 		embeddingModel: embeddingModel,
 		retrieveEngine: retrieveEngine,
 	}, nil
+}
+
+// resolveFileServiceForKnowledge resolves a provider-specific file service for the current knowledge file.
+// It falls back to the global service when tenant storage config is unavailable.
+func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Context, resources *extractionResources) interfaces.FileService {
+	if resources == nil || resources.knowledge == nil {
+		return s.fileService
+	}
+	if resources.tenant == nil || resources.tenant.StorageEngineConfig == nil {
+		return s.fileService
+	}
+
+	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
+	}
+	if provider == "" {
+		return s.fileService
+	}
+
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
+		provider,
+		resources.tenant.StorageEngineConfig,
+		baseDir,
+	)
+	if err != nil {
+		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
+		return s.fileService
+	}
+	logger.Infof(ctx, "[TableSummary] Resolved file service for knowledge=%s provider=%s", resources.knowledge.ID, resolvedProvider)
+	return resolvedSvc
 }
 
 // processTableData 处理表格数据：加载 -> 分析 -> 生成摘要 -> 创建chunks
@@ -377,7 +412,8 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 func (s *DataTableSummaryService) processTableData(ctx context.Context, resources *extractionResources) ([]*types.Chunk, error) {
 	// 创建DuckDB会话并加载数据
 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
-	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, s.fileService, s.sqlDB, sessionID)
+	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
+	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, fileSvc, s.sqlDB, sessionID)
 	defer duckdbTool.Cleanup(ctx)
 
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
