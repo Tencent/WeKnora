@@ -52,16 +52,16 @@ init_logging_request_id()
 
 
 def _resolve_images(images: dict, request_id: str, storage_map: dict | None = None) -> tuple[str, list]:
-    """Resolve document images with priority: shared storage > temp dir > inline bytes.
+    """Resolve document images into inline bytes for the Go App to persist.
 
     ``images`` is a dict of {relative_path: raw_data} where raw_data is
     base64-encoded string or raw bytes.
 
-    ``storage_map`` is a dict from the request's config.image_storage map.
-    When it contains a valid "provider" key, images are uploaded to shared object
-    storage and storage_key is set (no inline bytes, saving gRPC message size).
+    The Go App is solely responsible for persisting images to the configured
+    storage backend (local/minio/cos/tos). This function only decodes images
+    and returns them as inline bytes via ImageRef.
 
-    Returns (image_dir_path, list[ImageRef]).
+    Returns ("", list[ImageRef]).  image_dir_path is always empty.
     """
     import base64
 
@@ -72,28 +72,6 @@ def _resolve_images(images: dict, request_id: str, storage_map: dict | None = No
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
         ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
     }
-
-    storage_client = None
-    use_storage = False
-    provider = (storage_map or {}).get("provider", "")
-    if provider:
-        try:
-            from docreader.parser.storage import create_storage
-            storage_client = create_storage(storage_map)
-            use_storage = True
-            logger.info("Using shared storage (%s) for image upload", provider)
-        except Exception as e:
-            logger.warning("Failed to init shared storage, falling back to inline bytes: %s", e)
-
-    base_dir = CONFIG.image_output_dir
-    output_dir = os.path.join(base_dir, request_id, "images")
-    wrote_to_dir = False
-    if not use_storage:
-        try:
-            os.makedirs(output_dir, exist_ok=True)
-            wrote_to_dir = True
-        except OSError:
-            logger.warning("Cannot write to image output dir %s", output_dir)
 
     refs = []
     for ref_path, b64data in images.items():
@@ -106,26 +84,6 @@ def _resolve_images(images: dict, request_id: str, storage_map: dict | None = No
         ext = os.path.splitext(fname)[1].lower()
         mime = mime_map.get(ext, "application/octet-stream")
 
-        if use_storage and storage_client:
-            storage_key = storage_client.upload_bytes(img_bytes, ext)
-            if storage_key:
-                refs.append(ImageRef(
-                    filename=fname,
-                    original_ref=ref_path,
-                    mime_type=mime,
-                    storage_key=storage_key,
-                ))
-                continue
-            logger.warning("Storage upload failed for %s, falling back to inline bytes", fname)
-
-        if wrote_to_dir:
-            dest = os.path.join(output_dir, fname)
-            try:
-                with open(dest, "wb") as f:
-                    f.write(img_bytes)
-            except OSError as e:
-                logger.warning("Failed to write image %s: %s", dest, e)
-
         refs.append(ImageRef(
             filename=fname,
             original_ref=ref_path,
@@ -133,10 +91,8 @@ def _resolve_images(images: dict, request_id: str, storage_map: dict | None = No
             image_data=img_bytes,
         ))
 
-    image_dir = os.path.join(base_dir, request_id) if wrote_to_dir else ""
-    mode = "storage" if use_storage else ("dir+inline" if wrote_to_dir else "inline")
-    logger.info("Resolved %d images (mode=%s)", len(refs), mode)
-    return image_dir, refs
+    logger.info("Resolved %d images (mode=inline)", len(refs))
+    return "", refs
 
 
 class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
@@ -154,7 +110,6 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                 cfg = request.config
                 parser_engine = cfg.parser_engine if cfg else ""
                 engine_overrides = dict(cfg.parser_engine_overrides) if cfg else {}
-                storage_map = dict(cfg.image_storage) if cfg and cfg.image_storage else None
 
                 if is_url:
                     logger.info("Read(URL): url=%s", request.url)
@@ -189,7 +144,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
 
                 _c = to_valid_utf8_text
                 image_dir, image_refs = _resolve_images(
-                    result.images, request_id, storage_map=storage_map
+                    result.images, request_id
                 )
 
                 response = ReadResponse(

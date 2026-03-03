@@ -26,7 +26,11 @@ type cosFileService struct {
 	cosPathPrefix string
 	tempClient    *cos.Client
 	tempBucketURL string
+	bucketName    string
+	region        string
 }
+
+const cosScheme = "cos://"
 
 // newCosClient creates a bare cosFileService with just the SDK client initialised.
 // Shared by NewCosFileService* constructors and CheckCosConnectivity.
@@ -43,7 +47,7 @@ func newCosClient(bucketName, region, secretID, secretKey string) (*cosFileServi
 			SecretKey: secretKey,
 		},
 	})
-	return &cosFileService{client: client, bucketURL: bucketURL}, nil
+	return &cosFileService{client: client, bucketURL: bucketURL, bucketName: bucketName, region: region}, nil
 }
 
 // NewCosFileService creates a new COS file service instance
@@ -114,12 +118,12 @@ func (s *cosFileService) SaveFile(ctx context.Context,
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file to COS: %w", err)
 	}
-	return fmt.Sprintf("%s%s", s.bucketURL, objectName), nil
+	return fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, objectName), nil
 }
 
 // GetFile retrieves a file from COS storage by its path URL
 func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.ReadCloser, error) {
-	objectName := strings.TrimPrefix(filePathUrl, s.bucketURL)
+	objectName := s.parseCosObjectName(filePathUrl)
 	if err := utils.SafeObjectKey(objectName); err != nil {
 		return nil, fmt.Errorf("invalid file path: %w", err)
 	}
@@ -132,7 +136,7 @@ func (s *cosFileService) GetFile(ctx context.Context, filePathUrl string) (io.Re
 
 // DeleteFile removes a file from COS storage
 func (s *cosFileService) DeleteFile(ctx context.Context, filePath string) error {
-	objectName := strings.TrimPrefix(filePath, s.bucketURL)
+	objectName := s.parseCosObjectName(filePath)
 	if err := utils.SafeObjectKey(objectName); err != nil {
 		return fmt.Errorf("invalid file path: %w", err)
 	}
@@ -141,6 +145,23 @@ func (s *cosFileService) DeleteFile(ctx context.Context, filePath string) error 
 		return fmt.Errorf("failed to delete file: %w", err)
 	}
 	return nil
+}
+
+// parseCosObjectName extracts the object name from:
+// - provider scheme: cos://{bucket}/{region}/{objectKey}
+// - legacy URL: https://bucket.cos.region.myqcloud.com/{objectKey}
+func (s *cosFileService) parseCosObjectName(filePath string) string {
+	// Provider scheme format: cos://{bucket}/{region}/{objectKey}
+	if strings.HasPrefix(filePath, cosScheme) {
+		rest := strings.TrimPrefix(filePath, cosScheme)
+		parts := strings.SplitN(rest, "/", 3)
+		if len(parts) == 3 {
+			return parts[2]
+		}
+		return rest
+	}
+	// Legacy format: https://bucket.cos.region.myqcloud.com/{objectKey}
+	return strings.TrimPrefix(filePath, s.bucketURL)
 }
 
 // SaveBytes saves bytes data to COS
@@ -161,6 +182,7 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		if err != nil {
 			return "", fmt.Errorf("failed to upload bytes to COS temp bucket: %w", err)
 		}
+		// Temp bucket still uses legacy URL format for backward compat (auto-expiring)
 		return fmt.Sprintf("%s%s", s.tempBucketURL, objectName), nil
 	}
 
@@ -171,7 +193,7 @@ func (s *cosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		return "", fmt.Errorf("failed to upload bytes to COS: %w", err)
 	}
 
-	return fmt.Sprintf("%s%s", s.bucketURL, objectName), nil
+	return fmt.Sprintf("cos://%s/%s/%s", s.bucketName, s.region, objectName), nil
 }
 
 // GetFileURL returns a presigned download URL for the file
@@ -190,7 +212,7 @@ func (s *cosFileService) GetFileURL(ctx context.Context, filePath string) (strin
 		return presignedURL.String(), nil
 	}
 
-	objectName := strings.TrimPrefix(filePath, s.bucketURL)
+	objectName := s.parseCosObjectName(filePath)
 	if err := utils.SafeObjectKey(objectName); err != nil {
 		return "", fmt.Errorf("invalid file path: %w", err)
 	}

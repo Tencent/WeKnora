@@ -230,19 +230,32 @@ func (kb *KnowledgeBase) SetStorageProvider(provider string) {
 
 // InferStorageFromFilePath deduces the storage provider from a file path format.
 // Used as a safety fallback when the KB's configured provider doesn't match the data.
+// Supports provider:// scheme (local://, minio://, cos://, tos://),
+// unified /files/{provider}/... format, and legacy formats.
 func InferStorageFromFilePath(filePath string) string {
+	// Provider scheme format: provider://...
+	if p := ParseProviderScheme(filePath); p != "" {
+		return p
+	}
+	// Legacy formats
 	switch {
-	case strings.HasPrefix(filePath, "minio://"):
-		return "minio"
-	case strings.HasPrefix(filePath, "tos://"):
-		return "tos"
 	case strings.HasPrefix(filePath, "https://") && strings.Contains(filePath, ".cos."):
 		return "cos"
-	case strings.HasPrefix(filePath, "/"):
-		return "local"
 	default:
 		return ""
 	}
+}
+
+// ParseProviderScheme extracts the provider from a provider:// scheme path.
+// e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
+// Returns "" if the path does not use a known provider scheme.
+func ParseProviderScheme(filePath string) string {
+	for _, provider := range []string{"local", "minio", "cos", "tos"} {
+		if strings.HasPrefix(filePath, provider+"://") {
+			return provider
+		}
+	}
+	return ""
 }
 
 // ImageProcessingConfig represents the image processing configuration

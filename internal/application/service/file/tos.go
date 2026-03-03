@@ -26,6 +26,8 @@ type tosFileService struct {
 	tempBucketName string
 }
 
+const tosScheme = "tos://"
+
 // NewTosFileService creates a TOS file service.
 func NewTosFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
 	return NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, bucketName, pathPrefix, "", "")
@@ -137,12 +139,11 @@ func joinTOSObjectKey(parts ...string) string {
 }
 
 func parseTOSFilePath(filePath string) (bucketName string, objectKey string, err error) {
-	const prefix = "tos://"
-	if !strings.HasPrefix(filePath, prefix) {
+	if !strings.HasPrefix(filePath, tosScheme) {
 		return "", "", fmt.Errorf("invalid TOS file path: %s", filePath)
 	}
 
-	rest := strings.TrimPrefix(filePath, prefix)
+	rest := strings.TrimPrefix(filePath, tosScheme)
 	parts := strings.SplitN(rest, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("invalid TOS file path: %s", filePath)

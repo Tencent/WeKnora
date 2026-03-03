@@ -12,7 +12,9 @@ service DocReader {
 message ReadConfig {
   string parser_engine = 1;
   map<string, string> parser_engine_overrides = 2;
-  map<string, string> image_storage = 3;  // storage provider config (provider, endpoint, bucket, ...)
+  // image_storage removed: image persistence is now handled entirely by the Go App.
+  // Field number 3 is reserved for backward compatibility.
+  reserved 3;
 }
 
 // Unified read request: set file_content for file mode, url for URL mode.

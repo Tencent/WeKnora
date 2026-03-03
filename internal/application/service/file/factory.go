@@ -1,0 +1,97 @@
+package file
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
+
+// NewFileServiceFromStorageConfig builds a provider-specific FileService from tenant storage config.
+// provider can be empty; in that case it falls back to sec.DefaultProvider.
+// Returns the resolved provider name together with the service.
+func NewFileServiceFromStorageConfig(
+	provider string,
+	sec *types.StorageEngineConfig,
+	localBaseDir string,
+) (interfaces.FileService, string, error) {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if p == "" && sec != nil {
+		p = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
+	}
+	if p == "" {
+		return nil, "", fmt.Errorf("empty provider")
+	}
+
+	if localBaseDir == "" {
+		localBaseDir = strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	}
+	if localBaseDir == "" {
+		localBaseDir = "/data/files"
+	}
+
+	switch p {
+	case "local":
+		baseDir := localBaseDir
+		if sec != nil && sec.Local != nil {
+			rawPrefix := strings.TrimSpace(sec.Local.PathPrefix)
+			prefix := strings.Trim(rawPrefix, "/\\")
+			if prefix != "" {
+				candidate := filepath.Join(baseDir, prefix)
+				if safeBaseDir, err := secutils.SafePathUnderBase(baseDir, candidate); err == nil {
+					baseDir = safeBaseDir
+				}
+			}
+		}
+		return NewLocalFileService(baseDir), p, nil
+
+	case "minio":
+		if sec == nil || sec.MinIO == nil {
+			return nil, p, fmt.Errorf("missing minio config")
+		}
+		var endpoint, accessKeyID, secretAccessKey string
+		if sec.MinIO.Mode == "remote" {
+			endpoint = strings.TrimSpace(sec.MinIO.Endpoint)
+			accessKeyID = strings.TrimSpace(sec.MinIO.AccessKeyID)
+			secretAccessKey = strings.TrimSpace(sec.MinIO.SecretAccessKey)
+		} else {
+			endpoint = strings.TrimSpace(os.Getenv("MINIO_ENDPOINT"))
+			accessKeyID = strings.TrimSpace(os.Getenv("MINIO_ACCESS_KEY_ID"))
+			secretAccessKey = strings.TrimSpace(os.Getenv("MINIO_SECRET_ACCESS_KEY"))
+		}
+		bucketName := strings.TrimSpace(sec.MinIO.BucketName)
+		if bucketName == "" {
+			bucketName = strings.TrimSpace(os.Getenv("MINIO_BUCKET_NAME"))
+		}
+		if endpoint == "" || accessKeyID == "" || secretAccessKey == "" || bucketName == "" {
+			return nil, p, fmt.Errorf("incomplete minio config")
+		}
+		svc, err := NewMinioFileService(endpoint, accessKeyID, secretAccessKey, bucketName, sec.MinIO.UseSSL)
+		return svc, p, err
+
+	case "cos":
+		if sec == nil || sec.COS == nil || sec.COS.SecretID == "" || sec.COS.SecretKey == "" || sec.COS.BucketName == "" || sec.COS.Region == "" {
+			return nil, p, fmt.Errorf("incomplete cos config")
+		}
+		pathPrefix := strings.TrimSpace(sec.COS.PathPrefix)
+		if pathPrefix == "" {
+			pathPrefix = "weknora"
+		}
+		svc, err := NewCosFileService(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix)
+		return svc, p, err
+
+	case "tos":
+		if sec == nil || sec.TOS == nil || sec.TOS.Endpoint == "" || sec.TOS.Region == "" || sec.TOS.AccessKey == "" || sec.TOS.SecretKey == "" || sec.TOS.BucketName == "" {
+			return nil, p, fmt.Errorf("incomplete tos config")
+		}
+		svc, err := NewTosFileService(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix)
+		return svc, p, err
+
+	default:
+		return nil, p, fmt.Errorf("unsupported provider %q", p)
+	}
+}

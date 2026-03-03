@@ -7,15 +7,8 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class ReadConfig(_message.Message):
-    __slots__ = ("parser_engine", "parser_engine_overrides", "image_storage")
+    __slots__ = ("parser_engine", "parser_engine_overrides")
     class ParserEngineOverridesEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: str
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
-    class ImageStorageEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -24,11 +17,9 @@ class ReadConfig(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     PARSER_ENGINE_FIELD_NUMBER: _ClassVar[int]
     PARSER_ENGINE_OVERRIDES_FIELD_NUMBER: _ClassVar[int]
-    IMAGE_STORAGE_FIELD_NUMBER: _ClassVar[int]
     parser_engine: str
     parser_engine_overrides: _containers.ScalarMap[str, str]
-    image_storage: _containers.ScalarMap[str, str]
-    def __init__(self, parser_engine: _Optional[str] = ..., parser_engine_overrides: _Optional[_Mapping[str, str]] = ..., image_storage: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, parser_engine: _Optional[str] = ..., parser_engine_overrides: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class ReadRequest(_message.Message):
     __slots__ = ("file_content", "file_name", "file_type", "url", "title", "config", "request_id")
@@ -115,21 +106,3 @@ class ListEnginesResponse(_message.Message):
     ENGINES_FIELD_NUMBER: _ClassVar[int]
     engines: _containers.RepeatedCompositeFieldContainer[ParserEngineInfo]
     def __init__(self, engines: _Optional[_Iterable[_Union[ParserEngineInfo, _Mapping]]] = ...) -> None: ...
-
-class ConvertToPDFRequest(_message.Message):
-    __slots__ = ("file_content", "file_name", "file_type")
-    FILE_CONTENT_FIELD_NUMBER: _ClassVar[int]
-    FILE_NAME_FIELD_NUMBER: _ClassVar[int]
-    FILE_TYPE_FIELD_NUMBER: _ClassVar[int]
-    file_content: bytes
-    file_name: str
-    file_type: str
-    def __init__(self, file_content: _Optional[bytes] = ..., file_name: _Optional[str] = ..., file_type: _Optional[str] = ...) -> None: ...
-
-class ConvertToPDFResponse(_message.Message):
-    __slots__ = ("pdf_content", "error")
-    PDF_CONTENT_FIELD_NUMBER: _ClassVar[int]
-    ERROR_FIELD_NUMBER: _ClassVar[int]
-    pdf_content: bytes
-    error: str
-    def __init__(self, pdf_content: _Optional[bytes] = ..., error: _Optional[str] = ...) -> None: ...

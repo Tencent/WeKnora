@@ -53,7 +53,7 @@ import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -172,13 +172,34 @@ const markdownTokens = computed(() => {
     if (!text || typeof text !== 'string') {
         return [];
     }
+
+    const processed = replaceIncompleteImageWithPlaceholder(text);
     
     // 首先对 Markdown 内容进行安全处理
-    const safeMarkdown = safeMarkdownToHTML(text);
+    const safeMarkdown = safeMarkdownToHTML(processed);
     
     // 使用 marked.lexer 分词
     return marked.lexer(safeMarkdown);
 });
+
+const replaceIncompleteImageWithPlaceholder = (content) => {
+    const lastImgStart = content.lastIndexOf('![');
+    if (lastImgStart < 0) return content;
+
+    const tail = content.slice(lastImgStart);
+    const hasImageOpen = tail.startsWith('![');
+    const hasBracketClose = tail.includes(']');
+    const hasParenOpen = tail.includes('(');
+    const hasParenClose = tail.includes(')');
+    if (!hasImageOpen) return content;
+
+    // Incomplete image syntax at stream tail, e.g. ![alt](local://...
+    if (!hasBracketClose || (hasParenOpen && !hasParenClose)) {
+        const placeholder = `<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>`;
+        return content.slice(0, lastImgStart) + placeholder;
+    }
+    return content;
+};
 
 // 计算属性：判断是否有实际内容（非空且不只是空白）
 const hasActualContent = computed(() => {
@@ -354,20 +375,22 @@ const bindMermaidClickEvents = () => {
 
 // 监听内容变化并渲染 Mermaid - 只在会话完成后渲染
 watch(() => [props.content, props.session?.content, props.session?.is_completed], () => {
-    // 只在会话完成后渲染 mermaid
-    if (props.session?.is_completed) {
-        nextTick(() => {
+    nextTick(async () => {
+        await hydrateProtectedFileImages(parentMd.value);
+        // 只在会话完成后渲染 mermaid
+        if (props.session?.is_completed) {
             renderMermaidDiagrams();
-        });
-    }
+        }
+    });
 }, { immediate: true });
 
 onMounted(async () => {
     // 为 markdown-content 中的图片添加点击事件
-    nextTick(() => {
+    nextTick(async () => {
         if (parentMd.value) {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
         }
+        await hydrateProtectedFileImages(parentMd.value);
         // 初始渲染 Mermaid 图表
         renderMermaidDiagrams();
     });
@@ -685,6 +708,99 @@ onBeforeUnmount(() => {
     gap: 4px;
     margin-left: 16px;
     border-radius: 8px;
+}
+
+:deep(.streaming-image-loading) {
+    display: inline-block;
+    position: relative;
+    width: clamp(150px, 30vw, 260px);
+    max-width: 100%;
+    aspect-ratio: 4 / 3;
+    border-radius: 10px;
+    border: 1px solid rgba(175, 190, 210, 0.55);
+    background: linear-gradient(
+        145deg,
+        rgba(245, 249, 255, 0.72) 0%,
+        rgba(228, 236, 248, 0.62) 45%,
+        rgba(214, 225, 242, 0.58) 100%
+    );
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.75),
+        inset 0 -1px 0 rgba(168, 182, 206, 0.28),
+        0 8px 20px rgba(100, 121, 152, 0.12);
+    backdrop-filter: blur(3px) saturate(115%);
+    -webkit-backdrop-filter: blur(3px) saturate(115%);
+    overflow: hidden;
+    vertical-align: middle;
+    animation: streamingImageBreath 2.2s ease-in-out infinite;
+}
+
+:deep(.streaming-image-loading__skeleton) {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        110deg,
+        rgba(234, 239, 246, 0.95) 8%,
+        rgba(248, 250, 252, 0.98) 18%,
+        rgba(234, 239, 246, 0.95) 33%
+    );
+    background-size: 220% 100%;
+    animation: streamingImageShimmer 1.4s linear infinite;
+}
+
+:deep(.streaming-image-loading)::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(255, 255, 255, 0.45);
+    pointer-events: none;
+}
+
+:deep(.streaming-image-loading)::after {
+    content: '';
+    position: absolute;
+    left: -35%;
+    top: -55%;
+    width: 62%;
+    height: 210%;
+    background: linear-gradient(
+        120deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.38) 46%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    transform: rotate(16deg);
+    animation: streamingImageMirror 2.8s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes streamingImageShimmer {
+    to {
+        background-position-x: -220%;
+    }
+}
+
+@keyframes streamingImageMirror {
+    0%, 100% {
+        left: -38%;
+        opacity: 0.35;
+    }
+    50% {
+        left: 110%;
+        opacity: 0.75;
+    }
+}
+
+@keyframes streamingImageBreath {
+    0%, 100% {
+        transform: translateY(0) scale(1);
+        filter: saturate(1);
+    }
+    50% {
+        transform: translateY(-0.5px) scale(1.01);
+        filter: saturate(1.06);
+    }
 }
 
 :deep(.t-loading__gradient-conic) {

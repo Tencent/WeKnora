@@ -98,7 +98,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// External service clients
 	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
-	must(container.Provide(initImageResolver))
+	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
 	must(container.Provide(stream.NewStreamManager))
@@ -760,19 +760,6 @@ func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) 
 	default:
 		return docparser.NewGRPCDocumentReader(addr)
 	}
-}
-
-// initImageResolver creates the ImageResolver for storing images from DocReader.
-func initImageResolver(cfg *config.Config) *docparser.ImageResolver {
-	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
-	if baseDir == "" {
-		baseDir = "/data/files"
-	}
-	urlPrefix := os.Getenv("LOCAL_STORAGE_URL_PREFIX")
-	if urlPrefix == "" {
-		urlPrefix = "/files"
-	}
-	return docparser.NewImageResolver(baseDir, urlPrefix)
 }
 
 // initOllamaService initializes the Ollama service client

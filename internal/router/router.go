@@ -2,12 +2,14 @@ package router
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -19,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
 	_ "github.com/Tencent/WeKnora/docs" // swagger docs
@@ -95,9 +98,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 		))
 	}
 
-	// 本地存储文件服务（无需认证，用于 <img> 等标签访问图片）
-	serveLocalFiles(r)
-
 	// 前端静态文件（仅 Lite 版本内嵌前端）
 	if handler.Edition == "lite" {
 		serveFrontendStatic(r)
@@ -105,6 +105,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
+
+	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
+	serveFiles(r)
 
 	// 添加OpenTelemetry追踪中间件
 	// r.Use(middleware.TracingMiddleware())
@@ -601,10 +604,12 @@ func serveFrontendStatic(r *gin.Engine) {
 	})
 }
 
-// serveLocalFiles serves files from the local storage directory (e.g. /data/files)
-// at the /files/ URL path. Registered before auth middleware so that <img> tags
-// in rendered markdown can load images without authentication tokens.
-func serveLocalFiles(r *gin.Engine) {
+// serveFiles serves files via query parameters and tenant storage settings.
+// It is registered after auth middleware, so tenant context comes from authentication.
+//
+// Route:
+//   - /files?file_path=<provider://...>
+func serveFiles(r *gin.Engine) {
 	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 	if baseDir == "" {
 		baseDir = "/data/files"
@@ -613,35 +618,67 @@ func serveLocalFiles(r *gin.Engine) {
 	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
 		if err := os.MkdirAll(absDir, 0o755); err != nil {
 			logger.Warnf(context.Background(), "[Router] Cannot create local storage dir %s: %v", absDir, err)
-			return
 		}
 	}
 
-	logger.Infof(context.Background(), "[Router] Serving local storage files from %s at /files/", absDir)
+	logger.Infof(context.Background(), "[Router] Serving files from /files (local base: %s)", absDir)
 
-	r.GET("/files/*filepath", func(c *gin.Context) {
-		reqPath := strings.TrimPrefix(c.Param("filepath"), "/")
-		cleanPath := filepath.Clean(reqPath)
-		if cleanPath == "." || strings.HasPrefix(cleanPath, "..") {
-			logger.Warnf(context.Background(), "[Router] Reject invalid /files path: raw=%q clean=%q", c.Param("filepath"), cleanPath)
-			c.Status(http.StatusForbidden)
+	r.GET("/files", func(c *gin.Context) {
+		filePath := strings.TrimSpace(c.Query("file_path"))
+		if filePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
 			return
 		}
 
-		fullPath := filepath.Join(absDir, cleanPath)
-		if !strings.HasPrefix(fullPath, absDir) {
-			logger.Warnf(context.Background(), "[Router] Reject escaped /files path: raw=%q full=%q base=%q", c.Param("filepath"), fullPath, absDir)
-			c.Status(http.StatusForbidden)
+		provider := types.ParseProviderScheme(filePath)
+
+		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
 			return
 		}
 
-		info, err := os.Stat(fullPath)
-		if err != nil || info.IsDir() {
-			logger.Warnf(context.Background(), "[Router] /files not found: raw=%q full=%q err=%v", c.Param("filepath"), fullPath, err)
+		fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		if err != nil {
+			logger.Warnf(context.Background(), "[Router] /files resolve file service failed: tenant_id=%d provider=%s err=%v", tenant.ID, provider, err)
+			c.Status(http.StatusBadRequest)
+			return
+		}
+
+		reader, err := fileSvc.GetFile(c.Request.Context(), filePath)
+		if err != nil {
+			logger.Warnf(context.Background(), "[Router] /files get file failed: tenant_id=%d provider=%s path=%q err=%v", tenant.ID, resolvedProvider, filePath, err)
 			c.Status(http.StatusNotFound)
 			return
 		}
-		logger.Infof(context.Background(), "[Router] /files hit: raw=%q full=%q", c.Param("filepath"), fullPath)
-		c.File(fullPath)
+		defer reader.Close()
+
+		ext := filepath.Ext(filePath)
+		contentType := "application/octet-stream"
+		switch strings.ToLower(ext) {
+		case ".png":
+			contentType = "image/png"
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".gif":
+			contentType = "image/gif"
+		case ".webp":
+			contentType = "image/webp"
+		case ".bmp":
+			contentType = "image/bmp"
+		case ".svg":
+			contentType = "image/svg+xml"
+		case ".pdf":
+			contentType = "application/pdf"
+		case ".csv":
+			contentType = "text/csv; charset=utf-8"
+		}
+
+		c.Header("Content-Type", contentType)
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.Status(http.StatusOK)
+		if _, err := io.Copy(c.Writer, reader); err != nil {
+			logger.Warnf(context.Background(), "[Router] /files write response failed: %v", err)
+		}
 	})
 }

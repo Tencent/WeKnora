@@ -227,6 +227,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
 import { useI18n } from 'vue-i18n';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
+import { hydrateProtectedFileImages } from '@/utils/security';
 
 const router = useRouter();
 const uiStore = useUIStore();
@@ -278,7 +279,7 @@ const DOMPurifyConfig = {
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
-    'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt',
+    'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src',
     'width', 'height', 'style', 'id',
     // Mermaid SVG 支持的属性
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
@@ -294,7 +295,9 @@ const DOMPurifyConfig = {
     'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
     'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
     'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
-  ]
+  ],
+  // Allow provider:// URLs so they can be hydrated later.
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 };
 
 const TOOL_NAME_I18N: Record<string, string> = {
@@ -460,12 +463,13 @@ watch(eventStream, (stream) => {
     }
   });
 
-  // 只在会话完成后渲染 Mermaid 图表
-  if (props.session?.is_completed) {
-    nextTick(() => {
+  nextTick(async () => {
+    await hydrateProtectedFileImages(rootElement.value);
+    // 只在会话完成后渲染 Mermaid 图表
+    if (props.session?.is_completed) {
       renderMermaidDiagrams();
-    });
-  }
+    }
+  });
 }, { immediate: true, deep: true });
 
 // State for intermediate steps collapse
@@ -1096,7 +1100,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
 
 onMounted(() => {
   // 使用 nextTick 确保 DOM 已渲染
-  nextTick(() => {
+  nextTick(async () => {
     const root = rootElement.value;
     if (!root) return;
     root.addEventListener('click', onRootClick, true);
@@ -1109,6 +1113,7 @@ onMounted(() => {
     root.addEventListener('mouseout', onHoverOut, true);
     window.addEventListener('scroll', scheduleFloatClose, true);
     window.addEventListener('resize', scheduleFloatClose, true);
+    await hydrateProtectedFileImages(rootElement.value);
   });
 });
 
@@ -1148,17 +1153,9 @@ const parseTagAttributes = (attrString: string): Record<string, string> => {
 const preprocessMarkdown = (contentStr: string): string => {
   if (!contentStr.trim()) return '';
 
-  // Handle streaming image syntax to prevent flickering
-  const lastImgStart = contentStr.lastIndexOf('![');
-  if (lastImgStart !== -1) {
-    const potentialImgTag = contentStr.slice(lastImgStart);
-    const hasClosingParen = potentialImgTag.includes(')');
-    const hasClosingBracket = potentialImgTag.includes(']');
-    
-    if (!hasClosingBracket || !hasClosingParen) {
-       contentStr = contentStr.slice(0, lastImgStart);
-    }
-  }
+  // Replace incomplete streaming image markdown with an in-place loading placeholder.
+  // This avoids showing a half-baked provider:// URL while keeping layout stable.
+  contentStr = replaceIncompleteImageWithPlaceholder(contentStr);
 
   // Preprocess custom citation tags
   return contentStr
@@ -1220,6 +1217,26 @@ const preprocessMarkdown = (contentStr: string): string => {
     );
 };
 
+const replaceIncompleteImageWithPlaceholder = (content: string): string => {
+  const lastImgStart = content.lastIndexOf('![');
+  if (lastImgStart < 0) return content;
+
+  const tail = content.slice(lastImgStart);
+  const hasImageOpen = tail.startsWith('![');
+  const hasBracketClose = tail.includes(']');
+  const hasParenOpen = tail.includes('(');
+  const hasParenClose = tail.includes(')');
+  if (!hasImageOpen) return content;
+
+  // Incomplete image syntax at stream tail, e.g. ![alt](local://...
+  if (!hasBracketClose || (hasParenOpen && !hasParenClose)) {
+    const placeholder = `<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>`;
+    return content.slice(0, lastImgStart) + placeholder;
+  }
+
+  return content;
+};
+
 // Get tokens from markdown content
 const getTokens = (content: any) => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
@@ -1250,7 +1267,8 @@ agentRenderer.code = function(code, infostring) {
 const getTokenHTML = (token: any): string => {
   try {
     const html = marked.parser([token], { renderer: agentRenderer });
-    return DOMPurify.sanitize(html, DOMPurifyConfig);
+    const protectedHTML = protectProviderImageSrcInHTML(html);
+    return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
   } catch (e) {
     console.error('Token rendering error:', e);
     return '';
@@ -1267,11 +1285,24 @@ const renderMarkdown = (content: any): string => {
     const html = marked.parse(processed, { renderer: agentRenderer }) as string;
     if (!html) return '';
 
-    return DOMPurify.sanitize(html, DOMPurifyConfig);
+    const protectedHTML = protectProviderImageSrcInHTML(html);
+    return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
   } catch (e) {
     console.error('Markdown rendering error:', e, 'Content:', contentStr.substring(0, 100));
     return contentStr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
+};
+
+const protectProviderImageSrcInHTML = (html: string): string => {
+  if (!html) return html;
+  const placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+  return html.replace(
+    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos):\/\/([^"']+)\2([^>]*)>/gi,
+    (_m, before, quote, provider, restPath, after) => {
+      const src = `${provider}://${restPath}`;
+      return `<img${before} src=${quote}${placeholder}${quote} data-protected-src=${quote}${src}${quote}${after}>`;
+    },
+  );
 };
 
 // 已渲染的 mermaid 元素 ID 集合
@@ -3216,9 +3247,102 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
+:deep(.streaming-image-loading) {
+  display: inline-block;
+  position: relative;
+  width: clamp(150px, 30vw, 260px);
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  border: 1px solid rgba(175, 190, 210, 0.55);
+  background: linear-gradient(
+    145deg,
+    rgba(245, 249, 255, 0.72) 0%,
+    rgba(228, 236, 248, 0.62) 45%,
+    rgba(214, 225, 242, 0.58) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(168, 182, 206, 0.28),
+    0 8px 20px rgba(100, 121, 152, 0.12);
+  backdrop-filter: blur(3px) saturate(115%);
+  -webkit-backdrop-filter: blur(3px) saturate(115%);
+  overflow: hidden;
+  vertical-align: middle;
+  animation: streamingImageBreath 2.2s ease-in-out infinite;
+}
+
+:deep(.streaming-image-loading__skeleton) {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    rgba(234, 239, 246, 0.95) 8%,
+    rgba(248, 250, 252, 0.98) 18%,
+    rgba(234, 239, 246, 0.95) 33%
+  );
+  background-size: 220% 100%;
+  animation: streamingImageShimmer 1.4s linear infinite;
+}
+
+:deep(.streaming-image-loading)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+:deep(.streaming-image-loading)::after {
+  content: '';
+  position: absolute;
+  left: -35%;
+  top: -55%;
+  width: 62%;
+  height: 210%;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.38) 46%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: rotate(16deg);
+  animation: streamingImageMirror 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes streamingImageShimmer {
+  to {
+    background-position-x: -220%;
+  }
+}
+
+@keyframes streamingImageMirror {
+  0%, 100% {
+    left: -38%;
+    opacity: 0.35;
+  }
+  50% {
+    left: 110%;
+    opacity: 0.75;
+  }
+}
+
+@keyframes streamingImageBreath {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: saturate(1);
+  }
+  50% {
+    transform: translateY(-0.5px) scale(1.01);
+    filter: saturate(1.06);
   }
 }
 

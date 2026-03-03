@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -31,8 +33,8 @@ const (
 )
 
 // ImageMultimodalService handles image:multimodal asynq tasks.
-// It reads images from local storage, performs OCR and VLM caption,
-// and creates child chunks for the processed content.
+// It reads images from storage (via FileService for provider:// URLs),
+// performs OCR and VLM caption, and creates child chunks.
 type ImageMultimodalService struct {
 	chunkService   interfaces.ChunkService
 	modelService   interfaces.ModelService
@@ -70,8 +72,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
 	}
 
-	logger.Infof(ctx, "[ImageMultimodal] Processing image: chunk=%s, url=%s, local_path=%s, ocr=%v, caption=%v",
-		payload.ChunkID, payload.ImageURL, payload.ImageLocalPath, payload.EnableOCR, payload.EnableCaption)
+	logger.Infof(ctx, "[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v",
+		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 
@@ -80,24 +82,43 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return fmt.Errorf("resolve VLM: %w", err)
 	}
 
-	imgBytes, err := os.ReadFile(payload.ImageLocalPath)
-	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), trying to download from URL", payload.ImageLocalPath, err)
+	// Read image bytes: try provider:// via tenant-resolved FileService,
+	// then legacy local path, then HTTP URL.
+	var imgBytes []byte
+	if types.ParseProviderScheme(payload.ImageURL) != "" {
+		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
+		if fileSvc == nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Resolve tenant file service failed, fallback to URL/local: tenant=%d kb=%s",
+				payload.TenantID, payload.KnowledgeBaseID)
+		} else {
+			// provider:// scheme — read via FileService
+			reader, getErr := fileSvc.GetFile(ctx, payload.ImageURL)
+			if getErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] FileService.GetFile(%s) failed: %v", payload.ImageURL, getErr)
+			} else {
+				imgBytes, err = io.ReadAll(reader)
+				reader.Close()
+				if err != nil {
+					logger.Warnf(ctx, "[ImageMultimodal] Read provider file %s failed: %v", payload.ImageURL, err)
+					imgBytes = nil
+				}
+			}
+		}
+	}
+	if imgBytes == nil && payload.ImageLocalPath != "" {
+		imgBytes, err = os.ReadFile(payload.ImageLocalPath)
+		if err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), trying URL", payload.ImageLocalPath, err)
+			imgBytes = nil
+		}
+	}
+	if imgBytes == nil {
 		imgBytes, err = downloadImageFromURL(payload.ImageURL)
 		if err != nil {
 			logger.Errorf(ctx, "[ImageMultimodal] Failed to download image from URL %s: %v", payload.ImageURL, err)
-			return fmt.Errorf("read image: local file %s not found and URL download failed: %w", payload.ImageLocalPath, err)
+			return fmt.Errorf("read image from URL %s failed: %w", payload.ImageURL, err)
 		}
 		logger.Infof(ctx, "[ImageMultimodal] Image downloaded from URL, len=%d", len(imgBytes))
-	} else {
-		logger.Infof(ctx, "[ImageMultimodal] Image bytes read from %s, len=%d", payload.ImageLocalPath, len(imgBytes))
-		// Only clean up the local file when images have been re-uploaded to
-		// external object storage (COS/TOS) — the serving URL will be an
-		// absolute http(s) URL in that case. For local and MinIO storage the
-		// local file IS the serving file and must be kept.
-		if strings.HasPrefix(payload.ImageURL, "http://") || strings.HasPrefix(payload.ImageURL, "https://") {
-			defer os.Remove(payload.ImageLocalPath)
-		}
 	}
 
 	imageInfo := types.ImageInfo{
@@ -350,6 +371,33 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID string) (v
 
 	// Legacy: create VLM from inline config
 	return vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
+}
+
+// resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
+func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	if err != nil || tenant == nil {
+		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
+		return nil
+	}
+
+	provider := types.ParseProviderScheme(payload.ImageURL)
+	if provider == "" {
+		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+		if kbErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
+		} else if kb != nil {
+			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
+		}
+	}
+
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	fileSvc, _, svcErr := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, baseDir)
+	if svcErr != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed: tenant=%d provider=%s err=%v", payload.TenantID, provider, svcErr)
+		return nil
+	}
+	return fileSvc
 }
 
 // downloadImageFromURL downloads image bytes from an HTTP(S) URL.

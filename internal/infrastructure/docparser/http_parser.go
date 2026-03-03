@@ -25,7 +25,6 @@ const (
 type httpReadConfig struct {
 	ParserEngine          string            `json:"parser_engine,omitempty"`
 	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
-	ImageStorage          map[string]string `json:"image_storage,omitempty"`
 }
 
 type httpReadRequest struct {
@@ -197,7 +196,6 @@ func (p *HTTPDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (
 		Config: &httpReadConfig{
 			ParserEngine:          req.ParserEngine,
 			ParserEngineOverrides: req.ParserEngineOverrides,
-			ImageStorage:          req.ImageStorage,
 		},
 	}
 	if len(req.FileContent) > 0 {

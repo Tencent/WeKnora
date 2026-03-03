@@ -104,8 +104,8 @@ type ImageMultimodalPayload struct {
 	KnowledgeID     string `json:"knowledge_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	ChunkID         string `json:"chunk_id"`          // parent text chunk
-	ImageURL        string `json:"image_url"`          // serving URL (/files/images/xxx.png)
-	ImageLocalPath  string `json:"image_local_path"`   // absolute path on disk
+	ImageURL        string `json:"image_url"`          // provider:// URL (e.g. local://..., minio://...)
+	ImageLocalPath  string `json:"image_local_path"`   // deprecated: kept for backward compat with in-flight tasks
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 }

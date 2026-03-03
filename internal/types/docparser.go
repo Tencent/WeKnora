@@ -11,7 +11,6 @@ type ReadRequest struct {
 	ParserEngine          string
 	RequestID             string
 	ParserEngineOverrides map[string]string
-	ImageStorage          map[string]string // storage provider config (provider, endpoint, bucket, ...)
 }
 
 // ReadResult is the transport-agnostic result of document reading.

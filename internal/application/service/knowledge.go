@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -6845,79 +6844,13 @@ func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.Kno
 	}
 
 	sec := tenant.StorageEngineConfig
-	var svc interfaces.FileService
-	var err error
-
-	switch provider {
-	case "local":
-		baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-		if baseDir == "" {
-			baseDir = "/data/files"
-		}
-		if sec.Local != nil && sec.Local.PathPrefix != "" {
-			// path_prefix is a subdirectory under local storage base dir, not a replacement.
-			// Validate it cannot escape baseDir (e.g. path traversal via "..").
-			rawPrefix := strings.TrimSpace(sec.Local.PathPrefix)
-			prefix := strings.Trim(rawPrefix, "/\\")
-			if prefix != "" {
-				candidate := filepath.Join(baseDir, prefix)
-				safeBaseDir, pathErr := secutils.SafePathUnderBase(baseDir, candidate)
-				if pathErr != nil {
-					logger.Warnf(ctx,
-						"[storage] invalid local path_prefix ignored: kb=%s raw_prefix=%q err=%v",
-						kb.ID, rawPrefix, pathErr)
-				} else {
-					baseDir = safeBaseDir
-				}
-			}
-		}
-		logger.Infof(ctx, "[storage] resolveFileService local: kb=%s base_dir=%s", kb.ID, baseDir)
-		return filesvc.NewLocalFileService(baseDir)
-
-	case "minio":
-		if sec.MinIO == nil {
-			return s.fileSvc
-		}
-		var endpoint, accessKeyID, secretAccessKey string
-		if sec.MinIO.Mode == "remote" {
-			endpoint = sec.MinIO.Endpoint
-			accessKeyID = sec.MinIO.AccessKeyID
-			secretAccessKey = sec.MinIO.SecretAccessKey
-		} else {
-			endpoint = os.Getenv("MINIO_ENDPOINT")
-			accessKeyID = os.Getenv("MINIO_ACCESS_KEY_ID")
-			secretAccessKey = os.Getenv("MINIO_SECRET_ACCESS_KEY")
-		}
-		bucketName := sec.MinIO.BucketName
-		if bucketName == "" {
-			bucketName = os.Getenv("MINIO_BUCKET_NAME")
-		}
-		if endpoint == "" || accessKeyID == "" || secretAccessKey == "" || bucketName == "" {
-			logger.Warnf(ctx, "Incomplete MinIO config for KB storage, falling back to default")
-			return s.fileSvc
-		}
-		svc, err = filesvc.NewMinioFileService(endpoint, accessKeyID, secretAccessKey, bucketName, sec.MinIO.UseSSL)
-
-	case "cos":
-		if sec.COS == nil || sec.COS.SecretID == "" || sec.COS.BucketName == "" || sec.COS.Region == "" {
-			logger.Warnf(ctx, "Incomplete COS config for KB storage, falling back to default")
-			return s.fileSvc
-		}
-		pathPrefix := sec.COS.PathPrefix
-		if pathPrefix == "" {
-			pathPrefix = "weknora"
-		}
-		svc, err = filesvc.NewCosFileService(sec.COS.BucketName, sec.COS.Region, sec.COS.SecretID, sec.COS.SecretKey, pathPrefix)
-
-	default:
-		return s.fileSvc
-	}
-
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create %s file service from tenant config: %v, falling back to default", provider, err)
 		return s.fileSvc
 	}
-	logger.Infof(ctx, "[storage] resolveFileService selected: kb=%s provider=%s", kb.ID, provider)
+	logger.Infof(ctx, "[storage] resolveFileService selected: kb=%s provider=%s", kb.ID, resolvedProvider)
 	return svc
 }
 
@@ -7236,7 +7169,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 	if s.imageResolver != nil && convertResult != nil {
-		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(convertResult)
+		fileSvc := s.resolveFileService(ctx, kb)
+		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
 		}
@@ -7245,14 +7180,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		storedImages = images
 		logger.Infof(ctx, "Resolved %d images for knowledge %s", len(storedImages), knowledge.ID)
-
-		// If KB uses object storage (COS/MinIO), re-upload images from local to object storage
-		if len(storedImages) > 0 {
-			fileSvc := s.resolveFileService(ctx, kb)
-			reuploadedMd, reuploadedImages := s.reuploadImagesToStorage(ctx, kb, fileSvc, storedImages, convertResult.MarkdownContent)
-			convertResult.MarkdownContent = reuploadedMd
-			storedImages = reuploadedImages
-		}
 	}
 
 	// Step 3: Split into chunks using Go chunker
@@ -7290,13 +7217,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		EnableMultimodel:         payload.EnableMultimodel,
 		StoredImages:             storedImages,
 	})
-
-	// Step 5: Clean up temp dir
-	if convertResult.ImageDirPath != "" {
-		if removeErr := os.RemoveAll(convertResult.ImageDirPath); removeErr != nil {
-			logger.Warnf(ctx, "Failed to clean up temp image dir %s: %v", convertResult.ImageDirPath, removeErr)
-		}
-	}
 
 	return nil
 }
@@ -7341,27 +7261,12 @@ func (s *knowledgeService) convert(
 		return nil, nil
 	}
 
-	imageStorage := s.buildImageStorageConfig(ctx, kb)
-	if imageStorage == nil {
-		logger.Infof(ctx, "[storage] chunk image storage: kb=%s provider=%s image_storage=nil(use local temp/files)",
-			kb.ID, kb.GetStorageProvider())
-	} else {
-		logger.Infof(ctx, "[storage] chunk image storage: kb=%s provider=%s bucket=%s endpoint=%s path_prefix=%s",
-			kb.ID,
-			imageStorage["provider"],
-			imageStorage["bucket_name"],
-			imageStorage["endpoint"],
-			imageStorage["path_prefix"],
-		)
-	}
-
 	req := &types.ReadRequest{
 		URL:                   payload.URL,
 		Title:                 knowledge.Title,
 		ParserEngine:          parserEngine,
 		RequestID:             payload.RequestId,
 		ParserEngineOverrides: overrides,
-		ImageStorage:          imageStorage,
 	}
 
 	if !isURL {
@@ -7429,189 +7334,6 @@ func (s *knowledgeService) failKnowledge(
 	return nil, fmt.Errorf(format, args...)
 }
 
-// reuploadImagesToStorage re-uploads locally stored images to the KB's object storage
-// (COS/MinIO) when the KB is not using local storage. It updates the serving URLs in
-// both the markdown content and the StoredImage list.
-// Local copies are intentionally kept because async tasks (e.g. image:multimodal)
-// may still need to read them; they are cleaned up after those tasks complete.
-// Returns the original inputs unchanged when the storage provider is "local" or empty.
-func (s *knowledgeService) reuploadImagesToStorage(
-	ctx context.Context,
-	kb *types.KnowledgeBase,
-	fileSvc interfaces.FileService,
-	images []docparser.StoredImage,
-	markdown string,
-) (string, []docparser.StoredImage) {
-	provider := kb.GetStorageProvider()
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
-	if provider == "" || provider == "local" {
-		return markdown, images
-	}
-
-	tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
-	updated := make([]docparser.StoredImage, len(images))
-	copy(updated, images)
-
-	for i, img := range updated {
-		data, err := os.ReadFile(img.LocalPath)
-		if err != nil {
-			logger.Warnf(ctx, "reuploadImagesToStorage: cannot read local image %s: %v", img.LocalPath, err)
-			continue
-		}
-
-		storagePath, err := fileSvc.SaveBytes(ctx, data, tenantID, filepath.Base(img.LocalPath), false)
-		if err != nil {
-			logger.Warnf(ctx, "reuploadImagesToStorage: failed to upload image to %s: %v", provider, err)
-			continue
-		}
-
-		// For COS, SaveBytes returns a direct public URL (https://bucket.cos...).
-		// Use it directly instead of GetFileURL which returns a presigned URL that
-		// expires after 24h — unsuitable for permanent markdown image references.
-		// For MinIO, SaveBytes returns minio://... which is not a usable URL, so
-		// keep the local /files/images/... serving URL (the app proxies MinIO files).
-		storageURL := storagePath
-		if provider == "minio" {
-			storageURL = img.ServingURL
-		}
-
-		if storageURL != img.ServingURL {
-			logger.Infof(ctx, "reuploadImagesToStorage: uploaded %s -> %s", img.ServingURL, storageURL)
-			markdown = strings.ReplaceAll(markdown, img.ServingURL, storageURL)
-			updated[i].ServingURL = storageURL
-		} else {
-			logger.Infof(ctx, "reuploadImagesToStorage: uploaded %s to %s storage (serving via local URL)", img.ServingURL, provider)
-		}
-	}
-
-	return markdown, updated
-}
-
-// buildImageStorageConfig returns storage config map to pass to DocReader so it can
-// upload images to shared storage. Returns nil for local storage (use temp dir / inline bytes).
-// Prioritises KB/tenant-level StorageEngineConfig; falls back to environment variables.
-func (s *knowledgeService) buildImageStorageConfig(ctx context.Context, kb *types.KnowledgeBase) map[string]string {
-	provider := ""
-	if kb != nil {
-		provider = kb.GetStorageProvider()
-	}
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
-		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
-	}
-
-	// Try tenant-level StorageEngineConfig first
-	if tenant != nil && tenant.StorageEngineConfig != nil {
-		sec := tenant.StorageEngineConfig
-		switch provider {
-		case "cos":
-			if sec.COS != nil && sec.COS.SecretID != "" && sec.COS.BucketName != "" && sec.COS.Region != "" {
-				m := map[string]string{
-					"provider":          "cos",
-					"bucket_name":       sec.COS.BucketName,
-					"access_key_id":     sec.COS.SecretID,
-					"secret_access_key": sec.COS.SecretKey,
-					"region":            sec.COS.Region,
-				}
-				if sec.COS.AppID != "" {
-					m["app_id"] = sec.COS.AppID
-				}
-				if sec.COS.PathPrefix != "" {
-					m["path_prefix"] = sec.COS.PathPrefix
-				}
-				return m
-			}
-		case "minio":
-			if sec.MinIO != nil {
-				var endpoint, accessKey, secretKey, bucket string
-				if sec.MinIO.Mode == "remote" {
-					endpoint = sec.MinIO.Endpoint
-					accessKey = sec.MinIO.AccessKeyID
-					secretKey = sec.MinIO.SecretAccessKey
-				} else {
-					endpoint = os.Getenv("MINIO_ENDPOINT")
-					accessKey = os.Getenv("MINIO_ACCESS_KEY_ID")
-					secretKey = os.Getenv("MINIO_SECRET_ACCESS_KEY")
-				}
-				bucket = sec.MinIO.BucketName
-				if bucket == "" {
-					bucket = os.Getenv("MINIO_BUCKET_NAME")
-				}
-				if endpoint != "" && accessKey != "" && secretKey != "" && bucket != "" {
-					m := map[string]string{
-						"provider":          "minio",
-						"endpoint":          endpoint,
-						"bucket_name":       bucket,
-						"access_key_id":     accessKey,
-						"secret_access_key": secretKey,
-					}
-					if sec.MinIO.UseSSL {
-						m["use_ssl"] = "true"
-					}
-					if sec.MinIO.PathPrefix != "" {
-						m["path_prefix"] = sec.MinIO.PathPrefix
-					}
-					return m
-				}
-			}
-		}
-	}
-
-	// Fallback: read from environment variables
-	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
-	switch storageType {
-	case "minio":
-		endpoint := os.Getenv("MINIO_ENDPOINT")
-		accessKey := os.Getenv("MINIO_ACCESS_KEY_ID")
-		secretKey := os.Getenv("MINIO_SECRET_ACCESS_KEY")
-		bucket := os.Getenv("MINIO_BUCKET_NAME")
-		if endpoint == "" || accessKey == "" || secretKey == "" || bucket == "" {
-			return nil
-		}
-		m := map[string]string{
-			"provider":          "minio",
-			"endpoint":          endpoint,
-			"bucket_name":       bucket,
-			"access_key_id":     accessKey,
-			"secret_access_key": secretKey,
-		}
-		if v := os.Getenv("MINIO_USE_SSL"); v != "" {
-			m["use_ssl"] = v
-		}
-		if v := os.Getenv("MINIO_PATH_PREFIX"); v != "" {
-			m["path_prefix"] = v
-		}
-		return m
-	case "cos":
-		secretID := os.Getenv("COS_SECRET_ID")
-		secretKey := os.Getenv("COS_SECRET_KEY")
-		region := os.Getenv("COS_REGION")
-		bucket := os.Getenv("COS_BUCKET_NAME")
-		if secretID == "" || secretKey == "" || region == "" || bucket == "" {
-			return nil
-		}
-		m := map[string]string{
-			"provider":          "cos",
-			"bucket_name":       bucket,
-			"access_key_id":     secretID,
-			"secret_access_key": secretKey,
-			"region":            region,
-		}
-		if v := os.Getenv("COS_APP_ID"); v != "" {
-			m["app_id"] = v
-		}
-		if v := os.Getenv("COS_PATH_PREFIX"); v != "" {
-			m["path_prefix"] = v
-		}
-		return m
-	default:
-		return nil
-	}
-}
-
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
 func (s *knowledgeService) enqueueImageMultimodalTasks(
 	ctx context.Context,
@@ -7644,7 +7366,6 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			KnowledgeBaseID: kb.ID,
 			ChunkID:         chunkID,
 			ImageURL:        img.ServingURL,
-			ImageLocalPath:  img.LocalPath,
 			EnableOCR:       true,
 			EnableCaption:   true,
 		}

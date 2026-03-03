@@ -25,7 +25,6 @@ type ReadConfig struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	ParserEngine          string                 `protobuf:"bytes,1,opt,name=parser_engine,json=parserEngine,proto3" json:"parser_engine,omitempty"`
 	ParserEngineOverrides map[string]string      `protobuf:"bytes,2,rep,name=parser_engine_overrides,json=parserEngineOverrides,proto3" json:"parser_engine_overrides,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	ImageStorage          map[string]string      `protobuf:"bytes,3,rep,name=image_storage,json=imageStorage,proto3" json:"image_storage,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // storage provider config (provider, endpoint, bucket, ...)
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -70,13 +69,6 @@ func (x *ReadConfig) GetParserEngine() string {
 func (x *ReadConfig) GetParserEngineOverrides() map[string]string {
 	if x != nil {
 		return x.ParserEngineOverrides
-	}
-	return nil
-}
-
-func (x *ReadConfig) GetImageStorage() map[string]string {
-	if x != nil {
-		return x.ImageStorage
 	}
 	return nil
 }
@@ -490,134 +482,18 @@ func (x *ListEnginesResponse) GetEngines() []*ParserEngineInfo {
 	return nil
 }
 
-type ConvertToPDFRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileContent   []byte                 `protobuf:"bytes,1,opt,name=file_content,json=fileContent,proto3" json:"file_content,omitempty"`
-	FileName      string                 `protobuf:"bytes,2,opt,name=file_name,json=fileName,proto3" json:"file_name,omitempty"`
-	FileType      string                 `protobuf:"bytes,3,opt,name=file_type,json=fileType,proto3" json:"file_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ConvertToPDFRequest) Reset() {
-	*x = ConvertToPDFRequest{}
-	mi := &file_docreader_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ConvertToPDFRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ConvertToPDFRequest) ProtoMessage() {}
-
-func (x *ConvertToPDFRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_docreader_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ConvertToPDFRequest.ProtoReflect.Descriptor instead.
-func (*ConvertToPDFRequest) Descriptor() ([]byte, []int) {
-	return file_docreader_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *ConvertToPDFRequest) GetFileContent() []byte {
-	if x != nil {
-		return x.FileContent
-	}
-	return nil
-}
-
-func (x *ConvertToPDFRequest) GetFileName() string {
-	if x != nil {
-		return x.FileName
-	}
-	return ""
-}
-
-func (x *ConvertToPDFRequest) GetFileType() string {
-	if x != nil {
-		return x.FileType
-	}
-	return ""
-}
-
-type ConvertToPDFResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PdfContent    []byte                 `protobuf:"bytes,1,opt,name=pdf_content,json=pdfContent,proto3" json:"pdf_content,omitempty"`
-	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ConvertToPDFResponse) Reset() {
-	*x = ConvertToPDFResponse{}
-	mi := &file_docreader_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ConvertToPDFResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ConvertToPDFResponse) ProtoMessage() {}
-
-func (x *ConvertToPDFResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_docreader_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ConvertToPDFResponse.ProtoReflect.Descriptor instead.
-func (*ConvertToPDFResponse) Descriptor() ([]byte, []int) {
-	return file_docreader_proto_rawDescGZIP(), []int{8}
-}
-
-func (x *ConvertToPDFResponse) GetPdfContent() []byte {
-	if x != nil {
-		return x.PdfContent
-	}
-	return nil
-}
-
-func (x *ConvertToPDFResponse) GetError() string {
-	if x != nil {
-		return x.Error
-	}
-	return ""
-}
-
 var File_docreader_proto protoreflect.FileDescriptor
 
 const file_docreader_proto_rawDesc = "" +
 	"\n" +
-	"\x0fdocreader.proto\x12\tdocreader\"\xf4\x02\n" +
+	"\x0fdocreader.proto\x12\tdocreader\"\xeb\x01\n" +
 	"\n" +
 	"ReadConfig\x12#\n" +
 	"\rparser_engine\x18\x01 \x01(\tR\fparserEngine\x12h\n" +
-	"\x17parser_engine_overrides\x18\x02 \x03(\v20.docreader.ReadConfig.ParserEngineOverridesEntryR\x15parserEngineOverrides\x12L\n" +
-	"\rimage_storage\x18\x03 \x03(\v2'.docreader.ReadConfig.ImageStorageEntryR\fimageStorage\x1aH\n" +
+	"\x17parser_engine_overrides\x18\x02 \x03(\v20.docreader.ReadConfig.ParserEngineOverridesEntryR\x15parserEngineOverrides\x1aH\n" +
 	"\x1aParserEngineOverridesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
-	"\x11ImageStorageEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe0\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04\"\xe0\x01\n" +
 	"\vReadRequest\x12!\n" +
 	"\ffile_content\x18\x01 \x01(\fR\vfileContent\x12\x1b\n" +
 	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1b\n" +
@@ -658,19 +534,10 @@ const file_docreader_proto_rawDesc = "" +
 	"\tavailable\x18\x04 \x01(\bR\tavailable\x12-\n" +
 	"\x12unavailable_reason\x18\x05 \x01(\tR\x11unavailableReason\"L\n" +
 	"\x13ListEnginesResponse\x125\n" +
-	"\aengines\x18\x01 \x03(\v2\x1b.docreader.ParserEngineInfoR\aengines\"r\n" +
-	"\x13ConvertToPDFRequest\x12!\n" +
-	"\ffile_content\x18\x01 \x01(\fR\vfileContent\x12\x1b\n" +
-	"\tfile_name\x18\x02 \x01(\tR\bfileName\x12\x1b\n" +
-	"\tfile_type\x18\x03 \x01(\tR\bfileType\"M\n" +
-	"\x14ConvertToPDFResponse\x12\x1f\n" +
-	"\vpdf_content\x18\x01 \x01(\fR\n" +
-	"pdfContent\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error2\xe9\x01\n" +
+	"\aengines\x18\x01 \x03(\v2\x1b.docreader.ParserEngineInfoR\aengines2\x96\x01\n" +
 	"\tDocReader\x129\n" +
 	"\x04Read\x12\x16.docreader.ReadRequest\x1a\x17.docreader.ReadResponse\"\x00\x12N\n" +
-	"\vListEngines\x12\x1d.docreader.ListEnginesRequest\x1a\x1e.docreader.ListEnginesResponse\"\x00\x12Q\n" +
-	"\fConvertToPDF\x12\x1e.docreader.ConvertToPDFRequest\x1a\x1f.docreader.ConvertToPDFResponse\"\x00B5Z3github.com/Tencent/WeKnora/internal/docreader/protob\x06proto3"
+	"\vListEngines\x12\x1d.docreader.ListEnginesRequest\x1a\x1e.docreader.ListEnginesResponse\"\x00B5Z3github.com/Tencent/WeKnora/internal/docreader/protob\x06proto3"
 
 var (
 	file_docreader_proto_rawDescOnce sync.Once
@@ -684,41 +551,35 @@ func file_docreader_proto_rawDescGZIP() []byte {
 	return file_docreader_proto_rawDescData
 }
 
-var file_docreader_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_docreader_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_docreader_proto_goTypes = []any{
-	(*ReadConfig)(nil),           // 0: docreader.ReadConfig
-	(*ReadRequest)(nil),          // 1: docreader.ReadRequest
-	(*ImageRef)(nil),             // 2: docreader.ImageRef
-	(*ReadResponse)(nil),         // 3: docreader.ReadResponse
-	(*ListEnginesRequest)(nil),   // 4: docreader.ListEnginesRequest
-	(*ParserEngineInfo)(nil),     // 5: docreader.ParserEngineInfo
-	(*ListEnginesResponse)(nil),  // 6: docreader.ListEnginesResponse
-	(*ConvertToPDFRequest)(nil),  // 7: docreader.ConvertToPDFRequest
-	(*ConvertToPDFResponse)(nil), // 8: docreader.ConvertToPDFResponse
-	nil,                          // 9: docreader.ReadConfig.ParserEngineOverridesEntry
-	nil,                          // 10: docreader.ReadConfig.ImageStorageEntry
-	nil,                          // 11: docreader.ReadResponse.MetadataEntry
-	nil,                          // 12: docreader.ListEnginesRequest.ConfigOverridesEntry
+	(*ReadConfig)(nil),          // 0: docreader.ReadConfig
+	(*ReadRequest)(nil),         // 1: docreader.ReadRequest
+	(*ImageRef)(nil),            // 2: docreader.ImageRef
+	(*ReadResponse)(nil),        // 3: docreader.ReadResponse
+	(*ListEnginesRequest)(nil),  // 4: docreader.ListEnginesRequest
+	(*ParserEngineInfo)(nil),    // 5: docreader.ParserEngineInfo
+	(*ListEnginesResponse)(nil), // 6: docreader.ListEnginesResponse
+	nil,                         // 7: docreader.ReadConfig.ParserEngineOverridesEntry
+	nil,                         // 8: docreader.ReadResponse.MetadataEntry
+	nil,                         // 9: docreader.ListEnginesRequest.ConfigOverridesEntry
 }
 var file_docreader_proto_depIdxs = []int32{
-	9,  // 0: docreader.ReadConfig.parser_engine_overrides:type_name -> docreader.ReadConfig.ParserEngineOverridesEntry
-	10, // 1: docreader.ReadConfig.image_storage:type_name -> docreader.ReadConfig.ImageStorageEntry
-	0,  // 2: docreader.ReadRequest.config:type_name -> docreader.ReadConfig
-	2,  // 3: docreader.ReadResponse.image_refs:type_name -> docreader.ImageRef
-	11, // 4: docreader.ReadResponse.metadata:type_name -> docreader.ReadResponse.MetadataEntry
-	12, // 5: docreader.ListEnginesRequest.config_overrides:type_name -> docreader.ListEnginesRequest.ConfigOverridesEntry
-	5,  // 6: docreader.ListEnginesResponse.engines:type_name -> docreader.ParserEngineInfo
-	1,  // 7: docreader.DocReader.Read:input_type -> docreader.ReadRequest
-	4,  // 8: docreader.DocReader.ListEngines:input_type -> docreader.ListEnginesRequest
-	7,  // 9: docreader.DocReader.ConvertToPDF:input_type -> docreader.ConvertToPDFRequest
-	3,  // 10: docreader.DocReader.Read:output_type -> docreader.ReadResponse
-	6,  // 11: docreader.DocReader.ListEngines:output_type -> docreader.ListEnginesResponse
-	8,  // 12: docreader.DocReader.ConvertToPDF:output_type -> docreader.ConvertToPDFResponse
-	10, // [10:13] is the sub-list for method output_type
-	7,  // [7:10] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	7, // 0: docreader.ReadConfig.parser_engine_overrides:type_name -> docreader.ReadConfig.ParserEngineOverridesEntry
+	0, // 1: docreader.ReadRequest.config:type_name -> docreader.ReadConfig
+	2, // 2: docreader.ReadResponse.image_refs:type_name -> docreader.ImageRef
+	8, // 3: docreader.ReadResponse.metadata:type_name -> docreader.ReadResponse.MetadataEntry
+	9, // 4: docreader.ListEnginesRequest.config_overrides:type_name -> docreader.ListEnginesRequest.ConfigOverridesEntry
+	5, // 5: docreader.ListEnginesResponse.engines:type_name -> docreader.ParserEngineInfo
+	1, // 6: docreader.DocReader.Read:input_type -> docreader.ReadRequest
+	4, // 7: docreader.DocReader.ListEngines:input_type -> docreader.ListEnginesRequest
+	3, // 8: docreader.DocReader.Read:output_type -> docreader.ReadResponse
+	6, // 9: docreader.DocReader.ListEngines:output_type -> docreader.ListEnginesResponse
+	8, // [8:10] is the sub-list for method output_type
+	6, // [6:8] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_docreader_proto_init() }
@@ -732,7 +593,7 @@ func file_docreader_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_docreader_proto_rawDesc), len(file_docreader_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

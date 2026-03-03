@@ -90,9 +90,9 @@ func CheckMinioConnectivity(ctx context.Context, endpoint, accessKeyID, secretAc
 	return svc.CheckConnectivity(ctx)
 }
 
-// parseMinioFilePath extracts the object name from a "minio://bucket/key" path,
-// validates the bucket matches this service instance, and checks for path traversal.
+// parseMinioFilePath extracts the object name from a provider scheme: minio://{bucket}/{objectKey}
 func (s *minioFileService) parseMinioFilePath(filePath string) (string, error) {
+	// Provider scheme format: minio://{bucket}/{objectKey}
 	const prefix = "minio://"
 	if !strings.HasPrefix(filePath, prefix) {
 		return "", fmt.Errorf("invalid MinIO file path: %s", filePath)
@@ -134,7 +134,6 @@ func (s *minioFileService) SaveFile(ctx context.Context,
 		return "", fmt.Errorf("failed to upload file to MinIO: %w", err)
 	}
 
-	// Return the complete path to the object
 	return fmt.Sprintf("minio://%s/%s", s.bucketName, objectName), nil
 }
 

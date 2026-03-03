@@ -20,6 +20,8 @@ type localFileService struct {
 	baseDir string // Base directory for file storage
 }
 
+const localScheme = "local://"
+
 // CheckConnectivity verifies the local storage directory exists and is accessible.
 func (s *localFileService) CheckConnectivity(ctx context.Context) error {
 	info, err := os.Stat(s.baseDir)
@@ -93,11 +95,14 @@ func (s *localFileService) SaveFile(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "File saved successfully: %s", filePath)
-	return filePath, nil
+	// Return provider:// path format: local://{relative_path}
+	relPath, _ := filepath.Rel(s.baseDir, filePath)
+	return localScheme + filepath.ToSlash(relPath), nil
 }
 
 // GetFile retrieves a file from the local file system by its path
 // Returns a ReadCloser for reading the file content
+// Supports both provider scheme: local://{relative_path} and legacy absolute paths.
 // 路径必须在 baseDir 下，防止路径遍历（如 ../../）
 func (s *localFileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
 	logger.Infof(ctx, "Getting file: %s", filePath)
@@ -174,21 +179,37 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 	}
 
 	logger.Infof(ctx, "Bytes data saved successfully: %s", filePath)
-	return filePath, nil
+	relPath, _ := filepath.Rel(s.baseDir, filePath)
+	return localScheme + filepath.ToSlash(relPath), nil
 }
 
 // GetFileURL returns a download URL for the file
-// For local storage, returns the file path itself (no URL support)
+// For local storage, returns the local://... path
 func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	// Local storage doesn't support URLs, return the path
-	return filePath, nil
+	// If already in provider:// format, return as-is
+	if strings.HasPrefix(filePath, localScheme) {
+		return filePath, nil
+	}
+	// Convert absolute path to provider:// format
+	relPath, err := filepath.Rel(s.baseDir, filePath)
+	if err != nil {
+		return filePath, nil
+	}
+	return localScheme + filepath.ToSlash(relPath), nil
 }
 
 // normalizePathForBase keeps backward compatibility for legacy file paths:
+// - provider scheme: "local://tenant/.." → baseDir/tenant/..
 // - absolute path: "/data/files/tenant/.."
 // - path under base dir: "tenant/.."
 // - legacy relative with base prefix: "data/files/tenant/.."
 func (s *localFileService) normalizePathForBase(filePath string) string {
+	// Handle provider:// format: local://{relPath}
+	if strings.HasPrefix(filePath, localScheme) {
+		relPath := strings.TrimPrefix(filePath, localScheme)
+		return filepath.Join(s.baseDir, filepath.FromSlash(relPath))
+	}
+
 	clean := filepath.Clean(strings.TrimSpace(filePath))
 	if clean == "." || clean == "" {
 		return clean
