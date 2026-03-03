@@ -18,6 +18,7 @@ var databaseQueryTool = BaseTool{
 
 ## Security Features
 - Automatic tenant_id injection: All queries are automatically filtered by the logged-in user's tenant_id
+- Automatic soft-delete filtering: All queries are automatically filtered to include only records with deleted_at IS NULL
 - Read-only queries: Only SELECT statements are allowed
 - Safe tables: Only allow queries on authorized tables (knowledge_bases, knowledges, chunks)
 
@@ -30,7 +31,7 @@ var databaseQueryTool = BaseTool{
 - tenant_id (INTEGER): Owner tenant ID
 - embedding_model_id, summary_model_id, rerank_model_id (VARCHAR): Model IDs
 - vlm_config (JSON): Includes VLM settings such as enabled flag and model_id
-- created_at, updated_at (TIMESTAMP)
+- created_at, updated_at, deleted_at (TIMESTAMP)
 
 ### knowledges (documents)
 - id (VARCHAR): Document ID
@@ -44,7 +45,7 @@ var databaseQueryTool = BaseTool{
 - enable_status (VARCHAR): Enable status (enabled/disabled)
 - file_name, file_type (VARCHAR): File information
 - file_size, storage_size (BIGINT): Size in bytes
-- created_at, updated_at, processed_at (TIMESTAMP)
+- created_at, updated_at, processed_at, deleted_at (TIMESTAMP)
 
 
 
@@ -57,7 +58,7 @@ var databaseQueryTool = BaseTool{
 - chunk_index (INTEGER): Index in document
 - is_enabled (BOOLEAN): Enable status
 - chunk_type (VARCHAR): Type (text/image/table)
-- created_at, updated_at (TIMESTAMP)
+- created_at, updated_at, deleted_at (TIMESTAMP)
 
 ## Usage Examples
 
@@ -88,6 +89,7 @@ Join knowledge bases and documents:
 
 ## Important Notes
 - DO NOT include tenant_id in WHERE clause - it's automatically added
+- DO NOT include deleted_at filtering manually unless needed - default query already enforces deleted_at IS NULL
 - Only SELECT queries are allowed
 - Limit results with LIMIT clause for better performance
 - Use appropriate JOINs when querying across tables
@@ -257,6 +259,7 @@ func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint6
 	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(
 		sqlQuery,
 		utils.WithSecurityDefaults(tenantID),
+		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
 		utils.WithInjectionRiskCheck(),
 	)
 	if err != nil {
