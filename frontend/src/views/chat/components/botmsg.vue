@@ -48,7 +48,6 @@
 <script setup>
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick } from 'vue';
 import { marked } from 'marked';
-import mermaid from 'mermaid';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
@@ -58,6 +57,18 @@ import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
+import {
+    buildManualMarkdown,
+    copyTextToClipboard,
+    formatManualTitle,
+    replaceIncompleteImageWithPlaceholder
+} from '@/utils/chatMessageShared';
+import {
+    bindMermaidFullscreenEvents,
+    createMermaidCodeRenderer,
+    ensureMermaidInitialized,
+    renderMermaidInContainer
+} from '@/utils/mermaidShared';
 
 marked.use({
     mangle: false,
@@ -65,37 +76,7 @@ marked.use({
     breaks: true,  // 全局启用单个换行支持
 });
 
-// Mermaid 初始化计数器
-let botmsgMermaidCount = 0;
-
-// 初始化 Mermaid
-mermaid.initialize({
-    startOnLoad: false,
-    theme: 'default',
-    securityLevel: 'strict',
-    fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
-    flowchart: {
-        useMaxWidth: true,
-        htmlLabels: true,
-        curve: 'basis'
-    },
-    sequence: {
-        useMaxWidth: true,
-        diagramMarginX: 8,
-        diagramMarginY: 8,
-        actorMargin: 50,
-        width: 150,
-        height: 65
-    },
-    gantt: {
-        useMaxWidth: true,
-        leftPadding: 75,
-        gridLineStartPadding: 35,
-        barHeight: 20,
-        barGap: 4,
-        topPadding: 50
-    }
-});
+ensureMermaidInitialized();
 
 const emit = defineEmits(['scroll-bottom'])
 const { t } = useI18n()
@@ -151,20 +132,7 @@ customRenderer.image = function(href, title, text) {
 };
 
 // 覆盖代码块渲染方法，支持 Mermaid
-customRenderer.code = function(code, infostring) {
-    const lang = (infostring || '').trim();
-
-    // Mermaid 图表处理
-    if (lang === 'mermaid') {
-        const id = `mermaid-botmsg-${++botmsgMermaidCount}`;
-        return `<div class="mermaid" id="${id}">${code}</div>`;
-    }
-
-    // 普通代码块
-    const displayLang = lang || 'Code';
-    const escapedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<pre><code class="language-${displayLang}">${escapedCode}</code></pre>`;
-};
+customRenderer.code = createMermaidCodeRenderer('mermaid-botmsg');
 
 // 计算属性：将 Markdown 文本转换为 tokens
 const markdownTokens = computed(() => {
@@ -181,25 +149,6 @@ const markdownTokens = computed(() => {
     // 使用 marked.lexer 分词
     return marked.lexer(safeMarkdown);
 });
-
-const replaceIncompleteImageWithPlaceholder = (content) => {
-    const lastImgStart = content.lastIndexOf('![');
-    if (lastImgStart < 0) return content;
-
-    const tail = content.slice(lastImgStart);
-    const hasImageOpen = tail.startsWith('![');
-    const hasBracketClose = tail.includes(']');
-    const hasParenOpen = tail.includes('(');
-    const hasParenClose = tail.includes(')');
-    if (!hasImageOpen) return content;
-
-    // Incomplete image syntax at stream tail, e.g. ![alt](local://...
-    if (!hasBracketClose || (hasParenOpen && !hasParenClose)) {
-        const placeholder = `<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>`;
-        return content.slice(0, lastImgStart) + placeholder;
-    }
-    return content;
-};
 
 // 计算属性：判断是否有实际内容（非空且不只是空白）
 const hasActualContent = computed(() => {
@@ -237,24 +186,6 @@ const getActualContent = () => {
     return (props.content || props.session?.content || '').trim();
 };
 
-// 格式化标题
-const formatManualTitle = (question) => {
-    if (!question) {
-        return '会话摘录';
-    }
-    const condensed = question.replace(/\s+/g, ' ').trim();
-    if (!condensed) {
-        return '会话摘录';
-    }
-    return condensed.length > 40 ? `${condensed.slice(0, 40)}...` : condensed;
-};
-
-// 构建手动添加的 Markdown 内容
-const buildManualMarkdown = (question, answer) => {
-    const safeAnswer = answer?.trim() || '（无回答内容）';
-    return `${safeAnswer}`;
-};
-
 // 复制回答内容
 const handleCopyAnswer = async () => {
     const content = getActualContent();
@@ -264,20 +195,8 @@ const handleCopyAnswer = async () => {
     }
 
     try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(content);
-            MessagePlugin.success(t('chat.copySuccess') || '已复制到剪贴板');
-        } else {
-            const textArea = document.createElement('textarea');
-            textArea.value = content;
-            textArea.style.position = 'fixed';
-            textArea.style.opacity = '0';
-            document.body.appendChild(textArea);
-            textArea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textArea);
-            MessagePlugin.success(t('chat.copySuccess') || '已复制到剪贴板');
-        }
+        await copyTextToClipboard(content);
+        MessagePlugin.success(t('chat.copySuccess') || '已复制到剪贴板');
     } catch (err) {
         console.error('复制失败:', err);
         MessagePlugin.error(t('chat.copyFailed') || '复制失败，请手动复制');
@@ -322,19 +241,11 @@ const handleMarkdownImageClick = (e) => {
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
     try {
-        if (parentMd.value) {
-            const mermaidElements = parentMd.value.querySelectorAll('.mermaid');
-            console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
-            if (mermaidElements && mermaidElements.length > 0) {
-                await mermaid.run({
-                    nodes: mermaidElements
-                });
-                console.log('[Mermaid] Rendering complete');
-                // 渲染完成后绑定点击事件
-                nextTick(() => {
-                    bindMermaidClickEvents();
-                });
-            }
+        const renderedCount = await renderMermaidInContainer(parentMd.value, renderedMermaidIds);
+        if (renderedCount > 0) {
+            nextTick(() => {
+                bindMermaidClickEvents();
+            });
         }
     } catch (error) {
         console.error('Mermaid rendering error:', error);
@@ -344,32 +255,10 @@ const renderMermaidDiagrams = async () => {
 // 已渲染的 mermaid 元素 ID 集合
 const renderedMermaidIds = new Set();
 
-// Mermaid 点击处理函数 - 必须在 bindMermaidClickEvents 之前定义
-const handleMermaidClick = (e) => {
-    e.stopPropagation();
-    const target = e.currentTarget;
-    const svg = target.querySelector('svg');
-    if (svg) {
-        openMermaidFullscreen(svg.outerHTML);
-    }
-};
-
 // 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
 const bindMermaidClickEvents = () => {
-    if (!parentMd.value) {
-        console.log('[Mermaid] parentMd is null');
-        return;
-    }
-    // 绑定在 .mermaid div 上，而不是 SVG 上
-    const mermaidDivs = parentMd.value.querySelectorAll('.mermaid');
-    console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
-    mermaidDivs.forEach((div, index) => {
-        const divEl = div;
-        divEl.style.cursor = 'pointer';
-        // 移除旧的事件监听器（避免重复绑定）
-        divEl.removeEventListener('click', handleMermaidClick);
-        divEl.addEventListener('click', handleMermaidClick);
-        console.log(`[Mermaid] Bound click event to div ${index}`);
+    bindMermaidFullscreenEvents(parentMd.value, (svgOuterHTML) => {
+        openMermaidFullscreen(svgOuterHTML);
     });
 };
 
@@ -404,6 +293,7 @@ onBeforeUnmount(() => {
 </script>
 <style lang="less" scoped>
 @import '../../../components/css/markdown.less';
+@import '../../../components/css/chat-message-shared.less';
 
 // 内容包装器 - 与 Agent 模式的 answer 样式一致
 .content-wrapper {
@@ -620,81 +510,6 @@ onBeforeUnmount(() => {
     }
 }
 
-// 复制和添加到知识库按钮工具栏
-.answer-toolbar {
-    display: flex;
-    justify-content: flex-start;
-    gap: 6px;
-    margin-top: 8px;
-    min-height: 32px;
-
-    :deep(.t-button) {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: auto;
-        width: auto;
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        background: #ffffff;
-        color: #666;
-        transition: all 0.2s ease;
-        
-        .t-button__content {
-            display: inline-flex !important;
-            align-items: center;
-            justify-content: center;
-            gap: 0;
-        }
-        
-        .t-button__text {
-            display: inline-flex !important;
-            align-items: center;
-            justify-content: center;
-            gap: 0;
-        }
-        
-        .t-icon {
-            display: inline-flex !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            width: 16px;
-            height: 16px;
-            flex-shrink: 0;
-            color: #666;
-        }
-        
-        .t-icon svg {
-            display: block !important;
-            width: 16px;
-            height: 16px;
-        }
-        
-        .t-button__text > :not(.t-icon) {
-            display: none;
-        }
-        
-        &:hover:not(:disabled) {
-            background: rgba(7, 192, 95, 0.08);
-            border-color: rgba(7, 192, 95, 0.3);
-            color: #07c05f;
-            
-            .t-icon {
-                color: #07c05f;
-            }
-        }
-        
-        &:active:not(:disabled) {
-            background: rgba(7, 192, 95, 0.12);
-            border-color: rgba(7, 192, 95, 0.4);
-            transform: translateY(0.5px);
-        }
-    }
-}
-
 .img_loading {
     background: #3032360f;
     height: 230px;
@@ -708,99 +523,6 @@ onBeforeUnmount(() => {
     gap: 4px;
     margin-left: 16px;
     border-radius: 8px;
-}
-
-:deep(.streaming-image-loading) {
-    display: inline-block;
-    position: relative;
-    width: clamp(150px, 30vw, 260px);
-    max-width: 100%;
-    aspect-ratio: 4 / 3;
-    border-radius: 10px;
-    border: 1px solid rgba(175, 190, 210, 0.55);
-    background: linear-gradient(
-        145deg,
-        rgba(245, 249, 255, 0.72) 0%,
-        rgba(228, 236, 248, 0.62) 45%,
-        rgba(214, 225, 242, 0.58) 100%
-    );
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.75),
-        inset 0 -1px 0 rgba(168, 182, 206, 0.28),
-        0 8px 20px rgba(100, 121, 152, 0.12);
-    backdrop-filter: blur(3px) saturate(115%);
-    -webkit-backdrop-filter: blur(3px) saturate(115%);
-    overflow: hidden;
-    vertical-align: middle;
-    animation: streamingImageBreath 2.2s ease-in-out infinite;
-}
-
-:deep(.streaming-image-loading__skeleton) {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-        110deg,
-        rgba(234, 239, 246, 0.95) 8%,
-        rgba(248, 250, 252, 0.98) 18%,
-        rgba(234, 239, 246, 0.95) 33%
-    );
-    background-size: 220% 100%;
-    animation: streamingImageShimmer 1.4s linear infinite;
-}
-
-:deep(.streaming-image-loading)::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    border: 1px solid rgba(255, 255, 255, 0.45);
-    pointer-events: none;
-}
-
-:deep(.streaming-image-loading)::after {
-    content: '';
-    position: absolute;
-    left: -35%;
-    top: -55%;
-    width: 62%;
-    height: 210%;
-    background: linear-gradient(
-        120deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.38) 46%,
-        rgba(255, 255, 255, 0) 100%
-    );
-    transform: rotate(16deg);
-    animation: streamingImageMirror 2.8s ease-in-out infinite;
-    pointer-events: none;
-}
-
-@keyframes streamingImageShimmer {
-    to {
-        background-position-x: -220%;
-    }
-}
-
-@keyframes streamingImageMirror {
-    0%, 100% {
-        left: -38%;
-        opacity: 0.35;
-    }
-    50% {
-        left: 110%;
-        opacity: 0.75;
-    }
-}
-
-@keyframes streamingImageBreath {
-    0%, 100% {
-        transform: translateY(0) scale(1);
-        filter: saturate(1);
-    }
-    50% {
-        transform: translateY(-0.5px) scale(1.01);
-        filter: saturate(1.06);
-    }
 }
 
 :deep(.t-loading__gradient-conic) {
