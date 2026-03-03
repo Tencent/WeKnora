@@ -29,9 +29,9 @@ const (
 // MinerUCloudReader calls the MinerU Cloud API (mineru.net) to read/convert documents.
 // Flow: POST /file-urls/batch → PUT file → poll GET /extract-results/batch/{batch_id}.
 type MinerUCloudReader struct {
-	apiKey       string
-	baseURL      string
-	model        string
+	apiKey        string
+	baseURL       string
+	model         string
 	formulaEnable bool
 	tableEnable   bool
 	ocrEnable     bool
@@ -40,14 +40,9 @@ type MinerUCloudReader struct {
 
 // NewMinerUCloudReader creates a reader from ParserEngineOverrides.
 func NewMinerUCloudReader(overrides map[string]string) *MinerUCloudReader {
-	baseURL := strings.TrimRight(stringOr(overrides["mineru_api_base_url"], defaultBaseURL), "/")
-	if safe, reason := utils.IsSSRFSafeURL(baseURL); !safe {
-		logger.Printf("WARN: [MinerUCloud] baseURL rejected by SSRF check (%s), falling back to default", reason)
-		baseURL = defaultBaseURL
-	}
 	return &MinerUCloudReader{
 		apiKey:        strings.TrimSpace(overrides["mineru_api_key"]),
-		baseURL:       baseURL,
+		baseURL:       defaultBaseURL,
 		model:         stringOr(overrides["mineru_cloud_model"], "pipeline"),
 		formulaEnable: parseBoolOr(overrides["mineru_cloud_enable_formula"], true),
 		tableEnable:   parseBoolOr(overrides["mineru_cloud_enable_table"], true),
@@ -481,24 +476,14 @@ func readZipEntryBytes(f *zip.File) ([]byte, error) {
 	return io.ReadAll(rc)
 }
 
-// logCloudResponseStructure is now unified in helpers.go as logResponseStructure("MinerUCloud", ...)
-
 // PingMinerUCloud checks if the MinerU Cloud API is reachable with the given API key.
-func PingMinerUCloud(apiKey, baseURL string) (bool, string) {
+func PingMinerUCloud(apiKey string) (bool, string) {
 	apiKey = strings.TrimSpace(apiKey)
-	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if apiKey == "" {
 		return false, "未配置 MinerU Cloud API Key"
 	}
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
 
-	targetURL := baseURL + "/file-urls/batch"
-	if safe, reason := utils.IsSSRFSafeURL(targetURL); !safe {
-		return false, fmt.Sprintf("baseURL 不安全: %s", reason)
-	}
-
+	targetURL := defaultBaseURL + "/file-urls/batch"
 	payload := []byte(`{"files":[],"model_version":"pipeline"}`)
 	req, err := http.NewRequest(http.MethodPost, targetURL, bytes.NewReader(payload))
 	if err != nil {
@@ -522,5 +507,3 @@ func PingMinerUCloud(apiKey, baseURL string) (bool, string) {
 	}
 	return true, ""
 }
-
-// firstNonEmpty, sleepCtx are defined in helpers.go

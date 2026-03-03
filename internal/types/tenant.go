@@ -202,10 +202,9 @@ func (c *ConversationConfig) Scan(value interface{}) error {
 // ParserEngineConfig holds tenant-level overrides for document parser engines (e.g. MinerU endpoint, API key).
 // These values take precedence over environment variables when parsing documents.
 type ParserEngineConfig struct {
-	DocReaderAddr    string `json:"docreader_addr"`      // 文档解析服务地址
-	MinerUEndpoint   string `json:"mineru_endpoint"`     // MinerU 自建服务端点
-	MinerUAPIKey     string `json:"mineru_api_key"`      // MinerU 云 API Key
-	MinerUAPIBaseURL string `json:"mineru_api_base_url"` // MinerU 云 API Base URL（可选）
+	DocReaderAddr  string `json:"docreader_addr"`  // 文档解析服务地址
+	MinerUEndpoint string `json:"mineru_endpoint"` // MinerU 自建服务端点
+	MinerUAPIKey   string `json:"mineru_api_key"`  // MinerU 云 API Key
 
 	// MinerU 自建解析参数
 	MinerUModel         string `json:"mineru_model,omitempty"` // backend: pipeline, vlm-*, hybrid-*
@@ -223,7 +222,7 @@ type ParserEngineConfig struct {
 }
 
 // ToOverridesMap returns a map suitable for ParserEngineOverrides in parse requests.
-// Keys are snake_case (mineru_endpoint, mineru_api_key, mineru_api_base_url).
+// Keys are snake_case (mineru_endpoint, mineru_api_key, etc.).
 func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	if c == nil {
 		return nil
@@ -234,9 +233,6 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUAPIKey != "" {
 		m["mineru_api_key"] = c.MinerUAPIKey
-	}
-	if c.MinerUAPIBaseURL != "" {
-		m["mineru_api_base_url"] = c.MinerUAPIBaseURL
 	}
 	if c.MinerUModel != "" {
 		m["mineru_model"] = c.MinerUModel

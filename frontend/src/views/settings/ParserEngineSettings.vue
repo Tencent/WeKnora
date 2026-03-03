@@ -142,14 +142,6 @@
               />
             </div>
             <div class="form-field">
-              <label>API 地址</label>
-              <t-input
-                v-model="config.mineru_api_base_url"
-                placeholder="默认 https://mineru.net/api/v4"
-                clearable
-              />
-            </div>
-            <div class="form-field">
               <label>Model Version</label>
               <t-select v-model="config.mineru_cloud_model" placeholder="默认 pipeline" clearable>
                 <t-option value="pipeline" label="pipeline" />
@@ -215,7 +207,6 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   docreader_transport: 'grpc',
   mineru_endpoint: '',
   mineru_api_key: '',
-  mineru_api_base_url: 'https://mineru.net/api/v4',
   mineru_model: 'pipeline',
   mineru_enable_formula: true,
   mineru_enable_table: true,
@@ -298,7 +289,6 @@ async function loadConfig() {
       docreader_transport: data?.docreader_transport ?? DEFAULT_PARSER_CONFIG.docreader_transport ?? 'grpc',
       mineru_endpoint: data?.mineru_endpoint ?? DEFAULT_PARSER_CONFIG.mineru_endpoint ?? '',
       mineru_api_key: data?.mineru_api_key ?? DEFAULT_PARSER_CONFIG.mineru_api_key ?? '',
-      mineru_api_base_url: data?.mineru_api_base_url ?? DEFAULT_PARSER_CONFIG.mineru_api_base_url ?? '',
       mineru_model: data?.mineru_model ?? DEFAULT_PARSER_CONFIG.mineru_model ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
       mineru_enable_table: data?.mineru_enable_table ?? DEFAULT_PARSER_CONFIG.mineru_enable_table ?? true,
@@ -328,7 +318,6 @@ function buildConfigPayload(): ParserEngineConfig {
     docreader_transport: (config.value.docreader_transport ?? 'grpc').trim() || 'grpc',
     mineru_endpoint: config.value.mineru_endpoint?.trim() ?? '',
     mineru_api_key: config.value.mineru_api_key?.trim() ?? '',
-    mineru_api_base_url: config.value.mineru_api_base_url?.trim() ?? '',
     mineru_model: config.value.mineru_model?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
     mineru_enable_table: config.value.mineru_enable_table,
@@ -469,12 +458,12 @@ onMounted(loadAll)
 .engine-doc-link {
   margin-left: auto;
   font-size: 12px;
-  color: #999;
+  color: var(--td-brand-color, #0052d9);
   text-decoration: none;
   white-space: nowrap;
 
   &:hover {
-    color: var(--td-brand-color, #0052d9);
+    opacity: 0.8;
   }
 }
 

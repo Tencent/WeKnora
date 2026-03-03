@@ -127,7 +127,6 @@ export interface ParserEngineConfig {
   docreader_transport?: string
   mineru_endpoint?: string
   mineru_api_key?: string
-  mineru_api_base_url?: string
   // MinerU 自建参数
   mineru_model?: string
   mineru_enable_formula?: boolean | null

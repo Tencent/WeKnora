@@ -41,8 +41,10 @@ const SimpleEngineName = "simple"
 
 type simpleEngine struct{}
 
-func (e *simpleEngine) Name() string        { return SimpleEngineName }
-func (e *simpleEngine) Description() string { return "简单格式 & 图片解析（无需外部服务）" }
+func (e *simpleEngine) Name() string { return SimpleEngineName }
+func (e *simpleEngine) Description() string {
+	return "简单格式 & 图片解析（无需外部服务）"
+}
 func (e *simpleEngine) FileTypes(_ bool) []string {
 	return []string{"md", "markdown", "txt", "csv", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"}
 }
@@ -85,7 +87,7 @@ func (e *mineruCloudEngine) CheckAvailable(_ bool, overrides map[string]string) 
 	if apiKey == "" {
 		return false, "未配置 MinerU API Key"
 	}
-	return PingMinerUCloud(apiKey, overrides["mineru_api_base_url"])
+	return PingMinerUCloud(apiKey)
 }
 
 // ---------------------------------------------------------------------------
