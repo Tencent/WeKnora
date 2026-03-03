@@ -123,7 +123,8 @@ function protectProviderImageSrcInHTML(html: string): string {
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
       const protectedSrc = `${provider}://${restPath}`;
-      return `<img${before} src=${quote}${PROVIDER_IMAGE_PLACEHOLDER}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
+      const fileProxyURL = `/files?${new URLSearchParams({ file_path: protectedSrc }).toString()}`;
+      return `<img${before} src=${quote}${fileProxyURL}${quote} data-protected-src=${quote}${protectedSrc}${quote}${after}>`;
     },
   );
 }

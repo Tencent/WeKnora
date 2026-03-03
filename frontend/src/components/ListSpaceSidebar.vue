@@ -289,9 +289,9 @@ onBeforeUnmount(() => {
 .resize-handle {
   position: absolute;
   top: 0;
-  right: -4px;
+  right: -6px;
   bottom: 0;
-  width: 8px;
+  width: 12px;
   cursor: col-resize;
   z-index: 12;
   display: flex;
@@ -307,10 +307,10 @@ onBeforeUnmount(() => {
 
 .resize-handle-line {
   width: 2px;
-  height: 32px;
+  height: 40px;
   border-radius: 1px;
   background: #c5cad1;
-  opacity: 0;
+  opacity: 0.45;
   transition: opacity 0.2s ease, background 0.2s ease;
 }
 

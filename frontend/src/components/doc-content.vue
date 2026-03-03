@@ -7,7 +7,7 @@ import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
 import { downKnowledgeDetails, deleteGeneratedQuestion } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
-import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import DocumentPreview from '@/components/document-preview.vue';
@@ -269,7 +269,9 @@ const isMarkdownFile = (fileType?: string): boolean => {
 };
 watch(() => props.details.md, (newVal) => {
   nextTick(async () => {
-    const images = mdContentWrap.value.querySelectorAll('img.markdown-image');
+    const renderRoot = (doc as ParentNode) || mdContentWrap.value;
+    await hydrateProtectedFileImages(renderRoot);
+    const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
     if (images) {
       images.forEach(async item => {
         const isValid = await checkImage(item.src);
