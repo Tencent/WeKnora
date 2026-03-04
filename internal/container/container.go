@@ -88,6 +88,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initAntsPool))
 	must(container.Provide(initContextStorage))
 
+	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
+	must(container.Invoke(registerTracerCleanup))
+
 	// Register goroutine pool cleanup handler
 	must(container.Invoke(registerPoolCleanup))
 
@@ -737,6 +740,19 @@ func registerPoolCleanup(pool *ants.Pool, cleaner interfaces.ResourceCleaner) {
 	cleaner.RegisterWithName("AntsPool", func() error {
 		pool.Release()
 		return nil
+	})
+}
+
+// registerTracerCleanup registers the tracer for cleanup
+// Ensures proper cleanup of the tracer when application shuts down
+// Parameters:
+//   - tracer: Tracer instance
+//   - cleaner: Resource cleaner
+func registerTracerCleanup(tracer *tracing.Tracer, cleaner interfaces.ResourceCleaner) {
+	// Register the cleanup function - actual context will be provided during cleanup
+	cleaner.RegisterWithName("Tracer", func() error {
+		// Create context for cleanup with longer timeout for tracer shutdown
+		return tracer.Cleanup(context.Background())
 	})
 }
 

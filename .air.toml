@@ -17,13 +17,13 @@ tmp_dir = "tmp"
   include_dir = []
   include_ext = ["go", "tpl", "tmpl", "html", "yaml"]
   include_file = []
-  kill_delay = "0s"
+  kill_delay = "30s"
   log = "build-errors.log"
   poll = false
   poll_interval = 0
   rerun = false
   rerun_delay = 500
-  send_interrupt = false
+  send_interrupt = true
   stop_on_error = false
 
 [color]
