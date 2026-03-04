@@ -189,6 +189,11 @@ export default {
     // Additional translations for KnowledgeBase.vue
     newSession: 'New Chat',
     editDocument: 'Edit Document',
+    rebuildDocument: 'Rebuild Document',
+    rebuildConfirm: 'Rebuild document "{fileName}"? This will clear existing chunks and parse it again.',
+    rebuildSubmitted: 'Rebuild task submitted',
+    rebuildFailed: 'Rebuild failed. Please try again later',
+    rebuildInProgress: 'This document is currently being parsed. Please try again later',
     draft: 'Draft',
     draftTip: 'Temporarily saved and not included in retrieval',
     untitledDocument: 'Untitled Document',

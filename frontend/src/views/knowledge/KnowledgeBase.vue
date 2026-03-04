@@ -27,6 +27,7 @@ import {
   uploadKnowledgeFile,
   createKnowledgeFromURL,
   listKnowledgeBases,
+  reparseKnowledge,
 } from "@/api/knowledge-base/index";
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import { useI18n } from 'vue-i18n';
@@ -1171,6 +1172,33 @@ const handleManualEdit = (index: number, item: KnowledgeCard) => {
   });
 };
 
+const handleKnowledgeReparse = async (index: number, item: KnowledgeCard) => {
+  if (isFAQ.value) return;
+  if (!canEdit.value) return;
+  if (!item?.id) {
+    MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
+    return;
+  }
+  if (item.parse_status === 'pending' || item.parse_status === 'processing') {
+    MessagePlugin.info(t('knowledgeBase.rebuildInProgress'));
+    return;
+  }
+  if (cardList.value[index]) {
+    cardList.value[index].isMore = false;
+  }
+  const confirm = window.confirm(
+    t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || item.title || '' }) as string,
+  );
+  if (!confirm) return;
+  try {
+    await reparseKnowledge(item.id);
+    MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
+    loadKnowledgeFiles(kbId.value);
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('knowledgeBase.rebuildFailed'));
+  }
+};
+
 const handleScroll = () => {
   if (isFAQ.value) return;
   const element = knowledgeScroll.value;
@@ -1585,6 +1613,10 @@ async function createNewSession(value: string): Promise<void> {
                               >
                                 <t-icon class="icon" name="edit" />
                                 <span>{{ t('knowledgeBase.editDocument') }}</span>
+                              </div>
+                              <div class="card-menu-item" @click.stop="handleKnowledgeReparse(index, item)">
+                                <t-icon class="icon" name="refresh" />
+                                <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                               </div>
                               <div class="card-menu-item danger" @click.stop="delCard(index, item)">
                                 <t-icon class="icon" name="delete" />
