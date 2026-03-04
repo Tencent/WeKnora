@@ -296,7 +296,10 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       chunkSize: 512,
       chunkOverlap: 100,
       separators: ['\n\n', '\n', '。', '！', '？', ';', '；'],
-      parserEngineRules: undefined as any
+      parserEngineRules: undefined as any,
+      enableParentChild: false,
+      parentChunkSize: 1024,
+      childChunkSize: 256
     },
     storageProvider: 'local' as string,
     multimodalConfig: {
@@ -373,7 +376,10 @@ const loadKBData = async () => {
         chunkSize: kb.chunking_config?.chunk_size || 512,
         chunkOverlap: kb.chunking_config?.chunk_overlap || 100,
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
-        parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined
+        parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
+        enableParentChild: kb.chunking_config?.enable_parent_child || false,
+        parentChunkSize: kb.chunking_config?.parent_chunk_size || 1024,
+        childChunkSize: kb.chunking_config?.child_chunk_size || 256
       },
       storageProvider: (kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
@@ -503,6 +509,9 @@ const buildSubmitData = () => {
       chunk_overlap: formData.value.chunkingConfig.chunkOverlap,
       separators: formData.value.chunkingConfig.separators,
       enable_multimodal: formData.value.multimodalConfig.enabled,
+      enable_parent_child: formData.value.chunkingConfig.enableParentChild,
+      parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
+      child_chunk_size: formData.value.chunkingConfig.childChunkSize,
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -603,7 +612,10 @@ const handleSubmit = async () => {
           chunkSize: data.chunking_config.chunk_size,
           chunkOverlap: data.chunking_config.chunk_overlap,
           separators: data.chunking_config.separators,
-          parserEngineRules: data.chunking_config.parser_engine_rules || undefined
+          parserEngineRules: data.chunking_config.parser_engine_rules || undefined,
+          enableParentChild: data.chunking_config.enable_parent_child || false,
+          parentChunkSize: data.chunking_config.parent_chunk_size || 1024,
+          childChunkSize: data.chunking_config.child_chunk_size || 256
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled

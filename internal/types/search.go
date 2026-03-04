@@ -142,6 +142,10 @@ type SearchParams struct {
 	KnowledgeIDs         []string `json:"knowledge_ids"`
 	TagIDs               []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
 	OnlyRecommended      bool     `json:"only_recommended"`
+	// SkipContextEnrichment skips fetching parent, nearby, and relation chunks
+	// in processSearchResults. Used by the chat pipeline where context assembly
+	// is handled separately in the merge stage.
+	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

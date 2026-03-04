@@ -69,6 +69,64 @@
           />
         </div>
       </div>
+
+      <!-- Parent-Child Chunking -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.parentChildLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.parentChildDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch
+            v-model="localEnableParentChild"
+            @change="handleParentChildChange"
+          />
+        </div>
+      </div>
+
+      <!-- Parent Chunk Size -->
+      <div v-if="localEnableParentChild" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.parentChunkSizeLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.parentChunkSizeDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <div class="slider-container">
+            <t-slider
+              v-model="localParentChunkSize"
+              :min="256"
+              :max="4096"
+              :step="64"
+              :marks="{ 256: '256', 1024: '1024', 2048: '2048', 4096: '4096' }"
+              @change="handleParentChunkSizeChange"
+              style="width: 200px;"
+            />
+            <span class="value-display">{{ localParentChunkSize }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Child Chunk Size -->
+      <div v-if="localEnableParentChild" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.childChunkSizeLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.childChunkSizeDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <div class="slider-container">
+            <t-slider
+              v-model="localChildChunkSize"
+              :min="64"
+              :max="1024"
+              :step="32"
+              :marks="{ 64: '64', 256: '256', 512: '512', 1024: '1024' }"
+              @change="handleChildChunkSizeChange"
+              style="width: 200px;"
+            />
+            <span class="value-display">{{ localChildChunkSize }} {{ $t('knowledgeEditor.chunking.characters') }}</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -87,6 +145,9 @@ interface ChunkingConfig {
   chunkOverlap: number
   separators: string[]
   parserEngineRules?: ParserEngineRule[]
+  enableParentChild: boolean
+  parentChunkSize: number
+  childChunkSize: number
 }
 
 interface Props {
@@ -102,6 +163,9 @@ const emit = defineEmits<{
 const localChunkSize = ref(props.config.chunkSize)
 const localChunkOverlap = ref(props.config.chunkOverlap)
 const localSeparators = ref([...props.config.separators])
+const localEnableParentChild = ref(props.config.enableParentChild ?? false)
+const localParentChunkSize = ref(props.config.parentChunkSize || 1024)
+const localChildChunkSize = ref(props.config.childChunkSize || 256)
 const { t } = useI18n()
 
 const separatorOptions = computed(() => [
@@ -119,18 +183,27 @@ watch(() => props.config, (newConfig) => {
   localChunkSize.value = newConfig.chunkSize
   localChunkOverlap.value = newConfig.chunkOverlap
   localSeparators.value = [...newConfig.separators]
+  localEnableParentChild.value = newConfig.enableParentChild ?? false
+  localParentChunkSize.value = newConfig.parentChunkSize || 1024
+  localChildChunkSize.value = newConfig.childChunkSize || 256
 }, { deep: true })
 
 const handleChunkSizeChange = () => { emitUpdate() }
 const handleChunkOverlapChange = () => { emitUpdate() }
 const handleSeparatorsChange = () => { emitUpdate() }
+const handleParentChildChange = () => { emitUpdate() }
+const handleParentChunkSizeChange = () => { emitUpdate() }
+const handleChildChunkSizeChange = () => { emitUpdate() }
 
 const emitUpdate = () => {
   emit('update:config', {
     chunkSize: localChunkSize.value,
     chunkOverlap: localChunkOverlap.value,
     separators: localSeparators.value,
-    parserEngineRules: props.config.parserEngineRules
+    parserEngineRules: props.config.parserEngineRules,
+    enableParentChild: localEnableParentChild.value,
+    parentChunkSize: localParentChunkSize.value,
+    childChunkSize: localChildChunkSize.value
   })
 }
 </script>

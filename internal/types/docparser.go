@@ -67,6 +67,21 @@ type ParsedChunk struct {
 	End     int
 	Images  []ParsedImage
 	ChunkID string // populated by processChunks with the actual DB UUID
+
+	// ParentIndex is set when using parent-child chunking strategy.
+	// -1 (or unset/0 for flat chunks) means this is a top-level chunk.
+	// >= 0 means this is a child chunk referencing the parent at this index
+	// in the ParentChunks slice of ProcessChunksOptions.
+	ParentIndex int
+}
+
+// ParsedParentChunk represents a parent chunk in the parent-child strategy.
+// Parent chunks are stored in DB for context retrieval but NOT vector-indexed.
+type ParsedParentChunk struct {
+	Content string
+	Seq     int
+	Start   int
+	End     int
 }
 
 type ParsedImage struct {

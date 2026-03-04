@@ -143,6 +143,9 @@ export default {
     loadOriginalFailed: "원본 파일 내용 로드 실패",
     questions: "질문",
     generatedQuestions: "생성된 질문",
+    childChunk: "자식 청크",
+    viewParentContext: "부모 컨텍스트 보기",
+    parentContextLoadFailed: "부모 컨텍스트 로드 실패",
     confirmDeleteQuestion:
       "이 질문을 삭제하시겠습니까? 삭제 시 해당 벡터 인덱스도 함께 제거됩니다.",
     legacyQuestionCannotDelete: "이전 형식의 질문은 삭제할 수 없습니다. 질문을 다시 생성하세요",
@@ -1860,6 +1863,12 @@ export default {
         semicolonEn: "영어 세미콜론 (;)",
         space: "공백 ( )",
       },
+      parentChildLabel: "부모-자식 청킹",
+      parentChildDescription: "2단계 부모-자식 청킹 전략을 활성화합니다. 큰 부모 청크는 컨텍스트를 제공하고, 작은 자식 청크는 벡터 매칭에 사용됩니다.",
+      parentChunkSizeLabel: "부모 청크 크기",
+      parentChunkSizeDescription: "컨텍스트를 제공하는 부모 청크의 문자 수 (256-4096)",
+      childChunkSizeLabel: "자식 청크 크기",
+      childChunkSizeDescription: "임베딩 매칭에 사용되는 자식 청크의 문자 수 (64-1024)",
     },
     advanced: {
       title: "고급 설정",

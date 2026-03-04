@@ -96,6 +96,9 @@ type KBModelConfigRequest struct {
 		ChunkOverlap      int                      `json:"chunkOverlap"`
 		Separators        []string                 `json:"separators"`
 		ParserEngineRules []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
+		EnableParentChild bool                     `json:"enableParentChild"`
+		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
+		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
@@ -289,6 +292,13 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
 	}
 	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
+	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
+	if req.DocumentSplitting.ParentChunkSize > 0 {
+		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
+	}
+	if req.DocumentSplitting.ChildChunkSize > 0 {
+		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
+	}
 
 	// 更新多模态配置
 	if req.Multimodal.Enabled {

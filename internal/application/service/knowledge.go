@@ -1315,6 +1315,34 @@ type ProcessChunksOptions struct {
 	QuestionCount            int
 	EnableMultimodel         bool
 	StoredImages             []docparser.StoredImage
+	// ParentChunks holds parent chunk data when parent-child chunking is enabled.
+	// When set, the chunks passed to processChunks are child chunks, and each
+	// child's ParentIndex references an entry in this slice.
+	ParentChunks []types.ParsedParentChunk
+}
+
+// buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
+// The base config (already validated with defaults) is used for separators.
+func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
+	parentSize := cc.ParentChunkSize
+	if parentSize <= 0 {
+		parentSize = 1024
+	}
+	childSize := cc.ChildChunkSize
+	if childSize <= 0 {
+		childSize = 256
+	}
+	parent = chunker.SplitterConfig{
+		ChunkSize:    parentSize,
+		ChunkOverlap: base.ChunkOverlap, // reuse configured overlap for parents
+		Separators:   base.Separators,
+	}
+	child = chunker.SplitterConfig{
+		ChunkSize:    childSize,
+		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
+		Separators:   base.Separators,
+	}
+	return
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
@@ -1447,8 +1475,44 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// 重新分配容量，考虑图片相关的Chunk
-	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount)
+	// === Parent-Child Chunking: create parent chunks first ===
+	hasParentChild := len(options.ParentChunks) > 0
+	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
+	if hasParentChild {
+		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
+		for i, pc := range options.ParentChunks {
+			parentDBChunks[i] = &types.Chunk{
+				ID:              uuid.New().String(),
+				TenantID:        knowledge.TenantID,
+				KnowledgeID:     knowledge.ID,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				Content:         pc.Content,
+				ChunkIndex:      pc.Seq,
+				IsEnabled:       true,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				StartAt:         pc.Start,
+				EndAt:           pc.End,
+				ChunkType:       types.ChunkTypeParentText,
+			}
+		}
+		// Set prev/next links for parent chunks
+		for i := range parentDBChunks {
+			if i > 0 {
+				parentDBChunks[i-1].NextChunkID = parentDBChunks[i].ID
+				parentDBChunks[i].PreChunkID = parentDBChunks[i-1].ID
+			}
+		}
+		logger.Infof(ctx, "Created %d parent chunks for parent-child strategy", len(parentDBChunks))
+	}
+
+	// 重新分配容量，考虑图片相关的Chunk + parent chunks
+	parentCount := len(options.ParentChunks)
+	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount+parentCount)
+	// Add parent chunks first (they go into DB but NOT into the vector index)
+	if hasParentChild {
+		insertChunks = append(insertChunks, parentDBChunks...)
+	}
 
 	for idx, chunkData := range chunks {
 		if strings.TrimSpace(chunkData.Content) == "" {
@@ -1470,6 +1534,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
 		}
+
+		// Wire up ParentChunkID for child chunks
+		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
+			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
+		}
+
 		chunks[idx].ChunkID = textChunk.ID
 		insertChunks = append(insertChunks, textChunk)
 	}
@@ -1479,30 +1549,43 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
 	})
 
-	// 仅为文本类型的Chunk设置前后关系
+	// 仅为文本类型的Chunk设置前后关系（child chunks only, parents already linked above）
 	textChunks := make([]*types.Chunk, 0, len(chunks))
 	for _, chunk := range insertChunks {
-		if chunk.ChunkType == types.ChunkTypeText {
+		if chunk.ChunkType == types.ChunkTypeText && chunk.ParentChunkID != "" {
+			// This is a child chunk in parent-child mode
+			textChunks = append(textChunks, chunk)
+		} else if chunk.ChunkType == types.ChunkTypeText && !hasParentChild {
+			// Normal flat chunk (no parent-child mode)
 			textChunks = append(textChunks, chunk)
 		}
 	}
 
-	// 设置文本Chunk之间的前后关系
-	for i, chunk := range textChunks {
-		if i > 0 {
-			textChunks[i-1].NextChunkID = chunk.ID
-		}
-		if i < len(textChunks)-1 {
-			textChunks[i+1].PreChunkID = chunk.ID
+	// 设置文本Chunk之间的前后关系 (skip if parent-child, children don't need prev/next links)
+	if !hasParentChild {
+		for i, chunk := range textChunks {
+			if i > 0 {
+				textChunks[i-1].NextChunkID = chunk.ID
+			}
+			if i < len(textChunks)-1 {
+				textChunks[i+1].PreChunkID = chunk.ID
+			}
 		}
 	}
 
-	// Create index information for each chunk (without generated questions for now)
-	indexInfoList := make([]*types.IndexInfo, 0, len(insertChunks))
-	for _, chunk := range insertChunks {
-		// Add original chunk content to index
+	// Create index information — only for child/flat chunks, NOT parent chunks.
+	// Parent chunks are stored for context retrieval but do not need vector embeddings.
+	// Prepend the document title to improve semantic alignment between
+	// question-style queries and statement-style chunk content.
+	indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
+	titlePrefix := ""
+	if t := strings.TrimSpace(knowledge.Title); t != "" {
+		titlePrefix = t + "\n"
+	}
+	for _, chunk := range textChunks {
+		indexContent := titlePrefix + chunk.Content
 		indexInfoList = append(indexInfoList, &types.IndexInfo{
-			Content:         chunk.Content,
+			Content:         indexContent,
 			SourceID:        chunk.ID,
 			SourceType:      types.ChunkSourceType,
 			ChunkID:         chunk.ID,
@@ -3031,7 +3114,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	tagIDMapping := map[string]string{} // srcTagID -> dstTagID
 	targetChunks := make([]*types.Chunk, 0, 10)
 	chunkType := []types.ChunkType{
-		types.ChunkTypeText, types.ChunkTypeSummary,
+		types.ChunkTypeText, types.ChunkTypeParentText, types.ChunkTypeSummary,
 		types.ChunkTypeImageCaption, types.ChunkTypeImageOCR,
 	}
 	for {
@@ -6626,24 +6709,47 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
 	}
 
-	splitChunks := chunker.SplitText(clean, chunkCfg)
-	parsed := make([]types.ParsedChunk, len(splitChunks))
-	for i, c := range splitChunks {
-		parsed[i] = types.ParsedChunk{
-			Content: c.Content,
-			Seq:     c.Seq,
-			Start:   c.Start,
-			End:     c.End,
+	var parsed []types.ParsedChunk
+	var opts ProcessChunksOptions
+
+	if kb.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+		pcResult := chunker.SplitTextParentChild(clean, parentCfg, childCfg)
+		parsed = make([]types.ParsedChunk, len(pcResult.Children))
+		for i, c := range pcResult.Children {
+			parsed[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				ParentIndex: c.ParentIndex,
+			}
+		}
+		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
+		for i, p := range pcResult.Parents {
+			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+		}
+		opts.ParentChunks = parentChunks
+	} else {
+		splitChunks := chunker.SplitText(clean, chunkCfg)
+		parsed = make([]types.ParsedChunk, len(splitChunks))
+		for i, c := range splitChunks {
+			parsed[i] = types.ParsedChunk{
+				Content: c.Content,
+				Seq:     c.Seq,
+				Start:   c.Start,
+				End:     c.End,
+			}
 		}
 	}
 
 	if doSync {
-		s.processChunks(ctx, kb, knowledge, parsed)
+		s.processChunks(ctx, kb, knowledge, parsed, opts)
 		return
 	}
 
 	newCtx := logger.CloneContext(ctx)
-	go s.processChunks(newCtx, kb, knowledge, parsed)
+	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
@@ -7198,25 +7304,49 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
 	}
 
-	splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
-	chunks = make([]types.ParsedChunk, len(splitChunks))
-	for i, c := range splitChunks {
-		chunks[i] = types.ParsedChunk{
-			Content: c.Content,
-			Seq:     c.Seq,
-			Start:   c.Start,
-			End:     c.End,
-		}
-	}
-	logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
-
-	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
-	s.processChunks(ctx, kb, knowledge, chunks, ProcessChunksOptions{
+	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
 		EnableMultimodel:         payload.EnableMultimodel,
 		StoredImages:             storedImages,
-	})
+	}
+
+	if kb.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+		pcResult := chunker.SplitTextParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
+		chunks = make([]types.ParsedChunk, len(pcResult.Children))
+		for i, c := range pcResult.Children {
+			chunks[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				ParentIndex: c.ParentIndex,
+			}
+		}
+		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
+		for i, p := range pcResult.Parents {
+			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+		}
+		processOpts.ParentChunks = parentChunks
+		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
+			len(pcResult.Parents), len(pcResult.Children), knowledge.ID)
+	} else {
+		splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
+		chunks = make([]types.ParsedChunk, len(splitChunks))
+		for i, c := range splitChunks {
+			chunks[i] = types.ParsedChunk{
+				Content: c.Content,
+				Seq:     c.Seq,
+				Start:   c.Start,
+				End:     c.End,
+			}
+		}
+		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
+	}
+
+	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
+	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
 }

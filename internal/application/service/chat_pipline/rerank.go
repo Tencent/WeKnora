@@ -264,6 +264,20 @@ func (p *PluginRerank) rerank(ctx context.Context,
 			rankFilter = append(rankFilter, result)
 		}
 	}
+
+	// Fallback: if threshold filtering removed all results, keep top-N as safety net
+	// This prevents returning empty results when all scores are below threshold
+	if len(rankFilter) == 0 && len(rerankResp) > 0 {
+		fallbackN := min(3, len(rerankResp))
+		rankFilter = rerankResp[:fallbackN]
+		pipelineInfo(ctx, "Rerank", "fallback_topn", map[string]interface{}{
+			"reason":     "all_below_threshold",
+			"threshold":  chatManage.RerankThreshold,
+			"fallback_n": fallbackN,
+			"top_score":  rerankResp[0].RelevanceScore,
+		})
+	}
+
 	return rankFilter
 }
 

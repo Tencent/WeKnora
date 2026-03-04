@@ -36,7 +36,7 @@ type SplitterConfig struct {
 func DefaultConfig() SplitterConfig {
 	return SplitterConfig{
 		ChunkSize:    512,
-		ChunkOverlap: 50,
+		ChunkOverlap: 128,
 		Separators:   []string{"\n\n", "\n", "。"},
 	}
 }
@@ -314,6 +314,52 @@ func isSeparatorOnly(s string) bool {
 		}
 	}
 	return true
+}
+
+// ParentChildResult holds the two-level chunking output.
+// Parent chunks provide context (large window), child chunks are used for
+// embedding/retrieval (small window). Each child carries its ParentIndex so
+// the caller can wire up ParentChunkID after DB insertion.
+type ParentChildResult struct {
+	Parents  []Chunk
+	Children []ChildChunk
+}
+
+// ChildChunk extends Chunk with a reference to its parent.
+type ChildChunk struct {
+	Chunk
+	ParentIndex int // index into ParentChildResult.Parents
+}
+
+// SplitTextParentChild performs two-level chunking:
+//  1. Split text into large parent chunks (parentCfg).
+//  2. Split each parent into smaller child chunks (childCfg) for embedding.
+//
+// The child Seq is globally unique across the entire document.
+func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChildResult {
+	parents := SplitText(text, parentCfg)
+	if len(parents) == 0 {
+		return ParentChildResult{}
+	}
+
+	var children []ChildChunk
+	childSeq := 0
+	for pi, parent := range parents {
+		subs := SplitText(parent.Content, childCfg)
+		for _, sub := range subs {
+			// Adjust offsets: sub positions are relative to parent content,
+			// shift to document-level offsets.
+			sub.Seq = childSeq
+			sub.Start += parent.Start
+			sub.End = sub.Start + runeLen(sub.Content)
+			children = append(children, ChildChunk{
+				Chunk:       sub,
+				ParentIndex: pi,
+			})
+			childSeq++
+		}
+	}
+	return ParentChildResult{Parents: parents, Children: children}
 }
 
 // ExtractImageRefs extracts markdown image references from text.

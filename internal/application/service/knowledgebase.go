@@ -616,7 +616,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	matchCount := params.MatchCount * 3
+	// Use 5x over-retrieval to ensure sufficient candidates for RRF fusion and reranking.
+	// Minimum 50 to handle large knowledge bases with diverse content.
+	matchCount := max(params.MatchCount*5, 50)
 
 	// Add vector retrieval params if supported
 	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch {
@@ -790,14 +792,16 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			}
 		}
 
-		// Compute RRF scores
+		// Compute weighted RRF scores (vector retrieval weighted higher for semantic relevance)
+		const vectorWeight = 0.7
+		const keywordWeight = 0.3
 		for chunkID := range chunkInfoMap {
 			rrfScore := 0.0
 			if rank, ok := vectorRanks[chunkID]; ok {
-				rrfScore += 1.0 / float64(rrfK+rank)
+				rrfScore += vectorWeight / float64(rrfK+rank)
 			}
 			if rank, ok := keywordRanks[chunkID]; ok {
-				rrfScore += 1.0 / float64(rrfK+rank)
+				rrfScore += keywordWeight / float64(rrfK+rank)
 			}
 			rrfScores[chunkID] = rrfScore
 		}
@@ -858,7 +862,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks)
+	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
 }
 
 // iterativeRetrieveWithDeduplication performs iterative retrieval until enough unique chunks are found
@@ -1100,6 +1104,7 @@ func (s *knowledgeBaseService) matchesNegativeQuestions(queryTextLower string, n
 // processSearchResults handles the processing of search results, optimizing database queries
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
+	skipEnrichment bool,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
@@ -1157,34 +1162,36 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		chunkMap[chunk.ID] = chunk
 		processedChunkIDs[chunk.ID] = true
 
-		// Collect parent chunks
-		if chunk.ParentChunkID != "" && !processedChunkIDs[chunk.ParentChunkID] {
-			additionalChunkIDs = append(additionalChunkIDs, chunk.ParentChunkID)
-			processedChunkIDs[chunk.ParentChunkID] = true
+		if !skipEnrichment {
+			// Collect parent chunks
+			if chunk.ParentChunkID != "" && !processedChunkIDs[chunk.ParentChunkID] {
+				additionalChunkIDs = append(additionalChunkIDs, chunk.ParentChunkID)
+				processedChunkIDs[chunk.ParentChunkID] = true
 
-			// Pass score to parent
-			chunkScores[chunk.ParentChunkID] = chunkScores[chunk.ID]
-			chunkMatchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
-		}
-
-		// Collect related chunks
-		relationChunkIDs := s.collectRelatedChunkIDs(chunk, processedChunkIDs)
-		for _, chunkID := range relationChunkIDs {
-			additionalChunkIDs = append(additionalChunkIDs, chunkID)
-			chunkMatchTypes[chunkID] = types.MatchTypeRelationChunk
-		}
-
-		// Add nearby chunks (prev and next)
-		if slices.Contains([]string{types.ChunkTypeText}, chunk.ChunkType) {
-			if chunk.NextChunkID != "" && !processedChunkIDs[chunk.NextChunkID] {
-				additionalChunkIDs = append(additionalChunkIDs, chunk.NextChunkID)
-				processedChunkIDs[chunk.NextChunkID] = true
-				chunkMatchTypes[chunk.NextChunkID] = types.MatchTypeNearByChunk
+				// Pass score to parent
+				chunkScores[chunk.ParentChunkID] = chunkScores[chunk.ID]
+				chunkMatchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
 			}
-			if chunk.PreChunkID != "" && !processedChunkIDs[chunk.PreChunkID] {
-				additionalChunkIDs = append(additionalChunkIDs, chunk.PreChunkID)
-				processedChunkIDs[chunk.PreChunkID] = true
-				chunkMatchTypes[chunk.PreChunkID] = types.MatchTypeNearByChunk
+
+			// Collect related chunks
+			relationChunkIDs := s.collectRelatedChunkIDs(chunk, processedChunkIDs)
+			for _, chunkID := range relationChunkIDs {
+				additionalChunkIDs = append(additionalChunkIDs, chunkID)
+				chunkMatchTypes[chunkID] = types.MatchTypeRelationChunk
+			}
+
+			// Add nearby chunks (prev and next)
+			if slices.Contains([]string{types.ChunkTypeText}, chunk.ChunkType) {
+				if chunk.NextChunkID != "" && !processedChunkIDs[chunk.NextChunkID] {
+					additionalChunkIDs = append(additionalChunkIDs, chunk.NextChunkID)
+					processedChunkIDs[chunk.NextChunkID] = true
+					chunkMatchTypes[chunk.NextChunkID] = types.MatchTypeNearByChunk
+				}
+				if chunk.PreChunkID != "" && !processedChunkIDs[chunk.PreChunkID] {
+					additionalChunkIDs = append(additionalChunkIDs, chunk.PreChunkID)
+					processedChunkIDs[chunk.PreChunkID] = true
+					chunkMatchTypes[chunk.PreChunkID] = types.MatchTypeNearByChunk
+				}
 			}
 		}
 	}
@@ -1235,26 +1242,28 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 
 	// Second pass: Add additional chunks (parent, nearby, relation) that weren't in original input
-	for chunkID, chunk := range chunkMap {
-		if addedChunkIDs[chunkID] || !s.isValidTextChunk(chunk) {
-			continue
-		}
-
-		score, hasScore := chunkScores[chunkID]
-		if !hasScore || score <= 0 {
-			score = 0.0
-		}
-
-		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
-			matchType := types.MatchTypeParentChunk
-			if specificType, exists := chunkMatchTypes[chunkID]; exists {
-				matchType = specificType
-			} else {
-				logger.Warnf(ctx, "Unkonwn match type for chunk: %s", chunkID)
+	if !skipEnrichment {
+		for chunkID, chunk := range chunkMap {
+			if addedChunkIDs[chunkID] || !s.isValidTextChunk(chunk) {
 				continue
 			}
-			matchedContent := chunkMatchedContents[chunkID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+
+			score, hasScore := chunkScores[chunkID]
+			if !hasScore || score <= 0 {
+				score = 0.0
+			}
+
+			if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
+				matchType := types.MatchTypeParentChunk
+				if specificType, exists := chunkMatchTypes[chunkID]; exists {
+					matchType = specificType
+				} else {
+					logger.Warnf(ctx, "Unkonwn match type for chunk: %s", chunkID)
+					continue
+				}
+				matchedContent := chunkMatchedContents[chunkID]
+				searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			}
 		}
 	}
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))

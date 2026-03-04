@@ -83,6 +83,9 @@ export interface KBModelConfigRequest {
         chunkOverlap: number
         separators: string[]
         parserEngineRules?: { file_types: string[]; engine: string }[]
+        enableParentChild?: boolean
+        parentChunkSize?: number
+        childChunkSize?: number
     }
     multimodal: {
         enabled: boolean

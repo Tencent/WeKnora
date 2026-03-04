@@ -142,6 +142,9 @@ export default {
     loadOriginalFailed: 'Failed to load original file content',
     questions: 'Questions',
     generatedQuestions: 'Generated Questions',
+    childChunk: 'Child Chunk',
+    viewParentContext: 'View Parent Context',
+    parentContextLoadFailed: 'Failed to load parent context',
     confirmDeleteQuestion: 'Are you sure you want to delete this question? The corresponding vector index will also be removed.',
     legacyQuestionCannotDelete: 'Legacy format questions cannot be deleted. Please regenerate questions.',
     notInitialized: 'Knowledge base is not initialized. Please configure models in settings before uploading files',
@@ -1415,7 +1418,13 @@ export default {
         semicolonCn: 'Chinese semicolon (；)',
         semicolonEn: 'Semicolon (;)',
         space: 'Space ( )'
-      }
+      },
+      parentChildLabel: 'Parent-Child Chunking',
+      parentChildDescription: 'Enable two-level parent-child chunking strategy. Large parent chunks provide context while small child chunks are used for vector matching.',
+      parentChunkSizeLabel: 'Parent Chunk Size',
+      parentChunkSizeDescription: 'Size of parent chunks that provide context (256-4096)',
+      childChunkSizeLabel: 'Child Chunk Size',
+      childChunkSizeDescription: 'Size of child chunks used for embedding matching (64-1024)'
     },
     advanced: {
       title: 'Advanced Settings',

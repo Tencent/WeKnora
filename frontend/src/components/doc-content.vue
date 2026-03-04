@@ -4,8 +4,8 @@ import { marked } from "marked";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
-import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion } from "@/api/knowledge-base/index";
+import { onMounted, ref, nextTick, onUnmounted, watch } from "vue";
+import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -267,23 +267,38 @@ const isMarkdownFile = (fileType?: string): boolean => {
   const markdownTypes = ['md', 'markdown'];
   return markdownTypes.includes(fileType.toLowerCase());
 };
+const runMarkdownPostRenderPipeline = async () => {
+  await nextTick();
+  const renderRoot = mdContentWrap.value as ParentNode;
+  await hydrateProtectedFileImages(renderRoot);
+  const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
+  if (images) {
+    images.forEach(async item => {
+      const isValid = await checkImage(item.src);
+      if (!isValid) {
+        item.remove();
+      }
+    })
+  }
+  // 渲染 Mermaid 图表
+  await renderMermaidDiagrams();
+};
+
 watch(() => props.details.md, (newVal) => {
-  nextTick(async () => {
-    const renderRoot = (doc as ParentNode) || mdContentWrap.value;
-    await hydrateProtectedFileImages(renderRoot);
-    const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
-    if (images) {
-      images.forEach(async item => {
-        const isValid = await checkImage(item.src);
-        if (!isValid) {
-          item.remove();
-        }
-      })
-    }
-    // 渲染 Mermaid 图表
-    await renderMermaidDiagrams();
-  })
+  runMarkdownPostRenderPipeline();
 }, { immediate: true, deep: true })
+
+watch(() => viewMode.value, (mode) => {
+  if ((mode === 'chunks' || mode === 'merged') && props.visible) {
+    runMarkdownPostRenderPipeline();
+  }
+});
+
+watch(() => props.visible, (visible) => {
+  if (visible && (viewMode.value === 'chunks' || viewMode.value === 'merged')) {
+    runMarkdownPostRenderPipeline();
+  }
+});
 
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
@@ -557,6 +572,50 @@ const isDeleting = (chunkIndex: number, questionId: string) => {
   return deletingQuestion.value?.chunkIndex === chunkIndex && deletingQuestion.value?.questionId === questionId;
 };
 
+// 父 Chunk 上下文展开状态
+const parentContextExpanded = ref<Set<number>>(new Set());
+const parentContextCache = ref<Map<string, string>>(new Map());
+const parentContextLoading = ref<Set<number>>(new Set());
+
+const hasParentChunk = (item: any) => !!item?.parent_chunk_id;
+
+const isParentExpanded = (index: number) => parentContextExpanded.value.has(index);
+
+const toggleParentContext = async (item: any, index: number) => {
+  if (parentContextExpanded.value.has(index)) {
+    parentContextExpanded.value.delete(index);
+    parentContextExpanded.value = new Set(parentContextExpanded.value);
+    return;
+  }
+  
+  const parentId = item.parent_chunk_id;
+  if (!parentContextCache.value.has(parentId)) {
+    parentContextLoading.value.add(index);
+    parentContextLoading.value = new Set(parentContextLoading.value);
+    try {
+      const result: any = await getChunkByIdOnly(parentId);
+      if (result.success && result.data) {
+        parentContextCache.value.set(parentId, result.data.content || '');
+        parentContextCache.value = new Map(parentContextCache.value);
+      }
+    } catch (err) {
+      MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed') || '加载父上下文失败');
+      return;
+    } finally {
+      parentContextLoading.value.delete(index);
+      parentContextLoading.value = new Set(parentContextLoading.value);
+    }
+  }
+  
+  parentContextExpanded.value.add(index);
+  parentContextExpanded.value = new Set(parentContextExpanded.value);
+  await runMarkdownPostRenderPipeline();
+};
+
+const getParentContent = (item: any) => {
+  return parentContextCache.value.get(item.parent_chunk_id) || '';
+};
+
 const downloadFile = () => {
   downKnowledgeDetails(props.details.id)
     .then((result) => {
@@ -704,6 +763,14 @@ const handleDetailsScroll = () => {
               <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ index + 1 }}</span>
               <div class="chunk-header-right">
                 <t-tag 
+                  v-if="hasParentChunk(item)" 
+                  size="small" 
+                  theme="primary" 
+                  variant="light"
+                >
+                  {{ $t('knowledgeBase.childChunk') || '子块' }}
+                </t-tag>
+                <t-tag 
                   v-if="getGeneratedQuestions(item).length > 0" 
                   size="small" 
                   theme="success" 
@@ -715,6 +782,18 @@ const handleDetailsScroll = () => {
               </div>
             </div>
             <div class="md-content" v-html="processMarkdown(item.content)"></div>
+            
+            <!-- 父 Chunk 上下文展开 -->
+            <div v-if="hasParentChunk(item)" class="parent-context-section">
+              <div class="parent-context-toggle" @click="toggleParentContext(item, index)">
+                <t-icon v-if="!parentContextLoading.has(index)" :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <t-loading v-else size="small" style="width: 14px; height: 14px;" />
+                <span>{{ $t('knowledgeBase.viewParentContext') || '查看父块上下文' }}</span>
+              </div>
+              <div v-show="isParentExpanded(index)" class="parent-context-content">
+                <div class="md-content" v-html="processMarkdown(getParentContent(item))"></div>
+              </div>
+            </div>
             
             <!-- 生成的问题展示 -->
             <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
@@ -1055,6 +1134,42 @@ const handleDetailsScroll = () => {
   .chunk-meta {
     color: #00000066;
     font-size: 11px;
+  }
+}
+
+// 父 Chunk 上下文样式
+.parent-context-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed #d0d5dd;
+}
+
+.parent-context-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: #07c05f;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+  
+  &:hover {
+    color: #07c05f;
+  }
+}
+
+.parent-context-content {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f0f5ff;
+  border-radius: 4px;
+  border-left: 3px solid #07c05f;
+  
+  .md-content {
+    color: #4e5969;
+    font-size: 13px;
   }
 }
 
