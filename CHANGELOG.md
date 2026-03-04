@@ -2,6 +2,62 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-03-04
+
+### 🚀 New Features
+- **NEW**: Knowledge Search — new "Knowledge Search" entry point with semantic retrieval, supporting bringing search results directly into the conversation window
+- **NEW**: Parser Engine Configuration — support configuring document parser engines and storage engines for different sources in settings, with per-file-type parser engine selection in knowledge base
+- **NEW**: Storage Provider Configuration — support configuring storage providers (local, MinIO, COS, Volcengine TOS) per data source with standardized configuration and backward compatibility
+- **NEW**: Milvus Vector Database — added Milvus as a new vector database backend for knowledge retrieval
+- **NEW**: Volcengine TOS — added Volcengine TOS object storage support
+- **NEW**: Mermaid Rendering — support mermaid diagram rendering in chat with fullscreen viewer, zoom, pan, toolbar and export
+- **NEW**: Batch Conversation Management — batch management and delete all sessions functionality
+- **NEW**: Remote URL Knowledge Creation — support creating knowledge entries from remote file URLs
+- **NEW**: Async Knowledge Re-parse — async API for re-processing existing knowledge documents
+- **NEW**: User Memory Graph Preview — preview of user-level memory graph visualization
+- **NEW**: Tenant Access Authorization — tenant access authorization in TenantHandler
+- **NEW**: Database Query Tool — built-in database query tool for agents with automatic tenant isolation and soft-delete filtering
+
+### ⚡ Improvements
+- Image rendering in local storage mode during conversations with optimized streaming image placeholders
+- Embedded document preview component for previewing user-uploaded original files
+- Knowledge base, agent, and shared space list page interaction redesign with improved UI elements
+- Storage configuration standardization with enhanced backward compatibility
+- Dynamic file service resolution for knowledge extraction
+- SSRF safety checks enhanced in MinerUCloudReader
+- Nginx configuration improved for file handling
+- Dockerfile and build scripts with customizable APT mirror support
+- System information display with database version
+- Path and filename validation security utilities
+- Vector embeddings indexing enhanced with TagID and IsRecommended fields
+- Korean (한국어) README translation
+
+### 🐛 Bug Fixes
+- Handle thinking content in Ollama chat responses
+- Batch manage dialog now loads all sessions independently from API
+- Prevent modal from closing when text selection extends beyond dialog boundary
+- Handle empty metadata case in Knowledge struct
+- Swagger interface documentation generation error resolved
+- Auth form validation check to handle non-boolean responses
+- Helm frontend APP_HOST env default value corrected
+
+### 🗑️ Removals
+- Removed Lite edition support and related configurations
+
+## [0.3.1] - 2026-02-10
+
+### 🚀 New Features
+- **NEW**: Remote Backend Support — support remote backend and HTTPS proxy configuration
+- **NEW**: Enhanced Document Upload — expanded document upload capabilities in KnowledgeBase component
+
+### ⚡ Improvements
+- Enhanced resource management in ListSpaceSidebar and KnowledgeBaseList
+
+### 🐛 Bug Fixes
+- Add clipboard API fallback for non-secure contexts
+- DuckDB spatial extension not found error
+- Data analysis knowledge files loaded via presigned URLs
+
 ## [0.3.0] - 2026-02-09
 
 ### 🚀 New Features
@@ -590,6 +646,8 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.3.2]: https://github.com/Tencent/WeKnora/tree/v0.3.2
+[0.3.1]: https://github.com/Tencent/WeKnora/tree/v0.3.1
 [0.3.0]: https://github.com/Tencent/WeKnora/tree/v0.3.0
 [0.2.10]: https://github.com/Tencent/WeKnora/tree/v0.2.10
 [0.2.9]: https://github.com/Tencent/WeKnora/tree/v0.2.9

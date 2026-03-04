@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.3.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.3.2-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -49,6 +49,21 @@
 **官网：** https://weknora.weixin.qq.com
 
 ## ✨ 最新更新
+
+**v0.3.2 版本亮点：**
+
+- 🔍 **知识搜索**：新增"知识搜索"入口，支持语义检索，可将检索结果直接带入对话窗口
+- ⚙️ **解析引擎与存储引擎配置**：设置中支持配置各个来源的文档解析引擎和存储引擎信息，知识库中支持为不同类型文件选择不同的解析引擎
+- 🖼️ **本地存储图片渲染**：本地存储模式下支持对话过程中图片的渲染，流式输出中图片占位效果优化
+- 📄 **文档预览**：使用内嵌的文档预览组件预览用户上传的原始文件
+- 🎨 **交互优化**：知识库、智能体、共享空间列表页面交互全面优化
+- 🗄️ **Milvus支持**：新增Milvus向量数据库后端，用于知识检索
+- 🌋 **火山引擎TOS**：新增火山引擎TOS对象存储支持
+- 📊 **Mermaid渲染**：对话中支持Mermaid图表渲染，全屏查看器支持缩放、导航和导出
+- 💬 **对话批量管理**：支持批量管理和一键删除所有会话
+- 🔗 **远程URL创建知识**：支持从远程文件URL创建知识条目
+- 🧠 **记忆图谱预览**：用户级记忆图谱可视化预览
+- 🔄 **异步重新解析**：支持异步API重新解析已有知识文档
 
 **v0.3.0 版本亮点：**
 
