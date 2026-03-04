@@ -22,9 +22,19 @@ class PaddleOCRBackend(OCRBackend):
         try:
             import paddle
 
-            # Set PaddlePaddle to use CPU and disable GPU
-            os.environ["CUDA_VISIBLE_DEVICES"] = ""
-            paddle.device.set_device("cpu")
+            # Check for GPU availability and set device
+            use_gpu = False
+            if paddle.is_compiled_with_cuda():
+                try:
+                    paddle.device.set_device("gpu")
+                    use_gpu = True
+                    logger.info("PaddlePaddle initialized on GPU")
+                except Exception as e:
+                    logger.warning(f"Failed to set GPU device: {e}, falling back to CPU")
+                    paddle.device.set_device("cpu")
+            else:
+                paddle.device.set_device("cpu")
+                logger.info("PaddlePaddle initialized on CPU (GPU not available or not compiled)")
 
             # Try to detect if CPU supports AVX instruction set
             # 尝试检测CPU是否支持AVX指令集
@@ -70,7 +80,7 @@ class PaddleOCRBackend(OCRBackend):
 
             # OCR configuration with text orientation classification enabled
             ocr_config = {
-                "use_gpu": False,
+                "use_gpu": use_gpu,
                 "text_det_limit_type": "max",
                 "text_det_limit_side_len": 960,
                 "use_doc_orientation_classify": True,  # Enable document orientation classification / 启用文档方向分类

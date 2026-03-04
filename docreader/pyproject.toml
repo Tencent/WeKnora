@@ -22,7 +22,7 @@ dependencies = [
     "ollama>=0.6.0",
     "openai>=2.7.1",
     "paddleocr>=2.10.0,<3.0.0",
-    "paddlepaddle>=3.0.0,<4.0.0",
+    "paddlepaddle-gpu==3.3.0",
     "pdfplumber>=0.11.7",
     "pillow>=12.0.0",
     "playwright>=1.55.0",
@@ -36,3 +36,16 @@ dependencies = [
     "trafilatura>=2.0.0",
     "urllib3>=2.5.0",
 ]
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[[tool.uv.index]]
+name = "paddle"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu130/"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddle" }
