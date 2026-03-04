@@ -1709,8 +1709,9 @@ func (s *sessionService) consumeFallbackStream(
 				Type:      types.EventType(event.EventAgentFinalAnswer),
 				SessionID: chatManage.SessionID,
 				Data: event.AgentFinalAnswerData{
-					Content: response.Content,
-					Done:    response.Done,
+					Content:    response.Content,
+					Done:       response.Done,
+					IsFallback: true,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
@@ -1745,8 +1746,9 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 		Type:      types.EventType(event.EventAgentFinalAnswer),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentFinalAnswerData{
-			Content: content,
-			Done:    true,
+			Content:    content,
+			Done:       true,
+			IsFallback: true,
 		},
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to emit fallback answer event: %v", err)

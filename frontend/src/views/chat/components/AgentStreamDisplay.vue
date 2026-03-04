@@ -44,10 +44,10 @@
         
         <!-- Answer Event -->
         <div v-else-if="event.type === 'answer' && (event.done || (event.content && event.content.trim()))" class="answer-event">
-          <div 
+          <div
             v-if="event.content && event.content.trim()"
             class="answer-content-wrapper"
-            :class="{ 
+            :class="{
               'answer-active': !event.done,
               'answer-done': event.done
             }"
@@ -63,6 +63,12 @@
             <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge(event)" :title="$t('agent.addToKnowledgeBase')">
               <t-icon name="add" />
             </t-button>
+            <!-- Fallback 提示图标 -->
+            <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+              <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                <t-icon name="info-circle" />
+              </t-button>
+            </t-tooltip>
           </div>
         </div>
         
@@ -2026,7 +2032,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .answer-event {
   animation: fadeInUp 0.25s ease-out;
   min-height: 20px;
-  
+
+  .fallback-icon-btn {
+    color: #d1d5db !important;
+    border-color: #e5e7eb !important;
+
+    &:hover {
+      color: #9ca3af !important;
+      border-color: #d1d5db !important;
+    }
+  }
+
   .answer-content-wrapper {
     background: #ffffff;
     border-radius: 6px;

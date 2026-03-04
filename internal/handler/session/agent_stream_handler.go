@@ -291,6 +291,9 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 	// Accumulate final answer locally for assistant message (database)
 	h.finalAnswer += data.Content
+	if data.IsFallback {
+		h.assistantMessage.IsFallback = true
+	}
 
 	// Calculate duration if done
 	var metadata map[string]interface{}
@@ -307,6 +310,9 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 		metadata = map[string]interface{}{
 			"event_id": evt.ID,
 		}
+	}
+	if data.IsFallback {
+		metadata["is_fallback"] = true
 	}
 	h.mu.Unlock()
 

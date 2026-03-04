@@ -283,6 +283,7 @@ export default {
     referencesDocCount: "{count}개 문서 참조",
     referencesDocAndWebCount: "{docCount}개 문서와 {webCount}개 웹페이지 참조",
     referenceChunkCount: "{count}개 청크",
+    fallbackHint: "지식 베이스에서 관련 내용을 찾지 못했습니다. 위는 모델의 직접 응답입니다.",
     chunkLabel: "청크 {index}:",
     navigateToDocument: "문서 상세 보기",
     referenceIconAlt: "참조 내용 아이콘",

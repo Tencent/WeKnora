@@ -1528,6 +1528,7 @@ export default {
     referencesDocCount: 'Referenced {count} document(s)',
     referencesDocAndWebCount: 'Referenced {docCount} document(s) and {webCount} web page(s)',
     referenceChunkCount: '{count} chunk(s)',
+    fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
     chunkLabel: 'Chunk {index}:',
     navigateToDocument: 'View document details',
     referenceIconAlt: 'Reference materials icon',

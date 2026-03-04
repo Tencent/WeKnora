@@ -285,6 +285,7 @@ export default {
     referencesDocCount: "引用了{count}篇文档",
     referencesDocAndWebCount: "引用了{docCount}篇文档和{webCount}条网页",
     referenceChunkCount: "{count}个片段",
+    fallbackHint: "未从知识库中检索到相关内容，以上为模型直接回答",
     chunkLabel: "片段{index}:",
     navigateToDocument: "查看文档详情",
     referenceIconAlt: "参考内容图标",

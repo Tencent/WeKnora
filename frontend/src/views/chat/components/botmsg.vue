@@ -3,9 +3,9 @@
         <div style="display: flex;flex-direction: column; gap:8px">
             <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
             <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
-                <span 
-                    v-for="item in mentionedItems" 
-                    :key="item.id" 
+                <span
+                    v-for="item in mentionedItems"
+                    :key="item.id"
                     class="mentioned_tag"
                     :class="[
                       item.type === 'kb' ? (item.kb_type === 'faq' ? 'faq-tag' : 'kb-tag') : 'file-tag'
@@ -39,6 +39,12 @@
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleAddToKnowledge" :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="add" />
                 </t-button>
+                <!-- Fallback 提示图标 -->
+                <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                    <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                        <t-icon name="info-circle" />
+                    </t-button>
+                </t-tooltip>
             </div>
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{ $t('common.loading') }}</span></div>
         </div>
@@ -135,6 +141,10 @@ customRenderer.image = function(href, title, text) {
 customRenderer.code = createMermaidCodeRenderer('mermaid-botmsg');
 
 // 计算属性：将 Markdown 文本转换为 tokens
+const mentionedItems = computed(() => {
+    return props.session?.mentioned_items || [];
+});
+
 const markdownTokens = computed(() => {
     const text = props.content || props.session?.content || '';
     if (!text || typeof text !== 'string') {
@@ -303,6 +313,72 @@ onBeforeUnmount(() => {
     border: 1px solid #07c05f;
     box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
     transition: all 0.2s ease;
+}
+
+.mentioned_items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
+    max-width: 100%;
+    margin-bottom: 2px;
+}
+
+.mentioned_tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    max-width: 200px;
+    cursor: default;
+    transition: all 0.15s;
+    background: rgba(7, 192, 95, 0.06);
+    border: 1px solid rgba(7, 192, 95, 0.2);
+    color: #374151;
+
+    &.kb-tag {
+        .tag_icon {
+            color: #07c05f;
+        }
+    }
+
+    &.faq-tag {
+        .tag_icon {
+            color: #f59e0b;
+        }
+    }
+
+    &.file-tag {
+        .tag_icon {
+            color: #6b7280;
+        }
+    }
+
+    .tag_icon {
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+    }
+
+    .tag_name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: currentColor;
+    }
+}
+
+.fallback-icon-btn {
+    color: #d1d5db !important;
+    border-color: #e5e7eb !important;
+
+    &:hover {
+        color: #9ca3af !important;
+        border-color: #d1d5db !important;
+    }
 }
 
 @keyframes fadeInUp {

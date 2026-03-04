@@ -1353,6 +1353,7 @@ export default {
     referencesDocCount: 'Использовано {count} документ(ов)',
     referencesDocAndWebCount: 'Использовано {docCount} документ(ов) и {webCount} веб-страниц(ы)',
     referenceChunkCount: '{count} фрагмент(ов)',
+    fallbackHint: 'В базе знаний не найдено релевантного содержимого. Выше представлен прямой ответ модели.',
     chunkLabel: 'Фрагмент {index}:',
     navigateToDocument: 'Просмотр документа',
     referenceIconAlt: 'Иконка ссылок на материалы',

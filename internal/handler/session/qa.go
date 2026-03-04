@@ -406,6 +406,9 @@ func (h *Handler) executeNormalModeQA(reqCtx *qaRequestContext, generateTitle bo
 			return nil
 		}
 		streamCtx.assistantMessage.Content += data.Content
+		if data.IsFallback {
+			streamCtx.assistantMessage.IsFallback = true
+		}
 		if data.Done {
 			// Prevent duplicate completion handling
 			if completionHandled {

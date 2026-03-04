@@ -61,35 +61,41 @@ const props = defineProps({
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
-    border-radius: 6px;
+    padding: 3px 8px;
+    border-radius: 10px;
     font-size: 12px;
     font-weight: 500;
     max-width: 200px;
     cursor: default;
     transition: all 0.15s;
-    background: var(--td-bg-color-secondarycontainer, #f3f3f3);
-    border: 1px solid transparent;
-    color: var(--td-text-color-primary, #333);
-    
-    /* 知识库 / 文件 - 无背景，与整体一致 */
-    &.kb-tag,
-    &.faq-tag,
-    &.file-tag {
-        background: transparent;
-        color: var(--td-text-color-primary, #333);
-        
+    background: rgba(7, 192, 95, 0.06);
+    border: 1px solid rgba(7, 192, 95, 0.2);
+    color: #374151;
+
+    &.kb-tag {
         .tag_icon {
-            color: var(--td-text-color-secondary, #666);
+            color: #07c05f;
         }
     }
-    
+
+    &.faq-tag {
+        .tag_icon {
+            color: #f59e0b;
+        }
+    }
+
+    &.file-tag {
+        .tag_icon {
+            color: #6b7280;
+        }
+    }
+
     .tag_icon {
-        font-size: 14px;
+        font-size: 13px;
         display: flex;
         align-items: center;
     }
-    
+
     .tag_name {
         overflow: hidden;
         text-overflow: ellipsis;

@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS messages (
     agent_steps TEXT DEFAULT NULL,
     mentioned_items TEXT DEFAULT '[]',
     is_completed BOOLEAN NOT NULL DEFAULT 0,
+    is_fallback BOOLEAN NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
