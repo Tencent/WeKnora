@@ -82,6 +82,10 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 // mineruFileParseResponse mirrors the relevant fields from the MinerU API response.
 type mineruFileParseResponse struct {
 	Results struct {
+		Document struct {
+			MDContent string            `json:"md_content"`
+			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
+		} `json:"document"`
 		Files struct {
 			MDContent string            `json:"md_content"`
 			Images    map[string]string `json:"images"` // path -> "data:image/png;base64,..." or raw base64
@@ -170,7 +174,21 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 		return "", nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	return result.Results.Files.MDContent, result.Results.Files.Images, nil
+	// MinerU response schema differs by version/deployment:
+	// - older/self-hosted variants: results.document.*
+	// - some variants:            results.files.*
+	// Prefer document when available, then fallback to files.
+	if result.Results.Document.MDContent != "" || len(result.Results.Document.Images) > 0 {
+		logger.Printf("DEBUG: [MinerU] Using response path: results.document")
+		return result.Results.Document.MDContent, result.Results.Document.Images, nil
+	}
+	if result.Results.Files.MDContent != "" || len(result.Results.Files.Images) > 0 {
+		logger.Printf("DEBUG: [MinerU] Using response path: results.files")
+		return result.Results.Files.MDContent, result.Results.Files.Images, nil
+	}
+
+	logger.Printf("WARN: [MinerU] Response has no markdown/images under results.document or results.files")
+	return "", nil, nil
 }
 
 // processImages decodes base64 images from MinerU response and returns ImageRef list.
