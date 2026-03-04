@@ -154,6 +154,7 @@ func (p *PluginSearchParallel) OnEvent(ctx context.Context,
 
 	// Merge results from both searches (no concurrent access now)
 	chatManage.SearchResult = append(chunkChatManage.SearchResult, entityChatManage.SearchResult...)
+	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 
 	// Log any errors but don't fail the pipeline if at least one search succeeded
 	if chunkSearchErr != nil {
