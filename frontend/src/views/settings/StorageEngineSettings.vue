@@ -134,7 +134,7 @@
           </div>
           <div v-if="minioEnvAvailable" class="test-bar">
             <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
-            <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? 'success' : 'error']">
+            <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? (minioCheckResult.bucket_created ? 'created' : 'success') : 'error']">
               {{ minioCheckResult.message }}
             </span>
           </div>
@@ -192,7 +192,7 @@
           </div>
           <div class="test-bar">
             <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
-            <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? 'success' : 'error']">
+            <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? (minioCheckResult.bucket_created ? 'created' : 'success') : 'error']">
               {{ minioCheckResult.message }}
             </span>
           </div>
@@ -408,7 +408,7 @@ const saveMessage = ref('')
 const saveSuccess = ref(false)
 
 const checkingMinio = ref(false)
-const minioCheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const minioCheckResult = ref<{ ok: boolean; message: string; bucket_created?: boolean } | null>(null)
 const checkingCos = ref(false)
 const cosCheckResult = ref<{ ok: boolean; message: string } | null>(null)
 const checkingTos = ref(false)
@@ -569,6 +569,10 @@ async function onCheckMinio() {
     const payload = buildPayload()
     const res = await checkStorageEngine({ provider: 'minio', minio: payload.minio })
     minioCheckResult.value = res?.data ?? { ok: false, message: '未知错误' }
+    // Refresh bucket list if a new bucket was auto-created
+    if (res?.data?.bucket_created) {
+      loadMinioBuckets()
+    }
   } catch (e: unknown) {
     minioCheckResult.value = { ok: false, message: e instanceof Error ? e.message : '请求失败' }
   } finally {
@@ -832,6 +836,10 @@ onMounted(loadAll)
 
   &.success {
     color: #52c41a;
+  }
+
+  &.created {
+    color: #fa8c16;
   }
 
   &.error {

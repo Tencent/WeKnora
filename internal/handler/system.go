@@ -694,8 +694,9 @@ type StorageCheckRequest struct {
 
 // StorageCheckResponse is the response for a single-engine connectivity check.
 type StorageCheckResponse struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	OK            bool   `json:"ok"`
+	Message       string `json:"message"`
+	BucketCreated bool   `json:"bucket_created,omitempty"`
 }
 
 // CheckStorageEngine tests connectivity for a single storage engine using the provided config.
@@ -755,12 +756,51 @@ func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *typ
 
 	err := file.CheckMinioConnectivity(ctx, endpoint, accessKeyID, secretAccessKey, cfg.BucketName, cfg.UseSSL)
 	if err != nil {
-		logger.Error(ctx, "Storage check: MinIO connectivity failed", "error", err)
 		errMsg := err.Error()
-		if strings.Contains(errMsg, "does not exist") {
-			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在", cfg.BucketName)}})
+		// If bucket does not exist, auto-create it with public-read policy
+		if strings.Contains(errMsg, "does not exist") && cfg.BucketName != "" {
+			logger.Info(ctx, "Storage check: bucket does not exist, attempting auto-creation", "bucket", cfg.BucketName)
+			minioClient, clientErr := minio.New(endpoint, &minio.Options{
+				Creds:  credentials.NewStaticV4(accessKeyID, secretAccessKey, ""),
+				Secure: cfg.UseSSL,
+			})
+			if clientErr != nil {
+				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("创建 MinIO 客户端失败: %s", sanitizeStorageCheckError(clientErr))}})
+				return
+			}
+			if mkErr := minioClient.MakeBucket(ctx, cfg.BucketName, minio.MakeBucketOptions{}); mkErr != nil {
+				logger.Error(ctx, "Storage check: failed to create bucket", "bucket", cfg.BucketName, "error", mkErr)
+				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("自动创建 Bucket「%s」失败: %s", cfg.BucketName, sanitizeStorageCheckError(mkErr))}})
+				return
+			}
+			// Set public-read policy
+			publicReadPolicy := fmt.Sprintf(`{
+				"Version": "2012-10-17",
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Principal": {"AWS": ["*"]},
+						"Action": ["s3:GetBucketLocation", "s3:ListBucket"],
+						"Resource": ["arn:aws:s3:::%s"]
+					},
+					{
+						"Effect": "Allow",
+						"Principal": {"AWS": ["*"]},
+						"Action": ["s3:GetObject"],
+						"Resource": ["arn:aws:s3:::%s/*"]
+					}
+				]
+			}`, cfg.BucketName, cfg.BucketName)
+			if policyErr := minioClient.SetBucketPolicy(ctx, cfg.BucketName, publicReadPolicy); policyErr != nil {
+				logger.Error(ctx, "Storage check: bucket created but failed to set public-read policy", "bucket", cfg.BucketName, "error", policyErr)
+				c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, BucketCreated: true, Message: fmt.Sprintf("Bucket「%s」已自动创建，但设置公有读策略失败，请手动配置权限", cfg.BucketName)}})
+				return
+			}
+			logger.Info(ctx, "Storage check: bucket created with public-read policy", "bucket", cfg.BucketName)
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, BucketCreated: true, Message: fmt.Sprintf("Bucket「%s」不存在，已自动创建并设置公有读权限", cfg.BucketName)}})
 			return
 		}
+		logger.Error(ctx, "Storage check: MinIO connectivity failed", "error", err)
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: sanitizeStorageCheckError(err)}})
 		return
 	}

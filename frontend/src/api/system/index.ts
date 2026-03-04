@@ -227,6 +227,7 @@ export interface StorageCheckRequest {
 export interface StorageCheckResponse {
   ok: boolean
   message: string
+  bucket_created?: boolean
 }
 
 export function checkStorageEngine(req: StorageCheckRequest): Promise<{ data: StorageCheckResponse }> {
