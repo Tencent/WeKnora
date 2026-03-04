@@ -1,7 +1,12 @@
 package docparser
 
 import (
+	"bytes"
 	"context"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"log"
 	"path/filepath"
 	"regexp"
@@ -11,6 +16,30 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 )
+
+const (
+	// minImageDimension is the minimum width/height in pixels; images smaller
+	// than this on either axis are treated as icons and filtered out.
+	minImageDimension = 128
+	// minImageBytes is the minimum file size in bytes; very small images are
+	// almost certainly icons or decorative elements.
+	minImageBytes = 512 // 512 bytes
+)
+
+// isIconImage returns true if the image data looks like a small icon or
+// decorative element that should be filtered out. It checks pixel dimensions
+// when decodable, and falls back to raw byte size otherwise.
+func isIconImage(data []byte) bool {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		// Cannot decode dimensions — fall back to size-only heuristic.
+		return len(data) < minImageBytes
+	}
+	if cfg.Width < minImageDimension || cfg.Height < minImageDimension {
+		return true
+	}
+	return false
+}
 
 // StoredImage describes an image that has been saved to storage.
 type StoredImage struct {
@@ -69,6 +98,13 @@ func (r *ImageResolver) ResolveAndStore(
 		// Find inline image bytes from the result
 		ref, found := refMap[refPath]
 		if !found || len(ref.ImageData) == 0 {
+			continue
+		}
+
+		// Filter out small icons and decorative images
+		if isIconImage(ref.ImageData) {
+			// Remove the image reference from markdown entirely
+			markdown = markdown[:m[0]] + markdown[m[1]:]
 			continue
 		}
 
