@@ -380,13 +380,13 @@ onMounted(loadAll)
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #1a1a1a;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.6;
   }
@@ -398,7 +398,7 @@ onMounted(loadAll)
   justify-content: center;
   gap: 8px;
   padding: 48px 0;
-  color: #999;
+  color: var(--td-text-color-placeholder);
   font-size: 14px;
 }
 
@@ -412,7 +412,7 @@ onMounted(loadAll)
 
   .empty-text {
     font-size: 14px;
-    color: #999;
+    color: var(--td-text-color-placeholder);
     margin: 0;
   }
 }
@@ -421,7 +421,7 @@ onMounted(loadAll)
 .engine-item {
   padding-top: 24px;
   margin-top: 24px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--td-component-stroke);
 
   &.first {
     margin-top: 0;
@@ -435,7 +435,7 @@ onMounted(loadAll)
 
   p {
     font-size: 13px;
-    color: #888;
+    color: var(--td-text-color-placeholder);
     margin: 6px 0 0 0;
     line-height: 1.5;
   }
@@ -449,7 +449,7 @@ onMounted(loadAll)
   h3 {
     font-size: 15px;
     font-weight: 600;
-    color: #1a1a1a;
+    color: var(--td-text-color-primary);
     margin: 0;
     font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
   }
@@ -458,7 +458,7 @@ onMounted(loadAll)
 .engine-doc-link {
   margin-left: auto;
   font-size: 12px;
-  color: var(--td-brand-color, #0052d9);
+  color: var(--td-brand-color);
   text-decoration: none;
   white-space: nowrap;
 
@@ -470,7 +470,7 @@ onMounted(loadAll)
 // ---- DocReader 连接信息 ----
 .docreader-inline {
   padding: 10px 14px;
-  background: #f7f8fa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
   margin-bottom: 12px;
 
@@ -482,13 +482,13 @@ onMounted(loadAll)
 .docreader-desc {
   margin: 0;
   font-size: 12px;
-  color: #888;
+  color: var(--td-text-color-placeholder);
   line-height: 1.6;
 
   code {
     padding: 1px 5px;
     font-size: 11px;
-    background: #eee;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 3px;
   }
 }
@@ -502,7 +502,7 @@ onMounted(loadAll)
 
 .env-hint {
   font-size: 12px;
-  color: #999;
+  color: var(--td-text-color-placeholder);
 }
 
 // ---- 文件类型标签 ----
@@ -520,7 +520,7 @@ onMounted(loadAll)
   gap: 16px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px dashed #e5e7eb;
+  border-top: 1px dashed var(--td-component-stroke);
 }
 
 .form-field {
@@ -531,7 +531,7 @@ onMounted(loadAll)
   label {
     font-size: 13px;
     font-weight: 500;
-    color: #555;
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -550,7 +550,7 @@ onMounted(loadAll)
   bottom: 0;
   margin-top: 32px;
   padding: 16px 0 4px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, #ffffff 12%);
+  background: linear-gradient(to bottom, transparent 0%, var(--td-bg-color-container) 12%);
   z-index: 10;
 }
 
@@ -558,15 +558,15 @@ onMounted(loadAll)
   font-size: 13px;
 
   &.success {
-    color: #52c41a;
+    color: var(--td-success-color);
   }
 
   &.error {
-    color: #ff4d4f;
+    color: var(--td-error-color);
   }
 
   &.hint {
-    color: #666;
+    color: var(--td-text-color-secondary);
   }
 }
 

@@ -144,12 +144,12 @@ onMounted(() => {
   
   .model-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .add-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .model-name {
@@ -159,7 +159,7 @@ onMounted(() => {
   
   &.add {
     .model-name {
-      color: #07C05F;
+      color: var(--td-brand-color);
       font-weight: 500;
     }
   }

@@ -855,9 +855,9 @@ const handleDetailsScroll = () => {
 // 代码块样式
 :deep(.code-block-wrapper) {
   margin: 12px 0;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--td-component-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 
@@ -865,17 +865,17 @@ const handleDetailsScroll = () => {
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    background: #f3f4f6;
-    border-bottom: 1px solid #e5e7eb;
+    background: var(--td-bg-color-secondarycontainer);
+    border-bottom: 1px solid var(--td-component-stroke);
     font-size: 12px;
     font-weight: 600;
-    color: #1f2937;
+    color: var(--td-text-color-primary);
   }
 
   .code-block-pre {
     margin: 0;
     padding: 12px;
-    background: #f6f8fa;
+    background: var(--td-bg-color-secondarycontainer);
     overflow: auto;
     font-size: 13px;
     line-height: 1.5;
@@ -919,7 +919,7 @@ const handleDetailsScroll = () => {
 }
 
 .label {
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-size: 14px;
   font-style: normal;
   font-weight: 500;
@@ -939,8 +939,8 @@ const handleDetailsScroll = () => {
   padding: 5px 8px;
   align-items: center;
   border-radius: 3px;
-  border: 1px solid #dcdcdc;
-  background: #30323605;
+  border: 1px solid var(--td-component-border);
+  background: var(--td-bg-color-container-hover);
   word-break: break-all;
   text-align: justify;
 }
@@ -949,7 +949,7 @@ const handleDetailsScroll = () => {
   margin-left: 18px;
   display: flex;
   overflow: hidden;
-  color: #07c05f;
+  color: var(--td-brand-color);
 
   .download_box {
     width: 16px;
@@ -963,21 +963,21 @@ const handleDetailsScroll = () => {
 // URL链接区域
 .url_link_box {
   border-radius: 4px;
-  border: 1px solid #d0e8dc;
-  background: #f0fdf4;
+  border: 1px solid var(--td-success-color-focus);
+  background: var(--td-success-color-light);
   padding: 8px 12px;
   
   .url_link {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #059669;
+    color: var(--td-brand-color-active);
     text-decoration: none;
     transition: all 0.2s ease;
     
     &:hover {
-      color: #07c05f;
-      background: #e6f7ed;
+      color: var(--td-brand-color);
+      background: var(--td-success-color-light);
       border-radius: 3px;
       padding: 4px 6px;
       margin: -4px -6px;
@@ -996,7 +996,7 @@ const handleDetailsScroll = () => {
     .jump-icon {
       transition: transform 0.2s ease;
       flex-shrink: 0;
-      color: #059669;
+      color: var(--td-brand-color-active);
     }
   }
 }
@@ -1004,12 +1004,12 @@ const handleDetailsScroll = () => {
 // 手动创建标题区域
 .manual_title_box {
   border-radius: 4px;
-  border: 1px solid #dcdcdc;
-  background: #f0fdf4;
+  border: 1px solid var(--td-component-border);
+  background: var(--td-success-color-light);
   padding: 8px 12px;
   
   .manual_title {
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     font-size: 14px;
     font-weight: 500;
     word-break: break-word;
@@ -1044,9 +1044,9 @@ const handleDetailsScroll = () => {
   }
 
   .chunk-count {
-    color: #07c05f;
+    color: var(--td-brand-color);
     font-size: 12px;
-    background: #07c05f14;
+    background: var(--td-brand-color)14;
     padding: 4px 8px;
     border-radius: 12px;
   }
@@ -1067,7 +1067,7 @@ const handleDetailsScroll = () => {
 }
 
 .time {
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-size: 12px;
   font-style: normal;
   font-weight: 400;
@@ -1076,10 +1076,10 @@ const handleDetailsScroll = () => {
 
 .no_content {
   margin-top: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-size: 12px;
   padding: 16px;
-  background: #fbfbfb;
+  background: var(--td-bg-color-container);
   text-align: center;
 }
 
@@ -1097,15 +1097,15 @@ const handleDetailsScroll = () => {
   border: 1px solid transparent;
   
   &.chunk-even {
-    background: #3032360f;
+    background: var(--td-bg-color-container-hover);
   }
   
   &.chunk-odd {
-    background: #07c05f0d;
+    background: var(--td-brand-color)0d;
   }
   
   &:hover {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
   }
 }
@@ -1116,10 +1116,10 @@ const handleDetailsScroll = () => {
   justify-content: space-between;
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #e7e7e7;
+  border-bottom: 1px solid var(--td-component-stroke);
   
   .chunk-index {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.5px;
@@ -1132,7 +1132,7 @@ const handleDetailsScroll = () => {
   }
   
   .chunk-meta {
-    color: #00000066;
+    color: var(--td-text-color-disabled);
     font-size: 11px;
   }
 }
@@ -1141,7 +1141,7 @@ const handleDetailsScroll = () => {
 .parent-context-section {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px dashed #d0d5dd;
+  border-top: 1px dashed var(--td-component-stroke);
 }
 
 .parent-context-toggle {
@@ -1149,26 +1149,26 @@ const handleDetailsScroll = () => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #07c05f;
+  color: var(--td-brand-color);
   font-size: 12px;
   font-weight: 500;
   padding: 4px 0;
   transition: color 0.2s ease;
   
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
 .parent-context-content {
   margin-top: 8px;
   padding: 10px 12px;
-  background: #f0f5ff;
+  background: var(--td-brand-color-light);
   border-radius: 4px;
-  border-left: 3px solid #07c05f;
+  border-left: 3px solid var(--td-brand-color);
   
   .md-content {
-    color: #4e5969;
+    color: var(--td-text-color-secondary);
     font-size: 13px;
   }
 }
@@ -1177,7 +1177,7 @@ const handleDetailsScroll = () => {
 .questions-section {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px dashed #e0e0e0;
+  border-top: 1px dashed var(--td-component-stroke);
 }
 
 .questions-toggle {
@@ -1185,14 +1185,14 @@ const handleDetailsScroll = () => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #059669;
+  color: var(--td-brand-color-active);
   font-size: 12px;
   font-weight: 500;
   padding: 4px 0;
   transition: color 0.2s ease;
   
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1207,15 +1207,15 @@ const handleDetailsScroll = () => {
   gap: 8px;
   padding: 6px 8px;
   margin-bottom: 4px;
-  background: #f0fdf4;
+  background: var(--td-success-color-light);
   border-radius: 4px;
   font-size: 13px;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   line-height: 1.5;
   transition: background-color 0.2s ease;
   
   &:hover {
-    background: #e6f7ed;
+    background: var(--td-success-color-light);
     
     .delete-question-btn {
       opacity: 1;
@@ -1223,7 +1223,7 @@ const handleDetailsScroll = () => {
   }
   
   .question-icon {
-    color: #059669;
+    color: var(--td-brand-color-active);
     flex-shrink: 0;
     margin-top: 2px;
   }
@@ -1236,11 +1236,11 @@ const handleDetailsScroll = () => {
   .delete-question-btn {
     opacity: 0;
     flex-shrink: 0;
-    color: #999;
+    color: var(--td-text-color-placeholder);
     transition: opacity 0.2s ease, color 0.2s ease;
     
     &:hover {
-      color: #e34d59;
+      color: var(--td-error-color);
     }
   }
 }
@@ -1248,7 +1248,7 @@ const handleDetailsScroll = () => {
 .md-content {
   word-break: break-word;
   line-height: 1.6;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
 }
 
 // 保留旧样式作为兼容（已被chunk-item替代）

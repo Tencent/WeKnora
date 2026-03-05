@@ -569,7 +569,7 @@ watch(() => props.visible, (newVal) => {
     background: var(--td-brand-color-light, #eefdf5);
     
     .agent-option-name {
-      color: #10b981;
+      color: var(--td-success-color);
       font-weight: 600;
     }
   }
@@ -641,13 +641,13 @@ watch(() => props.visible, (newVal) => {
   flex-shrink: 0;
   
   &.normal {
-    background: rgba(7, 192, 95, 0.1);
-    color: #059669;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color-active);
   }
   
   &.agent {
     background: rgba(124, 77, 255, 0.1);
-    color: #7c4dff;
+    color: var(--td-brand-color);
   }
 }
 
@@ -695,7 +695,7 @@ watch(() => props.visible, (newVal) => {
 .check-icon {
   width: 14px;
   height: 14px;
-  color: #10b981;
+  color: var(--td-success-color);
   flex-shrink: 0;
 }
 
@@ -743,7 +743,7 @@ watch(() => props.visible, (newVal) => {
 
 .agent-tooltip-selected {
   font-size: 10px;
-  color: #10b981;
+  color: var(--td-success-color);
   font-weight: 500;
 }
 

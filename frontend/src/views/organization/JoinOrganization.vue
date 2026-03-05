@@ -69,12 +69,12 @@ const goToOrganizations = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #f7f9fc 0%, #e6f7ec 100%);
+  background: var(--td-bg-color-container);
   padding: 20px;
 }
 
 .join-card {
-  background: #fff;
+  background: var(--td-bg-color-container);
   border-radius: 16px;
   padding: 48px;
   text-align: center;
@@ -88,31 +88,31 @@ const goToOrganizations = () => {
   height: 80px;
   margin: 0 auto 24px;
   border-radius: 50%;
-  background: #e6f7ec;
+  background: var(--td-success-color-light);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #00a870;
+  color: var(--td-success-color);
 }
 
 .join-title {
   font-size: 20px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   margin: 0 0 16px;
 }
 
 .join-message {
   font-size: 14px;
-  color: #86909c;
+  color: var(--td-text-color-secondary);
   margin: 0 0 24px;
   
   &.error {
-    color: #e34d59;
+    color: var(--td-error-color);
   }
   
   &.success {
-    color: #00a870;
+    color: var(--td-success-color);
   }
 }
 </style>

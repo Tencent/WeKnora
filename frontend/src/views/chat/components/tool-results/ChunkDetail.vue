@@ -81,7 +81,7 @@ function fallbackCopy(text: string) {
 code {
   font-family: 'Monaco', 'Courier New', monospace;
   font-size: 11px;
-  background: #f0f0f0;
+  background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 3px;
 }

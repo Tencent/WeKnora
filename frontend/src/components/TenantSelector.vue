@@ -264,12 +264,12 @@ onUnmounted(() => {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
-  background: #f8faf9;
-  border: 1px solid #e8ebe9;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
 
   &:hover {
-    background: #f0f5f2;
-    border-color: #d0d8d3;
+    background: var(--td-bg-color-container-hover);
+    border-color: var(--td-component-border);
   }
 }
 
@@ -280,7 +280,7 @@ onUnmounted(() => {
 
 .tenant-label {
   font-size: 11px;
-  color: #8b9196;
+  color: var(--td-text-color-placeholder);
   margin-bottom: 2px;
   font-weight: 500;
 }
@@ -295,7 +295,7 @@ onUnmounted(() => {
 .tenant-name {
   font-size: 14px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -304,7 +304,7 @@ onUnmounted(() => {
 
 .tenant-switch-icon {
   font-size: 14px;
-  color: #07c05f;
+  color: var(--td-brand-color);
   flex-shrink: 0;
 }
 
@@ -322,8 +322,8 @@ onUnmounted(() => {
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  background: #fff;
-  border: 1px solid #e7e9eb;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   z-index: 1000;
@@ -332,14 +332,14 @@ onUnmounted(() => {
 
 .dropdown-header {
   padding: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .dropdown-title {
   display: block;
   font-size: 12px;
   font-weight: 600;
-  color: #666;
+  color: var(--td-text-color-secondary);
   margin-bottom: 8px;
 }
 
@@ -348,21 +348,21 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
-  background: #f5f7fa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
   border: 1px solid transparent;
   transition: all 0.2s;
 
   &:focus-within {
-    background: #fff;
-    border-color: #07c05f;
+    background: var(--td-bg-color-container);
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
   }
 }
 
 .search-icon {
   font-size: 14px;
-  color: #999;
+  color: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
 
@@ -372,23 +372,23 @@ onUnmounted(() => {
   outline: none;
   background: transparent;
   font-size: 13px;
-  color: #333;
+  color: var(--td-text-color-primary);
   min-width: 0;
 
   &::placeholder {
-    color: #999;
+    color: var(--td-text-color-placeholder);
   }
 }
 
 .clear-icon {
   font-size: 14px;
-  color: #999;
+  color: var(--td-text-color-placeholder);
   cursor: pointer;
   flex-shrink: 0;
   transition: color 0.2s;
 
   &:hover {
-    color: #666;
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -406,11 +406,11 @@ onUnmounted(() => {
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #e0e0e0;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 2px;
 
     &:hover {
-      background: #ccc;
+      background: var(--td-bg-color-component-disabled);
     }
   }
 }
@@ -430,14 +430,14 @@ onUnmounted(() => {
   }
 
   &:hover {
-    background: #f5f7fa;
+    background: var(--td-bg-color-secondarycontainer);
   }
 
   &.selected {
     background: rgba(7, 192, 95, 0.08);
 
     .tenant-item-name {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 500;
     }
   }
@@ -455,19 +455,19 @@ onUnmounted(() => {
   width: 32px;
   height: 32px;
   border-radius: 6px;
-  background: #f0f0f0;
+  background: var(--td-bg-color-secondarycontainer);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
   font-weight: 600;
-  color: #666;
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
   transition: all 0.2s;
 
   &.active {
-    background: linear-gradient(135deg, #07C05F 0%, #05A34E 100%);
-    color: #fff;
+    background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
+    color: var(--td-text-color-anti);
   }
 }
 
@@ -481,7 +481,7 @@ onUnmounted(() => {
 
 .tenant-item-name {
   font-size: 13px;
-  color: #333;
+  color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -489,11 +489,11 @@ onUnmounted(() => {
 
 .tenant-item-id {
   font-size: 11px;
-  color: #999;
+  color: var(--td-text-color-placeholder);
 }
 
 .check-icon {
-  color: #07c05f;
+  color: var(--td-brand-color);
   flex-shrink: 0;
 }
 
@@ -505,7 +505,7 @@ onUnmounted(() => {
   justify-content: center;
   padding: 24px 12px;
   gap: 8px;
-  color: #999;
+  color: var(--td-text-color-placeholder);
   font-size: 13px;
 }
 

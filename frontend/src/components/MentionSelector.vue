@@ -486,11 +486,11 @@ const scrollToItem = (index: number) => {
 }
 .mention-detail-content .detail-type-badge.doc {
   background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
+  color: var(--td-success-color);
 }
 .mention-detail-content .detail-type-badge.faq {
   background: rgba(0, 82, 217, 0.1);
-  color: #0052d9;
+  color: var(--td-brand-color);
 }
 .mention-detail-content .detail-desc {
   margin: 0 0 8px;
@@ -538,7 +538,7 @@ const scrollToItem = (index: number) => {
   vertical-align: middle;
 }
 .mention-detail-content .detail-kb .detail-icon {
-  color: #17b03a;
+  color: var(--td-brand-color);
   font-weight: 600;
 }
 .mention-detail-content .detail-icon-img {

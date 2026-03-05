@@ -321,13 +321,13 @@ onMounted(() => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -348,7 +348,7 @@ onMounted(() => {
   justify-content: space-between;
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   .header-info {
     flex: 1;
@@ -356,13 +356,13 @@ onMounted(() => {
     h3 {
       font-size: 15px;
       font-weight: 500;
-      color: #333333;
+      color: var(--td-text-color-primary);
       margin: 0 0 4px 0;
     }
 
     p {
       font-size: 13px;
-      color: #999999;
+      color: var(--td-text-color-placeholder);
       margin: 0;
       line-height: 1.5;
     }
@@ -375,7 +375,7 @@ onMounted(() => {
 
   :deep(.t-empty__description) {
     font-size: 14px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
 }
@@ -384,15 +384,15 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   padding: 16px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .service-card {
   padding: 12px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
   transition: all 0.2s;
 
   &:last-child {
@@ -415,7 +415,7 @@ onMounted(() => {
     .service-name {
       font-size: 15px;
       font-weight: 500;
-      color: #333333;
+      color: var(--td-text-color-primary);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -429,13 +429,13 @@ onMounted(() => {
       flex-shrink: 0;
 
       .more-btn {
-        color: #999999;
+        color: var(--td-text-color-placeholder);
         padding: 4px;
         transition: all 0.2s;
 
         &:hover {
-          background: #f5f7fa;
-          color: #333333;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-text-color-primary);
         }
       }
     }
@@ -443,7 +443,7 @@ onMounted(() => {
 
   .service-description {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin-bottom: 8px;
     line-height: 1.5;
   }
@@ -453,7 +453,7 @@ onMounted(() => {
     align-items: center;
     gap: 12px;
     font-size: 12px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
 
     .meta-item {
       display: flex;

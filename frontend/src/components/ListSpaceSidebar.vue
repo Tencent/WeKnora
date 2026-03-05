@@ -301,7 +301,7 @@ onBeforeUnmount(() => {
   &:hover .resize-handle-line,
   .dragging & .resize-handle-line {
     opacity: 1;
-    background: #07c05f;
+    background: var(--td-brand-color);
   }
 }
 
@@ -309,7 +309,7 @@ onBeforeUnmount(() => {
   width: 2px;
   height: 40px;
   border-radius: 1px;
-  background: #c5cad1;
+  background: var(--td-bg-color-component-disabled);
   opacity: 0.45;
   transition: opacity 0.2s ease, background 0.2s ease;
 }
@@ -343,25 +343,25 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 2px;
   cursor: pointer;
-  color: #6b7482;
+  color: var(--td-text-color-secondary);
   transition: all 0.15s ease;
   flex-shrink: 0;
 
   &:hover {
-    background: #f5f7fa;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: #eef9f2;
-    color: #07c05f;
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color);
 
     &:hover {
-      background: #e4f5ea;
+      background: var(--td-success-color-light);
     }
 
     .icon-label {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 520;
     }
   }
@@ -376,7 +376,7 @@ onBeforeUnmount(() => {
 .icon-label {
   font-size: 10px;
   line-height: 1.2;
-  color: #86909c;
+  color: var(--td-text-color-secondary);
   max-width: 44px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -388,7 +388,7 @@ onBeforeUnmount(() => {
 .icon-strip-divider {
   width: 24px;
   height: 1px;
-  background: #e7ebf0;
+  background: var(--td-bg-color-secondarycontainer);
   margin: 4px 0;
   flex-shrink: 0;
 }
@@ -404,7 +404,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
-  border-right: 1px solid #eef1f5;
+  border-right: 1px solid var(--td-component-stroke);
 
   &::-webkit-scrollbar {
     display: none;
@@ -418,7 +418,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: 8px 10px;
   border-radius: 7px;
-  color: #3f4652;
+  color: var(--td-text-color-primary);
   cursor: pointer;
   transition: all 0.15s ease;
   font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -435,7 +435,7 @@ onBeforeUnmount(() => {
 
   .item-icon {
     flex-shrink: 0;
-    color: #5c6470;
+    color: var(--td-text-color-secondary);
     font-size: 14px;
     transition: color 0.15s ease;
   }
@@ -458,36 +458,36 @@ onBeforeUnmount(() => {
 
   .item-count {
     font-size: 12px;
-    color: #6b7482;
+    color: var(--td-text-color-secondary);
     font-weight: 500;
     padding: 2px 7px;
     border-radius: 8px;
-    background: #f4f6f8;
+    background: var(--td-bg-color-secondarycontainer);
     margin-left: 6px;
     flex-shrink: 0;
     transition: all 0.15s ease;
   }
 
   &:hover {
-    background: #f5f7fa;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
 
     .item-icon {
-      color: #1d2129;
+      color: var(--td-text-color-primary);
     }
 
     .item-count {
-      background: #edf1f5;
-      color: #1d2129;
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
     }
   }
 
   &.active {
-    background: #eef9f2;
-    color: #07c05f;
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color);
 
     .item-icon {
-      color: #07c05f;
+      color: var(--td-brand-color);
     }
 
     .item-label {
@@ -495,13 +495,13 @@ onBeforeUnmount(() => {
     }
 
     .item-count {
-      background: #e4f5ea;
-      color: #2f9d67;
+      background: var(--td-success-color-light);
+      color: var(--td-brand-color);
       font-weight: 520;
     }
 
     &:hover {
-      background: #e4f5ea;
+      background: var(--td-success-color-light);
     }
   }
 }
@@ -509,11 +509,11 @@ onBeforeUnmount(() => {
 .sidebar-section {
   padding: 10px 8px 3px;
   margin-top: 2px;
-  border-top: 1px solid #eef1f5;
+  border-top: 1px solid var(--td-component-stroke);
 
   .section-title {
     font-size: 12px;
-    color: #86909c;
+    color: var(--td-text-color-secondary);
     font-weight: 600;
     line-height: 1.4;
   }

@@ -178,7 +178,7 @@ const handleClose = () => {
       margin-bottom: 12px;
       padding: 12px 16px;
       border-radius: 6px;
-      background: #f5f7fa;
+      background: var(--td-bg-color-secondarycontainer);
 
       :deep(.t-icon) {
         font-size: 20px;
@@ -192,31 +192,31 @@ const handleClose = () => {
 
     .status-success {
       :deep(.t-icon) {
-        color: #00a870;
+        color: var(--td-success-color);
       }
 
       .status-text {
-        color: #00a870;
+        color: var(--td-success-color);
       }
     }
 
     .status-error {
       :deep(.t-icon) {
-        color: #e34d59;
+        color: var(--td-error-color);
       }
 
       .status-text {
-        color: #e34d59;
+        color: var(--td-error-color);
       }
     }
 
     .status-message {
       margin: 0;
       padding: 12px 16px;
-      background: #f5f7fa;
+      background: var(--td-bg-color-secondarycontainer);
       border-radius: 6px;
       font-size: 13px;
-      color: #666666;
+      color: var(--td-text-color-secondary);
       line-height: 1.6;
       word-break: break-word;
     }
@@ -236,7 +236,7 @@ const handleClose = () => {
           font-size: 16px;
           font-weight: 600;
           margin: 0;
-          color: #303133;
+          color: var(--td-text-color-primary);
         }
       }
 
@@ -247,20 +247,20 @@ const handleClose = () => {
       }
 
       .tool-card {
-        border: 1px solid #e4e7ed;
+        border: 1px solid var(--td-component-stroke);
         border-radius: 8px;
-        background: #ffffff;
+        background: var(--td-bg-color-container);
         transition: all 0.2s ease;
         overflow: hidden;
 
         &:hover {
           border-color: var(--td-brand-color);
-          box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
+          box-shadow: 0 2px 8px var(--td-brand-color-light);
         }
 
         &.tool-card-expanded {
           border-color: var(--td-brand-color);
-          box-shadow: 0 2px 12px rgba(7, 192, 95, 0.15);
+          box-shadow: 0 2px 12px var(--td-brand-color-light);
         }
 
         .tool-card-header {
@@ -292,14 +292,14 @@ const handleClose = () => {
               .tool-name {
                 font-size: 15px;
                 font-weight: 600;
-                color: #303133;
+                color: var(--td-text-color-primary);
                 margin-bottom: 4px;
                 word-break: break-word;
               }
 
               .tool-desc-preview {
                 font-size: 13px;
-                color: #909399;
+                color: var(--td-text-color-placeholder);
                 line-height: 1.5;
                 display: -webkit-box;
                 -webkit-line-clamp: 2;
@@ -311,7 +311,7 @@ const handleClose = () => {
           }
 
           .expand-icon {
-            color: #909399;
+            color: var(--td-text-color-placeholder);
             font-size: 16px;
             flex-shrink: 0;
             transition: transform 0.2s ease;
@@ -320,7 +320,7 @@ const handleClose = () => {
 
         .tool-card-content {
           padding: 0 16px 16px 16px;
-          border-top: 1px solid #f0f0f0;
+          border-top: 1px solid var(--td-bg-color-secondarycontainer);
           margin-top: 12px;
           padding-top: 16px;
           animation: slideDown 0.2s ease;
@@ -336,7 +336,7 @@ const handleClose = () => {
             .label {
               font-size: 12px;
               font-weight: 600;
-              color: #909399;
+              color: var(--td-text-color-placeholder);
               text-transform: uppercase;
               letter-spacing: 0.5px;
               margin-bottom: 8px;
@@ -344,13 +344,13 @@ const handleClose = () => {
 
             .value {
               font-size: 14px;
-              color: #606266;
+              color: var(--td-text-color-secondary);
               line-height: 1.6;
             }
 
             .schema-content {
-              background: #f5f7fa;
-              border: 1px solid #e4e7ed;
+              background: var(--td-bg-color-secondarycontainer);
+              border: 1px solid var(--td-component-stroke);
               border-radius: 6px;
               overflow: hidden;
 
@@ -360,7 +360,7 @@ const handleClose = () => {
                 overflow-x: auto;
                 font-size: 12px;
                 font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
-                color: #303133;
+                color: var(--td-text-color-primary);
                 line-height: 1.6;
                 background: transparent;
                 border: none;
@@ -377,15 +377,15 @@ const handleClose = () => {
       }
 
       .resource-card {
-        border: 1px solid #e4e7ed;
+        border: 1px solid var(--td-component-stroke);
         border-radius: 8px;
-        background: #ffffff;
+        background: var(--td-bg-color-container);
         padding: 14px 16px;
         transition: all 0.2s ease;
 
         &:hover {
           border-color: var(--td-brand-color);
-          box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
+          box-shadow: 0 2px 8px var(--td-brand-color-light);
         }
 
         .resource-header {
@@ -408,14 +408,14 @@ const handleClose = () => {
             .resource-name {
               font-size: 15px;
               font-weight: 600;
-              color: #303133;
+              color: var(--td-text-color-primary);
               margin-bottom: 4px;
               word-break: break-word;
             }
 
             .resource-desc {
               font-size: 13px;
-              color: #909399;
+              color: var(--td-text-color-placeholder);
               line-height: 1.5;
             }
           }
@@ -427,7 +427,7 @@ const handleClose = () => {
           justify-content: space-between;
           gap: 12px;
           padding-top: 12px;
-          border-top: 1px solid #f0f0f0;
+          border-top: 1px solid var(--td-bg-color-secondarycontainer);
 
           .resource-uri {
             display: flex;
@@ -436,10 +436,10 @@ const handleClose = () => {
             flex: 1;
             min-width: 0;
             font-size: 12px;
-            color: #909399;
+            color: var(--td-text-color-placeholder);
 
             :deep(.t-icon) {
-              color: #909399;
+              color: var(--td-text-color-placeholder);
             }
 
             span {

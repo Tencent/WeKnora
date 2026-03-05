@@ -368,21 +368,21 @@ onUnmounted(() => {
 
 <style scoped lang="less">
 // ── Design tokens ──
-@border-color: #e7e7e7;
+@border-color: var(--td-component-stroke);
 @border-radius: 6px;
-@bg-white: #fff;
-@bg-subtle: #f6f8fa;
-@bg-muted: #f9fafb;
-@text-primary: #1d2129;
-@text-secondary: #000000a6;
-@text-tertiary: #00000066;
-@text-disabled: #00000040;
-@accent: #07c05f;
-@accent-hover: #059669;
-@accent-bg: #f0fdf4;
-@accent-bg-hover: #e6f7ed;
-@error-color: #e34d59;
-@table-border: #e7e7e7;
+@bg-white: var(--td-bg-color-container);
+@bg-subtle: var(--td-bg-color-container);
+@bg-muted: var(--td-bg-color-secondarycontainer);
+@text-primary: var(--td-text-color-primary);
+@text-secondary: var(--td-text-color-secondary);
+@text-tertiary: var(--td-text-color-placeholder);
+@text-disabled: var(--td-text-color-disabled);
+@accent: var(--td-brand-color);
+@accent-hover: var(--td-brand-color-active);
+@accent-bg: var(--td-success-color-light);
+@accent-bg-hover: var(--td-success-color-light);
+@error-color: var(--td-error-color);
+@table-border: var(--td-component-stroke);
 @preview-max-h: calc(100vh - 200px);
 @transition: all 0.2s ease;
 
@@ -556,7 +556,7 @@ onUnmounted(() => {
     padding: 8px 16px;
     border-left: 4px solid @accent;
     background: @bg-subtle;
-    color: #57606a;
+    color: var(--td-text-color-secondary);
   }
   ul, ol { padding-left: 24px; margin: 8px 0; }
   li { margin: 4px 0; }
@@ -574,7 +574,7 @@ onUnmounted(() => {
     code { background: transparent; padding: 0; }
   }
   code {
-    background: #eff1f3;
+    background: var(--td-bg-color-secondarycontainer);
     padding: 2px 6px;
     border-radius: 3px;
     font-size: 0.9em;

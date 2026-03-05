@@ -119,7 +119,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 
 .dialogue-title {
     display: flex;
-    color: #000000;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 28px;
     font-weight: 600;
@@ -133,8 +133,8 @@ const handleKBEditorSuccess = (kbId: string) => {
         justify-content: center;
         align-items: center;
         border-radius: 6px;
-        background: #FFF;
-        box-shadow: 0 0 2px -1px #0000001f;
+        background: var(--td-bg-color-container);
+        box-shadow: var(--td-shadow-1);
         margin-right: 12px;
 
         .logo_img {

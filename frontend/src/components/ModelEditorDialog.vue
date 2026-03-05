@@ -1031,7 +1031,7 @@ const handleOverlayMouseUp = () => {
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
-  background: #fff;
+  background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   display: flex;
@@ -1053,20 +1053,20 @@ const handleOverlayMouseUp = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666666;
+  color: var(--td-text-color-secondary);
   transition: all 0.15s ease;
   z-index: 10;
 
   &:hover {
-    background: #f5f5f5;
-    color: #333333;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 }
 
 // 标题区域
 .modal-header {
   padding: 24px 24px 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
 
@@ -1074,13 +1074,13 @@ const handleOverlayMouseUp = () => {
   margin: 0 0 6px 0;
   font-size: 18px;
   font-weight: 600;
-  color: #333333;
+  color: var(--td-text-color-primary);
 }
 
 .modal-desc {
   margin: 0;
   font-size: 13px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
 
@@ -1089,7 +1089,7 @@ const handleOverlayMouseUp = () => {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
 
   // 自定义滚动条
   &::-webkit-scrollbar {
@@ -1097,17 +1097,17 @@ const handleOverlayMouseUp = () => {
   }
 
   &::-webkit-scrollbar-track {
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #d0d0d0;
+    background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
     transition: background 0.15s;
 
     &:hover {
-      background: #b0b0b0;
+      background: var(--td-bg-color-component-disabled);
     }
   }
 
@@ -1132,11 +1132,11 @@ const handleOverlayMouseUp = () => {
   margin-bottom: 8px;
   font-size: 14px;
   font-weight: 500;
-  color: #333333;
+  color: var(--td-text-color-primary);
 
   &.required::after {
     content: '*';
-    color: #f56c6c;
+    color: var(--td-error-color);
     margin-left: 4px;
     font-weight: 600;
   }
@@ -1156,7 +1156,7 @@ const handleOverlayMouseUp = () => {
   textarea {
     font-size: 13px;
     border-radius: 6px;
-    border-color: #d9d9d9;
+    border-color: var(--td-component-stroke);
     transition: all 0.15s ease;
   }
 
@@ -1164,14 +1164,14 @@ const handleOverlayMouseUp = () => {
   &:hover .t-input__wrap,
   &:hover input,
   &:hover textarea {
-    border-color: #b3b3b3;
+    border-color: var(--td-component-stroke);
   }
 
   &.t-is-focused .t-input__inner,
   &.t-is-focused .t-input__wrap,
   &.t-is-focused input,
   &.t-is-focused textarea {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
   }
 }
@@ -1186,12 +1186,12 @@ const handleOverlayMouseUp = () => {
   .provider-name {
     font-size: 14px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
   }
 
   .provider-desc {
     font-size: 12px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
   }
 }
 
@@ -1206,19 +1206,19 @@ const handleOverlayMouseUp = () => {
 
     &:hover {
       .t-radio__label {
-        color: #07C05F;
+        color: var(--td-brand-color);
       }
     }
   }
 
   .t-radio__label {
     font-size: 13px;
-    color: #333333;
+    color: var(--td-text-color-primary);
     transition: color 0.15s ease;
   }
 
   .t-radio__input:checked + .t-radio__label {
-    color: #07C05F;
+    color: var(--td-brand-color);
     font-weight: 500;
   }
 }
@@ -1229,19 +1229,19 @@ const handleOverlayMouseUp = () => {
 
   .t-checkbox__label {
     font-size: 13px;
-    color: #333333;
+    color: var(--td-text-color-primary);
   }
 }
 
 // 底部按钮区域
 .modal-footer {
   padding: 16px 24px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
 
   :deep(.t-button) {
     min-width: 80px;
@@ -1252,27 +1252,27 @@ const handleOverlayMouseUp = () => {
     transition: all 0.15s ease;
 
     &.t-button--theme-primary {
-      background: #07C05F;
-      border-color: #07C05F;
+      background: var(--td-brand-color);
+      border-color: var(--td-brand-color);
 
       &:hover {
-        background: #06b04d;
-        border-color: #06b04d;
+        background: var(--td-brand-color);
+        border-color: var(--td-brand-color);
       }
 
       &:active {
-        background: #059642;
-        border-color: #059642;
+        background: var(--td-brand-color-active);
+        border-color: var(--td-brand-color-active);
       }
     }
 
     &.t-button--variant-outline {
-      color: #666666;
-      border-color: #d9d9d9;
+      color: var(--td-text-color-secondary);
+      border-color: var(--td-component-stroke);
 
       &:hover {
-        border-color: #07C05F;
-        color: #07C05F;
+        border-color: var(--td-brand-color);
+        color: var(--td-brand-color);
         background: rgba(7, 192, 95, 0.04);
       }
     }
@@ -1311,11 +1311,11 @@ const handleOverlayMouseUp = () => {
     flex: 1;
 
     &.success {
-      color: #059669;
+      color: var(--td-brand-color-active);
     }
 
     &.error {
-      color: #f56c6c;
+      color: var(--td-error-color);
     }
   }
 
@@ -1332,11 +1332,11 @@ const handleOverlayMouseUp = () => {
     flex-shrink: 0;
 
     &.available {
-      color: #07C05F;
+      color: var(--td-brand-color);
     }
 
     &.unavailable {
-      color: #f56c6c;
+      color: var(--td-error-color);
     }
   }
 }
@@ -1351,31 +1351,31 @@ const handleOverlayMouseUp = () => {
   
   .downloaded-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
     flex-shrink: 0;
   }
   
   .download-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
     flex-shrink: 0;
   }
   
   .model-name {
     flex: 1;
     font-size: 13px;
-    color: #333333;
+    color: var(--td-text-color-primary);
   }
   
   .model-size {
     font-size: 12px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     margin-left: auto;
   }
   
   &.download {
     .model-name {
-      color: #07C05F;
+      color: var(--td-brand-color);
       font-weight: 500;
     }
   }
@@ -1391,13 +1391,13 @@ const handleOverlayMouseUp = () => {
   .spinning {
     animation: spin 1s linear infinite;
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .progress-text {
     font-size: 12px;
     font-weight: 500;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1449,11 +1449,11 @@ const handleOverlayMouseUp = () => {
 .refresh-btn {
   margin-top: 0;
   font-size: 13px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
 
   &:hover {
-    color: #07C05F;
+    color: var(--td-brand-color);
     background: rgba(7, 192, 95, 0.04);
   }
 }
@@ -1483,10 +1483,10 @@ const handleOverlayMouseUp = () => {
   margin: 8px 0 0 0;
   font-size: 13px;
   line-height: 1.5;
-  color: #e34d59;
+  color: var(--td-error-color);
 
   &.success {
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1497,41 +1497,41 @@ const handleOverlayMouseUp = () => {
   gap: 8px;
   margin-top: 12px;
   padding: 10px 12px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
+  background: var(--td-error-color-light);
+  border: 1px solid var(--td-error-color-focus);
   border-radius: 6px;
   font-size: 13px;
 
   .tip-icon {
-    color: #f56c6c;
+    color: var(--td-error-color);
     font-size: 16px;
     flex-shrink: 0;
     margin-right: 2px;
 
     &.info {
-      color: #07C05F;
+      color: var(--td-brand-color);
     }
   }
 
   .tip-text {
-    color: #dc2626;
+    color: var(--td-error-color);
     flex: 1;
     line-height: 1.5;
   }
 
   // ReRank提示使用主题绿色风格，与主页面保持一致
   &.rerank-tip {
-    background: #f0fdf6;
-    border: 1px solid #d1fae5;
-    border-left: 3px solid #07C05F;
+    background: var(--td-success-color-light);
+    border: 1px solid var(--td-success-color-focus);
+    border-left: 3px solid var(--td-brand-color);
 
     .tip-text {
-      color: #166534;
+      color: var(--td-success-color);
     }
   }
 
   :deep(.tip-link) {
-    color: #07C05F;
+    color: var(--td-brand-color);
     font-size: 13px;
     font-weight: 500;
     padding: 4px 6px 4px 10px !important;
@@ -1548,7 +1548,7 @@ const handleOverlayMouseUp = () => {
 
     &:hover {
       background: rgba(7, 192, 95, 0.08) !important;
-      color: #05a04f !important;
+      color: var(--td-brand-color-active) !important;
     }
 
     &:active {

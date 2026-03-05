@@ -349,7 +349,7 @@ onMounted(() => {
 
   h2 {
     margin: 0;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC", -apple-system, sans-serif;
     font-size: 24px;
     font-weight: 600;
@@ -359,7 +359,7 @@ onMounted(() => {
 
 .header-subtitle {
   margin: 0;
-  color: #00000099;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 14px;
   font-weight: 400;
@@ -374,28 +374,28 @@ onMounted(() => {
 
   :deep(.t-input) {
     font-size: 13px;
-    background-color: #f7f9fc;
-    border-color: #e5e9f2;
+    background-color: var(--td-bg-color-container);
+    border-color: var(--td-component-stroke);
     border-radius: 6px;
 
     &:hover,
     &:focus,
     &.t-is-focused {
-      border-color: #07C05F;
-      background-color: #fff;
+      border-color: var(--td-brand-color);
+      background-color: var(--td-bg-color-container);
     }
   }
 
   :deep(.t-select .t-input) {
     font-size: 13px;
-    background-color: #f7f9fc;
-    border-color: #e5e9f2;
+    background-color: var(--td-bg-color-container);
+    border-color: var(--td-component-stroke);
     border-radius: 6px;
 
     &:hover,
     &.t-is-focused {
-      border-color: #07C05F;
-      background-color: #fff;
+      border-color: var(--td-brand-color);
+      background-color: var(--td-bg-color-container);
     }
   }
 }
@@ -412,13 +412,13 @@ onMounted(() => {
 
 .search-btn {
   flex-shrink: 0;
-  background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
+  background: linear-gradient(135deg, var(--td-brand-color) 0%, #00a67e 100%);
   border: none;
-  color: #fff;
+  color: var(--td-text-color-anti);
   border-radius: 6px;
 
   &:hover {
-    background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
+    background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
   }
 }
 
@@ -446,11 +446,11 @@ onMounted(() => {
 
   &.doc {
     background: rgba(7, 192, 95, 0.1);
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
   &.faq {
     background: rgba(255, 152, 0, 0.1);
-    color: #e8a735;
+    color: var(--td-warning-color);
   }
 }
 
@@ -468,7 +468,7 @@ onMounted(() => {
   justify-content: center;
   padding: 100px 0 60px;
   gap: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-size: 14px;
 
   p {
@@ -480,14 +480,14 @@ onMounted(() => {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: #f5f7fa;
+  background: var(--td-bg-color-secondarycontainer);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #c0c4cc;
+  color: var(--td-text-color-disabled);
 
   &.muted {
-    color: #dcdfe6;
+    color: var(--td-text-color-disabled);
   }
 }
 
@@ -496,7 +496,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   font-size: 13px;
-  color: #00000099;
+  color: var(--td-text-color-placeholder);
   margin-bottom: 16px;
   padding: 0 2px;
 }
@@ -506,7 +506,7 @@ onMounted(() => {
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: #07c05f;
+  color: var(--td-brand-color);
   cursor: pointer;
   padding: 4px 10px;
   border-radius: 6px;
@@ -515,12 +515,12 @@ onMounted(() => {
 
   &:hover {
     background: rgba(7, 192, 95, 0.08);
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
   }
 }
 
 .results-file-count {
-  color: #00000066;
+  color: var(--td-text-color-disabled);
 }
 
 .file-groups {
@@ -530,9 +530,9 @@ onMounted(() => {
 }
 
 .file-group {
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
   transition: box-shadow 0.2s;
@@ -552,7 +552,7 @@ onMounted(() => {
   transition: background 0.15s;
 
   &:hover {
-    background: #fafbfc;
+    background: var(--td-bg-color-container);
   }
 }
 
@@ -566,13 +566,13 @@ onMounted(() => {
 
 .file-icon {
   flex-shrink: 0;
-  color: #07c05f;
+  color: var(--td-brand-color);
 }
 
 .file-group-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -580,9 +580,9 @@ onMounted(() => {
 
 .file-group-kb {
   font-size: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   padding: 1px 8px;
-  background: #f5f7fa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 4px;
   flex-shrink: 0;
   max-width: 160px;
@@ -596,12 +596,12 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
 }
 
 .chunk-count {
   font-size: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
 }
 
 .go-detail-link {
@@ -609,7 +609,7 @@ onMounted(() => {
   align-items: center;
   gap: 3px;
   font-size: 12px;
-  color: #07c05f;
+  color: var(--td-brand-color);
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
@@ -617,17 +617,17 @@ onMounted(() => {
 
   &:hover {
     background: rgba(7, 192, 95, 0.08);
-    color: #05a04f;
+    color: var(--td-brand-color-active);
   }
 }
 
 .file-group-chunks {
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .chunk-item {
   padding: 12px 18px 12px 44px;
-  border-bottom: 1px solid #f8f8f8;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -643,7 +643,7 @@ onMounted(() => {
 
 .chunk-index {
   font-size: 11px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-weight: 600;
   font-family: "SF Mono", "Monaco", monospace;
 }
@@ -656,23 +656,23 @@ onMounted(() => {
 
   &.vector {
     background: rgba(22, 119, 255, 0.08);
-    color: #1677ff;
+    color: var(--td-brand-color);
   }
   &.keyword {
     background: rgba(255, 152, 0, 0.08);
-    color: #e8a735;
+    color: var(--td-warning-color);
   }
 }
 
 .chunk-score {
   font-size: 11px;
-  color: #00000044;
+  color: var(--td-text-color-placeholder);
   font-family: "SF Mono", "Monaco", monospace;
 }
 
 .chunk-content {
   font-size: 13px;
-  color: #000000cc;
+  color: var(--td-text-color-primary);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
@@ -689,7 +689,7 @@ onMounted(() => {
     left: 0;
     right: 0;
     height: 24px;
-    background: linear-gradient(transparent, #fff);
+    background: linear-gradient(transparent, var(--td-bg-color-container));
     pointer-events: none;
   }
 

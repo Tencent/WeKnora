@@ -2680,7 +2680,7 @@ const handleSave = async () => {
   max-width: 1100px;
   height: 85vh;
   max-height: 750px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   display: flex;
@@ -2695,19 +2695,19 @@ const handleSave = async () => {
   width: 32px;
   height: 32px;
   border: none;
-  background: #f5f5f5;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--td-text-color-secondary);
   transition: all 0.2s ease;
   z-index: 10;
 
   &:hover {
-    background: #e5e5e5;
-    color: #000;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -2719,8 +2719,8 @@ const handleSave = async () => {
 
 .settings-sidebar {
   width: 200px;
-  background: #fafafa;
-  border-right: 1px solid #e5e5e5;
+  background: var(--td-bg-color-settings-modal);
+  border-right: 1px solid var(--td-component-stroke);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -2728,7 +2728,7 @@ const handleSave = async () => {
 
 .sidebar-header {
   padding: 24px 20px;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .sidebar-title {
@@ -2736,7 +2736,7 @@ const handleSave = async () => {
   font-family: "PingFang SC";
   font-size: 18px;
   font-weight: 600;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
 }
 
 .settings-nav {
@@ -2755,15 +2755,16 @@ const handleSave = async () => {
   transition: all 0.2s ease;
   font-family: "PingFang SC";
   font-size: 14px;
-  color: #00000099;
+  color: var(--td-text-color-secondary);
 
   &:hover {
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
-    background: #07c05f1a;
-    color: #07c05f;
+    background: rgba(7, 192, 95, 0.1);
+    color: var(--td-brand-color);
     font-weight: 500;
   }
 }
@@ -2805,13 +2806,13 @@ const handleSave = async () => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -2829,7 +2830,7 @@ const handleSave = async () => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -2870,19 +2871,19 @@ const handleSave = async () => {
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
 
     .required {
-      color: #fa5151;
+      color: var(--td-error-color);
       margin-left: 2px;
     }
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -2927,7 +2928,7 @@ const handleSave = async () => {
 
 .settings-footer {
   padding: 16px 32px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -2939,10 +2940,10 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   padding: 10px 14px;
-  background: #f0faf5;
+  background: var(--td-success-color-light);
   border-radius: 6px;
-  border: 1px solid #d4f0e2;
-  color: #07c05f;
+  border: 1px solid var(--td-success-color-focus);
+  color: var(--td-brand-color);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -2979,7 +2980,7 @@ const handleSave = async () => {
   text-align: right;
   font-family: monospace;
   font-size: 14px;
-  color: #333;
+  color: var(--td-text-color-primary);
 }
 
 // 推荐问题列表
@@ -3003,40 +3004,40 @@ const handleSave = async () => {
 // Radio-group 样式优化，符合项目主题风格
 :deep(.t-radio-group) {
   .t-radio-group--filled {
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
   }
   .t-radio-button {
-    border-color: #d9d9d9;
+    border-color: var(--td-component-stroke);
 
     &:hover:not(.t-is-disabled) {
-      border-color: #07c05f;
-      color: #07c05f;
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color);
     }
 
     &.t-is-checked {
-      background: #07c05f;
-      border-color: #07c05f;
-      color: #fff;
+      background: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      color: var(--td-text-color-anti);
 
       &:hover:not(.t-is-disabled) {
-        background: #05a04f;
-        border-color: #05a04f;
-        color: #fff;
+        background: var(--td-brand-color);
+        border-color: var(--td-brand-color-active);
+        color: var(--td-text-color-anti);
       }
     }
 
     // 禁用状态样式
     &.t-is-disabled {
-      background: #f5f5f5;
-      border-color: #d9d9d9;
-      color: #00000040;
+      background: var(--td-bg-color-secondarycontainer);
+      border-color: var(--td-component-stroke);
+      color: var(--td-text-color-placeholder);
       cursor: not-allowed;
       opacity: 0.6;
 
       &.t-is-checked {
-        background: #f0f0f0;
-        border-color: #d9d9d9;
-        color: #00000066;
+        background: var(--td-bg-color-secondarycontainer);
+        border-color: var(--td-component-stroke);
+        color: var(--td-text-color-disabled);
       }
     }
   }
@@ -3054,14 +3055,14 @@ const handleSave = async () => {
   display: flex;
   align-items: flex-start;
   padding: 12px 16px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #07c05f;
-    background: #f0faf5;
+    border-color: var(--td-brand-color);
+    background: var(--td-success-color-light);
   }
 
   :deep(.t-checkbox__input) {
@@ -3082,18 +3083,18 @@ const handleSave = async () => {
 .tool-name {
   font-size: 14px;
   font-weight: 500;
-  color: #333;
+  color: var(--td-text-color-primary);
 }
 
 .tool-desc {
   font-size: 12px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
 
 .tool-disabled-hint {
   font-size: 11px;
-  color: #f5a623;
+  color: var(--td-warning-color);
   font-style: italic;
 }
 
@@ -3101,7 +3102,7 @@ const handleSave = async () => {
   opacity: 0.6;
   
   .tool-name, .tool-desc {
-    color: #999;
+    color: var(--td-text-color-placeholder);
   }
 }
 
@@ -3117,14 +3118,14 @@ const handleSave = async () => {
   display: flex;
   align-items: flex-start;
   padding: 12px 16px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #07c05f;
-    background: #f0faf5;
+    border-color: var(--td-brand-color);
+    background: var(--td-success-color-light);
   }
 
   :deep(.t-checkbox__input) {
@@ -3145,12 +3146,12 @@ const handleSave = async () => {
 .skill-name {
   font-size: 14px;
   font-weight: 500;
-  color: #333;
+  color: var(--td-text-color-primary);
 }
 
 .skill-desc {
   font-size: 12px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
 
@@ -3158,14 +3159,14 @@ const handleSave = async () => {
   display: flex;
   gap: 12px;
   padding: 16px;
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  background: var(--td-brand-color-light);
   border-radius: 8px;
-  border: 1px solid #bae6fd;
+  border: 1px solid var(--td-brand-color-focus);
   margin-top: 16px;
 
   .info-icon {
     font-size: 20px;
-    color: #0ea5e9;
+    color: var(--td-brand-color);
     flex-shrink: 0;
     margin-top: 2px;
   }
@@ -3176,7 +3177,7 @@ const handleSave = async () => {
     p {
       margin: 0;
       font-size: 13px;
-      color: #475569;
+      color: var(--td-text-color-secondary);
       line-height: 1.6;
 
       &:first-child {
@@ -3184,14 +3185,14 @@ const handleSave = async () => {
       }
 
       strong {
-        color: #0369a1;
+        color: var(--td-brand-color);
       }
     }
   }
 }
 
 .empty-hint {
-  color: #999;
+  color: var(--td-text-color-placeholder);
   font-style: italic;
 }
 
@@ -3199,14 +3200,14 @@ const handleSave = async () => {
 :deep(.t-checkbox) {
   &.t-is-checked {
     .t-checkbox__input {
-      border-color: #07c05f;
-      background-color: #07c05f;
+      border-color: var(--td-brand-color);
+      background-color: var(--td-brand-color);
     }
   }
   
   &:hover:not(.t-is-disabled) {
     .t-checkbox__input {
-      border-color: #07c05f;
+      border-color: var(--td-brand-color);
     }
   }
 }
@@ -3214,10 +3215,10 @@ const handleSave = async () => {
 // Switch 样式
 :deep(.t-switch) {
   &.t-is-checked {
-    background-color: #07c05f;
+    background-color: var(--td-brand-color);
     
     &:hover:not(.t-is-disabled) {
-      background-color: #05a04f;
+      background-color: var(--td-brand-color-active);
     }
   }
 }
@@ -3225,22 +3226,22 @@ const handleSave = async () => {
 // Slider 样式
 :deep(.t-slider) {
   .t-slider__track {
-    background-color: #07c05f;
+    background-color: var(--td-brand-color);
   }
   
   .t-slider__button {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
   }
 }
 
 // Button 主题样式
 :deep(.t-button--theme-primary) {
-  background-color: #07c05f;
-  border-color: #07c05f;
+  background-color: var(--td-brand-color);
+  border-color: var(--td-brand-color);
   
   &:hover:not(.t-is-disabled) {
-    background-color: #05a04f;
-    border-color: #05a04f;
+    background-color: var(--td-brand-color-active);
+    border-color: var(--td-brand-color-active);
   }
 }
 
@@ -3250,7 +3251,7 @@ const handleSave = async () => {
 :deep(.t-select) {
   &.t-is-focused,
   &:focus-within {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
   }
 }
@@ -3387,11 +3388,11 @@ const handleSave = async () => {
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  background: #fff7e6;
-  border: 1px solid #ffd591;
+  background: var(--td-warning-color-light);
+  border: 1px solid var(--td-warning-color-focus);
   border-radius: 8px;
   margin-bottom: 16px;
-  color: #d46b08;
+  color: var(--td-warning-color);
   font-size: 14px;
 
   .t-icon {
@@ -3412,12 +3413,12 @@ const handleSave = async () => {
   
   &.normal {
     background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
-    color: #059669;
+    color: var(--td-brand-color-active);
   }
   
   &.agent {
     background: linear-gradient(135deg, rgba(124, 77, 255, 0.15) 0%, rgba(124, 77, 255, 0.08) 100%);
-    color: #7c4dff;
+    color: var(--td-brand-color);
   }
 }
 
@@ -3430,17 +3431,17 @@ const handleSave = async () => {
 
   .prompt-toggle-label {
     font-size: 13px;
-    color: #666;
+    color: var(--td-text-color-secondary);
   }
 }
 
 // 提示词禁用提示
 .prompt-disabled-hint {
-  color: #999;
+  color: var(--td-text-color-placeholder);
   font-size: 13px;
   font-style: italic;
   padding: 12px 16px;
-  background: #f5f5f5;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
 }
 
@@ -3476,13 +3477,13 @@ const handleSave = async () => {
   // Document KB
   &.doc-icon {
     background: rgba(16, 185, 129, 0.1);
-    color: #10b981;
+    color: var(--td-success-color);
   }
   
   // FAQ KB
   &.faq-icon {
     background: rgba(0, 82, 217, 0.1);
-    color: #0052d9;
+    color: var(--td-brand-color);
   }
 }
 
@@ -3492,14 +3493,14 @@ const handleSave = async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
 }
 
 .kb-option-org {
   flex-shrink: 0;
   font-size: 11px;
-  color: #8c8c8c;
-  background: #f2f3f5;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-secondarycontainer);
   padding: 1px 6px;
   border-radius: 4px;
   max-width: 100px;
@@ -3511,8 +3512,8 @@ const handleSave = async () => {
 .kb-option-count {
   flex-shrink: 0;
   font-size: 11px;
-  color: #8c8c8c;
-  background: #f2f3f5;
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-secondarycontainer);
   padding: 1px 6px;
   border-radius: 4px;
 }
@@ -3533,7 +3534,7 @@ const handleSave = async () => {
   margin-bottom: 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #0052d9;
+  color: var(--td-brand-color);
   
   .faq-icon {
     font-size: 18px;
@@ -3541,7 +3542,7 @@ const handleSave = async () => {
   
   .help-icon {
     font-size: 14px;
-    color: #999;
+    color: var(--td-text-color-placeholder);
     cursor: help;
   }
 }

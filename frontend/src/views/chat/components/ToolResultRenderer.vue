@@ -148,7 +148,7 @@ const toolArguments = computed(() => props.arguments || {});
     
     .fallback-label {
       font-size: 12px;
-      color: #666;
+      color: var(--td-text-color-secondary);
       font-weight: 500;
       line-height: 1.5;
     }
@@ -156,8 +156,8 @@ const toolArguments = computed(() => props.arguments || {});
   
   .detail-output-wrapper {
     position: relative;
-    background: #fafafa;
-    border: 1px solid #e5e7eb;
+    background: var(--td-bg-color-secondarycontainer);
+    border: 1px solid var(--td-component-stroke);
     border-radius: 6px;
     overflow: hidden;
     margin: 0;
@@ -166,7 +166,7 @@ const toolArguments = computed(() => props.arguments || {});
     .detail-output {
       font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
       font-size: 12px;
-      color: #333;
+      color: var(--td-text-color-primary);
       padding: 16px;
       margin: 0;
       white-space: pre-wrap;
@@ -175,7 +175,7 @@ const toolArguments = computed(() => props.arguments || {});
       max-height: 400px;
       overflow-y: auto;
       overflow-x: auto;
-      background: #ffffff;
+      background: var(--td-bg-color-container);
       display: block;
       
       // 滚动条样式
@@ -185,16 +185,16 @@ const toolArguments = computed(() => props.arguments || {});
       }
       
       &::-webkit-scrollbar-track {
-        background: #f5f5f5;
+        background: var(--td-bg-color-secondarycontainer);
         border-radius: 4px;
       }
       
       &::-webkit-scrollbar-thumb {
-        background: #d1d5db;
+        background: var(--td-component-border);
         border-radius: 4px;
         
         &:hover {
-          background: #9ca3af;
+          background: var(--td-text-color-placeholder);
         }
       }
     }

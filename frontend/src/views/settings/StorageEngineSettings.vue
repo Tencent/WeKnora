@@ -622,13 +622,13 @@ onMounted(loadAll)
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -640,7 +640,7 @@ onMounted(loadAll)
   justify-content: center;
   gap: 8px;
   padding: 48px 0;
-  color: #999999;
+  color: var(--td-text-color-placeholder);
   font-size: 14px;
 }
 
@@ -659,7 +659,7 @@ onMounted(loadAll)
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -674,14 +674,14 @@ onMounted(loadAll)
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -698,7 +698,7 @@ onMounted(loadAll)
 .engine-section {
   margin-top: 32px;
   padding-top: 32px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .engine-header {
@@ -715,26 +715,26 @@ onMounted(loadAll)
     h3 {
       font-size: 17px;
       font-weight: 600;
-      color: #333333;
+      color: var(--td-text-color-primary);
       margin: 0;
     }
   }
 
   p {
     font-size: 13px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     margin: 0;
     line-height: 1.5;
   }
 }
 
 .engine-link {
-  color: #999999;
+  color: var(--td-text-color-placeholder);
   text-decoration: none;
   margin-left: 4px;
 
   &:hover {
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
 }
 
@@ -752,7 +752,7 @@ onMounted(loadAll)
   label {
     font-size: 13px;
     font-weight: 500;
-    color: #555555;
+    color: var(--td-text-color-secondary)555;
   }
 
   &--inline {
@@ -777,48 +777,48 @@ onMounted(loadAll)
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
 
   &:hover {
-    border-color: #c0c4cc;
+    border-color: var(--td-text-color-disabled);
   }
 
   &.active {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     background: rgba(7, 192, 95, 0.06);
   }
 
   .mode-label {
     font-size: 13px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
   }
 }
 
 .engine-hint {
   font-size: 13px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
   line-height: 1.6;
   padding: 10px 14px;
   margin-bottom: 16px;
   border-radius: 6px;
-  background: #f8f9fa;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
 
   &.success {
-    color: #333333;
-    background: #f0fdf6;
-    border-color: #d1fae5;
+    color: var(--td-text-color-primary);
+    background: var(--td-success-color-light);
+    border-color: var(--td-success-color-focus);
   }
 
   &.warning {
-    color: #333333;
-    background: #fffbeb;
-    border-color: #fde68a;
+    color: var(--td-text-color-primary);
+    background: var(--td-warning-color-light);
+    border-color: var(--td-warning-color-focus);
   }
 }
 
@@ -828,22 +828,22 @@ onMounted(loadAll)
   gap: 12px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .test-msg {
   font-size: 13px;
 
   &.success {
-    color: #52c41a;
+    color: var(--td-success-color);
   }
 
   &.created {
-    color: #fa8c16;
+    color: var(--td-warning-color);
   }
 
   &.error {
-    color: #ff4d4f;
+    color: var(--td-error-color);
   }
 }
 
@@ -855,7 +855,7 @@ onMounted(loadAll)
   bottom: 0;
   margin-top: 32px;
   padding: 16px 0 4px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, #ffffff 12%);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0) 0%, var(--td-bg-color-container) 12%);
   z-index: 10;
 }
 
@@ -863,11 +863,11 @@ onMounted(loadAll)
   font-size: 13px;
 
   &.success {
-    color: #52c41a;
+    color: var(--td-success-color);
   }
 
   &.error {
-    color: #ff4d4f;
+    color: var(--td-error-color);
   }
 }
 </style>

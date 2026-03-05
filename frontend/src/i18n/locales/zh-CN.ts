@@ -1405,6 +1405,13 @@ export default {
     settings: "设置",
     close: "关闭设置",
   },
+  theme: {
+    theme: "主题模式",
+    themeDescription: "选择界面的显示主题，支持跟随系统自动切换",
+    light: "浅色",
+    dark: "深色",
+    system: "跟随系统",
+  },
   platform: {
     subtitle: "企业级智能文档检索框架",
     description: "让复杂文档理解与精准检索变得简单",

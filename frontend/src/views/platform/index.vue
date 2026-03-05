@@ -136,7 +136,7 @@ onUnmounted(() => {
     height: 100%;
     min-width: 600px;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
-    background: #fafbfc;
+    background: var(--td-bg-color-container);
 }
 
 .upload-mask {

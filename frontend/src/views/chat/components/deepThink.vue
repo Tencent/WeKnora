@@ -97,7 +97,7 @@ const safeProcessThinkContent = (content) => {
     font-size: 12px;
     width: 100%;
     border-radius: 8px;
-    background-color: #ffffff;
+    background-color: var(--td-bg-color-container);
     box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
     overflow: hidden;
     box-sizing: border-box;
@@ -109,7 +109,7 @@ const safeProcessThinkContent = (content) => {
         justify-content: space-between;
         align-items: center;
         padding: 6px 14px;
-        color: #333333;
+        color: var(--td-text-color-primary);
         font-weight: 500;
         cursor: pointer;
         user-select: none;
@@ -135,7 +135,7 @@ const safeProcessThinkContent = (content) => {
             
             .thinking-text {
                 font-size: 12px;
-                color: #333333;
+                color: var(--td-text-color-primary);
                 white-space: nowrap;
             }
         }
@@ -152,7 +152,7 @@ const safeProcessThinkContent = (content) => {
             
             .done-text {
                 font-size: 12px;
-                color: #333333;
+                color: var(--td-text-color-primary);
                 white-space: nowrap;
             }
         }
@@ -160,7 +160,7 @@ const safeProcessThinkContent = (content) => {
         .toggle-icon-wrapper {
             font-size: 14px;
             padding: 0 2px 1px 2px;
-            color: #07c05f;
+            color: var(--td-brand-color);
             
             .toggle-icon {
                 transition: transform 0.2s;
@@ -169,13 +169,13 @@ const safeProcessThinkContent = (content) => {
     }
 
     .think-content {
-        border-top: 1px solid #f0f0f0;
+        border-top: 1px solid var(--td-bg-color-secondarycontainer);
         
         .content-inner {
             padding: 8px 14px;
             font-size: 12px;
             line-height: 1.6;
-            color: #666666;
+            color: var(--td-text-color-secondary);
             max-height: 200px;
             overflow-y: auto;
             word-break: break-word;

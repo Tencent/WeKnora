@@ -683,7 +683,7 @@ onBeforeUnmount(() => {
           :popup-props="{ attach: 'body' }"
         >
           <template #empty>
-            <div style="padding: 20px; text-align: center; color: #999;">
+            <div style="padding: 20px; text-align: center; color: var(--td-text-color-placeholder);">
               {{ $t('manualEditor.noDocumentKnowledgeBases') || '暂无可用的文档型知识库，请先创建一个文档型知识库' }}
             </div>
           </template>
@@ -815,7 +815,7 @@ onBeforeUnmount(() => {
 .form-label {
   font-size: 14px;
   font-weight: 500;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
 }
 
 .status-row {
@@ -830,8 +830,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: #ffffff;
-  border: 1px solid #e0e0e0;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   overflow-x: auto;
@@ -846,7 +846,7 @@ onBeforeUnmount(() => {
 .toolbar-divider {
   width: 1px;
   height: 24px;
-  background: #e0e0e0;
+  background: var(--td-bg-color-secondarycontainer);
   margin: 0 2px;
 }
 
@@ -855,7 +855,7 @@ onBeforeUnmount(() => {
   height: 28px;
   padding: 0;
   border-radius: 6px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   border: none;
   background: transparent;
   cursor: pointer;
@@ -865,7 +865,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   
   .t-icon {
-    color: #666;
+    color: var(--td-text-color-secondary);
     font-size: 16px;
     width: 16px;
     height: 16px;
@@ -874,19 +874,19 @@ onBeforeUnmount(() => {
 
 .toolbar-btn:hover {
   background: rgba(7, 192, 95, 0.08);
-  color: #07c05f;
+  color: var(--td-brand-color);
   
   .t-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
 .toolbar-btn.active {
   background: rgba(7, 192, 95, 0.12);
-  color: #07c05f;
+  color: var(--td-brand-color);
   
   .t-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -949,17 +949,17 @@ onBeforeUnmount(() => {
 :deep(.toggle-view-btn.active),
 :deep(.toggle-view-btn:hover) {
   background: rgba(7, 192, 95, 0.12) !important;
-  color: #059669 !important;
+  color: var(--td-brand-color-active) !important;
   border-color: rgba(7, 192, 95, 0.4) !important;
   
   .t-icon {
-    color: #059669;
+    color: var(--td-brand-color-active);
   }
 }
 
 .status-timestamp {
   font-size: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
 }
 
 .editor-area {
@@ -970,7 +970,7 @@ onBeforeUnmount(() => {
 .editor-pane {
   padding: 0;
   overflow: hidden;
-  background: #fff;
+  background: var(--td-bg-color-container);
 }
 
 :deep(.t-textarea__inner) {
@@ -983,10 +983,10 @@ onBeforeUnmount(() => {
   max-height: 520px;
   overflow-y: auto;
   padding: 16px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   font-size: 14px;
   line-height: 1.7;
-  color: #222;
+  color: var(--td-text-color-primary);
 
   :deep(h1),
   :deep(h2),
@@ -997,29 +997,29 @@ onBeforeUnmount(() => {
   }
 
   :deep(code) {
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--td-bg-color-container-hover);
     padding: 2px 4px;
     border-radius: 4px;
     font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
   }
 
   :deep(pre) {
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--td-bg-color-container-hover);
     padding: 12px;
     border-radius: 6px;
     overflow: auto;
   }
 
   :deep(blockquote) {
-    border-left: 4px solid #07c05f;
+    border-left: 4px solid var(--td-brand-color);
     padding-left: 12px;
-    color: #555;
+    color: var(--td-text-color-secondary);
     margin: 16px 0;
     background: rgba(7, 192, 95, 0.08);
   }
 
   :deep(a) {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1044,7 +1044,7 @@ onBeforeUnmount(() => {
 }
 
 .empty-preview {
-  color: #999;
+  color: var(--td-text-color-placeholder);
 }
 </style>
 

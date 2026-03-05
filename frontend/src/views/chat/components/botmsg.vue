@@ -307,10 +307,10 @@ onBeforeUnmount(() => {
 
 // 内容包装器 - 与 Agent 模式的 answer 样式一致
 .content-wrapper {
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     border-radius: 6px;
     padding: 8px 12px;
-    border: 1px solid #07c05f;
+    border: 1px solid var(--td-brand-color);
     box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
     transition: all 0.2s ease;
 }
@@ -337,23 +337,23 @@ onBeforeUnmount(() => {
     transition: all 0.15s;
     background: rgba(7, 192, 95, 0.06);
     border: 1px solid rgba(7, 192, 95, 0.2);
-    color: #374151;
+    color: var(--td-text-color-primary);
 
     &.kb-tag {
         .tag_icon {
-            color: #07c05f;
+            color: var(--td-brand-color);
         }
     }
 
     &.faq-tag {
         .tag_icon {
-            color: #f59e0b;
+            color: var(--td-warning-color);
         }
     }
 
     &.file-tag {
         .tag_icon {
-            color: #6b7280;
+            color: var(--td-text-color-secondary);
         }
     }
 
@@ -372,12 +372,12 @@ onBeforeUnmount(() => {
 }
 
 .fallback-icon-btn {
-    color: #d1d5db !important;
-    border-color: #e5e7eb !important;
+    color: var(--td-text-color-disabled) !important;
+    border-color: var(--td-component-stroke) !important;
 
     &:hover {
-        color: #9ca3af !important;
-        border-color: #d1d5db !important;
+        color: var(--td-text-color-placeholder) !important;
+        border-color: var(--td-component-border) !important;
     }
 }
 
@@ -394,7 +394,7 @@ onBeforeUnmount(() => {
 
 .ai-markdown-template {
     font-size: 13px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.6;
 }
 
@@ -405,7 +405,7 @@ onBeforeUnmount(() => {
     }
 
     :deep(code) {
-        background: #f3f4f6;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
         font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
@@ -413,7 +413,7 @@ onBeforeUnmount(() => {
     }
 
     :deep(pre) {
-        background: #f9fafb;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 10px;
         border-radius: 4px;
         overflow-x: auto;
@@ -435,20 +435,20 @@ onBeforeUnmount(() => {
     }
 
     :deep(blockquote) {
-        border-left: 2px solid #07c05f;
+        border-left: 2px solid var(--td-brand-color);
         padding-left: 10px;
         margin: 6px 0;
-        color: #6b7280;
+        color: var(--td-text-color-secondary);
     }
 
     :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
         margin: 10px 0 6px 0;
         font-weight: 600;
-        color: #374151;
+        color: var(--td-text-color-primary);
     }
 
     :deep(a) {
-        color: #07c05f;
+        color: var(--td-brand-color);
         text-decoration: none;
 
         &:hover {
@@ -463,18 +463,18 @@ onBeforeUnmount(() => {
         width: 100%;
 
         th, td {
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--td-component-stroke);
             padding: 5px 8px;
             text-align: left;
         }
 
         th {
-            background: #f9fafb;
+            background: var(--td-bg-color-secondarycontainer);
             font-weight: 600;
         }
 
         tbody tr:nth-child(even) {
-            background: #fafafa;
+            background: var(--td-bg-color-secondarycontainer);
         }
     }
 
@@ -486,7 +486,7 @@ onBeforeUnmount(() => {
         border-radius: 8px;
         display: block;
         margin: 8px 0;
-        border: 0.5px solid #e5e7eb;
+        border: 0.5px solid var(--td-component-stroke);
         object-fit: contain;
         cursor: pointer;
         transition: transform 0.2s ease;
@@ -500,7 +500,7 @@ onBeforeUnmount(() => {
     :deep(.mermaid) {
         margin: 16px 0;
         padding: 16px;
-        background: #f8f9fa;
+        background: var(--td-bg-color-secondarycontainer);
         border-radius: 8px;
         overflow-x: auto;
         text-align: center;
@@ -522,7 +522,7 @@ onBeforeUnmount(() => {
     cursor: pointer;
     object-fit: contain;
     margin: 8px 0 8px 16px;
-    border: 0.5px solid #E7E7E7;
+    border: 0.5px solid var(--td-component-stroke);
     transition: transform 0.2s ease;
 
     &:hover {
@@ -531,9 +531,9 @@ onBeforeUnmount(() => {
 }
 
 .bot_msg {
-    // background: #fff;
+    // background: var(--td-bg-color-container);
     border-radius: 4px;
-    color: rgba(0, 0, 0, 0.9);
+    color: var(--td-text-color-primary);
     font-size: 16px;
     // padding: 10px 12px;
     margin-right: auto;
@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: #07c05f;
+        background: var(--td-brand-color);
         animation: typingBounce 1.4s ease-in-out infinite;
         
         &:nth-child(1) {
@@ -587,10 +587,10 @@ onBeforeUnmount(() => {
 }
 
 .img_loading {
-    background: #3032360f;
+    background: var(--td-bg-color-container-hover);
     height: 230px;
     width: 230px;
-    color: #00000042;
+    color: var(--td-text-color-placeholder);
     display: flex;
     align-items: center;
     justify-content: center;

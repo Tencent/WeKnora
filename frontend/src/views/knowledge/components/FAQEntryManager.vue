@@ -3254,8 +3254,8 @@ watch(() => entries.value.map(e => ({
 /* 面包屑下拉菜单优化 */
 .t-popup__content {
   .t-dropdown__menu {
-    background: #ffffff;
-    border: 1px solid #e7e9eb;
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-component-stroke);
     border-radius: 10px;
     box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
     padding: 6px;
@@ -3269,7 +3269,7 @@ watch(() => entries.value.map(e => ({
     margin: 2px 0;
     transition: all 0.12s ease;
     font-size: 13px;
-    color: #0f172a;
+    color: var(--td-text-color-primary);
     cursor: pointer;
     min-width: auto !important;
     max-width: 100% !important;
@@ -3278,8 +3278,8 @@ watch(() => entries.value.map(e => ({
     width: 100%;
 
     &:hover {
-      background: #f6f8f7;
-      color: #10b981;
+      background: var(--td-bg-color-container);
+      color: var(--td-success-color);
     }
 
     .t-dropdown__item-icon {
@@ -3338,8 +3338,8 @@ watch(() => entries.value.map(e => ({
   display: flex;
   flex: 1;
   min-height: 0;
-  background: #fafbfc;
-  border: 1px solid #e7ebf0;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -3347,8 +3347,8 @@ watch(() => entries.value.map(e => ({
 // 与列表页筛选区、文档型知识库标签栏一致：白底卡片感
 .faq-tag-panel {
   width: 200px;
-  background: #fff;
-  border-right: 1px solid #e7ebf0;
+  background: var(--td-bg-color-container);
+  border-right: 1px solid var(--td-component-stroke);
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   padding: 16px;
   flex-shrink: 0;
@@ -3373,7 +3373,7 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     justify-content: space-between;
     margin-bottom: 10px;
-    color: #1d2129;
+    color: var(--td-text-color-primary);
 
     .sidebar-title {
       display: flex;
@@ -3384,14 +3384,14 @@ watch(() => entries.value.map(e => ({
 
       .sidebar-count {
         font-size: 12px;
-        color: #86909c;
+        color: var(--td-text-color-secondary);
       }
     }
 
     .sidebar-actions {
       display: flex;
       gap: 6px;
-      color: #c9ced6;
+      color: var(--td-text-color-placeholder);
 
       .create-tag-btn {
         width: 24px;
@@ -3403,13 +3403,13 @@ watch(() => entries.value.map(e => ({
         justify-content: center;
         font-size: 16px;
         font-weight: 600;
-        color: #00a870;
+        color: var(--td-success-color);
         line-height: 1;
         transition: background 0.2s ease, color 0.2s ease;
 
         &:hover {
-          background: #f3f5f7;
-          color: #05a04f;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-brand-color-active);
         }
       }
 
@@ -3428,8 +3428,8 @@ watch(() => entries.value.map(e => ({
         transition: background 0.2s ease, color 0.2s ease;
 
         &:hover {
-          background: #f3f5f7;
-          color: #00a870;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-success-color);
         }
       }
     }
@@ -3440,8 +3440,8 @@ watch(() => entries.value.map(e => ({
 
     :deep(.t-input) {
       font-size: 12px;
-      background-color: #f7f9fc;
-      border-color: #e5e9f2;
+      background-color: var(--td-bg-color-container);
+      border-color: var(--td-component-stroke);
       border-radius: 6px;
     }
 
@@ -3481,7 +3481,7 @@ watch(() => entries.value.map(e => ({
       justify-content: space-between;
       padding: 9px 12px;
       border-radius: 6px;
-      color: #2d3139;
+      color: var(--td-text-color-primary);
       cursor: pointer;
       transition: all 0.2s ease;
       font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -3497,7 +3497,7 @@ watch(() => entries.value.map(e => ({
 
         .t-icon {
           flex-shrink: 0;
-          color: #5c6470;
+          color: var(--td-text-color-secondary);
           font-size: 14px;
           transition: color 0.2s ease;
         }
@@ -3526,38 +3526,38 @@ watch(() => entries.value.map(e => ({
 
       .faq-tag-count {
         font-size: 12px;
-        color: #5c6470;
+        color: var(--td-text-color-secondary);
         font-weight: 500;
         min-width: 28px;
         padding: 3px 7px;
         border-radius: 8px;
-        background: #eef0f3;
+        background: var(--td-bg-color-secondarycontainer);
         transition: all 0.2s ease;
         text-align: center;
         box-sizing: border-box;
       }
 
       &:hover {
-        background: #f2f4f7;
-        color: #1d2129;
+        background: var(--td-bg-color-secondarycontainer);
+        color: var(--td-text-color-primary);
 
         .faq-tag-left .t-icon {
-          color: #1d2129;
+          color: var(--td-text-color-primary);
         }
 
         .faq-tag-count {
-          background: #e5e9f2;
-          color: #1d2129;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-text-color-primary);
         }
       }
 
       &.active {
-        background: #e6f7ec;
-        color: #07c05f;
+        background: var(--td-success-color-light);
+        color: var(--td-brand-color);
         font-weight: 500;
 
         .faq-tag-left .t-icon {
-          color: #07c05f;
+          color: var(--td-brand-color);
         }
 
         .tag-name {
@@ -3565,13 +3565,13 @@ watch(() => entries.value.map(e => ({
         }
 
         .faq-tag-count {
-          background: #b8f0d3;
-          color: #07c05f;
+          background: var(--td-success-color-light);
+          color: var(--td-brand-color);
           font-weight: 600;
         }
 
         &:hover {
-          background: #d4f4e3;
+          background: var(--td-success-color-light);
         }
       }
 
@@ -3615,22 +3615,22 @@ watch(() => entries.value.map(e => ({
         }
 
         :deep(.tag-action-btn.confirm) {
-          background: #eefcf5;
-          color: #059669;
+          background: var(--td-success-color-light);
+          color: var(--td-brand-color-active);
 
           &:hover {
-            background: #d9f7e9;
-            color: #047857;
+            background: var(--td-success-color-light);
+            color: var(--td-success-color);
           }
         }
 
         :deep(.tag-action-btn.cancel) {
-          background: #f9fafb;
-          color: #6b7280;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-text-color-secondary);
 
           &:hover {
-            background: #f3f4f6;
-            color: #4b5563;
+            background: var(--td-bg-color-secondarycontainer);
+            color: var(--td-text-color-secondary);
           }
         }
       }
@@ -3644,7 +3644,7 @@ watch(() => entries.value.map(e => ({
           font-size: 12px;
           background-color: transparent;
           border: none;
-          border-bottom: 1px solid #d0d5dd;
+          border-bottom: 1px solid var(--td-component-stroke);
           border-radius: 0;
           box-shadow: none;
           padding-left: 0;
@@ -3654,7 +3654,7 @@ watch(() => entries.value.map(e => ({
         :deep(.t-input__wrap) {
           background-color: transparent;
           border: none;
-          border-bottom: 1px solid #d0d5dd;
+          border-bottom: 1px solid var(--td-component-stroke);
           border-radius: 0;
           box-shadow: none;
         }
@@ -3662,15 +3662,15 @@ watch(() => entries.value.map(e => ({
         :deep(.t-input__inner) {
           padding-left: 0;
           padding-right: 0;
-          color: #1d2129;
-          caret-color: #1d2129;
+          color: var(--td-text-color-primary);
+          caret-color: var(--td-text-color-primary);
         }
 
         :deep(.t-input:hover),
         :deep(.t-input.t-is-focused),
         :deep(.t-input__wrap:hover),
         :deep(.t-input__wrap.t-is-focused) {
-          border-bottom-color: #00a870;
+          border-bottom-color: var(--td-success-color);
         }
       }
 
@@ -3681,13 +3681,13 @@ watch(() => entries.value.map(e => ({
         align-items: center;
         justify-content: center;
         border-radius: 4px;
-        color: #86909c;
+        color: var(--td-text-color-secondary);
         transition: all 0.2s ease;
         opacity: 0.6;
 
         &:hover {
-          background: #f3f5f7;
-          color: #4e5969;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-text-color-secondary);
           opacity: 1;
         }
       }
@@ -3708,7 +3708,7 @@ watch(() => entries.value.map(e => ({
     .tag-empty-state {
       text-align: center;
       padding: 10px 6px;
-      color: #a1a7b3;
+      color: var(--td-text-color-placeholder);
       font-size: 11px;
     }
   }
@@ -3722,7 +3722,7 @@ watch(() => entries.value.map(e => ({
   flex-direction: column;
   padding: 12px;
   overflow: hidden;
-  background: #fafbfc;
+  background: var(--td-bg-color-container);
 }
 
 .faq-search-bar {
@@ -3743,27 +3743,27 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     gap: 4px;
     :deep(.content-bar-icon-btn) {
-      color: #86909c;
+      color: var(--td-text-color-secondary);
       background: transparent;
       border: none;
       &:hover {
-        color: #4e5969;
-        background: #f2f3f5;
+        color: var(--td-text-color-secondary);
+        background: var(--td-bg-color-secondarycontainer);
       }
     }
   }
 
   :deep(.t-input) {
     font-size: 13px;
-    background-color: #f7f9fc;
-    border-color: #e5e9f2;
+    background-color: var(--td-bg-color-container);
+    border-color: var(--td-component-stroke);
     border-radius: 6px;
 
     &:hover,
     &:focus,
     &.t-is-focused {
-      background-color: #fff;
-      border-color: #00a870;
+      background-color: var(--td-bg-color-container);
+      border-color: var(--td-success-color);
     }
   }
 
@@ -3783,7 +3783,7 @@ watch(() => entries.value.map(e => ({
   padding: 8px 16px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
@@ -3794,19 +3794,19 @@ watch(() => entries.value.map(e => ({
   }
 
   &:hover {
-    background: #f5f5f5;
-    color: #000000e6;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 
   &.danger {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
 
     &:hover {
-      background: #fff1f0;
-      color: #fa5151;
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
 
       .menu-icon {
-        color: #fa5151;
+        color: var(--td-error-color);
       }
     }
   }
@@ -3842,7 +3842,7 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: #86909c;
+    color: var(--td-text-color-secondary);
     cursor: default;
   }
 
@@ -3851,7 +3851,7 @@ watch(() => entries.value.map(e => ({
   }
 
   .faq-access-meta-sep {
-    color: #c9ced6;
+    color: var(--td-text-color-placeholder);
     user-select: none;
   }
 
@@ -3866,7 +3866,7 @@ watch(() => entries.value.map(e => ({
     margin: 0;
     font-size: 20px;
     font-weight: 600;
-    color: #1d2129;
+    color: var(--td-text-color-primary);
   }
 
   .breadcrumb-link {
@@ -3875,7 +3875,7 @@ watch(() => entries.value.map(e => ({
     padding: 4px 8px;
     margin: -4px -8px;
     font: inherit;
-    color: #4e5969;
+    color: var(--td-text-color-secondary);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -3884,13 +3884,13 @@ watch(() => entries.value.map(e => ({
     transition: all 0.12s ease;
 
     &:hover:not(:disabled) {
-      color: #10b981;
-      background: #f6f8f7;
+      color: var(--td-success-color);
+      background: var(--td-bg-color-container);
     }
 
     &:disabled {
       cursor: not-allowed;
-      color: #c9ced6;
+      color: var(--td-text-color-placeholder);
     }
 
     &.dropdown {
@@ -3911,17 +3911,17 @@ watch(() => entries.value.map(e => ({
 
   .breadcrumb-separator {
     font-size: 14px;
-    color: #c9ced6;
+    color: var(--td-text-color-placeholder);
   }
 
   .breadcrumb-current {
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     font-weight: 600;
   }
 
   h2 {
     margin: 0;
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 24px;
     font-weight: 600;
@@ -3930,7 +3930,7 @@ watch(() => entries.value.map(e => ({
 
   .faq-subtitle {
     margin: 0;
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -3942,8 +3942,8 @@ watch(() => entries.value.map(e => ({
 // 导入进度条样式（显示在列表页面顶部）
 .faq-import-progress-bar {
   margin-bottom: 16px;
-  background: linear-gradient(135deg, #f8fffe 0%, #f5fff9 100%);
-  border: 1px solid #d4f0e0;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-success-color-focus);
   border-radius: 10px;
   padding: 14px 18px;
   box-shadow: 0 2px 12px rgba(0, 168, 112, 0.08);
@@ -3959,7 +3959,7 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     justify-content: space-between;
     font-size: 14px;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
 
     .progress-left {
       display: flex;
@@ -3978,26 +3978,26 @@ watch(() => entries.value.map(e => ({
 
       &.icon-loading {
         animation: rotate 1s linear infinite;
-        color: #00a870;
+        color: var(--td-success-color);
       }
 
       &.icon-success {
-        color: #00a870;
+        color: var(--td-success-color);
       }
 
       &.icon-error {
-        color: #fa5151;
+        color: var(--td-error-color);
       }
     }
 
     .progress-title {
       font-weight: 600;
       font-size: 14px;
-      color: #1d2129;
+      color: var(--td-text-color-primary);
     }
 
     .progress-count {
-      color: #4e5969;
+      color: var(--td-text-color-secondary);
       font-size: 13px;
       font-weight: 500;
       background: rgba(0, 168, 112, 0.1);
@@ -4040,7 +4040,7 @@ watch(() => entries.value.map(e => ({
   .progress-error {
     margin: 0;
     font-size: 13px;
-    color: #fa5151;
+    color: var(--td-error-color);
     line-height: 1.5;
     background: rgba(250, 81, 81, 0.08);
     padding: 8px 12px;
@@ -4060,8 +4060,8 @@ watch(() => entries.value.map(e => ({
 // 导入结果统计卡片样式
 .faq-import-result-card {
   margin-bottom: 16px;
-  background: #ffffff;
-  border: 1px solid #e7ebf0;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   padding: 16px 20px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
@@ -4083,7 +4083,7 @@ watch(() => entries.value.map(e => ({
       gap: 8px;
 
       .result-icon {
-        color: #07C05F;
+        color: var(--td-brand-color);
         flex-shrink: 0;
       }
 
@@ -4091,7 +4091,7 @@ watch(() => entries.value.map(e => ({
         font-family: "PingFang SC";
         font-weight: 600;
         font-size: 14px;
-        color: #1d2129;
+        color: var(--td-text-color-primary);
       }
     }
 
@@ -4103,18 +4103,18 @@ watch(() => entries.value.map(e => ({
       .result-time {
         font-family: "PingFang SC";
         font-size: 13px;
-        color: #86909c;
+        color: var(--td-text-color-secondary);
       }
 
       .result-close-btn {
         padding: 4px;
         border-radius: 4px;
-        color: #86909c;
+        color: var(--td-text-color-secondary);
         transition: all 0.2s ease;
 
         &:hover {
-          background: #f2f3f5;
-          color: #4e5969;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-text-color-secondary);
         }
       }
     }
@@ -4142,24 +4142,24 @@ watch(() => entries.value.map(e => ({
       font-size: 13px;
 
       .stat-label {
-        color: #86909c;
+        color: var(--td-text-color-secondary);
       }
 
       .stat-value {
         font-weight: 600;
-        color: #1d2129;
+        color: var(--td-text-color-primary);
       }
 
       &.success .stat-value {
-        color: #07C05F;
+        color: var(--td-brand-color);
       }
 
       &.failed .stat-value {
-        color: #E34D59;
+        color: var(--td-error-color);
       }
 
       &.skipped .stat-value {
-        color: #ED7B2F;
+        color: var(--td-warning-color);
       }
 
       .download-failed-btn {
@@ -4192,7 +4192,7 @@ watch(() => entries.value.map(e => ({
   margin-bottom: 12px;
 
   .tag-filter-label {
-    color: #6B7280;
+    color: var(--td-text-color-secondary);
     font-size: 14px;
   }
 }
@@ -4203,18 +4203,18 @@ watch(() => entries.value.map(e => ({
   height: 30px;
   border: none;
   border-radius: 50%;
-  background: #f5f6f8;
+  background: var(--td-bg-color-secondarycontainer);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
   padding: 0;
 
   &:hover:not(:disabled) {
-    background: #e6f7ec;
-    color: #07c05f;
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color);
   }
 
   &:disabled {
@@ -4243,9 +4243,9 @@ watch(() => entries.value.map(e => ({
 }
 
 .faq-card {
-  border: 1px solid #E7E7E7;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   padding: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   display: flex;
@@ -4260,13 +4260,13 @@ watch(() => entries.value.map(e => ({
   height: fit-content;
 
   &:hover {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
   }
 
   &.selected {
-    border-color: #07C05F;
-    background: #F0FDF4;
+    border-color: var(--td-brand-color);
+    background: var(--td-success-color-light);
     box-shadow: 0 2px 8px rgba(7, 192, 95, 0.15);
   }
 }
@@ -4276,7 +4276,7 @@ watch(() => entries.value.map(e => ({
   flex-direction: column;
   gap: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #F3F4F6;
+  border-bottom: 1px solid var(--td-component-stroke);
   position: relative;
 }
 
@@ -4300,7 +4300,7 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   gap: 8px;
   padding-top: 5px;
-  border-top: 1px dashed #F3F4F6;
+  border-top: 1px dashed var(--td-component-stroke);
 }
 
 .faq-meta-item {
@@ -4309,18 +4309,18 @@ watch(() => entries.value.map(e => ({
   gap: 5px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: #F9FAFB;
-  border: 1px solid #EEF2F7;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
 
   .meta-label {
     font-size: 11px;
-    color: #6B7280;
+    color: var(--td-text-color-secondary);
     font-weight: 500;
   }
 
   .meta-value {
     font-size: 12px;
-    color: #111827;
+    color: var(--td-text-color-primary);
     font-weight: 600;
   }
 }
@@ -4333,7 +4333,7 @@ watch(() => entries.value.map(e => ({
   padding: 8px 12px;
   margin: 0 -10px -10px;
   background: rgba(48, 50, 54, 0.02);
-  border-top: 1px solid #f5f5f5;
+  border-top: 1px solid var(--td-component-stroke);
   flex-wrap: nowrap;
 }
 
@@ -4351,22 +4351,22 @@ watch(() => entries.value.map(e => ({
   gap: 5px;
   padding: 3px 8px;
   border-radius: 999px;
-  background: #F9FAFB;
-  border: 1px solid #EEF2F7;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   font-size: 11px;
-  color: #4B5563;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
 
   .status-icon {
     font-size: 13px;
-    color: #9CA3AF;
+    color: var(--td-text-color-placeholder);
 
     &.warning {
-      color: #F97316;
+      color: var(--td-warning-color);
     }
 
     &.success {
-      color: #10B981;
+      color: var(--td-success-color);
     }
   }
 }
@@ -4383,7 +4383,7 @@ watch(() => entries.value.map(e => ({
   transition: all 0.2s ease;
 
   &:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: var(--td-bg-color-container-hover);
   }
 
   .status-icon {
@@ -4391,11 +4391,11 @@ watch(() => entries.value.map(e => ({
     flex-shrink: 0;
 
     &.warning {
-      color: #F97316;
+      color: var(--td-warning-color);
     }
 
     &.success {
-      color: #10B981;
+      color: var(--td-success-color);
     }
   }
 
@@ -4418,19 +4418,19 @@ watch(() => entries.value.map(e => ({
     max-width: 120px;
     height: 20px;
     border-radius: 4px;
-    border-color: #e5e7eb;
-    color: #00000066;
+    border-color: var(--td-component-stroke);
+    color: var(--td-text-color-disabled);
     padding: 0 6px;
-    background: #3032360f;
+    background: var(--td-bg-color-container-hover);
     font-size: 11px;
     font-weight: 400;
     font-family: "PingFang SC";
     transition: all 0.2s ease;
 
     &:hover {
-      border-color: #07c05f;
-      color: #059669;
-      background: #ecfdf5;
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color-active);
+      background: var(--td-success-color-light);
     }
   }
 }
@@ -4447,7 +4447,7 @@ watch(() => entries.value.map(e => ({
     white-space: nowrap;
     font-size: 11px;
     font-weight: 400;
-    color: #00000066;
+    color: var(--td-text-color-disabled);
   }
 }
 
@@ -4463,7 +4463,7 @@ watch(() => entries.value.map(e => ({
   opacity: 0.6;
 
   &:hover {
-    background: #F3F4F6;
+    background: var(--td-bg-color-secondarycontainer);
     opacity: 1;
   }
 
@@ -4488,7 +4488,7 @@ watch(() => entries.value.map(e => ({
   padding: 8px 16px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
@@ -4500,19 +4500,19 @@ watch(() => entries.value.map(e => ({
   }
 
   &:hover {
-    background: #f5f5f5;
-    color: #000000e6;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 
   &.danger {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
 
     &:hover {
-      background: #fff1f0;
-      color: #fa5151;
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
 
       .menu-icon {
-        color: #fa5151;
+        color: var(--td-error-color);
       }
     }
   }
@@ -4520,7 +4520,7 @@ watch(() => entries.value.map(e => ({
 
 .faq-question {
   flex: 1;
-  color: #111827;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 15px;
   font-weight: 600;
@@ -4552,7 +4552,7 @@ watch(() => entries.value.map(e => ({
   overflow: hidden;
 
   .faq-section-label {
-    color: #6B7280;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC";
     font-size: 11px;
     font-weight: 600;
@@ -4567,7 +4567,7 @@ watch(() => entries.value.map(e => ({
       content: '';
       width: 3px;
       height: 10px;
-      background: #07C05F;
+      background: var(--td-brand-color);
       border-radius: 2px;
       flex-shrink: 0;
     }
@@ -4579,8 +4579,8 @@ watch(() => entries.value.map(e => ({
       border-radius: 4px;
 
       &:hover {
-        color: #111827;
-        background: #F9FAFB;
+        color: var(--td-text-color-primary);
+        background: var(--td-bg-color-container);
         padding-left: 4px;
         padding-right: 4px;
         margin-left: -4px;
@@ -4590,28 +4590,28 @@ watch(() => entries.value.map(e => ({
 
     .collapse-icon {
       font-size: 13px;
-      color: #9CA3AF;
+      color: var(--td-text-color-placeholder);
       flex-shrink: 0;
       margin-left: auto; // 让箭头靠右对齐
     }
 
     .section-count {
-      color: #9CA3AF;
+      color: var(--td-text-color-placeholder);
       font-weight: 400;
       margin-left: 4px;
     }
   }
 
   &.answers .faq-section-label::before {
-    background: #07C05F;
+    background: var(--td-brand-color);
   }
 
   &.similar .faq-section-label::before {
-    background: #3B82F6;
+    background: var(--td-brand-color);
   }
 
   &.negative .faq-section-label::before {
-    background: #F59E0B;
+    background: var(--td-warning-color);
   }
 }
 
@@ -4656,9 +4656,9 @@ watch(() => entries.value.map(e => ({
     vertical-align: middle;
     overflow: hidden !important;
     box-sizing: border-box;
-    background: #F9FAFB;
-    border-color: #E5E7EB;
-    color: #374151;
+    background: var(--td-bg-color-container);
+    border-color: var(--td-component-stroke);
+    color: var(--td-text-color-primary);
   }
   
   // 针对TDesign tag内部的span元素
@@ -4689,7 +4689,7 @@ watch(() => entries.value.map(e => ({
 }
 
 .empty-tip {
-  color: #9CA3AF;
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-style: italic;
   padding: 8px 0;
@@ -4703,13 +4703,13 @@ watch(() => entries.value.map(e => ({
   justify-content: center;
   align-items: center;
   padding: 24px 16px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   font-size: 13px;
   font-family: "PingFang SC";
 }
 
 .faq-no-more {
-  color: #9CA3AF;
+  color: var(--td-text-color-placeholder);
   font-style: italic;
 }
 
@@ -4731,12 +4731,12 @@ watch(() => entries.value.map(e => ({
   }
 
   .empty-icon {
-    color: #D1D5DB;
+    color: var(--td-text-color-disabled);
     opacity: 0.6;
   }
 
   .empty-text {
-    color: #111827;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 18px;
     font-weight: 600;
@@ -4744,7 +4744,7 @@ watch(() => entries.value.map(e => ({
   }
 
   .empty-desc {
-    color: #6B7280;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -4770,7 +4770,7 @@ watch(() => entries.value.map(e => ({
   width: 100%;
   max-width: 600px;
   max-height: 90vh;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
@@ -4784,19 +4784,19 @@ watch(() => entries.value.map(e => ({
     width: 32px;
     height: 32px;
     border: none;
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #666;
+    color: var(--td-text-color-secondary);
     transition: all 0.2s ease;
     z-index: 10;
 
     &:hover {
-      background: #e5e5e5;
-      color: #000;
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
     }
   }
 }
@@ -4810,7 +4810,7 @@ watch(() => entries.value.map(e => ({
 
 .faq-import-header {
   padding: 24px 24px 16px;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 
   .import-title {
@@ -4818,7 +4818,7 @@ watch(() => entries.value.map(e => ({
     font-family: "PingFang SC";
     font-size: 18px;
     font-weight: 600;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -4836,24 +4836,24 @@ watch(() => entries.value.map(e => ({
   }
 
   &::-webkit-scrollbar-track {
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #d0d0d0;
+    background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
     transition: background 0.2s;
 
     &:hover {
-      background: #07C05F;
+      background: var(--td-brand-color);
     }
   }
 }
 
 .faq-import-footer {
   padding: 16px 24px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -4888,21 +4888,21 @@ watch(() => entries.value.map(e => ({
   font-weight: 500;
   padding: 6px 14px;
   border-radius: 6px;
-  border: 1px solid #E7E7E7;
-  background: #ffffff;
-  color: #333333;
+  border: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
   transition: all 0.2s ease;
   cursor: pointer;
   white-space: nowrap;
 
   &:hover {
-    border-color: #07C05F;
-    color: #07C05F;
-    background: #f0fdf4;
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+    background: var(--td-success-color-light);
   }
 
   &:active {
-    background: #e0f9ea;
+    background: var(--td-success-color-light);
   }
 
   :deep(.t-icon) {
@@ -4917,13 +4917,13 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 500;
-  color: #333333;
+  color: var(--td-text-color-primary);
   letter-spacing: -0.2px;
   flex: 1;
 
   &.required::after {
     content: '*';
-    color: #FA5151;
+    color: var(--td-error-color);
     margin-left: 4px;
     font-weight: 600;
   }
@@ -4932,7 +4932,7 @@ watch(() => entries.value.map(e => ({
 // 单选按钮组样式 - 符合项目主题风格
 :deep(.import-radio-group) {
   .t-radio-group--filled {
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 6px;
     padding: 2px;
   }
@@ -4940,24 +4940,24 @@ watch(() => entries.value.map(e => ({
   .t-radio-button {
     font-family: "PingFang SC";
     font-size: 14px;
-    border-color: #d9d9d9;
+    border-color: var(--td-component-stroke);
     transition: all 0.2s ease;
 
     &:hover:not(.t-is-disabled) {
-      border-color: #07c05f;
-      color: #07c05f;
+      border-color: var(--td-brand-color);
+      color: var(--td-brand-color);
     }
 
     &.t-is-checked {
-      background: #07c05f;
-      border-color: #07c05f;
-      color: #fff;
+      background: var(--td-brand-color);
+      border-color: var(--td-brand-color);
+      color: var(--td-text-color-anti);
       font-weight: 500;
 
       &:hover:not(.t-is-disabled) {
-        background: #05a04f;
-        border-color: #05a04f;
-        color: #fff;
+        background: var(--td-brand-color);
+        border-color: var(--td-brand-color-active);
+        color: var(--td-text-color-anti);
       }
     }
   }
@@ -4983,9 +4983,9 @@ watch(() => entries.value.map(e => ({
   position: relative;
   width: 100%;
   min-height: 120px;
-  border: 2px dashed #d9d9d9;
+  border: 2px dashed var(--td-component-stroke);
   border-radius: 8px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
   transition: all 0.3s ease;
   display: flex;
@@ -4993,13 +4993,13 @@ watch(() => entries.value.map(e => ({
   justify-content: center;
 
   &:hover {
-    border-color: #07C05F;
-    background: #f0fdf4;
+    border-color: var(--td-brand-color);
+    background: var(--td-success-color-light);
   }
 
   &.has-file {
-    border-color: #07C05F;
-    background: #f0fdf4;
+    border-color: var(--td-brand-color);
+    background: var(--td-success-color-light);
     border-style: solid;
   }
 }
@@ -5014,7 +5014,7 @@ watch(() => entries.value.map(e => ({
 }
 
 .upload-icon {
-  color: #07C05F;
+  color: var(--td-brand-color);
   transition: transform 0.2s ease;
 }
 
@@ -5032,20 +5032,20 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 500;
-  color: #333333;
+  color: var(--td-text-color-primary);
 }
 
 .upload-secondary-text {
   font-family: "PingFang SC";
   font-size: 12px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
 }
 
 .upload-file-name {
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 500;
-  color: #07C05F;
+  color: var(--td-brand-color);
   word-break: break-all;
 }
 
@@ -5054,7 +5054,7 @@ watch(() => entries.value.map(e => ({
   margin-top: 8px;
   font-family: "PingFang SC";
   font-size: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   line-height: 18px;
 }
 
@@ -5062,8 +5062,8 @@ watch(() => entries.value.map(e => ({
 .import-preview {
   margin-top: 20px;
   padding: 16px;
-  background: #fafafa;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
 }
 
@@ -5073,11 +5073,11 @@ watch(() => entries.value.map(e => ({
   gap: 8px;
   margin-bottom: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .preview-icon {
-  color: #07C05F;
+  color: var(--td-brand-color);
   flex-shrink: 0;
 }
 
@@ -5085,7 +5085,7 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 500;
-  color: #333333;
+  color: var(--td-text-color-primary);
 }
 
 .preview-list {
@@ -5100,13 +5100,13 @@ watch(() => entries.value.map(e => ({
   align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
   }
 }
@@ -5118,8 +5118,8 @@ watch(() => entries.value.map(e => ({
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #07C05F 0%, #05a04f 100%);
-  color: #ffffff;
+  background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
+  color: var(--td-text-color-anti);
   border-radius: 4px;
   font-family: "PingFang SC";
   font-size: 12px;
@@ -5130,7 +5130,7 @@ watch(() => entries.value.map(e => ({
   flex: 1;
   font-family: "PingFang SC";
   font-size: 13px;
-  color: #333333;
+  color: var(--td-text-color-primary);
   line-height: 1.5;
   word-break: break-word;
 }
@@ -5138,10 +5138,10 @@ watch(() => entries.value.map(e => ({
 .preview-more {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--td-component-stroke);
   font-family: "PingFang SC";
   font-size: 12px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
   text-align: center;
 }
 
@@ -5170,16 +5170,16 @@ watch(() => entries.value.map(e => ({
 
   .t-drawer__header {
     padding: 20px 24px;
-    border-bottom: 1px solid #e5e5e5;
+    border-bottom: 1px solid var(--td-component-stroke);
     font-family: "PingFang SC";
     font-size: 18px;
     font-weight: 600;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .t-drawer__footer {
     padding: 16px 24px;
-    border-top: 1px solid #e5e5e5;
+    border-top: 1px solid var(--td-component-stroke);
   }
 }
 
@@ -5195,17 +5195,17 @@ watch(() => entries.value.map(e => ({
   }
 
   &::-webkit-scrollbar-track {
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #d0d0d0;
+    background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
     transition: background 0.2s;
 
     &:hover {
-      background: #07C05F;
+      background: var(--td-brand-color);
     }
   }
 
@@ -5258,31 +5258,31 @@ watch(() => entries.value.map(e => ({
   }
 
   :deep(.add-item-btn) {
-    background: #07C05F !important;
-    border: 1px solid #07C05F !important;
+    background: var(--td-brand-color) !important;
+    border: 1px solid var(--td-brand-color) !important;
     border-radius: 8px !important;
-    color: #ffffff !important;
+    color: var(--td-text-color-anti) !important;
     display: flex;
     align-items: center;
     justify-content: center;
 
     &:hover:not(:disabled) {
-      background: #05a04f !important;
-      border-color: #05a04f !important;
+      background: var(--td-brand-color) !important;
+      border-color: var(--td-brand-color-active) !important;
       transform: scale(1.05);
       box-shadow: 0 2px 8px rgba(7, 192, 95, 0.3);
     }
 
     &:active:not(:disabled) {
-      background: #048a42 !important;
-      border-color: #048a42 !important;
+      background: var(--td-brand-color-active) !important;
+      border-color: var(--td-brand-color-active) !important;
       transform: scale(0.98);
     }
 
     &:disabled {
-      background: #E5E7EB !important;
-      border-color: #E5E7EB !important;
-      color: #9CA3AF !important;
+      background: var(--td-bg-color-component-disabled) !important;
+      border-color: var(--td-component-stroke) !important;
+      color: var(--td-text-color-placeholder) !important;
       cursor: not-allowed;
       opacity: 0.6;
     }
@@ -5302,7 +5302,7 @@ watch(() => entries.value.map(e => ({
 
 .item-count {
   font-size: 13px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
   font-weight: 500;
   text-align: right;
@@ -5324,8 +5324,8 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: #ffffff;
-  border: 1px solid #E7E7E7;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   transition: all 0.2s ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -5337,19 +5337,19 @@ watch(() => entries.value.map(e => ({
   }
 
   &:hover {
-    background: #fafafa;
-    border-color: #07C05F;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-brand-color);
     box-shadow: 0 2px 8px rgba(7, 192, 95, 0.12);
     transform: translateY(-1px);
   }
 
   &.negative {
-    background: #FFFBEB;
-    border-color: #FDE68A;
+    background: var(--td-warning-color-light);
+    border-color: var(--td-warning-color-focus);
 
     &:hover {
-      background: #FEF3C7;
-      border-color: #FCD34D;
+      background: var(--td-warning-color-light);
+      border-color: var(--td-warning-color);
       box-shadow: 0 2px 8px rgba(251, 191, 36, 0.15);
     }
   }
@@ -5358,7 +5358,7 @@ watch(() => entries.value.map(e => ({
     flex: 1;
     font-size: 14px;
     line-height: 1.6;
-    color: #111827;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     white-space: pre-wrap;
     word-break: break-word;
@@ -5368,7 +5368,7 @@ watch(() => entries.value.map(e => ({
 
   .remove-item-btn {
     flex-shrink: 0;
-    color: #9CA3AF;
+    color: var(--td-text-color-placeholder);
     padding: 0;
     width: 24px;
     height: 24px;
@@ -5383,12 +5383,12 @@ watch(() => entries.value.map(e => ({
     cursor: pointer;
 
     &:hover {
-      color: #EF4444;
-      background: #FEE2E2;
+      color: var(--td-error-color);
+      background: var(--td-error-color-light);
     }
 
     &:active {
-      background: #FECACA;
+      background: var(--td-error-color-light);
     }
 
     :deep(.t-icon) {
@@ -5404,7 +5404,7 @@ watch(() => entries.value.map(e => ({
 .form-tip {
   margin-top: 6px;
   font-size: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-family: "PingFang SC";
 }
 
@@ -5449,7 +5449,7 @@ watch(() => entries.value.map(e => ({
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -5484,7 +5484,7 @@ watch(() => entries.value.map(e => ({
       top: 20px;
       width: 3px;
       height: calc(100% - 40px);
-      background: #07C05F;
+      background: var(--td-brand-color);
       border-radius: 0 2px 2px 0;
     }
 
@@ -5512,24 +5512,24 @@ watch(() => entries.value.map(e => ({
 
     .setting-info {
       .optional-label {
-        color: #333333;
+        color: var(--td-text-color-primary);
         font-weight: 500;
       }
 
       .optional-desc {
-        color: #666666;
+        color: var(--td-text-color-secondary);
       }
     }
   }
 
   // 相似问的蓝色标记
   &.setting-row-similar::before {
-    background: #3B82F6;
+    background: var(--td-brand-color);
   }
 
   // 反例的橙色标记
   &.setting-row-negative::before {
-    background: #F59E0B;
+    background: var(--td-warning-color);
   }
 
   // 答案去掉底部边框
@@ -5546,7 +5546,7 @@ watch(() => entries.value.map(e => ({
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
@@ -5554,7 +5554,7 @@ watch(() => entries.value.map(e => ({
   .required-label {
     font-size: 15px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -5562,7 +5562,7 @@ watch(() => entries.value.map(e => ({
   }
 
   .required-mark {
-    color: #FA5151;
+    color: var(--td-error-color);
     font-weight: 600;
     font-size: 14px;
   }
@@ -5570,21 +5570,21 @@ watch(() => entries.value.map(e => ({
   .optional-label {
     font-size: 15px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
 
   .optional-desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -5632,17 +5632,17 @@ watch(() => entries.value.map(e => ({
 :deep(.t-input) {
   font-family: "PingFang SC";
   font-size: 14px;
-  border: 1px solid #E7E7E7;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
   }
 
   &:focus-within {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 3px rgba(7, 192, 95, 0.1);
   }
 
@@ -5654,7 +5654,7 @@ watch(() => entries.value.map(e => ({
     font-size: 14px;
     font-family: "PingFang SC";
     padding: 6px 12px;
-    color: #111827;
+    color: var(--td-text-color-primary);
 
     &:focus {
       border: none !important;
@@ -5663,7 +5663,7 @@ watch(() => entries.value.map(e => ({
     }
 
     &::placeholder {
-      color: #9CA3AF;
+      color: var(--td-text-color-placeholder);
     }
   }
 
@@ -5677,17 +5677,17 @@ watch(() => entries.value.map(e => ({
 :deep(.t-textarea) {
   font-family: "PingFang SC";
   font-size: 14px;
-  border: 1px solid #E7E7E7;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
   }
 
   &:focus-within {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 3px rgba(7, 192, 95, 0.1);
   }
 
@@ -5701,7 +5701,7 @@ watch(() => entries.value.map(e => ({
     line-height: 1.6;
     resize: vertical;
     padding: 6px 12px;
-    color: #111827;
+    color: var(--td-text-color-primary);
 
     &:focus {
       border: none !important;
@@ -5710,18 +5710,18 @@ watch(() => entries.value.map(e => ({
     }
 
     &::placeholder {
-      color: #9CA3AF;
+      color: var(--td-text-color-placeholder);
     }
   }
 }
 
 :deep(.t-button--theme-primary) {
-  background-color: #07c05f;
-  border-color: #07c05f;
+  background-color: var(--td-brand-color);
+  border-color: var(--td-brand-color);
   
   &:hover {
-    background-color: #05a04f;
-    border-color: #05a04f;
+    background-color: var(--td-brand-color-active);
+    border-color: var(--td-brand-color-active);
   }
 }
 
@@ -5753,15 +5753,15 @@ watch(() => entries.value.map(e => ({
 
 // Tag 样式优化
 .answer-tag {
-  background: #07c05f1a;
-  color: #07c05f;
-  border-color: #07c05f33;
+  background: var(--td-brand-color)1a;
+  color: var(--td-brand-color);
+  border-color: var(--td-brand-color)33;
 }
 
 .question-tag {
-  background: #fff;
-  border-color: #d9d9d9;
-  color: #00000099;
+  background: var(--td-bg-color-container);
+  border-color: var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
 }
 
 // Search test drawer styles - 与编辑器抽屉风格一致
@@ -5775,11 +5775,11 @@ watch(() => entries.value.map(e => ({
 
   .t-drawer__header {
     padding: 20px 24px;
-    border-bottom: 1px solid #e5e5e5;
+    border-bottom: 1px solid var(--td-component-stroke);
     font-family: "PingFang SC";
     font-size: 18px;
     font-weight: 600;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -5839,7 +5839,7 @@ watch(() => entries.value.map(e => ({
 
 .search-form .setting-row {
   padding: 16px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &.search-first-row {
     padding-top: 0;
@@ -5858,14 +5858,14 @@ watch(() => entries.value.map(e => ({
     label {
       font-size: 14px;
       font-weight: 500;
-      color: #333333;
+      color: var(--td-text-color-primary);
       display: block;
       margin-bottom: 4px;
     }
 
     .desc {
       font-size: 12px;
-      color: #666666;
+      color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.4;
     }
@@ -5886,13 +5886,13 @@ watch(() => entries.value.map(e => ({
   min-width: 0;
 
   .t-slider__rail {
-    background: #E7E7E7;
+    background: var(--td-bg-color-secondarycontainer);
     height: 4px;
     border-radius: 2px;
   }
 
   .t-slider__track {
-    background: #07C05F;
+    background: var(--td-brand-color);
     height: 4px;
     border-radius: 2px;
   }
@@ -5900,12 +5900,12 @@ watch(() => entries.value.map(e => ({
   .t-slider__button {
     width: 16px;
     height: 16px;
-    border: 2px solid #07C05F;
-    background: #ffffff;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 2px solid var(--td-brand-color);
+    background: var(--td-bg-color-container);
+    box-shadow: var(--td-shadow-1);
 
     &:hover {
-      border-color: #05a04f;
+      border-color: var(--td-brand-color-active);
       box-shadow: 0 2px 8px rgba(7, 192, 95, 0.2);
     }
   }
@@ -5918,9 +5918,9 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 500;
-  color: #111827;
+  color: var(--td-text-color-primary);
   padding: 4px 8px;
-  background: #F9FAFB;
+  background: var(--td-bg-color-container);
   border-radius: 6px;
 }
 
@@ -5962,12 +5962,12 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 600;
-  color: #111827;
+  color: var(--td-text-color-primary);
   flex-shrink: 0;
   justify-content: flex-start;
 
   .t-icon {
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
 }
 
@@ -5976,13 +5976,13 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   justify-content: center;
   padding: 48px 16px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
   font-size: 14px;
   text-align: center;
-  background: #F9FAFB;
+  background: var(--td-bg-color-container);
   border-radius: 8px;
-  border: 1px dashed #E7E7E7;
+  border: 1px dashed var(--td-component-stroke);
 }
 
 .results-list {
@@ -5992,9 +5992,9 @@ watch(() => entries.value.map(e => ({
 }
 
 .result-card {
-  border: 1px solid #E7E7E7;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   padding: 14px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -6005,7 +6005,7 @@ watch(() => entries.value.map(e => ({
   position: relative;
 
   &:hover {
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
     box-shadow: 0 2px 8px rgba(7, 192, 95, 0.12);
   }
 }
@@ -6024,14 +6024,14 @@ watch(() => entries.value.map(e => ({
   position: relative;
 
   &:hover {
-    background-color: #F9FAFB;
+    background-color: var(--td-bg-color-container);
   }
 }
 
 .result-card.expanded .result-header {
   margin-bottom: 12px;
   padding-bottom: 12px;
-  border-bottom: 1px solid #E7E7E7;
+  border-bottom: 1px solid var(--td-component-stroke);
   margin-left: -4px;
   margin-right: -4px;
   padding-left: 4px;
@@ -6057,7 +6057,7 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 600;
-  color: #111827;
+  color: var(--td-text-color-primary);
   line-height: 1.6;
   word-break: break-word;
   display: flex;
@@ -6066,7 +6066,7 @@ watch(() => entries.value.map(e => ({
 
   .result-index {
     flex-shrink: 0;
-    color: #07C05F;
+    color: var(--td-brand-color);
     font-weight: 600;
   }
 }
@@ -6081,12 +6081,12 @@ watch(() => entries.value.map(e => ({
 
   .matched-label {
     flex-shrink: 0;
-    color: #E37318;
+    color: var(--td-warning-color);
     font-weight: 500;
   }
 
   .matched-text {
-    color: #92400E;
+    color: var(--td-warning-color-active);
     background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
     padding: 1px 6px;
     border-radius: 4px;
@@ -6105,12 +6105,12 @@ watch(() => entries.value.map(e => ({
 .expand-icon {
   flex-shrink: 0;
   font-size: 18px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   transition: transform 0.2s ease;
   cursor: pointer;
 
   &:hover {
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
 }
 
@@ -6128,7 +6128,7 @@ watch(() => entries.value.map(e => ({
   gap: 12px;
   padding-top: 12px;
   margin-top: 0;
-  border-top: 1px solid #F3F4F6;
+  border-top: 1px solid var(--td-component-stroke);
   position: relative;
   width: 100%;
 }
@@ -6191,7 +6191,7 @@ watch(() => entries.value.map(e => ({
   position: relative;
   width: 100%;
   max-width: 480px;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
@@ -6205,19 +6205,19 @@ watch(() => entries.value.map(e => ({
     width: 32px;
     height: 32px;
     border: none;
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #666;
+    color: var(--td-text-color-secondary);
     transition: all 0.2s ease;
     z-index: 10;
 
     &:hover {
-      background: #e5e5e5;
-      color: #000;
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
     }
   }
 }
@@ -6236,7 +6236,7 @@ watch(() => entries.value.map(e => ({
     margin: 0;
     font-size: 20px;
     font-weight: 600;
-    color: #0f172a;
+    color: var(--td-text-color-primary);
     line-height: 1.4;
   }
 }
@@ -6252,17 +6252,17 @@ watch(() => entries.value.map(e => ({
   gap: 8px;
   padding: 12px 16px;
   margin-bottom: 20px;
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
+  background: var(--td-brand-color-light);
+  border: 1px solid var(--td-brand-color-focus);
   border-radius: 8px;
   font-size: 14px;
-  color: #0369a1;
+  color: var(--td-brand-color);
   line-height: 1.5;
 
   .tip-icon {
     flex-shrink: 0;
     margin-top: 2px;
-    color: #0284c7;
+    color: var(--td-brand-color);
   }
 }
 
@@ -6276,7 +6276,7 @@ watch(() => entries.value.map(e => ({
   :deep(.t-form-item__label) {
     font-size: 14px;
     font-weight: 500;
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     margin-bottom: 8px;
   }
 }
@@ -6291,13 +6291,13 @@ watch(() => entries.value.map(e => ({
   gap: 12px;
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .tag-select-empty {
   padding: 8px 12px;
   text-align: center;
-  color: #86909c;
+  color: var(--td-text-color-secondary);
   font-size: 14px;
 }
 
@@ -6305,7 +6305,7 @@ watch(() => entries.value.map(e => ({
   font-family: "PingFang SC";
   font-size: 12px;
   font-weight: 600;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.5px;

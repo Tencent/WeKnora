@@ -1625,14 +1625,14 @@ const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
   const reasonsText = reasons.join('、')
   
   const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
-    h('span', { style: 'color: #333; line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
+    h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
     h('a', {
       href: '#',
       onClick: (e: Event) => {
         e.preventDefault();
         router.push(`/platform/agents?edit=${agent.id}`);
       },
-      style: 'color: #07C05F; text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
+      style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
       onMouseenter: (e: Event) => {
         (e.target as HTMLElement).style.textDecoration = 'underline';
       },
@@ -1662,14 +1662,14 @@ const toggleWebSearch = () => {
 
   if (!isWebSearchConfigured.value) {
     const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 6px; max-width: 280px;' }, [
-      h('span', { style: 'color: #333; line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
+      h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
       h('a', {
         href: '#',
         onClick: (e: Event) => {
           e.preventDefault();
           handleGoToWebSearchSettings();
         },
-        style: 'color: #07C05F; text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
+        style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
         onMouseenter: (e: Event) => {
           (e.target as HTMLElement).style.textDecoration = 'underline';
         },
@@ -2151,7 +2151,7 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--faq .mention-chip__icon-wrap {
   background: rgba(107, 114, 228, 0.12);
-  color: #6366f1;
+  color: var(--td-brand-color);
 }
 
 .mention-chip--faq:hover {
@@ -2295,12 +2295,12 @@ const getImgSrc = (url: string) => {
     border-color: rgba(16, 185, 129, 0.35);
     
     .agent-mode-text {
-      color: #059669;
+      color: var(--td-brand-color-active);
       font-weight: 600;
     }
     
     .dropdown-arrow {
-      color: #059669;
+      color: var(--td-brand-color-active);
     }
     
     &:hover {
@@ -2315,12 +2315,12 @@ const getImgSrc = (url: string) => {
     border-color: rgba(124, 77, 255, 0.35);
     
     .agent-mode-text {
-      color: #7c4dff;
+      color: var(--td-brand-color);
       font-weight: 600;
     }
     
     .dropdown-arrow {
-      color: #7c4dff;
+      color: var(--td-brand-color);
     }
     
     &:hover {
@@ -2335,12 +2335,12 @@ const getImgSrc = (url: string) => {
     border-color: rgba(59, 130, 246, 0.35);
     
     .agent-mode-text {
-      color: #3b82f6;
+      color: var(--td-brand-color);
       font-weight: 600;
     }
     
     .dropdown-arrow {
-      color: #3b82f6;
+      color: var(--td-brand-color);
     }
     
     &:hover {
@@ -2367,12 +2367,12 @@ const getImgSrc = (url: string) => {
   
   &.normal {
     background: rgba(7, 192, 95, 0.12);
-    color: #059669;
+    color: var(--td-brand-color-active);
   }
   
   &.agent {
     background: rgba(124, 77, 255, 0.12);
-    color: #7c4dff;
+    color: var(--td-brand-color);
   }
 }
 
@@ -2397,7 +2397,7 @@ const getImgSrc = (url: string) => {
   
   &.active {
     background: rgba(16, 185, 129, 0.1);
-    color: #07C05F;
+    color: var(--td-brand-color);
     
     &:hover {
       background: rgba(16, 185, 129, 0.15);
@@ -2425,7 +2425,7 @@ const getImgSrc = (url: string) => {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  background: #07C05F;
+  background: var(--td-brand-color);
   color: white;
   font-size: 10px;
   font-weight: 600;
@@ -2443,7 +2443,7 @@ const getImgSrc = (url: string) => {
 }
 
 .kb-btn.active .kb-btn-text {
-  color: #07C05F;
+  color: var(--td-brand-color);
 }
 
 .websearch-btn {
@@ -2460,7 +2460,7 @@ const getImgSrc = (url: string) => {
     background: rgba(16, 185, 129, 0.1);
     
     .websearch-icon {
-      color: #07C05F;
+      color: var(--td-brand-color);
     }
     
     &:hover {
@@ -2498,7 +2498,7 @@ const getImgSrc = (url: string) => {
 
 :global(.input-field-tooltip) {
   .t-popup__content {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--td-shadow-2);
     border: 1px solid var(--td-component-border, #e7e7e7);
   }
 }
@@ -2513,7 +2513,7 @@ const getImgSrc = (url: string) => {
 }
 
 :global(.tooltip-with-link a) {
-  color: #07C05F;
+  color: var(--td-brand-color);
   font-weight: 500;
   text-decoration: none;
 }
@@ -2549,7 +2549,7 @@ const getImgSrc = (url: string) => {
   height: 28px;
   padding: 0;
   background: rgba(16, 185, 129, 0.08);
-  color: #07C05F;
+  color: var(--td-brand-color);
   border: 1.5px solid rgba(16, 185, 129, 0.2);
   position: relative;
   display: flex;
@@ -2558,7 +2558,7 @@ const getImgSrc = (url: string) => {
   
   &:hover {
     background: rgba(16, 185, 129, 0.12);
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
   }
   
   &:active {
@@ -2573,7 +2573,7 @@ const getImgSrc = (url: string) => {
     content: '';
     width: 12px;
     height: 12px;
-    background: #07C05F;
+    background: var(--td-brand-color);
     border-radius: 50%;
     display: block;
   }
@@ -2583,14 +2583,14 @@ const getImgSrc = (url: string) => {
   width: 28px;
   height: 28px;
   padding: 0;
-  background-color: #07C05F;
+  background-color: var(--td-brand-color);
   
   &:hover:not(.disabled) {
-    background-color: #059669;
+    background-color: var(--td-brand-color-active);
   }
   
   &.disabled {
-    background-color: #b5eccf;
+    background-color: var(--td-success-color-light);
   }
   
   img {
@@ -2652,7 +2652,7 @@ const getImgSrc = (url: string) => {
   flex: 1;
   font-size: 12px;
   font-weight: 600;
-  color: #07C05F;
+  color: var(--td-brand-color);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2661,7 +2661,7 @@ const getImgSrc = (url: string) => {
 .model-dropdown-arrow {
   width: 10px;
   height: 10px;
-  color: #07C05F;
+  color: var(--td-brand-color);
   flex-shrink: 0;
   transition: transform 0.12s;
   
@@ -2763,7 +2763,7 @@ const getImgSrc = (url: string) => {
     background: var(--td-brand-color-light, #eefdf5);
     
     .model-option-name {
-      color: #10b981;
+      color: var(--td-success-color);
       font-weight: 600;
     }
   }
@@ -2818,12 +2818,12 @@ const getImgSrc = (url: string) => {
 
 .model-badge-remote {
   background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
+  color: var(--td-success-color);
 }
 
 .model-badge-local {
   background: rgba(139, 145, 150, 0.1);
-  color: #52575a;
+  color: var(--td-text-color-secondary);
 }
 
 /* Agent 模式选择下拉菜单 */
@@ -2880,7 +2880,7 @@ const getImgSrc = (url: string) => {
     background: var(--td-brand-color-light, #eefdf5);
     
     .agent-mode-option-name {
-      color: #10b981;
+      color: var(--td-success-color);
       font-weight: 700;
     }
   }
@@ -2911,7 +2911,7 @@ const getImgSrc = (url: string) => {
 .check-icon {
   width: 14px;
   height: 14px;
-  color: #10b981;
+  color: var(--td-success-color);
   flex-shrink: 0;
   margin-left: 6px;
 }
@@ -2922,7 +2922,7 @@ const getImgSrc = (url: string) => {
   margin-left: 6px;
   
   .warning-icon {
-    color: #ff9800;
+    color: var(--td-warning-color);
     font-size: 14px;
   }
 }
@@ -2935,7 +2935,7 @@ const getImgSrc = (url: string) => {
 }
 
 .agent-mode-link {
-  color: #10b981;
+  color: var(--td-success-color);
   text-decoration: none;
   font-size: 11px;
   font-weight: 500;
@@ -2945,7 +2945,7 @@ const getImgSrc = (url: string) => {
   transition: all 0.12s;
   
   &:hover {
-    color: #059669;
+    color: var(--td-brand-color-active);
     text-decoration: underline;
   }
 }

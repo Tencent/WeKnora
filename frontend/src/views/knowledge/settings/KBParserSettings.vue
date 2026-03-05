@@ -275,13 +275,13 @@ watch(() => props.parserEngineRules, (v) => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -296,7 +296,7 @@ watch(() => props.parserEngineRules, (v) => {
 
 .empty-hint {
   padding: 24px 0;
-  color: #666;
+  color: var(--td-text-color-secondary);
 }
 
 .settings-group {
@@ -310,7 +310,7 @@ watch(() => props.parserEngineRules, (v) => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -330,14 +330,14 @@ watch(() => props.parserEngineRules, (v) => {
 
   .group-icon {
     font-size: 18px;
-    color: #555;
+    color: var(--td-text-color-secondary);
     flex-shrink: 0;
   }
 
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
@@ -353,8 +353,8 @@ watch(() => props.parserEngineRules, (v) => {
     display: inline-block;
     font-size: 12px;
     line-height: 1;
-    color: #555;
-    background: #f3f4f6;
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-secondarycontainer);
     padding: 3px 8px;
     border-radius: 4px;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -362,7 +362,7 @@ watch(() => props.parserEngineRules, (v) => {
 
   .desc {
     font-size: 13px;
-    color: #666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -382,11 +382,11 @@ watch(() => props.parserEngineRules, (v) => {
   gap: 4px;
   margin-top: 8px;
   font-size: 12px;
-  color: #e37318;
+  color: var(--td-warning-color);
   line-height: 1.4;
 
   .go-settings {
-    color: #07C05F;
+    color: var(--td-brand-color);
     cursor: pointer;
     white-space: nowrap;
     text-decoration: none;
@@ -414,23 +414,23 @@ watch(() => props.parserEngineRules, (v) => {
 .engine-option-name {
   font-size: 13px;
   font-weight: 600;
-  color: #333;
+  color: var(--td-text-color-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .engine-option-desc {
   font-size: 12px;
-  color: #888;
+  color: var(--td-text-color-placeholder);
   line-height: 1.4;
 }
 
 .engine-option-reason {
   font-size: 12px;
-  color: #e34d59;
+  color: var(--td-error-color);
   line-height: 1.4;
 
   .go-settings {
-    color: #07C05F;
+    color: var(--td-brand-color);
     cursor: pointer;
     margin-left: 4px;
     font-size: 12px;

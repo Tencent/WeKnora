@@ -1757,13 +1757,13 @@ const handleConversationRerankModelChange = async (value: string) => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0 0 12px 0;
     line-height: 1.5;
   }
@@ -1773,11 +1773,11 @@ const handleConversationRerankModelChange = async (value: string) => {
     align-items: flex-start;
     gap: 8px;
     padding: 12px 16px;
-    background: #f0f9ff;
-    border: 1px solid #bae0ff;
+    background: var(--td-brand-color-light);
+    border: 1px solid var(--td-brand-color-focus);
     border-radius: 8px;
     margin-bottom: 20px;
-    color: #0958d9;
+    color: var(--td-brand-color);
     font-size: 13px;
     line-height: 1.5;
 
@@ -1794,7 +1794,7 @@ const handleConversationRerankModelChange = async (value: string) => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
   margin-top: 8px;
 
   .status-label {
@@ -1805,7 +1805,7 @@ const handleConversationRerankModelChange = async (value: string) => {
     label {
       font-size: 15px;
       font-weight: 500;
-      color: #333333;
+      color: var(--td-text-color-primary);
       display: block;
       margin-bottom: 4px;
     }
@@ -1829,21 +1829,21 @@ const handleConversationRerankModelChange = async (value: string) => {
       font-weight: 500;
 
       &.ready {
-        background: #f0fdf4;
-        color: #16a34a;
+        background: var(--td-success-color-light);
+        color: var(--td-success-color);
         
         .status-icon {
-          color: #16a34a;
+          color: var(--td-success-color);
           font-size: 16px;
         }
       }
 
       &:not(.ready) {
-        background: #fff7ed;
-        color: #ea580c;
+        background: var(--td-warning-color-light);
+        color: var(--td-warning-color);
         
         .status-icon {
-          color: #ea580c;
+          color: var(--td-warning-color);
           font-size: 16px;
         }
       }
@@ -1855,7 +1855,7 @@ const handleConversationRerankModelChange = async (value: string) => {
 
     .status-hint {
       font-size: 13px;
-      color: #666666;
+      color: var(--td-text-color-secondary);
       text-align: right;
       line-height: 1.5;
       max-width: 280px;
@@ -1864,7 +1864,7 @@ const handleConversationRerankModelChange = async (value: string) => {
     .status-tip {
       margin: 8px 0 0 0;
       font-size: 12px;
-      color: #999999;
+      color: var(--td-text-color-placeholder);
       text-align: right;
       line-height: 1.5;
       max-width: 280px;
@@ -1875,7 +1875,7 @@ const handleConversationRerankModelChange = async (value: string) => {
 
       .tip-icon {
         font-size: 14px;
-        color: #999999;
+        color: var(--td-text-color-placeholder);
         flex-shrink: 0;
         margin-top: 2px;
       }
@@ -1885,9 +1885,9 @@ const handleConversationRerankModelChange = async (value: string) => {
 
 .model-recommendation-box {
   margin: 20px 0;
-  background: #f0fdf6;
-  border: 1px solid #d1fae5;
-  border-left: 3px solid #07C05F;
+  background: var(--td-success-color-light);
+  border: 1px solid var(--td-success-color-focus);
+  border-left: 3px solid var(--td-brand-color);
   border-radius: 6px;
   padding: 16px;
 
@@ -1899,21 +1899,21 @@ const handleConversationRerankModelChange = async (value: string) => {
 
     .recommendation-icon {
       font-size: 16px;
-      color: #07C05F;
+      color: var(--td-brand-color);
       flex-shrink: 0;
     }
 
     .recommendation-title {
       font-size: 14px;
       font-weight: 500;
-      color: #059669;
+      color: var(--td-brand-color-active);
     }
   }
 
   .recommendation-content {
     font-size: 13px;
     line-height: 1.6;
-    color: #065f46;
+    color: var(--td-success-color);
 
     p {
       margin: 0;
@@ -1932,7 +1932,7 @@ const handleConversationRerankModelChange = async (value: string) => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -1973,14 +1973,14 @@ const handleConversationRerankModelChange = async (value: string) => {
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -1988,7 +1988,7 @@ const handleConversationRerankModelChange = async (value: string) => {
   .hint-tip {
     margin: 8px 0 0 0;
     font-size: 12px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     line-height: 1.5;
     display: flex;
     align-items: flex-start;
@@ -1996,7 +1996,7 @@ const handleConversationRerankModelChange = async (value: string) => {
 
     .tip-icon {
       font-size: 14px;
-      color: #999999;
+      color: var(--td-text-color-placeholder);
       flex-shrink: 0;
       margin-top: 2px;
     }
@@ -2017,14 +2017,14 @@ const handleConversationRerankModelChange = async (value: string) => {
 .model-column-label {
   font-size: 13px;
   font-weight: 500;
-  color: #555;
+  color: var(--td-text-color-secondary);
   margin-bottom: 4px;
 }
 
 .model-column-desc {
   margin: 0 0 8px 0;
   font-size: 12px;
-  color: #888;
+  color: var(--td-text-color-placeholder);
 }
 
 .setting-control {
@@ -2044,7 +2044,7 @@ const handleConversationRerankModelChange = async (value: string) => {
   .value-display {
     font-size: 14px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     min-width: 40px;
     text-align: right;
   }
@@ -2058,12 +2058,12 @@ const handleConversationRerankModelChange = async (value: string) => {
   
   .model-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .add-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .model-name {
@@ -2073,7 +2073,7 @@ const handleConversationRerankModelChange = async (value: string) => {
   
   &.add {
     .model-name {
-      color: #07C05F;
+      color: var(--td-brand-color);
       font-weight: 500;
     }
   }
@@ -2095,7 +2095,7 @@ const handleConversationRerankModelChange = async (value: string) => {
 
 .prompt-toggle-label {
   font-size: 13px !important;
-  color: #555;
+  color: var(--td-text-color-secondary);
 }
 
 .prompt-toggle :deep(.t-switch) {
@@ -2106,23 +2106,23 @@ const handleConversationRerankModelChange = async (value: string) => {
 .prompt-toggle :deep(.t-switch__content) {
   font-size: 12px !important;
   line-height: 18px;
-  color: #666;
+  color: var(--td-text-color-secondary);
 }
 
 .prompt-toggle :deep(.t-switch__label--off),
 .prompt-toggle :deep(.t-switch__content) {
-  color: #fafafa !important;
+  color: var(--td-text-color-anti) !important;
 }
 
 .prompt-disabled-hint {
   margin: 0 0 8px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   font-size: 12px;
 }
 
 .prompt-tab-hint {
   margin: 0 0 12px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   font-size: 12px;
 }
 
@@ -2141,8 +2141,8 @@ const handleConversationRerankModelChange = async (value: string) => {
 }
 
 .allowed-tool-chip {
-  background: #f5f7fa;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   padding: 10px 12px;
   min-width: 180px;
@@ -2154,23 +2154,23 @@ const handleConversationRerankModelChange = async (value: string) => {
 .allowed-tool-label {
   font-size: 13px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
 }
 
 .allowed-tool-desc {
   font-size: 12px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
 
 .allowed-tools-empty {
   margin: 0;
   font-size: 12px;
-  color: #999;
+  color: var(--td-text-color-placeholder);
 }
 
 .prompt-textarea-readonly {
-  background-color: #fafafa;
+  background-color: var(--td-bg-color-secondarycontainer);
 }
 
 .prompt-textarea-wrapper {
@@ -2191,40 +2191,40 @@ const handleConversationRerankModelChange = async (value: string) => {
 .placeholder-hint {
   margin-top: 12px;
   padding: 12px;
-  background: #f5f7fa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 4px;
   font-size: 12px;
   line-height: 1.6;
 
   .hint-title {
     font-weight: 500;
-    color: #333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .placeholder-list {
     margin: 8px 0;
     padding-left: 20px;
-    color: #666;
+    color: var(--td-text-color-secondary);
 
     li {
       margin: 4px 0;
 
       code {
-        background: #fff;
+        background: var(--td-bg-color-container);
         padding: 2px 6px;
         border-radius: 3px;
         font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
         font-size: 11px;
-        color: #e83e8c;
-        border: 1px solid #e1e8ed;
+        color: var(--td-error-color);
+        border: 1px solid var(--td-component-stroke);
       }
     }
   }
 
   .hint-tip {
     margin: 8px 0 0 0;
-    color: #999;
+    color: var(--td-text-color-placeholder);
     font-style: italic;
   }
 }
@@ -2236,10 +2236,10 @@ const handleConversationRerankModelChange = async (value: string) => {
 }
 
 .placeholder-popup {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--td-shadow-3);
   max-width: 400px;
   max-height: 300px;
   overflow-y: auto;
@@ -2253,7 +2253,7 @@ const handleConversationRerankModelChange = async (value: string) => {
 
   &:hover,
   &.active {
-    background-color: #f5f7fa;
+    background-color: var(--td-bg-color-secondarycontainer);
   }
 
   .placeholder-name {
@@ -2261,18 +2261,18 @@ const handleConversationRerankModelChange = async (value: string) => {
     margin-bottom: 4px;
 
     code {
-      background: #f5f7fa;
+      background: var(--td-bg-color-secondarycontainer);
       padding: 2px 6px;
       border-radius: 3px;
       font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
       font-size: 12px;
-      color: #e83e8c;
+      color: var(--td-error-color);
     }
   }
 
   .placeholder-desc {
     font-size: 12px;
-    color: #666;
+    color: var(--td-text-color-secondary);
     line-height: 1.4;
   }
 }

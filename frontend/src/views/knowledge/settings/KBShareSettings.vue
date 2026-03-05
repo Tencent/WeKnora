@@ -317,14 +317,14 @@ onMounted(async () => {
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .section-desc {
     margin: 0;
     font-family: "PingFang SC";
     font-size: 14px;
-    color: #00000066;
+    color: var(--td-text-color-placeholder);
     line-height: 22px;
   }
 }
@@ -332,7 +332,7 @@ onMounted(async () => {
 .share-form {
   margin-bottom: 24px;
   padding-bottom: 24px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--td-bg-color-secondarycontainer);
 }
 
 .form-item {
@@ -342,13 +342,13 @@ onMounted(async () => {
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .form-tip {
     margin-top: 8px;
     font-size: 12px;
-    color: #00000066;
+    color: var(--td-text-color-placeholder);
     line-height: 18px;
   }
 }
@@ -384,15 +384,15 @@ onMounted(async () => {
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .shares-count {
     padding: 2px 8px;
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 10px;
     font-size: 12px;
-    color: #00000066;
+    color: var(--td-text-color-placeholder);
   }
 }
 
@@ -402,7 +402,7 @@ onMounted(async () => {
   justify-content: center;
   gap: 8px;
   padding: 32px;
-  color: #00000066;
+  color: var(--td-text-color-placeholder);
   font-size: 14px;
 }
 
@@ -413,9 +413,9 @@ onMounted(async () => {
   justify-content: center;
   gap: 12px;
   padding: 40px 20px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
-  color: #00000066;
+  color: var(--td-text-color-placeholder);
 
   .empty-icon {
     font-size: 32px;
@@ -436,14 +436,14 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   padding: 14px 16px;
-  background: #fafafa;
-  border: 1px solid #f0f0f0;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
   transition: background 0.2s ease, border-color 0.2s ease;
 
   &:hover {
-    background: #f5f5f5;
-    border-color: #e8e8e8;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-stroke);
   }
 }
 
@@ -468,7 +468,7 @@ onMounted(async () => {
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -477,21 +477,21 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #00000099;
+  color: var(--td-text-color-secondary);
 
   .org-meta-tag {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     padding: 2px 6px;
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 4px;
   }
 
   .org-meta-icon {
     flex-shrink: 0;
     vertical-align: middle;
-    color: #00000099;
+    color: var(--td-text-color-secondary);
   }
 
   .org-meta-icon-user {
@@ -524,14 +524,14 @@ onMounted(async () => {
   display: flex;
   gap: 12px;
   padding: 16px;
-  background: #f0f7ff;
+  background: var(--td-brand-color-light);
   border-radius: 8px;
-  border: 1px solid #e6f0ff;
+  border: 1px solid var(--td-brand-color-focus);
 
   .tip-icon {
     flex-shrink: 0;
     font-size: 16px;
-    color: #0052d9;
+    color: var(--td-brand-color);
     margin-top: 2px;
   }
 
@@ -541,7 +541,7 @@ onMounted(async () => {
     p {
       margin: 0 0 4px 0;
       font-size: 13px;
-      color: #00000099;
+      color: var(--td-text-color-secondary);
       line-height: 20px;
 
       &:last-child {
@@ -563,7 +563,7 @@ onMounted(async () => {
 
 :deep(.t-select-option:hover),
 :deep(.t-select-option.t-is-selected) {
-  background: #f0f7ff;
+  background: var(--td-brand-color-light);
 }
 
 :deep(.t-select-option__content) {
@@ -601,7 +601,7 @@ onMounted(async () => {
     font-family: "PingFang SC";
     font-size: 13px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -614,21 +614,21 @@ onMounted(async () => {
   gap: 6px;
   font-family: "PingFang SC";
   font-size: 12px;
-  color: #00000099;
+  color: var(--td-text-color-secondary);
 
   .org-meta-tag {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     padding: 0px 4px;
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 4px;
   }
 
   .org-meta-icon {
     flex-shrink: 0;
     vertical-align: middle;
-    color: #00000099;
+    color: var(--td-text-color-secondary);
   }
 
   .org-meta-icon-user {
@@ -655,7 +655,7 @@ onMounted(async () => {
   max-height: 320px;
   overflow-y: auto;
   border-radius: 6px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--td-shadow-2);
 }
 
 .org-select-dropdown-popup .t-select-option {

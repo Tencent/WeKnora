@@ -1934,6 +1934,13 @@ export default {
     settings: 'Settings',
     close: 'Close Settings'
   },
+  theme: {
+    theme: 'Theme',
+    themeDescription: 'Choose the display theme for the interface, supports automatic switching with system settings',
+    light: 'Light',
+    dark: 'Dark',
+    system: 'Follow System',
+  },
   platform: {
     subtitle: 'Enterprise-level Intelligent Document Retrieval Framework',
     description: 'Making complex document understanding and precise retrieval simple',

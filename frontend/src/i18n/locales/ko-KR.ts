@@ -1422,6 +1422,13 @@ export default {
     settings: "설정",
     close: "설정 닫기",
   },
+  theme: {
+    theme: "테마",
+    themeDescription: "인터페이스의 표시 테마를 선택하세요. 시스템 설정에 따라 자동 전환을 지원합니다",
+    light: "라이트",
+    dark: "다크",
+    system: "시스템 설정",
+  },
   platform: {
     subtitle: "엔터프라이즈급 지능형 문서 검색 프레임워크",
     description: "복잡한 문서 이해와 정확한 검색을 간단하게",

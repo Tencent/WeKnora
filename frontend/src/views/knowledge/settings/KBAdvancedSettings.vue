@@ -168,13 +168,13 @@ const handleAddModel = (subSection: string) => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -191,7 +191,7 @@ const handleAddModel = (subSection: string) => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -206,21 +206,21 @@ const handleAddModel = (subSection: string) => {
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
 
   .hint {
     font-size: 12px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     margin: 6px 0 0 0;
     line-height: 1.5;
   }
@@ -237,14 +237,14 @@ const handleAddModel = (subSection: string) => {
 .subsection {
   padding: 16px 20px;
   margin: 12px 0 0 0;
-  background: #f8fafb;
+  background: var(--td-bg-color-container);
   border-radius: 8px;
-  border-left: 3px solid #07C05F;
+  border-left: 3px solid var(--td-brand-color);
   position: relative;
 }
 
 .required {
-  color: #e34d59;
+  color: var(--td-error-color);
   margin-left: 2px;
   font-weight: 500;
 }

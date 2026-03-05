@@ -27,6 +27,25 @@
         </div>
       </div>
 
+      <!-- 主题设置 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('theme.theme') }}</label>
+          <p class="desc">{{ $t('theme.themeDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-select
+            v-model="localTheme"
+            style="width: 280px;"
+            @change="handleThemeChange"
+          >
+            <t-option value="light" :label="$t('theme.light')">{{ $t('theme.light') }}</t-option>
+            <t-option value="dark" :label="$t('theme.dark')">{{ $t('theme.dark') }}</t-option>
+            <t-option value="system" :label="$t('theme.system')">{{ $t('theme.system') }}</t-option>
+          </t-select>
+        </div>
+      </div>
+
       <!-- 记忆功能开关 -->
       <div class="setting-row">
         <div class="setting-info">
@@ -63,13 +82,15 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
 import { getSystemInfo } from '@/api/system'
+import { useTheme, type ThemeMode } from '@/composables/useTheme'
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
+const { currentTheme, setTheme } = useTheme()
 
 // 本地状态
 const localLanguage = ref('zh-CN')
-const localTheme = ref('light')
+const localTheme = ref<ThemeMode>(currentTheme.value)
 
 // 系统信息
 const systemInfo = ref<any>(null)
@@ -126,12 +147,8 @@ const handleMemoryChange = (val: boolean) => {
 }
 
 // 处理主题变化
-const handleThemeChange = () => {
-  const settings = {
-    language: localLanguage.value,
-    theme: localTheme.value
-  }
-  localStorage.setItem('WeKnora_general_settings', JSON.stringify(settings))
+const handleThemeChange = (val: ThemeMode) => {
+  setTheme(val)
   MessagePlugin.success(t('common.success'))
 }
 </script>
@@ -147,13 +164,13 @@ const handleThemeChange = () => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -170,7 +187,7 @@ const handleThemeChange = () => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -185,14 +202,14 @@ const handleThemeChange = () => {
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }

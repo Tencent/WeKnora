@@ -194,7 +194,7 @@ const getWebSearchDisplayText = (item) => {
     font-size: 12px;
     width: 100%;
     border-radius: 8px;
-    background-color: #ffffff;
+    background-color: var(--td-bg-color-container);
     box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
     overflow: hidden;
     box-sizing: border-box;
@@ -206,7 +206,7 @@ const getWebSearchDisplayText = (item) => {
         justify-content: space-between;
         align-items: center;
         padding: 6px 14px;
-        color: #333333;
+        color: var(--td-text-color-primary);
         font-weight: 500;
 
         .refer_title {
@@ -216,7 +216,7 @@ const getWebSearchDisplayText = (item) => {
             img {
                 width: 16px;
                 height: 16px;
-                color: #07c05f;
+                color: var(--td-brand-color);
                 fill: currentColor;
                 margin-right: 8px;
             }
@@ -230,7 +230,7 @@ const getWebSearchDisplayText = (item) => {
         .refer_show_icon {
             font-size: 14px;
             padding: 0 2px 1px 2px;
-            color: #07c05f;
+            color: var(--td-brand-color);
         }
     }
 
@@ -242,13 +242,13 @@ const getWebSearchDisplayText = (item) => {
     .refer_box {
         padding: 4px 14px 8px 14px;
         flex-direction: column;
-        border-top: 1px solid #f0f0f0;
+        border-top: 1px solid var(--td-bg-color-secondarycontainer);
     }
 }
 
 .doc {
     text-decoration: none;
-    color: #07c05f;
+    color: var(--td-brand-color);
     cursor: pointer;
     display: inline-block;
     white-space: nowrap;
@@ -261,7 +261,7 @@ const getWebSearchDisplayText = (item) => {
     border-bottom: 1px solid transparent;
 
     &:hover {
-        border-bottom-color: #07c05f;
+        border-bottom-color: var(--td-brand-color);
     }
 
     &.doc-web {
@@ -298,19 +298,19 @@ const getWebSearchDisplayText = (item) => {
         }
 
         .doc-group-arrow {
-            color: #999;
+            color: var(--td-text-color-placeholder);
             flex-shrink: 0;
             margin-right: 2px;
         }
 
         .doc-group-icon {
-            color: #07c05f;
+            color: var(--td-brand-color);
             flex-shrink: 0;
             margin-right: 6px;
         }
 
         .doc-group-title {
-            color: #333;
+            color: var(--td-text-color-primary);
             font-weight: 500;
             white-space: nowrap;
             overflow: hidden;
@@ -319,7 +319,7 @@ const getWebSearchDisplayText = (item) => {
         }
 
         .doc-group-count {
-            color: #999;
+            color: var(--td-text-color-placeholder);
             font-size: 11px;
             margin-left: 6px;
             white-space: nowrap;
@@ -338,12 +338,12 @@ const getWebSearchDisplayText = (item) => {
             width: 22px;
             height: 22px;
             border-radius: 4px;
-            color: #07c05f;
+            color: var(--td-brand-color);
             cursor: pointer;
             transition: all 0.15s ease;
 
             &:hover {
-                background-color: rgba(7, 192, 95, 0.1);
+                background-color: var(--td-brand-color-light);
             }
         }
     }
@@ -356,7 +356,7 @@ const getWebSearchDisplayText = (item) => {
 .doc-chunk-item {
     .doc-chunk-text {
         display: block;
-        color: #666;
+        color: var(--td-text-color-secondary);
         font-size: 12px;
         line-height: 18px;
         padding: 3px 6px;
@@ -369,11 +369,11 @@ const getWebSearchDisplayText = (item) => {
 
         &:hover {
             background-color: rgba(7, 192, 95, 0.04);
-            color: #07c05f;
+            color: var(--td-brand-color);
         }
 
         .doc-chunk-index {
-            color: #999;
+            color: var(--td-text-color-placeholder);
             font-size: 11px;
             margin-right: 4px;
         }

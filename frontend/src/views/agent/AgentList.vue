@@ -958,7 +958,7 @@ defineExpose({
   justify-content: center;
   min-height: 200px;
   padding: 12px;
-  background: #fafbfc;
+  background: var(--td-bg-color-container);
 }
 
 .shared-by-me-badge {
@@ -968,7 +968,7 @@ defineExpose({
   background: rgba(7, 192, 95, 0.1);
   border-radius: 4px;
   font-size: 12px;
-  color: #07c05f;
+  color: var(--td-brand-color);
   margin-left: 6px;
 }
 
@@ -992,7 +992,7 @@ defineExpose({
 
   h2 {
     margin: 0;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 24px;
     font-weight: 600;
@@ -1004,7 +1004,7 @@ defineExpose({
   --ripple-color: rgba(118, 75, 162, 0.3) !important;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
   border: none !important;
-  color: #fff !important;
+  color: var(--td-text-color-anti) !important;
   position: relative;
   overflow: hidden;
 
@@ -1015,7 +1015,7 @@ defineExpose({
   &[data-state="active"] {
     background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%) !important;
     border: none !important;
-    color: #fff !important;
+    color: var(--td-text-color-anti) !important;
   }
 
   --td-button-primary-bg-color: #667eea !important;
@@ -1063,7 +1063,7 @@ defineExpose({
 
 .header-subtitle {
   margin: 0;
-  color: #00000099;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
@@ -1078,17 +1078,17 @@ defineExpose({
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  background: #f2f3f5 !important;
-  border: 1px solid #e5e9f2 !important;
+  background: var(--td-bg-color-secondarycontainer) !important;
+  border: 1px solid var(--td-component-stroke) !important;
   border-radius: 6px !important;
-  color: #4e5969;
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   &:hover {
-    background: #e5e9f2 !important;
-    border-color: #c9cdd4 !important;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer) !important;
+    border-color: var(--td-component-stroke) !important;
+    color: var(--td-text-color-primary);
   }
 
   :deep(.t-button__icon) {
@@ -1100,7 +1100,7 @@ defineExpose({
 
   :deep(.t-icon),
   :deep(.btn-icon-wrapper) {
-    color: #07c05f;
+    color: var(--td-brand-color);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1112,26 +1112,26 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 24px;
-  border-bottom: 1px solid #e7ebf0;
+  border-bottom: 1px solid var(--td-component-stroke);
   margin-bottom: 20px;
 
   .tab-item {
     padding: 12px 0;
     cursor: pointer;
-    color: #666;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
     transition: color 0.2s;
 
     &:hover {
-      color: #1a1a1a;
+      color: var(--td-text-color-primary);
     }
 
     &.active {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 600;
-      border-bottom: 2px solid #07c05f;
+      border-bottom: 2px solid var(--td-brand-color);
       margin-bottom: -1px;
     }
   }
@@ -1147,7 +1147,7 @@ defineExpose({
   gap: 4px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--td-bg-color-container-hover);
   flex-shrink: 0;
 }
 
@@ -1158,7 +1158,7 @@ defineExpose({
 }
 
 .org-source-text {
-  color: #666;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
   font-size: 11px;
   font-weight: 500;
@@ -1171,8 +1171,8 @@ defineExpose({
   gap: 3px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.04);
-  color: #666;
+  background: var(--td-bg-color-container-hover);
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
   font-size: 11px;
   font-weight: 500;
@@ -1188,12 +1188,12 @@ defineExpose({
 
 /* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */
 .agent-card {
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: #fff;
+  background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
@@ -1204,18 +1204,18 @@ defineExpose({
   min-height: 160px;
 
   &:hover {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12);
   }
 
   // 普通模式样式
   &.agent-mode-normal {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fcfa 100%);
-    border-color: #e8f5ed;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%);
+    border-color: var(--td-success-color-focus);
 
     &:hover {
-      border-color: #07c05f;
-      background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+      border-color: var(--td-brand-color);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.08) 100%);
     }
 
     .card-decoration {
@@ -1229,13 +1229,13 @@ defineExpose({
 
   // Agent 模式样式
   &.agent-mode-agent {
-    background: linear-gradient(135deg, #ffffff 0%, #f8f5ff 100%);
-    border-color: #ede8ff;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(124, 77, 255, 0.04) 100%);
+    border-color: var(--td-brand-color-focus);
 
     &:hover {
-      border-color: #7c4dff;
+      border-color: var(--td-brand-color);
       box-shadow: 0 4px 12px rgba(124, 77, 255, 0.12);
-      background: linear-gradient(135deg, #ffffff 0%, #f3efff 100%);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(124, 77, 255, 0.08) 100%);
     }
 
     .card-decoration {
@@ -1337,7 +1337,7 @@ defineExpose({
 }
 
 .card-title {
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 15px;
   font-weight: 600;
@@ -1356,8 +1356,8 @@ defineExpose({
   gap: 3px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(0, 0, 0, 0.04);
-  color: #666;
+  background: var(--td-bg-color-container-hover);
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
   font-size: 11px;
   font-weight: 500;
@@ -1376,17 +1376,17 @@ defineExpose({
   &.agent-emoji {
     font-size: 18px;
     line-height: 1;
-    background: rgba(0, 0, 0, 0.04);
+    background: var(--td-bg-color-container-hover);
   }
   
   &.normal {
     background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
-    color: #059669;
+    color: var(--td-brand-color-active);
   }
   
   &.agent {
     background: linear-gradient(135deg, rgba(124, 77, 255, 0.15) 0%, rgba(124, 77, 255, 0.08) 100%);
-    color: #7c4dff;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1400,11 +1400,11 @@ defineExpose({
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.2s ease;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
 
   &:hover {
-    background: rgba(0, 0, 0, 0.06);
-    color: #07c05f;
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-brand-color);
   }
 }
 
@@ -1425,12 +1425,12 @@ defineExpose({
   }
 
   &:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--td-bg-color-container-hover);
     opacity: 1 !important;
   }
 
   &.active-more {
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--td-bg-color-container-hover);
     opacity: 1 !important;
   }
 
@@ -1458,7 +1458,7 @@ defineExpose({
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  color: #666;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 400;
@@ -1471,7 +1471,7 @@ defineExpose({
   justify-content: space-between;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .bottom-left {
@@ -1498,7 +1498,7 @@ defineExpose({
 
   &.mode-normal {
     background: rgba(7, 192, 95, 0.08);
-    color: #059669;
+    color: var(--td-brand-color-active);
 
     &:hover {
       background: rgba(7, 192, 95, 0.12);
@@ -1507,7 +1507,7 @@ defineExpose({
 
   &.mode-agent {
     background: rgba(124, 77, 255, 0.08);
-    color: #7c4dff;
+    color: var(--td-brand-color);
 
     &:hover {
       background: rgba(124, 77, 255, 0.12);
@@ -1516,7 +1516,7 @@ defineExpose({
 
   &.web-search {
     background: rgba(255, 152, 0, 0.08);
-    color: #f59e0b;
+    color: var(--td-warning-color);
 
     &:hover {
       background: rgba(255, 152, 0, 0.12);
@@ -1525,7 +1525,7 @@ defineExpose({
 
   &.knowledge {
     background: rgba(7, 192, 95, 0.08);
-    color: #059669;
+    color: var(--td-brand-color-active);
 
     &:hover {
       background: rgba(7, 192, 95, 0.12);
@@ -1534,7 +1534,7 @@ defineExpose({
 
   &.mcp {
     background: rgba(236, 72, 153, 0.08);
-    color: #ec4899;
+    color: var(--td-error-color);
 
     &:hover {
       background: rgba(236, 72, 153, 0.12);
@@ -1543,7 +1543,7 @@ defineExpose({
 
   &.multi-turn {
     background: rgba(59, 130, 246, 0.08);
-    color: #3b82f6;
+    color: var(--td-brand-color);
 
     &:hover {
       background: rgba(59, 130, 246, 0.12);
@@ -1552,7 +1552,7 @@ defineExpose({
 }
 
 .card-time {
-  color: #999;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC";
   font-size: 12px;
   font-weight: 400;
@@ -1573,7 +1573,7 @@ defineExpose({
   }
 
   .empty-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
@@ -1582,7 +1582,7 @@ defineExpose({
   }
 
   .empty-desc {
-    color: #00000066;
+    color: var(--td-text-color-disabled);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1650,7 +1650,7 @@ defineExpose({
   }
 
   .circle-title {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
@@ -1658,7 +1658,7 @@ defineExpose({
   }
 
   .del-circle-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1676,7 +1676,7 @@ defineExpose({
   }
 
   .circle-btn-txt {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1689,7 +1689,7 @@ defineExpose({
   }
 
   .confirm {
-    color: #FA5151;
+    color: var(--td-error-color);
     margin-left: 40px;
 
     &:hover {
@@ -1710,7 +1710,7 @@ defineExpose({
     min-width: 140px;
     border-radius: 6px !important;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1) !important;
-    border: 1px solid #e7ebf0 !important;
+    border: 1px solid var(--td-component-stroke) !important;
   }
 }
 
@@ -1726,7 +1726,7 @@ defineExpose({
   padding: 10px 16px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
@@ -1735,27 +1735,27 @@ defineExpose({
   .menu-icon {
     font-size: 16px;
     flex-shrink: 0;
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     transition: color 0.2s ease;
   }
 
   &:hover {
-    background: #f7f9fc;
-    
+    background: var(--td-bg-color-container-hover);
+
     .menu-icon {
-      color: #000000e6;
+      color: var(--td-text-color-primary);
     }
   }
 
   &.delete {
-    color: #000000e6;
-    
+    color: var(--td-text-color-primary);
+
     &:hover {
-      background: #fff1f0;
-      color: #fa5151;
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
 
       .menu-icon {
-        color: #fa5151;
+        color: var(--td-error-color);
       }
     }
   }
@@ -1778,7 +1778,7 @@ defineExpose({
   width: 360px;
   max-width: 90vw;
   height: 100%;
-  background: #fff;
+  background: var(--td-bg-color-container);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
@@ -1790,7 +1790,7 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  border-bottom: 1px solid #e7ebf0;
+  border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
 
@@ -1798,7 +1798,7 @@ defineExpose({
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
 }
 
 .shared-detail-drawer-close {
@@ -1806,8 +1806,8 @@ defineExpose({
   height: 32px;
   border: none;
   border-radius: 6px;
-  background: #f5f6f8;
-  color: #86909c;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1815,8 +1815,8 @@ defineExpose({
   transition: background 0.2s ease, color 0.2s ease;
 
   &:hover {
-    background: #e7ebf0;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -1838,21 +1838,21 @@ defineExpose({
 .shared-detail-drawer-body .shared-detail-section-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   margin: 20px 0 12px 0;
   padding-top: 16px;
-  border-top: 1px solid #e7ebf0;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .shared-detail-drawer-body .shared-detail-label {
   font-size: 12px;
-  color: #86909c;
+  color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
 
 .shared-detail-drawer-body .shared-detail-value {
   font-size: 14px;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   line-height: 1.5;
   word-break: break-word;
 
@@ -1871,9 +1871,9 @@ defineExpose({
 
 .shared-detail-drawer-footer {
   padding: 16px 24px;
-  border-top: 1px solid #e7ebf0;
+  border-top: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
-  background: #fff;
+  background: var(--td-bg-color-container);
 }
 
 .shared-detail-drawer-enter-active,

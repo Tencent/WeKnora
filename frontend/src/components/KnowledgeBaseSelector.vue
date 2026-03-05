@@ -365,10 +365,10 @@ watch(() => props.visible, async (v) => {
 /* 下拉面板使用 fixed 定位，相对于视口 */
 .kb-dropdown {
   position: fixed !important;
-  background: #fff;
-  border: 1px solid #e7e9eb;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border);
   border-radius: 10px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--td-shadow-2);
   overflow: hidden;
   animation: fadeIn 0.15s ease-out;
   z-index: 10000;
@@ -382,21 +382,21 @@ watch(() => props.visible, async (v) => {
 /* 宽度由 JS 控制（dropdownWidth），这里只做内部样式 */
 .kb-search {
   padding: 8px 10px;
-  border-bottom: 1px solid #f1f3f4;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 .kb-search-input {
   width: 100%;
   padding: 6px 10px;
   font-size: 12px;
-  border: 1px solid #eef1f2;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
-  background: #fbfdfc;
+  background: var(--td-bg-color-secondarycontainer);
   outline: none;
   transition: border 0.12s;
 }
 .kb-search-input:focus {
-  border-color: #10b981;
-  background: #fff;
+  border-color: var(--td-success-color);
+  background: var(--td-bg-color-container);
 }
 
 .kb-list {
@@ -422,9 +422,9 @@ watch(() => props.visible, async (v) => {
 .kb-item:last-child { margin-bottom: 0; }
 
 .kb-item:hover,
-.kb-item.highlighted { background: #f6f8f7; }
+.kb-item.highlighted { background: var(--td-bg-color-secondarycontainer); }
 
-.kb-item.selected { background: #eefdf5; }
+.kb-item.selected { background: var(--td-brand-color-light); }
 
 .kb-item-left {
   display: flex;
@@ -436,15 +436,15 @@ watch(() => props.visible, async (v) => {
 .checkbox {
   width: 16px; height: 16px;
   border-radius: 3px;
-  border: 1.5px solid #d7dadd;
+  border: 1.5px solid var(--td-component-border);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 .checkbox.checked {
-  background: #10b981;
-  border-color: #10b981;
+  background: var(--td-success-color);
+  border-color: var(--td-success-color);
 }
 .checkbox.checked svg {
   width: 10px;
@@ -457,40 +457,40 @@ watch(() => props.visible, async (v) => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #059669;
+  color: var(--td-brand-color-active);
   
   &.faq {
-    color: #0052d9;
+    color: var(--td-brand-color);
   }
 }
 .kb-name-wrap { display:flex; flex-direction: row; align-items: center; gap: 4px; min-width: 0; }
-.kb-name { font-size: 12px; color: #222; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
-.kb-docs { font-size: 11px; color: #8b9196; flex-shrink: 0; }
+.kb-name { font-size: 12px; color: var(--td-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.kb-docs { font-size: 11px; color: var(--td-text-color-placeholder); flex-shrink: 0; }
 
-.kb-empty { padding: 20px 8px; text-align: center; color: #9aa0a6; font-size: 12px; }
+.kb-empty { padding: 20px 8px; text-align: center; color: var(--td-text-color-placeholder); font-size: 12px; }
 
 .kb-actions {
   display: flex;
   gap: 8px;
   padding: 8px 10px;
-  border-top: 1px solid #f2f4f5;
-  background: #fafcfc;
+  border-top: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-secondarycontainer);
 }
 .kb-btn {
   flex: 1;
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid #e1e5e6;
-  background: #fff;
+  border: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
   font-size: 12px;
-  color: #52575a;
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: all 0.12s;
 }
 .kb-btn:hover {
-  border-color: #10b981;
-  color: #10b981;
-  background: #f0fdf6;
+  border-color: var(--td-success-color);
+  color: var(--td-success-color);
+  background: var(--td-brand-color-light);
 }
 
 @keyframes fadeIn {

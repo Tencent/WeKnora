@@ -30,9 +30,9 @@ useI18n(); // ensure component reacts to locale changes if needed
   display: flex;
   gap: 10px;
   padding: 12px 14px;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
-  border-left: 3px solid #9ca3af;
+  border-left: 3px solid var(--td-text-color-placeholder);
 }
 
 .thinking-icon {
@@ -43,7 +43,7 @@ useI18n(); // ensure component reacts to locale changes if needed
 
 .thinking-text {
   font-size: 15px;
-  color: #1f2937;
+  color: var(--td-text-color-primary);
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;

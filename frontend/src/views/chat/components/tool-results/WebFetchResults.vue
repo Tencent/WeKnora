@@ -194,21 +194,21 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 .result-index {
   font-size: 11px;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
 }
 
 .result-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #374151;
+  color: var(--td-text-color-primary);
   font-size: 12px;
   font-weight: 500;
   text-decoration: none;
   transition: color 0.15s ease;
 
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
     text-decoration: underline;
   }
 }
@@ -216,7 +216,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 .result-domain {
   font-size: 12px;
   font-weight: 500;
-  color: #374151;
+  color: var(--td-text-color-primary);
 }
 
 .meta-pill {
@@ -225,7 +225,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   padding: 2px 6px;
   border-radius: 999px;
   background: rgba(7, 192, 95, 0.08);
-  color: #0f7a49;
+  color: var(--td-success-color);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.4;
@@ -233,7 +233,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 
 .meta-text {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
 }
 
 .result-content.expanded {
@@ -241,7 +241,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .info-field .field-value a {
-  color: #07c05f;
+  color: var(--td-brand-color);
   text-decoration: none;
 
   &:hover {
@@ -251,7 +251,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 
 .raw-length {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   margin-left: 4px;
   font-weight: normal;
 }
@@ -261,13 +261,13 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .info-section-title.error {
-  color: #dc2626;
+  color: var(--td-error-color);
 }
 
 .full-content.error-text {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  background: var(--td-error-color-light);
+  border-color: var(--td-error-color-focus);
+  color: var(--td-error-color);
 }
 </style>
 

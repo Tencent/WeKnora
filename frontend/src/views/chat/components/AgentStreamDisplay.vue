@@ -1754,50 +1754,50 @@ const handleAddToKnowledge = (answerEvent: any) => {
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     border: 2px solid rgba(7, 192, 95, 0.3);
     z-index: 1;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    box-shadow: var(--td-shadow-1);
     box-sizing: border-box; // 确保 border 包含在尺寸内
   }
-  
+
   // 不同事件类型的节点颜色
   &:has(.thinking-event)::after {
     border-color: rgba(156, 163, 175, 0.4);
-    background: #f9fafb;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    background: var(--td-bg-color-secondarycontainer);
+    box-shadow: var(--td-shadow-1);
   }
   
   &:has(.answer-event)::after {
-    border-color: #07c05f;
-    background: #07c05f;
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.12), 0 2px 4px rgba(7, 192, 95, 0.2);
     transform: scale(1.1);
   }
   
   &:has(.tool-event)::after {
-    border-color: #07c05f;
-    background: #ffffff;
+    border-color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
     box-shadow: 0 1px 3px rgba(7, 192, 95, 0.15);
   }
   
   &:has(.tool-event .action-pending)::after {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     background: rgba(7, 192, 95, 0.15);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
     animation: pulseNode 2s ease-in-out infinite;
   }
   
   &:has(.tool-event .action-error)::after {
-    border-color: #e34d59;
-    background: #e34d59;
+    border-color: var(--td-error-color);
+    background: var(--td-error-color);
     box-shadow: 0 0 0 2px rgba(227, 77, 89, 0.15), 0 2px 4px rgba(227, 77, 89, 0.2);
   }
   
   &:has(.plan-task-change-event)::after {
-    border-color: #07c05f;
-    background: #07c05f;
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color);
     transform: rotate(45deg) scale(0.9);
     border-radius: 2px;
     box-shadow: 0 1px 3px rgba(7, 192, 95, 0.2);
@@ -1846,8 +1846,8 @@ const handleAddToKnowledge = (answerEvent: any) => {
   font-size: 13px;
   width: 100%;
   border-radius: 6px;
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  background-color: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
   overflow: hidden;
   box-sizing: border-box;
@@ -1860,7 +1860,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     justify-content: space-between;
     align-items: center;
     padding: 8px 12px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     font-weight: 500;
     cursor: pointer;
     background: linear-gradient(to right, rgba(7, 192, 95, 0.03), transparent);
@@ -1885,7 +1885,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       font-size: 13px;
       
       :deep(strong) {
-        color: #07c05f;
+        color: var(--td-brand-color);
         font-weight: 600;
       }
     }
@@ -1894,7 +1894,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .intermediate-steps-show-icon {
     font-size: 13px;
     padding: 0 2px 1px 2px;
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1904,15 +1904,15 @@ const handleAddToKnowledge = (answerEvent: any) => {
   min-height: 20px;
   
   .thinking-phase {
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     border-radius: 6px;
     padding: 8px 12px;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--td-component-stroke);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
     transition: all 0.2s ease;
     
     &.thinking-last {
-      border-color: #07c05f;
+      border-color: var(--td-brand-color);
       box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
       
       // 最后一个 Thinking 作为最终答案时，字体应该更大
@@ -1928,7 +1928,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   
   .thinking-content {
     font-size: 13px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.6;
     
     &.markdown-content {
@@ -1938,7 +1938,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(code) {
-        background: #f3f4f6;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
         font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
@@ -1946,7 +1946,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(pre) {
-        background: #f9fafb;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 10px;
         border-radius: 4px;
         overflow-x: auto;
@@ -1968,20 +1968,20 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(blockquote) {
-        border-left: 2px solid #07c05f;
+        border-left: 2px solid var(--td-brand-color);
         padding-left: 10px;
         margin: 6px 0;
-        color: #6b7280;
+        color: var(--td-text-color-secondary);
       }
       
       :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
         margin: 10px 0 6px 0;
         font-weight: 600;
-        color: #374151;
+        color: var(--td-text-color-primary);
       }
       
       :deep(a) {
-        color: #07c05f;
+        color: var(--td-brand-color);
         text-decoration: none;
         
         &:hover {
@@ -1995,12 +1995,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
         font-size: 11px;
         
         th, td {
-          border: 1px solid #e5e7eb;
+          border: 1px solid var(--td-component-stroke);
           padding: 5px 8px;
         }
         
         th {
-          background: #f9fafb;
+          background: var(--td-bg-color-secondarycontainer);
           font-weight: 600;
         }
       }
@@ -2014,11 +2014,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
         border-radius: 8px;
         display: block;
         margin: 8px 0;
-        border: 0.5px solid #e5e7eb;
+        border: 0.5px solid var(--td-component-stroke);
         object-fit: contain;
         cursor: pointer;
         transition: transform 0.2s ease;
-        background-color: #f9fafb; /* 加载时的占位背景色 */
+        background-color: var(--td-bg-color-secondarycontainer); /* 加载时的占位背景色 */
         
         &:hover {
           transform: scale(1.02);
@@ -2034,35 +2034,35 @@ const handleAddToKnowledge = (answerEvent: any) => {
   min-height: 20px;
 
   .fallback-icon-btn {
-    color: #d1d5db !important;
-    border-color: #e5e7eb !important;
+    color: var(--td-text-color-disabled) !important;
+    border-color: var(--td-component-stroke) !important;
 
     &:hover {
-      color: #9ca3af !important;
-      border-color: #d1d5db !important;
+      color: var(--td-text-color-placeholder) !important;
+      border-color: var(--td-component-border) !important;
     }
   }
 
   .answer-content-wrapper {
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     border-radius: 6px;
     padding: 8px 12px;
-    border: 1px solid #07c05f;
+    border: 1px solid var(--td-brand-color);
     box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
     transition: all 0.2s ease;
     
     &.answer-active {
-      background: linear-gradient(to right, rgba(7, 192, 95, 0.02), #ffffff);
+      background: linear-gradient(to right, rgba(7, 192, 95, 0.02), var(--td-bg-color-container));
     }
     
     &.answer-done {
-      border-color: #07c05f;
+      border-color: var(--td-brand-color);
     }
   }
   
   .answer-content {
     font-size: 13px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.6;
     
     &.markdown-content {
@@ -2070,7 +2070,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       
       /* keyboard focus */
       :deep(.citation-web:focus-visible) {
-        outline: 2px solid #34d399; /* green-400 */
+        outline: 2px solid var(--td-success-color); /* green-400 */
         outline-offset: 2px;
       }
       
@@ -2082,7 +2082,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(code) {
-        background: #f3f4f6;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
         font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
@@ -2090,7 +2090,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(pre) {
-        background: #f9fafb;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 10px;
         border-radius: 4px;
         overflow-x: auto;
@@ -2112,20 +2112,20 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(blockquote) {
-        border-left: 2px solid #07c05f;
+        border-left: 2px solid var(--td-brand-color);
         padding-left: 10px;
         margin: 6px 0;
-        color: #6b7280;
+        color: var(--td-text-color-secondary);
       }
       
       :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
         margin: 10px 0 6px 0;
         font-weight: 600;
-        color: #374151;
+        color: var(--td-text-color-primary);
       }
       
       :deep(a) {
-        color: #07c05f;
+        color: var(--td-brand-color);
         text-decoration: none;
         
         &:hover {
@@ -2139,12 +2139,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
         font-size: 11px;
 
         th, td {
-          border: 1px solid #e5e7eb;
+          border: 1px solid var(--td-component-stroke);
           padding: 5px 8px;
         }
 
         th {
-          background: #f9fafb;
+          background: var(--td-bg-color-secondarycontainer);
           font-weight: 600;
         }
       }
@@ -2158,11 +2158,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
         border-radius: 8px;
         display: block;
         margin: 8px 0;
-        border: 0.5px solid #e5e7eb;
+        border: 0.5px solid var(--td-component-stroke);
         object-fit: contain;
         cursor: pointer;
         transition: transform 0.2s ease;
-        background-color: #f9fafb; /* 加载时的占位背景色 */
+        background-color: var(--td-bg-color-secondarycontainer); /* 加载时的占位背景色 */
 
         &:hover {
           transform: scale(1.02);
@@ -2173,7 +2173,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       :deep(.mermaid) {
         margin: 16px 0;
         padding: 16px;
-        background: #f8f9fa;
+        background: var(--td-bg-color-secondarycontainer);
         border-radius: 8px;
         overflow-x: auto;
         text-align: center;
@@ -2196,9 +2196,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
   animation: fadeInUp 0.25s ease-out;
   
   .action-card {
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     border-radius: 6px;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--td-component-stroke);
     overflow: hidden;
     position: relative;
     transition: all 0.2s ease;
@@ -2210,12 +2210,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
     }
 
     &:hover {
-      border-color: #07c05f;
+      border-color: var(--td-brand-color);
       box-shadow: 0 1px 4px rgba(7, 192, 95, 0.08);
     }
 
     &.action-error {
-      border-left: 2px solid #e34d59;
+      border-left: 2px solid var(--td-error-color);
       animation: shakeError 0.4s ease-out;
     }
     
@@ -2223,7 +2223,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       opacity: 1;
       box-shadow: none;
       border-color: rgba(7, 192, 95, 0.15);
-      background: linear-gradient(120deg, rgba(7, 192, 95, 0.01), rgba(255, 255, 255, 0.98));
+      background: linear-gradient(120deg, rgba(7, 192, 95, 0.01), var(--td-bg-color-container));
 
       &::after {
         content: '';
@@ -2231,10 +2231,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
         inset: 0;
         background: linear-gradient(
           120deg,
-          rgba(255, 255, 255, 0) 0%,
-          rgba(255, 255, 255, 0.3) 40%,
-          rgba(7, 192, 95, 0.05) 55%,
-          rgba(255, 255, 255, 0) 85%
+          transparent 0%,
+          rgba(7, 192, 95, 0.06) 40%,
+          rgba(7, 192, 95, 0.08) 55%,
+          transparent 85%
         );
         transform: translateX(-100%);
         animation: actionPendingShimmer 2.8s ease-in-out infinite;
@@ -2247,9 +2247,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .tool-summary {
     padding: 6px 12px;
     font-size: 12px;
-    color: #374151;
-    background: #ffffff;
-    border-top: 1px solid #f3f4f6;
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container);
+    border-top: 1px solid var(--td-component-stroke);
     line-height: 1.6;
     font-weight: 500;
     animation: slideIn 0.2s ease-out;
@@ -2257,11 +2257,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
     .tool-summary-markdown {
       font-weight: 400;
       line-height: 1.6;
-      color: #374151;
+      color: var(--td-text-color-primary);
       
       :deep(p) {
         margin: 3px 0;
-        color: #374151;
+        color: var(--td-text-color-primary);
       }
       
       :deep(ul), :deep(ol) {
@@ -2270,17 +2270,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       :deep(code) {
-        background: #f9fafb;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
         font-size: 11px;
-        color: #07c05f;
+        color: var(--td-brand-color);
         font-weight: 500;
       }
       
       :deep(strong) {
         font-weight: 600;
-        color: #374151;
+        color: var(--td-text-color-primary);
       }
     }
   }
@@ -2291,7 +2291,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  color: #374151;
+  color: var(--td-text-color-primary);
   font-weight: 500;
   cursor: pointer;
   user-select: none;
@@ -2320,14 +2320,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .action-title-icon {
     width: 14px;
     height: 14px;
-    color: #07c05f;
+    color: var(--td-brand-color);
     fill: currentColor;
     flex-shrink: 0;
     
     :deep(svg) {
       width: 14px;
       height: 14px;
-      color: #07c05f;
+      color: var(--td-brand-color);
       fill: currentColor;
     }
   }
@@ -2379,13 +2379,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 @keyframes pulseNode {
   0%, 100% {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     background: rgba(7, 192, 95, 0.15);
     box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
     transform: scale(1);
   }
   50% {
-    border-color: #0ae06f;
+    border-color: var(--td-brand-color);
     background: rgba(7, 192, 95, 0.25);
     box-shadow: 0 0 0 3px rgba(7, 192, 95, 0.15);
     transform: scale(1.05);
@@ -2444,11 +2444,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 @keyframes pulseBorder {
   0%, 100% {
-    border-left-color: #07c05f;
+    border-left-color: var(--td-brand-color);
     box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
   }
   50% {
-    border-left-color: #0ae06f;
+    border-left-color: var(--td-brand-color);
     box-shadow: 0 1px 4px rgba(7, 192, 95, 0.12);
   }
 }
@@ -2480,7 +2480,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .action-name {
   font-size: 13px;
   font-weight: 500;
-  color: #374151;
+  color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2492,13 +2492,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .action-show-icon {
   font-size: 13px;
   padding: 0 2px 1px 2px;
-  color: #07c05f;
+  color: var(--td-brand-color);
 }
 
 .action-details {
   padding: 0;
-  border-top: 1px solid #f3f4f6;
-  background: #ffffff;
+  border-top: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
   display: flex;
   flex-direction: column;
 }
@@ -2509,17 +2509,17 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 .search-results-summary-fixed {
   padding: 6px 10px;
-  background: #f9fafb;
-  border-top: 1px solid #e5e7eb;
+  background: var(--td-bg-color-secondarycontainer);
+  border-top: 1px solid var(--td-component-stroke);
   
   .results-summary-text {
     font-size: 12px;
     font-weight: 500;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.5;
     
     :deep(strong) {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 600;
     }
   }
@@ -2527,13 +2527,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 .plan-status-summary-fixed {
   padding: 6px 10px;
-  background: #f9fafb;
-  border-top: 1px solid #e5e7eb;
+  background: var(--td-bg-color-secondarycontainer);
+  border-top: 1px solid var(--td-component-stroke);
   
   .plan-status-text {
     font-size: 12px;
     font-weight: 500;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.5;
     display: flex;
     align-items: center;
@@ -2545,20 +2545,20 @@ const handleAddToKnowledge = (answerEvent: any) => {
       flex-shrink: 0;
       
       &.in-progress {
-        color: #07C05F;
+        color: var(--td-brand-color);
       }
       
       &.pending {
-        color: #fa8c16;
+        color: var(--td-warning-color);
       }
       
       &.completed {
-        color: #07C05F;
+        color: var(--td-brand-color);
       }
     }
     
     .separator {
-      color: #999;
+      color: var(--td-text-color-placeholder);
       margin: 0 4px;
     }
     
@@ -2588,11 +2588,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
     border-radius: 6px;
     border: 1px solid rgba(7, 192, 95, 0.2);
     font-size: 12px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     
     .plan-task-change-content {
       strong {
-        color: #07c05f;
+        color: var(--td-brand-color);
         font-weight: 600;
         margin-right: 3px;
       }
@@ -2612,7 +2612,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     
     .fallback-label {
       font-size: 11px;
-      color: #6b7280;
+      color: var(--td-text-color-secondary);
       font-weight: 500;
       line-height: 1.5;
     }
@@ -2620,8 +2620,8 @@ const handleAddToKnowledge = (answerEvent: any) => {
   
   .detail-output-wrapper {
     position: relative;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
+    background: var(--td-bg-color-secondarycontainer);
+    border: 1px solid var(--td-component-stroke);
     border-radius: 6px;
     overflow: hidden;
     margin: 0;
@@ -2630,7 +2630,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     .detail-output {
       font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
       font-size: 11px;
-      color: #374151;
+      color: var(--td-text-color-primary);
       padding: 12px;
       margin: 0;
       white-space: pre-wrap;
@@ -2639,7 +2639,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       max-height: 400px;
       overflow-y: auto;
       overflow-x: auto;
-      background: #ffffff;
+      background: var(--td-bg-color-container);
       display: block;
       
       &::-webkit-scrollbar {
@@ -2648,16 +2648,16 @@ const handleAddToKnowledge = (answerEvent: any) => {
       }
       
       &::-webkit-scrollbar-track {
-        background: #f9fafb;
+        background: var(--td-bg-color-secondarycontainer);
         border-radius: 3px;
       }
       
       &::-webkit-scrollbar-thumb {
-        background: #d1d5db;
+        background: var(--td-bg-color-component-disabled);
         border-radius: 3px;
         
         &:hover {
-          background: #9ca3af;
+          background: var(--td-bg-color-component-disabled);
         }
       }
     }
@@ -2669,14 +2669,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
   
   .thinking-thought-markdown {
     font-size: 13px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.6;
     
     :deep(p) {
       margin: 5px 0;
       line-height: 1.6;
       font-size: 13px;
-      color: #374151;
+      color: var(--td-text-color-primary);
       
       &:first-child {
         margin-top: 0;
@@ -2688,16 +2688,16 @@ const handleAddToKnowledge = (answerEvent: any) => {
     }
     
     :deep(code) {
-      background: #f3f4f6;
+      background: var(--td-bg-color-secondarycontainer);
       padding: 2px 5px;
       border-radius: 3px;
       font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
       font-size: 11px;
-      color: #374151;
+      color: var(--td-text-color-primary);
     }
     
     :deep(pre) {
-      background: #f9fafb;
+      background: var(--td-bg-color-secondarycontainer);
       padding: 8px;
       border-radius: 4px;
       overflow-x: auto;
@@ -2720,9 +2720,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
     }
     
     :deep(blockquote) {
-      border-left: 3px solid #07c05f;
+      border-left: 3px solid var(--td-brand-color);
       margin: 6px 0;
-      color: #666;
+      color: var(--td-text-color-secondary);
       background: rgba(7, 192, 95, 0.05);
       padding: 6px 12px;
       border-radius: 4px;
@@ -2731,7 +2731,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
       margin: 8px 0 4px 0;
       font-weight: 600;
-      color: #333;
+      color: var(--td-text-color-primary);
       
       &:first-child {
         margin-top: 0;
@@ -2739,7 +2739,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     }
     
     :deep(a) {
-      color: #07c05f;
+      color: var(--td-brand-color);
       text-decoration: none;
       
       &:hover {
@@ -2753,12 +2753,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
       font-size: 12px;
       
       th, td {
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--td-component-stroke);
         padding: 6px 10px;
       }
       
       th {
-        background: #f5f5f5;
+        background: var(--td-bg-color-secondarycontainer);
         font-weight: 600;
       }
     }
@@ -2784,9 +2784,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 :deep(.citation-web) {
   /* Align with app primary green scheme */
-  background: #f0fdf4;           /* green-50 */
-  color: #065f46;                /* green-800 */
-  border: 1px solid #bbf7d0;     /* green-200 */
+  background: var(--td-success-color-light);           /* green-50 */
+  color: var(--td-success-color);                /* green-800 */
+  border: 1px solid var(--td-success-color-focus);     /* green-200 */
   cursor: pointer;
   white-space: nowrap;
   position: relative;
@@ -2794,9 +2794,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 :deep(.citation-web:hover) {
   /* Subtle hover in green tone */
-  background: #d1fae5;           /* green-100 */
-  border-color: #86efac;         /* green-300 */
-  color: #065f46;                /* keep readable on light bg */
+  background: var(--td-success-color-light);           /* green-100 */
+  border-color: var(--td-success-color);         /* green-300 */
+  color: var(--td-success-color);                /* keep readable on light bg */
 }
 
 /* Embedded tooltip bubble - hidden, use global floatPopup instead */
@@ -2832,12 +2832,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
   position: absolute;
   z-index: 10000;
   pointer-events: auto;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
   border: none !important;
   box-shadow: 0 6px 18px rgba(0,0,0,0.2);
   padding: 12px 14px;
-  color: #111827;
+  color: var(--td-text-color-primary);
   line-height: 1.5;
   font-size: 12px;
   box-sizing: border-box;
@@ -2857,7 +2857,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 .kb-float-popup .tip-title {
   font-weight: 600;
-  color: #07C05F;
+  color: var(--td-brand-color);
 }
 
 .kb-float-popup .tip-url {
@@ -2867,16 +2867,16 @@ const handleAddToKnowledge = (answerEvent: any) => {
 .kb-float-popup .tip-meta {
   margin-top: 1px;
   font-size: 11px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
 }
 
 .kb-float-popup .tip-loading {
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   font-style: italic;
 }
 
 .kb-float-popup .tip-error {
-  color: #dc2626;
+  color: var(--td-error-color);
   font-weight: 500;
 }
 
@@ -2894,9 +2894,9 @@ const handleAddToKnowledge = (answerEvent: any) => {
 /* KB citation styles - same green theme as web citations */
 :deep(.citation.citation-kb) {
   /* Green theme - same as web citations */
-  background: #f0fdf4;           /* green-50 */
-  color: #065f46;                /* green-800 */
-  border: 1px solid #bbf7d0;     /* green-200 */
+  background: var(--td-success-color-light);           /* green-50 */
+  color: var(--td-success-color);                /* green-800 */
+  border: 1px solid var(--td-success-color-focus);     /* green-200 */
   cursor: pointer;
   white-space: nowrap;
   position: relative;
@@ -2905,13 +2905,13 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 :deep(.citation.citation-kb:hover) {
   /* Subtle hover in green tone */
-  background: #d1fae5;           /* green-100 */
-  border-color: #86efac;         /* green-300 */
-  color: #065f46;                /* keep readable on light bg */
+  background: var(--td-success-color-light);           /* green-100 */
+  border-color: var(--td-success-color);         /* green-300 */
+  color: var(--td-success-color);                /* keep readable on light bg */
 }
 
 :deep(.citation.citation-kb:focus-visible) {
-  outline: 2px solid #34d399;    /* green-400 */
+  outline: 2px solid var(--td-success-color);    /* green-400 */
   outline-offset: 2px;
 }
 
@@ -2932,7 +2932,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     .arguments-label {
       font-size: 12px;
       font-weight: 600;
-      color: #666;
+      color: var(--td-text-color-secondary);
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
@@ -2940,14 +2940,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
   
   .detail-code {
     font-size: 12px;
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     padding: 10px;
     border-radius: 6px;
     font-family: 'Monaco', 'Courier New', monospace;
-    color: #333;
+    color: var(--td-text-color-primary);
     margin: 0;
     overflow-x: auto;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--td-component-stroke);
     line-height: 1.5;
   }
 }
@@ -2975,7 +2975,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #07c05f;
+      background: var(--td-brand-color);
       animation: dotBounce 1.4s ease-in-out infinite;
       
       &:nth-child(1) {
@@ -3002,7 +3002,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #07c05f;
+      background: var(--td-brand-color);
       animation: typingBounce 1.4s ease-in-out infinite;
       
       &:nth-child(1) {
@@ -3028,7 +3028,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     span {
       width: 3px;
       height: 16px;
-      background: #07c05f;
+      background: var(--td-brand-color);
       border-radius: 2px;
       animation: wave 1.2s ease-in-out infinite;
       
@@ -3067,4 +3067,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 }
 
+</style>
+
+<style lang="less">
+// Dark mode: invert agent icon (uses currentColor which doesn't work in <img>)
+html[theme-mode="dark"] .intermediate-steps-title img {
+  filter: invert(1);
+  opacity: 0.55;
+}
 </style>

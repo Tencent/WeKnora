@@ -37,7 +37,7 @@ const props = defineProps<Props>();
 <style lang="less" scoped>
 .plan-display {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   background: transparent;
   padding: 6px 0 6px 12px;
   margin: 0;
@@ -65,7 +65,7 @@ const props = defineProps<Props>();
   
   &.status-in_progress {
     .step-description {
-      color: #374151;
+      color: var(--td-text-color-primary);
       font-weight: 500;
     }
   }
@@ -83,7 +83,7 @@ const props = defineProps<Props>();
   &.checked {
     svg {
       rect {
-        fill: #07C05F;
+        fill: var(--td-brand-color);
       }
     }
   }
@@ -91,7 +91,7 @@ const props = defineProps<Props>();
   &.in-progress {
     svg {
       rect {
-        stroke: #07C05F;
+        stroke: var(--td-brand-color);
         stroke-width: 2;
       }
     }
@@ -100,13 +100,13 @@ const props = defineProps<Props>();
 
 .step-description {
   flex: 1;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
   font-size: 12px;
   
   &.completed {
     text-decoration: line-through;
-    color: #9ca3af;
+    color: var(--td-text-color-placeholder);
   }
   
   .sparkle {
@@ -118,7 +118,7 @@ const props = defineProps<Props>();
 .no-steps {
   padding: 12px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   font-style: italic;
   font-size: 12px;
 }

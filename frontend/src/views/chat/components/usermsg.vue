@@ -70,23 +70,23 @@ const props = defineProps({
     transition: all 0.15s;
     background: rgba(7, 192, 95, 0.06);
     border: 1px solid rgba(7, 192, 95, 0.2);
-    color: #374151;
+    color: var(--td-text-color-primary);
 
     &.kb-tag {
         .tag_icon {
-            color: #07c05f;
+            color: var(--td-brand-color);
         }
     }
 
     &.faq-tag {
         .tag_icon {
-            color: #f59e0b;
+            color: var(--td-warning-color);
         }
     }
 
     &.file-tag {
         .tag_icon {
-            color: #6b7280;
+            color: var(--td-text-color-secondary);
         }
     }
 
@@ -115,9 +115,9 @@ const props = defineProps({
     gap: 4px;
     flex: 1 0 0;
     border-radius: 4px;
-    background: #8CE97F;
+    background: var(--td-success-color);
     margin-left: auto;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-size: 16px;
     text-align: justify;
     word-break: break-all;

@@ -74,14 +74,14 @@ const props = defineProps<{
 
 .kb-index {
   font-size: 12px;
-  color: #8b8b8b;
+  color: var(--td-text-color-placeholder);
   font-weight: 600;
 }
 
 .kb-name {
   font-size: 14px;
   font-weight: 600;
-  color: #333;
+  color: var(--td-text-color-primary);
 }
 
 .kb-body {
@@ -92,7 +92,7 @@ const props = defineProps<{
 
 .kb-description {
   font-size: 12px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
   margin-top: 4px;
 }
@@ -100,7 +100,7 @@ const props = defineProps<{
 code {
   font-family: 'Monaco', 'Courier New', monospace;
   font-size: 11px;
-  background: #f0f0f0;
+  background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 3px;
 }

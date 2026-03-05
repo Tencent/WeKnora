@@ -11,10 +11,10 @@
     justify-content: center;
     min-width: auto;
     width: auto;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--td-component-stroke);
     border-radius: 6px;
-    background: #ffffff;
-    color: #666;
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
     transition: all 0.2s ease;
 
     .t-button__content {
@@ -41,7 +41,7 @@
       width: 16px;
       height: 16px;
       flex-shrink: 0;
-      color: #666;
+      color: var(--td-text-color-secondary);
     }
 
     .t-icon svg {
@@ -57,10 +57,10 @@
     &:hover:not(:disabled) {
       background: rgba(7, 192, 95, 0.08);
       border-color: rgba(7, 192, 95, 0.3);
-      color: #07c05f;
+      color: var(--td-brand-color);
 
       .t-icon {
-        color: #07c05f;
+        color: var(--td-brand-color);
       }
     }
 

@@ -1265,7 +1265,7 @@ onUnmounted(() => {
 
   h2 {
     margin: 0;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC", system-ui, sans-serif;
     font-size: 24px;
     font-weight: 600;
@@ -1282,35 +1282,35 @@ onUnmounted(() => {
 
 .org-join-btn {
   border-color: rgba(7, 192, 95, 0.5);
-  color: #07c05f;
+  color: var(--td-brand-color);
   font-weight: 500;
   transition: all 0.2s ease;
 
   .t-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 
   &:hover {
     background: rgba(7, 192, 95, 0.08);
-    border-color: #07c05f;
-    color: #07c05f;
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
 
     .t-icon {
-      color: #07c05f;
+      color: var(--td-brand-color);
     }
   }
 }
 
 .org-create-btn {
-  background: #07c05f;
+  background: var(--td-brand-color);
   border: none;
-  color: #fff;
+  color: var(--td-text-color-anti);
   font-weight: 500;
   box-shadow: 0 2px 8px rgba(7, 192, 95, 0.25);
   transition: all 0.25s ease;
 
   &:hover {
-    background: #05a650;
+    background: var(--td-brand-color);
     box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
   }
 
@@ -1323,7 +1323,7 @@ onUnmounted(() => {
 
 .header-subtitle {
   margin: 0;
-  color: #64748b;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC", system-ui, sans-serif;
   font-size: 14px;
   font-weight: 400;
@@ -1338,23 +1338,23 @@ onUnmounted(() => {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  background: #f2f3f5 !important;
-  border: 1px solid #e5e9f2 !important;
+  background: var(--td-bg-color-secondarycontainer) !important;
+  border: 1px solid var(--td-component-stroke) !important;
   border-radius: 6px !important;
-  color: #4e5969;
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   &:hover {
-    background: #e5e9f2 !important;
-    border-color: #c9cdd4 !important;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer) !important;
+    border-color: var(--td-component-stroke) !important;
+    color: var(--td-text-color-primary);
   }
 
   :deep(.t-icon),
   :deep(.btn-icon-wrapper),
   :deep(.org-create-icon) {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 
   :deep(.org-create-icon) {
@@ -1368,13 +1368,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 28px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--td-component-stroke);
   margin-bottom: 24px;
 
   .tab-item {
     padding: 12px 0;
     cursor: pointer;
-    color: #64748b;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC", system-ui, sans-serif;
     font-size: 14px;
     font-weight: 400;
@@ -1383,11 +1383,11 @@ onUnmounted(() => {
     transition: color 0.2s ease;
 
     &:hover {
-      color: #334155;
+      color: var(--td-text-color-secondary);
     }
 
     &.active {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 500;
 
       &::after {
@@ -1397,7 +1397,7 @@ onUnmounted(() => {
         left: 0;
         right: 0;
         height: 2px;
-        background: #07c05f;
+        background: var(--td-brand-color);
         border-radius: 1px;
       }
     }
@@ -1412,12 +1412,12 @@ onUnmounted(() => {
 
 /* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */
 .org-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
@@ -1552,7 +1552,7 @@ onUnmounted(() => {
 }
 
 .card-title {
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 15px;
   font-weight: 600;
@@ -1580,12 +1580,12 @@ onUnmounted(() => {
   }
 
   &:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--td-bg-color-container-hover);
     opacity: 1 !important;
   }
 
   &.active-more {
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--td-bg-color-container-hover);
     opacity: 1 !important;
   }
 
@@ -1613,7 +1613,7 @@ onUnmounted(() => {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  color: #666;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 400;
@@ -1626,7 +1626,7 @@ onUnmounted(() => {
   justify-content: space-between;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .bottom-left {
@@ -1668,21 +1668,21 @@ onUnmounted(() => {
 
   &.stat-member {
     background: rgba(100, 116, 139, 0.08);
-    color: #64748b;
-    .t-icon { color: #64748b; }
+    color: var(--td-text-color-secondary);
+    .t-icon { color: var(--td-text-color-secondary); }
     &:hover { background: rgba(100, 116, 139, 0.12); }
   }
 
   &.stat-kb {
     background: rgba(7, 192, 95, 0.08);
-    color: #07c05f;
-    .t-icon { color: #07c05f; }
+    color: var(--td-brand-color);
+    .t-icon { color: var(--td-brand-color); }
     &:hover { background: rgba(7, 192, 95, 0.12); }
   }
 
   &.stat-agent {
     background: rgba(124, 77, 255, 0.08);
-    color: #7c4dff;
+    color: var(--td-brand-color);
     .stat-agent-icon {
       width: 14px;
       height: 14px;
@@ -1704,7 +1704,7 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
   background: rgba(250, 173, 20, 0.12);
-  color: #d48806;
+  color: var(--td-warning-color);
   white-space: nowrap;
 }
 
@@ -1726,35 +1726,35 @@ onUnmounted(() => {
   font-weight: 500;
   font-family: "PingFang SC", system-ui, sans-serif;
   background: rgba(107, 114, 128, 0.08);
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
 
   .t-icon {
     flex-shrink: 0;
-    color: #6b7280;
+    color: var(--td-text-color-secondary);
   }
 
   &.owner {
     background: rgba(124, 77, 255, 0.1);
-    color: #7c4dff;
-    .t-icon { color: #7c4dff; }
+    color: var(--td-brand-color);
+    .t-icon { color: var(--td-brand-color); }
   }
 
   &.admin {
     background: rgba(7, 192, 95, 0.12);
-    color: #07c05f;
-    .t-icon { color: #07c05f; }
+    color: var(--td-brand-color);
+    .t-icon { color: var(--td-brand-color); }
   }
 
   &.editor {
     background: rgba(7, 192, 95, 0.08);
-    color: #07c05f;
-    .t-icon { color: #07c05f; }
+    color: var(--td-brand-color);
+    .t-icon { color: var(--td-brand-color); }
   }
 
   &.viewer {
     background: rgba(107, 114, 128, 0.08);
-    color: #6b7280;
-    .t-icon { color: #6b7280; }
+    color: var(--td-text-color-secondary);
+    .t-icon { color: var(--td-text-color-secondary); }
   }
 }
 
@@ -1773,7 +1773,7 @@ onUnmounted(() => {
   }
 
   .empty-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
@@ -1782,7 +1782,7 @@ onUnmounted(() => {
   }
 
   .empty-desc {
-    color: #00000066;
+    color: var(--td-text-color-disabled);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1853,7 +1853,7 @@ onUnmounted(() => {
   }
 
   .circle-title {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
@@ -1861,7 +1861,7 @@ onUnmounted(() => {
   }
 
   .del-circle-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1879,7 +1879,7 @@ onUnmounted(() => {
   }
 
   .circle-btn-txt {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1892,7 +1892,7 @@ onUnmounted(() => {
   }
 
   .confirm {
-    color: #FA5151;
+    color: var(--td-error-color);
     margin-left: 40px;
 
     &:hover {
@@ -1913,7 +1913,7 @@ onUnmounted(() => {
     min-width: 140px;
     border-radius: 6px !important;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1) !important;
-    border: 1px solid #e7ebf0 !important;
+    border: 1px solid var(--td-component-stroke) !important;
   }
 }
 
@@ -1929,7 +1929,7 @@ onUnmounted(() => {
   padding: 10px 16px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
@@ -1938,27 +1938,27 @@ onUnmounted(() => {
   .menu-icon {
     font-size: 16px;
     flex-shrink: 0;
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     transition: color 0.2s ease;
   }
 
   &:hover {
-    background: #f7f9fc;
+    background: var(--td-bg-color-container-hover);
 
     .menu-icon {
-      color: #000000e6;
+      color: var(--td-text-color-primary);
     }
   }
 
   &.delete {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
 
     &:hover {
-      background: #fff1f0;
-      color: #fa5151;
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
 
       .menu-icon {
-        color: #fa5151;
+        color: var(--td-error-color);
       }
     }
   }
@@ -1971,7 +1971,7 @@ onUnmounted(() => {
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .t-input,
@@ -1980,12 +1980,12 @@ onUnmounted(() => {
   }
 
   .t-button--theme-primary {
-    background-color: #3b82f6;
-    border-color: #3b82f6;
+    background-color: var(--td-brand-color);
+    border-color: var(--td-brand-color);
 
     &:hover {
-      background-color: #2563eb;
-      border-color: #2563eb;
+      background-color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
     }
   }
 }
@@ -2008,9 +2008,9 @@ onUnmounted(() => {
   width: 100%;
   max-width: 480px;
   max-height: 90vh;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border-radius: 12px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--td-component-stroke);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
   overflow: hidden;
   display: flex;
@@ -2022,8 +2022,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 20px 52px 20px 24px;
-  background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+  background: var(--td-bg-color-container);
+  border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
   gap: 12px;
 }
@@ -2039,12 +2039,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #64748b;
+  color: var(--td-text-color-secondary);
   transition: background 0.2s ease, color 0.2s ease;
 
   &:hover {
-    background: #f1f5f9;
-    color: #07c05f;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
   }
 }
 
@@ -2053,7 +2053,7 @@ onUnmounted(() => {
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 18px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--td-text-color-primary);
   letter-spacing: -0.02em;
   flex: 1;
   min-width: 0;
@@ -2072,17 +2072,17 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #64748b;
+  color: var(--td-text-color-secondary);
   transition: background 0.2s ease, color 0.2s ease;
   z-index: 10;
 
   &:hover {
-    background: #f1f5f9;
-    color: #0f172a;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 
   &:active {
-    background: #e2e8f0;
+    background: var(--td-bg-color-secondarycontainer);
   }
 }
 
@@ -2113,17 +2113,17 @@ onUnmounted(() => {
   }
 
   &::-webkit-scrollbar-track {
-    background: #f1f5f9;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
     transition: background 0.2s;
 
     &:hover {
-      background: #07c05f;
+      background: var(--td-brand-color);
     }
   }
 }
@@ -2133,12 +2133,12 @@ onUnmounted(() => {
   gap: 32px;
   margin-bottom: 24px;
   padding-bottom: 4px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   .join-tab {
     padding: 10px 0;
     cursor: pointer;
-    color: #64748b;
+    color: var(--td-text-color-secondary);
     font-size: 14px;
     font-weight: 500;
     user-select: none;
@@ -2147,11 +2147,11 @@ onUnmounted(() => {
     font-family: "PingFang SC", -apple-system, sans-serif;
 
     &:hover {
-      color: #0f172a;
+      color: var(--td-text-color-primary);
     }
 
     &.active {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 600;
 
       &::after {
@@ -2161,7 +2161,7 @@ onUnmounted(() => {
         left: 0;
         right: 0;
         height: 3px;
-        background: linear-gradient(90deg, #07c05f, #05a650);
+        background: linear-gradient(90deg, var(--td-brand-color), var(--td-brand-color-active));
         border-radius: 2px 2px 0 0;
       }
     }
@@ -2195,17 +2195,17 @@ onUnmounted(() => {
   }
 
   &::-webkit-scrollbar-track {
-    background: #f1f5f9;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
     transition: background 0.2s;
 
     &:hover {
-      background: #07c05f;
+      background: var(--td-brand-color);
     }
   }
 }
@@ -2228,7 +2228,7 @@ onUnmounted(() => {
   }
 
   .searchable-empty-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC", system-ui, sans-serif;
     font-size: 14px;
     font-weight: 500;
@@ -2246,12 +2246,12 @@ onUnmounted(() => {
 }
 
 .searchable-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 14px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
   transition: border-color 0.25s ease, box-shadow 0.25s ease;
@@ -2282,7 +2282,7 @@ onUnmounted(() => {
     opacity: 0.88;
 
     .searchable-card-title {
-      color: #64748b;
+      color: var(--td-text-color-secondary);
     }
   }
 
@@ -2322,7 +2322,7 @@ onUnmounted(() => {
   }
 
   .searchable-card-title {
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC", -apple-system, sans-serif;
     font-size: 15px;
     font-weight: 600;
@@ -2356,7 +2356,7 @@ onUnmounted(() => {
     line-clamp: 2;
     overflow: hidden;
     margin: 0;
-    color: #8c8c8c;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC", system-ui, sans-serif;
     font-size: 12px;
     font-weight: 400;
@@ -2391,17 +2391,17 @@ onUnmounted(() => {
 
     &.member {
       background: rgba(7, 192, 95, 0.08);
-      color: #07c05f;
+      color: var(--td-brand-color);
     }
 
     &.share {
       background: rgba(0, 82, 217, 0.08);
-      color: #0052d9;
+      color: var(--td-brand-color);
     }
 
     &.searchable-badge-agent {
       background: rgba(7, 192, 95, 0.08);
-      color: #07c05f;
+      color: var(--td-brand-color);
       .searchable-badge-agent-icon {
         width: 12px;
         height: 12px;
@@ -2411,13 +2411,13 @@ onUnmounted(() => {
 
   .searchable-tag-approval {
     background: rgba(217, 119, 6, 0.1);
-    color: #d97706;
+    color: var(--td-warning-color);
     border: none;
   }
 
   .searchable-tag-full {
     background: rgba(100, 116, 139, 0.1);
-    color: #64748b;
+    color: var(--td-text-color-secondary);
     border: none;
   }
 }
@@ -2425,7 +2425,7 @@ onUnmounted(() => {
 .invite-preview-input {
   .invite-preview-input-desc {
     font-size: 14px;
-    color: #475569;
+    color: var(--td-text-color-secondary);
     margin: 0 0 16px;
     line-height: 1.55;
     font-family: "PingFang SC", -apple-system, sans-serif;
@@ -2435,7 +2435,7 @@ onUnmounted(() => {
   }
   .invite-preview-input-tip {
     font-size: 12px;
-    color: #64748b;
+    color: var(--td-text-color-secondary);
     margin: 0 0 20px;
     line-height: 1.5;
     font-family: "PingFang SC", -apple-system, sans-serif;
@@ -2444,7 +2444,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #dc2626;
+    color: var(--td-error-color);
     font-size: 13px;
     margin-bottom: 16px;
     font-family: "PingFang SC", -apple-system, sans-serif;
@@ -2467,7 +2467,7 @@ onUnmounted(() => {
 
   .invite-preview-loading-text {
     font-size: 14px;
-    color: #64748b;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC", -apple-system, sans-serif;
   }
 }
@@ -2480,21 +2480,21 @@ onUnmounted(() => {
   padding: 40px 28px;
 
   .invite-preview-error-icon {
-    color: #e34d59;
+    color: var(--td-error-color);
     margin-bottom: 20px;
   }
 
   .invite-preview-error-title {
     font-size: 18px;
     font-weight: 600;
-    color: #1f2937;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px;
     font-family: "PingFang SC";
   }
 
   .invite-preview-error-desc {
     font-size: 14px;
-    color: #86909c;
+    color: var(--td-text-color-secondary);
     margin: 0 0 24px;
     line-height: 1.5;
     font-family: "PingFang SC";
@@ -2508,12 +2508,12 @@ onUnmounted(() => {
 
 // 空间详情卡片（与主列表卡片一致）
 .preview-detail-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 14px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  background: var(--td-bg-color-container);
   position: relative;
   padding: 18px 20px;
   margin-bottom: 20px;
@@ -2569,7 +2569,7 @@ onUnmounted(() => {
 .preview-detail-name {
   font-size: 18px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--td-text-color-primary);
   margin: 0 0 4px;
   font-family: "PingFang SC", system-ui, sans-serif;
   line-height: 1.3;
@@ -2582,7 +2582,7 @@ onUnmounted(() => {
   gap: 6px;
   margin: 0;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC", system-ui, sans-serif;
 }
 
@@ -2594,15 +2594,15 @@ onUnmounted(() => {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: #64748b;
+  color: var(--td-text-color-secondary);
 }
 
 .preview-detail-id-copy {
   padding: 2px;
-  color: #94a3b8;
+  color: var(--td-text-color-placeholder);
 }
 .preview-detail-id-copy:hover {
-  color: #0f172a;
+  color: var(--td-text-color-primary);
 }
 
 .preview-detail-content {
@@ -2618,7 +2618,7 @@ onUnmounted(() => {
   line-clamp: 3;
   overflow: hidden;
   margin: 0;
-  color: #8c8c8c;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC", system-ui, sans-serif;
   font-size: 13px;
   font-weight: 400;
@@ -2653,17 +2653,17 @@ onUnmounted(() => {
 
   &.member {
     background: rgba(7, 192, 95, 0.08);
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 
   &.share {
     background: rgba(0, 82, 217, 0.08);
-    color: #0052d9;
+    color: var(--td-brand-color);
   }
 
   &.preview-badge-agent {
     background: rgba(7, 192, 95, 0.08);
-    color: #07c05f;
+    color: var(--td-brand-color);
     .preview-badge-agent-icon {
       width: 14px;
       height: 14px;
@@ -2673,7 +2673,7 @@ onUnmounted(() => {
 
 .preview-tag-approval {
   background: rgba(217, 119, 6, 0.1);
-  color: #d97706;
+  color: var(--td-warning-color);
   border: none;
 }
 
@@ -2694,7 +2694,7 @@ onUnmounted(() => {
 }
 
 .preview-join-label {
-  color: #64748b;
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
 
@@ -2702,38 +2702,38 @@ onUnmounted(() => {
   font-weight: 500;
 
   &.value-success {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 
   &.value-warning {
-    color: #b45309;
+    color: var(--td-warning-color-active);
   }
 }
 
 .preview-join-note {
   padding: 10px 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--td-text-color-secondary);
   line-height: 1.5;
   font-family: "PingFang SC", system-ui, sans-serif;
   margin-bottom: 16px;
 
   &.preview-join-note-warning {
-    background: #fffbeb;
-    border-color: #fde68a;
-    color: #b45309;
+    background: var(--td-warning-color-light);
+    border-color: var(--td-warning-color-focus);
+    color: var(--td-warning-color-active);
   }
 
   &.preview-join-note-success {
     display: flex;
     align-items: center;
     gap: 8px;
-    background: #f0fdf4;
-    border-color: #bbf7d0;
-    color: #07c05f;
+    background: var(--td-success-color-light);
+    border-color: var(--td-success-color-focus);
+    color: var(--td-brand-color);
 
     .t-icon {
       flex-shrink: 0;
@@ -2755,7 +2755,7 @@ onUnmounted(() => {
   font-family: "PingFang SC", system-ui, sans-serif;
   font-size: 14px;
   font-weight: 500;
-  color: #64748b;
+  color: var(--td-text-color-secondary);
 }
 
 .preview-role-select {
@@ -2769,7 +2769,7 @@ onUnmounted(() => {
 
 .invite-preview-footer {
   padding: 20px 24px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
