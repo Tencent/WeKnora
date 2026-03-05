@@ -132,25 +132,35 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 					knowledgeMergedChunks = append(knowledgeMergedChunks, chunks[i])
 					continue
 				}
-				// Merge overlapping chunks
-				if chunks[i].EndAt > lastChunk.EndAt {
-					contentRunes := []rune(chunks[i].Content)
-					offset := len(contentRunes) - (chunks[i].EndAt - lastChunk.EndAt)
-					lastChunk.Content = lastChunk.Content + string(contentRunes[offset:])
-					lastChunk.EndAt = chunks[i].EndAt
-					lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
+			// Merge overlapping chunks
+			if chunks[i].EndAt > lastChunk.EndAt {
+				contentRunes := []rune(chunks[i].Content)
+				offset := len(contentRunes) - (chunks[i].EndAt - lastChunk.EndAt)
+				lastChunk.Content = lastChunk.Content + string(contentRunes[offset:])
+				lastChunk.EndAt = chunks[i].EndAt
+				lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
 
-					// 合并 ImageInfo
-					if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
-						pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
-							"knowledge_id": knowledgeID,
-							"error":        err.Error(),
-						})
-					}
+				if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
+					pipelineWarn(ctx, "Merge", "image_merge", map[string]interface{}{
+						"knowledge_id": knowledgeID,
+						"error":        err.Error(),
+					})
 				}
-				if chunks[i].Score > lastChunk.Score {
-					lastChunk.Score = chunks[i].Score
+			} else {
+				// Fully contained: track the subsumed chunk and merge its ImageInfo
+				if !containsID(lastChunk.SubChunkID, chunks[i].ID) {
+					lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)
 				}
+				if err := mergeImageInfo(ctx, lastChunk, chunks[i]); err != nil {
+					pipelineWarn(ctx, "Merge", "image_merge_contained", map[string]interface{}{
+						"knowledge_id": knowledgeID,
+						"error":        err.Error(),
+					})
+				}
+			}
+			if chunks[i].Score > lastChunk.Score {
+				lastChunk.Score = chunks[i].Score
+			}
 			}
 
 			pipelineInfo(ctx, "Merge", "group_output", map[string]interface{}{
@@ -231,6 +241,11 @@ func (p *PluginMerge) resolveParentChunks(
 		parentMap[c.ID] = c
 	}
 
+	// Collect merged ImageInfo for each parent by fetching ALL sibling
+	// child chunks. Individual child chunks only carry ImageInfo for images
+	// within their own range, but the parent content spans all children.
+	parentImageInfoMap := p.collectParentImageInfo(ctx, tenantID, ids)
+
 	// Replace child content with parent content
 	for _, r := range results {
 		if r.ParentChunkID == "" {
@@ -249,6 +264,9 @@ func (p *PluginMerge) resolveParentChunks(
 		r.Content = parent.Content
 		r.StartAt = parent.StartAt
 		r.EndAt = parent.EndAt
+		if mergedImageInfo, ok := parentImageInfoMap[r.ParentChunkID]; ok && mergedImageInfo != "" {
+			r.ImageInfo = mergedImageInfo
+		}
 		// Track the original child as a sub-chunk
 		if !containsID(r.SubChunkID, r.ID) {
 			r.SubChunkID = append(r.SubChunkID, r.ID)
@@ -256,6 +274,89 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	return results
+}
+
+// collectParentImageInfo batch-fetches all child chunks for the given parents
+// and merges their ImageInfo into a single JSON string per parent. This ensures
+// that when child content is replaced with parent content, the complete set of
+// image descriptions across all sibling chunks is preserved.
+func (p *PluginMerge) collectParentImageInfo(
+	ctx context.Context,
+	tenantID uint64,
+	parentIDs []string,
+) map[string]string {
+	result := make(map[string]string, len(parentIDs))
+
+	allChildren, err := p.chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
+	if err != nil {
+		pipelineWarn(ctx, "Merge", "parent_imageinfo_fetch_failed", map[string]interface{}{
+			"parent_cnt": len(parentIDs),
+			"error":      err.Error(),
+		})
+		return result
+	}
+
+	// Group children by parent chunk ID, collecting unique ImageInfo entries
+	type parentAgg struct {
+		imageInfos []types.ImageInfo
+		uniqueURLs map[string]bool
+		siblingCnt int
+	}
+	aggMap := make(map[string]*parentAgg, len(parentIDs))
+
+	for _, child := range allChildren {
+		agg, ok := aggMap[child.ParentChunkID]
+		if !ok {
+			agg = &parentAgg{uniqueURLs: make(map[string]bool)}
+			aggMap[child.ParentChunkID] = agg
+		}
+		agg.siblingCnt++
+
+		if child.ImageInfo == "" {
+			continue
+		}
+		var infos []types.ImageInfo
+		if err := json.Unmarshal([]byte(child.ImageInfo), &infos); err != nil {
+			pipelineWarn(ctx, "Merge", "parent_imageinfo_parse", map[string]interface{}{
+				"chunk_id": child.ID,
+				"error":    err.Error(),
+			})
+			continue
+		}
+		for _, info := range infos {
+			key := info.URL
+			if key == "" {
+				key = info.OriginalURL
+			}
+			if key != "" && !agg.uniqueURLs[key] {
+				agg.uniqueURLs[key] = true
+				agg.imageInfos = append(agg.imageInfos, info)
+			}
+		}
+	}
+
+	for parentID, agg := range aggMap {
+		if len(agg.imageInfos) == 0 {
+			continue
+		}
+		merged, err := json.Marshal(agg.imageInfos)
+		if err != nil {
+			pipelineWarn(ctx, "Merge", "parent_imageinfo_marshal", map[string]interface{}{
+				"parent_id": parentID,
+				"error":     err.Error(),
+			})
+			continue
+		}
+		result[parentID] = string(merged)
+
+		pipelineInfo(ctx, "Merge", "parent_imageinfo_collected", map[string]interface{}{
+			"parent_id":   parentID,
+			"sibling_cnt": agg.siblingCnt,
+			"image_cnt":   len(agg.imageInfos),
+		})
+	}
+
+	return result
 }
 
 // filterHistoryResults retrieves history references and filters them by

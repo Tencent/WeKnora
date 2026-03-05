@@ -44,6 +44,8 @@ type ChunkRepository interface {
 		knowledgeType string,
 	) ([]*types.Chunk, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
+	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
+	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
 	// UpdateChunk updates a chunk
 	UpdateChunk(ctx context.Context, chunk *types.Chunk) error
 	// UpdateChunks updates chunks in batch

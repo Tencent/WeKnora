@@ -246,6 +246,23 @@ func (r *chunkRepository) ListChunkByParentID(
 	return chunks, nil
 }
 
+func (r *chunkRepository) ListChunksByParentIDs(
+	ctx context.Context,
+	tenantID uint64,
+	parentIDs []string,
+) ([]*types.Chunk, error) {
+	if len(parentIDs) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND parent_chunk_id IN ?", tenantID, parentIDs).
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // UpdateChunk updates a chunk using GORM Save, which updates ALL fields
 // except SeqID (auto-increment, must not be overwritten).
 // Make sure the chunk object is complete (e.g., fetched from DB) before calling this method.
