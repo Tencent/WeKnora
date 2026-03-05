@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.3.2-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.3.3-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -49,6 +49,18 @@
 **官网：** https://weknora.weixin.qq.com
 
 ## ✨ 最新更新
+
+**v0.3.3 版本亮点：**
+
+- 🧩 **父子分块策略**：层级化的父子分块策略，增强上下文管理和检索精度
+- 📌 **知识库置顶**：支持置顶常用知识库，快速访问
+- 🔄 **兜底回复**：无相关结果时的兜底回复处理及UI指示
+- 🖼️ **图片图标检测**：文档处理中的图片图标自动检测与过滤
+- 🧹 **Rerank段落清洗**：Rerank模型段落清洗功能，提升相关性评分准确度
+- 🐳 **Docker与技能管理**：增强Docker设置，新增入口脚本和技能管理
+- 🗄️ **存储桶自动创建**：存储引擎连通性检查增强，支持自动创建存储桶
+- 🎨 **UI一致性优化**：统一边框样式、更新主题和组件样式，全面提升视觉一致性
+- ⚡ **分块尺寸调优**：更新知识库处理中的分块大小配置
 
 **v0.3.2 版本亮点：**
 

@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2026-03-05
+
+### 🚀 New Features
+- **NEW**: Parent-Child Chunking — implement parent-child chunking strategy for enhanced context management with hierarchical chunk retrieval
+- **NEW**: Knowledge Base Pinning — support pinning frequently-used knowledge bases for quick access
+- **NEW**: Fallback Response — add fallback response handling and UI indicators when no relevant results are found
+- **NEW**: Image Icon Detection — add image icon detection and filtering functionality for document processing
+- **NEW**: Passage Cleaning for Rerank — add passage cleaning functionality for rerank model to improve relevance scoring
+- **NEW**: ListChunksByParentIDs — add ListChunksByParentIDs method and enhance chunk merging logic for parent-child retrieval
+- **NEW**: GetUserByTenantID — add GetUserByTenantID functionality to user repository and service
+
+### ⚡ Improvements
+- Enhanced Docker setup with entrypoint script and skill management
+- Enhanced storage engine connectivity check with auto-creation of buckets
+- Enhanced MinerU response handling for document parsing
+- Enhanced sidebar functionality and UI responsiveness
+- Updated chunk size configurations for knowledge base processing
+- Enforced maximum length for tool names in MCPTool for safety
+- Updated theme and UI styles across components for visual consistency
+- Updated at-icon SVG and enhanced input field component
+- Standardized border styles and adjusted component styles for improved consistency
+
+### 🐛 Bug Fixes
+- Fixed cleanupCtx created at startup potentially expiring before shutdown
+
 ## [0.3.2] - 2026-03-04
 
 ### 🚀 New Features
@@ -646,6 +671,7 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.3.3]: https://github.com/Tencent/WeKnora/tree/v0.3.3
 [0.3.2]: https://github.com/Tencent/WeKnora/tree/v0.3.2
 [0.3.1]: https://github.com/Tencent/WeKnora/tree/v0.3.1
 [0.3.0]: https://github.com/Tencent/WeKnora/tree/v0.3.0
