@@ -2021,7 +2021,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
         background-color: var(--td-bg-color-secondarycontainer); /* 加载时的占位背景色 */
         
         &:hover {
-          transform: scale(1.02);
         }
       }
     }

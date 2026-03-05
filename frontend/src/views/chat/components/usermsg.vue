@@ -62,7 +62,7 @@ const props = defineProps({
     align-items: center;
     gap: 4px;
     padding: 3px 8px;
-    border-radius: 10px;
+    border-radius: 5px;
     font-size: 12px;
     font-weight: 500;
     max-width: 200px;
@@ -118,7 +118,7 @@ const props = defineProps({
     background: #8CE97F;
     margin-left: auto;
     color: #000000e6;
-    font-size: 16px;
+    font-size: 15px;
     text-align: justify;
     word-break: break-all;
     max-width: 100%;

@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 4px;
     padding: 3px 8px;
-    border-radius: 10px;
+    border-radius: 4px;
     font-size: 12px;
     font-weight: 500;
     max-width: 200px;
@@ -391,7 +391,7 @@ onBeforeUnmount(() => {
 }
 
 .ai-markdown-template {
-    font-size: 13px;
+    font-size: 15px;
     color: var(--td-text-color-primary);
     line-height: 1.6;
 }
@@ -490,7 +490,6 @@ onBeforeUnmount(() => {
         transition: transform 0.2s ease;
 
         &:hover {
-            transform: scale(1.02);
         }
     }
 
