@@ -1,5 +1,9 @@
 package tools
 
+// maxFunctionNameLength is the maximum length for a tool/function name
+// imposed by the OpenAI API.
+const maxFunctionNameLength = 64
+
 // Tool names constants
 const (
 	ToolThinking            = "thinking"
