@@ -6,9 +6,12 @@
       <t-popup
         v-for="(item, index) in kbItems"
         :key="item.id"
-        placement="right"
+        placement="right-start"
         trigger="hover"
         :show-arrow="true"
+        :delay="[200, 0]"
+        :disabled="isScrolling"
+        :overlay-class-name="'mention-detail-popup'"
         :overlay-inner-class-name="'mention-detail-popup-wrap'"
         @visible-change="(v: boolean) => v && fetchKbDetail(item)"
       >
@@ -77,9 +80,12 @@
       <t-popup
         v-for="(item, index) in fileItems"
         :key="item.id"
-        placement="right"
+        placement="right-start"
         trigger="hover"
         :show-arrow="true"
+        :delay="[200, 0]"
+        :disabled="isScrolling"
+        :overlay-class-name="'mention-detail-popup'"
         :overlay-inner-class-name="'mention-detail-popup-wrap'"
         @visible-change="(v: boolean) => v && fetchFileDetail(item)"
       >
@@ -148,7 +154,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch, ref, nextTick } from 'vue';
+import { computed, watch, ref, nextTick, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
@@ -173,6 +179,12 @@ const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
 const detailCache = ref<Record<string, DetailState>>({});
+const isScrolling = ref(false);
+let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+onBeforeUnmount(() => {
+  if (scrollTimer) clearTimeout(scrollTimer);
+});
 
 // 共享智能体上下文：用于请求知识库/知识详情时带 agent_id，后端据此校验权限
 const agentIdForDetail = computed(() => {
@@ -229,9 +241,14 @@ function handleOrgClick(orgName: string) {
 }
 
 const onScroll = (e: Event) => {
+  isScrolling.value = true;
+  if (scrollTimer) clearTimeout(scrollTimer);
+  scrollTimer = setTimeout(() => {
+    isScrolling.value = false;
+  }, 150);
+
   const target = e.target as HTMLElement;
   const { scrollTop, scrollHeight, clientHeight } = target;
-  // Load more when scrolled to bottom (with 50px threshold)
   if (scrollHeight - scrollTop - clientHeight < 50 && props.hasMore && !props.loading) {
     emit('loadMore');
   }
@@ -451,6 +468,10 @@ const scrollToItem = (index: number) => {
   padding: 12px;
   max-width: 320px;
   min-width: 240px;
+}
+/* 箭头对齐到触发条目的垂直中心（条目高约36px，箭头应在距顶部约18px处） */
+.mention-detail-popup.t-popup[data-popper-placement^="right"] > .t-popup__arrow {
+  top: 14px !important;
 }
 .mention-detail-content {
   font-size: var(--td-font-size-body-medium, 14px);

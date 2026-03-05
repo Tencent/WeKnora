@@ -1886,7 +1886,10 @@ onBeforeRouteUpdate((to, from, next) => {
             @click.stop
             @mousedown.prevent="triggerMention"
           >
-            <img :src="getImgSrc('at-icon.svg')" alt="@" class="control-icon" />
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="control-icon at-icon">
+              <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
             <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
           </div>
         </t-tooltip>
@@ -2261,8 +2264,9 @@ const getImgSrc = (url: string) => {
   padding: 6px 10px;
   border-radius: 6px;
   background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  color: var(--td-text-color-secondary, #666);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, color 0.12s;
   user-select: none;
   flex-shrink: 0;
 
@@ -2285,69 +2289,8 @@ const getImgSrc = (url: string) => {
   padding: 0 10px;
   min-width: auto;
   font-weight: 500;
-  border: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
   position: relative;
-  
-  // 内置普通模式 - 绿色
-  &.is-normal {
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
-    border-color: rgba(16, 185, 129, 0.35);
-    
-    .agent-mode-text {
-      color: var(--td-brand-color-active);
-      font-weight: 600;
-    }
-    
-    .dropdown-arrow {
-      color: var(--td-brand-color-active);
-    }
-    
-    &:hover {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.18) 0%, rgba(16, 185, 129, 0.12) 100%);
-      border-color: rgba(16, 185, 129, 0.5);
-    }
-  }
-  
-  // 内置 Agent 模式 - 紫色
-  &.is-agent {
-    background: linear-gradient(135deg, rgba(124, 77, 255, 0.12) 0%, rgba(124, 77, 255, 0.08) 100%);
-    border-color: rgba(124, 77, 255, 0.35);
-    
-    .agent-mode-text {
-      color: var(--td-brand-color);
-      font-weight: 600;
-    }
-    
-    .dropdown-arrow {
-      color: var(--td-brand-color);
-    }
-    
-    &:hover {
-      background: linear-gradient(135deg, rgba(124, 77, 255, 0.18) 0%, rgba(124, 77, 255, 0.12) 100%);
-      border-color: rgba(124, 77, 255, 0.5);
-    }
-  }
-  
-  // 自定义智能体 - 蓝色
-  &.is-custom {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0.08) 100%);
-    border-color: rgba(59, 130, 246, 0.35);
-    
-    .agent-mode-text {
-      color: var(--td-brand-color);
-      font-weight: 600;
-    }
-    
-    .dropdown-arrow {
-      color: var(--td-brand-color);
-    }
-    
-    &:hover {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.18) 0%, rgba(59, 130, 246, 0.12) 100%);
-      border-color: rgba(59, 130, 246, 0.5);
-    }
-  }
+  border: 1px solid var(--td-component-border, #e7e7e7);
 }
 
 .agent-icon {
@@ -2364,16 +2307,7 @@ const getImgSrc = (url: string) => {
   height: 20px;
   border-radius: 5px;
   flex-shrink: 0;
-  
-  &.normal {
-    background: rgba(7, 192, 95, 0.12);
-    color: var(--td-brand-color-active);
-  }
-  
-  &.agent {
-    background: rgba(124, 77, 255, 0.12);
-    color: var(--td-brand-color);
-  }
+  color: var(--td-text-color-secondary, #666);
 }
 
 .agent-mode-text {
@@ -2605,16 +2539,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   margin-left: auto;
   flex-shrink: 0;
-  
+
   &.agent-controlled {
     .model-selector-trigger {
       cursor: not-allowed;
-      opacity: 0.85;
-      
-      &:hover {
-        background: rgba(16, 185, 129, 0.1);
-        border-color: rgba(16, 185, 129, 0.3);
-      }
+      opacity: 0.5;
     }
   }
 }
@@ -2627,32 +2556,30 @@ const getImgSrc = (url: string) => {
   min-width: 100px;
   height: 22px;
   border-radius: 6px;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid var(--td-component-border, #e7e7e7);
+  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
   transition: background 0.12s, border-color 0.12s;
   cursor: pointer;
-}
 
-.model-selector-trigger:hover {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: rgba(16, 185, 129, 0.45);
-}
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+  }
 
-.model-selector-trigger.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 
-.model-selector-trigger.disabled:hover {
-  background: rgba(16, 185, 129, 0.1);
-  border-color: rgba(16, 185, 129, 0.3);
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+    }
+  }
 }
 
 .model-selector-name {
   flex: 1;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--td-brand-color);
+  font-weight: 500;
+  color: var(--td-text-color-secondary, #666);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2661,7 +2588,7 @@ const getImgSrc = (url: string) => {
 .model-dropdown-arrow {
   width: 10px;
   height: 10px;
-  color: var(--td-brand-color);
+  color: var(--td-text-color-placeholder, #999);
   flex-shrink: 0;
   transition: transform 0.12s;
   
@@ -2671,7 +2598,7 @@ const getImgSrc = (url: string) => {
 }
 
 .model-selector-trigger.disabled .model-dropdown-arrow {
-  color: rgba(16, 185, 129, 0.4);
+  color: var(--td-text-color-placeholder, #999);
 }
 
 .model-selector-overlay {
