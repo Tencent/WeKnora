@@ -125,10 +125,10 @@ type ChunkingConfig struct {
 	// When enabled, large parent chunks provide context while small child chunks
 	// are used for vector matching. Retrieval matches on child but returns parent content.
 	EnableParentChild bool `yaml:"enable_parent_child,omitempty" json:"enable_parent_child,omitempty"`
-	// ParentChunkSize is the size of parent chunks (default: 1024).
+	// ParentChunkSize is the size of parent chunks (default: 4096).
 	// Only used when EnableParentChild is true.
 	ParentChunkSize int `yaml:"parent_chunk_size,omitempty" json:"parent_chunk_size,omitempty"`
-	// ChildChunkSize is the size of child chunks used for embedding (default: 256).
+	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
 }

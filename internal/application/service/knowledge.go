@@ -1326,11 +1326,11 @@ type ProcessChunksOptions struct {
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
 	parentSize := cc.ParentChunkSize
 	if parentSize <= 0 {
-		parentSize = 1024
+		parentSize = 4096
 	}
 	childSize := cc.ChildChunkSize
 	if childSize <= 0 {
-		childSize = 256
+		childSize = 384
 	}
 	parent = chunker.SplitterConfig{
 		ChunkSize:    parentSize,
