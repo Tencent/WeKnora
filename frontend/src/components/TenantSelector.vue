@@ -265,7 +265,7 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.2s;
   background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-component-stroke);
+  border: .5px solid var(--td-component-stroke);
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -323,7 +323,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
+  border: .5px solid var(--td-component-stroke);
   border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   z-index: 1000;
@@ -332,7 +332,7 @@ onUnmounted(() => {
 
 .dropdown-header {
   padding: 12px;
-  border-bottom: 1px solid var(--td-component-stroke);
+  border-bottom: .5px solid var(--td-component-stroke);
 }
 
 .dropdown-title {
@@ -350,7 +350,7 @@ onUnmounted(() => {
   padding: 7px 10px;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
-  border: 1px solid transparent;
+  border: .5px solid transparent;
   transition: all 0.2s;
 
   &:focus-within {

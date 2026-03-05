@@ -310,8 +310,6 @@ onBeforeUnmount(() => {
     background: var(--td-bg-color-container);
     border-radius: 6px;
     padding: 8px 12px;
-    border: 1px solid var(--td-brand-color);
-    box-shadow: 0 1px 3px rgba(7, 192, 95, 0.06);
     transition: all 0.2s ease;
 }
 

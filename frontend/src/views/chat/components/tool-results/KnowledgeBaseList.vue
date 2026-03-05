@@ -54,7 +54,7 @@ const props = defineProps<{
 
 .kb-card {
   background: @card-bg;
-  border: 1px solid @card-border;
+  border: .5px solid @card-border;
   border-radius: @card-radius;
   padding: 12px;
   transition: all 0.2s ease;

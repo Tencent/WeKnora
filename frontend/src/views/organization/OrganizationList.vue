@@ -1412,7 +1412,7 @@ onUnmounted(() => {
 
 /* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */
 .org-card {
-  border: 1px solid var(--td-component-stroke);
+  border: .5px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
@@ -1626,7 +1626,7 @@ onUnmounted(() => {
   justify-content: space-between;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid var(--td-component-stroke);
+  border-top: .5px solid var(--td-component-stroke);
 }
 
 .bottom-left {

@@ -366,7 +366,7 @@ watch(() => props.visible, async (v) => {
 .kb-dropdown {
   position: fixed !important;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border);
+  border: .5px solid var(--td-component-border);
   border-radius: 10px;
   box-shadow: var(--td-shadow-2);
   overflow: hidden;
@@ -382,13 +382,13 @@ watch(() => props.visible, async (v) => {
 /* 宽度由 JS 控制（dropdownWidth），这里只做内部样式 */
 .kb-search {
   padding: 8px 10px;
-  border-bottom: 1px solid var(--td-component-stroke);
+  border-bottom: .5px solid var(--td-component-stroke);
 }
 .kb-search-input {
   width: 100%;
   padding: 6px 10px;
   font-size: 12px;
-  border: 1px solid var(--td-component-stroke);
+  border: .5px solid var(--td-component-stroke);
   border-radius: 6px;
   background: var(--td-bg-color-secondarycontainer);
   outline: none;

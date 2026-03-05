@@ -145,12 +145,12 @@ onMounted(() => {
   font-size: 12px;
   height: 26px;
   padding: 0 8px;
-  background: rgba(255, 255, 255, 0.95);
-  
+  background: var(--td-bg-color-container);
+
   &:hover {
     color: var(--td-brand-color);
     border-color: var(--td-brand-color);
-    background: var(--td-bg-color-container);
+    background: var(--td-bg-color-secondarycontainer);
   }
   
   :deep(.t-button__text) {

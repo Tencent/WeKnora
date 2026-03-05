@@ -1,6 +1,6 @@
 <template>
-    <div class="refer">
-        <div class="refer_header" @click="referBoxSwitch" v-if="session.knowledge_references && session.knowledge_references.length">
+    <div class="refer" v-if="session.knowledge_references && session.knowledge_references.length">
+        <div class="refer_header" @click="referBoxSwitch">
             <div class="refer_title">
                 <img src="@/assets/img/ziliao.svg" :alt="$t('chat.referenceIconAlt')" />
                 <span>{{ headerText }}</span>
@@ -195,6 +195,7 @@ const getWebSearchDisplayText = (item) => {
     width: 100%;
     border-radius: 8px;
     background-color: var(--td-bg-color-container);
+    border: .5px solid var(--td-component-stroke);
     box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
     overflow: hidden;
     box-sizing: border-box;

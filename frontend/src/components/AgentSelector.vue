@@ -478,7 +478,7 @@ watch(() => props.visible, (newVal) => {
   background: var(--td-bg-color-container, #fff);
   border-radius: 10px;
   box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
-  border: 1px solid var(--td-component-border, #e7e9eb);
+  border: .5px solid var(--td-component-border, #e7e9eb);
   overflow: hidden;
   display: flex;
   flex-direction: column;

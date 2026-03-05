@@ -2017,7 +2017,7 @@ const getImgSrc = (url: string) => {
   width: 800px;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
-  border: 1px solid var(--td-component-border, #E7E7E7);
+  border: .5px solid var(--td-component-border, #E7E7E7);
   box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
   
   &:focus-within {
@@ -2032,7 +2032,7 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 5px;
   padding: 6px 12px 6px;
-  border-bottom: 1px solid var(--td-component-stroke, #e7e7e7);
+  border-bottom: .5px solid var(--td-component-stroke, #e7e7e7);
   background: var(--td-bg-color-container, #fff);
   border-radius: 11px 11px 0 0; /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
 }
@@ -2047,7 +2047,7 @@ const getImgSrc = (url: string) => {
   font-weight: 500;
   cursor: default;
   transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-  border: 1px solid transparent;
+  border: .5px solid transparent;
   color: var(--td-text-color-primary, #1f2937);
   line-height: 1.3;
 }
@@ -2263,7 +2263,6 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 6px 10px;
   border-radius: 6px;
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
   color: var(--td-text-color-secondary, #666);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
@@ -2290,7 +2289,7 @@ const getImgSrc = (url: string) => {
   min-width: auto;
   font-weight: 500;
   position: relative;
-  border: 1px solid var(--td-component-border, #e7e7e7);
+  border: .5px solid var(--td-component-border, #e7e7e7);
 }
 
 .agent-icon {
@@ -2433,7 +2432,7 @@ const getImgSrc = (url: string) => {
 :global(.input-field-tooltip) {
   .t-popup__content {
     box-shadow: var(--td-shadow-2);
-    border: 1px solid var(--td-component-border, #e7e7e7);
+    border: .5px solid var(--td-component-border, #e7e7e7);
   }
 }
 
@@ -2556,8 +2555,7 @@ const getImgSrc = (url: string) => {
   min-width: 100px;
   height: 22px;
   border-radius: 6px;
-  border: 1px solid var(--td-component-border, #e7e7e7);
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  border: .5px solid var(--td-component-border, #e7e7e7);
   transition: background 0.12s, border-color 0.12s;
   cursor: pointer;
 
@@ -2615,7 +2613,7 @@ const getImgSrc = (url: string) => {
   background: var(--td-bg-color-container, #fff);
   border-radius: 10px;
   box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
-  border: 1px solid var(--td-component-border, #e7e9eb);
+  border: .5px solid var(--td-component-border, #e7e9eb);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2629,7 +2627,7 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  border-bottom: .5px solid var(--td-component-stroke, #f0f0f0);
   background: var(--td-bg-color-container, #fff);
   font-size: 12px;
   font-weight: 500;
@@ -2651,7 +2649,7 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid transparent;
+  border: .5px solid transparent;
   background: transparent;
   color: var(--td-brand-color, #07c05f);
   font-size: 12px;

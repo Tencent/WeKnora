@@ -115,13 +115,20 @@ const props = defineProps({
     gap: 4px;
     flex: 1 0 0;
     border-radius: 4px;
-    background: var(--td-success-color);
+    background: #8CE97F;
     margin-left: auto;
-    color: var(--td-text-color-primary);
+    color: #000000e6;
     font-size: 16px;
     text-align: justify;
     word-break: break-all;
     max-width: 100%;
     box-sizing: border-box;
+}
+
+html[theme-mode="dark"] {
+    .user_msg {
+        background: var(--td-brand-color-3);
+        color: rgba(255, 255, 255, 0.9);
+    }
 }
 </style>

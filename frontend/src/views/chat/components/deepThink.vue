@@ -3,7 +3,10 @@
         <div class="think-header" @click="toggleFold">
             <div class="think-title">
                 <span v-if="deepSession.thinking" class="thinking-status">
-                    <img class="thinking-gif" src="@/assets/img/think.gif" :alt="$t('chat.thinkingAlt')">
+                    <span class="thinking-indicator">
+                        <span class="indicator-dot"></span>
+                        <span class="indicator-ring"></span>
+                    </span>
                     <span class="thinking-text">{{ $t('chat.thinking') }}</span>
                 </span>
                 <span v-else class="done-status">
@@ -80,13 +83,13 @@ const toggleFold = () => {
 // 安全地处理思考内容，防止XSS攻击
 const safeProcessThinkContent = (content) => {
     if (!content || typeof content !== 'string') return '';
-    
+
     // 先处理换行符
     const contentWithBreaks = content.replace(/\n/g, '<br/>');
-    
+
     // 使用DOMPurify进行安全清理，允许基本的文本格式化标签
     const cleanContent = sanitizeHTML(contentWithBreaks);
-    
+
     return cleanContent;
 };
 </script>
@@ -98,6 +101,7 @@ const safeProcessThinkContent = (content) => {
     width: 100%;
     border-radius: 8px;
     background-color: var(--td-bg-color-container);
+    border: .5px solid var(--td-component-stroke);
     box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
     overflow: hidden;
     box-sizing: border-box;
@@ -126,13 +130,34 @@ const safeProcessThinkContent = (content) => {
         .thinking-status {
             display: flex;
             align-items: center;
-            
-            .thinking-gif {
+
+            .thinking-indicator {
+                position: relative;
                 width: 16px;
                 height: 16px;
                 margin-right: 8px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+
+                .indicator-dot {
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 50%;
+                    background: var(--td-brand-color);
+                    animation: pulse-dot 1.8s ease-in-out infinite;
+                }
+
+                .indicator-ring {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 50%;
+                    border: 1.5px solid var(--td-brand-color);
+                    opacity: 0;
+                    animation: pulse-ring 1.8s ease-out infinite;
+                }
             }
-            
+
             .thinking-text {
                 font-size: 12px;
                 color: var(--td-text-color-primary);
@@ -143,13 +168,13 @@ const safeProcessThinkContent = (content) => {
         .done-status {
             display: flex;
             align-items: center;
-            
+
             .done-icon {
                 width: 16px;
                 height: 16px;
                 margin-right: 8px;
             }
-            
+
             .done-text {
                 font-size: 12px;
                 color: var(--td-text-color-primary);
@@ -161,7 +186,7 @@ const safeProcessThinkContent = (content) => {
             font-size: 14px;
             padding: 0 2px 1px 2px;
             color: var(--td-brand-color);
-            
+
             .toggle-icon {
                 transition: transform 0.2s;
             }
@@ -170,7 +195,7 @@ const safeProcessThinkContent = (content) => {
 
     .think-content {
         border-top: 1px solid var(--td-bg-color-secondarycontainer);
-        
+
         .content-inner {
             padding: 8px 14px;
             font-size: 12px;
@@ -179,14 +204,46 @@ const safeProcessThinkContent = (content) => {
             max-height: 200px;
             overflow-y: auto;
             word-break: break-word;
-            
+
             &::-webkit-scrollbar {
                 width: 4px;
             }
-            
+
             &::-webkit-scrollbar-thumb {
                 background: rgba(0, 0, 0, 0.1);
                 border-radius: 2px;
+            }
+        }
+    }
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        transform: scale(0.85);
+        opacity: 0.6;
+    }
+    50% {
+        transform: scale(1.1);
+        opacity: 1;
+    }
+}
+
+@keyframes pulse-ring {
+    0% {
+        transform: scale(0.5);
+        opacity: 0.6;
+    }
+    100% {
+        transform: scale(1.2);
+        opacity: 0;
+    }
+}
+
+html[theme-mode="dark"] {
+    .deep-think {
+        .think-content .content-inner {
+            &::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.15);
             }
         }
     }

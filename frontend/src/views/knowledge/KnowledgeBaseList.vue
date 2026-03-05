@@ -1585,7 +1585,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .kb-card {
-  border: 1px solid var(--td-component-stroke);
+  border: .5px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
@@ -1832,7 +1832,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   justify-content: space-between;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid var(--td-component-stroke);
+  border-top: .5px solid var(--td-component-stroke);
 }
 
 .bottom-left {
