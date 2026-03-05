@@ -1173,6 +1173,13 @@ export default {
     menu: {
       viewDetails: 'View Details',
     },
+    pin: {
+      pin: 'Pin to Top',
+      unpin: 'Unpin',
+      pinSuccess: 'Pinned',
+      unpinSuccess: 'Unpinned',
+      failed: 'Operation failed',
+    },
     messages: {
       deleted: 'Knowledge base deleted',
       deleteFailed: 'Failed to delete knowledge base'

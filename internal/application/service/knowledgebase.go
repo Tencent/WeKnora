@@ -312,6 +312,23 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
+// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+func (s *knowledgeBaseService) TogglePinKnowledgeBase(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	if id == "" {
+		return nil, errors.New("knowledge base ID cannot be empty")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	kb, err := s.repo.TogglePinKnowledgeBase(ctx, id, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": id,
+		})
+		return nil, err
+	}
+	logger.Infof(ctx, "Knowledge base pin toggled, ID: %s, is_pinned: %v", id, kb.IsPinned)
+	return kb, nil
+}
+
 // DeleteKnowledgeBase deletes a knowledge base by its ID
 // This method marks the knowledge base as deleted and enqueues an async task
 // to handle the heavy cleanup operations (embeddings, chunks, files, graph data)

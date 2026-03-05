@@ -1045,6 +1045,13 @@ export default {
       confirmMessage: 'Удалить базу знаний «{name}»? Отменить действие будет невозможно.',
       confirmButton: 'Удалить'
     },
+    pin: {
+      pin: 'Закрепить',
+      unpin: 'Открепить',
+      pinSuccess: 'Закреплено',
+      unpinSuccess: 'Откреплено',
+      failed: 'Операция не удалась',
+    },
     messages: {
       deleted: 'База знаний удалена',
       deleteFailed: 'Не удалось удалить базу знаний'

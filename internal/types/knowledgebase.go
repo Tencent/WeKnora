@@ -70,6 +70,10 @@ type KnowledgeBase struct {
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
+	// Whether this knowledge base is pinned to the top of the list
+	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"default:false"`
+	// Time when the knowledge base was pinned (nil if not pinned)
+	PinnedAt *time.Time `yaml:"pinned_at"               json:"pinned_at"`
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base

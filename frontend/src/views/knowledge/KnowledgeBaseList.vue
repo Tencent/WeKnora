@@ -93,6 +93,10 @@
           :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
           @click="handleCardClick(kb)"
         >
+          <!-- 置顶标识 -->
+          <div v-if="kb.is_pinned" class="pin-indicator">
+            <t-icon name="pin-filled" size="14px" />
+          </div>
           <!-- 卡片头部 -->
           <div class="card-header">
             <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -107,6 +111,10 @@
               </div>
               <template #content>
                 <div class="popup-menu" @click.stop>
+                  <div class="popup-menu-item" @click.stop="handleTogglePinById(kb.id)">
+                    <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                    <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                  </div>
                   <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
                     <t-icon class="menu-icon" name="setting" />
                     <span>{{ $t('knowledgeBase.settings') }}</span>
@@ -251,6 +259,10 @@
         :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
         @click="handleCardClick(kb)"
       >
+        <!-- 置顶标识 -->
+        <div v-if="kb.is_pinned" class="pin-indicator">
+          <t-icon name="pin-filled" size="14px" />
+        </div>
         <!-- 卡片头部 -->
         <div class="card-header">
           <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -272,6 +284,10 @@
             </div>
             <template #content>
               <div class="popup-menu" @click.stop>
+                <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
+                  <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                  <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                </div>
                 <div class="popup-menu-item" @click.stop="handleSettings(kb)">
                   <t-icon class="menu-icon" name="setting" />
                   <span>{{ $t('knowledgeBase.settings') }}</span>
@@ -586,7 +602,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listKnowledgeBases, deleteKnowledgeBase } from '@/api/knowledge-base'
+import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useOrganizationStore } from '@/stores/organization'
@@ -620,9 +636,10 @@ interface KB {
   question_generation_config?: { enabled?: boolean; question_count?: number };
   knowledge_count?: number;
   chunk_count?: number;
-  isProcessing?: boolean; // 是否有正在处理的导入任务
-  processing_count?: number; // 正在处理的文档数量（仅文档类型）
-  share_count?: number; // 共享给组织的数量
+  isProcessing?: boolean;
+  processing_count?: number;
+  share_count?: number;
+  is_pinned?: boolean;
 }
 
 const kbs = ref<KB[]>([])
@@ -847,6 +864,35 @@ const handleDeleteById = (id: string) => {
   if (kb) {
     deletingKb.value = kb
     deleteVisible.value = true
+  }
+}
+
+const handleTogglePin = async (kb: KB) => {
+  kb.showMore = false
+  try {
+    const res: any = await togglePinKnowledgeBase(kb.id)
+    if (res.success) {
+      MessagePlugin.success(
+        res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
+      )
+      fetchList()
+    }
+  } catch {
+    MessagePlugin.error(t('knowledgeList.pin.failed'))
+  }
+}
+
+const handleTogglePinById = async (id: string) => {
+  try {
+    const res: any = await togglePinKnowledgeBase(id)
+    if (res.success) {
+      MessagePlugin.success(
+        res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
+      )
+      fetchList()
+    }
+  } catch {
+    MessagePlugin.error(t('knowledgeList.pin.failed'))
   }
 }
 
@@ -1614,6 +1660,15 @@ const handleUploadFinishedEvent = (event: Event) => {
       pointer-events: none;
       z-index: 0;
     }
+  }
+
+  .pin-indicator {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    color: var(--td-brand-color);
+    z-index: 2;
+    opacity: 0.7;
   }
 
   // 确保内容在装饰之上

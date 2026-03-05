@@ -1581,6 +1581,13 @@ export default {
     menu: {
       viewDetails: "查看详情",
     },
+    pin: {
+      pin: "置顶",
+      unpin: "取消置顶",
+      pinSuccess: "已置顶",
+      unpinSuccess: "已取消置顶",
+      failed: "操作失败",
+    },
     detail: {
       title: "共享知识库",
       overview: "概览",

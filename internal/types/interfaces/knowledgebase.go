@@ -80,6 +80,9 @@ type KnowledgeBaseService interface {
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	DeleteKnowledgeBase(ctx context.Context, id string) error
 
+	// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+	TogglePinKnowledgeBase(ctx context.Context, id string) (*types.KnowledgeBase, error)
+
 	// HybridSearch performs hybrid search (vector + keywords) in the knowledge base
 	// Parameters:
 	//   - ctx: Context information
@@ -190,4 +193,7 @@ type KnowledgeBaseRepository interface {
 	// Returns:
 	//   - Possible errors such as record not existing, database errors, etc.
 	DeleteKnowledgeBase(ctx context.Context, id string) error
+
+	// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+	TogglePinKnowledgeBase(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error)
 }

@@ -45,6 +45,10 @@ export function copyKnowledgeBase(data: { source_id: string; target_id?: string 
   return post(`/api/v1/knowledge-bases/copy`, data);
 }
 
+export function togglePinKnowledgeBase(id: string) {
+  return put(`/api/v1/knowledge-bases/${id}/pin`);
+}
+
 // 知识文件 API（基于具体知识库）
 // data.tag_id: 可选，指定知识所属的分类ID
 export function uploadKnowledgeFile(kbId: string, data: { file: File; tag_id?: string; [key: string]: any } = { file: new File([], '') }, onProgress?: (progressEvent: any) => void) {
