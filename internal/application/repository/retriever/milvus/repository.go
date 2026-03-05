@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	envQdrantCollection   = "MILVUS_COLLECTION"
+	envMilvusCollection   = "MILVUS_COLLECTION"
 	defaultCollectionName = "weknora_embeddings"
 	fieldContent          = "content"
 	fieldSourceID         = "source_id"
@@ -45,7 +45,7 @@ func NewMilvusRetrieveEngineRepository(client *client.Client) interfaces.Retriev
 	log := logger.GetLogger(context.Background())
 	log.Info("[Milvus] Initializing Milvus retriever engine repository")
 
-	collectionBaseName := os.Getenv(envQdrantCollection)
+	collectionBaseName := os.Getenv(envMilvusCollection)
 	if collectionBaseName == "" {
 		log.Warn("[Milvus] MILVUS_COLLECTION environment variable not set, using default collection name")
 		collectionBaseName = defaultCollectionName
@@ -506,7 +506,7 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 	// Get all collections
 	collections, err := m.client.ListCollections(ctx, client.NewListCollectionOption())
 	if err != nil {
-		log.Errorf("[Milvus] Failed to list collections: %w", err)
+		log.Errorf("[Milvus] Failed to list collections: %v", err)
 		return fmt.Errorf("failed to list collections: %w", err)
 	}
 
