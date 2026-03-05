@@ -66,6 +66,18 @@ func (r *userRepository) GetUserByUsername(ctx context.Context, username string)
 	return &user, nil
 }
 
+// GetUserByTenantID gets the first user (owner) of a tenant
+func (r *userRepository) GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error) {
+	var user types.User
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Order("created_at ASC").First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 // UpdateUser updates a user
 func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error {
 	return r.db.WithContext(ctx).Save(user).Error
