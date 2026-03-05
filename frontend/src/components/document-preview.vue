@@ -304,7 +304,7 @@ onUnmounted(() => {
   <div class="document-preview">
     <!-- Loading -->
     <div v-if="loading" class="preview-loading">
-      <t-loading size="large" />
+      <t-loading size="medium" />
       <span class="loading-text">{{ $t('preview.loading') }}</span>
     </div>
 

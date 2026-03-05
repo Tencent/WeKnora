@@ -77,7 +77,7 @@
                             <t-icon :name="isAgentMode ? 'control-platform' : 'chat'" size="24px" />
                           </div>
                           <!-- 自定义智能体使用 AgentAvatar -->
-                          <AgentAvatar v-else :name="formData.name || '?'" size="large" />
+                          <AgentAvatar v-else :name="formData.name || '?'" size="medium" />
                           <t-input 
                             v-model="formData.name" 
                             :placeholder="$t('agent.editor.namePlaceholder')" 

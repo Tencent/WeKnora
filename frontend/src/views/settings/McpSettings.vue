@@ -55,7 +55,7 @@
                 <t-switch 
                   v-model="service.enabled" 
                   @change="() => handleToggleEnabled(service)"
-                  size="large"
+                  size="medium"
                   :disabled="service.is_builtin"
                 />
                 <t-dropdown 

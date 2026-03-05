@@ -43,7 +43,7 @@
                       <div class="form-item">
                         <label class="form-label required">{{ $t('organization.name') }}</label>
                         <div class="name-input-wrapper">
-                          <SpaceAvatar :name="createForm.name || '?'" size="large" />
+                          <SpaceAvatar :name="createForm.name || '?'" size="medium" />
                           <t-input
                             v-model="createForm.name"
                             :placeholder="$t('organization.namePlaceholder')"
@@ -159,7 +159,7 @@
                           v-model="joinForm.invite_code"
                           :placeholder="$t('organization.inviteCodePlaceholder')"
                           :maxlength="32"
-                          size="large"
+                          size="medium"
                           class="invite-code-input"
                         />
                         <p class="form-tip">{{ $t('organization.editor.inviteCodeTip') }}</p>

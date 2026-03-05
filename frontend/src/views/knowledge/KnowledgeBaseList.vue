@@ -408,7 +408,7 @@
 
     <!-- 按空间筛选：该空间内全部知识库（含我共享的） -->
     <div v-if="spaceSelectionOrgId && spaceKbsLoading" class="kb-list-main-loading">
-      <t-loading size="large" text="" />
+      <t-loading size="medium" text="" />
     </div>
     <div v-else-if="spaceSelectionOrgId && spaceKbsList.length > 0" class="kb-card-wrap">
       <div

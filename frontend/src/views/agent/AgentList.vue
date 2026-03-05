@@ -303,7 +303,7 @@
 
     <!-- 按空间筛选：该空间内全部智能体（含我共享的） -->
     <div v-if="spaceSelectionOrgId && spaceAgentsLoading" class="agent-list-main-loading">
-      <t-loading size="large" text="" />
+      <t-loading size="medium" text="" />
     </div>
     <div v-else-if="spaceSelectionOrgId && spaceAgentsList.length > 0" class="agent-card-wrap">
       <div
