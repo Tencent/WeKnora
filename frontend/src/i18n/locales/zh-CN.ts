@@ -2245,6 +2245,7 @@ export default {
     },
     deleteConfirmBody: '确定要删除 MCP 服务"{name}"吗？此操作无法撤销。',
     unnamed: "未命名",
+    builtin: "内置",
   },
 
   // 新增：模型设置

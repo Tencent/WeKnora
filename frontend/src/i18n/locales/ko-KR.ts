@@ -2291,6 +2291,7 @@ export default {
     },
     deleteConfirmBody: 'MCP 서비스 "{name}"을(를) 삭제하시겠습니까? 이 작업은 취소할 수 없습니다.',
     unnamed: "이름 없음",
+    builtin: "내장",
   },
   // 모델 설정
   modelSettings: {

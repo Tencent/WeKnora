@@ -36,6 +36,14 @@
               <div class="service-name">
                 {{ service.name }}
                 <t-tag 
+                  v-if="service.is_builtin"
+                  theme="warning"
+                  size="small"
+                  variant="light"
+                >
+                  {{ $t('mcpSettings.builtin') }}
+                </t-tag>
+                <t-tag 
                   :theme="getTransportTypeTheme(service.transport_type)" 
                   size="small"
                   variant="light"
@@ -48,9 +56,22 @@
                   v-model="service.enabled" 
                   @change="() => handleToggleEnabled(service)"
                   size="large"
+                  :disabled="service.is_builtin"
                 />
                 <t-dropdown 
+                  v-if="!service.is_builtin"
                   :options="getServiceOptions(service)" 
+                  @click="(data: any) => handleMenuAction(data, service)"
+                  placement="bottom-right"
+                  :disabled="testing"
+                >
+                  <t-button variant="text" shape="square" size="small" class="more-btn" :disabled="testing">
+                    <t-icon name="more" />
+                  </t-button>
+                </t-dropdown>
+                <t-dropdown 
+                  v-else
+                  :options="getBuiltinServiceOptions(service)" 
                   @click="(data: any) => handleMenuAction(data, service)"
                   placement="bottom-right"
                   :disabled="testing"
@@ -260,6 +281,16 @@ const getServiceOptions = (service: MCPService) => {
       content: t('common.delete'),
       value: `delete-${service.id}`,
       theme: 'error'
+    }
+  ]
+}
+
+// Get service options for builtin services (test only)
+const getBuiltinServiceOptions = (service: MCPService) => {
+  return [
+    {
+      content: t('mcpSettings.actions.test'),
+      value: `test-${service.id}`
     }
   ]
 }

@@ -1602,7 +1602,8 @@ export default {
       deleteFailed: 'Не удалось удалить сервис MCP'
     },
     deleteConfirmBody: 'Удалить сервис MCP «{name}»? Действие необратимо.',
-    unnamed: 'Без названия'
+    unnamed: 'Без названия',
+    builtin: 'Встроенный'
   },
   modelSettings: {
     title: 'Настройки моделей',

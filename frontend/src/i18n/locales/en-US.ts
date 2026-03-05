@@ -2241,7 +2241,8 @@ export default {
       deleteFailed: 'Failed to delete MCP service'
     },
     deleteConfirmBody: 'Delete MCP service "{name}"? This action cannot be undone.',
-    unnamed: 'Unnamed'
+    unnamed: 'Unnamed',
+    builtin: 'Built-in'
   },
   // New: Model Settings
   modelSettings: {

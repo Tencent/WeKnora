@@ -129,9 +129,15 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 		return
 	}
 
+	// Hide sensitive information for builtin MCP services
+	responseService := service
+	if service.IsBuiltin {
+		responseService = service.HideSensitiveInfo()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    service,
+		"data":    responseService,
 	})
 }
 
