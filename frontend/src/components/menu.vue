@@ -1,15 +1,48 @@
 <template>
-    <div class="aside_box">
-        <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
-            <img class="logo" src="@/assets/img/weknora.png" alt="">
+    <div class="aside_box" :class="{ 'aside_box--collapsed': uiStore.sidebarCollapsed }">
+        <!-- 展开时：Logo + 折叠按钮同行 -->
+        <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
+            <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
+                <img class="logo" src="@/assets/img/weknora.png" alt="">
+            </div>
+            <div class="sidebar-toggle"
+                 @click="uiStore.toggleSidebar"
+                 :title="t('menu.collapseSidebar')">
+                <svg viewBox="0 0 20 20" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
+                    <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
+                    <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                </svg>
+            </div>
         </div>
+        <!-- 折叠时：展开按钮 -->
+        <t-tooltip v-else :content="t('menu.expandSidebar')" placement="right">
+            <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
+                <div class="menu_item-box">
+                    <div class="menu_icon">
+                        <svg class="icon" viewBox="0 0 20 20" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
+                            <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
+                            <line x1="5" y1="10" x2="3" y2="8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                            <line x1="5" y1="10" x2="3" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </t-tooltip>
         
         <!-- 租户选择器：仅在用户可切换租户时显示 -->
-        <TenantSelector v-if="canAccessAllTenants" />
+        <TenantSelector v-if="canAccessAllTenants && !uiStore.sidebarCollapsed" />
+
+        <!-- 折叠时右侧拖拽展开手柄 -->
+        <div v-if="uiStore.sidebarCollapsed"
+             class="sidebar-drag-handle"
+             @mousedown="onDragHandleMouseDown" />
         
         <!-- 上半部分：知识库和对话 -->
         <div class="menu_top">
             <div class="menu_box" :class="{ 'has-submenu': item.children }" v-for="(item, index) in topMenuItems" :key="index">
+                <t-tooltip :content="item.title" placement="right" :disabled="!uiStore.sidebarCollapsed">
                 <div @click="handleMenuClick(item.path)"
                     @mouseenter="mouseenteMenu(item.path)" @mouseleave="mouseleaveMenu(item.path)"
                      :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
@@ -17,13 +50,16 @@
                         <div class="menu_icon">
                             <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
                         </div>
-                        <span class="menu_title" :title="item.title">{{ item.title }}</span>
-                        <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0" class="menu-pending-badge" :title="t('organization.settings.pendingJoinRequestsBadge')">{{ orgStore.totalPendingJoinRequestCount }}</span>
-                        <span v-if="item.path === 'creatChat' && batchMode" class="batch-cancel-hint" @click.stop="exitBatchMode">{{ t('batchManage.cancel') }}</span>
-                        <t-icon v-else-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
+                        <template v-if="!uiStore.sidebarCollapsed">
+                            <span class="menu_title" :title="item.title">{{ item.title }}</span>
+                            <span v-if="item.path === 'organizations' && orgStore.totalPendingJoinRequestCount > 0" class="menu-pending-badge" :title="t('organization.settings.pendingJoinRequestsBadge')">{{ orgStore.totalPendingJoinRequestCount }}</span>
+                            <span v-if="item.path === 'creatChat' && batchMode" class="batch-cancel-hint" @click.stop="exitBatchMode">{{ t('batchManage.cancel') }}</span>
+                            <t-icon v-else-if="item.path === 'creatChat'" name="add" class="menu-create-hint" />
+                        </template>
                     </div>
                 </div>
-                <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children">
+                </t-tooltip>
+                <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children && !uiStore.sidebarCollapsed">
                     <template v-for="(group, groupIndex) in groupedSessions" :key="groupIndex">
                         <div class="timeline_header">{{ group.label }}</div>
                         <div class="submenu_item_p" v-for="(subitem, subindex) in group.items" :key="subitem.id">
@@ -53,7 +89,7 @@
                         </div>
                     </template>
                 </div>
-                <div v-if="batchMode && item.path === 'creatChat'" class="batch-inline-footer">
+                <div v-if="batchMode && item.path === 'creatChat' && !uiStore.sidebarCollapsed" class="batch-inline-footer">
                     <div class="batch-footer-left">
                         <t-checkbox
                             :checked="isAllBatchSelected"
@@ -670,11 +706,32 @@ const mouseenteMenu = (path: string) => {
 const mouseleaveMenu = (path: string) => {
 }
 
+const onDragHandleMouseDown = (e: MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const expandThreshold = 40
+
+    const onMouseMove = (ev: MouseEvent) => {
+        if (ev.clientX - startX > expandThreshold) {
+            uiStore.expandSidebar()
+            cleanup()
+        }
+    }
+    const onMouseUp = () => cleanup()
+    const cleanup = () => {
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+}
+
 
 </script>
 <style lang="less" scoped>
 .aside_box {
     min-width: 260px;
+    width: 260px;
     padding: 8px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
@@ -682,18 +739,85 @@ const mouseleaveMenu = (path: string) => {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    /* 与右侧内容区统一的细分界，减少割裂感 */
     border-right: 1px solid var(--td-component-stroke);
     box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
+    transition: width 0.25s ease, min-width 0.25s ease;
+    position: relative;
 
-    .logo_box {
-        height: 80px;
+    &--collapsed {
+        min-width: 60px;
+        width: 60px;
+        padding: 8px 4px;
+        overflow: visible;
+
+        .menu_item {
+            justify-content: center;
+            padding: 13px 0;
+            .menu_item-box {
+                justify-content: center;
+                width: auto;
+            }
+            .menu_icon {
+                margin-right: 0;
+            }
+        }
+
+        .menu_bottom {
+            align-items: center;
+        }
+    }
+
+    .logo_row {
         display: flex;
         align-items: center;
+        justify-content: space-between;
+        height: 56px;
+        flex-shrink: 0;
+        padding: 0 8px 0 16px;
+    }
+
+    .sidebar-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        flex-shrink: 0;
+        cursor: pointer;
+        color: var(--td-text-color-secondary);
+        border-radius: 4px;
+        transition: background-color 0.2s ease;
+        box-sizing: border-box;
+
+        &:hover {
+            background: var(--td-bg-color-container-hover);
+            color: var(--td-text-color-primary);
+        }
+    }
+
+    .sidebar-drag-handle {
+        position: absolute;
+        top: 0;
+        right: -3px;
+        width: 6px;
+        height: 100%;
+        cursor: ew-resize;
+        z-index: 10;
+
+        &:hover {
+            background: var(--td-brand-color-light);
+        }
+    }
+
+    .logo_box {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
         .logo{
             width: 134px;
             height: auto;
-            margin-left: 24px;
         }
     }
 
@@ -1121,20 +1245,20 @@ html[theme-mode="dark"] .aside_box .logo_box .logo {
 }
 
 // Dark mode: make SVG icons match text color (loaded via <img>, currentColor won't work)
-html[theme-mode="dark"] .aside_box .menu_icon .icon {
+html[theme-mode="dark"] .aside_box .menu_icon img.icon {
     filter: invert(1);
     opacity: 0.55;
 }
 // Hover state: brighter icon like text
-html[theme-mode="dark"] .aside_box .menu_item:hover .menu_icon .icon {
+html[theme-mode="dark"] .aside_box .menu_item:hover .menu_icon img.icon {
     opacity: 0.9;
 }
 // menu_item_c_active: text is primary, so icon should match
-html[theme-mode="dark"] .aside_box .menu_item_c_active .menu_icon .icon {
+html[theme-mode="dark"] .aside_box .menu_item_c_active .menu_icon img.icon {
     opacity: 0.9;
 }
 // Active (green) icons should not be inverted
-html[theme-mode="dark"] .aside_box .menu_item_active .menu_icon .icon {
+html[theme-mode="dark"] .aside_box .menu_item_active .menu_icon img.icon {
     filter: none;
     opacity: 1;
 }

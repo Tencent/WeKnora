@@ -15,6 +15,8 @@ export default {
     confirmLogout: "정말 로그아웃 하시겠습니까?",
     systemInfo: "시스템 정보",
     knowledgeSearch: "지식 검색",
+    collapseSidebar: "사이드바 접기",
+    expandSidebar: "사이드바 펼치기",
   },
   batchManage: {
     title: "대화 관리",

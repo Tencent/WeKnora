@@ -15,6 +15,8 @@ export default {
     confirmLogout: "确定要退出登录吗？",
     systemInfo: "系统信息",
     knowledgeSearch: "知识搜索",
+    collapseSidebar: "收起侧边栏",
+    expandSidebar: "展开侧边栏",
   },
   batchManage: {
     title: "管理对话记录",

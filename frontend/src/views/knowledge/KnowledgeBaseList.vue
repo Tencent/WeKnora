@@ -1439,7 +1439,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   // 共享知识库根据类型显示不同样式
   &.kb-type-document {
     background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%) !important;
-    border-color: var(--td-success-color-focus) !important;
 
     &:hover {
       border-color: var(--td-brand-color) !important;
@@ -1454,7 +1453,6 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.kb-type-faq {
     background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.04) 100%) !important;
-    border-color: var(--td-brand-color-focus) !important;
 
     &:hover {
       border-color: var(--td-brand-color) !important;
@@ -1614,7 +1612,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   // 文档类型样式
   &.kb-type-document {
     background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%);
-    border-color: var(--td-success-color-focus);
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -1639,7 +1636,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   // 问答类型样式
   &.kb-type-faq {
     background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.04) 100%);
-    border-color: var(--td-brand-color-focus);
 
     &:hover {
       border-color: var(--td-brand-color);

@@ -1,16 +1,18 @@
 <template>
-  <div class="user-menu" ref="menuRef">
+  <div class="user-menu" :class="{ 'user-menu--collapsed': uiStore.sidebarCollapsed }" ref="menuRef">
     <!-- 用户按钮 -->
     <div class="user-button" @click="toggleMenu">
       <div class="user-avatar">
         <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
         <span v-else class="avatar-placeholder">{{ userInitial }}</span>
       </div>
-      <div class="user-info">
-        <div class="user-name">{{ userName }}</div>
-        <div class="user-email">{{ userEmail }}</div>
-      </div>
-      <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
+      <template v-if="!uiStore.sidebarCollapsed">
+        <div class="user-info">
+          <div class="user-name">{{ userName }}</div>
+          <div class="user-email">{{ userEmail }}</div>
+        </div>
+        <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
+      </template>
     </div>
 
     <!-- 下拉菜单 -->
@@ -256,6 +258,30 @@ onUnmounted(() => {
 .user-menu {
   position: relative;
   width: 100%;
+
+  &--collapsed {
+    .user-button {
+      justify-content: center;
+      padding: 8px;
+      gap: 0;
+    }
+
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+
+      .avatar-placeholder {
+        font-size: 13px;
+      }
+    }
+
+    .user-dropdown {
+      left: calc(100% + 8px);
+      bottom: 0;
+      right: auto;
+      min-width: 200px;
+    }
+  }
 }
 
 .user-button {
@@ -287,6 +313,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: width 0.2s ease, height 0.2s ease;
 
   img {
     width: 100%;

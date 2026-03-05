@@ -1611,3 +1611,110 @@ onMounted(() => {
   }
 }
 </style>
+
+<style lang="less">
+html[theme-mode="dark"] {
+  // 整体背景：更深的绿色渐变
+  .login-layout {
+    background: linear-gradient(225deg, #011a14 0%, #032e22 15%, #043a2c 25%, #05503d 38%, #046647 50%, #038a56 65%, #049b60 78%, #06a06a 90%, #07b074 100%);
+
+    &::before {
+      background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
+                  radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
+    }
+  }
+
+  // 知识图谱节点：降低发光强度
+  .knowledge-node {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 0 10px rgba(255, 255, 255, 0.2),
+      0 0 20px rgba(16, 185, 129, 0.2),
+      inset 0 0 10px rgba(255, 255, 255, 0.05);
+  }
+
+  .knowledge-node:hover {
+    box-shadow:
+      0 0 15px rgba(255, 255, 255, 0.3),
+      0 0 30px rgba(16, 185, 129, 0.3),
+      inset 0 0 15px rgba(255, 255, 255, 0.1);
+  }
+
+  .connection-line {
+    stroke: rgba(255, 255, 255, 0.3);
+  }
+
+  // Logo 反色
+  .header-logo .logo-image {
+    filter: invert(1) hue-rotate(180deg) brightness(1.1) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+  }
+
+  .header-logo:hover .logo-image {
+    filter: invert(1) hue-rotate(180deg) brightness(1.2) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.6));
+  }
+
+  // 顶部链接按钮：降低玻璃效果亮度
+  .header-link {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+  }
+
+  .language-switch button {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+  }
+
+  // 语言下拉菜单
+  .language-dropdown {
+    background: rgba(36, 36, 36, 0.95) !important;
+    border-color: var(--td-component-stroke) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  // 特性标签：降低白色亮度
+  .tag {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  // 表单卡片
+  .form-card {
+    background: rgba(36, 36, 36, 0.92) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  }
+
+  // 表单输入框：确保深色背景下有边框对比
+  .form-content .t-input {
+    background: var(--td-bg-color-page) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+
+    &:hover {
+      border-color: var(--td-brand-color) !important;
+    }
+
+    &:focus-within {
+      border-color: var(--td-brand-color) !important;
+    }
+  }
+
+  // 轮播分页：深色模式下用白色圆点确保可见
+  .screenshot-swiper .swiper-pagination-bullet-active {
+    background: rgba(255, 255, 255, 0.9) !important;
+  }
+
+  // 特性列表图标背景
+  .login-features .feature-icon {
+    background: rgba(6, 176, 77, 0.15);
+  }
+}
+</style>

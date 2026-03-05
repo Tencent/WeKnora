@@ -13,6 +13,8 @@ export default {
     confirmLogout: 'Вы уверены, что хотите выйти?',
     systemInfo: 'Информация о системе',
     knowledgeSearch: 'Поиск знаний',
+    collapseSidebar: 'Свернуть боковую панель',
+    expandSidebar: 'Развернуть боковую панель',
   },
   batchManage: {
     title: 'Управление диалогами',

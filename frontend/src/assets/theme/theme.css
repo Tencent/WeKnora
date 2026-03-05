@@ -116,3 +116,16 @@
 :root[theme-mode="dark"] .more-wrap:hover .more-icon {
     opacity: 0.9;
 }
+
+/* 覆盖浏览器自动填充的背景色（Chrome 会强制加浅蓝/浅黄底色） */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 1000px var(--td-bg-color-container) inset !important;
+    -webkit-text-fill-color: var(--td-text-color-primary) !important;
+    caret-color: var(--td-text-color-primary) !important;
+    transition: background-color 5000s ease-in-out 0s;
+}

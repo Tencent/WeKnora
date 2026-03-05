@@ -1211,7 +1211,6 @@ defineExpose({
   // 普通模式样式
   &.agent-mode-normal {
     background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%);
-    border-color: var(--td-success-color-focus);
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -1230,7 +1229,6 @@ defineExpose({
   // Agent 模式样式
   &.agent-mode-agent {
     background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(124, 77, 255, 0.04) 100%);
-    border-color: var(--td-brand-color-focus);
 
     &:hover {
       border-color: var(--td-brand-color);

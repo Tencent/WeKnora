@@ -15,6 +15,8 @@ export default {
     confirmLogout: 'Are you sure you want to logout?',
     systemInfo: 'System Information',
     knowledgeSearch: 'Knowledge Search',
+    collapseSidebar: 'Collapse Sidebar',
+    expandSidebar: 'Expand Sidebar',
   },
   batchManage: {
     title: 'Manage Conversations',
