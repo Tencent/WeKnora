@@ -200,16 +200,16 @@ const getActualContent = () => {
 const handleCopyAnswer = async () => {
     const content = getActualContent();
     if (!content) {
-        MessagePlugin.warning(t('chat.emptyContentWarning') || '当前回答为空，无法复制');
+        MessagePlugin.warning(t('chat.emptyContentWarning'));
         return;
     }
 
     try {
         await copyTextToClipboard(content);
-        MessagePlugin.success(t('chat.copySuccess') || '已复制到剪贴板');
+        MessagePlugin.success(t('chat.copySuccess'));
     } catch (err) {
         console.error('复制失败:', err);
-        MessagePlugin.error(t('chat.copyFailed') || '复制失败，请手动复制');
+        MessagePlugin.error(t('chat.copyFailed'));
     }
 };
 
@@ -217,7 +217,7 @@ const handleCopyAnswer = async () => {
 const handleAddToKnowledge = () => {
     const content = getActualContent();
     if (!content) {
-        MessagePlugin.warning(t('chat.emptyContentWarning') || '当前回答为空，无法保存到知识库');
+        MessagePlugin.warning(t('chat.emptyContentWarning'));
         return;
     }
 
@@ -232,7 +232,7 @@ const handleAddToKnowledge = () => {
         status: 'draft',
     });
 
-    MessagePlugin.info(t('chat.editorOpened') || '已打开编辑器，请选择知识库后保存');
+    MessagePlugin.info(t('chat.editorOpened'));
 };
 
 // 处理 markdown-content 中图片的点击事件

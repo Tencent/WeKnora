@@ -9,14 +9,14 @@
         <div class="info-box">
           <div class="info-header">
             <t-icon name="info-circle" class="info-icon" />
-            <span class="info-title">内置模型</span>
+            <span class="info-title">{{ $t('modelSettings.builtinModels.title') }}</span>
           </div>
           <div class="info-content">
-            <p>内置模型对所有租户可见，敏感信息会被隐藏，且不可编辑或删除。</p>
+            <p>{{ $t('modelSettings.builtinModels.description') }}</p>
             <p class="doc-link">
               <t-icon name="link" class="link-icon" />
               <a href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md" target="_blank" rel="noopener noreferrer">
-                查看内置模型管理指南
+                {{ $t('modelSettings.builtinModels.viewGuide') }}
               </a>
             </p>
           </div>
@@ -44,7 +44,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
@@ -93,7 +93,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
@@ -143,7 +143,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
@@ -192,7 +192,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
@@ -214,9 +214,9 @@
         </div>
       </div>
       <div v-else class="empty-state">
-        <p class="empty-text">暂无 VLLM 视觉模型</p>
+        <p class="empty-text">{{ $t('modelSettings.vllm.empty') }}</p>
         <t-button theme="default" variant="outline" size="small" @click="openAddDialog('vllm')">
-          添加模型
+          {{ $t('modelSettings.actions.addModel') }}
         </t-button>
       </div>
     </div>
@@ -330,7 +330,7 @@ const loadModels = async () => {
     allModels.value = models
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
-    MessagePlugin.error(error.message || '加载模型列表失败')
+    MessagePlugin.error(error.message)
   } finally {
     loading.value = false
   }
@@ -347,7 +347,7 @@ const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm') => {
 const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: any) => {
   // 内置模型不能编辑
   if (model.isBuiltin) {
-    MessagePlugin.warning('内置模型不能编辑')
+    MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
     return
   }
   currentModelType.value = type
@@ -435,7 +435,7 @@ const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model
   // 检查是否是内置模型
   const model = allModels.value.find(m => m.id === modelId)
   if (model?.is_builtin) {
-    MessagePlugin.warning('内置模型不能删除')
+    MessagePlugin.warning(t('modelSettings.toasts.builtinCannotDelete'))
     return
   }
   

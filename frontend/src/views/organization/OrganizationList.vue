@@ -1138,7 +1138,7 @@ function copyPreviewSpaceId() {
       MessagePlugin.success(t('common.copied'))
     }
   } catch {
-    MessagePlugin.error('复制失败')
+    MessagePlugin.error(t('common.copyFailed'))
   }
 }
 

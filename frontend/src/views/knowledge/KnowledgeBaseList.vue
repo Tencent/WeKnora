@@ -490,8 +490,8 @@
     <!-- 空间下知识库空状态 -->
     <div v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-      <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') || '暂无共享知识库' }}</span>
-      <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') || '您可以加入组织或请求他人共享知识库给您' }}</span>
+      <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') }}</span>
+      <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') }}</span>
     </div>
       </div>
     </div>

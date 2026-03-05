@@ -1,21 +1,21 @@
 <template>
   <div class="storage-engine-settings">
     <div class="section-header">
-      <h2>存储引擎</h2>
+      <h2>{{ $t('settings.storage.title') }}</h2>
       <p class="section-description">
-        配置文档与图片的存储方式。此处设置各引擎参数，知识库中仅选择使用哪个引擎。
+        {{ $t('settings.storage.description') }}
       </p>
     </div>
 
     <div v-if="loading" class="loading-state">
       <t-loading size="small" />
-      <span>加载中...</span>
+      <span>{{ $t('settings.storage.loading') }}</span>
     </div>
 
     <div v-else-if="error" class="error-inline">
       <t-alert theme="error" :message="error">
         <template #operation>
-          <t-button size="small" @click="loadAll">重试</t-button>
+          <t-button size="small" @click="loadAll">{{ $t('settings.storage.retry') }}</t-button>
         </template>
       </t-alert>
     </div>
@@ -24,15 +24,15 @@
       <div class="settings-group">
         <div class="setting-row">
           <div class="setting-info">
-            <label>默认引擎</label>
-            <p class="desc">新建知识库时默认选用的存储引擎</p>
+            <label>{{ $t('settings.storage.defaultEngine') }}</label>
+            <p class="desc">{{ $t('settings.storage.defaultEngineDesc') }}</p>
           </div>
           <div class="setting-control">
             <t-select v-model="config.default_provider" style="width: 280px;">
-              <t-option value="local" label="Local（本地）" />
+              <t-option value="local" :label="$t('settings.storage.engineLocal')" />
               <t-option value="minio" label="MinIO" />
-              <t-option value="cos" label="腾讯云 COS" />
-              <t-option value="tos" label="火山引擎 TOS" />
+              <t-option value="cos" :label="$t('settings.storage.engineCos')" />
+              <t-option value="tos" :label="$t('settings.storage.engineTos')" />
             </t-select>
           </div>
         </div>
@@ -43,18 +43,18 @@
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
-              <h3>Local（本地存储）</h3>
-              <t-tag theme="success" variant="light" size="small">可用</t-tag>
+              <h3>{{ $t('settings.storage.localTitle') }}</h3>
+              <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.available') }}</t-tag>
             </div>
-            <p>使用服务器本地文件系统存储文件，仅适合单机部署。</p>
+            <p>{{ $t('settings.storage.localDesc') }}</p>
           </div>
         </div>
         <div class="engine-form">
           <div class="form-field">
-            <label>路径前缀（可选）</label>
+            <label>{{ $t('settings.storage.pathPrefix') }}</label>
             <t-input
               v-model="config.local.path_prefix"
-              placeholder="如 weknora/images"
+              :placeholder="$t('settings.storage.pathPrefixPlaceholder')"
               clearable
             />
           </div>
@@ -67,10 +67,10 @@
           <div class="engine-header-info">
             <div class="engine-title-row">
               <h3>MinIO</h3>
-              <t-tag v-if="minioAvailable" theme="success" variant="light" size="small">可用</t-tag>
-              <t-tag v-else theme="default" variant="light" size="small">需要配置</t-tag>
+              <t-tag v-if="minioAvailable" theme="success" variant="light" size="small">{{ $t('settings.storage.available') }}</t-tag>
+              <t-tag v-else theme="default" variant="light" size="small">{{ $t('settings.storage.needsConfig') }}</t-tag>
             </div>
-            <p>S3 兼容的自托管对象存储，适合内网和私有云部署。</p>
+            <p>{{ $t('settings.storage.minioDesc') }}</p>
           </div>
         </div>
 
@@ -79,34 +79,34 @@
             :class="['mode-option', { active: config.minio.mode !== 'remote' }]"
             @click="config.minio.mode = 'docker'"
           >
-            <span class="mode-label">Docker 部署</span>
-            <t-tag v-if="minioEnvAvailable" theme="success" variant="light" size="small">已检测</t-tag>
-            <t-tag v-else theme="default" variant="light" size="small">未检测到</t-tag>
+            <span class="mode-label">{{ $t('settings.storage.minioDocker') }}</span>
+            <t-tag v-if="minioEnvAvailable" theme="success" variant="light" size="small">{{ $t('settings.storage.detected') }}</t-tag>
+            <t-tag v-else theme="default" variant="light" size="small">{{ $t('settings.storage.notDetected') }}</t-tag>
           </div>
           <div
             :class="['mode-option', { active: config.minio.mode === 'remote' }]"
             @click="config.minio.mode = 'remote'"
           >
-            <span class="mode-label">远程 MinIO</span>
+            <span class="mode-label">{{ $t('settings.storage.minioRemote') }}</span>
           </div>
         </div>
 
         <!-- Docker mode -->
         <div v-if="config.minio.mode !== 'remote'">
           <div v-if="minioEnvAvailable" class="engine-hint success">
-            已检测到 Docker 部署的 MinIO 环境变量，连接信息由环境变量提供，无需手动填写。
+            {{ $t('settings.storage.minioDockerDetected') }}
           </div>
           <div v-else class="engine-hint warning">
-            未检测到 MinIO 环境变量（MINIO_ENDPOINT 等），请确认 Docker Compose 配置正确。
+            {{ $t('settings.storage.minioDockerNotDetected') }}
           </div>
           <div class="engine-form">
             <div class="form-field">
-              <label>Bucket 名称</label>
+              <label>{{ $t('settings.storage.bucketName') }}</label>
               <t-select
                 v-model="config.minio.bucket_name"
                 filterable
                 creatable
-                placeholder="选择或输入 Bucket"
+                :placeholder="$t('settings.storage.bucketSelectPlaceholder')"
                 :loading="loadingBuckets"
                 :disabled="!minioEnvAvailable"
                 @focus="loadMinioBuckets"
@@ -124,16 +124,16 @@
               <t-switch v-model="config.minio.use_ssl" size="small" />
             </div>
             <div class="form-field">
-              <label>路径前缀（可选）</label>
+              <label>{{ $t('settings.storage.pathPrefix') }}</label>
               <t-input
                 v-model="config.minio.path_prefix"
-                placeholder="如 weknora"
+                :placeholder="$t('settings.storage.prefixPlaceholder')"
                 clearable
               />
             </div>
           </div>
           <div v-if="minioEnvAvailable" class="test-bar">
-            <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
+            <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">{{ $t('settings.storage.testConnection') }}</t-button>
             <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? (minioCheckResult.bucket_created ? 'created' : 'success') : 'error']">
               {{ minioCheckResult.message }}
             </span>
@@ -142,13 +142,13 @@
 
         <!-- Remote mode -->
         <div v-else>
-          <div class="engine-hint">连接到远程 MinIO 服务，需要手动填写连接信息。</div>
+          <div class="engine-hint">{{ $t('settings.storage.minioRemoteHint') }}</div>
           <div class="engine-form">
             <div class="form-field">
               <label>Endpoint</label>
               <t-input
                 v-model="config.minio.endpoint"
-                placeholder="如 minio.example.com:9000"
+                placeholder="e.g. minio.example.com:9000"
                 clearable
               />
             </div>
@@ -170,10 +170,10 @@
               />
             </div>
             <div class="form-field">
-              <label>Bucket 名称</label>
+              <label>{{ $t('settings.storage.bucketName') }}</label>
               <t-input
                 v-model="config.minio.bucket_name"
-                placeholder="存储桶名称"
+                :placeholder="$t('settings.storage.bucketPlaceholder')"
                 clearable
               />
             </div>
@@ -182,16 +182,16 @@
               <t-switch v-model="config.minio.use_ssl" size="small" />
             </div>
             <div class="form-field">
-              <label>路径前缀（可选）</label>
+              <label>{{ $t('settings.storage.pathPrefix') }}</label>
               <t-input
                 v-model="config.minio.path_prefix"
-                placeholder="如 weknora"
+                :placeholder="$t('settings.storage.prefixPlaceholder')"
                 clearable
               />
             </div>
           </div>
           <div class="test-bar">
-            <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">测试连接</t-button>
+            <t-button size="small" variant="outline" :loading="checkingMinio" @click="onCheckMinio">{{ $t('settings.storage.testConnection') }}</t-button>
             <span v-if="minioCheckResult" :class="['test-msg', minioCheckResult.ok ? (minioCheckResult.bucket_created ? 'created' : 'success') : 'error']">
               {{ minioCheckResult.message }}
             </span>
@@ -204,13 +204,13 @@
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
-              <h3>腾讯云 COS</h3>
-              <t-tag theme="success" variant="light" size="small">可配置</t-tag>
+              <h3>{{ $t('settings.storage.cosTitle') }}</h3>
+              <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
             </div>
             <p>
-              腾讯云对象存储服务，适合公有云部署，支持 CDN 加速。
-              <a class="engine-link" href="https://console.cloud.tencent.com/cos" target="_blank" rel="noopener">控制台 ↗</a>
-              <a class="engine-link" href="https://cloud.tencent.com/document/product/436" target="_blank" rel="noopener">文档 ↗</a>
+              {{ $t('settings.storage.cosDesc') }}
+              <a class="engine-link" href="https://console.cloud.tencent.com/cos" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
+              <a class="engine-link" href="https://cloud.tencent.com/document/product/436" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
             </p>
           </div>
         </div>
@@ -219,7 +219,7 @@
             <label>Secret ID</label>
             <t-input
               v-model="config.cos.secret_id"
-              placeholder="腾讯云 API 密钥 SecretId"
+              :placeholder="$t('settings.storage.cosSecretIdPlaceholder')"
               clearable
             />
           </div>
@@ -228,7 +228,7 @@
             <t-input
               v-model="config.cos.secret_key"
               type="password"
-              placeholder="腾讯云 API 密钥 SecretKey"
+              :placeholder="$t('settings.storage.cosSecretKeyPlaceholder')"
               clearable
             />
           </div>
@@ -236,15 +236,15 @@
             <label>Region</label>
             <t-input
               v-model="config.cos.region"
-              placeholder="如 ap-guangzhou"
+              placeholder="e.g. ap-guangzhou"
               clearable
             />
           </div>
           <div class="form-field">
-            <label>Bucket 名称</label>
+            <label>{{ $t('settings.storage.bucketName') }}</label>
             <t-input
               v-model="config.cos.bucket_name"
-              placeholder="存储桶名称"
+              :placeholder="$t('settings.storage.bucketPlaceholder')"
               clearable
             />
           </div>
@@ -252,21 +252,21 @@
             <label>App ID</label>
             <t-input
               v-model="config.cos.app_id"
-              placeholder="腾讯云账号 AppID"
+              :placeholder="$t('settings.storage.cosAppIdPlaceholder')"
               clearable
             />
           </div>
           <div class="form-field">
-            <label>路径前缀（可选）</label>
+            <label>{{ $t('settings.storage.pathPrefix') }}</label>
             <t-input
               v-model="config.cos.path_prefix"
-              placeholder="如 weknora"
+              :placeholder="$t('settings.storage.prefixPlaceholder')"
               clearable
             />
           </div>
         </div>
         <div class="test-bar">
-          <t-button size="small" variant="outline" :loading="checkingCos" @click="onCheckCos">测试连接</t-button>
+          <t-button size="small" variant="outline" :loading="checkingCos" @click="onCheckCos">{{ $t('settings.storage.testConnection') }}</t-button>
           <span v-if="cosCheckResult" :class="['test-msg', cosCheckResult.ok ? 'success' : 'error']">
             {{ cosCheckResult.message }}
           </span>
@@ -278,13 +278,13 @@
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
-              <h3>火山引擎 TOS</h3>
-              <t-tag theme="success" variant="light" size="small">可配置</t-tag>
+              <h3>{{ $t('settings.storage.tosTitle') }}</h3>
+              <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
             </div>
             <p>
-              火山引擎对象存储服务（TOS），适合公有云部署。
-              <a class="engine-link" href="https://console.volcengine.com/tos" target="_blank" rel="noopener">控制台 ↗</a>
-              <a class="engine-link" href="https://www.volcengine.com/docs/6349" target="_blank" rel="noopener">文档 ↗</a>
+              {{ $t('settings.storage.tosDesc') }}
+              <a class="engine-link" href="https://console.volcengine.com/tos" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
+              <a class="engine-link" href="https://www.volcengine.com/docs/6349" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
             </p>
           </div>
         </div>
@@ -293,7 +293,7 @@
             <label>Endpoint</label>
             <t-input
               v-model="config.tos.endpoint"
-              placeholder="如 https://tos-cn-beijing.volces.com"
+              placeholder="e.g. https://tos-cn-beijing.volces.com"
               clearable
             />
           </div>
@@ -301,7 +301,7 @@
             <label>Region</label>
             <t-input
               v-model="config.tos.region"
-              placeholder="如 cn-beijing"
+              placeholder="e.g. cn-beijing"
               clearable
             />
           </div>
@@ -309,7 +309,7 @@
             <label>Access Key</label>
             <t-input
               v-model="config.tos.access_key"
-              placeholder="火山引擎 Access Key"
+              :placeholder="$t('settings.storage.tosAccessKeyPlaceholder')"
               clearable
             />
           </div>
@@ -318,29 +318,29 @@
             <t-input
               v-model="config.tos.secret_key"
               type="password"
-              placeholder="火山引擎 Secret Key"
+              :placeholder="$t('settings.storage.tosSecretKeyPlaceholder')"
               clearable
             />
           </div>
           <div class="form-field">
-            <label>Bucket 名称</label>
+            <label>{{ $t('settings.storage.bucketName') }}</label>
             <t-input
               v-model="config.tos.bucket_name"
-              placeholder="存储桶名称"
+              :placeholder="$t('settings.storage.bucketPlaceholder')"
               clearable
             />
           </div>
           <div class="form-field">
-            <label>路径前缀（可选）</label>
+            <label>{{ $t('settings.storage.pathPrefix') }}</label>
             <t-input
               v-model="config.tos.path_prefix"
-              placeholder="如 weknora"
+              :placeholder="$t('settings.storage.prefixPlaceholder')"
               clearable
             />
           </div>
         </div>
         <div class="test-bar">
-          <t-button size="small" variant="outline" :loading="checkingTos" @click="onCheckTos">测试连接</t-button>
+          <t-button size="small" variant="outline" :loading="checkingTos" @click="onCheckTos">{{ $t('settings.storage.testConnection') }}</t-button>
           <span v-if="tosCheckResult" :class="['test-msg', tosCheckResult.ok ? 'success' : 'error']">
             {{ tosCheckResult.message }}
           </span>
@@ -349,7 +349,7 @@
 
       <!-- Save -->
       <div class="save-bar">
-        <t-button theme="primary" :loading="saving" @click="onSave">保存配置</t-button>
+        <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('settings.storage.saveConfig') }}</t-button>
         <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
           {{ saveMessage }}
         </span>
@@ -360,6 +360,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   getStorageEngineConfig,
   updateStorageEngineConfig,
@@ -369,6 +370,8 @@ import {
   type StorageEngineConfig,
   type MinioBucketInfo,
 } from '@/api/system'
+
+const { t } = useI18n()
 
 const defaultConfig = (): StorageEngineConfig => ({
   default_provider: 'local',
@@ -507,7 +510,7 @@ async function loadAll() {
     await Promise.all([loadConfig(), loadStatus()])
     if (minioEnvAvailable.value) loadMinioBuckets()
   } catch (e: unknown) {
-    error.value = e instanceof Error ? e.message : '加载失败'
+    error.value = e instanceof Error ? e.message : t('settings.storage.loadFailed')
   } finally {
     loading.value = false
   }
@@ -553,10 +556,10 @@ async function onSave() {
     await updateStorageEngineConfig(buildPayload())
     await loadStatus()
     saveSuccess.value = true
-    saveMessage.value = '保存成功'
+    saveMessage.value = t('settings.storage.saveSuccess')
   } catch (e: unknown) {
     saveSuccess.value = false
-    saveMessage.value = e instanceof Error ? e.message : '保存失败'
+    saveMessage.value = e instanceof Error ? e.message : t('settings.storage.saveFailed')
   } finally {
     saving.value = false
   }
@@ -568,13 +571,13 @@ async function onCheckMinio() {
   try {
     const payload = buildPayload()
     const res = await checkStorageEngine({ provider: 'minio', minio: payload.minio })
-    minioCheckResult.value = res?.data ?? { ok: false, message: '未知错误' }
+    minioCheckResult.value = res?.data ?? { ok: false, message: t('settings.storage.unknownError') }
     // Refresh bucket list if a new bucket was auto-created
     if (res?.data?.bucket_created) {
       loadMinioBuckets()
     }
   } catch (e: unknown) {
-    minioCheckResult.value = { ok: false, message: e instanceof Error ? e.message : '请求失败' }
+    minioCheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
   } finally {
     checkingMinio.value = false
   }
@@ -586,9 +589,9 @@ async function onCheckCos() {
   try {
     const payload = buildPayload()
     const res = await checkStorageEngine({ provider: 'cos', cos: payload.cos })
-    cosCheckResult.value = res?.data ?? { ok: false, message: '未知错误' }
+    cosCheckResult.value = res?.data ?? { ok: false, message: t('settings.storage.unknownError') }
   } catch (e: unknown) {
-    cosCheckResult.value = { ok: false, message: e instanceof Error ? e.message : '请求失败' }
+    cosCheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
   } finally {
     checkingCos.value = false
   }
@@ -600,9 +603,9 @@ async function onCheckTos() {
   try {
     const payload = buildPayload()
     const res = await checkStorageEngine({ provider: 'tos', tos: payload.tos })
-    tosCheckResult.value = res?.data ?? { ok: false, message: '未知错误' }
+    tosCheckResult.value = res?.data ?? { ok: false, message: t('settings.storage.unknownError') }
   } catch (e: unknown) {
-    tosCheckResult.value = { ok: false, message: e instanceof Error ? e.message : '请求失败' }
+    tosCheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
   } finally {
     checkingTos.value = false
   }

@@ -175,7 +175,7 @@ const navItems = computed(() => [
   {
     key: 'parser',
     icon: 'file-search',
-    label: '解析引擎',
+    label: t('settings.parserEngine'),
     children: [
       { key: 'builtin', label: 'Builtin (DocReader)' },
       { key: 'simple', label: 'Simple' },
@@ -191,8 +191,8 @@ const navItems = computed(() => [
     children: [
       { key: 'local', label: 'Local' },
       { key: 'minio', label: 'MinIO' },
-      { key: 'cos', label: '腾讯云 COS' },
-      { key: 'tos', label: '火山引擎 TOS' },
+      { key: 'cos', label: t('settings.storage.cos') },
+      { key: 'tos', label: t('settings.storage.tos') },
     ]
   },
   { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },

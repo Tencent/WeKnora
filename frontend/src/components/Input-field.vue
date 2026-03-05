@@ -1756,7 +1756,7 @@ onBeforeRouteUpdate((to, from, next) => {
             </span>
           </span>
           <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
-          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)" aria-label="移除">×</span>
+          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)" :aria-label="$t('common.remove')">×</span>
         </span>
       </div>
       

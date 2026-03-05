@@ -1,28 +1,28 @@
 <template>
   <div class="kb-storage-settings">
     <div class="section-header">
-      <h2>存储引擎</h2>
+      <h2>{{ $t('kbSettings.storage.title') }}</h2>
       <p class="section-description">
-        选择文件存储引擎，影响文档上传存储和文档中图片的存储方式。参数在全局设置中配置。
+        {{ $t('kbSettings.storage.description') }}
       </p>
     </div>
 
     <div v-if="loading" class="loading-inline">
       <t-loading size="small" />
-      <span>加载中...</span>
+      <span>{{ $t('kbSettings.storage.loading') }}</span>
     </div>
 
     <div v-else class="settings-group">
       <div class="setting-row">
         <div class="setting-info">
-          <label>存储引擎</label>
-          <p class="desc">选择该知识库使用的存储引擎，需在全局设置中已配置对应引擎。</p>
+          <label>{{ $t('kbSettings.storage.engineLabel') }}</label>
+          <p class="desc">{{ $t('kbSettings.storage.engineDesc') }}</p>
         </div>
         <div class="setting-control">
           <t-select
             v-model="localProvider"
             size="medium"
-            placeholder="请选择存储引擎"
+            :placeholder="$t('kbSettings.storage.selectPlaceholder')"
             style="width: 100%; min-width: 220px;"
             :disabled="props.hasFiles"
             @change="handleChange"
@@ -36,14 +36,14 @@
             >
               <span class="select-option">
                 <span>{{ opt.label }}</span>
-                <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">未配置</t-tag>
-                <t-tag v-else-if="opt.available === false" theme="danger" variant="light" size="small">不可用</t-tag>
+                <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{ $t('kbSettings.storage.notConfigured') }}</t-tag>
+                <t-tag v-else-if="opt.available === false" theme="danger" variant="light" size="small">{{ $t('kbSettings.storage.unavailable') }}</t-tag>
               </span>
             </t-option>
           </t-select>
-          <p v-if="props.hasFiles" class="option-hint locked-hint">知识库中已有文件，无法切换存储引擎。如需更换，请先清空知识库中的所有文件。</p>
+          <p v-if="props.hasFiles" class="option-hint locked-hint">{{ $t('kbSettings.storage.lockedHint') }}</p>
           <p v-else-if="selectedOption?.desc" class="option-hint">{{ selectedOption.desc }}</p>
-          <a v-if="showGoSettings" href="javascript:void(0)" class="go-settings" @click.prevent="goToStorageSettings">去全局设置中配置</a>
+          <a v-if="showGoSettings" href="javascript:void(0)" class="go-settings" @click.prevent="goToStorageSettings">{{ $t('kbSettings.storage.goGlobalSettings') }}</a>
         </div>
       </div>
     </div>
@@ -52,8 +52,11 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getStorageEngineConfig, getStorageEngineStatus, type StorageEngineStatusItem } from '@/api/system'
 import { useUIStore } from '@/stores/ui'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   storageProvider: string
@@ -79,29 +82,29 @@ const engineOptions = computed(() => {
   return [
     {
       value: 'local',
-      label: 'Local（本地存储）',
-      desc: '仅适合单机部署，简单轻量',
+      label: t('kbSettings.storage.engineLocal'),
+      desc: t('kbSettings.storage.engineLocalDesc'),
       available: statusMap.local !== false,
       disabled: false,
     },
     {
       value: 'minio',
       label: 'MinIO',
-      desc: 'S3 兼容，适合内网或私有云',
+      desc: t('kbSettings.storage.engineMinioDesc'),
       available: statusMap.minio,
       disabled: statusMap.minio === false,
     },
     {
       value: 'cos',
-      label: '腾讯云 COS',
-      desc: '公有云部署，支持 CDN 加速',
+      label: t('kbSettings.storage.engineCos'),
+      desc: t('kbSettings.storage.engineCosDesc'),
       available: statusMap.cos,
       disabled: statusMap.cos === false,
     },
     {
       value: 'tos',
-      label: '火山引擎 TOS',
-      desc: '火山引擎对象存储，适合公有云部署',
+      label: t('kbSettings.storage.engineTos'),
+      desc: t('kbSettings.storage.engineTosDesc'),
       available: statusMap.tos,
       disabled: statusMap.tos === false,
     },

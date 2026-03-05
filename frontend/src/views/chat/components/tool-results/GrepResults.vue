@@ -12,14 +12,17 @@
     </div>
 
     <div v-else class="empty-state">
-      未找到匹配的内容
+      {{ $t('chat.noMatchFound') }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { GrepResultsData } from '@/types/tool-results';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   data: GrepResultsData;

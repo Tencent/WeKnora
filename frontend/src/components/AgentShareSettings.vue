@@ -2,7 +2,7 @@
   <div class="section-content">
     <div class="section-header">
       <h3 class="section-title">{{ $t('organization.share.title') }}</h3>
-      <p class="section-desc">{{ $t('organization.share.agentShareDesc') || '将智能体共享到空间，空间成员可使用该智能体' }}</p>
+      <p class="section-desc">{{ $t('organization.share.agentShareDesc') }}</p>
     </div>
     <!-- 共享范围说明：当传入 agent 时展示，仅提示 + 变更同步说明，不列具体开关 -->
     <div v-if="agent?.config" class="share-scope-block">

@@ -1,3 +1,5 @@
+import i18n from '@/i18n';
+
 const STREAMING_IMAGE_PLACEHOLDER = '<span class="streaming-image-loading"><span class="streaming-image-loading__skeleton"></span></span>';
 
 export const replaceIncompleteImageWithPlaceholder = (content: string): string => {
@@ -23,17 +25,17 @@ export const replaceIncompleteImageWithPlaceholder = (content: string): string =
 
 export const formatManualTitle = (question?: string): string => {
   if (!question) {
-    return '会话摘录';
+    return i18n.global.t('chat.sessionExcerpt');
   }
   const condensed = question.replace(/\s+/g, ' ').trim();
   if (!condensed) {
-    return '会话摘录';
+    return i18n.global.t('chat.sessionExcerpt');
   }
   return condensed.length > 40 ? `${condensed.slice(0, 40)}...` : condensed;
 };
 
 export const buildManualMarkdown = (_question: string, answer: string): string => {
-  const safeAnswer = answer?.trim() || '（无回答内容）';
+  const safeAnswer = answer?.trim() || i18n.global.t('chat.noAnswerContent');
   return `${safeAnswer}`;
 };
 

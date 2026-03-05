@@ -154,7 +154,7 @@ watch(() => props.details?.chunkLoading, (val) => {
       const hasError = Boolean(props.details?.chunkLoadError);
       if (hasError && currentLength <= pendingChunksBeforeLoad) {
         page = Math.max(1, pendingRequestedPage - 1);
-        MessagePlugin.warning(props.details?.chunkLoadError || '分块加载失败，请继续下滑重试');
+        MessagePlugin.warning(props.details?.chunkLoadError);
       }
     }
     pendingRequestedPage = null;
@@ -407,11 +407,11 @@ const getDisplayTitle = () => {
 const getTypeLabel = () => {
   switch (props.details.type) {
     case 'url':
-      return t('knowledgeBase.typeURL') || '网页';
+      return t('knowledgeBase.typeURL');
     case 'manual':
-      return t('knowledgeBase.typeManual') || '手动创建';
+      return t('knowledgeBase.typeManual');
     case 'file':
-      return props.details.file_type ? props.details.file_type.toUpperCase() : t('knowledgeBase.typeFile') || '文件';
+      return props.details.file_type ? props.details.file_type.toUpperCase() : t('knowledgeBase.typeFile');
     default:
       return '';
   }
@@ -435,12 +435,12 @@ const getTypeTheme = () => {
 const getContentLabel = () => {
   switch (props.details.type) {
     case 'url':
-      return t('knowledgeBase.webContent') || '网页内容';
+      return t('knowledgeBase.webContent');
     case 'manual':
-      return t('knowledgeBase.documentContent') || '文档内容';
+      return t('knowledgeBase.documentContent');
     case 'file':
     default:
-      return t('knowledgeBase.fileContent') || '文件内容';
+      return t('knowledgeBase.fileContent');
   }
 };
 
@@ -448,12 +448,12 @@ const getContentLabel = () => {
 const getTimeLabel = () => {
   switch (props.details.type) {
     case 'url':
-      return t('knowledgeBase.importTime') || '导入时间';
+      return t('knowledgeBase.importTime');
     case 'manual':
-      return t('knowledgeBase.createTime') || '创建时间';
+      return t('knowledgeBase.createTime');
     case 'file':
     default:
-      return t('knowledgeBase.uploadTime') || '上传时间';
+      return t('knowledgeBase.uploadTime');
   }
 };
 
@@ -467,7 +467,7 @@ const getChunkMeta = (item: any) => {
   if (!item) return '';
   const parts = [];
   if (item.char_count) {
-    parts.push(`${item.char_count} ${t('knowledgeBase.characters') || '字符'}`);
+    parts.push(`${item.char_count} ${t('knowledgeBase.characters')}`);
   }
   if (item.token_count) {
     parts.push(`${item.token_count} tokens`);
@@ -521,27 +521,27 @@ const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(
 // 删除生成的问题
 const handleDeleteQuestion = async (item: any, chunkIndex: number, question: GeneratedQuestion) => {
   if (!item || !item.id) {
-    MessagePlugin.error(t('common.error') || '操作失败');
+    MessagePlugin.error(t('common.error'));
     return;
   }
 
   // 检查是否是旧格式数据（无法删除）
   if (question.id.startsWith('legacy-')) {
-    MessagePlugin.warning(t('knowledgeBase.legacyQuestionCannotDelete') || '旧格式问题无法删除，请重新生成问题');
+    MessagePlugin.warning(t('knowledgeBase.legacyQuestionCannotDelete'));
     return;
   }
 
   const confirmDialog = DialogPlugin.confirm({
-    header: t('common.confirmDelete') || '确认删除',
-    body: t('knowledgeBase.confirmDeleteQuestion') || '确定要删除这个问题吗？删除后将同时移除对应的向量索引。',
-    confirmBtn: t('common.confirm') || '确认',
-    cancelBtn: t('common.cancel') || '取消',
+    header: t('common.confirmDelete'),
+    body: t('knowledgeBase.confirmDeleteQuestion'),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
     onConfirm: async () => {
       confirmDialog.hide();
       deletingQuestion.value = { chunkIndex, questionId: question.id };
       try {
         await deleteGeneratedQuestion(item.id, question.id);
-        MessagePlugin.success(t('common.deleteSuccess') || '删除成功');
+        MessagePlugin.success(t('common.deleteSuccess'));
         
         // 更新本地数据
         const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
@@ -556,7 +556,7 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
         // 通知父组件刷新数据
         emit('questionDeleted', { chunkId: item.id, questionId: question.id });
       } catch (error: any) {
-        MessagePlugin.error(error?.message || t('common.deleteFailed') || '删除失败');
+        MessagePlugin.error(error?.message || t('common.deleteFailed'));
       } finally {
         deletingQuestion.value = null;
       }
@@ -599,7 +599,7 @@ const toggleParentContext = async (item: any, index: number) => {
         parentContextCache.value = new Map(parentContextCache.value);
       }
     } catch (err) {
-      MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed') || '加载父上下文失败');
+      MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed'));
       return;
     } finally {
       parentContextLoading.value.delete(index);
@@ -681,7 +681,7 @@ const handleDetailsScroll = () => {
       
       <!-- URL类型专属区域 -->
       <div v-else-if="details.type === 'url'" class="url_box">
-        <span class="label">{{ $t('knowledgeBase.urlSource') || '来源网址' }}</span>
+        <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
         <div class="url_link_box">
           <a :href="details.source" target="_blank" class="url_link">
             <t-icon name="link" size="14px" />
@@ -693,7 +693,7 @@ const handleDetailsScroll = () => {
       
       <!-- 手动创建类型专属区域 -->
       <div v-else-if="details.type === 'manual'" class="manual_box">
-        <span class="label">{{ $t('knowledgeBase.documentTitle') || '文档标题' }}</span>
+        <span class="label">{{ $t('knowledgeBase.documentTitle') }}</span>
         <div class="manual_title_box">
           <span class="manual_title">{{ details.title }}</span>
         </div>
@@ -704,7 +704,7 @@ const handleDetailsScroll = () => {
           <div class="title-row">
             <span class="label">{{ getContentLabel() }}</span>
             <span v-if="details.total > 0" class="chunk-count">
-              {{ $t('knowledgeBase.chunkCount', { count: details.total }) || `共 ${details.total} 个片段` }}
+              {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
             </span>
           </div>
           <div class="meta-row">
@@ -718,7 +718,7 @@ const handleDetailsScroll = () => {
                 @click="viewMode = 'preview'"
                 class="view-mode-btn"
               >
-                {{ $t('preview.tab') || '预览' }}
+                {{ $t('preview.tab') }}
               </t-button>
               <t-button 
                 v-if="!canPreview()"
@@ -728,7 +728,7 @@ const handleDetailsScroll = () => {
                 @click="viewMode = 'merged'"
                 class="view-mode-btn"
               >
-                {{ $t('knowledgeBase.viewMerged') || '全文' }}
+                {{ $t('knowledgeBase.viewMerged') }}
               </t-button>
               <t-button 
                 size="small" 
@@ -737,7 +737,7 @@ const handleDetailsScroll = () => {
                 @click="viewMode = 'chunks'"
                 class="view-mode-btn"
               >
-                {{ $t('knowledgeBase.viewChunks') || '分块' }}
+                {{ $t('knowledgeBase.viewChunks') }}
               </t-button>
             </div>
           </div>
@@ -760,7 +760,7 @@ const handleDetailsScroll = () => {
             :class="getChunkClass(index)"
           >
             <div class="chunk-header">
-              <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ index + 1 }}</span>
+              <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
               <div class="chunk-header-right">
                 <t-tag 
                   v-if="hasParentChunk(item)" 
@@ -768,7 +768,7 @@ const handleDetailsScroll = () => {
                   theme="primary" 
                   variant="light"
                 >
-                  {{ $t('knowledgeBase.childChunk') || '子块' }}
+                  {{ $t('knowledgeBase.childChunk') }}
                 </t-tag>
                 <t-tag 
                   v-if="getGeneratedQuestions(item).length > 0" 
@@ -776,7 +776,7 @@ const handleDetailsScroll = () => {
                   theme="success" 
                   variant="light"
                 >
-                  {{ $t('knowledgeBase.questions') || '问题' }} {{ getGeneratedQuestions(item).length }}
+                  {{ $t('knowledgeBase.questions') }} {{ getGeneratedQuestions(item).length }}
                 </t-tag>
                 <span class="chunk-meta">{{ getChunkMeta(item) }}</span>
               </div>
@@ -788,7 +788,7 @@ const handleDetailsScroll = () => {
               <div class="parent-context-toggle" @click="toggleParentContext(item, index)">
                 <t-icon v-if="!parentContextLoading.has(index)" :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
                 <t-loading v-else size="small" style="width: 14px; height: 14px;" />
-                <span>{{ $t('knowledgeBase.viewParentContext') || '查看父块上下文' }}</span>
+                <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
               </div>
               <div v-show="isParentExpanded(index)" class="parent-context-content">
                 <div class="md-content" v-html="processMarkdown(getParentContent(item))"></div>
@@ -799,7 +799,7 @@ const handleDetailsScroll = () => {
             <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
               <div class="questions-toggle" @click="toggleQuestions(index)">
                 <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                <span>{{ $t('knowledgeBase.generatedQuestions') || '生成的问题' }} ({{ getGeneratedQuestions(item).length }})</span>
+                <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ getGeneratedQuestions(item).length }})</span>
               </div>
               <div v-show="isExpanded(index)" class="questions-list">
                 <div 

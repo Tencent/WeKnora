@@ -1,4 +1,5 @@
 import { MessagePlugin } from "tdesign-vue-next";
+import i18n from '@/i18n';
 
 // 声明全局运行时配置类型
 declare global {
@@ -53,13 +54,13 @@ export function kbFileTypeVerification(file: any, silent = false, validTypes?: S
   const type = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
   if (!allowed.has(type)) {
     if (!silent) {
-      MessagePlugin.error("不支持的文件类型！");
+      MessagePlugin.error(i18n.global.t('error.unsupportedFileType'));
     }
     return true;
   }
   if (file.size > MAX_FILE_SIZE_BYTES) {
     if (!silent) {
-      MessagePlugin.error(`文件大小不能超过 ${MAX_FILE_SIZE_MB}M！`);
+      MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
     }
     return true;
   }

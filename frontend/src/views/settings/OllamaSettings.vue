@@ -253,21 +253,19 @@ const formatSize = (bytes: number): string => {
 
 // 格式化日期
 const formatDate = (dateStr: string): string => {
-  if (!dateStr) return '未知'
-  
+  if (!dateStr) return t('ollama.unknown')
+
   const date = new Date(dateStr)
-  // 检查日期是否有效
-  if (isNaN(date.getTime())) return '未知'
-  
+  if (isNaN(date.getTime())) return t('ollama.unknown')
+
   const now = new Date()
   const diff = now.getTime() - date.getTime()
   const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  
-  if (days === 0) return '今天'
-  if (days === 1) return '昨天'
-  if (days < 7) return `${days} 天前`
-  if (days < 0) return date.toLocaleDateString('zh-CN')
-  return date.toLocaleDateString('zh-CN')
+
+  if (days === 0) return t('ollama.today')
+  if (days === 1) return t('ollama.yesterday')
+  if (days < 7) return t('ollama.daysAgo', { days })
+  return date.toLocaleDateString()
 }
 
 // 下载模型

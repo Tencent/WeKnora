@@ -6,7 +6,7 @@
         <p class="section-description">{{ $t('conversationSettings.description') }}</p>
         <div class="global-config-notice">
           <t-icon name="info-circle" />
-          <span>这些是全局默认配置，新建智能体时会继承这些设置。您也可以在智能体列表中单独配置每个智能体。</span>
+          <span>{{ $t('agentSettings.globalConfigNotice') }}</span>
         </div>
       </div>
 
@@ -161,7 +161,7 @@
             </t-button>
           </div>
           <p class="prompt-tab-hint">
-            {{ $t('agentSettings.systemPrompt.tabHint') }}（留空则使用系统默认，使用 {{web_search_status}} 占位符动态控制网络搜索行为）
+            {{ $t('agentSettings.systemPrompt.tabHintDetail') }}
           </p>
           <div class="system-prompt-tabs">
             <div class="prompt-textarea-wrapper textarea-with-template">
@@ -221,7 +221,7 @@
             <div class="setting-row vertical">
               <div class="setting-info">
                 <label>{{ $t('conversationSettings.systemPrompt.label') }}</label>
-                <p class="desc">{{ $t('conversationSettings.systemPrompt.desc') }}（留空则使用系统默认）</p>
+                <p class="desc">{{ $t('conversationSettings.systemPrompt.descWithDefault') }}</p>
               </div>
               <div class="setting-control full-width">
                 <div class="prompt-textarea-wrapper textarea-with-template">
@@ -246,7 +246,7 @@
             <div class="setting-row vertical">
               <div class="setting-info">
                 <label>{{ $t('conversationSettings.contextTemplate.label') }}</label>
-                <p class="desc">{{ $t('conversationSettings.contextTemplate.desc') }}（留空则使用系统默认）</p>
+                <p class="desc">{{ $t('conversationSettings.contextTemplate.descWithDefault') }}</p>
               </div>
               <div class="setting-control full-width">
                 <div class="prompt-textarea-wrapper textarea-with-template">
@@ -1051,7 +1051,7 @@ onMounted(async () => {
     })
   } catch (error) {
     console.error('加载Agent配置失败:', error)
-    MessagePlugin.error('加载Agent配置失败')
+    MessagePlugin.error(t('agentSettings.loadConfigFailed'))
     configLoaded.value = false // 加载失败时重置标记，允许重试
     
     // 失败时从store加载
@@ -1146,7 +1146,7 @@ const loadAllModels = async () => {
     rerankModels.value = allModels.filter(m => m.type === 'Rerank')
   } catch (error) {
     console.error('加载模型列表失败:', error)
-    MessagePlugin.error('加载模型列表失败')
+    MessagePlugin.error(t('agentSettings.loadModelsFailed'))
   } finally {
     loadingModels.value = false
   }

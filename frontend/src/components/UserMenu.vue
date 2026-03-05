@@ -119,7 +119,7 @@ const menuVisible = ref(false)
 
 // 用户信息
 const userInfo = ref({
-  username: '用户',
+  username: t('common.defaultUser'),
   email: 'user@example.com',
   avatar: ''
 })

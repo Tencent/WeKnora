@@ -1,28 +1,28 @@
 <template>
   <div class="parser-engine-settings">
     <div class="section-header">
-      <h2>解析引擎</h2>
+      <h2>{{ $t('settings.parser.title') }}</h2>
       <p class="section-description">
-        文档解析引擎状态及配置。此处设置优先于服务端环境变量，留空则使用环境变量默认值。
+        {{ $t('settings.parser.description') }}
       </p>
     </div>
 
     <div v-if="loading" class="loading-state">
       <t-loading size="small" />
-      <span>加载中...</span>
+      <span>{{ $t('settings.parser.loading') }}</span>
     </div>
 
     <div v-else-if="error" class="error-inline">
       <t-alert theme="error" :message="error">
         <template #operation>
-          <t-button size="small" @click="loadAll">重试</t-button>
+          <t-button size="small" @click="loadAll">{{ $t('settings.parser.retry') }}</t-button>
         </template>
       </t-alert>
     </div>
 
     <template v-else>
       <div v-if="engines.length === 0 && !hasBuiltinEngine" class="empty-state">
-        <p class="empty-text">未检测到解析引擎，请确认 DocReader 服务正常运行。</p>
+        <p class="empty-text">{{ $t('settings.parser.noEngineDetected') }}</p>
       </div>
 
       <template v-else>
@@ -31,18 +31,18 @@
           <div class="engine-item-header">
             <div class="engine-title-row">
               <h3>builtin</h3>
-              <t-tag theme="danger" variant="light" size="small">未连接</t-tag>
+              <t-tag theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
             </div>
-            <p>DocReader 内置解析引擎（docx/pdf/xlsx 等复杂格式）</p>
+            <p>{{ $t('settings.parser.builtinDesc') }}</p>
           </div>
           <div class="docreader-inline">
             <div class="status-line">
-              <t-tag theme="danger" variant="light" size="small">未连接</t-tag>
+              <t-tag theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
               <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-              <span v-if="docreaderAddrEnv" class="env-hint">当前: {{ docreaderAddrEnv }}</span>
+              <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
             </div>
             <p class="docreader-desc">
-              修改请设置环境变量 <code>DOCREADER_ADDR</code>、<code>DOCREADER_TRANSPORT</code>（grpc/http），重启服务生效。
+              {{ $t('settings.parser.envVarHint') }}
             </p>
           </div>
         </div>
@@ -56,11 +56,11 @@
           <div class="engine-item-header">
             <div class="engine-title-row">
               <h3>{{ engine.Name }}</h3>
-              <t-tag v-if="engine.Available" theme="success" variant="light" size="small">可用</t-tag>
+              <t-tag v-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
               <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
-                <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">不可用</t-tag>
+                <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">{{ $t('settings.parser.unavailable') }}</t-tag>
               </t-tooltip>
-              <t-tag v-else theme="danger" variant="light" size="small">不可用</t-tag>
+              <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.unavailable') }}</t-tag>
               <a
                 v-if="engineDocLink(engine.Name)"
                 :href="engineDocLink(engine.Name)"
@@ -75,13 +75,13 @@
           <!-- builtin: DocReader 连接信息 -->
           <div v-if="engine.Name === 'builtin'" class="docreader-inline">
             <div class="status-line">
-              <t-tag v-if="connected" theme="success" variant="light" size="small">已连接</t-tag>
-              <t-tag v-else theme="danger" variant="light" size="small">未连接</t-tag>
+              <t-tag v-if="connected" theme="success" variant="light" size="small">{{ $t('settings.parser.connected') }}</t-tag>
+              <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
               <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-              <span v-if="docreaderAddrEnv" class="env-hint">当前: {{ docreaderAddrEnv }}</span>
+              <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
             </div>
             <p class="docreader-desc">
-              修改请设置环境变量 <code>DOCREADER_ADDR</code>、<code>DOCREADER_TRANSPORT</code>（grpc/http），重启服务生效。
+              {{ $t('settings.parser.envVarHint') }}
             </p>
           </div>
 
@@ -98,16 +98,16 @@
           <!-- mineru 自建配置 -->
           <div v-if="engine.Name === 'mineru'" class="engine-form">
             <div class="form-field">
-              <label>自建端点</label>
+              <label>{{ t('settings.parser.selfHostedEndpoint') }}</label>
               <t-input
                 v-model="config.mineru_endpoint"
-                placeholder="如 https://your-mineru.example.com"
+                :placeholder="$t('settings.parser.mineruEndpointPlaceholder')"
                 clearable
               />
             </div>
             <div class="form-field">
               <label>Backend</label>
-              <t-select v-model="config.mineru_model" placeholder="默认 pipeline" clearable>
+              <t-select v-model="config.mineru_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
                 <t-option value="pipeline" label="pipeline" />
                 <t-option value="vlm-auto-engine" label="vlm-auto-engine" />
                 <t-option value="vlm-http-client" label="vlm-http-client" />
@@ -116,15 +116,15 @@
               </t-select>
             </div>
             <div class="form-toggles">
-              <t-checkbox v-model="config.mineru_enable_formula">公式识别</t-checkbox>
-              <t-checkbox v-model="config.mineru_enable_table">表格识别</t-checkbox>
+              <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
               <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
             </div>
             <div class="form-field">
-              <label>语言</label>
+              <label>{{ t('settings.parser.language') }}</label>
               <t-input
                 v-model="config.mineru_language"
-                placeholder="如 ch、en、ja（默认 ch）"
+                :placeholder="$t('settings.parser.languagePlaceholder')"
                 clearable
               />
             </div>
@@ -137,28 +137,28 @@
               <t-input
                 v-model="config.mineru_api_key"
                 type="password"
-                placeholder="MinerU 云服务 API Key"
+                :placeholder="$t('settings.parser.mineruCloudApiKeyPlaceholder')"
                 clearable
               />
             </div>
             <div class="form-field">
               <label>Model Version</label>
-              <t-select v-model="config.mineru_cloud_model" placeholder="默认 pipeline" clearable>
+              <t-select v-model="config.mineru_cloud_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
                 <t-option value="pipeline" label="pipeline" />
-                <t-option value="vlm" label="vlm（视觉语言模型）" />
-                <t-option value="MinerU-HTML" label="MinerU-HTML（HTML 解析）" />
+                <t-option value="vlm" :label="$t('settings.parser.vlmLabel')" />
+                <t-option value="MinerU-HTML" :label="$t('settings.parser.mineruHtmlLabel')" />
               </t-select>
             </div>
             <div class="form-toggles">
-              <t-checkbox v-model="config.mineru_cloud_enable_formula">公式识别</t-checkbox>
-              <t-checkbox v-model="config.mineru_cloud_enable_table">表格识别</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
+              <t-checkbox v-model="config.mineru_cloud_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
               <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
             </div>
             <div class="form-field">
-              <label>语言</label>
+              <label>{{ t('settings.parser.language') }}</label>
               <t-input
                 v-model="config.mineru_cloud_language"
-                placeholder="如 ch、en、ja（默认 ch）"
+                :placeholder="$t('settings.parser.languagePlaceholder')"
                 clearable
               />
             </div>
@@ -169,9 +169,9 @@
       <!-- 检测与保存 -->
       <div class="save-bar">
         <t-button theme="default" variant="outline" :loading="checking" @click="onCheck">
-          使用当前参数检测
+          {{ $t('settings.parser.checkWithParams') }}
         </t-button>
-        <t-button theme="primary" :loading="saving" @click="onSave">保存配置</t-button>
+        <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('settings.parser.saveConfig') }}</t-button>
         <span v-if="checkMessage" class="save-msg hint">{{ checkMessage }}</span>
         <span v-else-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
           {{ saveMessage }}
@@ -183,6 +183,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   getParserEngines,
   getParserEngineConfig,
@@ -192,13 +193,15 @@ import {
   type ParserEngineConfig,
 } from '@/api/system'
 
+const { t } = useI18n()
+
 const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud'])
 
 /** 各解析引擎的项目/官方文档地址 */
-const ENGINE_DOC_LINKS: Record<string, { url: string; label: string }> = {
-  markitdown: { url: 'https://github.com/microsoft/markitdown', label: 'Markitdown 文档' },
-  mineru: { url: 'https://github.com/opendatalab/MinerU', label: 'MinerU 文档' },
-  mineru_cloud: { url: 'https://mineru.net/apiManage/docs', label: 'MinerU 文档' },
+const ENGINE_DOC_LINKS: Record<string, string> = {
+  markitdown: 'https://github.com/microsoft/markitdown',
+  mineru: 'https://github.com/opendatalab/MinerU',
+  mineru_cloud: 'https://mineru.net/apiManage/docs',
 }
 
 /** 解析引擎配置默认值（与 DocReader/Python 侧一致） */
@@ -258,11 +261,11 @@ function hasConfigFields(engineName: string): boolean {
 }
 
 function engineDocLink(name: string): string | undefined {
-  return ENGINE_DOC_LINKS[name]?.url
+  return ENGINE_DOC_LINKS[name]
 }
 
-function engineDocLabel(name: string): string {
-  return ENGINE_DOC_LINKS[name]?.label ?? '文档'
+function engineDocLabel(_name: string): string {
+  return t('settings.parser.docs')
 }
 
 async function loadEngines() {
@@ -270,11 +273,11 @@ async function loadEngines() {
     const res = await getParserEngines()
     engines.value = res?.data ?? []
     docreaderAddrEnv.value = res?.docreader_addr ?? ''
-    const t = (res?.docreader_transport ?? 'grpc').toLowerCase()
-    docreaderTransport.value = t === 'http' ? 'http' : 'grpc'
+    const transport = (res?.docreader_transport ?? 'grpc').toLowerCase()
+    docreaderTransport.value = transport === 'http' ? 'http' : 'grpc'
     connected.value = res?.connected ?? (engines.value.length > 0)
   } catch (e: any) {
-    error.value = e?.message || '加载解析引擎列表失败'
+    error.value = e?.message || t('settings.parser.loadFailed')
     engines.value = []
     connected.value = false
   }
@@ -333,7 +336,7 @@ function buildConfigPayload(): ParserEngineConfig {
 
 async function onCheck() {
   if (!connected) {
-    checkMessage.value = '请先确保 DocReader 服务已通过环境变量配置并已连接'
+    checkMessage.value = t('settings.parser.ensureDocreaderConnected')
     return
   }
   checking.value = true
@@ -341,10 +344,10 @@ async function onCheck() {
   try {
     const res = await checkParserEngines(buildConfigPayload())
     engines.value = res?.data ?? []
-    checkMessage.value = '已使用当前填写参数检测，上方状态已更新'
+    checkMessage.value = t('settings.parser.checkDoneStatusUpdated')
     setTimeout(() => { checkMessage.value = '' }, 3000)
   } catch (e: any) {
-    checkMessage.value = e?.message || '检测失败'
+    checkMessage.value = e?.message || t('settings.parser.checkFailed')
   } finally {
     checking.value = false
   }
@@ -356,11 +359,11 @@ async function onSave() {
   try {
     await updateParserEngineConfig(buildConfigPayload())
     saveSuccess.value = true
-    saveMessage.value = '保存成功'
+    saveMessage.value = t('settings.parser.saveSuccess')
     loadEngines()
   } catch (e: any) {
     saveSuccess.value = false
-    saveMessage.value = e?.message || '保存失败'
+    saveMessage.value = e?.message || t('settings.parser.saveFailed')
   } finally {
     saving.value = false
   }

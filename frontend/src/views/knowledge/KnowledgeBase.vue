@@ -175,7 +175,7 @@ let docSearchDebounce: ReturnType<typeof setTimeout> | null = null;
 const docSearchKeyword = ref('');
 const selectedFileType = ref('');
 const fileTypeOptions = computed(() => [
-  { content: t('knowledgeBase.allFileTypes') || '全部类型', value: '' },
+  { content: t('knowledgeBase.allFileTypes'), value: '' },
   { content: 'PDF', value: 'pdf' },
   { content: 'DOCX', value: 'docx' },
   { content: 'DOC', value: 'doc' },
@@ -184,7 +184,7 @@ const fileTypeOptions = computed(() => [
   { content: 'TXT', value: 'txt' },
   { content: 'MD', value: 'md' },
   { content: 'URL', value: 'url' },
-  { content: t('knowledgeBase.typeManual') || '手动创建', value: 'manual' },
+  { content: t('knowledgeBase.typeManual'), value: 'manual' },
 ]);
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
 const tagDropdownOptions = computed(() =>
@@ -261,7 +261,7 @@ const getKnowledgeType = (item: any) => {
     return t('knowledgeBase.typeURL') || 'URL';
   }
   if (item.type === 'manual') {
-    return t('knowledgeBase.typeManual') || '手动创建';
+    return t('knowledgeBase.typeManual');
   }
   if (item.file_type) {
     return item.file_type.toUpperCase();
@@ -486,7 +486,7 @@ const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) =
     // Pass the tag value directly (empty string means no tag)
     const tagIdToUpdate = tagValue || null;
     await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIdToUpdate } });
-    MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess') || '分类已更新');
+    MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
     loadKnowledgeFiles(kbId.value);
     loadTags(kbId.value);
   } catch (error: any) {
@@ -824,7 +824,7 @@ const handleDocumentActionSelect = (data: { value: string }) => {
 
 const ensureDocumentKbReady = () => {
   if (isFAQ.value) {
-    MessagePlugin.warning('当前知识库类型不支持该操作');
+    MessagePlugin.warning(t('knowledgeBase.operationNotSupportedForType'));
     return false;
   }
   if (!kbId.value) {
@@ -861,7 +861,7 @@ const handleDocumentUpload = async (event: Event) => {
   if (!files || files.length === 0) return;
   
   if (!kbId.value) {
-    MessagePlugin.error("缺少知识库ID");
+    MessagePlugin.error(t('error.missingKbId'));
     resetUploadInput();
     return;
   }
@@ -880,13 +880,13 @@ const handleDocumentUpload = async (event: Event) => {
 
   if (validFiles.length === 0) {
     if (skippedCount > 0) {
-      MessagePlugin.warning(`所选文件类型暂无可用解析引擎，已全部跳过`);
+      MessagePlugin.warning(t('knowledgeBase.allFilesSkippedNoEngine'));
     }
     resetUploadInput();
     return;
   }
   if (skippedCount > 0) {
-    MessagePlugin.warning(`${skippedCount} 个文件因无可用解析引擎被跳过`);
+    MessagePlugin.warning(t('knowledgeBase.filesSkippedNoEngine', { count: skippedCount }));
   }
 
   let successCount = 0;
@@ -904,14 +904,14 @@ const handleDocumentUpload = async (event: Event) => {
         successCount++;
       } else {
         failCount++;
-        let errorMessage = "上传失败！";
+        let errorMessage = t('knowledgeBase.uploadFailed');
         if (responseData?.error?.message) {
           errorMessage = responseData.error.message;
         } else if (responseData?.message) {
           errorMessage = responseData.message;
         }
         if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-          errorMessage = "文件已存在";
+          errorMessage = t('knowledgeBase.fileExists');
         }
         if (totalCount === 1) {
           MessagePlugin.error(errorMessage);
@@ -919,7 +919,7 @@ const handleDocumentUpload = async (event: Event) => {
       }
     } catch (error: any) {
       failCount++;
-      let errorMessage = error?.error?.message || error?.message || "上传失败！";
+      let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
       if (error?.code === 'duplicate_file') {
         errorMessage = "文件已存在";
       }
@@ -938,15 +938,15 @@ const handleDocumentUpload = async (event: Event) => {
 
   if (totalCount === 1) {
     if (successCount === 1) {
-      MessagePlugin.success("上传成功！");
+      MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
     }
   } else {
     if (failCount === 0) {
-      MessagePlugin.success(`所有文件上传成功（${successCount}个）`);
+      MessagePlugin.success(t('knowledgeBase.allUploadSuccess', { count: successCount }));
     } else if (successCount > 0) {
-      MessagePlugin.warning(`部分文件上传成功（成功：${successCount}，失败：${failCount}）`);
+      MessagePlugin.warning(t('knowledgeBase.partialUploadSuccess', { success: successCount, fail: failCount }));
     } else {
-      MessagePlugin.error(`所有文件上传失败（${failCount}个）`);
+      MessagePlugin.error(t('knowledgeBase.allUploadFailed', { count: failCount }));
     }
   }
 
@@ -960,7 +960,7 @@ const handleFolderUpload = async (event: Event) => {
   if (!files || files.length === 0) return;
 
   if (!kbId.value) {
-    MessagePlugin.error("缺少知识库ID");
+    MessagePlugin.error(t('error.missingKbId'));
     if (input) input.value = '';
     return;
   }
@@ -1075,7 +1075,7 @@ const handleURLImportCancel = () => {
 const handleURLImportConfirm = async () => {
   const url = urlInputValue.value.trim();
   if (!url) {
-    MessagePlugin.warning(t('knowledgeBase.urlRequired') || '请输入URL');
+    MessagePlugin.warning(t('knowledgeBase.urlRequired'));
     return;
   }
   
@@ -1083,12 +1083,12 @@ const handleURLImportConfirm = async () => {
   try {
     new URL(url);
   } catch (error) {
-    MessagePlugin.warning(t('knowledgeBase.invalidURL') || '请输入有效的URL');
+    MessagePlugin.warning(t('knowledgeBase.invalidURL'));
     return;
   }
 
   if (!kbId.value) {
-    MessagePlugin.error("缺少知识库ID");
+    MessagePlugin.error(t('error.missingKbId'));
     return;
   }
 
@@ -1102,25 +1102,25 @@ const handleURLImportConfirm = async () => {
     }));
     const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
     if (isSuccess) {
-      MessagePlugin.success(t('knowledgeBase.urlImportSuccess') || 'URL导入成功！');
+      MessagePlugin.success(t('knowledgeBase.urlImportSuccess'));
       urlDialogVisible.value = false;
       urlInputValue.value = '';
     } else {
-      let errorMessage = t('knowledgeBase.urlImportFailed') || "URL导入失败！";
+      let errorMessage = t('knowledgeBase.urlImportFailed');
       if (responseData?.error?.message) {
         errorMessage = responseData.error.message;
       } else if (responseData?.message) {
         errorMessage = responseData.message;
       }
       if (responseData?.code === 'duplicate_url' || responseData?.error?.code === 'duplicate_url') {
-        errorMessage = t('knowledgeBase.urlExists') || "该URL已存在";
+        errorMessage = t('knowledgeBase.urlExists');
       }
       MessagePlugin.error(errorMessage);
     }
   } catch (error: any) {
-    let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.urlImportFailed') || "URL导入失败！";
+    let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.urlImportFailed');
     if (error?.code === 'duplicate_url') {
-      errorMessage = t('knowledgeBase.urlExists') || "该URL已存在";
+      errorMessage = t('knowledgeBase.urlExists');
     }
     MessagePlugin.error(errorMessage);
   } finally {
@@ -1703,7 +1703,7 @@ async function createNewSession(value: string): Promise<void> {
                         </div>
                         <div class="card-popover-extra">
                           <span v-if="(hoveredCardItem as any).created_at" class="card-popover-created">
-                            {{ t('knowledgeBase.createdAt') || '创建' }}：{{ formatDocTime((hoveredCardItem as any).created_at) }}
+                            {{ t('knowledgeBase.createdAt') }}：{{ formatDocTime((hoveredCardItem as any).created_at) }}
                           </span>
                           <span v-if="formatFileSize((hoveredCardItem as any).file_size)" class="card-popover-size">
                             {{ formatFileSize((hoveredCardItem as any).file_size) }}
@@ -1711,11 +1711,11 @@ async function createNewSession(value: string): Promise<void> {
                         </div>
                       </template>
                       <div class="card-popover-meta">
-                        <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') || '更新' }}：{{ formatDocTime(hoveredCardItem.updated_at) }}</span>
+                        <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') }}：{{ formatDocTime(hoveredCardItem.updated_at) }}</span>
                         <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{ getTagName(hoveredCardItem.tag_id) }}</span>
                         <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
                       </div>
-                      <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') || '点击卡片查看全文与分段' }}</div>
+                      <div class="card-popover-hint">{{ t('knowledgeBase.clickToViewFull') }}</div>
                     </template>
                   </div>
                 </Teleport>
@@ -1754,27 +1754,27 @@ async function createNewSession(value: string): Promise<void> {
           <!-- URL 导入对话框 -->
           <t-dialog
             v-model:visible="urlDialogVisible"
-            :header="$t('knowledgeBase.importURLTitle') || '导入网页'"
+            :header="$t('knowledgeBase.importURLTitle')"
             :confirm-btn="{
-              content: $t('common.confirm') || '确认',
+              content: $t('common.confirm'),
               theme: 'primary',
               loading: urlImporting,
             }"
-            :cancel-btn="{ content: $t('common.cancel') || '取消' }"
+            :cancel-btn="{ content: $t('common.cancel') }"
             @confirm="handleURLImportConfirm"
             @cancel="handleURLImportCancel"
             width="500px"
           >
             <div class="url-import-form">
-              <div class="url-input-label">{{ $t('knowledgeBase.urlLabel') || 'URL地址' }}</div>
+              <div class="url-input-label">{{ $t('knowledgeBase.urlLabel') }}</div>
               <t-input
                 v-model="urlInputValue"
-                :placeholder="$t('knowledgeBase.urlPlaceholder') || '请输入网页URL，例如：https://example.com'"
+                :placeholder="$t('knowledgeBase.urlPlaceholder')"
                 clearable
                 autofocus
                 @keydown.enter="handleURLImportConfirm"
               />
-              <div class="url-input-tip">{{ $t('knowledgeBase.urlTip') || '支持导入各类网页内容，系统会自动提取和解析网页中的文本内容' }}</div>
+              <div class="url-input-tip">{{ $t('knowledgeBase.urlTip') }}</div>
             </div>
           </t-dialog>
           

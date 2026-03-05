@@ -1,6 +1,9 @@
 // src/utils/request.js
 import axios from "axios";
 import { generateRandomString } from "./index";
+import i18n from '@/i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 // API基础URL
 const BASE_URL = import.meta.env.VITE_IS_DOCKER ? "" : "http://localhost:8080";
@@ -81,13 +84,13 @@ instance.interceptors.response.use(
     const originalRequest = error.config;
     
     if (!error.response) {
-      return Promise.reject({ message: "网络错误，请检查您的网络连接" });
+      return Promise.reject({ message: t('error.networkError') });
     }
     
     // 如果是登录接口的401，直接返回错误以便页面展示toast，不做跳转
     if (error.response.status === 401 && originalRequest?.url?.includes('/auth/login')) {
       const { status, data } = error.response;
-      return Promise.reject({ status, message: (typeof data === 'object' ? data?.message : data) || '用户名或密码错误' });
+      return Promise.reject({ status, message: (typeof data === 'object' ? data?.message : data) || t('error.invalidCredentials') });
     }
 
     // 如果是401错误且不是刷新token的请求，尝试刷新token
@@ -130,7 +133,7 @@ instance.interceptors.response.use(
             
             return instance(originalRequest);
           } else {
-            throw new Error(response.message || 'Token刷新失败');
+            throw new Error(response.message || t('error.tokenRefreshFailed'));
           }
         } catch (refreshError) {
           // 刷新失败，清除所有token并跳转到登录页
@@ -162,7 +165,7 @@ instance.interceptors.response.use(
           window.location.href = '/login';
         }
         
-        return Promise.reject({ message: '请重新登录' });
+        return Promise.reject({ message: t('error.pleaseRelogin') });
       }
     }
     
@@ -170,7 +173,7 @@ instance.interceptors.response.use(
     if (error.response.status === 413) {
       return Promise.reject({ 
         status: 413, 
-        message: '文件大小超过限制，请上传较小的文件',
+        message: t('error.fileSizeExceeded'),
         success: false
       });
     }

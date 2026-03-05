@@ -3,7 +3,8 @@
  * TypeScript interfaces for all tool result types
  */
 
-// Relevance levels
+// Relevance levels — values match the backend API response (Chinese literals).
+// Display labels are resolved via i18n in SearchResults.vue and GraphQueryResults.vue.
 export type RelevanceLevel = '高相关' | '中相关' | '低相关' | '弱相关';
 
 // Display types

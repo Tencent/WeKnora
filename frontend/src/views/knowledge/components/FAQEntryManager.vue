@@ -84,7 +84,7 @@
           <div class="import-result-header">
             <div class="header-left">
               <t-icon name="check-circle-filled" size="20px" class="result-icon" />
-              <span class="result-title">最近导入结果</span>
+              <span class="result-title">{{ $t('faqManager.import.recentResult') }}</span>
             </div>
             <div class="header-right">
               <span class="result-time">{{ formatImportTime(importResult.imported_at) }}</span>
@@ -102,16 +102,16 @@
           <div class="import-result-body">
             <div class="import-result-stats">
               <div class="stat-item">
-                <span class="stat-label">导入数据</span>
-                <span class="stat-value">{{ importResult.total_entries }}条</span>
+                <span class="stat-label">{{ $t('faqManager.import.totalData') }}</span>
+                <span class="stat-value">{{ importResult.total_entries }}{{ $t('faqManager.import.unit') }}</span>
               </div>
               <div class="stat-item success">
-                <span class="stat-label">成功</span>
-                <span class="stat-value">{{ importResult.success_count }}条</span>
+                <span class="stat-label">{{ $t('faqManager.import.success') }}</span>
+                <span class="stat-value">{{ importResult.success_count }}{{ $t('faqManager.import.unit') }}</span>
               </div>
               <div v-if="importResult.failed_count > 0" class="stat-item failed">
-                <span class="stat-label">失败</span>
-                <span class="stat-value">{{ importResult.failed_count }}条</span>
+                <span class="stat-label">{{ $t('faqManager.import.failed') }}</span>
+                <span class="stat-value">{{ importResult.failed_count }}{{ $t('faqManager.import.unit') }}</span>
                 <t-button
                   v-if="importResult.failed_entries_url"
                   variant="outline"
@@ -121,17 +121,17 @@
                   @click="downloadFailedEntries"
                 >
                   <t-icon name="download" size="14px" />
-                  下载原因
+                  {{ $t('faqManager.import.downloadReasons') }}
                 </t-button>
               </div>
               <div v-if="importResult.skipped_count > 0" class="stat-item skipped">
-                <span class="stat-label">跳过</span>
-                <span class="stat-value">{{ importResult.skipped_count }}条</span>
+                <span class="stat-label">{{ $t('faqManager.import.skipped') }}</span>
+                <span class="stat-value">{{ importResult.skipped_count }}{{ $t('faqManager.import.unit') }}</span>
               </div>
             </div>
             <div class="import-mode-tag">
               <t-tag size="small" variant="light" theme="success">
-                {{ importResult.import_mode === 'append' ? '追加模式' : '替换模式' }}
+                {{ importResult.import_mode === 'append' ? $t('faqManager.import.appendMode') : $t('faqManager.import.replaceMode') }}
               </t-tag>
             </div>
           </div>
@@ -156,14 +156,14 @@
                 }"
               />
               <span class="progress-title">
-                {{ importState.taskStatus.status === 'running' ? '导入中...' : 
-                   importState.taskStatus.status === 'success' ? '导入完成' : 
-                   importState.taskStatus.status === 'failed' ? '导入失败' : '等待中...' }}
+                {{ importState.taskStatus.status === 'running' ? $t('faqManager.import.importing') :
+                   importState.taskStatus.status === 'success' ? $t('faqManager.import.importDone') :
+                   importState.taskStatus.status === 'failed' ? $t('faqManager.import.importFailed') : $t('faqManager.import.waiting') }}
               </span>
             </div>
             <div class="progress-right">
               <span class="progress-count">
-                {{ importState.taskStatus.processed }}/{{ importState.taskStatus.total }} 条
+                {{ importState.taskStatus.processed }}/{{ importState.taskStatus.total }} {{ $t('faqManager.import.unit') }}
               </span>
               <t-button
                 v-if="importState.taskStatus.status === 'success' || importState.taskStatus.status === 'failed'"
@@ -820,8 +820,8 @@
 
             <div class="setting-row vertical">
               <div class="setting-info">
-                <label>{{ $t('knowledgeBase.category') || '分类' }}</label>
-                <p class="desc">{{ $t('knowledgeEditor.faq.tagDesc') || '为 FAQ 条目选择分类' }}</p>
+                <label>{{ $t('knowledgeBase.category') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.faq.tagDesc') }}</p>
               </div>
               <div class="setting-control">
                 <t-select
@@ -829,7 +829,7 @@
                   class="full-width-input"
                   :options="tagSelectOptions"
                   clearable
-                  :placeholder="$t('knowledgeEditor.faq.tagPlaceholder') || '选择分类'"
+                  :placeholder="$t('knowledgeEditor.faq.tagPlaceholder')"
                 />
               </div>
             </div>
@@ -968,8 +968,8 @@
                   :loading="importState.importing && !importState.taskId"
                   :disabled="importState.taskStatus?.status === 'running'"
                 >
-                  {{ importState.taskStatus?.status === 'success' ? $t('common.close') : 
-                     importState.taskStatus?.status === 'failed' ? '重试' :
+                  {{ importState.taskStatus?.status === 'success' ? $t('common.close') :
+                     importState.taskStatus?.status === 'failed' ? $t('common.retry') :
                      $t('knowledgeEditor.faqImport.importButton') }}
                 </t-button>
               </div>
@@ -1634,8 +1634,8 @@ const loadTags = async (reset = false) => {
 }
 
 const getTagName = (tagId?: number) => {
-  if (!tagId) return t('knowledgeBase.untagged') || '未分类'
-  return tagMap.value[tagId]?.name || (t('knowledgeBase.untagged') || '未分类')
+  if (!tagId) return t('knowledgeBase.untagged')
+  return tagMap.value[tagId]?.name || (t('knowledgeBase.untagged'))
 }
 
 const handleTagFilterChange = (value: number) => {
@@ -1835,7 +1835,7 @@ const handleFaqMenuAction = (event: Event) => {
   } else if (detail.action === 'batch') {
     // 批量操作通过左侧菜单的下拉菜单处理
     if (selectedRowKeys.value.length === 0) {
-      MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst') || '请先选中要操作的FAQ条目')
+      MessagePlugin.warning(t('knowledgeEditor.faq.selectEntriesFirst'))
     }
   } else if (detail.action === 'batchTag') {
     if (canEdit.value && selectedRowKeys.value.length > 0) {
@@ -2239,7 +2239,7 @@ const handleMenuDelete = async (entry: FAQEntry) => {
 const openImportDialog = () => {
   // 如果正在导入，不允许打开导入对话框
   if (importState.taskStatus?.status === 'running') {
-    MessagePlugin.warning('导入正在进行中，请等待完成后再试')
+    MessagePlugin.warning(t('faqManager.import.importInProgress'))
     return
   }
   stopPolling()
@@ -2344,7 +2344,7 @@ const parseCSVFile = async (file: File): Promise<FAQEntryPayload[]> => {
         }
       },
       error: (error: Error) => {
-        reject(new Error(`CSV解析失败: ${error.message}`))
+        reject(new Error(`CSV parse failed: ${error.message}`))
       },
     })
   })
@@ -2702,7 +2702,7 @@ const closeImportResult = async () => {
 // 下载失败条目原因
 const downloadFailedEntries = () => {
   if (!importResult.value?.failed_entries_url) {
-    MessagePlugin.warning('暂无失败记录可下载')
+    MessagePlugin.warning(t('faqManager.import.noFailedRecords'))
     return
   }
   // 直接打开下载链接
@@ -2914,7 +2914,7 @@ const downloadExcelExample = () => {
 const exportLoading = ref(false)
 const handleExportCSV = async () => {
   if (!props.kbId) {
-    MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBase') || '请先选择知识库')
+    MessagePlugin.warning(t('knowledgeBase.selectKnowledgeBase'))
     return
   }
   
@@ -2929,10 +2929,10 @@ const handleExportCSV = async () => {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
-    MessagePlugin.success(t('knowledgeEditor.faqExport.exportSuccess') || '导出成功')
+    MessagePlugin.success(t('knowledgeEditor.faqExport.exportSuccess'))
   } catch (error: any) {
     console.error('Export failed:', error)
-    MessagePlugin.error(t('knowledgeEditor.faqExport.exportFailed') || '导出失败')
+    MessagePlugin.error(t('knowledgeEditor.faqExport.exportFailed'))
   } finally {
     exportLoading.value = false
   }
