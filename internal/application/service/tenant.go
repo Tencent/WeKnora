@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 var apiKeySecret = func() []byte {
@@ -67,6 +68,14 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 
 	logger.Infof(ctx, "Tenant created successfully, ID: %d, generating official API Key", tenant.ID)
 	tenant.APIKey = s.generateApiKey(tenant.ID)
+
+	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
+	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
+		if encrypted, err := utils.EncryptAESGCM(tenant.APIKey, key); err == nil {
+			tenant.APIKey = encrypted
+		}
+	}
+
 	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id":   tenant.ID,
@@ -195,6 +204,13 @@ func (s *tenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, er
 
 	logger.Infof(ctx, "Generating new API Key for tenant, ID: %d", id)
 	tenant.APIKey = s.generateApiKey(tenant.ID)
+
+	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
+	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
+		if encrypted, err := utils.EncryptAESGCM(tenant.APIKey, key); err == nil {
+			tenant.APIKey = encrypted
+		}
+	}
 
 	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

@@ -10,7 +10,7 @@ CREATE TABLE tenants (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    api_key VARCHAR(64) NOT NULL,
+    api_key VARCHAR(256) NOT NULL,
     retriever_engines JSON NOT NULL,
     status VARCHAR(50) DEFAULT 'active',
     business VARCHAR(255) NOT NULL,

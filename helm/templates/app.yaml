@@ -104,6 +104,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: TENANT_AES_KEY
+            - name: SYSTEM_AES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: SYSTEM_AES_KEY
             # Retrieval & Storage
             - name: RETRIEVE_DRIVER
               value: {{ .Values.app.env.RETRIEVE_DRIVER | quote }}
