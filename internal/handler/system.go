@@ -287,7 +287,7 @@ func (h *SystemHandler) getVectorStoreEngine() string {
 // getGraphDatabaseEngine returns the graph database engine name
 func (h *SystemHandler) getGraphDatabaseEngine() string {
 	if h.neo4jDriver == nil {
-		return "未启用"
+		return "Not Enabled"
 	}
 	return "Neo4j"
 }
