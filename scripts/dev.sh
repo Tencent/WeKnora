@@ -271,7 +271,9 @@ start_app() {
     log_info "数据库地址: $DB_HOST:${DB_PORT:-5432}"
     
     export CGO_CFLAGS="-Wno-deprecated-declarations -Wno-gnu-folding-constant"
-    export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+    if [[ "$(uname)" == "Darwin" ]]; then
+      export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+    fi
 
     # 检查是否安装了 Air（热重载工具）
     if command -v air &> /dev/null; then
