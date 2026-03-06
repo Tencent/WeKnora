@@ -16,6 +16,7 @@ var (
 		"无文字内容",
 		"无法识别",
 		"no text",
+		"no text content",
 		"no content",
 		"empty",
 		"图片中没有文字",
