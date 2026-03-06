@@ -1033,15 +1033,15 @@ export default {
       modelRequired: "모델을 선택하세요.",
       rerankModelRequired: "지식베이스를 사용할 때 ReRank 모델을 선택하세요",
       contextsMissing:
-        "지식베이스를 사용할 때 컨텍스트 템플릿에는 {{contexts}} 플레이스홀더가 포함되어야 합니다.",
-      queryMissingInContext: "컨텍스트 템플릿에는 {{query}} 플레이스홀더가 포함되어야 합니다.",
+        "지식베이스를 사용할 때 컨텍스트 템플릿에는 {'{{'}contexts{'}}'}  플레이스홀더가 포함되어야 합니다.",
+      queryMissingInContext: "컨텍스트 템플릿에는 {'{{'}query{'}}'} 플레이스홀더가 포함되어야 합니다.",
       knowledgeBasesMissing:
-        "모델이 사용 가능한 지식베이스를 알 수 있도록 시스템 프롬프트에 {{knowledge_bases}} 플레이스홀더를 포함하는 것을 권장합니다.",
+        "모델이 사용 가능한 지식베이스를 알 수 있도록 시스템 프롬프트에 {'{{'}knowledge_bases{'}}'} 플레이스홀더를 포함하는 것을 권장합니다.",
       queryMissingInRewrite:
-        "재작성 사용자 프롬프트에는 {{query}} 플레이스홀더가 포함되어야 합니다.",
+        "재작성 사용자 프롬프트에는 {'{{'}query{'}}'} 플레이스홀더가 포함되어야 합니다.",
       conversationMissing:
-        "재작성 사용자 프롬프트에는 {{conversation}} 플레이스홀더가 포함되어야 합니다.",
-      queryMissingInFallback: "폴백 프롬프트에는 {{query}} 플레이스홀더가 포함되어야 합니다.",
+        "재작성 사용자 프롬프트에는 {'{{'}conversation{'}}'} 플레이스홀더가 포함되어야 합니다.",
+      queryMissingInFallback: "폴백 프롬프트에는 {'{{'}query{'}}'} 플레이스홀더가 포함되어야 합니다.",
       avatar: "아바타",
       avatarPlaceholder: "이모티콘을 입력하거나 클릭하여 선택하세요.",
       description: "설명",
@@ -1053,12 +1053,12 @@ export default {
       modelPlaceholder: "모델을 선택하세요.",
       systemPrompt: "시스템 프롬프트",
       systemPromptPlaceholder:
-        "에이전트의 동작과 역할을 정의하는 사용자 지정 시스템 프롬프트(웹 검색 동작을 동적으로 제어하려면 {{web_search_status}} 플레이스홀더 사용)",
+        "에이전트의 동작과 역할을 정의하는 사용자 지정 시스템 프롬프트(웹 검색 동작을 동적으로 제어하려면 {'{{'}web_search_status{'}}'} 플레이스홀더 사용)",
       defaultPromptHint: "다음 시스템 기본 프롬프트를 사용하려면 비워 두세요.",
       defaultContextTemplateHint: "다음 시스템 기본 컨텍스트 템플릿을 사용하려면 비워 두세요.",
       contextTemplateRequired: "컨텍스트 템플릿을 입력하십시오.",
       availablePlaceholders: "사용 가능한 플레이스홀더",
-      placeholderHint: "{{ 입력 시 자동완성",
+      placeholderHint: "{'{{'} 입력 시 자동완성",
       temperature: "온도",
       thinking: "사고 모델",
       welcomeMessage: "환영 메시지",
@@ -2222,7 +2222,7 @@ export default {
       disabledHint:
         "현재 시스템 기본 Prompt를 사용 중입니다. 사용자 정의를 활성화한 후에 아래 내용이 적용됩니다.",
       placeholder: "시스템 Prompt를 입력하거나 비워두면 기본 Prompt가 사용됩니다...",
-      tabHintDetail: "통합 시스템 프롬프트 (비워두면 시스템 기본값 사용, {{web_search_status}} 자리 표시자로 웹 검색 동작을 동적 제어)",
+      tabHintDetail: "통합 시스템 프롬프트 (비워두면 시스템 기본값 사용, {'{{'}web_search_status{'}}'} 자리 표시자로 웹 검색 동작을 동적 제어)",
       tabHint: "웹 검색 활성화 여부에 따라 시스템 Prompt를 개별적으로 설정합니다.",
       tabWebOn: "웹 검색 활성화됨",
       tabWebOff: "웹 검색 비활성화됨",
@@ -3134,7 +3134,7 @@ export default {
     placeholders: {
       available: '사용 가능한 변수: ',
       clickToInsert: '(클릭하여 삽입)',
-      hint: '(클릭하여 삽입, 또는 {{ 입력으로 목록 표시)',
+      hint: "(클릭하여 삽입, 또는 {'{{'} 입력으로 목록 표시)",
     },
     selection: {
       all: '전체',

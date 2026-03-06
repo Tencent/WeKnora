@@ -3067,7 +3067,7 @@ export default {
     placeholders: {
       available: "可用变量：",
       clickToInsert: "（点击插入）",
-      hint: "（点击插入，或输入 {{ 唤起列表）",
+      hint: "（点击插入，或输入 {'{{'} 唤起列表）",
     },
     selection: {
       all: "全部",

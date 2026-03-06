@@ -1168,7 +1168,7 @@ const hasFaqKnowledgeBase = computed(() => {
 });
 
 const availableTools = computed(() => {
-  return allTools.map(tool => ({
+  return allTools.value.map(tool => ({
     ...tool,
     disabled: tool.requiresKB && !hasKnowledgeBase.value
   }));
