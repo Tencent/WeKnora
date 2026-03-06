@@ -1937,6 +1937,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 
+	if kb.SummaryModelID == "" {
+		logger.Errorf(ctx, "Knowledge base summary model ID is empty")
+		return nil
+	}
+
 	// Get knowledge
 	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
 	if err != nil {

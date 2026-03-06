@@ -94,6 +94,11 @@
                   <WebSearchSettings />
                 </div>
 
+                <!-- 消息管理 -->
+                <div v-if="currentSection === 'chathistory'" class="section">
+                  <ChatHistorySettings />
+                </div>
+
                 <!-- 解析引擎 -->
                 <div v-if="currentSection === 'parser'" class="section">
                   <ParserEngineSettings />
@@ -145,6 +150,7 @@ import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
+import ChatHistorySettings from './ChatHistorySettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 
@@ -172,6 +178,7 @@ const navItems = computed(() => [
   },
   { key: 'ollama', icon: 'server', label: 'Ollama' },
   { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
+  { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
   {
     key: 'parser',
     icon: 'file-search',

@@ -276,6 +276,10 @@ func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler) 
 	// 消息路由组
 	messages := r.Group("/messages")
 	{
+		// 搜索历史对话（关键词 + 向量混合搜索）
+		messages.POST("/search", handler.SearchMessages)
+		// 获取聊天历史知识库的统计信息
+		messages.GET("/chat-history-stats", handler.GetChatHistoryKBStats)
 		// 加载更早的消息，用于向上滚动加载
 		messages.GET("/:session_id/load", handler.LoadMessages)
 		// 删除消息

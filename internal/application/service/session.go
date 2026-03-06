@@ -205,6 +205,22 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
 
+	// Cleanup chat history knowledge entries for this session (async, best-effort).
+	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
+	bgCtx := context.WithoutCancel(ctx)
+	go func() {
+		knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, id)
+		if err != nil {
+			logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", id, err)
+			return
+		}
+		if len(knowledgeIDs) > 0 {
+			if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+				logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", id, err)
+			}
+		}
+	}()
+
 	// Cleanup temporary KB stored in Redis for this session
 	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
@@ -239,7 +255,22 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Cleanup associated resources for each session
+	bgCtx := context.WithoutCancel(ctx)
 	for _, id := range ids {
+		// Cleanup chat history knowledge entries (async, best-effort)
+		go func(sessionID string) {
+			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
+			if err != nil {
+				logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
+				return
+			}
+			if len(knowledgeIDs) > 0 {
+				if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+				}
+			}
+		}(id)
+
 		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
 		}
@@ -269,7 +300,22 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
 	} else {
+		bgCtx := context.WithoutCancel(ctx)
 		for _, session := range sessions {
+			// Cleanup chat history knowledge entries (async, best-effort)
+			go func(sessionID string) {
+				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
+				if err != nil {
+					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
+					return
+				}
+				if len(knowledgeIDs) > 0 {
+					if err := s.knowledgeService.DeleteKnowledgeList(bgCtx, knowledgeIDs); err != nil {
+						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+					}
+				}
+			}(session.ID)
+
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
 			}
@@ -1210,8 +1256,15 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		return []*types.SearchResult{}, nil
 	}
 
-	// Create default retrieval parameters
+	// Create default retrieval parameters — prefer tenant RetrievalConfig, fallback to built-in defaults
 	userID, _ := types.UserIDFromContext(ctx)
+
+	// Load tenant-level retrieval config (nil is safe — GetEffective* methods handle nil receiver)
+	var rc *types.RetrievalConfig
+	if tenant, err2 := s.tenantService.GetTenantByID(ctx, tenantID); err2 == nil {
+		rc = tenant.RetrievalConfig
+	}
+
 	chatManage := &types.ChatManage{
 		Query:            query,
 		RewriteQuery:     query,
@@ -1219,12 +1272,12 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		KnowledgeBaseIDs: knowledgeBaseIDs,
 		KnowledgeIDs:     knowledgeIDs,
 		SearchTargets:    searchTargets,
-		VectorThreshold:  s.cfg.Conversation.VectorThreshold,  // Use default configuration
-		KeywordThreshold: s.cfg.Conversation.KeywordThreshold, // Use default configuration
-		EmbeddingTopK:    s.cfg.Conversation.EmbeddingTopK,    // Use default configuration
-		RerankTopK:       s.cfg.Conversation.RerankTopK,       // Use default configuration
-		RerankThreshold:  s.cfg.Conversation.RerankThreshold,  // Use default configuration
 		MaxRounds:        s.cfg.Conversation.MaxRounds,
+		EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
+		VectorThreshold:  rc.GetEffectiveVectorThreshold(),
+		KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
+		RerankTopK:       rc.GetEffectiveRerankTopK(),
+		RerankThreshold:  rc.GetEffectiveRerankThreshold(),
 	}
 
 	// Get default models
@@ -1234,14 +1287,18 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		return nil, err
 	}
 
-	// Find the first available rerank model
-	for _, model := range models {
-		if model == nil {
-			continue
-		}
-		if model.Type == types.ModelTypeRerank {
-			chatManage.RerankModelID = model.ID
-			break
+	// Use rerank model from RetrievalConfig if set, otherwise auto-select the first available
+	if rc != nil && rc.RerankModelID != "" {
+		chatManage.RerankModelID = rc.RerankModelID
+	} else {
+		for _, model := range models {
+			if model == nil {
+				continue
+			}
+			if model.Type == types.ModelTypeRerank {
+				chatManage.RerankModelID = model.ID
+				break
+			}
 		}
 	}
 

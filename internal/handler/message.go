@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -154,5 +155,99 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Message deleted successfully",
+	})
+}
+
+// SearchMessages godoc
+// @Summary      搜索历史对话
+// @Description  通过关键词和/或向量相似度搜索历史对话记录，支持关键词、向量、混合三种模式
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Param        request  body      SearchMessagesRequest  true  "搜索请求"
+// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/search [post]
+func (h *MessageHandler) SearchMessages(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Start searching messages")
+
+	var request SearchMessagesRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		logger.Error(ctx, "Failed to parse search request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	if request.Query == "" {
+		logger.Error(ctx, "Query content is empty")
+		c.Error(errors.NewBadRequestError("Query content cannot be empty"))
+		return
+	}
+
+	params := &types.MessageSearchParams{
+		Query:      secutils.SanitizeForLog(request.Query),
+		Mode:       types.MessageSearchMode(request.Mode),
+		Limit:      request.Limit,
+		SessionIDs: request.SessionIDs,
+	}
+
+	logger.Infof(ctx, "Searching messages with params: query=%s, mode=%s, limit=%d, session_ids=%v",
+		params.Query, params.Mode, params.Limit, params.SessionIDs)
+
+	result, err := h.MessageService.SearchMessages(ctx, params)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Message search completed, found %d results", result.Total)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// SearchMessagesRequest defines the request structure for searching messages
+type SearchMessagesRequest struct {
+	// Query text for search
+	Query string `json:"query" binding:"required"`
+	// Search mode: "keyword", "vector", "hybrid" (default: "hybrid")
+	Mode string `json:"mode"`
+	// Maximum number of results to return (default: 20)
+	Limit int `json:"limit"`
+	// Filter by specific session IDs (optional)
+	SessionIDs []string `json:"session_ids"`
+}
+
+// GetChatHistoryKBStats godoc
+// @Summary      获取聊天历史知识库统计
+// @Description  获取聊天历史知识库的统计信息（已索引消息数、知识库大小等）
+// @Tags         消息
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "统计信息"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /messages/chat-history-stats [get]
+func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Getting chat history KB stats")
+
+	stats, err := h.MessageService.GetChatHistoryKBStats(ctx)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    stats,
 	})
 }
