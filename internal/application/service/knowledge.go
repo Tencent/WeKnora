@@ -1809,10 +1809,10 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		var imageAnnotations string
 		for _, img := range allImageInfos {
 			if img.Caption != "" {
-				imageAnnotations += fmt.Sprintf("\n[图片描述: %s]", img.Caption)
+				imageAnnotations += fmt.Sprintf("\n[Image Description: %s]", img.Caption)
 			}
 			if img.OCRText != "" {
-				imageAnnotations += fmt.Sprintf("\n[图片文字: %s]", img.OCRText)
+				imageAnnotations += fmt.Sprintf("\n[Image OCR Text: %s]", img.OCRText)
 			}
 		}
 
@@ -1829,15 +1829,15 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 
 	// Add knowledge metadata if available
 	if knowledge != nil {
-		metadataIntro := fmt.Sprintf("文档类型: %s\n文件名称: %s\n", knowledge.FileType, knowledge.FileName)
+		metadataIntro := fmt.Sprintf("Document Type: %s\nFile Name: %s\n", knowledge.FileType, knowledge.FileName)
 
 		// Add additional metadata if available
 		if knowledge.Type != "" {
-			metadataIntro += fmt.Sprintf("知识类型: %s\n", knowledge.Type)
+			metadataIntro += fmt.Sprintf("Knowledge Type: %s\n", knowledge.Type)
 		}
 
 		// Prepend metadata to content
-		contentWithMetadata = metadataIntro + "\n内容:\n" + contentWithMetadata
+		contentWithMetadata = metadataIntro + "\nContent:\n" + contentWithMetadata
 	}
 
 	// Generate summary using AI model
@@ -2035,7 +2035,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# 文档名称\n%s\n\n# 摘要\n%s", knowledge.FileName, summary),
+			Content:         fmt.Sprintf("# Document\n%s\n\n# Summary\n%s", knowledge.FileName, summary),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -2282,12 +2282,12 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	// Build context section
 	var contextSection string
 	if prevContent != "" || nextContent != "" {
-		contextSection = "## 上下文信息（仅供参考，帮助理解主要内容）\n"
+		contextSection = "## Context Information (for reference only, to help understand the main content)\n"
 		if prevContent != "" {
-			contextSection += fmt.Sprintf("【前文】%s\n", prevContent)
+			contextSection += fmt.Sprintf("[Preceding Context] %s\n", prevContent)
 		}
 		if nextContent != "" {
-			contextSection += fmt.Sprintf("【后文】%s\n", nextContent)
+			contextSection += fmt.Sprintf("[Following Context] %s\n", nextContent)
 		}
 		contextSection += "\n"
 	}
@@ -2335,32 +2335,38 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 }
 
 // Default prompt for question generation with context support
-const defaultQuestionGenerationPrompt = `你是一个专业的问题生成助手。你的任务是根据给定的【主要内容】生成用户可能会问的相关问题。
+const defaultQuestionGenerationPrompt = `You are a professional question generation assistant. Your task is to generate related questions that users might ask based on the given [Main Content].
 
 {{context}}
-## 主要内容（请基于此内容生成问题）
-文档名称：{{doc_name}}
-文档内容：
+## Main Content (generate questions based on this content)
+Document name: {{doc_name}}
+Document content:
 {{content}}
 
-## 核心要求
-- 生成的问题必须与【主要内容】直接相关
-- 问题中禁止使用任何代词或指代词（如"它"、"这个"、"该文档"、"本文"、"文中"、"其"等），必须用具体名称替代
-- 问题必须是完整独立的，脱离上下文也能被理解
-- 问题应该是用户在实际场景中可能会提出的自然问题
-- 问题应该多样化，覆盖内容的不同方面
-- 每个问题应该简洁明了，长度控制在30字以内
-- 生成的问题数量为 {{question_count}} 个
+## Core Requirements
+- Generated questions must be directly related to the [Main Content]
+- Questions must NOT use any pronouns or referential words (such as "it", "this", "that document", "this article", "the text", "its", etc.); use specific names instead
+- Questions must be complete and self-contained, understandable without additional context
+- Questions should be natural questions that users would likely ask in real scenarios
+- Questions should be diverse, covering different aspects of the content
+- Each question should be concise and clear, within 30 words
+- Generate {{question_count}} questions
 
-## 问题类型建议
-- 定义类：什么是...？...是什么？
-- 原因类：为什么...？...的原因是什么？
-- 方法类：如何...？怎样...？
-- 比较类：...和...有什么区别？
-- 应用类：...可以用于什么场景？
+## Suggested Question Types
+- Definition: What is...? What does... mean?
+- Reason: Why...? What is the reason for...?
+- Method: How to...? What is the way to...?
+- Comparison: What is the difference between... and...?
+- Application: What scenarios can... be used for?
 
-## 输出格式
-直接输出问题列表，每行一个问题，不要有序号或其他前缀。`
+## Output Format
+Output the question list directly, one question per line, without numbering or other prefixes.
+
+## CRITICAL: Language Rule
+- Generate questions in the SAME LANGUAGE as the source document
+- If the document is in Korean, generate questions in Korean
+- If the document is in English, generate questions in English
+- If the document is in Chinese, generate questions in Chinese`
 
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
