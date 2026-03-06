@@ -121,7 +121,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
-					err: fmt.Errorf("无法获取文档信息: %v", err),
+					err: fmt.Errorf("failed to get document info: %v", err),
 				}
 				mu.Unlock()
 				return
@@ -131,7 +131,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			if !t.searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
 				mu.Lock()
 				results[id] = &docInfo{
-					err: fmt.Errorf("知识库 %s 不可访问", knowledge.KnowledgeBaseID),
+					err: fmt.Errorf("knowledge base %s is not accessible", knowledge.KnowledgeBaseID),
 				}
 				mu.Unlock()
 				return
@@ -146,7 +146,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{
-					err: fmt.Errorf("无法获取文档信息: %v", err),
+					err: fmt.Errorf("failed to get document info: %v", err),
 				}
 				mu.Unlock()
 				return
@@ -180,16 +180,16 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	if len(successDocs) == 0 {
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("无法获取任何文档信息。错误: %v", errors),
+			Error:   fmt.Sprintf("Failed to retrieve any document info. Errors: %v", errors),
 		}, fmt.Errorf("all document retrievals failed")
 	}
 
 	// Format output
-	output := "=== 文档信息 ===\n\n"
-	output += fmt.Sprintf("成功获取 %d / %d 个文档信息\n\n", len(successDocs), len(knowledgeIDs))
+	output := "=== Document Info ===\n\n"
+	output += fmt.Sprintf("Successfully retrieved %d / %d documents\n\n", len(successDocs), len(knowledgeIDs))
 
 	if len(errors) > 0 {
-		output += "=== 部分失败 ===\n"
+		output += "=== Partial Failures ===\n"
 		for _, errMsg := range errors {
 			output += fmt.Sprintf("  - %s\n", errMsg)
 		}
@@ -200,28 +200,28 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 	for i, doc := range successDocs {
 		k := doc.knowledge
 
-		output += fmt.Sprintf("【文档 #%d】\n", i+1)
-		output += fmt.Sprintf("  ID:       %s\n", k.ID)
-		output += fmt.Sprintf("  标题:     %s\n", k.Title)
+		output += fmt.Sprintf("[Document #%d]\n", i+1)
+		output += fmt.Sprintf("  ID:           %s\n", k.ID)
+		output += fmt.Sprintf("  Title:        %s\n", k.Title)
 
 		if k.Description != "" {
-			output += fmt.Sprintf("  描述:     %s\n", k.Description)
+			output += fmt.Sprintf("  Description:  %s\n", k.Description)
 		}
 
-		output += fmt.Sprintf("  来源:     %s\n", formatSource(k.Type, k.Source))
+		output += fmt.Sprintf("  Source:       %s\n", formatSource(k.Type, k.Source))
 
 		if k.FileName != "" {
-			output += fmt.Sprintf("  文件名:   %s\n", k.FileName)
-			output += fmt.Sprintf("  文件类型: %s\n", k.FileType)
-			output += fmt.Sprintf("  文件大小: %s\n", formatFileSize(k.FileSize))
+			output += fmt.Sprintf("  File Name:    %s\n", k.FileName)
+			output += fmt.Sprintf("  File Type:    %s\n", k.FileType)
+			output += fmt.Sprintf("  File Size:    %s\n", formatFileSize(k.FileSize))
 		}
 
-		output += fmt.Sprintf("  处理状态: %s\n", formatParseStatus(k.ParseStatus))
-		output += fmt.Sprintf("  分块数量: %d 个\n", doc.chunkCount)
+		output += fmt.Sprintf("  Parse Status: %s\n", formatParseStatus(k.ParseStatus))
+		output += fmt.Sprintf("  Chunk Count:  %d\n", doc.chunkCount)
 
 		if k.Metadata != nil {
 			if metadata, err := k.Metadata.Map(); err == nil && len(metadata) > 0 {
-				output += "  元数据:\n"
+				output += "  Metadata:\n"
 				for key, value := range metadata {
 					output += fmt.Sprintf("    - %s: %v\n", key, value)
 				}
@@ -268,11 +268,11 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 func formatSource(knowledgeType, source string) string {
 	switch knowledgeType {
 	case "file":
-		return "文件上传"
+		return "File Upload"
 	case "url":
 		return fmt.Sprintf("URL: %s", source)
 	case "passage":
-		return "文本输入"
+		return "Text Input"
 	default:
 		return knowledgeType
 	}
@@ -280,7 +280,7 @@ func formatSource(knowledgeType, source string) string {
 
 func formatFileSize(size int64) string {
 	if size == 0 {
-		return "未知"
+		return "Unknown"
 	}
 	const unit = 1024
 	if size < unit {
@@ -297,13 +297,13 @@ func formatFileSize(size int64) string {
 func formatParseStatus(status string) string {
 	switch status {
 	case "pending":
-		return "⏳ 待处理"
+		return "Pending"
 	case "processing":
-		return "🔄 处理中"
+		return "Processing"
 	case "completed", "success":
-		return "✅ 已完成"
+		return "Completed"
 	case "failed":
-		return "❌ 失败"
+		return "Failed"
 	default:
 		return status
 	}
