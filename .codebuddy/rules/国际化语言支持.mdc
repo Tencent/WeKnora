@@ -1,0 +1,9 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2026-03-06T08:11:34.113Z
+provider: 
+---
+
+i18n国际化文件修改的时候同时修改i18n/locals下面的所有语言文件

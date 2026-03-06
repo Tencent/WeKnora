@@ -80,6 +80,8 @@ type Message struct {
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)
 	IsFallback bool `json:"is_fallback,omitempty"`
+	// Agent total execution duration in milliseconds (from query start to answer start)
+	AgentDurationMs int64 `json:"agent_duration_ms,omitempty" gorm:"column:agent_duration_ms;default:0"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

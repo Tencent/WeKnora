@@ -266,6 +266,8 @@ export default {
     webSearchFound: 'Found <strong>{count}</strong> web search result(s)',
     argumentsLabel: 'Arguments',
     toolFallback: 'Tool',
+    stepsCompleted: 'Completed <strong>{steps}</strong> step(s)',
+    stepsCompletedWithDuration: 'Completed <strong>{steps}</strong> step(s) in <strong>{duration}</strong>',
     title: 'Agents',
     subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
     createAgent: 'Create Agent',

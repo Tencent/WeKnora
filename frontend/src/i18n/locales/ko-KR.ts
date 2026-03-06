@@ -917,6 +917,8 @@ export default {
     webSearchFound: "<strong>{count}</strong>개의 웹 검색 결과 발견",
     argumentsLabel: "파라미터",
     toolFallback: "도구",
+    stepsCompleted: "<strong>{steps}</strong>개 단계 완료",
+    stepsCompletedWithDuration: "<strong>{steps}</strong>개 단계 완료, 소요 시간 <strong>{duration}</strong>",
     title: "에이전트",
     subtitle: "에이전트 구성 및 관리, 대화 동작 및 기능 맞춤화",
     createAgent: "에이전트 만들기",

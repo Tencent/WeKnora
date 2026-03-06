@@ -156,12 +156,15 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
 
 // Reconstruct agentEventStream from agent_steps stored in database
 // This allows the frontend to restore the exact conversation state including all agent reasoning steps
-const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted = false, isFallback = false) => {
+const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted = false, isFallback = false, agentDurationMs = 0) => {
     const events = [];
 
     // Process agent steps if they exist
     if (agentSteps && Array.isArray(agentSteps) && agentSteps.length > 0) {
     agentSteps.forEach((step) => {
+        // Compute step timestamp (milliseconds) from step.timestamp if available
+        const stepTimestamp = step.timestamp ? new Date(step.timestamp).getTime() : 0;
+
         // Add thinking event if thought content exists
         if (step.thought && step.thought.trim()) {
             events.push({
@@ -170,14 +173,16 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
                 content: step.thought,
                 done: true,
                 thinking: false,
+                timestamp: stepTimestamp || undefined,
                 // Extract duration from step if available
                 duration_ms: step.duration || undefined,
             });
         }
-        
-        // Add tool call and result events
+
+        // Add tool call and result events (skip final_answer as its content is in the answer event)
         if (step.tool_calls && Array.isArray(step.tool_calls)) {
             step.tool_calls.forEach((toolCall) => {
+                if (toolCall.name === 'final_answer') return; // Skip - shown as answer event
                 events.push({
                     type: 'tool_call',
                     tool_call_id: toolCall.id,
@@ -187,6 +192,7 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
                     success: toolCall.result?.success !== false,
                     output: toolCall.result?.output || '',
                     error: toolCall.result?.error || undefined,
+                    timestamp: stepTimestamp || undefined,
                     // Use both duration and duration_ms for compatibility
                     duration: toolCall.duration,
                     duration_ms: toolCall.duration,
@@ -198,6 +204,14 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
     });
     }
     
+    // Add agent_complete event with duration info (before answer event)
+    if (agentDurationMs > 0) {
+        events.push({
+            type: 'agent_complete',
+            total_duration_ms: agentDurationMs,
+        });
+    }
+
     // 总是添加 answer 事件如果有内容（无论是否有 agent_steps）
     // 这样可以确保最终答案始终被渲染
     if (messageContent && messageContent.trim()) {
@@ -236,7 +250,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         if (item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
             console.log('[Message Load] Reconstructing agent steps for message:', item.id, 'steps:', item.agent_steps.length);
             item.isAgentMode = true;
-            item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback);
+            item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback, item.agent_duration_ms || 0);
             // 隐藏最终答案内容，因为它已经包含在 agentEventStream 的 answer 事件中
             item.hideContent = true;
             console.log('[Message Load] Reconstructed', item.agentEventStream.length, 'events from agent steps');
@@ -652,6 +666,10 @@ const handleAgentChunk = (data) => {
             break;
             
         case 'tool_call':
+            // Skip final_answer tool call from event stream - its content appears as answer events
+            if (data.data && data.data.tool_name === 'final_answer') {
+                break;
+            }
             // Store or update pending tool call to pair with result later
             if (data.data && (data.data.tool_name || data.data.tool_call_id)) {
                 const incomingToolName = data.data.tool_name;
@@ -851,7 +869,14 @@ const handleAgentChunk = (data) => {
             console.log('[Agent] Complete event received');
             loading.value = false;
             isReplying.value = false;
-            // 不清空 message.content，保持已有内容
+            // 将 total_duration_ms 存入事件流供 AgentStreamDisplay 使用
+            if (data.data?.total_duration_ms && message.agentEventStream) {
+                message.agentEventStream.push({
+                    type: 'agent_complete',
+                    total_duration_ms: data.data.total_duration_ms,
+                    total_steps: data.data.total_steps,
+                });
+            }
             break;
             
         case 'stop':

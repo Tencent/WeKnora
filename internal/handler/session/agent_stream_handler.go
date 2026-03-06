@@ -422,6 +422,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if data.MessageID == h.assistantMessageID {
 		// h.assistantMessage.Content = data.FinalAnswer
 		h.assistantMessage.IsCompleted = true
+		h.assistantMessage.AgentDurationMs = data.TotalDurationMs
 
 		// Update knowledge references if provided
 		if len(data.KnowledgeRefs) > 0 {
@@ -433,6 +434,8 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 			}
 			h.assistantMessage.KnowledgeReferences = knowledgeRefs
 		}
+
+		h.assistantMessage.Content += data.FinalAnswer
 
 		// Update agent steps if provided
 		if data.AgentSteps != nil {

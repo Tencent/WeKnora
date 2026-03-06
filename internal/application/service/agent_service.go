@@ -347,8 +347,9 @@ func (s *agentService) registerTools(
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
 	}
-	logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 
+	logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
+	allowedTools = append(allowedTools, tools.ToolFinalAnswer)
 	// Register each allowed tool
 	for _, toolName := range allowedTools {
 		var toolToRegister types.Tool
@@ -402,6 +403,9 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository())
 			logger.Infof(ctx, "Registered data_schema tool")
 
+		case tools.ToolFinalAnswer:
+			toolToRegister = tools.NewFinalAnswerTool()
+			logger.Infof(ctx, "Registered final_answer tool")
 		default:
 			logger.Warnf(ctx, "Unknown tool: %s", toolName)
 		}

@@ -256,6 +256,8 @@ export default {
     webSearchFound: 'Найдено <strong>{count}</strong> результатов веб‑поиска',
     argumentsLabel: 'Параметры',
     toolFallback: 'Инструмент',
+    stepsCompleted: 'Выполнено <strong>{steps}</strong> шаг(ов)',
+    stepsCompletedWithDuration: 'Выполнено <strong>{steps}</strong> шаг(ов) за <strong>{duration}</strong>',
     editor: {
       skillsConfig: 'Skills',
       skillsConfigDesc: 'Настройка предустановленных Skills для агента, предоставляющих специализированные знания и рабочие процессы',

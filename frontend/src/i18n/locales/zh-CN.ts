@@ -910,6 +910,8 @@ export default {
     webSearchFound: "找到 <strong>{count}</strong> 个网络搜索结果",
     argumentsLabel: "参数",
     toolFallback: "工具",
+    stepsCompleted: "已完成 <strong>{steps}</strong> 个步骤",
+    stepsCompletedWithDuration: "已完成 <strong>{steps}</strong> 个步骤，耗时 <strong>{duration}</strong>",
     title: "智能体",
     subtitle: "配置和管理您的智能体，自定义对话行为和能力",
     createAgent: "创建智能体",
