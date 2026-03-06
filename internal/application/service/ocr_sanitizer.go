@@ -16,6 +16,7 @@ var (
 		"无文字内容",
 		"无法识别",
 		"no text",
+		"no text content",
 		"no content",
 		"empty",
 		"图片中没有文字",
@@ -94,8 +95,11 @@ func ocrHTMLToMarkdown(content string) string {
 
 // isKnownEmptyReply checks whether the text matches a known "no content"
 // reply pattern that VLM models produce when the image has no text.
+// Trailing punctuation (., !, ?) is stripped before comparison so that
+// responses like "No text content." still match "no text content".
 func isKnownEmptyReply(text string) bool {
 	lower := strings.ToLower(strings.TrimSpace(text))
+	lower = strings.TrimRight(lower, ".!?。！？")
 	for _, phrase := range knownEmptyReplies {
 		if lower == strings.ToLower(phrase) {
 			return true

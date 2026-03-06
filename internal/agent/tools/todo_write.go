@@ -173,7 +173,7 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	if input.Task == "" {
-		input.Task = "未提供任务描述"
+		input.Task = "No task description provided"
 	}
 
 	// Parse plan steps
@@ -227,17 +227,17 @@ func getStringArrayField(m map[string]interface{}, key string) []string {
 
 // generatePlanOutput generates a formatted plan output
 func generatePlanOutput(task string, steps []PlanStep) string {
-	output := "计划已创建\n\n"
-	output += fmt.Sprintf("**任务**: %s\n\n", task)
+	output := "Plan created\n\n"
+	output += fmt.Sprintf("**Task**: %s\n\n", task)
 
 	if len(steps) == 0 {
-		output += "注意：未提供具体步骤。建议创建3-7个检索任务以系统化研究。\n\n"
-		output += "建议的检索流程（专注于检索任务，不包含总结）：\n"
-		output += "1. 使用 grep_chunks 搜索关键词定位相关文档\n"
-		output += "2. 使用 knowledge_search 进行语义搜索获取相关内容\n"
-		output += "3. 使用 list_knowledge_chunks 获取关键文档的完整内容\n"
-		output += "4. 使用 web_search 获取补充信息（如需要）\n"
-		output += "\n注意：总结和综合由 thinking 工具处理，不要在此处添加总结任务。\n"
+		output += "Note: No specific steps provided. It is recommended to create 3-7 retrieval tasks for systematic research.\n\n"
+		output += "Suggested retrieval workflow (focused on retrieval tasks, excluding summarization):\n"
+		output += "1. Use grep_chunks to search keywords and locate relevant documents\n"
+		output += "2. Use knowledge_search for semantic search to retrieve relevant content\n"
+		output += "3. Use list_knowledge_chunks to get the full content of key documents\n"
+		output += "4. Use web_search to get supplementary information (if needed)\n"
+		output += "\nNote: Summarization and synthesis are handled by the thinking tool. Do not add summarization tasks here.\n"
 		return output
 	}
 
@@ -258,7 +258,7 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 	totalCount := len(steps)
 	remainingCount := pendingCount + inProgressCount
 
-	output += "**计划步骤**:\n\n"
+	output += "**Plan Steps**:\n\n"
 
 	// Display all steps in order
 	for i, step := range steps {
@@ -266,32 +266,32 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 	}
 
 	// Add summary and emphasis on remaining tasks
-	output += "\n=== 任务进度 ===\n"
-	output += fmt.Sprintf("总计: %d 个任务\n", totalCount)
-	output += fmt.Sprintf("✅ 已完成: %d 个\n", completedCount)
-	output += fmt.Sprintf("🔄 进行中: %d 个\n", inProgressCount)
-	output += fmt.Sprintf("⏳ 待处理: %d 个\n", pendingCount)
+	output += "\n=== Task Progress ===\n"
+	output += fmt.Sprintf("Total: %d tasks\n", totalCount)
+	output += fmt.Sprintf("✅ Completed: %d\n", completedCount)
+	output += fmt.Sprintf("🔄 In Progress: %d\n", inProgressCount)
+	output += fmt.Sprintf("⏳ Pending: %d\n", pendingCount)
 
-	output += "\n=== ⚠️ 重要提醒 ===\n"
+	output += "\n=== ⚠️ Important Reminder ===\n"
 	if remainingCount > 0 {
-		output += fmt.Sprintf("**还有 %d 个任务未完成！**\n\n", remainingCount)
-		output += "**必须完成所有任务后才能总结或得出结论。**\n\n"
-		output += "下一步操作：\n"
+		output += fmt.Sprintf("**%d tasks remaining!**\n\n", remainingCount)
+		output += "**All tasks must be completed before summarizing or drawing conclusions.**\n\n"
+		output += "Next steps:\n"
 		if inProgressCount > 0 {
-			output += "- 继续完成当前进行中的任务\n"
+			output += "- Continue completing tasks currently in progress\n"
 		}
 		if pendingCount > 0 {
-			output += fmt.Sprintf("- 开始处理 %d 个待处理任务\n", pendingCount)
-			output += "- 按顺序完成每个任务，不要跳过\n"
+			output += fmt.Sprintf("- Start processing %d pending tasks\n", pendingCount)
+			output += "- Complete each task in order, do not skip\n"
 		}
-		output += "- 完成每个任务后，更新 todo_write 标记为 completed\n"
-		output += "- 只有在所有任务完成后，才能生成最终总结\n"
+		output += "- After completing each task, update todo_write to mark it as completed\n"
+		output += "- Only generate the final summary after all tasks are completed\n"
 	} else {
-		output += "✅ **所有任务已完成！**\n\n"
-		output += "现在可以：\n"
-		output += "- 综合所有任务的发现\n"
-		output += "- 生成完整的最终答案或报告\n"
-		output += "- 确保所有方面都已充分研究\n"
+		output += "✅ **All tasks completed!**\n\n"
+		output += "You can now:\n"
+		output += "- Synthesize findings from all tasks\n"
+		output += "- Generate a complete final answer or report\n"
+		output += "- Ensure all aspects have been thoroughly researched\n"
 	}
 
 	return output

@@ -22,14 +22,14 @@ import (
 )
 
 const (
-	vlmOCRPrompt = "请提取这张文档图片中的所有正文内容，用纯 Markdown 格式输出。要求：\n" +
-		"1. 忽略页眉、页脚\n" +
-		"2. 表格使用 Markdown 表格语法\n" +
-		"3. 公式使用 LaTeX 格式（用 $ 或 $$ 包裹）\n" +
-		"4. 按照原文阅读顺序组织\n" +
-		"5. 只输出提取到的文本内容，不要添加任何 HTML 标签\n" +
-		"如果图片中没有可识别的文字内容，请回复：无文字内容。"
-	vlmCaptionPrompt = "简单凝炼的描述图片的主要内容"
+	vlmOCRPrompt = "Extract all body text content from this document image and output in pure Markdown format. Requirements:\n" +
+		"1. Ignore headers and footers\n" +
+		"2. Use Markdown table syntax for tables\n" +
+		"3. Use LaTeX format for formulas (wrapped with $ or $$)\n" +
+		"4. Organize content in the original reading order\n" +
+		"5. Only output extracted text content, do not add any HTML tags\n" +
+		"If there is no recognizable text content in the image, reply: No text content."
+	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image"
 )
 
 // ImageMultimodalService handles image:multimodal asynq tasks.

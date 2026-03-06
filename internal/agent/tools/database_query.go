@@ -284,20 +284,20 @@ func (t *DatabaseQueryTool) formatQueryResults(
 	results []map[string]interface{},
 	query string,
 ) string {
-	output := "=== 查询结果 ===\n\n"
-	output += fmt.Sprintf("执行的SQL: %s\n\n", query)
-	output += fmt.Sprintf("返回 %d 行数据\n\n", len(results))
+	output := "=== Query Results ===\n\n"
+	output += fmt.Sprintf("Executed SQL: %s\n\n", query)
+	output += fmt.Sprintf("Returned %d rows\n\n", len(results))
 
 	if len(results) == 0 {
-		output += "未找到匹配的记录。\n"
+		output += "No matching records found.\n"
 		return output
 	}
 
-	output += "=== 数据详情 ===\n\n"
+	output += "=== Data Details ===\n\n"
 
 	// Format each row
 	for i, row := range results {
-		output += fmt.Sprintf("--- 记录 #%d ---\n", i+1)
+		output += fmt.Sprintf("--- Record #%d ---\n", i+1)
 		for _, col := range columns {
 			value := row[col]
 			// Format the value
@@ -325,7 +325,7 @@ func (t *DatabaseQueryTool) formatQueryResults(
 
 	// Add summary statistics if applicable
 	if len(results) > 10 {
-		output += fmt.Sprintf("注意: 显示了前 %d 条记录，共 %d 条。建议使用 LIMIT 子句限制结果数量。\n", len(results), len(results))
+		output += fmt.Sprintf("Note: Showing %d records out of %d total. Consider using a LIMIT clause to restrict the result count.\n", len(results), len(results))
 	}
 
 	return output

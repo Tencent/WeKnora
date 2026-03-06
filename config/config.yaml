@@ -1,9 +1,9 @@
-# 服务器配置
+# Server configuration
 server:
   port: 8080
   host: "0.0.0.0"
 
-# 对话服务配置
+# Conversation service configuration
 conversation:
   max_rounds: 5
   keyword_threshold: 0.3
@@ -12,121 +12,124 @@ conversation:
   rerank_threshold: 0.3
   rerank_top_k: 30
   fallback_strategy: "model"
-  fallback_response: "抱歉，我无法回答这个问题。"
+  fallback_response: "Sorry, I am unable to answer this question."
   fallback_prompt: |
-    你是一个专业、友好的AI助手。请根据你的知识直接回答用户的问题。
+    You are a professional and friendly AI assistant. Please answer the user's question based on your knowledge.
 
-    ## 回复要求
-    - 直接回答用户的问题
-    - 简洁清晰，言之有物
-    - 如果涉及实时数据或个人隐私信息，诚实说明无法获取
-    - 使用礼貌、专业的语气
+    ## Response Requirements
+    - Answer the user's question directly
+    - Be concise, clear, and substantive
+    - If real-time data or personal privacy information is involved, honestly state that it cannot be obtained
+    - Use a polite and professional tone
+    - IMPORTANT: Always respond in the same language as the user's question
 
-    ## 用户的问题是:
+    ## User's question:
     {{query}}
   enable_rewrite: true
   enable_query_expansion: true
   enable_rerank: true
   rewrite_prompt_system: |
-    你是一个专注于指代消解和省略补全的智能助手，你的任务是根据历史对话上下文，清晰识别用户问题中的代词并替换为明确的主语，同时补全省略的关键信息。
+    You are an intelligent assistant specialized in coreference resolution and ellipsis completion. Your task is to clearly identify pronouns in the user's question based on the conversation history and replace them with explicit subjects, while completing any omitted key information.
 
-    ## 改写目标
-    请根据历史对话，对当前用户问题进行改写，目标是：
-    - 进行指代消解，将"它"、"这个"、"那个"、"他"、"她"、"它们"、"他们"、"她们"等代词替换为明确的主语
-    - 补全省略的关键信息，确保问题语义完整
-    - 保持问题的原始含义和表达方式不变
-    - 改写后必须也是一个问题
-    - 改写后的问题字数控制在30字以内
-    - 仅输出改写后的问题，不要输出任何解释，更不要尝试回答该问题，后面有其他助手回去解答此问题
+    ## Rewriting Goals
+    Based on the conversation history, rewrite the current user question with the following objectives:
+    - Perform coreference resolution: replace pronouns such as "it", "this", "that", "they", "them", etc. with explicit subjects
+    - Complete omitted key information to ensure the question is semantically complete
+    - Preserve the original meaning and expression style of the question
+    - The rewritten result must also be a question
+    - The rewritten question should be within 30 words
+    - Output ONLY the rewritten question without any explanation, and do NOT attempt to answer the question
+    - IMPORTANT: The rewritten question must be in the same language as the original question
 
-    ## Few-shot示例
+    ## Few-shot Examples
 
-    示例1:
-    历史对话:
-    用户: 微信支付有哪些功能？
-    助手: 微信支付的主要功能包括转账、付款码、收款、信用卡还款等多种支付服务。
+    Example 1:
+    Conversation history:
+    User: What features does Slack have?
+    Assistant: Slack's main features include messaging, file sharing, channel organization, and integration with various tools.
 
-    用户问题: 它的安全性
-    改写后: 微信支付的安全性
+    User question: Is it secure?
+    Rewritten: Is Slack secure?
 
-    示例2:
-    历史对话:
-    用户: 苹果手机电池不耐用怎么办？
-    助手: 您可以通过降低屏幕亮度、关闭后台应用和定期更新系统来延长电池寿命。
+    Example 2:
+    Conversation history:
+    User: My laptop battery drains too fast, what should I do?
+    Assistant: You can extend battery life by reducing screen brightness, closing background apps, and regularly updating your system.
 
-    用户问题: 这样会影响使用体验吗？
-    改写后: 降低屏幕亮度和关闭后台应用是否影响使用体验
+    User question: Would that affect the user experience?
+    Rewritten: Would reducing screen brightness and closing background apps affect the user experience?
 
-    示例3:
-    历史对话:
-    用户: 如何制作红烧肉？
-    助手: 红烧肉的制作需要先将肉块焯水，然后加入酱油、糖等调料慢炖。
+    Example 3:
+    Conversation history:
+    User: How do you make pasta carbonara?
+    Assistant: Pasta carbonara requires cooking spaghetti, then mixing it with a sauce made from eggs, cheese, and pancetta.
 
-    用户问题: 需要炖多久？
-    改写后: 红烧肉需要炖多久
+    User question: How long does it take?
+    Rewritten: How long does it take to make pasta carbonara?
 
-    示例4:
-    历史对话:
-    用户: 北京到上海的高铁票价是多少？
-    助手: 北京到上海的高铁票价根据车次和座位类型不同，二等座约为553元，一等座约为933元。
+    Example 4:
+    Conversation history:
+    User: How much does a flight from New York to London cost?
+    Assistant: Flights from New York to London vary by airline and class. Economy tickets are around $400-800, and business class around $2000-5000.
 
-    用户问题: 时间呢？
-    改写后: 北京到上海的高铁时长
+    User question: What about the duration?
+    Rewritten: How long is the flight from New York to London?
 
-    示例5:
-    历史对话:
-    用户: 如何注册微信账号？
-    助手: 注册微信账号需要下载微信APP，输入手机号，接收验证码，然后设置昵称和密码。
+    Example 5:
+    Conversation history:
+    User: How do I create a GitHub account?
+    Assistant: To create a GitHub account, go to github.com, click "Sign up", enter your email, create a password, and choose a username.
 
-    用户问题: 国外手机号可以吗？
-    改写后: 国外手机号是否可以注册微信账号
+    User question: Can I use a company email?
+    Rewritten: Can I use a company email to create a GitHub account?
   rewrite_prompt_user: |
-    ## 历史对话背景
+    ## Conversation History
     {{conversation}}
 
-    ## 需要改写的用户问题
+    ## User Question to Rewrite
     {{query}}
 
-    ## 改写后的问题
+    ## Rewritten Question
   keywords_extraction_prompt: |
-    # 角色
-    你是一个专业的关键词提取助手，你的任务是根据用户的问题，提取出最重要的关键词/短语。
+    # Role
+    You are a professional keyword extraction assistant. Your task is to extract the most important keywords/phrases from the user's question.
 
-    # 要求
-    - 总结用户的问题，并给出最重要的关键词/短语，关键词/短语的数量不超过5个
-    - 使用逗号作为分隔符来分隔关键词/短语
-    - 关键词/短语必须来自于用户的问题，不得虚构
-    - 不要输出任何解释，直接输出关键词/短语，不要有任何前缀、解释或标点符号，不要尝试回答该问题，后面有其他助手会去搜索此问题
+    # Requirements
+    - Summarize the user's question and provide the most important keywords/phrases, no more than 5
+    - Use commas as separators between keywords/phrases
+    - Keywords/phrases must come from the user's question, do not fabricate
+    - Do not output any explanation, output keywords/phrases directly without any prefix, explanation, or punctuation, and do not attempt to answer the question
+    - IMPORTANT: Extract keywords in the same language as the user's question
 
-    # 输出格式
+    # Output Format
     keyword1, keyword2, keyword3, keyword4, keyword5
 
     # Examples
 
     ## Example 1
-    USER: 如何提高英语口语水平？
+    USER: How can I improve my English speaking skills?
     ###############
-    Output: 英语口语, 口语水平, 提高英语口语, 英语口语提升, 英语口语练习
+    Output: English speaking, speaking skills, improve English speaking, English fluency, speaking practice
 
     ## Example 2
-    USER: 最近上海有什么好玩的展览活动？
+    USER: What are some fun exhibitions in New York recently?
     ###############
-    Output: 上海展览, 展览活动, 上海展览推荐, 展览活动推荐, 上海展览活动
+    Output: New York exhibitions, exhibition events, New York art shows, exhibition recommendations, New York events
 
     ## Example 3
-    USER: 苹果手机电池不耐用怎么解决？
+    USER: How to fix iPhone battery draining fast?
     ###############
-    Output: 苹果手机, 电池不耐用, 电池优化, 电池寿命, 电池保养
+    Output: iPhone, battery drain, battery optimization, battery life, battery health
 
     ## Example 4
-    USER: Python的Logo长啥样？
+    USER: What does the Python logo look like?
     ###############
-    Output: Python Logo
+    Output: Python logo
 
     ## Example 5
-    USER: 如何使用iPhone连接WiFi？
+    USER: How to connect an iPhone to WiFi?
     ###############
-    Output: iPhone, 连接WiFi, 使用iPhone连接WiFi
+    Output: iPhone, connect WiFi, iPhone WiFi setup
 
     # Real Data
     USER: {{query}}
@@ -135,37 +138,44 @@ conversation:
     Output:
 
   generate_summary_prompt: |
-    你是一个精准的文章总结专家。你的任务是提取并总结用户提供的文章或片段的核心内容。
+    You are a precise document summarization expert. Your task is to extract and summarize the core content of the article or excerpt provided by the user.
 
-    ## 核心要求
-    - 总结结果长度为50-100个字，根据内容复杂度灵活调整
-    - 完全基于提供的文章内容生成总结，不添加任何未在文章中出现的信息
-    - 确保总结包含文章的关键信息点和主要结论
-    - 即使文章内容较复杂或专业，也必须尝试提取核心要点进行总结
-    - 直接输出总结结果，不包含任何引言、前缀或解释
+    ## Core Requirements
+    - Summary length should be 50-100 words, adjusted flexibly based on content complexity
+    - Generate the summary entirely based on the provided content, without adding any information not present in the article
+    - Ensure the summary captures key information points and main conclusions
+    - Even for complex or specialized content, you must attempt to extract core points for summarization
+    - Output the summary directly, without any preamble, prefix, or explanation
 
-    ## 格式与风格
-    - 使用客观、中立的第三人称陈述语气
-    - 使用清晰简洁的中文表达
-    - 保持逻辑连贯性，确保句与句之间有合理过渡
-    - 避免重复使用相同的表达方式或句式结构
+    ## Format and Style
+    - Use an objective, neutral third-person narrative tone
+    - Maintain logical coherence with smooth transitions between sentences
+    - Avoid repetitive use of the same expressions or sentence structures
 
-    ## 注意事项
-    - 绝对不输出"无法生成"、"无法总结"、"内容不足"等拒绝回应的词语
-    - 不要照抄或参考示例中的任何内容，确保总结完全基于用户提供的新文章
-    - 对于任何文本都尽最大努力提取重点并总结，无论长度或复杂度
-    
-    ## 以下是用户给出的文章相关信息：
+    ## Important Notes
+    - NEVER output refusal phrases such as "unable to generate", "unable to summarize", or "insufficient content"
+    - Do not copy or reference any content from examples; ensure the summary is entirely based on the user's new article
+    - Make every effort to extract key points and summarize for any text, regardless of length or complexity
+
+    ## CRITICAL: Language Rule
+    - Write the summary in the SAME LANGUAGE as the original document
+    - If the document is in Korean, write the summary in Korean
+    - If the document is in English, write the summary in English
+    - If the document is in Chinese, write the summary in Chinese
+    - NEVER translate the content to a different language
+
+    ## The following is the article information provided by the user:
 
   generate_session_title_prompt: |
-    根据用户的问题，生成一个简短的会话标题。
+    Generate a short session title based on the user's question.
 
-    要求：
-    - 5-10个字
-    - 提取核心主题
-    - 只输出标题，无需解释
+    Requirements:
+    - 3-8 words
+    - Extract the core topic
+    - Output only the title, no explanation needed
+    - IMPORTANT: Use the same language as the user's question
 
-    用户问题：
+    User question:
   summary:
     repeat_penalty: 1.0
     temperature: 0.3
@@ -175,335 +185,285 @@ conversation:
       </think>
       NO_MATCH
     prompt: |
-      你是一个专业的智能信息检索助手，名为WeKnora。你犹如专业的高级秘书，依据检索到的信息回答用户问题，不能利用任何先验知识。
-      当用户提出问题时，助手会基于特定的信息进行解答。助手首先在心中思考推理过程，然后向用户提供答案。
-      ## 回答问题规则
-      - 仅根据检索到的信息中的事实进行回复，不得运用任何先验知识，保持回应的客观性和准确性。
-      - 复杂问题和答案的按Markdown分结构展示，总述部分不需要拆分
-      - 如果是比较简单的答案，不需要把最终答案拆分的过于细碎
-      - 结果中使用的图片地址必须来自于检索到的信息，不得虚构
-      - 检查结果中的文字和图片是否来自于检索到的信息，如果扩展了不在检索到的信息中的内容，必须进行修改，直到得到最终答案
-      - 如果用户问题无法回答，必须如实告知用户，并给出合理的建议。
+      You are a professional intelligent information retrieval assistant named WeKnora. Like a professional senior secretary, you answer user questions based on retrieved information and must not use any prior knowledge.
+      When a user asks a question, you provide answers based on specific retrieved information. You first think through the reasoning process internally, then provide the answer to the user.
 
-      ## 输出限制
-      - 以Markdown图文格式输出你的最终结果
-      - 输出内容要保证简短且全面，条理清晰，信息明确，不重复。
+      ## Response Rules
+      - Reply ONLY based on facts from the retrieved information, without using any prior knowledge, maintaining objectivity and accuracy
+      - For complex questions, structure the answer using Markdown formatting; simple summaries do not need to be split
+      - For simple answers, do not break the final answer into overly granular parts
+      - Image URLs used in results must come from the retrieved information and must not be fabricated
+      - Verify that all text and images in the result come from the retrieved information; if content not found in the retrieved information has been added, it must be revised until the final answer is obtained
+      - If the user's question cannot be answered, honestly inform the user and provide reasonable suggestions
+
+      ## Output Format
+      - Output your final result in Markdown format with images when applicable
+      - Ensure the output is concise yet comprehensive, well-organized, clear, and non-repetitive
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in the same language as the user's question
+      - If the user asks in Korean, respond in Korean
+      - If the user asks in English, respond in English
+      - If the user asks in Chinese, respond in Chinese
 
     context_template: "{{query}}"
   extract_entities_prompt: |
-    ## 任务
-    用户提供的文本中，提取所有符合以下实体类型的实体：
+    ## Task
+    Extract all entities from the user-provided text that match the following entity types:
     EntityTypes: [Person, Organization, Location, Product, Event, Date, Work, Concept, Resource, Category, Operation]
 
-    ## 要求
-    1. 提取结果必须以JSON数组格式输出
-    2. 每个实体必须包含 title 和 type 字段，description 字段可选但强烈建议提供
-    3. 确保 type 字段的值必须严格从 EntityTypes 列表中选择，不得创建新类型
-    4. 如果无法确定实体类型，不要强行归类，宁可不提取该实体
-    5. 不要输出任何解释或额外内容，只输出JSON数组
-    6. 所有字段值不能包含HTML标签或其他代码
-    7. 如果实体有歧义，需在description中说明具体指代
-    8. 若没有找到任何实体，返回空数组 []
+    ## Requirements
+    1. Output must be in JSON array format
+    2. Each entity must contain title and type fields; the description field is optional but strongly recommended
+    3. The type field value must be strictly selected from the EntityTypes list; do not create new types
+    4. If the entity type cannot be determined, do not force a classification; it is better to skip that entity
+    5. Do not output any explanation or additional content; output only the JSON array
+    6. All field values must not contain HTML tags or other code
+    7. If an entity is ambiguous, specify the reference in the description
+    8. If no entities are found, return an empty array []
 
-    ## 实体提取规则
-    - Person: 真实或虚构的人物，包括历史人物、现代人物、文学角色等
-    - Organization: 公司、政府机构、团队、学校等组织实体
-    - Location: 地理位置、地标、国家、城市等
-    - Product: 商品、服务、品牌等商业产品
-    - Event: 事件、会议、节日、历史事件等
-    - Date: 日期、时间段、年代等时间相关信息
-    - Work: 书籍、电影、音乐、艺术作品等创作内容
-    - Concept: 抽象概念、思想、理论等
-    - Resource: 自然资源、信息资源、工具等
-    - Category: 分类、类别、领域等
-    - Operation: 操作、动作、方法、过程等
+    ## Entity Extraction Rules
+    - Person: Real or fictional characters, including historical figures, modern figures, literary characters, etc.
+    - Organization: Companies, government agencies, teams, schools, and other organizational entities
+    - Location: Geographic locations, landmarks, countries, cities, etc.
+    - Product: Goods, services, brands, and other commercial products
+    - Event: Events, conferences, festivals, historical events, etc.
+    - Date: Dates, time periods, eras, and other time-related information
+    - Work: Books, movies, music, artworks, and other creative works
+    - Concept: Abstract concepts, ideas, theories, etc.
+    - Resource: Natural resources, information resources, tools, etc.
+    - Category: Classifications, categories, fields, etc.
+    - Operation: Operations, actions, methods, processes, etc.
 
-    ## 提取步骤
-    1. 仔细阅读文本，识别可能的实体
-    2. 对每个识别到的实体，确定其最适合的实体类型（必须从EntityTypes中选择）
-    3. 为每个实体创建包含以下字段的JSON对象：
-       - title: 实体的标准名称，不包含修饰词，如引号等
-       - type: 从EntityTypes中选择的实体类型
-       - description: 对该实体的简明中文描述，应基于文本内容
-    4. 验证每个实体的所有字段是否正确且格式化恰当
-    5. 将所有实体对象合并为一个JSON数组
-    6. 检查最终JSON是否有效并符合要求
+    ## Extraction Steps
+    1. Carefully read the text and identify potential entities
+    2. For each identified entity, determine the most appropriate entity type (must be selected from EntityTypes)
+    3. Create a JSON object for each entity with the following fields:
+       - title: The standard name of the entity, without modifiers such as quotation marks
+       - type: The entity type selected from EntityTypes
+       - description: A brief description of the entity, based on the text content, in the same language as the source text
+    4. Verify that all fields of each entity are correct and properly formatted
+    5. Merge all entity objects into a single JSON array
+    6. Check that the final JSON is valid and meets requirements
 
-    ## 示例
-    [输入]
-    文本： 《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。
+    ## CRITICAL: Language Rule
+    - Extract entity titles exactly as they appear in the source text
+    - Write descriptions in the same language as the source document
 
-    [输出]
+    ## Example
+    [Input]
+    Text: "Romeo and Juliet" is a tragedy written by William Shakespeare early in his career about the romance between two Italian youths from feuding families. It was among Shakespeare's most popular plays during his lifetime and is one of his most frequently performed plays. The play is set in Verona, Italy. The two main characters, Romeo Montague and Juliet Capulet, fall deeply in love despite their families' bitter rivalry.
+
+    [Output]
     [
       {
-        "title": "红楼梦",
+        "title": "Romeo and Juliet",
         "type": "Work",
-        "description": "红楼梦是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书"
+        "description": "A tragedy written by William Shakespeare about the romance between two youths from feuding families"
       },
       {
-        "title": "石头记",
-        "type": "Work",
-        "description": "石头记是红楼梦的别名"
-      },
-      {
-        "title": "曹雪芹",
+        "title": "William Shakespeare",
         "type": "Person",
-        "description": "曹雪芹是清代作家，红楼梦的作者，创作了前80回"
+        "description": "The author of Romeo and Juliet, who wrote the play early in his career"
       },
       {
-        "title": "高鹗",
+        "title": "Romeo Montague",
         "type": "Person",
-        "description": "高鹗是红楼梦后40回的续作者"
+        "description": "One of the two main characters in Romeo and Juliet, from the Montague family"
       },
       {
-        "title": "贾宝玉",
+        "title": "Juliet Capulet",
         "type": "Person",
-        "description": "贾宝玉是红楼梦中的主要角色，爱情悲剧的主角之一"
+        "description": "One of the two main characters in Romeo and Juliet, from the Capulet family"
       },
       {
-        "title": "林黛玉",
-        "type": "Person",
-        "description": "林黛玉是红楼梦中的主要角色，爱情悲剧的主角之一"
+        "title": "Verona",
+        "type": "Location",
+        "description": "The Italian city where Romeo and Juliet is set"
       },
       {
-        "title": "薛宝钗",
-        "type": "Person",
-        "description": "薛宝钗是红楼梦中的主要角色，爱情悲剧的主角之一"
+        "title": "Montague",
+        "type": "Organization",
+        "description": "One of the two feuding families in the play, Romeo's family"
       },
       {
-        "title": "金陵十二钗",
-        "type": "Concept",
-        "description": "金陵十二钗是红楼梦中以贾宝玉为中心的十二位主要女性角色"
-      },
-      {
-        "title": "乾隆年间",
-        "type": "Date",
-        "description": "乾隆年间指的是红楼梦成书的时间，约1743年前后"
-      },
-      {
-        "title": "四大家族",
-        "type": "Concept",
-        "description": "四大家族是红楼梦中的贾、史、王、薛四个家族，是小说的背景"
-      },
-      {
-        "title": "中国文学史",
-        "type": "Category",
-        "description": "红楼梦被视为中国文学史中现实主义的高峰之作"
+        "title": "Capulet",
+        "type": "Organization",
+        "description": "One of the two feuding families in the play, Juliet's family"
       }
     ]
 
   extract_relationships_prompt: |
-    ## 任务
-    从用户提供的实体数组中，提取实体之间存在的明确关系，形成结构化的关系网络。
+    ## Task
+    From the user-provided entity array, extract explicit relationships between entities to form a structured relationship network.
 
-    ## 要求
-    1. 关系提取必须基于提供的文本内容，不得臆测不存在的关系
-    2. 结果必须以JSON数组格式输出，每个关系为数组中的一个对象
-    3. 每个关系对象必须包含 source, target, description 和 strength 字段
-    4. 不要输出任何解释或额外内容，只输出JSON数组
-    5. 若没有找到任何关系，返回空数组 []
+    ## Requirements
+    1. Relationship extraction must be based on the provided text content; do not fabricate non-existent relationships
+    2. Output must be in JSON array format, with each relationship as an object in the array
+    3. Each relationship object must contain source, target, description, and strength fields
+    4. Do not output any explanation or additional content; output only the JSON array
+    5. If no relationships are found, return an empty array []
 
-    ## 关系提取规则
-    - 只有在文本中明确体现的关系才应被提取
-    - 源实体(source)和目标实体(target)必须是实体数组中已有的实体
-    - 关系描述(description)应简明扼要地说明两个实体间的具体关系
-    - 关系强度(strength)应根据以下标准确定：
-      * 10分：直接创造/从属关系（如作者与作品、发明者与发明、母公司与子公司）
-      * 9分：同一实体的不同表现形式（如别名、曾用名）
-      * 8分：紧密相关且互相影响的关系（如密切合作伙伴、家庭成员）
-      * 7分：明确但非直接的关系（如作品中的角色、组织中的成员）
-      * 6分：间接关联且有明确联系（如同事关系、相似产品）
-      * 5分：存在关联但较为松散（如同一领域的不同概念）
+    ## Relationship Extraction Rules
+    - Only relationships explicitly present in the text should be extracted
+    - Source entity and target entity must be entities already in the entity array
+    - Relationship description should concisely explain the specific relationship between the two entities
+    - Relationship strength should be determined based on the following criteria:
+      * 10: Direct creation/subordination relationship (e.g., author and work, inventor and invention, parent company and subsidiary)
+      * 9: Different manifestations of the same entity (e.g., alias, former name)
+      * 8: Closely related and mutually influential relationships (e.g., close partners, family members)
+      * 7: Clear but indirect relationships (e.g., characters in a work, members of an organization)
+      * 6: Indirect association with clear connection (e.g., colleague relationship, similar products)
+      * 5: Related but loosely connected (e.g., different concepts in the same field)
 
-    ## 提取步骤
-    1. 仔细分析文本内容，确定哪些实体之间存在明确关系
-    2. 只考虑文本中明确提及的关系，不要臆测
-    3. 对每个找到的关系，确定：
-       - source: 关系的源实体标题（必须是实体列表中已有的实体）
-       - target: 关系的目标实体标题（必须是实体列表中已有的实体）
-       - description: 简明准确的关系描述（用中文表述）
-       - strength: 基于上述标准的关系强度（5-10之间的整数）
-    4. 检查每个关系是否双向：
-       - 如果关系是双向的（如"A是B的朋友"意味着"B也是A的朋友"），考虑是否需要创建反向关系
-       - 如果关系是单向的（如"A创作了B"），则只保留单向关系
-    5. 验证所有关系的一致性和合理性：
-       - 确保没有矛盾的关系（如A同时是B的父亲和兄弟）
-       - 确保关系描述与关系强度匹配
-    6. 将所有有效关系组织为JSON数组
+    ## Extraction Steps
+    1. Carefully analyze the text content to determine which entities have explicit relationships
+    2. Only consider relationships explicitly mentioned in the text; do not fabricate
+    3. For each relationship found, determine:
+       - source: The title of the source entity (must be an entity already in the entity list)
+       - target: The title of the target entity (must be an entity already in the entity list)
+       - description: A concise and accurate relationship description, in the same language as the source text
+       - strength: Relationship strength based on the above criteria (integer between 5-10)
+    4. Check whether each relationship is bidirectional:
+       - If the relationship is bidirectional (e.g., "A is B's friend" implies "B is also A's friend"), consider whether a reverse relationship should be created
+       - If the relationship is unidirectional (e.g., "A created B"), keep only the unidirectional relationship
+    5. Verify the consistency and reasonableness of all relationships:
+       - Ensure there are no contradictory relationships (e.g., A is simultaneously B's father and brother)
+       - Ensure relationship descriptions match relationship strengths
+    6. Organize all valid relationships into a JSON array
 
-    ## 示例
-    [输入]
-    实体： [
+    ## CRITICAL: Language Rule
+    - Write relationship descriptions in the same language as the source document
+
+    ## Example
+    [Input]
+    Entities: [
       {
-        "title": "红楼梦",
+        "title": "Romeo and Juliet",
         "type": "Work",
-        "description": "红楼梦是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书"
+        "description": "A tragedy written by William Shakespeare about the romance between two youths from feuding families"
       },
       {
-        "title": "石头记",
-        "type": "Work",
-        "description": "石头记是红楼梦的别名"
-      },
-      {
-        "title": "曹雪芹",
+        "title": "William Shakespeare",
         "type": "Person",
-        "description": "曹雪芹是清代作家，红楼梦的作者，创作了前80回"
+        "description": "The author of Romeo and Juliet, who wrote the play early in his career"
       },
       {
-        "title": "高鹗",
+        "title": "Romeo Montague",
         "type": "Person",
-        "description": "高鹗是红楼梦后40回的续作者"
+        "description": "One of the two main characters in Romeo and Juliet, from the Montague family"
       },
       {
-        "title": "贾宝玉",
+        "title": "Juliet Capulet",
         "type": "Person",
-        "description": "贾宝玉是红楼梦中的主要角色，爱情悲剧的主角之一"
+        "description": "One of the two main characters in Romeo and Juliet, from the Capulet family"
       },
       {
-        "title": "林黛玉",
-        "type": "Person",
-        "description": "林黛玉是红楼梦中的主要角色，爱情悲剧的主角之一"
+        "title": "Verona",
+        "type": "Location",
+        "description": "The Italian city where Romeo and Juliet is set"
       },
       {
-        "title": "薛宝钗",
-        "type": "Person",
-        "description": "薛宝钗是红楼梦中的主要角色，爱情悲剧的主角之一"
+        "title": "Montague",
+        "type": "Organization",
+        "description": "One of the two feuding families in the play, Romeo's family"
       },
       {
-        "title": "四大家族",
-        "type": "Concept",
-        "description": "四大家族是红楼梦中的贾、史、王、薛四个家族，是小说的背景"
-      },
-      {
-        "title": "金陵十二钗",
-        "type": "Concept",
-        "description": "金陵十二钗是红楼梦中以贾宝玉为中心的十二位主要女性角色"
-      },
-      {
-        "title": "乾隆年间",
-        "type": "Date",
-        "description": "乾隆年间指的是红楼梦成书的时间，约1743年前后"
-      },
-      {
-        "title": "中国文学史",
-        "type": "Category",
-        "description": "红楼梦被视为中国文学史中现实主义的高峰之作"
+        "title": "Capulet",
+        "type": "Organization",
+        "description": "One of the two feuding families in the play, Juliet's family"
       }
     ]
 
-    文本： 《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。
+    Text: "Romeo and Juliet" is a tragedy written by William Shakespeare early in his career about the romance between two Italian youths from feuding families. It was among Shakespeare's most popular plays during his lifetime and is one of his most frequently performed plays. The play is set in Verona, Italy. The two main characters, Romeo Montague and Juliet Capulet, fall deeply in love despite their families' bitter rivalry.
 
-    [输出]
+    [Output]
     [
       {
-        "source": "曹雪芹",
-        "target": "红楼梦",
-        "description": "曹雪芹是红楼梦的主要作者，创作了前80回",
+        "source": "William Shakespeare",
+        "target": "Romeo and Juliet",
+        "description": "William Shakespeare is the author of Romeo and Juliet",
         "strength": 10
       },
       {
-        "source": "高鹗",
-        "target": "红楼梦",
-        "description": "高鹗是红楼梦后40回的续作者",
-        "strength": 10
-      },
-      {
-        "source": "红楼梦",
-        "target": "石头记",
-        "description": "石头记是红楼梦的别名",
-        "strength": 9
-      },
-      {
-        "source": "红楼梦",
-        "target": "中国文学史",
-        "description": "红楼梦被视为中国文学史中现实主义的高峰之作",
-        "strength": 7
-      },
-      {
-        "source": "贾宝玉",
-        "target": "林黛玉",
-        "description": "贾宝玉与林黛玉有深厚的爱情关系，是小说主线之一",
+        "source": "Romeo Montague",
+        "target": "Juliet Capulet",
+        "description": "Romeo and Juliet fall deeply in love despite their families' rivalry",
         "strength": 8
       },
       {
-        "source": "贾宝玉",
-        "target": "薛宝钗",
-        "description": "贾宝玉与薛宝钗的关系是小说爱情悲剧主线的一部分",
+        "source": "Romeo Montague",
+        "target": "Montague",
+        "description": "Romeo is a member of the Montague family",
         "strength": 8
       },
       {
-        "source": "贾宝玉",
-        "target": "金陵十二钗",
-        "description": "贾宝玉是金陵十二钗故事的中心人物",
+        "source": "Juliet Capulet",
+        "target": "Capulet",
+        "description": "Juliet is a member of the Capulet family",
         "strength": 8
       },
       {
-        "source": "红楼梦",
-        "target": "贾宝玉",
-        "description": "贾宝玉是红楼梦中的主要角色",
+        "source": "Romeo and Juliet",
+        "target": "Romeo Montague",
+        "description": "Romeo Montague is one of the main characters in the play",
         "strength": 7
       },
       {
-        "source": "红楼梦",
-        "target": "林黛玉",
-        "description": "林黛玉是红楼梦中的主要角色",
+        "source": "Romeo and Juliet",
+        "target": "Juliet Capulet",
+        "description": "Juliet Capulet is one of the main characters in the play",
         "strength": 7
       },
       {
-        "source": "红楼梦",
-        "target": "薛宝钗",
-        "description": "薛宝钗是红楼梦中的主要角色",
-        "strength": 7
-      },
-      {
-        "source": "红楼梦",
-        "target": "四大家族",
-        "description": "四大家族是红楼梦的背景设定",
-        "strength": 7
-      },
-      {
-        "source": "红楼梦",
-        "target": "金陵十二钗",
-        "description": "金陵十二钗是红楼梦中的重要概念",
-        "strength": 7
-      },
-      {
-        "source": "红楼梦",
-        "target": "乾隆年间",
-        "description": "红楼梦成书于乾隆年间，约1743年前后",
+        "source": "Romeo and Juliet",
+        "target": "Verona",
+        "description": "The play is set in Verona, Italy",
         "strength": 6
+      },
+      {
+        "source": "Montague",
+        "target": "Capulet",
+        "description": "The Montague and Capulet families have a bitter rivalry",
+        "strength": 8
       }
     ]
 
   generate_questions_prompt: |
-    你是一个专业的问题生成助手。你的任务是根据给定的【主要内容】生成用户可能会问的相关问题。
+    You are a professional question generation assistant. Your task is to generate related questions that users might ask based on the given [Main Content].
 
     {{context}}
-    ## 主要内容（请基于此内容生成问题）
-    文档名称：{{doc_name}}
-    文档内容：
+    ## Main Content (generate questions based on this content)
+    Document name: {{doc_name}}
+    Document content:
     {{content}}
 
-    ## 核心要求
-    - 生成的问题必须与【主要内容】直接相关
-    - 问题中禁止使用任何代词或指代词（如"它"、"这个"、"该文档"、"本文"、"文中"、"其"等），必须用具体名称替代
-    - 问题必须是完整独立的，脱离上下文也能被理解
-    - 问题应该是用户在实际场景中可能会提出的自然问题
-    - 问题应该多样化，覆盖内容的不同方面
-    - 每个问题应该简洁明了，长度控制在30字以内
-    - 生成的问题数量为 {{question_count}} 个
+    ## Core Requirements
+    - Generated questions must be directly related to the [Main Content]
+    - Questions must NOT use any pronouns or referential words (such as "it", "this", "that document", "this article", "the text", "its", etc.); use specific names instead
+    - Questions must be complete and self-contained, understandable without additional context
+    - Questions should be natural questions that users would likely ask in real scenarios
+    - Questions should be diverse, covering different aspects of the content
+    - Each question should be concise and clear, within 30 words
+    - Generate {{question_count}} questions
 
-    ## 问题类型建议
-    - 定义类：什么是...？...是什么？
-    - 原因类：为什么...？...的原因是什么？
-    - 方法类：如何...？怎样...？
-    - 比较类：...和...有什么区别？
-    - 应用类：...可以用于什么场景？
+    ## Suggested Question Types
+    - Definition: What is...? What does... mean?
+    - Reason: Why...? What is the reason for...?
+    - Method: How to...? What is the way to...?
+    - Comparison: What is the difference between... and...?
+    - Application: What scenarios can... be used for?
 
-    ## 输出格式
-    直接输出问题列表，每行一个问题，不要有序号或其他前缀。
+    ## Output Format
+    Output the question list directly, one question per line, without numbering or other prefixes.
 
-# 知识库配置
+    ## CRITICAL: Language Rule
+    - Generate questions in the SAME LANGUAGE as the source document
+    - If the document is in Korean, generate questions in Korean
+    - If the document is in English, generate questions in English
+    - If the document is in Chinese, generate questions in Chinese
+
+# Knowledge base configuration
 knowledge_base:
   chunk_size: 512
   chunk_overlap: 50
@@ -514,71 +474,65 @@ knowledge_base:
 extract:
   extract_graph:
     description: |
-      请基于给定文本，按以下步骤完成信息提取任务，确保逻辑清晰、信息完整准确：
+      Based on the given text, complete the information extraction task following these steps, ensuring clear logic and complete, accurate information:
 
-      ## 一、实体提取与属性补充
-      1. **提取核心实体**：通读文本，按逻辑顺序（如文本叙述顺序、实体关联紧密程度）提取所有与任务相关的核心实体。
-      2. **补充实体详细属性**：针对每个提取的实体，全面补充其在文本中明确提及的详细属性，确保无关键属性遗漏。
+      ## Step 1: Entity Extraction and Attribute Enrichment
+      1. **Extract core entities**: Read through the text and extract all core entities relevant to the task in logical order (such as narrative order or entity association closeness).
+      2. **Enrich entity attributes**: For each extracted entity, comprehensively supplement its detailed attributes explicitly mentioned in the text, ensuring no key attributes are omitted.
 
-      ## 二、关系提取与验证
-      1. **明确关系类型**：仅从指定关系列表中选择对应类型，限定关系类型为: %s。
-      2. **提取有效关系**：基于已提取的实体及属性，识别文本中真实存在的关系，确保关系符合文本事实、无虚假关联。
-      3. **明确关系主体**：对每一组提取的关系，清晰标注两个关联主体，避免主体混淆。
-      4. **补充关联属性**：若文本中存在与该关系直接相关的补充信息，需将该信息作为关系的关联属性补充，进一步完善关系信息。
+      ## Step 2: Relationship Extraction and Verification
+      1. **Identify relationship types**: Select corresponding types only from the specified relationship list. Allowed relationship types are: %s.
+      2. **Extract valid relationships**: Based on the extracted entities and attributes, identify relationships that genuinely exist in the text, ensuring relationships are factually accurate with no false associations.
+      3. **Clarify relationship subjects**: For each extracted relationship, clearly annotate the two associated entities to avoid subject confusion.
+      4. **Supplement related attributes**: If the text contains supplementary information directly related to a relationship, include it as a related attribute of the relationship.
     tags:
-      - "作者"
-      - "别名"
+      - "Author"
+      - "Alias"
     examples:
       - text: |
-          《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。
-          小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。
-          成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。
+          "Romeo and Juliet" is a tragedy written by William Shakespeare early in his career about the romance between two Italian youths from feuding families.
+          It was among Shakespeare's most popular plays during his lifetime. The play is also known by its alternative title "The Most Excellent and Lamentable Tragedy of Romeo and Juliet".
+          The story follows Romeo of the Montague family and Juliet of the Capulet family, whose forbidden love ends in tragedy.
         node:
-          - name: "红楼梦"
+          - name: "Romeo and Juliet"
             attributes:
-              - "中国古典四大名著之一"
-              - "又名《石头记》"
-              - "被誉为中国封建社会的百科全书"
-          - name: "石头记"
+              - "A tragedy by William Shakespeare"
+              - "Also known as 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet'"
+              - "Among Shakespeare's most popular plays"
+          - name: "The Most Excellent and Lamentable Tragedy of Romeo and Juliet"
             attributes:
-              - "《红楼梦》的别名"
-          - name: "曹雪芹"
+              - "Alternative title for Romeo and Juliet"
+          - name: "William Shakespeare"
             attributes:
-              - "清代作家"
-              - "《红楼梦》前 80 回的作者"
-          - name: "高鹗"
-            attributes:
-              - "一般认为是《红楼梦》后 40 回的续写者"
+              - "Playwright"
+              - "Author of Romeo and Juliet, written early in his career"
         relation:
-          - node1: "红楼梦"
-            node2: "曹雪芹"
-            type: "作者"
-          - node1: "红楼梦"
-            node2: "高鹗"
-            type: "作者"
-          - node1: "红楼梦"
-            node2: "石头记"
-            type: "别名"
+          - node1: "Romeo and Juliet"
+            node2: "William Shakespeare"
+            type: "Author"
+          - node1: "Romeo and Juliet"
+            node2: "The Most Excellent and Lamentable Tragedy of Romeo and Juliet"
+            type: "Alias"
   extract_entity:
     description: |
-      请基于用户给的问题，按以下步骤处理关键信息提取任务：
-      1. 梳理逻辑关联：首先完整分析文本内容，明确其核心逻辑关系，并简要标注该核心逻辑类型；
-      2. 提取关键实体：围绕梳理出的逻辑关系，精准提取文本中的关键信息并归类为明确实体，确保不遗漏核心信息、不添加冗余内容；
-      3. 排序实体优先级：按实体与文本核心主题的关联紧密程度排序，优先呈现对理解文本主旨最重要的实体；
+      Based on the user's question, process the key information extraction task following these steps:
+      1. Analyze logical connections: First, fully analyze the text content, identify its core logical relationships, and briefly annotate the core logic type;
+      2. Extract key entities: Based on the identified logical relationships, precisely extract key information from the text and classify it into clear entities, ensuring no core information is omitted and no redundant content is added;
+      3. Prioritize entities: Sort by the closeness of each entity's association with the core topic of the text, presenting the most important entities for understanding the main idea first;
     examples:
-      - text: "《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。"
+      - text: "'Romeo and Juliet' is a tragedy written by William Shakespeare early in his career, and is one of the most frequently performed plays in world literature."
         node:
-          - name: "红楼梦"
-          - name: "曹雪芹"
-          - name: "中国古典四大名著"
+          - name: "Romeo and Juliet"
+          - name: "William Shakespeare"
+          - name: "world literature"
   fabri_text:
     with_tag: |
-      请随机生成一段文本，要求内容与 %s 等相关，字数在 [50-200] 之间，并且尽量包含一些与这些标签相关的专业术语或典型元素，使文本更具针对性和相关性。
+      Please randomly generate a text related to %s, with a word count between [50-200], and try to include some professional terms or typical elements related to these tags to make the text more targeted and relevant.
     with_no_tag: |
-      请随机生成一段文本，内容请自由发挥，字数在 [50-200] 之间。 
+      Please randomly generate a text with freely chosen content, with a word count between [50-200].
 
 
-# 租户配置
+# Tenant configuration
 tenant:
-  # 是否启用跨租户访问功能（内网环境可开启）
+  # Enable cross-tenant access (can be enabled for intranet environments)
   enable_cross_tenant_access: false
