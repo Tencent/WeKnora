@@ -1848,21 +1848,19 @@ const handleAddToKnowledge = (answerEvent: any) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 5px 12px;
-  font-size: 13px;
+  padding: 6px 14px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  border-radius: 6px;
-  background: linear-gradient(135deg, rgba(7, 192, 95, 0.06) 0%, rgba(7, 192, 95, 0.02) 50%, transparent 100%);
-  border: 1px solid rgba(7, 192, 95, 0.12);
-  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  background-color: var(--td-bg-color-container);
+  border: .5px solid var(--td-component-stroke);
+  box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
   color: var(--td-text-color-primary);
-  transition: all 0.25s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover {
-    background: linear-gradient(135deg, rgba(7, 192, 95, 0.10) 0%, rgba(7, 192, 95, 0.04) 50%, transparent 100%);
-    border-color: rgba(7, 192, 95, 0.22);
-    box-shadow: 0 2px 8px rgba(7, 192, 95, 0.08);
+    background-color: rgba(7, 192, 95, 0.04);
   }
 }
 
@@ -1871,14 +1869,16 @@ const handleAddToKnowledge = (answerEvent: any) => {
   align-items: center;
 
   img {
-    width: 14px;
-    height: 14px;
-    margin-right: 7px;
+    width: 16px;
+    height: 16px;
+    color: var(--td-brand-color);
+    fill: currentColor;
+    margin-right: 8px;
   }
 
   span {
     white-space: nowrap;
-    font-size: 13px;
+    font-size: 12px;
 
     :deep(strong) {
       color: var(--td-brand-color);
