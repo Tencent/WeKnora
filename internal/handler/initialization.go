@@ -2094,15 +2094,15 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 
 	var req FabriTextRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "生成示例文本请求参数错误")
-		c.Error(errors.NewBadRequestError("生成示例文本请求参数错误"))
+		logger.Error(ctx, "failed to parse fabri text request")
+		c.Error(errors.NewBadRequestError("invalid fabri text request parameters"))
 		return
 	}
 
 	result, err := h.fabriText(ctx, req.Tags, req.LLMConfig)
 	if err != nil {
-		logger.Error(ctx, "生成示例文本失败", err)
-		c.Error(errors.NewInternalServerError("生成示例文本失败: " + err.Error()))
+		logger.Error(ctx, "failed to generate fabri text", err)
+		c.Error(errors.NewInternalServerError("failed to generate fabri text: " + err.Error()))
 		return
 	}
 
@@ -2158,7 +2158,8 @@ type FabriTagResponse struct {
 }
 
 var tagOptions = []string{
-	"内容", "文化", "人物", "事件", "时间", "地点", "作品", "作者", "关系", "属性",
+	"Content", "Culture", "Person", "Event", "Time", "Location",
+	"Work", "Author", "Relation", "Attribute",
 }
 
 // FabriTag godoc

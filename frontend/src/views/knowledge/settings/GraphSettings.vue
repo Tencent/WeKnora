@@ -346,7 +346,7 @@ const systemInfo = ref<any>(null)
 
 // 计算图数据库是否启用
 const isGraphDatabaseEnabled = computed(() => {
-  return systemInfo.value?.graph_database_engine && systemInfo.value.graph_database_engine !== '未启用'
+  return systemInfo.value?.graph_database_engine && systemInfo.value.graph_database_engine !== 'Not Enabled'
 })
 
 // Watch for prop changes
@@ -516,18 +516,18 @@ const handleExtract = async () => {
 
 // 默认示例
 const defaultExtractExample = () => {
-  localGraphExtract.value.text = `《红楼梦》，又名《石头记》，是清代作家曹雪芹创作的中国古典四大名著之一，被誉为中国封建社会的百科全书。该书前80回由曹雪芹所著，后40回一般认为是高鹗所续。小说以贾、史、王、薛四大家族的兴衰为背景，以贾宝玉、林黛玉和薛宝钗的爱情悲剧为主线，刻画了以贾宝玉和金陵十二钗为中心的正邪两赋、贤愚并出的高度复杂的人物群像。成书于乾隆年间（1743年前后），是中国文学史上现实主义的高峰，对后世影响深远。`
-  localGraphExtract.value.tags = ['作者', '别名']
+  localGraphExtract.value.text = `"Romeo and Juliet" is a tragedy written by William Shakespeare early in his career, and is one of the most frequently performed plays in world literature. The play follows two young lovers from feuding families in Verona, Italy — the Montagues and the Capulets. Written around 1594-1596, it was first published in quarto in 1597. The full title is "The Most Excellent and Lamentable Tragedy of Romeo and Juliet." The story has been adapted countless times for stage, film, and other media.`
+  localGraphExtract.value.tags = ['Author', 'Alias']
   localGraphExtract.value.nodes = [
-    {name: '红楼梦', attributes: ['中国古典四大名著之一', '又名《石头记》', '被誉为中国封建社会的百科全书']},
-    {name: '石头记', attributes: ['《红楼梦》的别名']},
-    {name: '曹雪芹', attributes: ['清代作家', '《红楼梦》前 80 回的作者']},
-    {name: '高鹗', attributes: ['一般认为是《红楼梦》后 40 回的续写者']}
+    {name: 'Romeo and Juliet', attributes: ['One of the most frequently performed plays', 'Written around 1594-1596', 'A tragedy']},
+    {name: 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet', attributes: ['Full title of Romeo and Juliet']},
+    {name: 'William Shakespeare', attributes: ['English playwright', 'Author of Romeo and Juliet']},
+    {name: 'Verona', attributes: ['City in Italy', 'Setting of the play']}
   ]
   localGraphExtract.value.relations = [
-    {node1: '红楼梦', node2: '石头记', type: '别名'},
-    {node1: '红楼梦', node2: '曹雪芹', type: '作者'},
-    {node1: '红楼梦', node2: '高鹗', type: '作者'}
+    {node1: 'Romeo and Juliet', node2: 'The Most Excellent and Lamentable Tragedy of Romeo and Juliet', type: 'Alias'},
+    {node1: 'Romeo and Juliet', node2: 'William Shakespeare', type: 'Author'},
+    {node1: 'Romeo and Juliet', node2: 'Verona', type: 'Setting'}
   ]
   handleNodesChange()
   MessagePlugin.success(t('graphSettings.exampleLoaded'))

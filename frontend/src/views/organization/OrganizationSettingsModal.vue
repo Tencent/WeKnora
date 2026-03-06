@@ -681,7 +681,7 @@
         </p>
         <div class="upgrade-form-item">
           <label>{{ $t('organization.upgrade.selectRole') }}</label>
-          <t-select v-model="upgradeForm.requested_role" :options="upgradeRoleOptions" />
+          <t-select v-model="upgradeForm.requested_role" :options="upgradeRoleOptions" :placeholder="$t('organization.upgrade.selectRole')" />
         </div>
         <div class="upgrade-form-item">
           <label>{{ $t('organization.upgrade.reason') }}</label>
@@ -725,7 +725,7 @@
 
         <div class="add-member-field">
           <label>{{ $t('organization.addMember.selectRole') }}</label>
-          <t-select v-model="addMemberRole" :options="addMemberRoleOptions" />
+          <t-select v-model="addMemberRole" :options="addMemberRoleOptions" :placeholder="$t('organization.addMember.selectRole')" />
         </div>
       </div>
     </t-dialog>

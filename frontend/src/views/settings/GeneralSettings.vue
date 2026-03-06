@@ -37,6 +37,7 @@
           <t-select
             v-model="localTheme"
             style="width: 280px;"
+            :placeholder="$t('theme.selectTheme')"
             @change="handleThemeChange"
           >
             <t-option value="light" :label="$t('theme.light')">{{ $t('theme.light') }}</t-option>
