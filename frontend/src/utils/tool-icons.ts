@@ -31,15 +31,15 @@ const matchTypeIconKeys: Record<string, string> = {
     graph: '🕸️',
 };
 
-// Match type to icon mapping (Chinese keys preserved for API compatibility)
+// Match type to icon mapping (keys match backend API response)
 export const matchTypeIcons: Record<string, string> = {
-    '向量匹配': '🎯',
-    '关键词匹配': '🔤',
-    '相邻块匹配': '📌',
-    '历史匹配': '📜',
-    '父块匹配': '⬆️',
-    '关系块匹配': '🔗',
-    '图谱匹配': '🕸️',
+    'Vector Match': '🎯',
+    'Keyword Match': '🔤',
+    'Adjacent Chunk Match': '📌',
+    'History Match': '📜',
+    'Parent Chunk Match': '⬆️',
+    'Relation Chunk Match': '🔗',
+    'Graph Match': '🕸️',
 };
 
 // Get icon for a tool name
