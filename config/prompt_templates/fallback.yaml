@@ -1,47 +1,48 @@
-# 兜底提示词模板
+# Fallback prompt templates
 templates:
   - id: "default_fallback"
-    name: "标准兜底"
-    description: "标准的兜底回复模板"
+    name: "Standard Fallback"
+    description: "Standard fallback response template"
     content: |
-      抱歉，我在知识库中没有找到与您问题直接相关的内容。
+      Sorry, I could not find content directly related to your question in the knowledge base.
 
-      您可以尝试：
-      1. 换一种方式描述您的问题
-      2. 提供更多具体信息
-      3. 咨询相关领域的专业人员
+      You can try:
+      1. Rephrasing your question in a different way
+      2. Providing more specific information
+      3. Consulting a professional in the relevant field
 
-      如果您有其他问题，我很乐意继续为您服务。
+      If you have other questions, I'm happy to continue helping you.
 
   - id: "polite_fallback"
-    name: "礼貌兜底"
-    description: "更加礼貌友好的兜底回复"
+    name: "Polite Fallback"
+    description: "More polite and friendly fallback response"
     content: |
-      非常抱歉，目前我无法为您提供这个问题的准确答案。这可能是因为：
-      - 该问题超出了我的知识范围
-      - 知识库中暂无相关内容
+      I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
+      - The question is beyond my knowledge scope
+      - The knowledge base does not yet contain relevant content
 
-      建议您：
-      1. 尝试用不同的关键词重新提问
-      2. 将问题拆分为更具体的小问题
-      3. 联系人工客服获取帮助
+      Suggestions:
+      1. Try rephrasing with different keywords
+      2. Break down your question into more specific sub-questions
+      3. Contact customer support for assistance
 
-      感谢您的理解，期待能在其他问题上帮助到您！
+      Thank you for your understanding, and I look forward to helping you with other questions!
 
   - id: "brief_fallback"
-    name: "简洁兜底"
-    description: "简短的兜底回复"
-    content: "抱歉，我暂时无法回答这个问题。请尝试换一种方式提问，或联系人工客服。"
+    name: "Brief Fallback"
+    description: "Short fallback response"
+    content: "Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support."
 
   - id: "model_fallback"
-    name: "模型兜底"
-    description: "交给模型继续生成的兜底提示词"
+    name: "Model Fallback"
+    description: "Fallback prompt that delegates to the model for generation"
     content: |
-      知识库中没有找到与用户问题直接相关的内容。请根据你的通用知识，尽可能帮助用户解答问题。
+      No content directly related to the user's question was found in the knowledge base. Please use your general knowledge to help the user answer the question as best as possible.
 
-      注意事项：
-      1. 明确告知用户这是基于通用知识的回答，而非知识库内容
-      2. 如果问题涉及特定领域或需要最新信息，建议用户查阅官方资料
-      3. 保持回答的准确性和客观性
+      Important Notes:
+      1. Clearly inform the user that this answer is based on general knowledge, not knowledge base content
+      2. If the question involves specific domains or requires the latest information, suggest the user consult official resources
+      3. Maintain accuracy and objectivity in the response
+      4. IMPORTANT: Always respond in the same language as the user's question
 
-      用户问题：{{query}}
+      User question: {{query}}
