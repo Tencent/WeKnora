@@ -274,7 +274,7 @@ interface Props {
   modelData?: ModelFormData | null
 }
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const uiStore = useUIStore()
 
 const props = withDefaults(defineProps<Props>(), {
@@ -381,13 +381,22 @@ const loadProviders = async () => {
 }
 
 // 根据当前模型类型过滤的 Provider 列表
+// API 返回的 defaultUrls/modelTypes 数据优先，但 label/description 使用 i18n
 const providerOptions = computed(() => {
-  // 优先使用 API 返回的数据
+  // API 数据可用时，用 API 的结构数据 + i18n 的显示文本
   if (apiProviderOptions.value.length > 0) {
-    return apiProviderOptions.value
+    return apiProviderOptions.value.map(p => ({
+      ...p,
+      label: te(`model.editor.providers.${p.value}.label`)
+        ? t(`model.editor.providers.${p.value}.label`)
+        : p.label,
+      description: te(`model.editor.providers.${p.value}.description`)
+        ? t(`model.editor.providers.${p.value}.description`)
+        : p.description,
+    }))
   }
   // 回退到硬编码值，按 modelTypes 过滤
-  return fallbackProviderOptions.value.filter(p => 
+  return fallbackProviderOptions.value.filter(p =>
     p.modelTypes.includes(props.modelType)
   )
 })
@@ -716,14 +725,17 @@ const checkOllamaDimension = async () => {
       dimensionMessage.value = t('model.editor.dimensionDetected', { value: result.dimension })
       MessagePlugin.success(dimensionMessage.value)
     } else {
-      dimensionMessage.value = result.message || t('model.editor.dimensionFailed')
+      if (result.message) {
+        console.debug('Backend dimension message:', result.message)
+      }
+      dimensionMessage.value = t('model.editor.dimensionFailed')
       MessagePlugin.warning(dimensionMessage.value)
     }
   } catch (error: any) {
-    console.error('检测 Ollama 模型维度失败:', error)
+    console.error('Ollama dimension check failed:', error)
     dimensionChecked.value = true
     dimensionSuccess.value = false
-    dimensionMessage.value = error.message || t('model.editor.dimensionFailed')
+    dimensionMessage.value = t('model.editor.dimensionFailed')
     MessagePlugin.error(dimensionMessage.value)
   } finally {
     checking.value = false
@@ -798,18 +810,24 @@ const checkRemoteAPI = async () => {
     
     remoteChecked.value = true
     remoteAvailable.value = result.available || false
-    remoteMessage.value = result.message || (result.available ? t('model.editor.connectionSuccess') : t('model.editor.connectionFailed'))
-    
+    // Always use i18n for display; backend message is for debugging only
+    if (result.message) {
+      console.debug('Backend message:', result.message)
+    }
+    remoteMessage.value = result.available
+      ? t('model.editor.connectionSuccess')
+      : t('model.editor.connectionFailed')
+
     if (result.available) {
       MessagePlugin.success(remoteMessage.value)
     } else {
       MessagePlugin.error(remoteMessage.value)
     }
   } catch (error: any) {
-    console.error('Remote API 校验失败:', error)
+    console.error('Remote API check failed:', error)
     remoteChecked.value = true
     remoteAvailable.value = false
-    remoteMessage.value = error.message || t('model.editor.connectionConfigError')
+    remoteMessage.value = t('model.editor.connectionConfigError')
     MessagePlugin.error(remoteMessage.value)
   } finally {
     checking.value = false
@@ -947,7 +965,8 @@ const startDownload = async (modelName: string) => {
     downloading.value = false
     downloadProgress.value = 0
     currentDownloadModel.value = ''
-    MessagePlugin.error(error.message || t('model.editor.downloadStartFailed'))
+    console.error('Download start failed:', error)
+    MessagePlugin.error(t('model.editor.downloadStartFailed'))
   }
 }
 

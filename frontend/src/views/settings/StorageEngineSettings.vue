@@ -28,7 +28,7 @@
             <p class="desc">{{ $t('settings.storage.defaultEngineDesc') }}</p>
           </div>
           <div class="setting-control">
-            <t-select v-model="config.default_provider" style="width: 280px;">
+            <t-select v-model="config.default_provider" style="width: 280px;" :placeholder="$t('settings.storage.defaultEngine')">
               <t-option value="local" :label="$t('settings.storage.engineLocal')" />
               <t-option value="minio" label="MinIO" />
               <t-option value="cos" :label="$t('settings.storage.engineCos')" />

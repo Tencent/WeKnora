@@ -17,7 +17,7 @@ export default {
     expandSidebar: 'Развернуть боковую панель',
     logoutSuccess: 'Вы вышли из системы',
     agents: 'Агенты',
-    organizations: 'Общие пространства',
+    organizations: 'Общие пространства'
   },
   batchManage: {
     title: 'Управление диалогами',
@@ -30,7 +30,7 @@ export default {
     deleteSuccess: 'Успешно удалено',
     deleteFailed: 'Ошибка удаления, попробуйте позже',
     noSelection: 'Выберите хотя бы один диалог',
-    loadFailed: 'Не удалось загрузить список диалогов',
+    loadFailed: 'Не удалось загрузить список диалогов'
   },
   knowledgeBase: {
     title: 'База знаний',
@@ -166,7 +166,6 @@ export default {
     confirmDeleteFile: 'Вы уверены, что хотите удалить этот файл?',
     totalFiles: 'Всего файлов',
     totalSize: 'Общий размер',
-    // Дополнительные переводы для KnowledgeBase.vue
     newSession: 'Новый диалог',
     editDocument: 'Редактировать документ',
     draft: 'Черновик',
@@ -194,7 +193,6 @@ export default {
     errorHandling: 'Обработка ошибок',
     priorityCurrentPageKbId: 'Приоритет использования ID базы знаний текущей страницы',
     fallbackLocalStorageKbId: 'Если на текущей странице нет ID базы знаний, попытка получить ID базы знаний из настроек в localStorage',
-    // Дополнительные переводы для KnowledgeBaseList.vue
     createNewKnowledgeBase: 'Создать базу знаний',
     uninitializedWarning: 'Некоторые базы знаний не инициализированы, необходимо сначала настроить информацию о моделях в настройках, чтобы добавить документы знаний',
     initializedStatus: 'Инициализирована',
@@ -221,14 +219,34 @@ export default {
     noMatch: 'Совпадающих баз знаний не найдено',
     noKnowledge: 'Нет доступных баз знаний',
     loadingFailed: 'Не удалось загрузить базы знаний',
-    operationNotSupportedForType: "Эта операция не поддерживается для текущего типа базы знаний",
-    allFilesSkippedNoEngine: "Все выбранные файлы были пропущены из-за отсутствия парсера",
-    filesSkippedNoEngine: "{count} файл(ов) пропущено из-за отсутствия парсера",
-    allUploadSuccess: "Все файлы загружены ({count})",
-    partialUploadSuccess: "Частичная загрузка (успешно: {success}, ошибки: {fail})",
-    allUploadFailed: "Все файлы не удалось загрузить ({count})",
-    deleteSuccess: "Знание удалено!",
-    chunkLoadFailed: "Не удалось загрузить фрагменты",
+    operationNotSupportedForType: 'Эта операция не поддерживается для текущего типа базы знаний',
+    allFilesSkippedNoEngine: 'Все выбранные файлы были пропущены из-за отсутствия парсера',
+    filesSkippedNoEngine: '{count} файл(ов) пропущено из-за отсутствия парсера',
+    allUploadSuccess: 'Все файлы загружены ({count})',
+    partialUploadSuccess: 'Частичная загрузка (успешно: {success}, ошибки: {fail})',
+    allUploadFailed: 'Все файлы не удалось загрузить ({count})',
+    deleteSuccess: 'Знание удалено!',
+    chunkLoadFailed: 'Не удалось загрузить фрагменты',
+    accessInfo: {
+      myRole: 'Моя роль',
+      roleOwner: 'Создатель',
+      permissionOwner: 'Редактирование, управление настройками, удаление базы знаний',
+      permissionAdmin: 'Редактирование, управление общим доступом',
+      permissionEditor: 'Редактирование документов и категорий',
+      permissionViewer: 'Только просмотр',
+      fromOrg: 'Из пространства',
+      sharedAt: 'Дата общего доступа',
+      lastUpdated: 'Последнее обновление'
+    },
+    addDocument: 'Добавить документ',
+    createdAt: 'Создано',
+    updatedAt: 'Обновлено',
+    clickToViewFull: 'Нажмите для полного просмотра',
+    rebuildDocument: 'Пересобрать документ',
+    rebuildConfirm: 'Подтвердить пересборку документа "{fileName}"? Существующие фрагменты будут удалены и документ будет повторно проанализирован.',
+    rebuildSubmitted: 'Задача пересборки отправлена',
+    rebuildFailed: 'Ошибка пересборки, попробуйте позже',
+    rebuildInProgress: 'Документ сейчас анализируется, попробуйте позже'
   },
   agent: {
     taskLabel: 'Задача:',
@@ -239,7 +257,6 @@ export default {
     argumentsLabel: 'Параметры',
     toolFallback: 'Инструмент',
     editor: {
-      // Skills Config
       skillsConfig: 'Skills',
       skillsConfigDesc: 'Настройка предустановленных Skills для агента, предоставляющих специализированные знания и рабочие процессы',
       skillsSelection: 'Выбор Skills',
@@ -252,7 +269,237 @@ export default {
       noSkillsAvailable: 'Нет доступных предустановленных Skills',
       skillsInfoTitle: 'Что такое Skills?',
       skillsInfoContent: 'Skills — это предустановленные модули профессиональных знаний, которые предоставляют агенту инструкции, рабочие процессы и инструменты для конкретных областей. При активации агент автоматически загружает соответствующие знания по мере необходимости.',
+      createTitle: 'Create Agent',
+      editTitle: 'Edit Agent',
+      basicInfo: 'Basic Info',
+      basicInfoDesc: 'Configure agent basic information',
+      modelConfig: 'Model Config',
+      modelConfigDesc: 'Configure agent model parameters',
+      capabilities: 'Capabilities',
+      capabilitiesDesc: 'Configure agent capabilities and tools',
+      toolsConfig: 'Tools',
+      toolsConfigDesc: 'Configure tools available to the Agent',
+      knowledgeConfig: 'Knowledge Base',
+      knowledgeConfigDesc: 'Configure knowledge bases for the agent',
+      webSearchConfig: 'Web Search',
+      webSearchConfigDesc: 'Configure web search capabilities for the agent',
+      configuration: 'Configuration',
+      name: 'Name',
+      namePlaceholder: 'Enter agent name',
+      nameRequired: 'Agent name is required',
+      disabled: 'Disable',
+      disabledDesc: 'When disabled, this agent will not appear in the conversation agent dropdown',
+      systemPromptRequired: 'System prompt is required',
+      modelRequired: 'Please select a model',
+      rerankModelRequired: 'ReRank model is required when using knowledge bases',
+      contextsMissing: "Context template must contain {'{{'}contexts{'}}'} placeholder when knowledge base is enabled",
+      queryMissingInContext: "Context template must contain {'{{'}query{'}}'} placeholder",
+      knowledgeBasesMissing: "It is recommended to include {'{{'}knowledge_bases{'}}'} placeholder in system prompt so the model knows available knowledge bases",
+      queryMissingInRewrite: "Rewrite user prompt must contain {'{{'}query{'}}'} placeholder",
+      conversationMissing: "Rewrite user prompt must contain {'{{'}conversation{'}}'} placeholder",
+      queryMissingInFallback: "Fallback prompt must contain {'{{'}query{'}}'} placeholder",
+      avatar: 'Avatar',
+      avatarPlaceholder: 'Enter Emoji or select',
+      description: 'Description',
+      descriptionPlaceholder: 'Enter agent description',
+      baseType: 'Base Type',
+      normalDesc: 'Quick response, direct answers',
+      agentDesc: 'Multi-step thinking, deep analysis for complex questions',
+      model: 'Model',
+      modelPlaceholder: 'Select Model',
+      systemPrompt: 'System Prompt',
+      systemPromptPlaceholder: "Custom system prompt to define agent behavior and role (use {'{{'}web_search_status{'}}'} placeholder for dynamic web search behavior)",
+      defaultPromptHint: 'Leave empty to use the following default system prompt:',
+      defaultContextTemplateHint: 'Leave empty to use the following default context template:',
+      contextTemplateRequired: 'Context template is required',
+      availablePlaceholders: 'Available Placeholders',
+      placeholderHint: "Type {'{{'} to trigger autocomplete",
+      temperature: 'Temperature',
+      thinking: 'Thinking Mode',
+      welcomeMessage: 'Welcome Message',
+      welcomeMessagePlaceholder: 'Message displayed when this agent is selected',
+      suggestedPrompts: 'Suggested Prompts',
+      mode: 'Running Mode',
+      webSearch: 'Web Search',
+      webSearchMaxResults: 'Max Search Results',
+      knowledgeBases: 'Knowledge Bases',
+      allKnowledgeBases: 'All Knowledge Bases',
+      allKnowledgeBasesDesc: 'Agent can access all knowledge bases',
+      selectedKnowledgeBases: 'Selected Knowledge Bases',
+      selectedKnowledgeBasesDesc: 'Only access selected knowledge bases',
+      noKnowledgeBase: 'No Knowledge Base',
+      noKnowledgeBaseDesc: 'Pure model conversation, no knowledge retrieval',
+      selectKnowledgeBases: 'Select Knowledge Bases',
+      selectKnowledgeBasesDesc: 'Select knowledge bases to associate (including collaborative ones)',
+      myKnowledgeBases: 'My Knowledge Bases',
+      sharedKnowledgeBases: 'Collaborative Knowledge Bases',
+      retrieveKBOnlyWhenMentioned: 'Retrieve Only When Mentioned',
+      retrieveKBOnlyWhenMentionedDesc: "Off: auto-retrieve configured KBs; On: retrieve only when user {'@'} mentions",
+      rerankModel: 'ReRank Model',
+      rerankModelDesc: 'Used to rerank knowledge base retrieval results for better accuracy',
+      rerankModelPlaceholder: 'Select ReRank Model',
+      maxIterations: 'Max Iterations',
+      allowedTools: 'Allowed Tools',
+      multiTurn: 'Multi-turn Conversation',
+      historyTurns: 'History Turns',
+      retrievalStrategy: 'Retrieval Strategy',
+      embeddingTopK: 'Embedding Top K',
+      keywordThreshold: 'Keyword Threshold',
+      vectorThreshold: 'Vector Threshold',
+      rerankTopK: 'Rerank Top K',
+      rerankThreshold: 'Rerank Threshold',
+      conversationSettings: 'Conversation',
+      advancedSettings: 'Advanced Settings',
+      contextTemplate: 'Context Template',
+      contextTemplatePlaceholder: 'Custom context template...',
+      availableContextPlaceholders: 'Available Placeholders',
+      placeholderQuery: 'User query',
+      placeholderContexts: 'Retrieved content list',
+      placeholderCurrentTime: 'Current time (format: 2006-01-02 15:04:05)',
+      placeholderCurrentWeek: 'Current weekday (e.g., Monday)',
+      enableQueryExpansion: 'Query Expansion',
+      enableRewrite: 'Query Rewrite',
+      rewritePromptSystem: 'Rewrite System Prompt',
+      rewritePromptSystemPlaceholder: 'Leave empty to use default prompt',
+      rewritePromptUser: 'Rewrite User Prompt',
+      rewritePromptUserPlaceholder: 'Leave empty to use default prompt',
+      maxCompletionTokens: 'Max Completion Tokens',
+      fallbackStrategy: 'Fallback Strategy',
+      fallbackResponse: 'Fixed Response',
+      fallbackResponsePlaceholder: 'Sorry, I cannot answer this question.',
+      fallbackPrompt: 'Fallback Prompt',
+      fallbackPromptPlaceholder: 'Leave empty to use default prompt'
     },
+    title: 'Agents',
+    subtitle: 'Configure and manage your agents to customize conversation behavior and capabilities',
+    createAgent: 'Create Agent',
+    createAgentShort: 'New',
+    builtin: 'Built-in',
+    disabled: 'Disabled',
+    disable: 'Disable',
+    enable: 'Enable',
+    noDescription: 'No description',
+    selectAgent: 'Select Agent',
+    noAgents: 'No agents',
+    manageAgents: 'Manage',
+    builtinAgents: 'Built-in Agents',
+    customAgents: 'Custom Agents',
+    capabilities: {
+      normal: 'Quick response, direct answers',
+      agent: 'Multi-step thinking, deep analysis for complex questions',
+      modelSpecified: 'Model specified',
+      kbCount: '{count} knowledge base(s) specified',
+      kbAll: 'Access to all knowledge bases',
+      kbDisabled: 'Knowledge base disabled',
+      rerankSpecified: 'ReRank model specified',
+      webSearchOn: 'Web search enabled',
+      webSearchOff: 'Web search disabled',
+      hasPrompt: 'Custom prompt',
+      default: 'Default configuration',
+      mcpEnabled: 'MCP services enabled',
+      multiTurn: 'Multi-turn conversation'
+    },
+    type: {
+      normal: 'Quick Answer',
+      agent: 'Smart Reasoning',
+      custom: 'Custom'
+    },
+    mode: {
+      normal: 'Quick Answer',
+      agent: 'Smart Reasoning'
+    },
+    features: {
+      webSearch: 'Web Search Enabled',
+      knowledgeBase: 'Knowledge Base Linked',
+      mcp: 'MCP Services Enabled',
+      multiTurn: 'Multi-turn Conversation'
+    },
+    tabs: {
+      all: 'All',
+      mine: 'My Agents',
+      sharedToMe: 'Shared to Me'
+    },
+    empty: {
+      title: 'No Custom Agents',
+      description: 'Click the button in the top right to create your first agent',
+      sharedTitle: 'No shared agents yet',
+      sharedDescription: 'You can join a space or ask others to share agents with you'
+    },
+    detail: {
+      title: 'Agent Details',
+      useInChat: 'Use in Chat'
+    },
+    shareScope: {
+      title: 'Share Scope',
+      desc: 'Space members have read-only access to this agent and will use it according to your current configuration; your changes to the agent will sync to shared spaces. To allow space members to edit knowledge base content, share the knowledge base to the space.',
+      knowledgeBase: 'Knowledge bases',
+      chatModel: 'Chat model',
+      rerankModel: 'Rerank model',
+      webSearch: 'Web search',
+      mcp: 'MCP services',
+      kbAll: 'All knowledge bases',
+      kbSelected: '{count} selected',
+      kbNone: 'None',
+      modelConfigured: 'Configured',
+      modelNotSet: 'Not set',
+      enabled: 'On',
+      disabled: 'Off',
+      mcpAll: 'All services',
+      mcpSelected: '{count} selected',
+      mcpNone: 'None'
+    },
+    delete: {
+      confirmTitle: 'Delete Agent',
+      confirmMessage: 'Are you sure you want to delete agent "{name}"? This action cannot be undone.',
+      confirmButton: 'Confirm Delete'
+    },
+    messages: {
+      created: 'Agent created successfully',
+      updated: 'Agent updated successfully',
+      deleted: 'Agent deleted',
+      deleteFailed: 'Delete failed',
+      saveFailed: 'Save failed',
+      builtinReadonly: 'Built-in agents cannot be edited',
+      copied: 'Agent copied successfully',
+      copyFailed: 'Copy failed',
+      disabled: 'Agent disabled',
+      enabled: 'Agent enabled'
+    },
+    selector: {
+      title: 'Select Agent',
+      builtinSection: 'Built-in Agents',
+      customSection: 'My Agents',
+      addNew: 'Add New Agent',
+      current: 'Current',
+      goToSettings: 'Settings',
+      sharedLabel: 'Shared'
+    },
+    builtinInfo: {
+      quickAnswer: {
+        name: 'Quick Answer',
+        description: 'Knowledge base RAG Q&A for fast and accurate answers'
+      },
+      smartReasoning: {
+        name: 'Smart Reasoning',
+        description: 'ReAct reasoning framework with multi-step thinking and tool calling'
+      },
+      deepResearcher: {
+        name: 'Deep Researcher',
+        description: 'Focused on in-depth research and comprehensive analysis, capable of creating research plans, multi-dimensional information retrieval, deep thinking and providing thorough analysis reports'
+      },
+      dataAnalyst: {
+        name: 'Data Analyst',
+        description: 'Focused on database queries and data analysis, capable of understanding business needs, building SQL queries, analyzing data and providing insights'
+      },
+      knowledgeGraphExpert: {
+        name: 'Knowledge Graph Expert',
+        description: 'Focused on knowledge graph queries and relationship analysis, capable of exploring entity relationships, discovering hidden connections and building knowledge networks'
+      },
+      documentAssistant: {
+        name: 'Document Assistant',
+        description: 'Focused on document retrieval and content organization, capable of quickly locating documents, extracting key information and generating summaries'
+      }
+    }
   },
   settings: {
     title: 'Настройки',
@@ -340,7 +587,7 @@ export default {
       languagePlaceholder: 'напр. ch, en, ja (по умолчанию ch)',
       mineruCloudApiKeyPlaceholder: 'MinerU Cloud API Key',
       vlmLabel: 'vlm (визуальная языковая модель)',
-      mineruHtmlLabel: 'MinerU-HTML (HTML парсинг)',
+      mineruHtmlLabel: 'MinerU-HTML (HTML парсинг)'
     },
     storage: {
       title: 'Хранилище',
@@ -390,8 +637,8 @@ export default {
       unknownError: 'Неизвестная ошибка',
       requestFailed: 'Ошибка запроса',
       cos: 'Tencent Cloud COS',
-      tos: 'Volcengine TOS',
-    },
+      tos: 'Volcengine TOS'
+    }
   },
   webSearchSettings: {
     title: 'Настройки веб-поиска',
@@ -412,7 +659,9 @@ export default {
     compressionSummary: 'LLM-конспект',
     blacklistLabel: 'Чёрный список URL',
     blacklistDescription: 'Исключите домены или URL из результатов. По одному в строке. Поддерживаются подстановки (*) и регулярные выражения (/pattern/).',
-    blacklistPlaceholder: 'Например:\n*://*.example.com/*\n/example\\.(net|org)/',
+    blacklistPlaceholder: `Например:
+*://*.example.com/*
+/example\.(net|org)/`,
     errors: {
       unknown: 'Неизвестная ошибка'
     },
@@ -471,8 +720,8 @@ export default {
     saveSuccess: 'Настройки графа сохранены',
     saveFailed: 'Не удалось сохранить настройки: {message}',
     errors: {
-      unknown: 'Неизвестная ошибка',
-    },
+      unknown: 'Неизвестная ошибка'
+    }
   },
   initialization: {
     title: 'Инициализация',
@@ -485,7 +734,6 @@ export default {
     skip: 'Пропустить',
     next: 'Далее',
     previous: 'Назад',
-    // Ollama сервис
     ollamaServiceStatus: 'Статус службы Ollama',
     refreshStatus: 'Обновить статус',
     ollamaServiceAddress: 'Адрес службы Ollama',
@@ -494,13 +742,11 @@ export default {
     normal: 'Нормально',
     installedModels: 'Установленные модели',
     none: 'Временно отсутствует',
-    // База знаний
     knowledgeBaseInfo: 'Информация о базе знаний',
     knowledgeBaseName: 'Название базы знаний',
     knowledgeBaseNamePlaceholder: 'Введите название базы знаний',
     knowledgeBaseDescription: 'Описание базы знаний',
     knowledgeBaseDescriptionPlaceholder: 'Введите описание базы знаний',
-    // LLM модель
     llmModelConfig: 'Конфигурация LLM большой языковой модели',
     modelSource: 'Источник модели',
     local: 'Ollama (локальный)',
@@ -519,22 +765,18 @@ export default {
     connectionNormal: 'Соединение в норме',
     connectionFailed: 'Ошибка соединения',
     checkingConnection: 'Проверка соединения',
-    // Embedding модель
     embeddingModelConfig: 'Конфигурация модели встраивания',
     embeddingWarning: 'В базе знаний уже есть файлы, невозможно изменить конфигурацию модели встраивания',
     dimension: 'Размерность',
     dimensionPlaceholder: 'Введите размерность вектора',
     detectDimension: 'Определить размерность',
-    // Rerank модель
     rerankModelConfig: 'Конфигурация модели ранжирования',
     enableRerank: 'Включить модель ранжирования',
-    // Мультимодальные настройки
     multimodalConfig: 'Мультимодальная конфигурация',
     enableMultimodal: 'Включить извлечение информации из изображений',
     visualLanguageModelConfig: 'Конфигурация визуально-языковой модели',
     interfaceType: 'Тип интерфейса',
     openaiCompatible: 'Совместимый с OpenAI интерфейс',
-    // Настройки хранилища
     storageServiceConfig: 'Конфигурация службы хранения',
     storageType: 'Тип хранения',
     bucketName: 'Bucket Name',
@@ -549,7 +791,6 @@ export default {
     regionPlaceholder: 'Например: ap-beijing',
     appId: 'App ID',
     appIdPlaceholder: 'Введите App ID',
-    // Тестирование мультимодальных функций
     functionTest: 'Тест функции',
     testDescription: 'Загрузите изображение для тестирования функций описания изображений и распознавания текста модели VLM',
     selectImage: 'Выбрать изображение',
@@ -560,7 +801,6 @@ export default {
     processingTime: 'Время обработки:',
     testFailed: 'Тест не удался',
     multimodalProcessingFailed: 'Ошибка мультимодальной обработки',
-    // Разделение документов
     documentSplittingConfig: 'Конфигурация разделения документов',
     splittingStrategy: 'Стратегия разделения',
     balancedMode: 'Сбалансированный режим',
@@ -585,7 +825,6 @@ export default {
     separatorChineseSemicolon: 'Китайская точка с запятой (；)',
     separatorComma: 'Запятая (,)',
     separatorChineseComma: 'Китайская запятая (，)',
-    // Извлечение сущностей и отношений
     entityRelationExtraction: 'Извлечение сущностей и отношений',
     enableEntityRelationExtraction: 'Включить извлечение сущностей и отношений',
     relationTypeConfig: 'Конфигурация типов отношений',
@@ -613,7 +852,6 @@ export default {
     extracting: 'Извлечение...',
     defaultExample: 'Пример по умолчанию',
     clearExample: 'Очистить пример',
-    // Кнопки и сообщения
     updateKnowledgeBaseSettings: 'Обновить настройки базы знаний',
     updateConfigInfo: 'Обновить информацию о конфигурации',
     completeConfig: 'Завершить конфигурацию',
@@ -650,7 +888,6 @@ export default {
     checkOllamaStatusFailed: 'Не удалось проверить статус Ollama',
     getKnowledgeBaseInfoFailed: 'Не удалось получить информацию о базе знаний',
     textRelationExtractionFailed: 'Не удалось извлечь текстовые отношения',
-    // Валидация
     pleaseEnterKnowledgeBaseName: 'Пожалуйста, введите название базы знаний',
     knowledgeBaseNameLength: 'Длина названия базы знаний должна быть от 1 до 50 символов',
     knowledgeBaseDescriptionLength: 'Длина описания базы знаний не может превышать 200 символов',
@@ -663,7 +900,6 @@ export default {
     textContentMinLength: 'Текстовое содержание должно содержать не менее 10 символов',
     pleaseEnterValidTag: 'Пожалуйста, введите действительный тег',
     tagAlreadyExists: 'Этот тег уже существует',
-    // Дополнительные переводы для InitializationContent.vue
     checkFailed: 'Проверка не удалась',
     startingDownload: 'Запуск загрузки...',
     downloadStarted: 'Загрузка началась',
@@ -771,7 +1007,6 @@ export default {
     clear: 'Очистить',
     website: 'Официальный сайт',
     github: 'GitHub',
-    wechat: 'WeChat',
     on: 'Вкл',
     off: 'Выкл',
     resetToDefault: 'Сбросить по умолчанию',
@@ -781,16 +1016,20 @@ export default {
     file: 'Файл',
     knowledgeBase: 'База знаний',
     noResult: 'Нет результатов',
-    remove: "Удалить",
-    defaultUser: "Пользователь",
-    copyFailed: "Ошибка копирования",
-    retry: "Повторить",
+    remove: 'Удалить',
+    defaultUser: 'Пользователь',
+    copyFailed: 'Ошибка копирования',
+    retry: 'Повторить',
+    me: 'Я',
+    copy: 'Копировать',
+    copied: 'Скопировано'
   },
   mentionDetail: {
     faqCount: '{count} вопросов и ответов',
     kbCount: '{count} документов',
     belongsToKb: 'База знаний: ',
     belongsToOrg: 'Пространство: ',
+    readOnlyFromAgent: 'Только чтение (от агента)'
   },
   file: {
     upload: 'Загрузить файл',
@@ -818,7 +1057,6 @@ export default {
     status: 'Статус',
     active: 'Активен',
     inactive: 'Неактивен',
-    // Дополнительные переводы для TenantInfo.vue
     systemInfo: 'Системная информация',
     viewSystemInfo: 'Просмотр информации о версии системы и конфигурации учётной записи пользователя',
     version: 'Версия',
@@ -973,22 +1211,23 @@ export default {
       getTenantFailed: 'Не удалось получить информацию о тенанте',
       refreshTokenFailed: 'Не удалось обновить токен',
       logoutFailed: 'Ошибка выхода',
-      validateTokenFailed: 'Ошибка проверки токена',
+      validateTokenFailed: 'Ошибка проверки токена'
     },
     model: {
       createFailed: 'Не удалось создать модель',
       getFailed: 'Не удалось получить модель',
       updateFailed: 'Не удалось обновить модель',
-      deleteFailed: 'Не удалось удалить модель',
+      deleteFailed: 'Не удалось удалить модель'
     },
     tenant: {
       listFailed: 'Не удалось получить список тенантов',
-      searchFailed: 'Не удалось выполнить поиск тенантов',
+      searchFailed: 'Не удалось выполнить поиск тенантов'
     },
     initialization: {
       checkFailed: 'Проверка не пройдена',
-      testFailed: 'Тест не пройден',
+      testFailed: 'Тест не пройден'
     },
+    invalidImageLink: 'Invalid image link'
   },
   model: {
     llmModel: 'LLM модель',
@@ -1074,88 +1313,92 @@ export default {
         baseUrlEmpty: 'Base URL не может быть пустым',
         baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
       },
-      // Переводы для провайдеров
       providerLabel: 'Провайдер',
       providerPlaceholder: 'Выберите провайдера модели',
       providers: {
         openai: {
           label: 'OpenAI',
-          description: 'gpt-5.2, gpt-5-mini, etc.',
+          description: 'gpt-5.2, gpt-5-mini, etc.'
         },
         aliyun: {
           label: 'Aliyun DashScope',
-          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.',
+          description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
         },
         zhipu: {
           label: 'Zhipu BigModel',
-          description: 'glm-4.7, embedding-3, rerank, etc.',
+          description: 'glm-4.7, embedding-3, rerank, etc.'
         },
         openrouter: {
           label: 'OpenRouter',
-          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.',
+          description: 'openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.'
         },
         generic: {
           label: 'Пользовательский (OpenAI-совместимый)',
-          description: 'Generic API endpoint',
+          description: 'Generic API endpoint'
         },
         siliconflow: {
           label: 'SiliconFlow',
-          description: 'deepseek-ai/DeepSeek-V3.1, etc.',
+          description: 'deepseek-ai/DeepSeek-V3.1, etc.'
         },
         jina: {
           label: 'Jina',
-          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.',
+          description: 'jina-clip-v1, jina-embeddings-v2-base-zh, etc.'
         },
         volcengine: {
           label: 'Volcengine',
-          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.',
+          description: 'doubao-1-5-pro-32k-250115, doubao-embedding-vision-250615, etc.'
         },
         deepseek: {
           label: 'DeepSeek',
-          description: 'deepseek-chat, deepseek-reasoner, etc.',
+          description: 'deepseek-chat, deepseek-reasoner, etc.'
         },
         hunyuan: {
           label: 'Hunyuan',
-          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.',
+          description: 'hunyuan-pro, hunyuan-standard, hunyuan-embedding, etc.'
         },
         minimax: {
           label: 'MiniMax',
-          description: 'MiniMax-M2.1, MiniMax-M2.1-lightning, etc.',
+          description: 'MiniMax-M2.1, MiniMax-M2.1-lightning, etc.'
         },
         mimo: {
           label: 'MiMo',
-          description: 'mimo-v2-flash',
+          description: 'mimo-v2-flash'
         },
         gemini: {
           label: 'Google Gemini',
-          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.',
+          description: 'gemini-3-flash-preview, gemini-2.5-pro, etc.'
         },
         gpustack: {
           label: 'GPUStack',
-          description: 'Choose your deployed model on GPUStack',
+          description: 'Choose your deployed model on GPUStack'
         },
         modelscope: {
           label: 'ModelScope',
-          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.',
+          description: 'Qwen/Qwen3-8B, Qwen/Qwen3-Embedding-8B, etc.'
         },
         qiniu: {
           label: 'Qiniu Cloud',
-          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.',
+          description: 'deepseek/deepseek-v3.2-251201, z-ai/glm-4.7, etc.'
         },
         moonshot: {
           label: 'Moonshot',
-          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.',
+          description: 'kimi-k2-turbo-preview, moonshot-v1-8k-vision-preview, etc.'
         },
         qianfan: {
           label: 'Baidu Qianfan',
-          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.',
+          description: 'ernie-5.0-thinking-preview, embedding-v1, bce-reranker-base, etc.'
         },
         longcat: {
           label: 'LongCat AI',
-          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.',
+          description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.'
         },
-      },
+        lkeap: {
+          label: 'Tencent Cloud LKEAP',
+          description: 'DeepSeek-R1, DeepSeek-V3 с поддержкой цепочки рассуждений'
+        }
+      }
     },
+    builtinTag: 'Built-in'
   },
   createChat: {
     title: 'Вопросы и ответы на основе базы знаний — AI помощник',
@@ -1173,7 +1416,9 @@ export default {
     uninitializedBanner: 'Некоторые базы знаний не инициализированы. Сначала настройте модели в разделе настроек, чтобы добавлять документы.',
     empty: {
       title: 'Базы знаний отсутствуют',
-      description: 'Нажмите «Создать базу знаний» в левом быстром действии, чтобы добавить первую базу.'
+      description: 'Нажмите «Создать базу знаний» в левом быстром действии, чтобы добавить первую базу.',
+      sharedTitle: 'No shared knowledge bases',
+      sharedDescription: 'You can join a shared space or request others to share knowledge bases with you'
     },
     delete: {
       confirmTitle: 'Подтверждение удаления',
@@ -1185,11 +1430,14 @@ export default {
       unpin: 'Открепить',
       pinSuccess: 'Закреплено',
       unpinSuccess: 'Откреплено',
-      failed: 'Операция не удалась',
+      failed: 'Операция не удалась'
     },
     messages: {
       deleted: 'База знаний удалена',
-      deleteFailed: 'Не удалось удалить базу знаний'
+      deleteFailed: 'Не удалось удалить базу знаний',
+      file: '文件',
+      knowledgeBase: '知识库',
+      noResult: '无结果'
     },
     features: {
       knowledgeGraph: 'Граф знаний включен',
@@ -1212,6 +1460,47 @@ export default {
       refreshing: 'Обновляем список и статусы разбора...',
       errorTip: 'Часть файлов загрузить не удалось. Проверьте уведомления.',
       unknownKb: 'База знаний {id}'
+    },
+    createShort: 'New',
+    myKnowledgeBases: 'My Knowledge Bases',
+    sharedKnowledgeBases: 'Shared Knowledge Bases',
+    sharedToOrgs: 'Shared to {count} space(s)',
+    sharedLabel: 'Shared',
+    myLabel: 'Mine',
+    fromAgent: 'From agent {name}',
+    fromAgentShort: 'Agent: {name}',
+    tabs: {
+      all: 'All',
+      myKnowledgeBases: 'My Knowledge Bases',
+      sharedToMe: 'Shared with me'
+    },
+    emptyShared: 'No collaborative knowledge bases yet. Join a shared space to access knowledge bases from others.',
+    menu: {
+      viewDetails: 'View Details'
+    },
+    detail: {
+      title: 'Shared Knowledge Base',
+      overview: 'Overview',
+      overviewDesc: 'View knowledge base information and source',
+      permission: 'Permission',
+      permissionDesc: 'View your permissions for this knowledge base',
+      sourceType: 'Source',
+      sourceTypeKbShare: 'KB shared directly to this space',
+      sourceTypeAgent: 'Visible via shared agent',
+      sourceOrg: 'Space',
+      sourceFromAgent: 'Agent',
+      agentKbStrategy: 'Agent KB strategy',
+      agentKbStrategyAll: 'All knowledge bases',
+      agentKbStrategySelected: 'Selected knowledge bases',
+      agentKbStrategyNone: 'No knowledge bases',
+      sharedAt: 'Shared At',
+      myPermission: 'My Permission',
+      canEdit: 'Can edit knowledge base content',
+      canView: 'Can view knowledge base content',
+      canSearch: 'Can search and use knowledge base',
+      goToKb: 'Go to Knowledge Base',
+      enabled: 'Enabled',
+      disabled: 'Disabled'
     }
   },
   knowledgeEditor: {
@@ -1223,7 +1512,9 @@ export default {
       chunking: 'Настройки разбиения',
       advanced: 'Дополнительные настройки',
       faq: 'FAQ настройки',
-      graph: 'Граф знаний'
+      graph: 'Граф знаний',
+      storage: 'Storage Engine',
+      share: 'Sharing'
     },
     basic: {
       title: 'Основная информация',
@@ -1258,7 +1549,7 @@ export default {
     },
     document: {
       title: 'Управление документами',
-      subtitle: 'Загружайте файлы кликом или перетаскиванием — поддерживается автоматический разбор разных форматов и умное разбиение на фрагменты для быстрого поиска',
+      subtitle: 'Загружайте файлы кликом или перетаскиванием — поддерживается автоматический разбор разных форматов и умное разбиение на фрагменты для быстрого поиска'
     },
     faq: {
       title: 'Настройки FAQ',
@@ -1334,6 +1625,13 @@ export default {
       batchDisable: 'Пакетное отключение',
       batchEnableRecommended: 'Пакетное включение рекомендации',
       batchDisableRecommended: 'Пакетное отключение рекомендации',
+      standardQuestionDesc: 'Set the standard phrasing of the question — this is the most common way users ask it.',
+      answersDesc: 'Provide complete and accurate answer content. Multiple answers can be added to cover different scenarios.',
+      similarQuestionsDesc: 'Add questions with the same meaning but different phrasing to help the system better match user queries.',
+      negativeQuestionsDesc: 'Add questions that should not match this answer, to exclude false positives.',
+      addFaq: 'Add FAQ',
+      manageFaq: 'FAQ Actions',
+      createGroup: 'New'
     },
     faqImport: {
       title: 'Пакетный импорт FAQ',
@@ -1357,12 +1655,12 @@ export default {
       downloadExample: 'Скачать пример',
       downloadExampleJSON: 'Скачать пример JSON',
       downloadExampleCSV: 'Скачать пример CSV',
-      downloadExampleExcel: 'Скачать пример Excel',
+      downloadExampleExcel: 'Скачать пример Excel'
     },
     faqExport: {
       exportButton: 'Экспорт CSV',
       exportSuccess: 'Экспорт успешен',
-      exportFailed: 'Ошибка экспорта',
+      exportFailed: 'Ошибка экспорта'
     },
     models: {
       title: 'Конфигурация моделей',
@@ -1413,7 +1711,7 @@ export default {
         label: 'AI генерация вопросов',
         description: 'Генерация связанных вопросов для каждого фрагмента с помощью LLM при парсинге документа для улучшения полноты поиска. Включение увеличит время парсинга документа.',
         countLabel: 'Количество вопросов',
-        countDescription: 'Количество вопросов для генерации на фрагмент документа (1-10)',
+        countDescription: 'Количество вопросов для генерации на фрагмент документа (1-10)'
       },
       multimodal: {
         label: 'Мультимодальная функция',
@@ -1437,7 +1735,13 @@ export default {
           useSslDescription: 'Определяет, использовать ли SSL-соединение',
           pathPrefixLabel: 'Префикс пути',
           pathPrefixDescription: 'Необязательный префикс для путей хранения файлов',
-          pathPrefixPlaceholder: 'Введите префикс пути'
+          pathPrefixPlaceholder: 'Введите префикс пути',
+          bucketHint: 'Select an existing bucket with public read access, or enter a new name to create automatically',
+          policyLabels: {
+            public: 'Public Read',
+            private: 'Private',
+            custom: 'Custom'
+          }
         },
         cos: {
           secretIdLabel: 'SecretId',
@@ -1460,6 +1764,13 @@ export default {
           pathPrefixPlaceholder: 'Введите префикс пути'
         }
       }
+    },
+    share: {
+      description: 'Share the knowledge base with spaces so members can access and use it',
+      addShare: 'Share',
+      unshareConfirm: 'Are you sure you want to unshare from "{name}"?',
+      tip1: 'After sharing, space members will access this knowledge base based on the assigned permissions',
+      tip2: 'Editable permission allows members to modify content; Read-only permission only allows retrieval and Q&A'
     }
   },
   chat: {
@@ -1473,7 +1784,6 @@ export default {
     delete: 'Удалить',
     reference: 'Ссылка',
     noMessages: 'Нет сообщений',
-    // Дополнительные переводы для компонентов чата
     waitingForAnswer: 'Ожидание ответа...',
     cannotAnswer: 'Извините, я не могу ответить на этот вопрос.',
     summarizingAnswer: 'Подведение итогов ответа...',
@@ -1565,8 +1875,11 @@ export default {
     processError: 'Ошибка обработки',
     sessionExcerpt: 'Выдержка из сессии',
     noAnswerContent: '(Нет содержимого ответа)',
-    noMatchFound: "Совпадений не найдено",
-    deleteSessionFailed: "Ошибка удаления, попробуйте позже!",
+    noMatchFound: 'Совпадений не найдено',
+    deleteSessionFailed: 'Ошибка удаления, попробуйте позже!',
+    thinkingAlt: 'Обдумывание...',
+    deepThoughtCompleted: 'Глубокий анализ завершён',
+    deepThoughtAlt: 'Глубокий анализ'
   },
   language: {
     zhCN: '简体中文',
@@ -1591,6 +1904,7 @@ export default {
     light: 'Светлая',
     dark: 'Тёмная',
     system: 'Системная',
+    selectTheme: 'Выбрать тему'
   },
   platform: {
     subtitle: 'Корпоративная платформа интеллектуального поиска документов',
@@ -1627,7 +1941,6 @@ export default {
     onlineEdit: 'Онлайн редактирование',
     deleteRecord: 'Удалить запись'
   },
-  // Новые разделы
   agentSettings: {
     title: 'Настройки Agent',
     description: 'Настройте поведение и параметры AI Agent. Эти параметры применяются ко всем чатам с включённым режимом Agent.',
@@ -1643,7 +1956,9 @@ export default {
       missingRerankModel: 'модель ранжирования',
       missingAllowedTools: 'разрешённые инструменты',
       pleaseConfigure: 'Пожалуйста, настройте: {items}',
-      goConfigureModels: 'Перейти к настройке моделей →'
+      goConfigureModels: 'Перейти к настройке моделей →',
+      missingSummaryModel: 'Chat Model (Summary Model)',
+      goToConfig: 'Go to configure chat model'
     },
     maxIterations: {
       label: 'Макс. число итераций',
@@ -1683,9 +1998,7 @@ export default {
       disabledHint: 'Сейчас используется промпт по умолчанию. Включите пользовательский, чтобы применить содержимое ниже.',
       placeholder: 'Введите системный промпт или оставьте пустым для значения по умолчанию...',
       tabHintDetail: "Единый системный промпт (оставьте пустым для значения по умолчанию, используйте {'{{'}web_search_status{'}}'} для динамического управления веб-поиском)",
-      tabHint: 'Настройте разные промпты для режимов с включённым и отключённым веб-поиском.',
-      tabWebOn: 'Веб-поиск включён',
-      tabWebOff: 'Веб-поиск отключён'
+      tabHint: 'Настройте разные промпты для режимов с включённым и отключённым веб-поиском.'
     },
     reset: {
       header: 'Сбросить к промпту по умолчанию',
@@ -1709,6 +2022,10 @@ export default {
       resetToDefault: 'Восстановлено значение по умолчанию',
       systemPromptSaved: 'Системный промпт сохранён',
       autoDisabled: 'Конфигурация Agent неполная. Режим Agent автоматически выключен'
+    },
+    modelRecommendation: {
+      title: 'Model Recommendation',
+      content: 'For better Agent experience, we recommend using large language models with FunctionCalling support and long context windows, such as deepseek-v3.1-terminus'
     }
   },
   conversationSettings: {
@@ -1717,7 +2034,31 @@ export default {
       desc: 'При низкой выдаче обращаться к LLM для генерации дополнительных запросов (дороже и медленнее)'
     },
     toasts: {
-      enableQueryExpansionSaved: 'Настройка расширения запросов сохранена'
+      enableQueryExpansionSaved: 'Настройка расширения запросов сохранена',
+      chatModelSaved: 'LLM model saved',
+      rerankModelSaved: 'ReRank model saved',
+      contextTemplateSaved: 'Retrieval result summary prompt saved',
+      systemPromptSaved: 'System prompt saved',
+      temperatureSaved: 'Temperature saved',
+      maxTokensSaved: 'Max tokens saved',
+      maxRoundsSaved: 'History rounds saved',
+      embeddingSaved: 'Embedding TopK saved',
+      keywordThresholdSaved: 'Keyword threshold saved',
+      vectorThresholdSaved: 'Vector threshold saved',
+      rerankTopKSaved: 'ReRank TopK saved',
+      rerankThresholdSaved: 'ReRank threshold saved',
+      enableRewriteSaved: 'Query rewrite preference saved',
+      fallbackStrategySaved: 'Fallback strategy saved',
+      fallbackResponseSaved: 'Fallback response saved',
+      fallbackPromptSaved: 'Fallback prompt saved',
+      rewritePromptSystemSaved: 'Rewrite system prompt saved',
+      rewritePromptUserSaved: 'Rewrite user prompt saved',
+      customPromptEnabled: 'Custom prompt enabled',
+      defaultPromptEnabled: 'Using default prompt',
+      customContextTemplateEnabled: 'Custom summary prompt enabled',
+      defaultContextTemplateEnabled: 'Using default summary prompt',
+      resetSystemPromptSuccess: 'Reset to default system prompt',
+      resetContextTemplateSuccess: 'Reset to default summary prompt'
     },
     contextTemplate: {
       label: 'Шаблон контекста',
@@ -1725,7 +2066,7 @@ export default {
       descWithDefault: 'Шаблон промпта для генерации ответов на основе результатов поиска в обычном режиме (оставьте пустым для значения по умолчанию)',
       placeholder: 'Введите шаблон промпта для суммирования результатов поиска...',
       custom: 'Пользовательский шаблон',
-      disabledHint: 'Сейчас используется промпт по умолчанию. Включите пользовательский для редактирования.',
+      disabledHint: 'Сейчас используется промпт по умолчанию. Включите пользовательский для редактирования.'
     },
     systemPrompt: {
       label: 'Системный промпт',
@@ -1733,8 +2074,112 @@ export default {
       descWithDefault: 'Системный промпт для обычного режима диалога (оставьте пустым для значения по умолчанию)',
       placeholder: 'Введите системный промпт...',
       custom: 'Пользовательский промпт',
-      disabledHint: 'Сейчас используется промпт по умолчанию. Включите пользовательский для редактирования.',
+      disabledHint: 'Сейчас используется промпт по умолчанию. Включите пользовательский для редактирования.'
     },
+    description: 'Configure default behavior and parameters for conversation modes, including prompts for Agent and normal modes',
+    agentMode: 'Agent Mode',
+    normalMode: 'Normal Mode',
+    menus: {
+      modes: 'Mode Settings',
+      models: 'Model Mapping',
+      thresholds: 'Retrieval Thresholds',
+      advanced: 'Advanced Settings'
+    },
+    models: {
+      description: 'Manage thinking/chat models and re-rank models for both Agent and normal modes',
+      chatGroupLabel: 'Thinking / Chat Models',
+      chatGroupDesc: 'Includes Agent reasoning/planning model and the default chat/summary model for normal mode',
+      chatModel: {
+        label: 'Default chat model (normal mode)',
+        desc: 'Used when a conversation does not specify its own model',
+        placeholder: 'Select default chat model'
+      },
+      rerankModel: {
+        label: 'Default ReRank model (normal mode)',
+        desc: 'Used for re-ranking when a session does not override it',
+        placeholder: 'Select default rerank model'
+      },
+      rerankGroupLabel: 'ReRank Models',
+      rerankGroupDesc: 'Includes Agent rerank model and the default rerank model for normal mode'
+    },
+    thresholds: {
+      description: 'Tune retrieval and re-ranking thresholds to balance accuracy and performance'
+    },
+    maxRounds: {
+      label: 'History Rounds',
+      desc: 'Number of rounds kept for context and query rewrite'
+    },
+    embeddingTopK: {
+      label: 'Embedding TopK',
+      desc: 'Number of documents kept after vector retrieval'
+    },
+    keywordThreshold: {
+      label: 'Keyword Threshold',
+      desc: 'Minimum score for keyword retrieval'
+    },
+    vectorThreshold: {
+      label: 'Vector Threshold',
+      desc: 'Minimum similarity for vector retrieval'
+    },
+    rerankTopK: {
+      label: 'ReRank TopK',
+      desc: 'Documents kept after re-ranking'
+    },
+    rerankThreshold: {
+      label: 'ReRank Threshold',
+      desc: 'Minimum score required after re-ranking'
+    },
+    enableRewrite: {
+      label: 'Enable Query Rewrite',
+      desc: 'Automatically rewrite multi-turn queries for better recall'
+    },
+    fallbackStrategy: {
+      label: 'Fallback Strategy',
+      desc: 'How to respond when no relevant documents are found',
+      fixed: 'Fixed response',
+      model: 'Let the model continue answering'
+    },
+    fallbackResponse: {
+      label: 'Fixed fallback response',
+      desc: 'Text returned when using the fixed fallback strategy'
+    },
+    fallbackPrompt: {
+      label: 'Fallback Prompt',
+      desc: 'Prompt used when fallback strategy is "model"'
+    },
+    advanced: {
+      description: 'Configure query rewrite, fallback strategy and other advanced settings'
+    },
+    rewritePrompt: {
+      system: 'Rewrite System Prompt',
+      user: 'Rewrite User Prompt',
+      desc: 'System prompt used during query rewrite',
+      userDesc: 'User prompt used during query rewrite'
+    },
+    chatModel: {
+      label: 'LLM Model',
+      desc: 'Large language model used for summarization and abstract generation'
+    },
+    rerankModel: {
+      label: 'ReRank Model',
+      desc: 'Model for re-ranking search results (optional)'
+    },
+    temperature: {
+      label: 'Temperature',
+      desc: 'Controls randomness in outputs. 0 is most deterministic; 1 is most random'
+    },
+    maxTokens: {
+      label: 'Max Tokens',
+      desc: 'Maximum number of tokens to generate in the response'
+    },
+    resetSystemPrompt: {
+      header: 'Reset to Default System Prompt',
+      body: 'Are you sure you want to reset to the default system prompt?'
+    },
+    resetContextTemplate: {
+      header: 'Reset to Default Summary Prompt',
+      body: 'Are you sure you want to reset to the default summary prompt?'
+    }
   },
   mcpSettings: {
     title: 'Сервисы MCP',
@@ -1807,12 +2252,12 @@ export default {
       setDefault: 'Установлено по умолчанию',
       setDefaultFailed: 'Не удалось установить по умолчанию',
       builtinCannotEdit: 'Встроенные модели нельзя редактировать',
-      builtinCannotDelete: 'Встроенные модели нельзя удалить',
+      builtinCannotDelete: 'Встроенные модели нельзя удалить'
     },
     builtinModels: {
       title: 'Встроенные модели',
       description: 'Встроенные модели видны всем тенантам. Конфиденциальная информация скрыта, их нельзя редактировать или удалять.',
-      viewGuide: 'Посмотреть руководство по управлению встроенными моделями',
+      viewGuide: 'Посмотреть руководство по управлению встроенными моделями'
     },
     builtinTag: 'Встроенная',
     confirmDelete: 'Удалить эту модель?'
@@ -1860,7 +2305,7 @@ export default {
     unknown: 'Неизвестно',
     today: 'Сегодня',
     yesterday: 'Вчера',
-    daysAgo: '{days} дней назад',
+    daysAgo: '{days} дней назад'
   },
   mcpServiceDialog: {
     addTitle: 'Добавить сервис MCP',
@@ -2041,17 +2486,31 @@ export default {
       agentEnabled: 'Agent режим включён',
       agentDisabled: 'Agent режим отключён',
       agentNotReadyDetail: 'Agent не готов. Пожалуйста, настройте следующее: {reasons}',
-      agentMissingAllowedTools: 'Разрешённые инструменты',
-      agentMissingSummaryModel: 'Модель беседы (Summary Model)',
-      agentMissingRerankModel: 'Модель переранжирования (Rerank Model)',
       webSearchNotConfigured: 'Веб-поиск не настроен. Сначала выберите провайдера и настройте ключи в разделе настроек.',
       webSearchEnabled: 'Веб-поиск включён',
       webSearchDisabled: 'Веб-поиск выключен',
       sessionMissing: 'ID сессии не существует',
       messageMissing: 'Не удалось получить ID сообщения. Обновите страницу и попробуйте снова.',
       stopSuccess: 'Генерация остановлена',
-      stopFailed: 'Не удалось остановить. Попробуйте ещё раз.'
-    }
+      stopFailed: 'Не удалось остановить. Попробуйте ещё раз.',
+      agentSelected: 'Selected agent "{name}"'
+    },
+    customAgentNotReadyTooltip: 'Agent is not ready. Please finish configuration first.',
+    customAgentNotReadyDetail: 'Agent is not ready. Please configure the following: {reasons}',
+    customAgentMissingSummaryModel: 'Chat Model (Summary Model)',
+    customAgentMissingRerankModel: 'Rerank Model',
+    goToAgentEditor: 'Go to configure →',
+    builtinAgentNotReadyDetail: 'Built-in agent "{agentName}" is not ready. Please configure: {reasons}',
+    builtinAgentSettingName: 'Intelligent Reasoning',
+    builtinNormalSettingName: 'Quick Q&A',
+    webSearchDisabledByAgent: 'Web search is disabled by the current agent',
+    webSearchForcedByAgent: 'Web search is enabled by the current agent and cannot be turned off',
+    kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
+    kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
+    cannotRemoveAgentKb: 'Cannot remove knowledge base configured by agent',
+    agentConfiguredKb: 'Configured by agent, cannot be removed',
+    modelLockedByAgent: 'Model selection is locked by the current agent',
+    goToAgentSettings: 'Go to agent settings'
   },
   preview: {
     tab: 'Предпросмотр',
@@ -2059,7 +2518,7 @@ export default {
     loadFailed: 'Не удалось загрузить предпросмотр документа',
     retry: 'Повторить',
     unsupported: 'Этот тип файла не поддерживает онлайн-просмотр',
-    unsupportedHint: 'Скачайте файл и откройте локально',
+    unsupportedHint: 'Скачайте файл и откройте локально'
   },
   knowledgeSearch: {
     title: 'Поиск знаний',
@@ -2084,9 +2543,8 @@ export default {
     viewDetail: 'Подробнее',
     startChat: 'Начать чат',
     chatWithFile: 'Чат',
-    newChatTitle: 'Поиск: {query}',
+    newChatTitle: 'Поиск: {query}'
   },
-  // ---- i18n keys for hardcoded Chinese extraction ----
   tools: {
     multiKbSearch: 'Кросс-КБ поиск',
     knowledgeSearch: 'Поиск по базе знаний',
@@ -2097,7 +2555,7 @@ export default {
     getDocumentInfo: 'Получить информацию о документе',
     queryKnowledgeGraph: 'Запрос к графу знаний',
     think: 'Глубокое размышление',
-    todoWrite: 'Составить план',
+    todoWrite: 'Составить план'
   },
   kbSettings: {
     storage: {
@@ -2117,7 +2575,7 @@ export default {
       engineCos: 'Tencent Cloud COS',
       engineCosDesc: 'Публичное облако, поддержка CDN-ускорения',
       engineTos: 'Volcengine TOS',
-      engineTosDesc: 'Объектное хранилище Volcengine, для публичного облака',
+      engineTosDesc: 'Объектное хранилище Volcengine, для публичного облака'
     },
     parser: {
       title: 'Парсер',
@@ -2135,9 +2593,9 @@ export default {
       fileTypeExcel: 'Таблицы Excel',
       fileTypeCsv: 'Файлы CSV',
       fileTypeText: 'Текстовые файлы',
-      fileTypeImage: 'Изображения',
+      fileTypeImage: 'Изображения'
     },
-    supportedFormats: 'Поддерживаемые форматы',
+    supportedFormats: 'Поддерживаемые форматы'
   },
   agentStream: {
     tools: {
@@ -2151,7 +2609,7 @@ export default {
       getDocumentContent: 'Получение содержимого документа',
       todoWrite: 'Управление планами',
       knowledgeGraphExtract: 'Извлечение графа знаний',
-      thinking: 'Размышление',
+      thinking: 'Размышление'
     },
     summary: {
       searchKb: 'Поиск по базе знаний <strong>{count}</strong> раз(а)',
@@ -2160,24 +2618,24 @@ export default {
       callTools: 'Вызов инструментов {names}',
       intermediateSteps: '<strong>{count}</strong> промежуточных шагов',
       separator: ', ',
-      comma: ', ',
+      comma: ', '
     },
     citation: {
       loading: 'Загрузка...',
       notFound: 'Содержимое не найдено',
       loadFailed: 'Ошибка загрузки',
-      chunkId: 'ID фрагмента',
+      chunkId: 'ID фрагмента'
     },
     toolSummary: {
       getDocument: 'Получить документ: {title}',
       document: 'Документ',
       listChunks: 'Просмотр {fetched}/{total} фрагментов {title}',
-      deepThinking: 'Глубокое размышление',
+      deepThinking: 'Глубокое размышление'
     },
     plan: {
       inProgress: 'В процессе',
       pending: 'Ожидание',
-      completed: 'Завершено',
+      completed: 'Завершено'
     },
     search: {
       noResults: 'Совпадения не найдены',
@@ -2185,7 +2643,7 @@ export default {
       foundResults: 'Найдено {count} результат(ов)',
       webResults: 'Найдено {count} результат(ов) веб-поиска',
       foundMatches: 'Найдено {count} совпадений',
-      showingCount: '(показано {count})',
+      showingCount: '(показано {count})'
     },
     toolStatus: {
       calling: 'Вызов {name}...',
@@ -2200,29 +2658,29 @@ export default {
       updateTodos: 'Обновление списка задач',
       updateTodosFailed: 'Ошибка обновления списка задач',
       called: 'Вызван {name}',
-      calledFailed: 'Ошибка вызова {name}',
+      calledFailed: 'Ошибка вызова {name}'
     },
     copy: {
       emptyContent: 'Текущий ответ пуст, копирование невозможно',
       success: 'Скопировано в буфер обмена',
-      failed: 'Ошибка копирования, скопируйте вручную',
+      failed: 'Ошибка копирования, скопируйте вручную'
     },
     saveToKb: {
       emptyContent: 'Текущий ответ пуст, сохранение в базу знаний невозможно',
-      editorOpened: 'Редактор открыт, выберите базу знаний и сохраните',
-    },
+      editorOpened: 'Редактор открыт, выберите базу знаний и сохраните'
+    }
   },
   agentEditor: {
     builtinHint: 'Это встроенный агент. Имя и описание нельзя изменить, но можно настроить параметры конфигурации.',
     placeholders: {
       available: 'Доступные переменные: ',
       clickToInsert: '(нажмите для вставки)',
-      hint: "(нажмите для вставки или введите {'{{'} для списка)",
+      hint: "(нажмите для вставки или введите {'{{'} для списка)"
     },
     selection: {
       all: 'Все',
       selected: 'Выбранные',
-      disabled: 'Отключено',
+      disabled: 'Отключено'
     },
     desc: {
       name: 'Задайте легко узнаваемое имя для агента',
@@ -2254,7 +2712,7 @@ export default {
       rerankThreshold: 'Минимальная оценка релевантности для переранжирования',
       fallbackStrategy: 'Действие при отсутствии релевантного контента в базе знаний',
       fallbackResponse: 'Фиксированный текст при невозможности ответить',
-      fallbackPrompt: 'Промпт для генерации ответа модели, когда ответ не найден в базе знаний',
+      fallbackPrompt: 'Промпт для генерации ответа модели, когда ответ не найден в базе знаний'
     },
     tools: {
       thinking: 'Размышление',
@@ -2277,14 +2735,14 @@ export default {
       dataAnalysisDesc: 'Понимание файлов данных и проведение анализа',
       dataSchema: 'Схема данных',
       dataSchemaDesc: 'Получение метаинформации табличных файлов',
-      requiresKb: '(требуется настройка базы знаний)',
+      requiresKb: '(требуется настройка базы знаний)'
     },
     mcp: {
       label: 'MCP-сервисы',
       desc: 'Выберите MCP-сервисы, доступные агенту',
       selectLabel: 'Выбор MCP-сервисов',
       selectDesc: 'Выберите MCP-сервисы для включения',
-      selectPlaceholder: 'Выберите MCP-сервисы',
+      selectPlaceholder: 'Выберите MCP-сервисы'
     },
     faq: {
       title: 'Стратегия приоритета FAQ',
@@ -2294,11 +2752,11 @@ export default {
       thresholdLabel: 'Порог прямого ответа',
       thresholdDesc: 'Если сходство вопроса с FAQ превышает это значение, ответ FAQ используется напрямую',
       boostLabel: 'Коэффициент FAQ',
-      boostDesc: 'Умножение оценки релевантности FAQ на этот коэффициент для повышения ранга',
+      boostDesc: 'Умножение оценки релевантности FAQ на этот коэффициент для повышения ранга'
     },
     fallback: {
       fixed: 'Фиксированный ответ',
-      model: 'Генерация моделью',
+      model: 'Генерация моделью'
     },
     fileTypes: {
       label: 'Поддерживаемые типы файлов',
@@ -2312,8 +2770,8 @@ export default {
       csv: 'Файлы CSV',
       excel: 'Таблицы Excel (.xlsx/.xls)',
       imageLabel: 'Изображения',
-      image: 'Изображения (.jpg/.jpeg/.png)',
-    },
+      image: 'Изображения (.jpg/.jpeg/.png)'
+    }
   },
   faqManager: {
     import: {
@@ -2331,9 +2789,9 @@ export default {
       importFailed: 'Ошибка импорта',
       waiting: 'Ожидание...',
       importInProgress: 'Импорт выполняется, дождитесь завершения',
-      noFailedRecords: 'Нет записей с ошибками для скачивания',
+      noFailedRecords: 'Нет записей с ошибками для скачивания'
     },
-    retry: 'Повторить',
+    retry: 'Повторить'
   },
   mermaid: {
     zoomIn: 'Увеличить',
@@ -2341,12 +2799,383 @@ export default {
     reset: 'Сброс',
     download: 'Скачать изображение',
     close: 'Закрыть',
-    downloading: 'Загрузка...',
+    downloading: 'Загрузка...'
   },
   ollama: {
     unknown: 'Неизвестно',
     today: 'Сегодня',
     yesterday: 'Вчера',
-    daysAgo: '{days} дней назад',
+    daysAgo: '{days} дней назад'
   },
+  listSpaceSidebar: {
+    title: 'Фильтр',
+    all: 'Все',
+    mine: 'Мои',
+    sharedToMe: 'Совместные',
+    spaces: 'Пространства'
+  },
+  promptTemplate: {
+    noTemplates: 'No templates available',
+    selectTemplate: 'Select Template',
+    useTemplate: 'Use Template',
+    withKnowledgeBase: 'KB',
+    withWebSearch: 'Web Search',
+    systemPrompt: {
+      defaultKB: {
+        name: 'Knowledge Base Assistant',
+        desc: 'Basic knowledge base Q&A template for most scenarios'
+      },
+      expert: {
+        name: 'Domain Expert',
+        desc: 'Professional and in-depth answers for technical domains'
+      },
+      customerService: {
+        name: 'Customer Service',
+        desc: 'Friendly and warm service style for customer support'
+      },
+      techSupport: {
+        name: 'Technical Support',
+        desc: 'Professional technical problem solving with code examples'
+      },
+      pureChat: {
+        name: 'General Chat',
+        desc: 'General conversation assistant without knowledge base'
+      },
+      webSearch: {
+        name: 'Web Search Assistant',
+        desc: 'Combines web search for up-to-date information'
+      }
+    },
+    contextTemplate: {
+      default: {
+        name: 'Standard Template',
+        desc: 'Basic context template with clear references and questions'
+      },
+      detailed: {
+        name: 'Detailed Template',
+        desc: 'Complete template with detailed instructions and requirements'
+      },
+      simple: {
+        name: 'Simple Template',
+        desc: 'Minimal template format for simple Q&A scenarios'
+      },
+      qa: {
+        name: 'Q&A Template',
+        desc: 'Optimized template for Q&A scenarios'
+      }
+    },
+    rewriteSystem: {
+      default: {
+        name: 'Standard Rewrite',
+        desc: 'Standard rules for resolving references and completing omissions'
+      },
+      strict: {
+        name: 'Strict Rewrite',
+        desc: 'Stricter requirements for complete and independent questions'
+      }
+    },
+    rewriteUser: {
+      default: {
+        name: 'Standard Format',
+        desc: 'Standard format with conversation history and current question'
+      },
+      detailed: {
+        name: 'Detailed Format',
+        desc: 'Detailed format with task instructions'
+      }
+    },
+    fallback: {
+      default: {
+        name: 'Standard Fallback',
+        desc: 'Friendly message with suggestions when unable to answer'
+      },
+      polite: {
+        name: 'Polite Fallback',
+        desc: 'More polite and detailed unable-to-answer message'
+      },
+      brief: {
+        name: 'Brief Fallback',
+        desc: 'Short unable-to-answer message'
+      },
+      model: {
+        name: 'Model Fallback Prompt',
+        desc: 'Prompt to guide model to answer with general knowledge'
+      }
+    }
+  },
+  organization: {
+    title: 'Shared Spaces',
+    subtitle: 'Create or join shared spaces to share knowledge bases and agents with your team',
+    createOrg: 'Create Space',
+    createOrgShort: 'New',
+    joinOrg: 'Join Space',
+    joinOrgShort: 'Join',
+    name: 'Space Name',
+    namePlaceholder: 'Enter space name',
+    nameRequired: 'Please enter space name',
+    avatar: 'Space Avatar',
+    avatarClear: 'Clear',
+    avatarPickerHint: 'Choose an emoji as space avatar',
+    description: 'Description',
+    descriptionPlaceholder: 'Enter space description (optional)',
+    noDescription: 'No description',
+    members: 'members',
+    memberCount: 'Member count',
+    owner: 'Creator',
+    inviteCode: 'Invite Code',
+    inviteCodePlaceholder: 'Enter invite code',
+    inviteCodeRequired: 'Please enter invite code',
+    inviteCodeTip: 'Share this invite code with others to let them join your space',
+    refreshInviteCode: 'Refresh Invite Code',
+    inviteCodeRefreshed: 'Invite code refreshed',
+    inviteCodeRefreshFailed: 'Failed to refresh invite code',
+    join: {
+      title: 'Join Space',
+      joining: 'Joining space...',
+      success: 'Successfully joined space!',
+      failed: 'Failed to join space',
+      noCode: 'Invite code not found',
+      goToOrganizations: 'Go to Spaces',
+      confirmTitle: 'Confirm Join Space',
+      confirm: 'Confirm Join',
+      preview: 'Preview & Join',
+      memberCount: '{count} members',
+      shareCount: '{count} shared knowledge bases',
+      agentShareCount: '{count} agents',
+      alreadyMember: 'You are already a member of this space',
+      invalidCode: 'Invalid invite code',
+      byInviteCode: 'Enter invite code',
+      searchSpaces: 'Search spaces',
+      searchSpacesDesc: 'Browse or search spaces that are open for discovery; join without an invite code',
+      searchSpacesPlaceholder: 'Search by space name, description or space ID',
+      spaceId: 'Space ID',
+      noSearchResult: 'No matching spaces',
+      noSearchableSpaces: 'No discoverable spaces yet, or try a search',
+      membersWithLimit: '{current}/{limit} members',
+      memberLimitReached: 'Full',
+      backToSearch: 'Back to search'
+    },
+    invite: {
+      loading: 'Loading...',
+      previewTitle: 'Join Space',
+      previewInfo: 'Space Overview',
+      inputDesc: 'Enter the invite code (or paste from an invite link) to view the space and join',
+      previewAction: 'View',
+      primaryJoin: 'Join',
+      invalidTitle: 'Invalid Invitation',
+      invalidCode: 'Invite code is invalid or expired',
+      previewFailed: 'Preview failed, please try again',
+      members: 'Members',
+      knowledgeBases: 'Knowledge Bases',
+      agents: 'Agents',
+      alreadyMember: 'You are already a member of this space',
+      confirmJoin: 'Confirm Join',
+      submitRequest: 'Request to Join',
+      requireApprovalTip: 'This space requires admin approval to join',
+      approvalLabel: 'Join method',
+      needApproval: 'Requires approval',
+      noApproval: 'No approval required',
+      defaultRoleAfterJoin: 'Default role after joining: {role}',
+      requestRole: 'Requested role',
+      selectRole: 'Select role',
+      messagePlaceholder: 'Optional: message (e.g. intro or reason to join)',
+      applicationNote: 'Application note (optional)',
+      joinSuccess: 'Successfully joined space!',
+      joinFailed: 'Failed to join, please try again',
+      requestSubmitted: 'Request submitted, please wait for admin approval',
+      requestFailed: 'Failed to submit request, please try again',
+      viewOrganization: 'View Space'
+    },
+    leave: 'Leave Space',
+    leaveConfirm: 'Are you sure you want to leave this space?',
+    leaveConfirmTitle: 'Leave Space',
+    leaveConfirmMessage: 'Are you sure you want to leave "{name}"? You will lose access to shared knowledge bases.',
+    leaveSuccess: 'Left space successfully',
+    leaveFailed: 'Failed to leave space',
+    deleteConfirm: 'Are you sure you want to delete this space? This action cannot be undone.',
+    deleteConfirmTitle: 'Delete Space',
+    deleteConfirmMessage: 'Are you sure you want to delete "{name}"? All members will be removed. This action cannot be undone.',
+    deleteSuccess: 'Space deleted',
+    deleteFailed: 'Failed to delete space',
+    createSuccess: 'Space created successfully',
+    createFailed: 'Failed to create space',
+    joinSuccess: 'Joined space successfully',
+    joinFailed: 'Failed to join space',
+    manageMembers: 'Manage Members',
+    noMembers: 'No members',
+    roleUpdated: 'Role updated',
+    roleUpdateFailed: 'Failed to update role',
+    memberRemoved: 'Member removed',
+    memberRemoveFailed: 'Failed to remove member',
+    empty: 'You have not joined any shared space yet',
+    emptyDesc: 'Create a space or join an existing one with an invite code',
+    all: 'All',
+    createdByMe: 'Created by me',
+    joinedByMe: 'Joined',
+    createdTag: 'Created',
+    joinedTag: 'Joined',
+    joinedLabel: 'Joined',
+    emptyCreated: 'You have not created any space yet',
+    emptyCreatedDesc: 'Click "Create Space" to create one',
+    emptyJoined: 'You have not joined any space yet',
+    emptyJoinedDesc: 'Join an existing space with an invite code',
+    role: {
+      admin: 'Admin',
+      editor: 'Editor',
+      viewer: 'Viewer'
+    },
+    detail: {
+      myRole: 'My Role',
+      removeMemberTitle: 'Remove Member',
+      removeMemberConfirm: 'Are you sure you want to remove "{name}"?',
+      removeMember: 'Remove Member',
+      shareKBTip: 'Go to knowledge base list, select a knowledge base and click share to share it to this space'
+    },
+    settings: {
+      editTitle: 'Space Settings',
+      detailTitle: 'Space Details',
+      myRoleDesc: 'Your role in this space determines your permissions',
+      membersDesc: 'View and manage space members, adjust member roles',
+      sharedDesc: 'View all knowledge bases shared to this space',
+      noSharedKB: 'No shared knowledge bases yet',
+      noSharedKBTip: 'Knowledge base owners can share their knowledge bases to this space in KB settings',
+      sharedAgents: 'Shared Agents',
+      noSharedAgents: 'No shared agents yet',
+      sharedAgentsDesc: 'Agents shared to this space; members can use them in chat',
+      sharedAgentsKbHint: "Knowledge bases linked to an agent are only available (read-only) when members use that agent in a conversation (via {'@'}). They do not appear in the Knowledge Base list. To let members see or edit a knowledge base in the list, share that knowledge base to this space separately.",
+      sharedAgentsKbHintShort: 'Agent-linked knowledge is read-only in chat; share the KB to this space if members should see or edit it in the list.',
+      noSharedAgentsTip: 'Admins can share agents to this space from agent settings',
+      sharePermissionLabel: 'Space permission',
+      myPermissionLabel: 'My actual permission',
+      permissionCalcFormula: 'Space permission is what was set when the KB was shared to this space; my actual permission = min(space permission, my role in this space)',
+      permissionCalcTip: 'My actual permission = min(space permission, my role in this space). As a viewer in the space, I have at most read-only on this KB; as editor or admin, my permission is capped by the space permission.',
+      inviteMembers: 'Invite Members',
+      inviteMembersDesc: 'Invite others to join the space via code or link',
+      inviteLink: 'Invite Link',
+      inviteLinkValidity: 'Invite link validity',
+      inviteLinkValidityDesc: 'Validity period for newly generated invite links',
+      validity1Day: '1 day',
+      validity7Days: '7 days',
+      validity30Days: '30 days',
+      validityNever: 'Never expire',
+      remainingValidity: 'Expires in {n} days',
+      remainingValidityNever: 'Never expire',
+      remainingValidityExpired: 'Expired',
+      removeShareFromOrg: 'Remove from space',
+      removeShareConfirm: 'Remove "{name}" from this space? Members will no longer have access to this knowledge base.',
+      removeAgentShareConfirm: 'Remove "{name}" from this space? Members will no longer have access to this agent.',
+      removeShareSuccess: 'Removed from space',
+      removeShareFailed: 'Failed to remove, please try again',
+      requireApproval: 'Require Approval',
+      requireApprovalDesc: 'When enabled, new members need admin approval to join',
+      searchable: 'Open for search',
+      searchableDesc: 'When enabled, this space appears in the "Join Space" search list; others can search and request to join without an invite code',
+      memberLimit: 'Member limit',
+      memberLimitDesc: 'No new members can be added when the limit is reached; 0 means unlimited',
+      memberLimitPlaceholder: '0 = unlimited',
+      memberLimitHint: 'Current members: {count}',
+      joinRequests: 'Join Requests',
+      joinRequestsDesc: 'Review pending requests to join the space',
+      noPendingRequests: 'No pending requests',
+      pendingJoinRequestsBadge: 'Pending join requests to review',
+      pendingReview: 'Pending',
+      assignRole: 'Assign role',
+      approve: 'Approve',
+      reject: 'Reject',
+      approveSuccess: 'Request approved',
+      rejectSuccess: 'Request rejected',
+      reviewFailed: 'Operation failed, please try again'
+    },
+    editor: {
+      navBasic: 'Basic Info',
+      navPermissions: 'Permissions',
+      navJoin: 'Join Space',
+      basicTitle: 'Basic Information',
+      basicDesc: 'Set the space name and description for easy identification',
+      nameTip: 'Use your team or project name for easy identification',
+      descriptionTip: 'Describe the purpose and goals of the space',
+      permissionsTitle: 'Member Permissions',
+      permissionsDesc: 'Understand the permission scope of different roles for knowledge bases and agents in the space',
+      permissionFeature: 'Permission Feature',
+      fullAccess: 'Full Access',
+      editAccess: 'Edit Access',
+      viewAccess: 'View Only',
+      adminPerm1: 'Manage space settings, members, and knowledge base & agent sharing',
+      adminPerm2: 'Share and manage knowledge bases and agents',
+      adminPerm3: 'Edit shared knowledge base content',
+      adminPerm4: 'View and search knowledge bases',
+      useSharedAgentsPerm: 'Use shared agents',
+      shareKBPerm: 'Share knowledge bases to space',
+      editorPerm1: 'Edit shared knowledge base content',
+      editorPerm2: 'View and search knowledge bases',
+      editorPerm3: 'Manage space settings and members',
+      viewerPerm1: 'View and search knowledge bases',
+      viewerPerm2: 'Edit knowledge base content',
+      viewerPerm3: 'Manage space settings',
+      ownerNote: 'As the space creator, you will automatically become an admin with full permissions.',
+      joinTitle: 'Join Space',
+      joinDesc: 'Join an existing space with an invite code to access shared knowledge bases and agents',
+      joinIllustration: 'Enter the invite code provided by the space admin to join',
+      inviteCodeTip: 'The invite code is generated by space admins, please ask them for it',
+      howToGetCode: 'How to get an invite code?',
+      step1: 'Contact the admin of the space you want to join',
+      step2: 'Ask them to share the space invite code',
+      step3: 'Paste the invite code in the input field above'
+    },
+    upgrade: {
+      requestUpgrade: 'Request Permission Upgrade',
+      pending: 'Request Submitted',
+      dialogTitle: 'Request Permission Upgrade',
+      currentRole: 'Current Role',
+      selectRole: 'Request Role',
+      reason: 'Reason (Optional)',
+      reasonPlaceholder: 'Please briefly explain why you need higher permissions...',
+      submitSuccess: 'Upgrade request submitted, waiting for admin approval',
+      submitFailed: 'Failed to submit request',
+      upgradeRequest: 'Permission Upgrade'
+    },
+    addMember: {
+      button: 'Add Member',
+      dialogTitle: 'Add Member',
+      tip: 'Added users will immediately become space members and can access shared knowledge bases.',
+      searchUser: 'Select User',
+      searchPlaceholder: 'Search by username or email...',
+      searchHint: 'Type at least 2 characters to search',
+      selectRole: 'Assign Role',
+      confirmBtn: 'Add',
+      success: 'Member added successfully',
+      failed: 'Failed to add member',
+      roleHint: {
+        viewer: 'Can view and search',
+        editor: 'Can edit content',
+        admin: 'Full management access'
+      }
+    },
+    share: {
+      title: 'Share Knowledge Base',
+      shareToSpace: 'Share to space',
+      shareModelToSpace: 'Share "{name}" to space',
+      shareAgentToSpace: 'Share "{name}" to space',
+      modelShareDesc: 'Share this model to a space so members can use it',
+      agentShareDesc: 'Share this agent to a space so members can use it',
+      spaceAgentShareCountTip: 'Number of agents shared to this space',
+      selectOrg: 'Select Space',
+      selectOrgPlaceholder: 'Select a space to share with',
+      permission: 'Permission',
+      permissionTip: 'Editable permission allows members to modify knowledge base content, Read-only permission only allows search and Q&A',
+      shareSuccess: 'Knowledge base shared',
+      shareFailed: 'Failed to share',
+      unshareSuccess: 'Share cancelled',
+      unshareFailed: 'Failed to cancel share',
+      sharedTo: 'Shared to',
+      noShares: 'Not shared to any space yet',
+      sharedKnowledgeBase: 'Shared Knowledge Base',
+      sharedFrom: 'From',
+      sharedBadge: 'Shared',
+      permissionReadonly: 'Read-only',
+      permissionEditable: 'Editable',
+      sharedKBs: ' knowledge bases',
+      sharedAgents: ' agents'
+    }
+  }
 }

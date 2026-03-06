@@ -103,6 +103,7 @@
             v-model="localCompressionMethod"
             @change="handleCompressionMethodChange"
             style="width: 280px;"
+            :placeholder="t('webSearchSettings.compressionLabel')"
           >
             <t-option value="none" :label="t('webSearchSettings.compressionNone')">
               {{ t('webSearchSettings.compressionNone') }}

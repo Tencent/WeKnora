@@ -880,6 +880,7 @@ export default {
     reset: "重置",
     clear: "清空",
     website: "官方网站",
+    github: 'GitHub',
     on: "开启",
     off: "关闭",
     resetToDefault: "恢复默认",
@@ -1521,6 +1522,10 @@ export default {
           label: "LongCat AI",
           description: "LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.",
         },
+        lkeap: {
+          label: "腾讯云 LKEAP",
+          description: "DeepSeek-R1, DeepSeek-V3 系列模型，支持思维链",
+        },
       },
     },
     builtinTag: "内置",
@@ -1548,6 +1553,7 @@ export default {
     light: "浅色",
     dark: "深色",
     system: "跟随系统",
+    selectTheme: "选择主题",
   },
   platform: {
     subtitle: "企业级智能文档检索框架",

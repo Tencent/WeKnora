@@ -1035,6 +1035,7 @@ export default {
     reset: 'Reset',
     clear: 'Clear',
     website: 'Official Website',
+    github: 'GitHub',
     on: 'On',
     off: 'Off',
     resetToDefault: 'Reset to default',
@@ -1210,9 +1211,6 @@ export default {
       agentEnabled: 'Agent Mode enabled',
       agentDisabled: 'Agent Mode disabled',
       agentNotReadyDetail: 'Agent is not ready. Please configure the following: {reasons}',
-      agentMissingAllowedTools: 'Allowed tools',
-      agentMissingSummaryModel: 'Chat Model (Summary Model)',
-      agentMissingRerankModel: 'Rerank Model',
       webSearchNotConfigured: 'Web search engine is not configured. Please configure a provider and credentials in settings.',
       webSearchEnabled: 'Web search enabled',
       webSearchDisabled: 'Web search disabled',
@@ -1281,7 +1279,10 @@ export default {
     },
     messages: {
       deleted: 'Knowledge base deleted',
-      deleteFailed: 'Failed to delete knowledge base'
+      deleteFailed: 'Failed to delete knowledge base',
+      file: 'File',
+      knowledgeBase: 'Knowledge Base',
+      noResult: 'No results',
     },
     detail: {
       title: 'Shared Knowledge Base',
@@ -1327,7 +1328,7 @@ export default {
       completedDetail: 'All {total} files uploaded. Refreshing list to show parsing status...',
       refreshing: 'Refreshing list to show parsing status...',
       errorTip: 'Some files failed to upload. Please check the notifications.',
-      unknownKb: 'Knowledge Base {id}'
+      unknownKb: 'Knowledge Base {id}',
     }
   },
   knowledgeEditor: {
@@ -1403,9 +1404,13 @@ export default {
         separate: 'Separate'
       },
       standardQuestion: 'Primary Question',
+      standardQuestionDesc: 'Set the standard phrasing of the question — this is the most common way users ask it.',
       answers: 'Answers',
+      answersDesc: 'Provide complete and accurate answer content. Multiple answers can be added to cover different scenarios.',
       similarQuestions: 'Similar Questions',
+      similarQuestionsDesc: 'Add questions with the same meaning but different phrasing to help the system better match user queries.',
       negativeQuestions: 'Negative Examples',
+      negativeQuestionsDesc: 'Add questions that should not match this answer, to exclude false positives.',
       categoryLabel: 'FAQ Category',
       categoryButton: 'Switch Category',
       editorCreate: 'Create FAQ Entry',
@@ -1708,8 +1713,6 @@ export default {
     noMatchFound: 'No matching content found',
     deleteSessionFailed: 'Delete failed, please try again later!',
   },
-    noMatchFound: 'No matching content found',
-    deleteSessionFailed: 'Delete failed, please try again later!',
   tenant: {
     title: 'Tenant Information',
     currentTenant: 'Current Tenant',
@@ -1868,6 +1871,7 @@ export default {
     fileSizeExceeded: 'File size cannot exceed {size}MB!',
     unsupportedFileType: 'Unsupported file type!',
     invalidFileType: 'Invalid file type!',
+    invalidImageLink: 'Invalid image link',
     missingKbId: 'Missing knowledge base ID',
     tokenNotFound: 'Login token not found, please log in again',
     streamFailed: 'Stream connection failed',
@@ -2059,8 +2063,13 @@ export default {
           label: 'LongCat AI',
           description: 'LongCat-Flash-Chat, LongCat-Flash-Thinking, etc.',
         },
+        lkeap: {
+          label: 'Tencent Cloud LKEAP',
+          description: 'DeepSeek-R1, DeepSeek-V3 series with chain-of-thought',
+        },
       },
     },
+    builtinTag: 'Built-in',
   },
   language: {
     zhCN: '简体中文',
@@ -2085,6 +2094,7 @@ export default {
     light: 'Light',
     dark: 'Dark',
     system: 'Follow System',
+    selectTheme: 'Select theme',
   },
   platform: {
     subtitle: 'Enterprise-level Intelligent Document Retrieval Framework',
@@ -2134,9 +2144,11 @@ export default {
       notReady: 'Not Ready',
       hint: 'Once configuration is complete, the status will change to "Ready". You can then enable Agent mode in the chat.',
       missingThinkingModel: 'Thinking model',
+      missingSummaryModel: 'Chat Model (Summary Model)',
       missingRerankModel: 'Rerank model',
       missingAllowedTools: 'Allowed tools',
       pleaseConfigure: 'Please configure {items}',
+      goToConfig: 'Go to configure chat model',
       goConfigureModels: 'Configure models →'
     },
     maxIterations: {
@@ -2537,6 +2549,7 @@ export default {
     }
   },
   promptTemplate: {
+    noTemplates: 'No templates available',
     selectTemplate: 'Select Template',
     useTemplate: 'Use Template',
     withKnowledgeBase: 'KB',
