@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -94,12 +95,19 @@ type Model struct {
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"  json:"deleted_at"  gorm:"index"`
 }
 
-// Value implements the driver.Valuer interface, used to convert ModelParameters to database value
+// Value implements the driver.Valuer interface, used to convert ModelParameters to database value.
+// Encrypts APIKey before persisting to database (value receiver = no memory pollution).
 func (c ModelParameters) Value() (driver.Value, error) {
+	if key := utils.GetAESKey(); key != nil && c.APIKey != "" {
+		if encrypted, err := utils.EncryptAESGCM(c.APIKey, key); err == nil {
+			c.APIKey = encrypted
+		}
+	}
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to ModelParameters
+// Scan implements the sql.Scanner interface, used to convert database value to ModelParameters.
+// Decrypts APIKey after loading from database; legacy plaintext is returned as-is.
 func (c *ModelParameters) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -108,7 +116,15 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	return json.Unmarshal(b, c)
+	if err := json.Unmarshal(b, c); err != nil {
+		return err
+	}
+	if key := utils.GetAESKey(); key != nil && c.APIKey != "" {
+		if decrypted, err := utils.DecryptAESGCM(c.APIKey, key); err == nil {
+			c.APIKey = decrypted
+		}
+	}
+	return nil
 }
 
 // BeforeCreate is a GORM hook that runs before creating a new model record

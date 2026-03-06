@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    api_key VARCHAR(64) NOT NULL,
+    api_key VARCHAR(256) NOT NULL,
     retriever_engines JSONB NOT NULL DEFAULT '[]',
     status VARCHAR(50) DEFAULT 'active',
     business VARCHAR(255) NOT NULL,

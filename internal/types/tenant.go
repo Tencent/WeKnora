@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/utils"
 	"gorm.io/gorm"
 )
 
@@ -123,6 +124,28 @@ func (t *Tenant) GetEffectiveEngines() []RetrieverEngineParams {
 func (t *Tenant) BeforeCreate(tx *gorm.DB) error {
 	if t.RetrieverEngines.Engines == nil {
 		t.RetrieverEngines.Engines = []RetrieverEngineParams{}
+	}
+	return nil
+}
+
+// BeforeSave encrypts APIKey before persisting to database.
+// Uses tx.Statement.SetColumn to avoid polluting the in-memory struct.
+func (t *Tenant) BeforeSave(tx *gorm.DB) error {
+	if key := utils.GetAESKey(); key != nil && t.APIKey != "" {
+		if encrypted, err := utils.EncryptAESGCM(t.APIKey, key); err == nil {
+			tx.Statement.SetColumn("api_key", encrypted)
+		}
+	}
+	return nil
+}
+
+// AfterFind decrypts APIKey after loading from database.
+// Legacy plaintext (without enc:v1: prefix) is returned as-is.
+func (t *Tenant) AfterFind(tx *gorm.DB) error {
+	if key := utils.GetAESKey(); key != nil && t.APIKey != "" {
+		if decrypted, err := utils.DecryptAESGCM(t.APIKey, key); err == nil {
+			t.APIKey = decrypted
+		}
 	}
 	return nil
 }

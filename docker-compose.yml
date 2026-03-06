@@ -106,6 +106,7 @@ services:
       - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
       - TENANT_AES_KEY=${TENANT_AES_KEY:-}
+      - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
       # File size limit (in MB)
