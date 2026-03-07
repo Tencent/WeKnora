@@ -290,14 +290,15 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, and TOS.
+// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, and S3.
 // Knowledge bases select which provider to use; parameters are read from here.
 type StorageEngineConfig struct {
-	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos"
+	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3"
 	Local           *LocalEngineConfig `json:"local,omitempty"`
 	MinIO           *MinIOEngineConfig `json:"minio,omitempty"`
 	COS             *COSEngineConfig   `json:"cos,omitempty"`
 	TOS             *TOSEngineConfig   `json:"tos,omitempty"`
+	S3              *S3EngineConfig    `json:"s3,omitempty"`
 }
 
 // LocalEngineConfig is for local file system storage (single-machine deployment only).
@@ -329,6 +330,16 @@ type COSEngineConfig struct {
 
 // TOSEngineConfig is for Volcengine TOS (火山引擎对象存储).
 type TOSEngineConfig struct {
+	Endpoint   string `json:"endpoint"`
+	Region     string `json:"region"`
+	AccessKey  string `json:"access_key"`
+	SecretKey  string `json:"secret_key"`
+	BucketName string `json:"bucket_name"`
+	PathPrefix string `json:"path_prefix"`
+}
+
+// S3EngineConfig is for AWS S3 and S3-compatible object storage.
+type S3EngineConfig struct {
 	Endpoint   string `json:"endpoint"`
 	Region     string `json:"region"`
 	AccessKey  string `json:"access_key"`
