@@ -326,12 +326,6 @@ services:
       - CLUSTER_GOSSIP_BIND_PORT=7000
       - CLUSTER_DATA_BIND_PORT=7001
       - RAFT_BOOTSTRAP_EXPECT=1
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/.well-known/live"]
-      interval: 30s
-      start_period: 90s
-      timeout: 20s
-      retries: 3
     ports:
       - "9035:8080"
       - "50052:50051"

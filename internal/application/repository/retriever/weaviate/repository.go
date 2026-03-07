@@ -100,7 +100,7 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 				{
 					Name:         fieldContent,
 					DataType:     []string{"text"},
-					Tokenization: "word",
+					Tokenization: "gse",
 				},
 				{
 					Name:     fieldSourceID,
