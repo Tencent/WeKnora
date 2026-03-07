@@ -686,10 +686,11 @@ func isBlockedStorageEndpoint(endpoint string) (bool, string) {
 
 // StorageCheckRequest is the body for POST /system/storage-engine-check.
 type StorageCheckRequest struct {
-	Provider string                   `json:"provider"` // "minio", "cos", or "tos"
+	Provider string                   `json:"provider"` // "minio", "cos", "tos", or "s3"
 	MinIO    *types.MinIOEngineConfig `json:"minio,omitempty"`
 	COS      *types.COSEngineConfig   `json:"cos,omitempty"`
 	TOS      *types.TOSEngineConfig   `json:"tos,omitempty"`
+	S3       *types.S3EngineConfig    `json:"s3,omitempty"`
 }
 
 // StorageCheckResponse is the response for a single-engine connectivity check.
@@ -724,6 +725,8 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 		h.checkCOS(c, ctx, req.COS)
 	case "tos":
 		h.checkTOS(c, ctx, req.TOS)
+	case "s3":
+		h.checkS3(c, ctx, req.S3)
 	default:
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: "本地存储无需检测"}})
 	}
@@ -873,6 +876,40 @@ func (h *SystemHandler) checkTOS(c *gin.Context, ctx context.Context, cfg *types
 			return
 		}
 		if strings.Contains(errMsg, "404") {
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在，请检查名称和 Region", cfg.BucketName)}})
+			return
+		}
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: sanitizeStorageCheckError(err)}})
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: fmt.Sprintf("连接成功，Bucket「%s」已确认存在", cfg.BucketName)}})
+}
+
+func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.S3EngineConfig) {
+	if cfg == nil {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 S3 配置"}})
+		return
+	}
+	if cfg.Endpoint == "" || cfg.Region == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Region、Access Key、Secret Key、Bucket 名称不能为空"}})
+		return
+	}
+
+	if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
+		logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+		return
+	}
+
+	err := file.CheckS3Connectivity(ctx, cfg.Endpoint, cfg.AccessKey, cfg.SecretKey, cfg.BucketName, cfg.Region)
+	if err != nil {
+		logger.Errorf(ctx, "Storage check: S3 connectivity failed, bucket: %s, error: %v", cfg.BucketName, err)
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "403") {
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			return
+		}
+		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NotFound") {
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在，请检查名称和 Region", cfg.BucketName)}})
 			return
 		}

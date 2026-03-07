@@ -90,6 +90,16 @@ func NewFileServiceFromStorageConfig(
 		}
 		svc, err := NewTosFileService(sec.TOS.Endpoint, sec.TOS.Region, sec.TOS.AccessKey, sec.TOS.SecretKey, sec.TOS.BucketName, sec.TOS.PathPrefix)
 		return svc, p, err
+	case "s3":
+		if sec == nil || sec.S3 == nil || sec.S3.Endpoint == "" || sec.S3.Region == "" || sec.S3.AccessKey == "" || sec.S3.SecretKey == "" || sec.S3.BucketName == "" {
+			return nil, p, fmt.Errorf("incomplete s3 config")
+		}
+		pathPrefix := strings.TrimSpace(sec.S3.PathPrefix)
+		if pathPrefix == "" {
+			pathPrefix = "weknora/"
+		}
+		svc, err := NewS3FileService(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix)
+		return svc, p, err
 
 	default:
 		return nil, p, fmt.Errorf("unsupported provider %q", p)
