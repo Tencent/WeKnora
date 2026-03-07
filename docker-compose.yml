@@ -86,6 +86,11 @@ services:
       - MILVUS_COLLECTION=${MILVUS_COLLECTION:-weknora_embeddings}
       - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
       - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
+      - WEAVIATE_HOST=${WEAVIATE_HOST:-weaviate:8080}
+      - WEAVIATE_GRPC_ADDRESS=${WEAVIATE_GRPC_ADDRESS:-weaviate:50051}
+      - WEAVIATE_SCHEME=${WEAVIATE_SCHEME:-http}
+      - WEAVIATE_AUTH_ENABLED=${WEAVIATE_AUTH_ENABLED:-false}
+      - WEAVIATE_API_KEY=${WEAVIATE_API_KEY:-}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -309,6 +314,29 @@ services:
     profiles:
       - milvus
 
+  weaviate:
+    image: semitechnologies/weaviate:1.28.4
+    container_name: WeKnora-weaviate
+    environment:
+      - PERSISTENCE_DATA_PATH=/var/lib/weaviate
+      - CLUSTER_HOSTNAME=node1
+      - DEFAULT_VECTORIZER_MODULE=none
+      - ENABLE_MODULES=none
+      - AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED=true
+      - CLUSTER_GOSSIP_BIND_PORT=7000
+      - CLUSTER_DATA_BIND_PORT=7001
+      - RAFT_BOOTSTRAP_EXPECT=1
+    ports:
+      - "9035:8080"
+      - "50052:50051"
+    volumes:
+      - weaviate_data:/var/lib/weaviate
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - weaviate
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -322,3 +350,4 @@ volumes:
   neo4j-data:
   qdrant_data:
   milvus_data:
+  weaviate_data:
