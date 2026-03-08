@@ -1,5 +1,5 @@
 #!/bin/bash
-set -x
+set -ex
 
 # 设置目录
 PROTO_DIR="docreader/proto"
@@ -13,12 +13,16 @@ python3 -m grpc_tools.protoc -I${PROTO_DIR} \
     --grpc_python_out=${PYTHON_OUT} \
     ${PROTO_DIR}/docreader.proto
 
-# 生成Go代码
-protoc -I${PROTO_DIR} --go_out=${GO_OUT} \
-    --go_opt=paths=source_relative \
-    --go-grpc_out=${GO_OUT} \
-    --go-grpc_opt=paths=source_relative \
-    ${PROTO_DIR}/docreader.proto
+# 生成Go代码（仅在 protoc-gen-go 可用时执行）
+if command -v protoc-gen-go &> /dev/null; then
+    protoc -I${PROTO_DIR} --go_out=${GO_OUT} \
+        --go_opt=paths=source_relative \
+        --go-grpc_out=${GO_OUT} \
+        --go-grpc_opt=paths=source_relative \
+        ${PROTO_DIR}/docreader.proto
+else
+    echo "protoc-gen-go not found, skipping Go code generation"
+fi
 
 # 修复Python导入问题（MacOS兼容版本）
 if [ "$(uname)" == "Darwin" ]; then

@@ -1,37 +1,32 @@
 <template>
   <div class="kb-list-container">
-    <!-- 头部：仅标题与副标题 -->
-    <div class="header">
-      <div class="header-title">
-        <h2>{{ $t('knowledgeBase.title') }}</h2>
-        <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
+    <ListSpaceSidebar
+      v-model="spaceSelection"
+      :count-all="allKnowledgeBases"
+      :count-mine="kbs.length"
+      :count-shared="sharedKbs.length"
+      :count-by-org="effectiveSharedCountByOrg"
+    />
+    <div class="kb-list-content">
+      <div class="header">
+        <div class="header-title">
+          <div class="title-row">
+            <h2>{{ $t('knowledgeBase.title') }}</h2>
+            <t-tooltip :content="$t('knowledgeList.create')" placement="bottom">
+              <t-button
+                variant="text"
+                theme="default"
+                size="small"
+                class="header-action-btn"
+                @click="handleCreateKnowledgeBase"
+              >
+                <template #icon><t-icon name="folder-add" size="16px" /></template>
+              </t-button>
+            </t-tooltip>
+          </div>
+          <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
+        </div>
       </div>
-    </div>
-
-    <!-- 左侧菜单 + 主内容 -->
-    <div class="kb-list-body">
-      <ListSpaceSidebar
-        v-model="spaceSelection"
-        :count-all="allKnowledgeBases"
-        :count-mine="kbs.length"
-        :count-shared="sharedKbs.length"
-        :count-by-org="effectiveSharedCountByOrg"
-      >
-        <template #actions>
-          <t-tooltip :content="$t('knowledgeList.create')" placement="top">
-            <t-button
-              variant="text"
-              theme="default"
-              class="sidebar-action-btn"
-              size="small"
-              :aria-label="$t('knowledgeList.create')"
-              @click="handleCreateKnowledgeBase"
-            >
-              <template #icon><t-icon name="folder-add" size="16px" /></template>
-            </t-button>
-          </t-tooltip>
-        </template>
-      </ListSpaceSidebar>
       <div class="kb-list-main">
     <!-- 未初始化知识库提示 -->
     <div v-if="hasUninitializedKbs" class="warning-banner">
@@ -98,6 +93,10 @@
           :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
           @click="handleCardClick(kb)"
         >
+          <!-- 置顶标识 -->
+          <div v-if="kb.is_pinned" class="pin-indicator">
+            <t-icon name="pin-filled" size="14px" />
+          </div>
           <!-- 卡片头部 -->
           <div class="card-header">
             <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -112,6 +111,10 @@
               </div>
               <template #content>
                 <div class="popup-menu" @click.stop>
+                  <div class="popup-menu-item" @click.stop="handleTogglePinById(kb.id)">
+                    <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                    <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                  </div>
                   <div class="popup-menu-item" @click.stop="handleSettingsById(kb.id)">
                     <t-icon class="menu-icon" name="setting" />
                     <span>{{ $t('knowledgeBase.settings') }}</span>
@@ -148,7 +151,7 @@
                     <t-icon name="relation" size="14px" />
                   </div>
                 </t-tooltip>
-                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.cos_config?.provider && kb.cos_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+                <t-tooltip v-if="kb.vlm_config?.enabled" :content="$t('knowledgeList.features.multimodal')" placement="top">
                   <div class="feature-badge multimodal">
                     <t-icon name="image" size="14px" />
                   </div>
@@ -216,7 +219,7 @@
                     <t-icon name="relation" size="14px" />
                   </div>
                 </t-tooltip>
-                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.cos_config?.provider && kb.cos_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_config?.provider && kb.storage_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
                   <div class="feature-badge multimodal">
                     <t-icon name="image" size="14px" />
                   </div>
@@ -256,6 +259,10 @@
         :ref="el => { if (highlightedKbId !== null && highlightedKbId === kb.id && el) highlightedCardRef = el as HTMLElement }"
         @click="handleCardClick(kb)"
       >
+        <!-- 置顶标识 -->
+        <div v-if="kb.is_pinned" class="pin-indicator">
+          <t-icon name="pin-filled" size="14px" />
+        </div>
         <!-- 卡片头部 -->
         <div class="card-header">
           <span class="card-title" :title="kb.name">{{ kb.name }}</span>
@@ -277,6 +284,10 @@
             </div>
             <template #content>
               <div class="popup-menu" @click.stop>
+                <div class="popup-menu-item" @click.stop="handleTogglePin(kb)">
+                  <t-icon class="menu-icon" :name="kb.is_pinned ? 'pin-filled' : 'pin'" />
+                  <span>{{ kb.is_pinned ? $t('knowledgeList.pin.unpin') : $t('knowledgeList.pin.pin') }}</span>
+                </div>
                 <div class="popup-menu-item" @click.stop="handleSettings(kb)">
                   <t-icon class="menu-icon" name="setting" />
                   <span>{{ $t('knowledgeBase.settings') }}</span>
@@ -313,7 +324,7 @@
                   <t-icon name="relation" size="14px" />
                 </div>
               </t-tooltip>
-              <t-tooltip v-if="kb.vlm_config?.enabled || (kb.cos_config?.provider && kb.cos_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+              <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_config?.provider && kb.storage_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
                 <div class="feature-badge multimodal">
                   <t-icon name="image" size="14px" />
                 </div>
@@ -479,8 +490,8 @@
     <!-- 空间下知识库空状态 -->
     <div v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" class="empty-state">
       <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-      <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') || '暂无共享知识库' }}</span>
-      <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') || '您可以加入组织或请求他人共享知识库给您' }}</span>
+      <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') }}</span>
+      <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') }}</span>
     </div>
       </div>
     </div>
@@ -591,7 +602,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
-import { listKnowledgeBases, deleteKnowledgeBase } from '@/api/knowledge-base'
+import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
 import { useOrganizationStore } from '@/stores/organization'
@@ -621,13 +632,14 @@ interface KB {
   showMore?: boolean;
   vlm_config?: { enabled?: boolean; model_id?: string };
   extract_config?: { enabled?: boolean };
-  cos_config?: { provider?: string; bucket_name?: string };
+  storage_config?: { provider?: string; bucket_name?: string };
   question_generation_config?: { enabled?: boolean; question_count?: number };
   knowledge_count?: number;
   chunk_count?: number;
-  isProcessing?: boolean; // 是否有正在处理的导入任务
-  processing_count?: number; // 正在处理的文档数量（仅文档类型）
-  share_count?: number; // 共享给组织的数量
+  isProcessing?: boolean;
+  processing_count?: number;
+  share_count?: number;
+  is_pinned?: boolean;
 }
 
 const kbs = ref<KB[]>([])
@@ -852,6 +864,35 @@ const handleDeleteById = (id: string) => {
   if (kb) {
     deletingKb.value = kb
     deleteVisible.value = true
+  }
+}
+
+const handleTogglePin = async (kb: KB) => {
+  kb.showMore = false
+  try {
+    const res: any = await togglePinKnowledgeBase(kb.id)
+    if (res.success) {
+      MessagePlugin.success(
+        res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
+      )
+      fetchList()
+    }
+  } catch {
+    MessagePlugin.error(t('knowledgeList.pin.failed'))
+  }
+}
+
+const handleTogglePinById = async (id: string) => {
+  try {
+    const res: any = await togglePinKnowledgeBase(id)
+    if (res.success) {
+      MessagePlugin.success(
+        res.data.is_pinned ? t('knowledgeList.pin.pinSuccess') : t('knowledgeList.pin.unpinSuccess')
+      )
+      fetchList()
+    }
+  } catch {
+    MessagePlugin.error(t('knowledgeList.pin.failed'))
   }
 }
 
@@ -1151,14 +1192,21 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 <style scoped lang="less">
 .kb-list-container {
-  padding: 24px 32px;
-  margin: 0 16px 0 4px;
+  margin: 0 16px 0 0;
   height: calc(100vh);
   box-sizing: border-box;
   flex: 1;
   display: flex;
-  flex-direction: column;
+  position: relative;
   min-height: 0;
+}
+
+.kb-list-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 24px 32px 0 32px;
 }
 
 .header {
@@ -1173,9 +1221,15 @@ const handleUploadFinishedEvent = (event: Event) => {
     gap: 4px;
   }
 
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   h2 {
     margin: 0;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 24px;
     font-weight: 600;
@@ -1185,23 +1239,13 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .kb-create-btn {
-  background: linear-gradient(135deg, #07c05f 0%, #00a67e 100%);
+  background: linear-gradient(135deg, var(--td-brand-color) 0%, #00a67e 100%);
   border: none;
-  color: #fff;
+  color: var(--td-text-color-anti);
 
   &:hover {
-    background: linear-gradient(135deg, #05a04f 0%, #008a6a 100%);
+    background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
   }
-}
-
-.kb-list-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  background: #fafbfc;
-  border: 1px solid #e7ebf0;
-  border-radius: 10px;
-  overflow: hidden;
 }
 
 .kb-list-main {
@@ -1209,8 +1253,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 12px;
-  background: #fafbfc;
+  padding: 12px 0;
 }
 
 .kb-list-main-loading {
@@ -1219,7 +1262,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   justify-content: center;
   min-height: 200px;
   padding: 12px;
-  background: #fafbfc;
+  background: var(--td-bg-color-container);
 }
 
 .shared-by-me-badge {
@@ -1229,17 +1272,44 @@ const handleUploadFinishedEvent = (event: Event) => {
   background: rgba(7, 192, 95, 0.1);
   border-radius: 4px;
   font-size: 12px;
-  color: #07c05f;
+  color: var(--td-brand-color);
   margin-left: 6px;
 }
 
 .header-subtitle {
   margin: 0;
-  color: #00000099;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
+}
+
+.header-action-btn {
+  padding: 0 !important;
+  min-width: 28px !important;
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--td-bg-color-secondarycontainer) !important;
+  border: 1px solid var(--td-component-stroke) !important;
+  border-radius: 6px !important;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer) !important;
+    border-color: var(--td-component-stroke) !important;
+    color: var(--td-text-color-primary);
+  }
+
+  :deep(.t-icon),
+  :deep(.btn-icon-wrapper) {
+    color: var(--td-brand-color);
+  }
 }
 
 // Tab 切换样式（已由左侧菜单替代，保留以备兼容）
@@ -1247,13 +1317,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: flex;
   align-items: center;
   gap: 24px;
-  border-bottom: 1px solid #e7ebf0;
+  border-bottom: 1px solid var(--td-component-stroke);
   margin-bottom: 20px;
 
   .tab-item {
     padding: 12px 0;
     cursor: pointer;
-    color: #666;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -1262,11 +1332,11 @@ const handleUploadFinishedEvent = (event: Event) => {
     transition: color 0.2s ease;
 
     &:hover {
-      color: #333;
+      color: var(--td-text-color-primary);
     }
 
     &.active {
-      color: #07c05f;
+      color: var(--td-brand-color);
       font-weight: 500;
 
       &::after {
@@ -1276,7 +1346,7 @@ const handleUploadFinishedEvent = (event: Event) => {
         left: 0;
         right: 0;
         height: 2px;
-        background: #07c05f;
+        background: var(--td-brand-color);
         border-radius: 1px;
       }
     }
@@ -1297,11 +1367,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   background: rgba(7, 192, 95, 0.1);
   border-radius: 4px;
   font-size: 12px;
-  color: #07c05f;
+  color: var(--td-brand-color);
   font-weight: 500;
 
   .t-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -1315,7 +1385,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
-  color: #4e5969;
+  color: var(--td-text-color-secondary);
   max-width: 140px;
   transition: background-color 0.15s ease;
 
@@ -1334,7 +1404,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .t-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
     flex-shrink: 0;
   }
 }
@@ -1349,7 +1419,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   border-radius: 6px;
   font-size: 11px;
   line-height: 1.4;
-  color: #4e5969;
+  color: var(--td-text-color-secondary);
   font-weight: 500;
   transition: background-color 0.15s ease;
 
@@ -1358,7 +1428,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .t-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
     flex-shrink: 0;
   }
 }
@@ -1368,13 +1438,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   // 共享知识库根据类型显示不同样式
   &.kb-type-document {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fcfa 100%) !important;
-    border-color: #e8f5ed !important;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%) !important;
 
     &:hover {
-      border-color: #07c05f !important;
+      border-color: var(--td-brand-color) !important;
       box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12) !important;
-      background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%) !important;
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.08) 100%) !important;
     }
 
     &::after {
@@ -1383,13 +1452,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.kb-type-faq {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%) !important;
-    border-color: #e6f0ff !important;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.04) 100%) !important;
 
     &:hover {
-      border-color: #0052d9 !important;
+      border-color: var(--td-brand-color) !important;
       box-shadow: 0 4px 12px rgba(0, 82, 217, 0.12) !important;
-      background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%) !important;
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.08) 100%) !important;
     }
 
     &::after {
@@ -1399,10 +1467,10 @@ const handleUploadFinishedEvent = (event: Event) => {
     // FAQ 类型共享标识使用蓝色
     .shared-badge {
       background: rgba(0, 82, 217, 0.1);
-      color: #0052d9;
+      color: var(--td-brand-color);
 
       .t-icon {
-        color: #0052d9;
+        color: var(--td-brand-color);
       }
     }
   }
@@ -1413,7 +1481,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     gap: 4px;
     font-size: 12px;
     border-color: rgba(0, 82, 217, 0.15);
-    color: #0052d9;
+    color: var(--td-brand-color);
     background: rgba(0, 82, 217, 0.04);
     font-weight: 500;
     padding: 2px 8px;
@@ -1428,15 +1496,15 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 8px;
   padding: 12px 16px;
   margin-bottom: 20px;
-  background: #fff7e6;
-  border: 1px solid #ffd591;
+  background: var(--td-warning-color-light);
+  border: 1px solid var(--td-warning-color-focus);
   border-radius: 6px;
-  color: #d46b08;
+  color: var(--td-warning-color);
   font-family: "PingFang SC";
   font-size: 14px;
   
   .t-icon {
-    color: #d46b08;
+    color: var(--td-warning-color);
     flex-shrink: 0;
   }
 }
@@ -1453,13 +1521,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  border: 1px solid #e7ebf0;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
-  background: #f7fbff;
+  background: var(--td-bg-color-container);
 }
 
 .upload-progress-icon {
-  color: #07c05f;
+  color: var(--td-brand-color);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1470,7 +1538,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .progress-title {
-  color: #0f172a;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 600;
@@ -1479,19 +1547,19 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .progress-subtitle {
-  color: #475467;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC";
   font-size: 12px;
   line-height: 18px;
 }
 
 .progress-subtitle.secondary {
-  color: #94a3b8;
+  color: var(--td-text-color-placeholder);
   margin-top: 2px;
 }
 
 .progress-subtitle.error {
-  color: #d92d20;
+  color: var(--td-error-color);
   margin-top: 4px;
 }
 
@@ -1499,14 +1567,14 @@ const handleUploadFinishedEvent = (event: Event) => {
   width: 100%;
   height: 6px;
   border-radius: 999px;
-  background: #e7eef5;
+  background: var(--td-bg-color-secondarycontainer);
   margin-top: 10px;
   overflow: hidden;
 }
 
 .progress-bar-inner {
   height: 100%;
-  background: linear-gradient(90deg, #05a04f 0%, #07c05f 100%);
+  background: linear-gradient(90deg, var(--td-brand-color-active) 0%, var(--td-brand-color) 100%);
   transition: width 0.2s ease;
 }
 
@@ -1517,12 +1585,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .kb-card {
-  border: 1px solid #f0f0f0;
+  border: .5px solid var(--td-component-stroke);
   border-radius: 12px;
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: #fff;
+  background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
   transition: all 0.25s ease;
@@ -1533,7 +1601,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   min-height: 160px;
 
   &:hover {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12);
   }
 
@@ -1543,12 +1611,11 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   // 文档类型样式
   &.kb-type-document {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fcfa 100%);
-    border-color: #e8f5ed;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%);
 
     &:hover {
-      border-color: #07c05f;
-      background: linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+      border-color: var(--td-brand-color);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.08) 100%);
     }
 
     // 右上角装饰
@@ -1568,13 +1635,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   // 问答类型样式
   &.kb-type-faq {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
-    border-color: #e6f0ff;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.04) 100%);
 
     &:hover {
-      border-color: #0052d9;
+      border-color: var(--td-brand-color);
       box-shadow: 0 4px 12px rgba(0, 82, 217, 0.12);
-      background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.08) 100%);
     }
 
     // 右上角装饰
@@ -1590,6 +1656,15 @@ const handleUploadFinishedEvent = (event: Event) => {
       pointer-events: none;
       z-index: 0;
     }
+  }
+
+  .pin-indicator {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    color: var(--td-brand-color);
+    z-index: 2;
+    opacity: 0.7;
   }
 
   // 确保内容在装饰之上
@@ -1648,7 +1723,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     flex: 1;
     font-size: 15px;
     font-weight: 600;
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     letter-spacing: 0.01em;
     white-space: nowrap;
     overflow: hidden;
@@ -1666,13 +1741,13 @@ const handleUploadFinishedEvent = (event: Event) => {
     align-items: center;
     justify-content: center;
     border-radius: 6px;
-    color: #999;
+    color: var(--td-text-color-placeholder);
     cursor: pointer;
     transition: all 0.2s;
 
     &:hover {
-      background: rgba(0, 0, 0, 0.05);
-      color: #666;
+      background: var(--td-bg-color-container-hover);
+      color: var(--td-text-color-secondary);
     }
   }
 
@@ -1682,7 +1757,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .card-title {
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 15px;
   font-weight: 600;
@@ -1712,12 +1787,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--td-bg-color-container-hover);
     opacity: 1 !important;
   }
 
   &.active-more {
-    background: rgba(0, 0, 0, 0.06);
+    background: var(--td-bg-color-container-hover);
     opacity: 1 !important;
   }
 
@@ -1744,7 +1819,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   -webkit-line-clamp: 2;
   line-clamp: 2;
   overflow: hidden;
-  color: #666;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC", -apple-system, sans-serif;
   font-size: 12px;
   font-weight: 400;
@@ -1757,7 +1832,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   justify-content: space-between;
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid #f0f0f0;
+  border-top: .5px solid var(--td-component-stroke);
 }
 
 .bottom-left {
@@ -1776,7 +1851,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .card-time {
     font-size: 12px;
-    color: #999;
+    color: var(--td-text-color-placeholder);
   }
 }
 
@@ -1798,7 +1873,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.type-document {
     background: rgba(7, 192, 95, 0.08);
-    color: #059669;
+    color: var(--td-brand-color-active);
     width: auto;
     padding: 0 6px;
     gap: 3px;
@@ -1819,7 +1894,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.type-faq {
     background: rgba(0, 82, 217, 0.08);
-    color: #0052d9;
+    color: var(--td-brand-color);
     width: auto;
     padding: 0 6px;
     gap: 3px;
@@ -1840,7 +1915,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.kg {
     background: rgba(124, 77, 255, 0.08);
-    color: #7c4dff;
+    color: var(--td-brand-color);
 
     &:hover {
       background: rgba(124, 77, 255, 0.12);
@@ -1849,7 +1924,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.multimodal {
     background: rgba(255, 152, 0, 0.08);
-    color: #f59e0b;
+    color: var(--td-warning-color);
 
     &:hover {
       background: rgba(255, 152, 0, 0.12);
@@ -1858,7 +1933,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.question {
     background: rgba(0, 150, 136, 0.08);
-    color: #009688;
+    color: var(--td-success-color);
 
     &:hover {
       background: rgba(0, 150, 136, 0.12);
@@ -1867,7 +1942,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.shared {
     background: rgba(0, 82, 217, 0.08);
-    color: #0052d9;
+    color: var(--td-brand-color);
 
     &:hover {
       background: rgba(0, 82, 217, 0.12);
@@ -1876,7 +1951,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.role-admin {
     background: rgba(7, 192, 95, 0.1);
-    color: #059669;
+    color: var(--td-brand-color-active);
 
     &:hover {
       background: rgba(7, 192, 95, 0.15);
@@ -1885,7 +1960,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &.role-editor {
     background: rgba(255, 152, 0, 0.1);
-    color: #f59e0b;
+    color: var(--td-warning-color);
 
     &:hover {
       background: rgba(255, 152, 0, 0.15);
@@ -1893,8 +1968,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.role-viewer {
-    background: rgba(0, 0, 0, 0.05);
-    color: #666;
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-secondary);
 
     &:hover {
       background: rgba(0, 0, 0, 0.08);
@@ -1913,17 +1988,17 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 @keyframes highlightFlash {
   0% {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 0 rgba(7, 192, 95, 0.4);
     transform: scale(1);
   }
   50% {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 8px rgba(7, 192, 95, 0);
     transform: scale(1.02);
   }
   100% {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 0 0 0 rgba(7, 192, 95, 0);
     transform: scale(1);
   }
@@ -1931,12 +2006,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .kb-card.highlight-flash {
   animation: highlightFlash 0.6s ease-in-out 3;
-  border-color: #07c05f !important;
+  border-color: var(--td-brand-color) !important;
   box-shadow: 0 0 12px rgba(7, 192, 95, 0.3) !important;
 }
 
 .card-time {
-  color: #999;
+  color: var(--td-text-color-placeholder);
   font-family: "PingFang SC";
   font-size: 12px;
   font-weight: 400;
@@ -1958,7 +2033,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .empty-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
@@ -1967,7 +2042,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .empty-desc {
-    color: #00000066;
+    color: var(--td-text-color-disabled);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -2035,7 +2110,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .circle-title {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
@@ -2043,7 +2118,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .del-circle-txt {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -2061,7 +2136,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .circle-btn-txt {
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 400;
@@ -2074,7 +2149,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .confirm {
-    color: #FA5151;
+    color: var(--td-error-color);
     margin-left: 40px;
 
     &:hover {
@@ -2095,7 +2170,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     min-width: 140px;
     border-radius: 6px !important;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1) !important;
-    border: 1px solid #e7ebf0 !important;
+    border: 1px solid var(--td-component-stroke) !important;
   }
 }
 
@@ -2111,7 +2186,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   padding: 10px 16px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 400;
@@ -2120,27 +2195,27 @@ const handleUploadFinishedEvent = (event: Event) => {
   .menu-icon {
     font-size: 16px;
     flex-shrink: 0;
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     transition: color 0.2s ease;
   }
 
   &:hover {
-    background: #f7f9fc;
-    
+    background: var(--td-bg-color-container-hover);
+
     .menu-icon {
-      color: #000000e6;
+      color: var(--td-text-color-primary);
     }
   }
 
   &.delete {
-    color: #000000e6;
-    
+    color: var(--td-text-color-primary);
+
     &:hover {
-      background: #fff1f0;
-      color: #fa5151;
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
 
       .menu-icon {
-        color: #fa5151;
+        color: var(--td-error-color);
       }
     }
   }
@@ -2155,7 +2230,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #07c05f;
+  color: var(--td-brand-color);
   font-size: 13px;
   font-family: "PingFang SC", sans-serif;
   cursor: pointer;
@@ -2167,7 +2242,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &:hover {
     background: rgba(7, 192, 95, 0.08);
-    color: #059655;
+    color: var(--td-brand-color);
   }
 }
 
@@ -2188,7 +2263,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   width: 360px;
   max-width: 90vw;
   height: 100%;
-  background: #fff;
+  background: var(--td-bg-color-container);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
@@ -2200,7 +2275,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
-  border-bottom: 1px solid #e7ebf0;
+  border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
 
@@ -2208,7 +2283,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
 }
 
 .shared-detail-drawer-close {
@@ -2216,8 +2291,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   height: 32px;
   border: none;
   border-radius: 6px;
-  background: #f5f6f8;
-  color: #86909c;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2225,8 +2300,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   transition: background 0.2s ease, color 0.2s ease;
 
   &:hover {
-    background: #e7ebf0;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -2247,19 +2322,19 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .shared-detail-drawer-body .shared-detail-label {
   font-size: 12px;
-  color: #86909c;
+  color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
 
 .shared-detail-drawer-body .shared-detail-value {
   font-size: 14px;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   line-height: 1.5;
   word-break: break-word;
 
   &.shared-detail-source-type {
     font-weight: 500;
-    color: #0d0d0d;
+    color: var(--td-text-color-primary);
   }
 
   &.shared-detail-org {
@@ -2277,12 +2352,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .shared-detail-drawer-footer {
   padding: 16px 24px;
-  border-top: 1px solid #e7ebf0;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
   flex-shrink: 0;
-  background: #fff;
+  background: var(--td-bg-color-container);
 
   .go-to-kb-btn .t-button__text {
     display: inline-flex;
@@ -2316,7 +2391,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .t-input,
@@ -2325,12 +2400,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   .t-button--theme-primary {
-    background-color: #07c05f;
-    border-color: #07c05f;
+    background-color: var(--td-brand-color);
+    border-color: var(--td-brand-color);
 
     &:hover {
-      background-color: #05a04f;
-      border-color: #05a04f;
+      background-color: var(--td-brand-color-active);
+      border-color: var(--td-brand-color-active);
     }
   }
 }

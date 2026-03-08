@@ -4,12 +4,36 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
+
+var (
+	currentMigrationVersion uint
+	currentMigrationDirty   bool
+	migrationVersionOnce    sync.Once
+	migrationVersionSet     bool
+)
+
+// CachedMigrationVersion returns the migration version captured at startup.
+// Returns (version, dirty, ok). ok is false if the version was never captured.
+func CachedMigrationVersion() (uint, bool, bool) {
+	return currentMigrationVersion, currentMigrationDirty, migrationVersionSet
+}
+
+func setMigrationVersion(version uint, dirty bool) {
+	migrationVersionOnce.Do(func() {
+		currentMigrationVersion = version
+		currentMigrationDirty = dirty
+		migrationVersionSet = true
+	})
+}
 
 // RunMigrations executes all pending database migrations
 // This should be called during application startup
@@ -30,8 +54,10 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 
 	logger.Infof(ctx, "Starting database migration...")
 
-	// Use versioned migrations directory
 	migrationsPath := "file://migrations/versioned"
+	if strings.HasPrefix(dsn, "sqlite3://") {
+		migrationsPath = "file://migrations/sqlite"
+	}
 
 	m, err := migrate.New(migrationsPath, dsn)
 	if err != nil {
@@ -137,6 +163,8 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 	if err != nil && err != migrate.ErrNilVersion {
 		return fmt.Errorf("failed to get migration version: %w", err)
 	}
+
+	setMigrationVersion(version, dirty)
 
 	if oldVersion != version {
 		logger.Infof(ctx, "Database migrated from version %d to %d", oldVersion, version)

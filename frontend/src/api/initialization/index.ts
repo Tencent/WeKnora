@@ -1,4 +1,7 @@
 import { get, post, put } from '../../utils/request';
+import i18n from '@/i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 // 初始化配置数据类型
 export interface InitializationConfig {
@@ -82,24 +85,16 @@ export interface KBModelConfigRequest {
         chunkSize: number
         chunkOverlap: number
         separators: string[]
+        parserEngineRules?: { file_types: string[]; engine: string }[]
+        enableParentChild?: boolean
+        parentChunkSize?: number
+        childChunkSize?: number
     }
     multimodal: {
         enabled: boolean
-        storageType?: 'cos' | 'minio'
-        cos?: {
-            secretId: string
-            secretKey: string
-            region: string
-            bucketName: string
-            appId: string
-            pathPrefix: string
-        }
-        minio?: {
-            bucketName: string
-            useSSL: boolean
-            pathPrefix: string
-        }
     }
+    /** 存储引擎选择："local" | "minio" | "cos"，影响文档上传与文档内图片存储 */
+    storageProvider?: string
     nodeExtract: {
         enabled: boolean
         text: string
@@ -115,14 +110,14 @@ export interface KBModelConfigRequest {
 
 export function updateKBConfig(kbId: string, config: KBModelConfigRequest): Promise<any> {
     return new Promise((resolve, reject) => {
-        console.log('开始知识库配置更新（简化版）...', kbId, config);
+        console.log('Starting KB config update (simplified)...', kbId, config);
         put(`/api/v1/initialization/config/${kbId}`, config)
             .then((response: any) => {
-                console.log('知识库配置更新完成', response);
+                console.log('KB config update completed', response);
                 resolve(response);
             })
             .catch((error: any) => {
-                console.error('知识库配置更新失败:', error);
+                console.error('Failed to update KB config:', error);
                 reject(error.error || error);
             });
     });
@@ -131,14 +126,14 @@ export function updateKBConfig(kbId: string, config: KBModelConfigRequest): Prom
 // 根据知识库ID执行配置更新（旧版，保留兼容性）
 export function initializeSystemByKB(kbId: string, config: InitializationConfig): Promise<any> {
     return new Promise((resolve, reject) => {
-        console.log('开始知识库配置更新...', kbId, config);
+        console.log('Starting KB config update...', kbId, config);
         post(`/api/v1/initialization/initialize/${kbId}`, config)
             .then((response: any) => {
-                console.log('知识库配置更新完成', response);
+                console.log('KB config update completed', response);
                 resolve(response);
             })
             .catch((error: any) => {
-                console.error('知识库配置更新失败:', error);
+                console.error('Failed to update KB config:', error);
                 reject(error.error || error);
             });
     });
@@ -152,8 +147,8 @@ export function checkOllamaStatus(): Promise<{ available: boolean; version?: str
                 resolve(response.data || { available: false });
             })
             .catch((error: any) => {
-                console.error('检查Ollama状态失败:', error);
-                resolve({ available: false, error: error.message || '检查失败' });
+                console.error('Failed to check Ollama status:', error);
+                resolve({ available: false, error: error.message || t('error.initialization.checkFailed') });
             });
     });
 }
@@ -174,7 +169,7 @@ export function listOllamaModels(): Promise<OllamaModelInfo[]> {
                 resolve((response.data && response.data.models) || []);
             })
             .catch((error: any) => {
-                console.error('获取 Ollama 模型列表失败:', error);
+                console.error('Failed to list Ollama models:', error);
                 resolve([]);
             });
     });
@@ -188,7 +183,7 @@ export function checkOllamaModels(models: string[]): Promise<{ models: Record<st
                 resolve(response.data || { models: {} });
             })
             .catch((error: any) => {
-                console.error('检查Ollama模型状态失败:', error);
+                console.error('Failed to check Ollama models:', error);
                 reject(error);
             });
     });
@@ -202,7 +197,7 @@ export function downloadOllamaModel(modelName: string): Promise<{ taskId: string
                 resolve(response.data || { taskId: '', modelName, status: 'failed', progress: 0 });
             })
             .catch((error: any) => {
-                console.error('启动Ollama模型下载失败:', error);
+                console.error('Failed to start Ollama model download:', error);
                 reject(error);
             });
     });
@@ -216,7 +211,7 @@ export function getDownloadProgress(taskId: string): Promise<DownloadTask> {
                 resolve(response.data);
             })
             .catch((error: any) => {
-                console.error('查询下载进度失败:', error);
+                console.error('Failed to get download progress:', error);
                 reject(error);
             });
     });
@@ -230,7 +225,7 @@ export function listDownloadTasks(): Promise<DownloadTask[]> {
                 resolve(response.data || []);
             })
             .catch((error: any) => {
-                console.error('获取下载任务列表失败:', error);
+                console.error('Failed to list download tasks:', error);
                 reject(error);
             });
     });
@@ -244,7 +239,7 @@ export function getCurrentConfigByKB(kbId: string): Promise<InitializationConfig
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('获取知识库配置失败:', error);
+                console.error('Failed to get KB config:', error);
                 reject(error);
             });
     });
@@ -265,7 +260,7 @@ export function checkRemoteModel(modelConfig: {
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('检查远程模型失败:', error);
+                console.error('Failed to check remote model:', error);
                 reject(error);
             });
     });
@@ -286,7 +281,7 @@ export function testEmbeddingModel(modelConfig: {
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('测试Embedding模型失败:', error);
+                console.error('Failed to test Embedding model:', error);
                 reject(error);
             });
     });
@@ -307,7 +302,7 @@ export function checkRerankModel(modelConfig: {
                 resolve(response.data || {});
             })
             .catch((error: any) => {
-                console.error('检查Rerank模型失败:', error);
+                console.error('Failed to check Rerank model:', error);
                 reject(error);
             });
     });
@@ -403,11 +398,11 @@ export function testMultimodalFunction(testData: {
                 if (data.success) {
                     resolve(data.data || {});
                 } else {
-                    resolve({ success: false, message: data.message || '测试失败' });
+                    resolve({ success: false, message: data.message || t('error.initialization.testFailed') });
                 }
             })
             .catch((error: any) => {
-                console.error('多模态测试失败:', error);
+                console.error('Failed multimodal test:', error);
                 reject(error);
             });
     });
@@ -451,7 +446,7 @@ export function extractTextRelations(request: TextRelationExtractionRequest): Pr
                 resolve(response.data || { nodes: [], relations: [] });
             })
             .catch((error: any) => {
-                console.error('文本内容关系提取失败:', error);
+                console.error('Failed to extract text relations:', error);
                 reject(error);
             });
     });
@@ -474,7 +469,7 @@ export function fabriText(request: FabriTextRequest): Promise<FabriTextResponse>
                 resolve(response.data || { text: '' });
             })
             .catch((error: any) => {
-                console.error('文本内容生成失败:', error);
+                console.error('Failed to generate text:', error);
                 reject(error);
             });
     });
@@ -496,7 +491,7 @@ export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
                 resolve(response.data || { tags: [] as string[] });
             })
             .catch((error: any) => {
-                console.error('标签生成失败:', error);
+                console.error('Failed to generate tags:', error);
                 reject(error);
             });
     });
@@ -522,7 +517,7 @@ export function listModelProviders(modelType?: string): Promise<ModelProviderOpt
                 resolve(response.data || []);
             })
             .catch((error: any) => {
-                console.error('获取模型厂商列表失败:', error);
+                console.error('Failed to list model providers:', error);
                 resolve([]); // 失败时返回空数组，前端可以回退到默认值
             });
     });

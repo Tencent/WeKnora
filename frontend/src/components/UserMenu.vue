@@ -1,16 +1,18 @@
 <template>
-  <div class="user-menu" ref="menuRef">
+  <div class="user-menu" :class="{ 'user-menu--collapsed': uiStore.sidebarCollapsed }" ref="menuRef">
     <!-- 用户按钮 -->
     <div class="user-button" @click="toggleMenu">
       <div class="user-avatar">
         <img v-if="userAvatar" :src="userAvatar" :alt="$t('common.avatar')" />
         <span v-else class="avatar-placeholder">{{ userInitial }}</span>
       </div>
-      <div class="user-info">
-        <div class="user-name">{{ userName }}</div>
-        <div class="user-email">{{ userEmail }}</div>
-      </div>
-      <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
+      <template v-if="!uiStore.sidebarCollapsed">
+        <div class="user-info">
+          <div class="user-name">{{ userName }}</div>
+          <div class="user-email">{{ userEmail }}</div>
+        </div>
+        <t-icon :name="menuVisible ? 'chevron-up' : 'chevron-down'" class="dropdown-icon" />
+      </template>
     </div>
 
     <!-- 下拉菜单 -->
@@ -117,7 +119,7 @@ const menuVisible = ref(false)
 
 // 用户信息
 const userInfo = ref({
-  username: '用户',
+  username: t('common.defaultUser'),
   email: 'user@example.com',
   avatar: ''
 })
@@ -256,6 +258,30 @@ onUnmounted(() => {
 .user-menu {
   position: relative;
   width: 100%;
+
+  &--collapsed {
+    .user-button {
+      justify-content: center;
+      padding: 8px;
+      gap: 0;
+    }
+
+    .user-avatar {
+      width: 32px;
+      height: 32px;
+
+      .avatar-placeholder {
+        font-size: 13px;
+      }
+    }
+
+    .user-dropdown {
+      left: calc(100% + 8px);
+      bottom: 0;
+      right: auto;
+      min-width: 200px;
+    }
+  }
 }
 
 .user-button {
@@ -269,7 +295,7 @@ onUnmounted(() => {
   background: transparent;
 
   &:hover {
-    background: #f5f7fa;
+    background: var(--td-bg-color-container-hover);
   }
 
   &:active {
@@ -283,10 +309,11 @@ onUnmounted(() => {
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
-  background: linear-gradient(135deg, #07C05F 0%, #05A34E 100%);
+  background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: width 0.2s ease, height 0.2s ease;
 
   img {
     width: 100%;
@@ -295,7 +322,7 @@ onUnmounted(() => {
   }
 
   .avatar-placeholder {
-    color: #ffffff;
+    color: var(--td-text-color-anti);
     font-size: 16px;
     font-weight: 600;
   }
@@ -309,7 +336,7 @@ onUnmounted(() => {
   .user-name {
     font-size: 14px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -317,7 +344,7 @@ onUnmounted(() => {
 
   .user-email {
     font-size: 12px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -326,7 +353,7 @@ onUnmounted(() => {
 
 .dropdown-icon {
   font-size: 16px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
   transition: transform 0.2s;
 }
@@ -337,10 +364,10 @@ onUnmounted(() => {
   left: 8px;
   right: 8px;
   margin-bottom: 8px;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   overflow: hidden;
   z-index: 1000;
 }
@@ -353,27 +380,27 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all 0.2s;
   font-size: 14px;
-  color: #333333;
+  color: var(--td-text-color-primary);
 
   &:hover {
-    background: #f5f7fa;
+    background: var(--td-bg-color-container-hover);
   }
 
   &.danger {
-    color: #e34d59;
+    color: var(--td-error-color);
 
     &:hover {
-      background: #fef0f0;
+      background: var(--td-error-color-light);
     }
 
     .menu-icon {
-      color: #e34d59;
+      color: var(--td-error-color);
     }
   }
 
   .menu-icon {
     font-size: 16px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     
     &.svg-icon {
       width: 16px;
@@ -400,20 +427,20 @@ onUnmounted(() => {
   .menu-external-icon {
     width: 14px;
     height: 14px;
-    color: #9ca3af;
+    color: var(--td-text-color-disabled);
     flex-shrink: 0;
     transition: color 0.2s ease;
     pointer-events: none;
   }
 
   &:hover .menu-external-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
 .menu-divider {
   height: 1px;
-  background: #e5e7eb;
+  background: var(--td-component-stroke);
   margin: 4px 0;
 }
 

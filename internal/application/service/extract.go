@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -22,64 +23,66 @@ import (
 )
 
 const (
-	// tableDescriptionPromptTemplate 表格描述生成的 prompt 模板
-	tableDescriptionPromptTemplate = `你是一个数据分析专家。请根据以下表格的结构信息和数据样本，生成一段简洁的表格元数据描述（200-300字）。
+	// tableDescriptionPromptTemplate is the prompt template for generating table descriptions
+	tableDescriptionPromptTemplate = `You are a data analysis expert. Based on the following table structure information and data samples, generate a concise table metadata description (200-300 words).
 
-表名: %s
-
-%s
-
-%s
-
-请从以下维度描述这个表格：
-1. **数据主题**：这个表格记录的是什么类型的数据？（如：用户信息、销售记录、日志数据等）
-2. **核心字段**：列出3-5个最重要的字段及其含义
-3. **数据规模**：总行数和列数
-4. **业务场景**：这个表格可能用于什么业务分析或应用场景？
-5. **关键特征**：数据有什么显著特点？（如：包含地理位置、有分类标签、存在层级关系等）
-
-**重要提示**：
-- 不要输出具体的数据值或样本内容
-- 使用概括性的描述，让用户能快速判断这个表格是否包含他们需要的信息
-- 用简洁专业的语言，便于检索和理解`
-
-	// columnDescriptionsPromptTemplate 列描述生成的 prompt 模板
-	columnDescriptionsPromptTemplate = `你是一个数据分析专家。请根据以下表格的结构信息和数据样本，为每一列生成结构化的描述信息。
-
-表名: %s
+Table name: %s
 
 %s
 
 %s
 
-请为每一列生成详细的描述，包含以下信息：
-1. **字段含义**：这一列存储的是什么信息？（如：用户ID、订单金额、创建时间等）
-2. **数据类型**：数据的类型和格式（如：整数、字符串、日期时间、布尔值等）
-3. **业务用途**：这个字段在业务中的作用（如：用于用户识别、金额计算、时间排序等）
-4. **数据特征**：数据的显著特点（如：唯一标识、可为空、有枚举值、有单位等）
+Please describe the table from the following dimensions:
+1. **Data Subject**: What type of data does this table record? (e.g., user information, sales records, log data, etc.)
+2. **Core Fields**: List 3-5 most important fields and their meanings
+3. **Data Scale**: Total number of rows and columns
+4. **Business Scenarios**: What business analysis or application scenarios might this table be used for?
+5. **Key Characteristics**: What notable features does the data have? (e.g., contains geographic locations, has category labels, has hierarchical relationships, etc.)
 
-请按以下格式输出（每列一个段落）：
+**Important Notes**:
+- Do not output specific data values or sample content
+- Use general descriptions so users can quickly determine if this table contains the information they need
+- Use concise and professional language for easy retrieval and understanding
+- Write the description in the same language as the data content`
 
-**列名1** (数据类型)
-- 字段含义：xxx
-- 业务用途：xxx
-- 数据特征：xxx
+	// columnDescriptionsPromptTemplate is the prompt template for generating column descriptions
+	columnDescriptionsPromptTemplate = `You are a data analysis expert. Based on the following table structure information and data samples, generate structured description information for each column.
 
-**列名2** (数据类型)
-- 字段含义：xxx
-- 业务用途：xxx
-- 数据特征：xxx
+Table name: %s
 
-**重要提示**：
-- 不要输出具体的数据值，只描述字段的元信息
-- 使用清晰的业务术语，便于用户理解和搜索
-- 如果从样本数据中能推断出枚举值范围，可以概括说明（如：状态字段包含待处理/进行中/已完成等状态）`
+%s
+
+%s
+
+Please generate a detailed description for each column, including the following information:
+1. **Field Meaning**: What information does this column store? (e.g., user ID, order amount, creation time, etc.)
+2. **Data Type**: The type and format of the data (e.g., integer, string, datetime, boolean, etc.)
+3. **Business Purpose**: The role of this field in business (e.g., for user identification, amount calculation, time sorting, etc.)
+4. **Data Characteristics**: Notable features of the data (e.g., unique identifier, nullable, has enum values, has units, etc.)
+
+Please output in the following format (one paragraph per column):
+
+**Column1** (data type)
+- Field Meaning: xxx
+- Business Purpose: xxx
+- Data Characteristics: xxx
+
+**Column2** (data type)
+- Field Meaning: xxx
+- Business Purpose: xxx
+- Data Characteristics: xxx
+
+**Important Notes**:
+- Do not output specific data values, only describe the field metadata
+- Use clear business terms for easy user understanding and search
+- If enum value ranges can be inferred from sample data, provide a summary (e.g., status field contains pending/in-progress/completed states)
+- Write descriptions in the same language as the data content`
 )
 
 // NewChunkExtractTask creates a new chunk extract task
 func NewChunkExtractTask(
 	ctx context.Context,
-	client *asynq.Client,
+	client interfaces.TaskEnqueuer,
 	tenantID uint64,
 	chunkID string,
 	modelID string,
@@ -109,7 +112,7 @@ func NewChunkExtractTask(
 // NewTableExtractTask creates a new table extract task
 func NewDataTableSummaryTask(
 	ctx context.Context,
-	client *asynq.Client,
+	client interfaces.TaskEnqueuer,
 	tenantID uint64,
 	knowledgeID string,
 	summaryModel string,
@@ -314,6 +317,7 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 // extractionResources 封装提取过程所需的所有资源
 type extractionResources struct {
 	knowledge      *types.Knowledge
+	tenant         *types.Tenant
 	chatModel      chat.Chat
 	embeddingModel embedding.Embedder
 	retrieveEngine *retriever.CompositeRetrieveEngine
@@ -366,10 +370,43 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 
 	return &extractionResources{
 		knowledge:      knowledge,
+		tenant:         tenantInfo,
 		chatModel:      chatModel,
 		embeddingModel: embeddingModel,
 		retrieveEngine: retrieveEngine,
 	}, nil
+}
+
+// resolveFileServiceForKnowledge resolves a provider-specific file service for the current knowledge file.
+// It falls back to the global service when tenant storage config is unavailable.
+func (s *DataTableSummaryService) resolveFileServiceForKnowledge(ctx context.Context, resources *extractionResources) interfaces.FileService {
+	if resources == nil || resources.knowledge == nil {
+		return s.fileService
+	}
+	if resources.tenant == nil || resources.tenant.StorageEngineConfig == nil {
+		return s.fileService
+	}
+
+	provider := types.InferStorageFromFilePath(resources.knowledge.FilePath)
+	if provider == "" {
+		provider = strings.ToLower(strings.TrimSpace(resources.tenant.StorageEngineConfig.DefaultProvider))
+	}
+	if provider == "" {
+		return s.fileService
+	}
+
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(
+		provider,
+		resources.tenant.StorageEngineConfig,
+		baseDir,
+	)
+	if err != nil {
+		logger.Warnf(ctx, "[TableSummary] Failed to resolve file service for provider=%s, fallback to default: %v", provider, err)
+		return s.fileService
+	}
+	logger.Infof(ctx, "[TableSummary] Resolved file service for knowledge=%s provider=%s", resources.knowledge.ID, resolvedProvider)
+	return resolvedSvc
 }
 
 // processTableData 处理表格数据：加载 -> 分析 -> 生成摘要 -> 创建chunks
@@ -377,7 +414,8 @@ func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload 
 func (s *DataTableSummaryService) processTableData(ctx context.Context, resources *extractionResources) ([]*types.Chunk, error) {
 	// 创建DuckDB会话并加载数据
 	sessionID := fmt.Sprintf("table_summary_%s", resources.knowledge.ID)
-	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, s.fileService, s.sqlDB, sessionID)
+	fileSvc := s.resolveFileServiceForKnowledge(ctx, resources)
+	duckdbTool := tools.NewDataAnalysisTool(s.knowledgeService, fileSvc, s.sqlDB, sessionID)
 	defer duckdbTool.Cleanup(ctx)
 
 	// 使用knowledge.ID作为表名，根据文件类型自动加载数据
@@ -487,6 +525,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			IsEnabled:       true,
 		})
 	}
 
@@ -575,7 +614,7 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 		return "", fmt.Errorf("failed to generate table description: %w", err)
 	}
 
-	return fmt.Sprintf("# 表格摘要\n\n表名: %s\n\n%s", tableName, response.Content), nil
+	return fmt.Sprintf("# Table Summary\n\nTable name: %s\n\n%s", tableName, response.Content), nil
 }
 
 // generateColumnDescriptions generates descriptions for each column in batch
@@ -597,13 +636,13 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 		return "", fmt.Errorf("failed to generate column descriptions: %w", err)
 	}
 
-	return fmt.Sprintf("# 表格列信息\n\n表名: %s\n\n%s", tableName, response.Content), nil
+	return fmt.Sprintf("# Table Column Information\n\nTable name: %s\n\n%s", tableName, response.Content), nil
 }
 
 // buildSampleDataDescription builds a formatted sample data description
 func (s *DataTableSummaryService) buildSampleDataDescription(sampleData *types.ToolResult, maxRows int) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("前%d行数据示例:\n", maxRows))
+	builder.WriteString(fmt.Sprintf("Sample data (first %d rows):\n", maxRows))
 
 	rows, ok := sampleData.Data["rows"].([]map[string]interface{})
 	if !ok {

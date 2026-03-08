@@ -8,6 +8,9 @@ import TDesign from "tdesign-vue-next";
 import "tdesign-vue-next/es/style/index.css";
 import "@/assets/theme/theme.css";
 import i18n from "./i18n";
+import { initTheme } from "@/composables/useTheme";
+
+initTheme();
 
 const app = createApp(App);
 

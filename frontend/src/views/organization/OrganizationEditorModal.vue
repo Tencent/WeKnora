@@ -433,7 +433,7 @@ watch(() => props.mode, () => {
   max-width: 900px;
   height: 80vh;
   max-height: 650px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   display: flex;
@@ -453,19 +453,19 @@ watch(() => props.mode, () => {
   width: 32px;
   height: 32px;
   border: none;
-  background: #f5f5f5;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--td-text-color-secondary);
   transition: all 0.2s ease;
   z-index: 10;
 
   &:hover {
-    background: #e5e5e5;
-    color: #000;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -477,8 +477,8 @@ watch(() => props.mode, () => {
 
 .settings-sidebar {
   width: 200px;
-  background: #fafafa;
-  border-right: 1px solid #e5e5e5;
+  background: var(--td-bg-color-secondarycontainer);
+  border-right: 1px solid var(--td-component-stroke);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -486,7 +486,7 @@ watch(() => props.mode, () => {
 
 .sidebar-header {
   padding: 24px 20px;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .sidebar-title {
@@ -494,7 +494,7 @@ watch(() => props.mode, () => {
   font-family: "PingFang SC";
   font-size: 18px;
   font-weight: 600;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
 }
 
 .settings-nav {
@@ -513,15 +513,15 @@ watch(() => props.mode, () => {
   transition: all 0.2s ease;
   font-family: "PingFang SC";
   font-size: 14px;
-  color: #00000099;
+  color: var(--td-text-color-secondary);
 
   &:hover {
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer);
   }
 
   &.active {
-    background: #07c05f1a;
-    color: #07c05f;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
     font-weight: 500;
   }
 }
@@ -563,14 +563,14 @@ watch(() => props.mode, () => {
     font-family: "PingFang SC";
     font-size: 16px;
     font-weight: 600;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 
   .section-desc {
     margin: 0;
     font-family: "PingFang SC";
     font-size: 14px;
-    color: #00000066;
+    color: var(--td-text-color-placeholder);
     line-height: 22px;
   }
 }
@@ -589,11 +589,11 @@ watch(() => props.mode, () => {
   font-family: "PingFang SC";
   font-size: 14px;
   font-weight: 500;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
 
   &.required::after {
     content: '*';
-    color: #FA5151;
+    color: var(--td-error-color);
     margin-left: 4px;
   }
 }
@@ -601,7 +601,7 @@ watch(() => props.mode, () => {
 .form-tip {
   margin-top: 8px;
   font-size: 12px;
-  color: #00000066;
+  color: var(--td-text-color-placeholder);
   line-height: 18px;
 }
 
@@ -623,10 +623,10 @@ watch(() => props.mode, () => {
 }
 
 .permission-card {
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
   padding: 16px;
-  border: 1px solid #e5e5e5;
+  border: 1px solid var(--td-component-stroke);
 }
 
 .permission-header {
@@ -643,18 +643,18 @@ watch(() => props.mode, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--td-text-color-anti);
 
   &.admin {
-    background: linear-gradient(135deg, #07c05f, #05a04f);
+    background: linear-gradient(135deg, var(--td-brand-color), var(--td-brand-color-active));
   }
 
   &.editor {
-    background: linear-gradient(135deg, #f5a623, #e09612);
+    background: linear-gradient(135deg, var(--td-warning-color), var(--td-warning-color-active));
   }
 
   &.viewer {
-    background: linear-gradient(135deg, #909399, #606266);
+    background: var(--td-bg-color-component-disabled);
   }
 }
 
@@ -666,7 +666,7 @@ watch(() => props.mode, () => {
   .role-name {
     font-size: 15px;
     font-weight: 600;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -681,16 +681,16 @@ watch(() => props.mode, () => {
     gap: 8px;
     padding: 6px 0;
     font-size: 13px;
-    color: #00000099;
+    color: var(--td-text-color-secondary);
   }
 
   .check-icon {
-    color: #07c05f;
+    color: var(--td-brand-color);
     font-size: 14px;
   }
 
   .close-icon {
-    color: #FA5151;
+    color: var(--td-error-color);
     font-size: 14px;
   }
 }
@@ -701,9 +701,9 @@ watch(() => props.mode, () => {
   gap: 8px;
   margin-top: 20px;
   padding: 12px 16px;
-  background: #e8f4ff;
+  background: var(--td-brand-color-light);
   border-radius: 8px;
-  color: #0052d9;
+  color: var(--td-brand-color);
   font-size: 13px;
   line-height: 20px;
 
@@ -722,18 +722,18 @@ watch(() => props.mode, () => {
     width: 80px;
     height: 80px;
     margin: 0 auto 16px;
-    background: linear-gradient(135deg, #07c05f1a, #07c05f0d);
+    background: linear-gradient(135deg, var(--td-brand-color-light), #07c05f0d);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 
   .illustration-text {
     margin: 0;
     font-size: 14px;
-    color: #00000066;
+    color: var(--td-text-color-placeholder);
   }
 }
 
@@ -748,13 +748,13 @@ watch(() => props.mode, () => {
 .join-steps {
   margin-top: 32px;
   padding: 20px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
 
   .step-title {
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
     margin-bottom: 16px;
   }
 
@@ -773,8 +773,8 @@ watch(() => props.mode, () => {
   .step-number {
     width: 24px;
     height: 24px;
-    background: #07c05f;
-    color: #fff;
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -786,13 +786,13 @@ watch(() => props.mode, () => {
 
   .step-text {
     font-size: 13px;
-    color: #00000099;
+    color: var(--td-text-color-secondary);
   }
 }
 
 .settings-footer {
   padding: 16px 32px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--td-component-stroke);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
@@ -820,10 +820,10 @@ watch(() => props.mode, () => {
 }
 
 .org-preview-card {
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
   padding: 16px;
-  border: 1px solid #e5e5e5;
+  border: 1px solid var(--td-component-stroke);
 }
 
 .org-preview-header {
@@ -835,12 +835,12 @@ watch(() => props.mode, () => {
 .org-avatar {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, #07c05f, #05a04f);
+  background: linear-gradient(135deg, var(--td-brand-color), var(--td-brand-color-active));
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--td-text-color-anti);
   flex-shrink: 0;
 }
 
@@ -853,13 +853,13 @@ watch(() => props.mode, () => {
   margin: 0 0 4px 0;
   font-size: 16px;
   font-weight: 600;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
 }
 
 .org-desc {
   margin: 0;
   font-size: 13px;
-  color: #00000066;
+  color: var(--td-text-color-placeholder);
   line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -872,7 +872,7 @@ watch(() => props.mode, () => {
   display: flex;
   gap: 24px;
   padding-top: 12px;
-  border-top: 1px solid #e5e5e5;
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .stat-item {
@@ -880,11 +880,11 @@ watch(() => props.mode, () => {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #00000099;
+  color: var(--td-text-color-secondary);
 
   .t-icon {
     font-size: 16px;
-    color: #00000066;
+    color: var(--td-text-color-placeholder);
   }
 
   &.stat-item-agent .stat-agent-icon {
@@ -900,14 +900,14 @@ watch(() => props.mode, () => {
   gap: 8px;
   margin-top: 16px;
   padding: 12px 16px;
-  background: #e8f4ff;
+  background: var(--td-brand-color-light);
   border-radius: 8px;
-  color: #0052d9;
+  color: var(--td-brand-color);
   font-size: 14px;
 
   .t-icon {
     font-size: 18px;
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 </style>

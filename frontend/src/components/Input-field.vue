@@ -5,6 +5,7 @@ import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
+import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge } from '@/api/knowledge-base';
 import { stopSession } from '@/api/chat';
 import { useOrganizationStore } from '@/stores/organization';
@@ -23,6 +24,7 @@ const router = useRouter();
 const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
+const menuStore = useMenuStore();
 const { t } = useI18n();
 
 let query = ref("");
@@ -96,6 +98,9 @@ const agentKBSelectionMode = computed(() => {
   if (!hasAgentConfig.value) return null; // null 表示不受智能体控制
   return currentAgentConfig.value?.kb_selection_mode || 'all';
 });
+
+// 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
+const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
 // 当智能体改变时，模型、网络搜索、可@知识库列表均跟随新智能体配置
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
@@ -204,9 +209,6 @@ const sharedAgentOrgName = computed(() => {
   );
   return shared?.org_name || shared?.shared_by_username || '';
 });
-
-// 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
-const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
 const props = defineProps({
   isReplying: {
@@ -1216,6 +1218,15 @@ onMounted(() => {
     settingsStore.addKnowledgeBase(kbId);
   }
 
+  const prefill = menuStore.consumePrefillQuery();
+  if (prefill) {
+    query.value = prefill;
+    nextTick(() => {
+      const textarea = getTextareaEl();
+      if (textarea) textarea.focus();
+    });
+  }
+
   // 监听点击外部关闭下拉菜单
   document.addEventListener('click', closeAgentModeSelector);
   document.addEventListener('click', closeModelSelector);
@@ -1614,14 +1625,14 @@ const showAgentNotReadyMessage = (agent: CustomAgent, reasons: string[]) => {
   const reasonsText = reasons.join('、')
   
   const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
-    h('span', { style: 'color: #333; line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
+    h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })),
     h('a', {
       href: '#',
       onClick: (e: Event) => {
         e.preventDefault();
         router.push(`/platform/agents?edit=${agent.id}`);
       },
-      style: 'color: #07C05F; text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
+      style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
       onMouseenter: (e: Event) => {
         (e.target as HTMLElement).style.textDecoration = 'underline';
       },
@@ -1651,14 +1662,14 @@ const toggleWebSearch = () => {
 
   if (!isWebSearchConfigured.value) {
     const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 6px; max-width: 280px;' }, [
-      h('span', { style: 'color: #333; line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
+      h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
       h('a', {
         href: '#',
         onClick: (e: Event) => {
           e.preventDefault();
           handleGoToWebSearchSettings();
         },
-        style: 'color: #07C05F; text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
+        style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
         onMouseenter: (e: Event) => {
           (e.target as HTMLElement).style.textDecoration = 'underline';
         },
@@ -1745,7 +1756,7 @@ onBeforeRouteUpdate((to, from, next) => {
             </span>
           </span>
           <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
-          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)" aria-label="移除">×</span>
+          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)" :aria-label="$t('common.remove')">×</span>
         </span>
       </div>
       
@@ -1875,7 +1886,10 @@ onBeforeRouteUpdate((to, from, next) => {
             @click.stop
             @mousedown.prevent="triggerMention"
           >
-            <img :src="getImgSrc('at-icon.svg')" alt="@" class="control-icon" />
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" class="control-icon at-icon">
+              <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
             <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
           </div>
         </t-tooltip>
@@ -2003,7 +2017,7 @@ const getImgSrc = (url: string) => {
   width: 800px;
   background: var(--td-bg-color-container, #FFF);
   border-radius: 12px;
-  border: 1px solid var(--td-component-border, #E7E7E7);
+  border: .5px solid var(--td-component-border, #E7E7E7);
   box-shadow: 0 6px 6px 0 rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
   
   &:focus-within {
@@ -2018,7 +2032,7 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 5px;
   padding: 6px 12px 6px;
-  border-bottom: 1px solid var(--td-component-stroke, #e7e7e7);
+  border-bottom: .5px solid var(--td-component-stroke, #e7e7e7);
   background: var(--td-bg-color-container, #fff);
   border-radius: 11px 11px 0 0; /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
 }
@@ -2033,7 +2047,7 @@ const getImgSrc = (url: string) => {
   font-weight: 500;
   cursor: default;
   transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-  border: 1px solid transparent;
+  border: .5px solid transparent;
   color: var(--td-text-color-primary, #1f2937);
   line-height: 1.3;
 }
@@ -2140,7 +2154,7 @@ const getImgSrc = (url: string) => {
 
 .mention-chip--faq .mention-chip__icon-wrap {
   background: rgba(107, 114, 228, 0.12);
-  color: #6366f1;
+  color: var(--td-brand-color);
 }
 
 .mention-chip--faq:hover {
@@ -2249,9 +2263,9 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 6px 10px;
   border-radius: 6px;
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  color: var(--td-text-color-secondary, #666);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, color 0.12s;
   user-select: none;
   flex-shrink: 0;
 
@@ -2274,69 +2288,8 @@ const getImgSrc = (url: string) => {
   padding: 0 10px;
   min-width: auto;
   font-weight: 500;
-  border: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
   position: relative;
-  
-  // 内置普通模式 - 绿色
-  &.is-normal {
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%);
-    border-color: rgba(16, 185, 129, 0.35);
-    
-    .agent-mode-text {
-      color: #059669;
-      font-weight: 600;
-    }
-    
-    .dropdown-arrow {
-      color: #059669;
-    }
-    
-    &:hover {
-      background: linear-gradient(135deg, rgba(16, 185, 129, 0.18) 0%, rgba(16, 185, 129, 0.12) 100%);
-      border-color: rgba(16, 185, 129, 0.5);
-    }
-  }
-  
-  // 内置 Agent 模式 - 紫色
-  &.is-agent {
-    background: linear-gradient(135deg, rgba(124, 77, 255, 0.12) 0%, rgba(124, 77, 255, 0.08) 100%);
-    border-color: rgba(124, 77, 255, 0.35);
-    
-    .agent-mode-text {
-      color: #7c4dff;
-      font-weight: 600;
-    }
-    
-    .dropdown-arrow {
-      color: #7c4dff;
-    }
-    
-    &:hover {
-      background: linear-gradient(135deg, rgba(124, 77, 255, 0.18) 0%, rgba(124, 77, 255, 0.12) 100%);
-      border-color: rgba(124, 77, 255, 0.5);
-    }
-  }
-  
-  // 自定义智能体 - 蓝色
-  &.is-custom {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(59, 130, 246, 0.08) 100%);
-    border-color: rgba(59, 130, 246, 0.35);
-    
-    .agent-mode-text {
-      color: #3b82f6;
-      font-weight: 600;
-    }
-    
-    .dropdown-arrow {
-      color: #3b82f6;
-    }
-    
-    &:hover {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.18) 0%, rgba(59, 130, 246, 0.12) 100%);
-      border-color: rgba(59, 130, 246, 0.5);
-    }
-  }
+  border: .5px solid var(--td-component-border, #e7e7e7);
 }
 
 .agent-icon {
@@ -2353,16 +2306,7 @@ const getImgSrc = (url: string) => {
   height: 20px;
   border-radius: 5px;
   flex-shrink: 0;
-  
-  &.normal {
-    background: rgba(7, 192, 95, 0.12);
-    color: #059669;
-  }
-  
-  &.agent {
-    background: rgba(124, 77, 255, 0.12);
-    color: #7c4dff;
-  }
+  color: var(--td-text-color-secondary, #666);
 }
 
 .agent-mode-text {
@@ -2386,7 +2330,7 @@ const getImgSrc = (url: string) => {
   
   &.active {
     background: rgba(16, 185, 129, 0.1);
-    color: #07C05F;
+    color: var(--td-brand-color);
     
     &:hover {
       background: rgba(16, 185, 129, 0.15);
@@ -2414,7 +2358,7 @@ const getImgSrc = (url: string) => {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  background: #07C05F;
+  background: var(--td-brand-color);
   color: white;
   font-size: 10px;
   font-weight: 600;
@@ -2432,7 +2376,7 @@ const getImgSrc = (url: string) => {
 }
 
 .kb-btn.active .kb-btn-text {
-  color: #07C05F;
+  color: var(--td-brand-color);
 }
 
 .websearch-btn {
@@ -2449,7 +2393,7 @@ const getImgSrc = (url: string) => {
     background: rgba(16, 185, 129, 0.1);
     
     .websearch-icon {
-      color: #07C05F;
+      color: var(--td-brand-color);
     }
     
     &:hover {
@@ -2487,8 +2431,8 @@ const getImgSrc = (url: string) => {
 
 :global(.input-field-tooltip) {
   .t-popup__content {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-    border: 1px solid var(--td-component-border, #e7e7e7);
+    box-shadow: var(--td-shadow-2);
+    border: .5px solid var(--td-component-border, #e7e7e7);
   }
 }
 
@@ -2502,7 +2446,7 @@ const getImgSrc = (url: string) => {
 }
 
 :global(.tooltip-with-link a) {
-  color: #07C05F;
+  color: var(--td-brand-color);
   font-weight: 500;
   text-decoration: none;
 }
@@ -2538,7 +2482,7 @@ const getImgSrc = (url: string) => {
   height: 28px;
   padding: 0;
   background: rgba(16, 185, 129, 0.08);
-  color: #07C05F;
+  color: var(--td-brand-color);
   border: 1.5px solid rgba(16, 185, 129, 0.2);
   position: relative;
   display: flex;
@@ -2547,7 +2491,7 @@ const getImgSrc = (url: string) => {
   
   &:hover {
     background: rgba(16, 185, 129, 0.12);
-    border-color: #07C05F;
+    border-color: var(--td-brand-color);
   }
   
   &:active {
@@ -2562,7 +2506,7 @@ const getImgSrc = (url: string) => {
     content: '';
     width: 12px;
     height: 12px;
-    background: #07C05F;
+    background: var(--td-brand-color);
     border-radius: 50%;
     display: block;
   }
@@ -2572,14 +2516,14 @@ const getImgSrc = (url: string) => {
   width: 28px;
   height: 28px;
   padding: 0;
-  background-color: #07C05F;
+  background-color: var(--td-brand-color);
   
   &:hover:not(.disabled) {
-    background-color: #059669;
+    background-color: var(--td-brand-color-active);
   }
   
   &.disabled {
-    background-color: #b5eccf;
+    background-color: var(--td-success-color-light);
   }
   
   img {
@@ -2594,16 +2538,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   margin-left: auto;
   flex-shrink: 0;
-  
+
   &.agent-controlled {
     .model-selector-trigger {
       cursor: not-allowed;
-      opacity: 0.85;
-      
-      &:hover {
-        background: rgba(16, 185, 129, 0.1);
-        border-color: rgba(16, 185, 129, 0.3);
-      }
+      opacity: 0.5;
     }
   }
 }
@@ -2616,32 +2555,29 @@ const getImgSrc = (url: string) => {
   min-width: 100px;
   height: 22px;
   border-radius: 6px;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.1);
+  border: .5px solid var(--td-component-border, #e7e7e7);
   transition: background 0.12s, border-color 0.12s;
   cursor: pointer;
-}
 
-.model-selector-trigger:hover {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: rgba(16, 185, 129, 0.45);
-}
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+  }
 
-.model-selector-trigger.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 
-.model-selector-trigger.disabled:hover {
-  background: rgba(16, 185, 129, 0.1);
-  border-color: rgba(16, 185, 129, 0.3);
+    &:hover {
+      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+    }
+  }
 }
 
 .model-selector-name {
   flex: 1;
   font-size: 12px;
-  font-weight: 600;
-  color: #07C05F;
+  font-weight: 500;
+  color: var(--td-text-color-secondary, #666);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2650,7 +2586,7 @@ const getImgSrc = (url: string) => {
 .model-dropdown-arrow {
   width: 10px;
   height: 10px;
-  color: #07C05F;
+  color: var(--td-text-color-placeholder, #999);
   flex-shrink: 0;
   transition: transform 0.12s;
   
@@ -2660,7 +2596,7 @@ const getImgSrc = (url: string) => {
 }
 
 .model-selector-trigger.disabled .model-dropdown-arrow {
-  color: rgba(16, 185, 129, 0.4);
+  color: var(--td-text-color-placeholder, #999);
 }
 
 .model-selector-overlay {
@@ -2677,7 +2613,7 @@ const getImgSrc = (url: string) => {
   background: var(--td-bg-color-container, #fff);
   border-radius: 10px;
   box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
-  border: 1px solid var(--td-component-border, #e7e9eb);
+  border: .5px solid var(--td-component-border, #e7e9eb);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2691,7 +2627,7 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  border-bottom: .5px solid var(--td-component-stroke, #f0f0f0);
   background: var(--td-bg-color-container, #fff);
   font-size: 12px;
   font-weight: 500;
@@ -2713,7 +2649,7 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid transparent;
+  border: .5px solid transparent;
   background: transparent;
   color: var(--td-brand-color, #07c05f);
   font-size: 12px;
@@ -2752,7 +2688,7 @@ const getImgSrc = (url: string) => {
     background: var(--td-brand-color-light, #eefdf5);
     
     .model-option-name {
-      color: #10b981;
+      color: var(--td-success-color);
       font-weight: 600;
     }
   }
@@ -2807,12 +2743,12 @@ const getImgSrc = (url: string) => {
 
 .model-badge-remote {
   background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
+  color: var(--td-success-color);
 }
 
 .model-badge-local {
   background: rgba(139, 145, 150, 0.1);
-  color: #52575a;
+  color: var(--td-text-color-secondary);
 }
 
 /* Agent 模式选择下拉菜单 */
@@ -2869,7 +2805,7 @@ const getImgSrc = (url: string) => {
     background: var(--td-brand-color-light, #eefdf5);
     
     .agent-mode-option-name {
-      color: #10b981;
+      color: var(--td-success-color);
       font-weight: 700;
     }
   }
@@ -2900,7 +2836,7 @@ const getImgSrc = (url: string) => {
 .check-icon {
   width: 14px;
   height: 14px;
-  color: #10b981;
+  color: var(--td-success-color);
   flex-shrink: 0;
   margin-left: 6px;
 }
@@ -2911,7 +2847,7 @@ const getImgSrc = (url: string) => {
   margin-left: 6px;
   
   .warning-icon {
-    color: #ff9800;
+    color: var(--td-warning-color);
     font-size: 14px;
   }
 }
@@ -2924,7 +2860,7 @@ const getImgSrc = (url: string) => {
 }
 
 .agent-mode-link {
-  color: #10b981;
+  color: var(--td-success-color);
   text-decoration: none;
   font-size: 11px;
   font-weight: 500;
@@ -2934,7 +2870,7 @@ const getImgSrc = (url: string) => {
   transition: all 0.12s;
   
   &:hover {
-    color: #059669;
+    color: var(--td-brand-color-active);
     text-decoration: underline;
   }
 }

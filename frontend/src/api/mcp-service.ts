@@ -24,6 +24,7 @@ export interface MCPService {
     args: string[] // Command arguments array
   }
   env_vars?: Record<string, string> // Environment variables for stdio transport
+  is_builtin?: boolean // Whether this is a builtin MCP service
   created_at?: string
   updated_at?: string
 }

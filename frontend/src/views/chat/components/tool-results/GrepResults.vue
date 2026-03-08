@@ -12,14 +12,17 @@
     </div>
 
     <div v-else class="empty-state">
-      未找到匹配的内容
+      {{ $t('chat.noMatchFound') }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import type { GrepResultsData } from '@/types/tool-results';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   data: GrepResultsData;
@@ -47,17 +50,17 @@ const hasMoreResults = computed(() => totalMatches.value > resultCount.value);
 
 .summary-inline {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   display: flex;
   align-items: center;
   gap: 6px;
 
   &__divider {
-    color: #d1d5db;
+    color: var(--td-text-color-disabled);
   }
 
   &__truncated {
-    color: #f59e0b;
+    color: var(--td-warning-color);
   }
 }
 
@@ -75,19 +78,19 @@ const hasMoreResults = computed(() => totalMatches.value > resultCount.value);
   gap: 8px;
   padding: 4px 10px;
   border-radius: 4px;
-  background: #f9fafb;
-  border: 1px solid #edf2f7;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .result-row__index {
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
 }
 
 .result-row__title {
-  color: #111827;
+  color: var(--td-text-color-primary);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -103,9 +106,9 @@ const hasMoreResults = computed(() => totalMatches.value > resultCount.value);
 
 .meta-pill {
   font-size: 11px;
-  color: #6b7280;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 999px;
   padding: 2px 8px;
 }
@@ -113,11 +116,11 @@ const hasMoreResults = computed(() => totalMatches.value > resultCount.value);
 .empty-state {
   padding: 20px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-style: italic;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
-  border: 1px dashed #e5e7eb;
+  border: 1px dashed var(--td-component-stroke);
 }
 </style>

@@ -19,7 +19,7 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
-    apt-get install -y git build-essential
+    apt-get install -y git build-essential libsqlite3-dev
 
 # Install migrate tool
 RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
@@ -63,8 +63,10 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential postgresql-client default-mysql-client ca-certificates tzdata sed curl bash vim wget \
+        libsqlite3-0 \
         python3 python3-pip python3-dev libffi-dev libssl-dev \
-        nodejs npm && \
+        nodejs npm \
+        gosu && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
     mkdir -p /home/appuser/.local/bin && \
     curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \
@@ -88,8 +90,13 @@ COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/dataset/samples ./dataset/samples
 COPY --from=builder /app/skills/preloaded ./skills/preloaded
+# Keep a read-only backup so bind-mount cannot erase built-in skills
+COPY --from=builder /app/skills/preloaded ./skills/_builtin
 COPY --from=builder /root/.duckdb /home/appuser/.duckdb
 COPY --from=builder /app/WeKnora .
+
+# Copy and make entrypoint script executable
+COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh
 
 # Make scripts executable
 RUN chmod +x ./scripts/*.sh
@@ -97,7 +104,6 @@ RUN chmod +x ./scripts/*.sh
 # Expose ports
 EXPOSE 8080
 
-# Switch to non-root user and run the application directly
-USER appuser
 
+ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["./WeKnora"]

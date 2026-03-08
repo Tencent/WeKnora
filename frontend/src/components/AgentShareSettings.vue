@@ -2,7 +2,7 @@
   <div class="section-content">
     <div class="section-header">
       <h3 class="section-title">{{ $t('organization.share.title') }}</h3>
-      <p class="section-desc">{{ $t('organization.share.agentShareDesc') || '将智能体共享到空间，空间成员可使用该智能体' }}</p>
+      <p class="section-desc">{{ $t('organization.share.agentShareDesc') }}</p>
     </div>
     <!-- 共享范围说明：当传入 agent 时展示，仅提示 + 变更同步说明，不列具体开关 -->
     <div v-if="agent?.config" class="share-scope-block">
@@ -247,8 +247,8 @@ defineExpose({ loadShares })
 </script>
 
 <style scoped lang="less">
-.section-content { .section-header { margin-bottom: 20px; } .section-title { margin: 0 0 8px 0; font-size: 16px; font-weight: 600; } .section-desc { margin: 0; font-size: 14px; color: #00000066; } }
-.share-form { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #f0f0f0; }
+.section-content { .section-header { margin-bottom: 20px; } .section-title { margin: 0 0 8px 0; font-size: 16px; font-weight: 600; } .section-desc { margin: 0; font-size: 14px; color: var(--td-text-color-disabled); } }
+.share-form { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--td-component-stroke); }
 .form-item {
   .form-label {
     display: block;
@@ -274,14 +274,14 @@ defineExpose({ loadShares })
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
   .shares-count {
     padding: 2px 8px;
-    background: #f5f5f5;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 10px;
     font-size: 12px;
-    color: #00000066;
+    color: var(--td-text-color-disabled);
   }
 }
 .shares-loading {
@@ -290,7 +290,7 @@ defineExpose({ loadShares })
   justify-content: center;
   gap: 8px;
   padding: 32px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-size: 14px;
 }
 .shares-empty {
@@ -300,9 +300,9 @@ defineExpose({ loadShares })
   justify-content: center;
   gap: 12px;
   padding: 40px 20px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   .empty-icon { font-size: 32px; opacity: 0.5; }
 }
 .shares-list {
@@ -318,13 +318,13 @@ defineExpose({ loadShares })
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: #fafafa;
-  border: 1px solid #f0f0f0;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   transition: background 0.2s ease, border-color 0.2s ease;
   &:hover {
-    background: #f5f5f5;
-    border-color: #e8e8e8;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-stroke);
   }
 }
 .share-info {
@@ -347,7 +347,7 @@ defineExpose({ loadShares })
     font-family: "PingFang SC";
     font-size: 14px;
     font-weight: 500;
-    color: #000000e6;
+    color: var(--td-text-color-primary);
   }
 }
 .share-item-meta {
@@ -355,19 +355,19 @@ defineExpose({ loadShares })
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #00000099;
+  color: var(--td-text-color-placeholder);
   .org-meta-tag {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     padding: 2px 6px;
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 4px;
   }
   .org-meta-icon {
     flex-shrink: 0;
     vertical-align: middle;
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
   }
   .org-meta-icon-user {
     font-size: 12px;
@@ -393,20 +393,20 @@ defineExpose({ loadShares })
 .share-scope-block {
   margin-bottom: 24px;
   padding: 16px;
-  background: #f8faf9;
-  border: 1px solid #e8f5ed;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-success-color-focus);
   border-radius: 8px;
 }
 .share-scope-title {
   margin: 0 0 6px 0;
   font-size: 14px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: var(--td-text-color-primary);
 }
 .share-scope-desc {
   margin: 0 0 12px 0;
   font-size: 12px;
-  color: #666;
+  color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
 
@@ -421,7 +421,7 @@ defineExpose({ loadShares })
 }
 :deep(.t-select-option:hover),
 :deep(.t-select-option.t-is-selected) {
-  background: #f0f7ff;
+  background: var(--td-brand-color-light);
 }
 :deep(.t-select-option__content) {
   width: 100%;
@@ -454,7 +454,7 @@ defineExpose({ loadShares })
   font-family: "PingFang SC";
   font-size: 13px;
   font-weight: 500;
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -465,21 +465,21 @@ defineExpose({ loadShares })
   gap: 6px;
   font-family: "PingFang SC";
   font-size: 12px;
-  color: #00000099;
+  color: var(--td-text-color-placeholder);
 
   .org-meta-tag {
     display: inline-flex;
     align-items: center;
     gap: 3px;
     padding: 0px 4px;
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 4px;
   }
 
   .org-meta-icon {
     flex-shrink: 0;
     vertical-align: middle;
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
   }
 
   .org-meta-icon-user {
@@ -505,7 +505,7 @@ defineExpose({ loadShares })
   max-height: 320px;
   overflow-y: auto;
   border-radius: 6px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--td-shadow-2);
 }
 .org-select-dropdown-popup .t-select-option {
   height: auto;
@@ -516,5 +516,11 @@ defineExpose({ loadShares })
 }
 .org-select-dropdown-popup .t-select-option__content {
   width: 100%;
+}
+// Dark mode: invert black SVG icons loaded via <img> tag, match text opacity
+html[theme-mode="dark"] .org-meta-icon-kb,
+html[theme-mode="dark"] .org-meta-icon-agent {
+  filter: invert(1);
+  opacity: 0.55;
 }
 </style>

@@ -44,74 +44,10 @@ func NewKnowledgeHandler(
 }
 
 // validateKnowledgeBaseAccess validates access permissions to a knowledge base
-// Returns the knowledge base, the knowledge base ID, effective tenant ID, permission level, and any errors encountered
-// For owned KBs, effectiveTenantID is the caller's tenant ID
-// For shared KBs, effectiveTenantID is the source tenant ID (owner's tenant)
+// using the ":id" URL path parameter. It delegates to validateKnowledgeBaseAccessWithKBID.
 func (h *KnowledgeHandler) validateKnowledgeBaseAccess(c *gin.Context) (*types.KnowledgeBase, string, uint64, types.OrgMemberRole, error) {
-	ctx := c.Request.Context()
-
-	// Get tenant ID from context
-	tenantID := c.GetUint64(types.TenantIDContextKey.String())
-	if tenantID == 0 {
-		logger.Error(ctx, "Failed to get tenant ID")
-		return nil, "", 0, "", errors.NewUnauthorizedError("Unauthorized")
-	}
-
-	// Get user ID from context (needed for shared KB permission check)
-	userID, userExists := c.Get(types.UserIDContextKey.String())
-
-	// Get knowledge base ID from URL path parameter
 	kbID := secutils.SanitizeForLog(c.Param("id"))
-	if kbID == "" {
-		logger.Error(ctx, "Knowledge base ID is empty")
-		return nil, "", 0, "", errors.NewBadRequestError("Knowledge base ID cannot be empty")
-	}
-
-	// Get knowledge base details
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		return nil, kbID, 0, "", errors.NewInternalServerError(err.Error())
-	}
-
-	// Check 1: Verify tenant ownership (owner has full access)
-	if kb.TenantID == tenantID {
-		return kb, kbID, tenantID, types.OrgRoleAdmin, nil
-	}
-
-	// Check 2: If not owner, check organization shared access
-	if userExists && h.kbShareService != nil {
-		// Check if user has shared access through organization
-		permission, isShared, permErr := h.kbShareService.CheckUserKBPermission(ctx, kbID, userID.(string))
-		if permErr == nil && isShared {
-			// User has shared access, get the source tenant ID for queries
-			sourceTenantID, srcErr := h.kbShareService.GetKBSourceTenant(ctx, kbID)
-			if srcErr == nil {
-				logger.Infof(ctx, "User %s accessing shared KB %s with permission %s, source tenant: %d",
-					userID.(string), kbID, permission, sourceTenantID)
-				return kb, kbID, sourceTenantID, permission, nil
-			}
-		}
-	}
-
-	// Check 3: If not owner and no direct share, allow if user has any shared agent that can access this KB (e.g. opened from "通过智能体可见" list)
-	if userExists && h.agentShareService != nil {
-		can, err := h.agentShareService.UserCanAccessKBViaSomeSharedAgent(ctx, userID.(string), tenantID, kb)
-		if err == nil && can {
-			logger.Infof(ctx, "User %s accessing KB %s via some shared agent", userID.(string), kbID)
-			return kb, kbID, kb.TenantID, types.OrgRoleViewer, nil
-		}
-	}
-
-	// No permission: not owner and no shared access
-	logger.Warnf(
-		ctx,
-		"Permission denied to access this knowledge base, tenant ID mismatch, "+
-			"requested tenant ID: %d, knowledge base tenant ID: %d",
-		tenantID,
-		kb.TenantID,
-	)
-	return nil, kbID, 0, "", errors.NewForbiddenError("Permission denied to access this knowledge base")
+	return h.validateKnowledgeBaseAccessWithKBID(c, kbID)
 }
 
 // validateKnowledgeBaseAccessWithKBID validates access to the given knowledge base ID (e.g. from query or body).
@@ -366,12 +302,12 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 // CreateKnowledgeFromURL godoc
 // @Summary      从URL创建知识
-// @Description  从指定URL抓取内容并创建知识条目
+// @Description  从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,enable_multimodel=bool,title=string,tag_id=string}  true  "URL请求"
+// @Param        request  body      object{url=string,file_name=string,file_type=string,enable_multimodel=bool,title=string,tag_id=string}  true  "URL请求"
 // @Success      201      {object}  map[string]interface{}  "创建的知识"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      409      {object}  map[string]interface{}  "URL重复"
@@ -399,6 +335,8 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	// Parse URL from request body
 	var req struct {
 		URL              string `json:"url" binding:"required"`
+		FileName         string `json:"file_name"`
+		FileType         string `json:"file_type"`
 		EnableMultimodel *bool  `json:"enable_multimodel"`
 		Title            string `json:"title"`
 		TagID            string `json:"tag_id"`
@@ -409,19 +347,26 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Received URL request: %s", secutils.SanitizeForLog(req.URL))
-	logger.Infof(
-		ctx,
+	logger.Infof(ctx, "Received URL request: %s, file_name: %s, file_type: %s",
+		secutils.SanitizeForLog(req.URL),
+		secutils.SanitizeForLog(req.FileName),
+		secutils.SanitizeForLog(req.FileType),
+	)
+	logger.Infof(ctx,
 		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
 		secutils.SanitizeForLog(kbID),
 		secutils.SanitizeForLog(req.URL),
 	)
 
 	// Create knowledge entry from the URL
-	knowledge, err := h.kgService.CreateKnowledgeFromURL(ctx, kbID, req.URL, req.EnableMultimodel, req.Title, req.TagID)
+	knowledge, err := h.kgService.CreateKnowledgeFromURL(ctx, kbID, req.URL, req.FileName, req.FileType, req.EnableMultimodel, req.Title, req.TagID)
 	// Check for duplicate knowledge error
 	if err != nil {
 		if h.handleDuplicateKnowledgeError(c, err, knowledge, "url") {
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
@@ -725,6 +670,102 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 			return false
 		}
 		logger.Debug(ctx, "File sending completed")
+		return false
+	})
+}
+
+// mimeTypeByExt returns the MIME type for a given file extension.
+func mimeTypeByExt(filename string) string {
+	ext := strings.ToLower(filename)
+	if idx := strings.LastIndex(ext, "."); idx >= 0 {
+		ext = ext[idx:]
+	} else {
+		ext = ""
+	}
+	m := map[string]string{
+		".pdf":      "application/pdf",
+		".docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".doc":      "application/msword",
+		".pptx":     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+		".ppt":      "application/vnd.ms-powerpoint",
+		".xlsx":     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		".xls":      "application/vnd.ms-excel",
+		".csv":      "text/csv",
+		".jpg":      "image/jpeg",
+		".jpeg":     "image/jpeg",
+		".png":      "image/png",
+		".gif":      "image/gif",
+		".bmp":      "image/bmp",
+		".webp":     "image/webp",
+		".svg":      "image/svg+xml",
+		".tiff":     "image/tiff",
+		".txt":      "text/plain; charset=utf-8",
+		".md":       "text/markdown; charset=utf-8",
+		".markdown": "text/markdown; charset=utf-8",
+		".json":     "application/json; charset=utf-8",
+		".xml":      "application/xml; charset=utf-8",
+		".html":     "text/html; charset=utf-8",
+		".css":      "text/css; charset=utf-8",
+		".js":       "text/javascript; charset=utf-8",
+		".ts":       "text/typescript; charset=utf-8",
+		".py":       "text/x-python; charset=utf-8",
+		".go":       "text/x-go; charset=utf-8",
+		".java":     "text/x-java; charset=utf-8",
+		".yaml":     "text/yaml; charset=utf-8",
+		".yml":      "text/yaml; charset=utf-8",
+		".sh":       "text/x-shellscript; charset=utf-8",
+	}
+	if ct, ok := m[ext]; ok {
+		return ct
+	}
+	return "application/octet-stream"
+}
+
+// PreviewKnowledgeFile godoc
+// @Summary      预览知识文件
+// @Description  返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览
+// @Tags         知识管理
+// @Accept       json
+// @Produce      application/pdf,image/jpeg,image/png,text/plain
+// @Param        id   path      string  true  "知识ID"
+// @Success      200  {file}    file    "文件内容"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/preview [get]
+func (h *KnowledgeHandler) PreviewKnowledgeFile(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, id, types.OrgRoleViewer)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+
+	file, filename, err := h.kgService.GetKnowledgeFile(effCtx, id)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to retrieve file").WithDetails(err.Error()))
+		return
+	}
+	defer file.Close()
+
+	contentType := mimeTypeByExt(filename)
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%s", filename))
+	c.Header("Cache-Control", "private, max-age=3600")
+
+	c.Stream(func(w io.Writer) bool {
+		if _, err := io.Copy(w, file); err != nil {
+			logger.Errorf(ctx, "Failed to stream preview: %v", err)
+			return false
+		}
 		return false
 	})
 }

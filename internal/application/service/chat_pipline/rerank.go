@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -249,21 +250,37 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		}
 	}
 
-	// Filter results based on threshold with special handling for history matches
+	// Filter results based on threshold
 	rankFilter := []rerank.RankResult{}
 	for _, result := range rerankResp {
 		if result.Index >= len(candidates) {
 			continue
 		}
-		th := chatManage.RerankThreshold
-		matchType := candidates[result.Index].MatchType
-		if matchType == types.MatchTypeHistory {
-			th = math.Max(th-0.1, 0.5) // Lower threshold for history matches
-		}
-		if result.RelevanceScore > th {
+		if result.RelevanceScore >= chatManage.RerankThreshold {
 			rankFilter = append(rankFilter, result)
 		}
 	}
+
+	// Fallback: if threshold filtering removed all results but the top candidate
+	// still has a reasonable score, keep it as a safety net. Skip fallback entirely
+	// when the best score is too low — forcing irrelevant results is worse than
+	// returning nothing and letting the caller handle the empty-result case.
+	const fallbackMinScore = 0.15
+	if len(rankFilter) == 0 && len(rerankResp) > 0 && rerankResp[0].RelevanceScore >= fallbackMinScore {
+		rankFilter = rerankResp[:1]
+		pipelineInfo(ctx, "Rerank", "fallback_top1", map[string]interface{}{
+			"reason":    "all_below_threshold",
+			"threshold": chatManage.RerankThreshold,
+			"top_score": rerankResp[0].RelevanceScore,
+		})
+	} else if len(rankFilter) == 0 {
+		pipelineInfo(ctx, "Rerank", "fallback_skip", map[string]interface{}{
+			"reason":    "top_score_too_low",
+			"threshold": chatManage.RerankThreshold,
+			"top_score": safeTopScore(rerankResp),
+		})
+	}
+
 	return rankFilter
 }
 
@@ -273,6 +290,13 @@ func ensureMetadata(m map[string]string) map[string]string {
 		return make(map[string]string)
 	}
 	return m
+}
+
+func safeTopScore(results []rerank.RankResult) float64 {
+	if len(results) == 0 {
+		return 0
+	}
+	return results[0].RelevanceScore
 }
 
 // compositeScore calculates the composite score for a search result
@@ -383,9 +407,82 @@ func applyMMR(
 	return selected
 }
 
+// --- Passage cleaning for rerank ---
+//
+// Rerank models work on semantic text similarity. Markdown formatting, raw URLs,
+// image references, table separators, and other structural syntax are noise that
+// can dilute the semantic signal. The functions below strip this noise before
+// passages are sent to the rerank model.
+
+var (
+	// reMarkdownImage matches ![alt](url) — the entire construct is noise.
+	reMarkdownImage = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
+	// reMarkdownLink matches [text](url) — we keep the text, drop the URL.
+	reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	// reRawURL matches standalone http(s) URLs.
+	reRawURL = regexp.MustCompile(`https?://[^\s)\]>]+`)
+	// reCodeBlock matches fenced code blocks (```...```).
+	reCodeBlock = regexp.MustCompile("(?s)```(?:\\w*)\n?.*?```")
+	// reLatexBlock matches block-level LaTeX ($$...$$).
+	reLatexBlock = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
+	// reTableSep matches table separator rows like |---|---|.
+	reTableSep = regexp.MustCompile(`(?m)^\s*\|[\s:|-]+\|\s*$`)
+	// reHeadingPrefix matches leading # markers in headings.
+	reHeadingPrefix = regexp.MustCompile(`(?m)^#{1,6}\s+`)
+	// reBlockquote matches leading > markers.
+	reBlockquote = regexp.MustCompile(`(?m)^>\s?`)
+	// reBoldItalic3 matches ***text*** wrappers (must come before 2 and 1).
+	reBoldItalic3 = regexp.MustCompile(`\*{3}(.+?)\*{3}`)
+	// reBoldItalic2 matches **text** wrappers.
+	reBoldItalic2 = regexp.MustCompile(`\*{2}(.+?)\*{2}`)
+	// reBoldItalic1 matches *text* wrappers.
+	reBoldItalic1 = regexp.MustCompile(`\*(.+?)\*`)
+	// reExcessiveNewlines collapses 3+ consecutive newlines into 2.
+	reExcessiveNewlines = regexp.MustCompile(`\n{3,}`)
+	// reListMarker matches unordered (- , * ) and ordered (1. ) list prefixes.
+	reListMarker = regexp.MustCompile(`(?m)^[\t ]*(?:[-*+]|\d+\.)\s+`)
+	// reHTMLTag matches HTML tags like <br>, <div class="...">, etc.
+	reHTMLTag = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
+)
+
+// cleanPassageForRerank strips markdown/structural noise from text to produce
+// a clean semantic passage for the rerank model. The cleaning is designed to
+// preserve all meaningful natural-language content while removing formatting
+// that would confuse text-similarity scoring.
+func cleanPassageForRerank(text string) string {
+	// 1. Remove code blocks (before other patterns to avoid partial matches)
+	text = reCodeBlock.ReplaceAllString(text, "")
+	// 2. Remove LaTeX block math
+	text = reLatexBlock.ReplaceAllString(text, "")
+	// 3. Remove HTML tags
+	text = reHTMLTag.ReplaceAllString(text, "")
+	// 4. Remove markdown image references entirely
+	text = reMarkdownImage.ReplaceAllString(text, "")
+	// 5. Convert markdown links to just their display text
+	text = reMarkdownLink.ReplaceAllString(text, "$1")
+	// 6. Remove standalone raw URLs
+	text = reRawURL.ReplaceAllString(text, "")
+	// 7. Remove table separator rows
+	text = reTableSep.ReplaceAllString(text, "")
+	// 8. Strip heading markers but keep heading text
+	text = reHeadingPrefix.ReplaceAllString(text, "")
+	// 9. Strip blockquote markers
+	text = reBlockquote.ReplaceAllString(text, "")
+	// 10. Unwrap bold/italic markers, keeping inner text (order: *** before ** before *)
+	text = reBoldItalic3.ReplaceAllString(text, "$1")
+	text = reBoldItalic2.ReplaceAllString(text, "$1")
+	text = reBoldItalic1.ReplaceAllString(text, "$1")
+	// 11. Strip list markers
+	text = reListMarker.ReplaceAllString(text, "")
+	// 12. Collapse excessive newlines
+	text = reExcessiveNewlines.ReplaceAllString(text, "\n\n")
+
+	return strings.TrimSpace(text)
+}
+
 // getEnrichedPassage 合并Content、ImageInfo和GeneratedQuestions的文本内容
 func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string {
-	combinedText := result.Content
+	combinedText := cleanPassageForRerank(result.Content)
 	var enrichments []string
 
 	// 解析ImageInfo
@@ -400,10 +497,10 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 			// 提取所有图片的描述和OCR文本
 			for _, img := range imageInfos {
 				if img.Caption != "" {
-					enrichments = append(enrichments, fmt.Sprintf("图片描述: %s", img.Caption))
+					enrichments = append(enrichments, img.Caption)
 				}
 				if img.OCRText != "" {
-					enrichments = append(enrichments, fmt.Sprintf("图片文本: %s", img.OCRText))
+					enrichments = append(enrichments, img.OCRText)
 				}
 			}
 		}
@@ -418,7 +515,7 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 				"error": err.Error(),
 			})
 		} else if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
-			enrichments = append(enrichments, fmt.Sprintf("相关问题: %s", strings.Join(questionStrings, "; ")))
+			enrichments = append(enrichments, strings.Join(questionStrings, "; "))
 		}
 	}
 
@@ -434,7 +531,7 @@ func getEnrichedPassage(ctx context.Context, result *types.SearchResult) string 
 
 	pipelineInfo(ctx, "Rerank", "passage_enrich", map[string]interface{}{
 		"content_len":    len(result.Content),
-		"enrichment":     strings.Join(enrichments, "\n"),
+		"cleaned_len":    len(cleanPassageForRerank(result.Content)),
 		"enrichment_len": len(strings.Join(enrichments, "\n")),
 	})
 

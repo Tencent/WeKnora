@@ -1,4 +1,7 @@
 import { post, get, put } from '@/utils/request'
+import i18n from '@/i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 // 用户登录接口
 export interface LoginRequest {
@@ -122,7 +125,7 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '登录失败'
+      message: error.message || t('error.auth.loginFailed')
     }
   }
 }
@@ -137,7 +140,7 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '注册失败'
+      message: error.message || t('error.auth.registerFailed')
     }
   }
 }
@@ -152,7 +155,7 @@ export async function getCurrentUser(): Promise<{ success: boolean; data?: { use
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '获取用户信息失败'
+      message: error.message || t('error.auth.getUserFailed')
     }
   }
 }
@@ -167,7 +170,7 @@ export async function getCurrentTenant(): Promise<{ success: boolean; data?: Ten
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '获取租户信息失败'
+      message: error.message || t('error.auth.getTenantFailed')
     }
   }
 }
@@ -193,12 +196,12 @@ export async function refreshToken(refreshToken: string): Promise<{ success: boo
     // 其他情况直接返回原始消息
     return {
       success: false,
-      message: response?.message || '刷新Token失败'
+      message: response?.message || t('error.auth.refreshTokenFailed')
     }
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '刷新Token失败'
+      message: error.message || t('error.auth.refreshTokenFailed')
     }
   }
 }
@@ -215,7 +218,7 @@ export async function logout(): Promise<{ success: boolean; message?: string }> 
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '登出失败'
+      message: error.message || t('error.auth.logoutFailed')
     }
   }
 }
@@ -231,7 +234,7 @@ export async function validateToken(): Promise<{ success: boolean; valid?: boole
     return {
       success: false,
       valid: false,
-      message: error.message || 'Token验证失败'
+      message: error.message || t('error.auth.validateTokenFailed')
     }
   }
 }

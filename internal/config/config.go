@@ -29,8 +29,12 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 }
 
+// DocReaderConfig configures the document parser client (gRPC or HTTP).
 type DocReaderConfig struct {
+	// Addr: for gRPC it is the server address (e.g. "localhost:50051"); for HTTP it is the base URL (e.g. "http://localhost:8080").
 	Addr string `yaml:"addr" json:"addr"`
+	// Transport: "grpc" (default) or "http"
+	Transport string `yaml:"transport" json:"transport"`
 }
 
 type VectorDatabaseConfig struct {

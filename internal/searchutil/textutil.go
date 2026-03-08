@@ -4,6 +4,9 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"strings"
+	"unicode"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // BuildContentSignature creates a normalized MD5 signature for content to detect duplicates.
@@ -20,18 +23,53 @@ func BuildContentSignature(content string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// TokenizeSimple tokenizes text into a set of words (simple whitespace-based).
-// Returns a map where keys are lowercase tokens with length > 1.
+// containsChinese checks whether text contains any CJK unified ideographs.
+func containsChinese(text string) bool {
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// TokenizeSimple tokenizes text into a set of unique tokens.
+// For text containing Chinese characters, it uses jieba segmentation for accurate word boundaries.
+// For pure non-Chinese text, it falls back to whitespace-based splitting.
+// Returns a map where keys are lowercase tokens with rune length > 1.
 func TokenizeSimple(text string) map[string]struct{} {
-	text = strings.ToLower(text)
-	fields := strings.Fields(text)
-	set := make(map[string]struct{}, len(fields))
-	for _, f := range fields {
-		if len(f) > 1 {
-			set[f] = struct{}{}
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return nil
+	}
+
+	var words []string
+	if containsChinese(text) {
+		// Use jieba for Chinese text segmentation (search mode for finer granularity)
+		words = types.Jieba.CutForSearch(text, true)
+	} else {
+		words = strings.Fields(text)
+	}
+
+	set := make(map[string]struct{}, len(words))
+	for _, w := range words {
+		w = strings.TrimSpace(w)
+		// Filter out single-rune tokens and pure punctuation/whitespace
+		if len([]rune(w)) > 1 && !isAllPunct(w) {
+			set[w] = struct{}{}
 		}
 	}
 	return set
+}
+
+// isAllPunct checks if a string consists entirely of punctuation or whitespace.
+func isAllPunct(s string) bool {
+	for _, r := range s {
+		if !unicode.IsPunct(r) && !unicode.IsSpace(r) && !unicode.IsSymbol(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // Jaccard calculates Jaccard similarity between two token sets.

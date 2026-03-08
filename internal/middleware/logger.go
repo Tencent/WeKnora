@@ -135,6 +135,10 @@ func Logger() gin.HandlerFunc {
 		start := time.Now()
 		path := c.Request.URL.Path
 		raw := c.Request.URL.RawQuery
+		if strings.HasPrefix(path, "/assets/") {
+			c.Next()
+			return
+		}
 
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string

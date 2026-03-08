@@ -171,13 +171,13 @@ const formatDate = (dateStr: string): string => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #4b5563;
+  color: var(--td-text-color-secondary);
   /* Align with title start (after index column) */
   padding-left: 34px;
 }
 
 .group-intro {
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
 }
 
 .group-source {
@@ -185,15 +185,15 @@ const formatDate = (dateStr: string): string => {
   align-items: center;
   padding: 1px 6px;
   border-radius: 4px;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  color: #111827;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-primary);
   font-weight: 600;
 }
 
 .group-count {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
 }
 
 .results-list {
@@ -203,7 +203,7 @@ const formatDate = (dateStr: string): string => {
 }
 
 .result-item {
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border: none;
   border-radius: 0;
   transition: none;
@@ -224,7 +224,7 @@ const formatDate = (dateStr: string): string => {
 .result-index {
   font-size: 11px;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   flex-shrink: 0;
   min-width: 24px;
   text-align: right;
@@ -236,11 +236,11 @@ const formatDate = (dateStr: string): string => {
   gap: 6px;
   flex: 1;
   text-decoration: none;
-  color: #374151;
+  color: var(--td-text-color-primary);
   transition: color 0.15s ease;
-  
+
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
     
     .result-title {
       text-decoration: underline;
@@ -275,7 +275,7 @@ const formatDate = (dateStr: string): string => {
     font-size: 12px;
     font-weight: 500;
     line-height: 1.4;
-    color: #374151;
+    color: var(--td-text-color-primary);
   }
 }
 
@@ -285,9 +285,9 @@ const formatDate = (dateStr: string): string => {
   gap: 8px;
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--td-bg-color-secondarycontainer);
   font-size: 10px;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   
   .meta-item {
     display: flex;
@@ -303,12 +303,12 @@ const formatDate = (dateStr: string): string => {
 .empty-state {
   padding: 16px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-style: italic;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 6px;
-  border: 1px dashed #e5e7eb;
+  border: 1px dashed var(--td-component-stroke);
 }
 </style>
 

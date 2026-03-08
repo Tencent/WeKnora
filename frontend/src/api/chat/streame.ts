@@ -1,6 +1,7 @@
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { ref, type Ref, onUnmounted, nextTick } from 'vue'
 import { generateRandomString } from '@/utils/index';
+import i18n from '@/i18n';
 
 
 
@@ -41,7 +42,7 @@ export function useStream() {
     // 获取JWT Token
     const token = localStorage.getItem('weknora_token');
     if (!token) {
-      error.value = "未找到登录令牌，请重新登录";
+      error.value = i18n.global.t('error.tokenNotFound');
       stopStream();
       return;
     }
@@ -143,7 +144,7 @@ export function useStream() {
         },
 
         onerror: (err) => {
-          throw new Error(`流式连接失败: ${err}`);
+          throw new Error(`${i18n.global.t('error.streamFailed')}: ${err}`);
         },
 
         onclose: () => {

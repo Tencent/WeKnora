@@ -232,12 +232,13 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 			} else if refMap, ok := ref.(map[string]interface{}); ok {
 				// Parse from map if needed
 				searchResult := &types.SearchResult{
-					ID:             getString(refMap, "id"),
-					Content:        getString(refMap, "content"),
-					Score:          getFloat64(refMap, "score"),
-					KnowledgeID:    getString(refMap, "knowledge_id"),
-					KnowledgeTitle: getString(refMap, "knowledge_title"),
-					ChunkIndex:     int(getFloat64(refMap, "chunk_index")),
+					ID:              getString(refMap, "id"),
+					Content:         getString(refMap, "content"),
+					Score:           getFloat64(refMap, "score"),
+					KnowledgeID:     getString(refMap, "knowledge_id"),
+					KnowledgeTitle:  getString(refMap, "knowledge_title"),
+					ChunkIndex:      int(getFloat64(refMap, "chunk_index")),
+					KnowledgeBaseID: getString(refMap, "knowledge_base_id"),
 				}
 
 				if meta, ok := refMap["metadata"].(map[string]interface{}); ok {
@@ -290,6 +291,9 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 
 	// Accumulate final answer locally for assistant message (database)
 	h.finalAnswer += data.Content
+	if data.IsFallback {
+		h.assistantMessage.IsFallback = true
+	}
 
 	// Calculate duration if done
 	var metadata map[string]interface{}
@@ -306,6 +310,9 @@ func (h *AgentStreamHandler) handleFinalAnswer(ctx context.Context, evt event.Ev
 		metadata = map[string]interface{}{
 			"event_id": evt.ID,
 		}
+	}
+	if data.IsFallback {
+		metadata["is_fallback"] = true
 	}
 	h.mu.Unlock()
 

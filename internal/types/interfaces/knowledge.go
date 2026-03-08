@@ -23,11 +23,15 @@ type KnowledgeService interface {
 		tagID string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
+	// When fileName or fileType is provided (or the URL path has a known file extension),
+	// the URL is treated as a direct file download instead of a web page crawl.
 	// tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
 	CreateKnowledgeFromURL(
 		ctx context.Context,
 		kbID string,
 		url string,
+		fileName string,
+		fileType string,
 		enableMultimodel *bool,
 		title string,
 		tagID string,

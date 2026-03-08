@@ -213,6 +213,11 @@ func (s *userService) GetUserByUsername(ctx context.Context, username string) (*
 	return s.userRepo.GetUserByUsername(ctx, username)
 }
 
+// GetUserByTenantID gets the first user (owner) of a tenant
+func (s *userService) GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error) {
+	return s.userRepo.GetUserByTenantID(ctx, tenantID)
+}
+
 // UpdateUser updates user information
 func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	user.UpdatedAt = time.Now()

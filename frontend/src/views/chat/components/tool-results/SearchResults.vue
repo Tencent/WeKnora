@@ -98,20 +98,20 @@ const hasOtherParams = computed(() => {
 
 const getRelevanceClass = (level: RelevanceLevel): string => {
   const classMap: Record<RelevanceLevel, string> = {
-    '高相关': 'high',
-    '中相关': 'medium',
-    '低相关': 'low',
-    '弱相关': 'weak',
+    'High Relevance': 'high',
+    'Medium Relevance': 'medium',
+    'Low Relevance': 'low',
+    'Weak Relevance': 'weak',
   };
   return classMap[level] || 'weak';
 };
 
 const getRelevanceLabel = (level: RelevanceLevel): string => {
   const labelMap: Record<RelevanceLevel, string> = {
-    '高相关': t('chat.relevanceHigh'),
-    '中相关': t('chat.relevanceMedium'),
-    '低相关': t('chat.relevanceLow'),
-    '弱相关': t('chat.relevanceWeak'),
+    'High Relevance': t('chat.relevanceHigh'),
+    'Medium Relevance': t('chat.relevanceMedium'),
+    'Low Relevance': t('chat.relevanceLow'),
+    'Weak Relevance': t('chat.relevanceWeak'),
   };
   return labelMap[level] || level;
 };
@@ -151,7 +151,7 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
   transition: color 0.15s ease;
   
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -167,7 +167,7 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 
 .result-index {
   font-size: 11px;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -181,7 +181,7 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 
 .knowledge-title {
   font-size: 12px;
-  color: #374151;
+  color: var(--td-text-color-primary);
   flex: 1;
   font-weight: 500;
   overflow: hidden;
@@ -215,12 +215,12 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 
 .full-content {
   font-size: 12px;
-  color: #374151;
+  color: var(--td-text-color-primary);
   line-height: 1.6;
   padding: 10px;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border-radius: 4px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   white-space: pre-wrap;
   word-break: break-word;
   margin-bottom: 6px;
@@ -239,7 +239,7 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 code {
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
   font-size: 10px;
-  background: #f3f4f6;
+  background: var(--td-bg-color-secondarycontainer);
   padding: 1px 4px;
   border-radius: 2px;
 }

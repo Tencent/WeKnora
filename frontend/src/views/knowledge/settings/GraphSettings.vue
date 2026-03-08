@@ -604,13 +604,13 @@ onMounted(async () => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -627,7 +627,7 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -652,14 +652,14 @@ onMounted(async () => {
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -698,10 +698,10 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: #666666;
+  color: var(--td-text-color-secondary);
 
   .tip-icon {
-    color: #0052d9;
+    color: var(--td-brand-color);
   }
 }
 
@@ -713,8 +713,8 @@ onMounted(async () => {
 }
 
 .node-item {
-  background: #f8fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   padding: 16px;
 }
@@ -727,7 +727,7 @@ onMounted(async () => {
 
   .node-icon {
     font-size: 20px;
-    color: #0052d9;
+    color: var(--td-brand-color);
   }
 
   .node-name-input {
@@ -768,8 +768,8 @@ onMounted(async () => {
   align-items: center;
   gap: 12px;
   padding: 12px;
-  background: #f8fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
 
   .relation-select {
@@ -778,7 +778,7 @@ onMounted(async () => {
   }
 
   .relation-arrow {
-    color: #666666;
+    color: var(--td-text-color-secondary);
     font-size: 16px;
   }
 }

@@ -25,7 +25,7 @@ type knowledgeTagService struct {
 	chunkRepo      interfaces.ChunkRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	modelService   interfaces.ModelService
-	task           *asynq.Client
+	task           interfaces.TaskEnqueuer
 	kbShareService interfaces.KBShareService
 }
 
@@ -37,7 +37,7 @@ func NewKnowledgeTagService(
 	chunkRepo interfaces.ChunkRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	modelService interfaces.ModelService,
-	task *asynq.Client,
+	task interfaces.TaskEnqueuer,
 	kbShareService interfaces.KBShareService,
 ) (interfaces.KnowledgeTagService, error) {
 	return &knowledgeTagService{
@@ -73,7 +73,7 @@ func (s *knowledgeTagService) ListTags(
 	}
 
 	// Check access permission
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	if kb.TenantID != tenantID {
 		// Get user ID from context
 		userIDVal := ctx.Value(types.UserIDContextKey)
@@ -192,7 +192,7 @@ func (s *knowledgeTagService) UpdateTag(
 	if id == "" {
 		return nil, werrors.NewBadRequestError("标签ID不能为空")
 	}
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return nil, err
@@ -225,7 +225,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	if id == "" {
 		return werrors.NewBadRequestError("标签ID不能为空")
 	}
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	}
 
 	// Get tenant info for effective engines
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
 	// Helper function to delete chunks and enqueue index deletion task
 	deleteChunksAndEnqueueIndexDelete := func() error {

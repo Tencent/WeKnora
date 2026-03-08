@@ -1063,6 +1063,21 @@ func (e *elasticsearchRepository) processSingleHit(ctx context.Context,
 		sourceType = int(st)
 	}
 
+	// Extract is_enabled (default true for backward compatibility)
+	isEnabled := true
+	if v, ok := sourceObj["is_enabled"].(bool); ok {
+		isEnabled = v
+	}
+
+	// Extract is_recommended
+	isRecommended := false
+	if v, ok := sourceObj["is_recommended"].(bool); ok {
+		isRecommended = v
+	}
+
+	// Extract tag_id
+	tagID, _ := sourceObj["tag_id"].(string)
+
 	// Handle SourceID transformation for generated questions
 	// Generated questions have SourceID format: {chunkID}-{questionID}
 	// Regular chunks have SourceID == ChunkID
@@ -1100,6 +1115,9 @@ func (e *elasticsearchRepository) processSingleHit(ctx context.Context,
 		KnowledgeBaseID: targetKnowledgeBaseID,
 		Content:         content,
 		SourceType:      typesLocal.SourceType(sourceType),
+		IsEnabled:       isEnabled,
+		IsRecommended:   isRecommended,
+		TagID:           tagID,
 	}
 
 	return indexInfo, embedding, nil

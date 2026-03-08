@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -77,10 +78,38 @@ func (r *knowledgeBaseRepository) ListKnowledgeBasesByTenantID(
 ) ([]*types.KnowledgeBase, error) {
 	var kbs []*types.KnowledgeBase
 	if err := r.db.WithContext(ctx).Where("tenant_id = ? AND is_temporary = ?", tenantID, false).
-		Order("created_at DESC").Find(&kbs).Error; err != nil {
+		Order("is_pinned DESC, pinned_at DESC, created_at DESC").Find(&kbs).Error; err != nil {
 		return nil, err
 	}
 	return kbs, nil
+}
+
+// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+func (r *knowledgeBaseRepository) TogglePinKnowledgeBase(ctx context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
+	var kb types.KnowledgeBase
+	if err := r.db.WithContext(ctx).Where("id = ? AND tenant_id = ?", id, tenantID).First(&kb).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrKnowledgeBaseNotFound
+		}
+		return nil, err
+	}
+
+	if kb.IsPinned {
+		kb.IsPinned = false
+		kb.PinnedAt = nil
+	} else {
+		kb.IsPinned = true
+		now := time.Now()
+		kb.PinnedAt = &now
+	}
+
+	if err := r.db.WithContext(ctx).Model(&kb).Updates(map[string]interface{}{
+		"is_pinned": kb.IsPinned,
+		"pinned_at": kb.PinnedAt,
+	}).Error; err != nil {
+		return nil, err
+	}
+	return &kb, nil
 }
 
 // UpdateKnowledgeBase updates a knowledge base

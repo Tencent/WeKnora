@@ -518,7 +518,7 @@ func (e *AgentEngine) executeLoop(
 			common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 				"error": err.Error(),
 			})
-			state.FinalAnswer = "抱歉，我无法生成完整的答案。"
+			state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
 		}
 		state.IsComplete = true
 	}
@@ -692,13 +692,13 @@ func (e *AgentEngine) streamReflectionToEventBus(
 	sessionID string,
 ) (string, error) {
 	// Simplified reflection without BuildReflectionPrompt
-	reflectionPrompt := fmt.Sprintf(`请评估刚才调用工具 %s 的结果，并决定下一步行动。
+	reflectionPrompt := fmt.Sprintf(`Evaluate the result of calling tool %s and decide the next action.
 
-工具返回: %s
+Tool returned: %s
 
-思考:
-1. 结果是否满足需求？
-2. 下一步应该做什么？`, toolName, result)
+Think:
+1. Does the result satisfy the requirement?
+2. What should be done next?`, toolName, result)
 
 	messages := []chat.Message{
 		{Role: "user", Content: reflectionPrompt},
@@ -853,7 +853,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			toolResultCount++
 			messages = append(messages, chat.Message{
 				Role:    "user",
-				Content: fmt.Sprintf("工具 %s 返回: %s", toolCall.Name, toolCall.Result.Output),
+				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, toolCall.Result.Output),
 			})
 			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
 				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
@@ -864,17 +864,18 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		len(messages), toolResultCount)
 
 	// Add final answer prompt
-	finalPrompt := fmt.Sprintf(`基于上述工具调用结果，请为用户问题生成完整答案。
+	finalPrompt := fmt.Sprintf(`Based on the above tool call results, generate a complete answer for the user's question.
 
-用户问题: %s
+User question: %s
 
-要求:
-1. 基于实际检索到的内容回答
-2. 清晰标注信息来源 (chunk_id, 文档名)
-3. 结构化组织答案
-4. 如信息不足，诚实说明
+Requirements:
+1. Answer based on the actually retrieved content
+2. Clearly cite information sources (chunk_id, document name)
+3. Organize the answer in a structured format
+4. If information is insufficient, honestly state so
+5. IMPORTANT: Respond in the same language as the user's question
 
-现在请生成最终答案:`, query)
+Now generate the final answer:`, query)
 
 	messages = append(messages, chat.Message{
 		Role:    "user",

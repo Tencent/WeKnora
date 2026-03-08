@@ -166,9 +166,9 @@ watch(showTooltip, (newVal) => {
   max-width: 320px;
   min-width: 100px;
   padding: 10px 14px;
-  background: #FFFFFF;
-  color: #000000e6;
-  border: 1px solid #e7ebf0;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   box-shadow: 0 0 8px 0 rgba(0, 0, 0, 0.08);
   font-family: "PingFang SC";
@@ -190,7 +190,7 @@ watch(showTooltip, (newVal) => {
     bottom: -10px;
     left: 50%;
     transform: translateX(-50%);
-    border-top-color: #e7ebf0;
+    border-top-color: var(--td-component-stroke);
   }
 
   &.placement-top::after {
@@ -202,14 +202,14 @@ watch(showTooltip, (newVal) => {
     width: 0;
     height: 0;
     border: 5px solid transparent;
-    border-top-color: #FFFFFF;
+    border-top-color: var(--td-bg-color-container);
   }
 
   &.placement-bottom::before {
     top: -10px;
     left: 50%;
     transform: translateX(-50%);
-    border-bottom-color: #e7ebf0;
+    border-bottom-color: var(--td-component-stroke);
   }
 
   &.placement-bottom::after {
@@ -221,14 +221,14 @@ watch(showTooltip, (newVal) => {
     width: 0;
     height: 0;
     border: 5px solid transparent;
-    border-bottom-color: #FFFFFF;
+    border-bottom-color: var(--td-bg-color-container);
   }
 
   &.placement-left::before {
     right: -10px;
     top: 50%;
     transform: translateY(-50%);
-    border-left-color: #e7ebf0;
+    border-left-color: var(--td-component-stroke);
   }
 
   &.placement-left::after {
@@ -240,14 +240,14 @@ watch(showTooltip, (newVal) => {
     width: 0;
     height: 0;
     border: 5px solid transparent;
-    border-left-color: #FFFFFF;
+    border-left-color: var(--td-bg-color-container);
   }
 
   &.placement-right::before {
     left: -10px;
     top: 50%;
     transform: translateY(-50%);
-    border-right-color: #e7ebf0;
+    border-right-color: var(--td-component-stroke);
   }
 
   &.placement-right::after {
@@ -259,7 +259,7 @@ watch(showTooltip, (newVal) => {
     width: 0;
     height: 0;
     border: 5px solid transparent;
-    border-right-color: #FFFFFF;
+    border-right-color: var(--td-bg-color-container);
   }
 
   // 所有类型使用统一的常规边框颜色
@@ -272,7 +272,7 @@ watch(showTooltip, (newVal) => {
 }
 
 .tooltip-content {
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-family: "PingFang SC";
   font-size: 12px;
   font-weight: 400;

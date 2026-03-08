@@ -15,10 +15,13 @@
     "@microsoft/fetch-event-source": "^2.0.1",
     "@types/dompurify": "^3.0.5",
     "@types/papaparse": "^5.5.0",
+    "@vue-office/pptx": "^1.0.1",
     "axios": "^1.8.4",
+    "docx-preview": "^0.3.7",
     "dompurify": "^3.2.6",
     "highlight.js": "^11.11.1",
     "marked": "^5.1.2",
+    "mermaid": "^11.4.1",
     "pagefind": "^1.1.1",
     "papaparse": "^5.5.3",
     "pinia": "^3.0.1",
@@ -26,6 +29,7 @@
     "tdesign-icons-vue-next": "^0.4.1",
     "tdesign-vue-next": "^1.17.2",
     "vue": "^3.5.13",
+    "vue-demi": "^0.14.6",
     "vue-i18n": "^11.1.12",
     "vue-router": "^4.5.0",
     "webpack": "^5.94.0",
@@ -40,17 +44,19 @@
     "@vue/tsconfig": "^0.7.0",
     "less": "^4.3.0",
     "less-loader": "^12.2.0",
-    "npm-run-all2": "^7.0.2",
+    "npm-run-all2": "^8.0.4",
     "typescript": "~5.8.0",
     "vite": "^7.2.2",
-    "vue-tsc": "^2.2.8"
+    "vue-tsc": "^3.2.5"
   },
   "overrides": {
     "lightningcss": "none",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "serialize-javascript": "^7.0.3"
   },
   "resolutions": {
     "lightningcss": "none",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "serialize-javascript": "^7.0.3"
   }
 }

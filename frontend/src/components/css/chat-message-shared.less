@@ -1,0 +1,166 @@
+.answer-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  min-height: 32px;
+
+  :deep(.t-button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: auto;
+    width: auto;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 6px;
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-secondary);
+    transition: all 0.2s ease;
+
+    .t-button__content {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+
+    .t-button__text {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+    }
+
+    .t-icon {
+      display: inline-flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      color: var(--td-text-color-secondary);
+    }
+
+    .t-icon svg {
+      display: block !important;
+      width: 16px;
+      height: 16px;
+    }
+
+    .t-button__text > :not(.t-icon) {
+      display: none;
+    }
+
+    &:hover:not(:disabled) {
+      background: rgba(7, 192, 95, 0.08);
+      border-color: rgba(7, 192, 95, 0.3);
+      color: var(--td-brand-color);
+
+      .t-icon {
+        color: var(--td-brand-color);
+      }
+    }
+
+    &:active:not(:disabled) {
+      background: rgba(7, 192, 95, 0.12);
+      border-color: rgba(7, 192, 95, 0.4);
+      transform: translateY(0.5px);
+    }
+  }
+}
+
+:deep(.streaming-image-loading) {
+  display: inline-block;
+  position: relative;
+  width: clamp(150px, 30vw, 260px);
+  max-width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  border: 1px solid rgba(175, 190, 210, 0.55);
+  background: linear-gradient(
+    145deg,
+    rgba(245, 249, 255, 0.72) 0%,
+    rgba(228, 236, 248, 0.62) 45%,
+    rgba(214, 225, 242, 0.58) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(168, 182, 206, 0.28),
+    0 8px 20px rgba(100, 121, 152, 0.12);
+  backdrop-filter: blur(3px) saturate(115%);
+  -webkit-backdrop-filter: blur(3px) saturate(115%);
+  overflow: hidden;
+  vertical-align: middle;
+  animation: streamingImageBreath 2.2s ease-in-out infinite;
+}
+
+:deep(.streaming-image-loading__skeleton) {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    rgba(234, 239, 246, 0.95) 8%,
+    rgba(248, 250, 252, 0.98) 18%,
+    rgba(234, 239, 246, 0.95) 33%
+  );
+  background-size: 220% 100%;
+  animation: streamingImageShimmer 1.4s linear infinite;
+}
+
+:deep(.streaming-image-loading)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+:deep(.streaming-image-loading)::after {
+  content: '';
+  position: absolute;
+  left: -35%;
+  top: -55%;
+  width: 62%;
+  height: 210%;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.38) 46%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: rotate(16deg);
+  animation: streamingImageMirror 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes streamingImageShimmer {
+  to {
+    background-position-x: -220%;
+  }
+}
+
+@keyframes streamingImageMirror {
+  0%, 100% {
+    left: -38%;
+    opacity: 0.35;
+  }
+  50% {
+    left: 110%;
+    opacity: 0.75;
+  }
+}
+
+@keyframes streamingImageBreath {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: saturate(1);
+  }
+  50% {
+    transform: translateY(-0.5px) scale(1.01);
+    filter: saturate(1.06);
+  }
+}

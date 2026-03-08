@@ -1,4 +1,5 @@
 import { MessagePlugin } from "tdesign-vue-next";
+import i18n from '@/i18n';
 
 // 声明全局运行时配置类型
 declare global {
@@ -39,29 +40,29 @@ export function formatStringDate(date: any) {
     year + "-" + month + "-" + day + " " + hour + ":" + minute + ":" + second
   );
 }
-export function kbFileTypeVerification(file: any, silent = false) {
-  let validTypes = ["pdf", "txt", "md", "docx", "doc", "jpg", "jpeg", "png", "csv", "xlsx", "xls"];
-  let type = file.name.substring(file.name.lastIndexOf(".") + 1);
-  if (!validTypes.includes(type)) {
+const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "jpg", "jpeg", "png", "csv", "xlsx", "xls"]);
+
+/**
+ * Returns true when the file should be **rejected**.
+ * @param validTypes - override the default extension whitelist with a dynamic set (e.g. from engine registry).
+ */
+export function kbFileTypeVerification(file: any, silent = false, validTypes?: Set<string> | string[]) {
+  const allowed = validTypes
+    ? (validTypes instanceof Set ? validTypes : new Set(validTypes))
+    : DEFAULT_VALID_TYPES;
+
+  const type = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
+  if (!allowed.has(type)) {
     if (!silent) {
-      MessagePlugin.error("文件类型错误！");
+      MessagePlugin.error(i18n.global.t('error.unsupportedFileType'));
     }
     return true;
   }
-  if (
-    (type == "pdf" || type == "docx" || type == "doc") &&
-    file.size > MAX_FILE_SIZE_BYTES
-  ) {
+  if (file.size > MAX_FILE_SIZE_BYTES) {
     if (!silent) {
-      MessagePlugin.error(`pdf/doc文件不能超过${MAX_FILE_SIZE_MB}M！`);
+      MessagePlugin.error(i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }));
     }
     return true;
   }
-  if ((type == "txt" || type == "md") && file.size > MAX_FILE_SIZE_BYTES) {
-    if (!silent) {
-      MessagePlugin.error(`txt/md文件不能超过${MAX_FILE_SIZE_MB}M！`);
-    }
-    return true;
-  }
-  return false
+  return false;
 }

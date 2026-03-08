@@ -1,65 +1,67 @@
-# 上下文模板
+# Context templates
 templates:
   - id: "default_context"
-    name: "标准模板"
-    description: "标准的上下文格式化模板"
+    name: "Standard Template"
+    description: "Standard context formatting template"
     has_knowledge_base: true
     content: |
-      请根据以下参考资料回答用户问题。
+      Answer the user's question based on the following reference materials. IMPORTANT: Always respond in the same language as the user's question.
 
-      参考资料：
+      Reference materials:
       {{contexts}}
 
-      用户问题：{{query}}
+      User question: {{query}}
 
-      请基于上述参考资料进行回答。如果参考资料不足以回答问题，请明确告知。
+      Please answer based on the above reference materials. If the materials are insufficient to answer the question, clearly state so.
 
   - id: "detailed_context"
-    name: "详细模板"
-    description: "包含详细说明的上下文模板"
+    name: "Detailed Template"
+    description: "Context template with detailed instructions"
     has_knowledge_base: true
     content: |
-      ## 任务说明
-      请根据提供的参考资料，准确、全面地回答用户问题。
+      ## Task Description
+      Answer the user's question accurately and comprehensively based on the provided reference materials.
 
-      ## 参考资料
+      ## Reference Materials
       {{contexts}}
 
-      ## 用户问题
+      ## User Question
       {{query}}
 
-      ## 回答要求
-      1. 仅基于参考资料回答，不要编造信息
-      2. 如果多个资料有冲突，请综合分析
-      3. 适当引用来源，增强可信度
-      4. 如果资料不足，请明确说明
+      ## Response Requirements
+      1. Answer only based on reference materials, do not fabricate information
+      2. If multiple materials conflict, provide a comprehensive analysis
+      3. Cite sources appropriately to enhance credibility
+      4. If materials are insufficient, clearly state so
+      5. IMPORTANT: Always respond in the same language as the user's question
 
-      当前时间：{{current_time}} {{current_week}}
+      Current time: {{current_time}} {{current_week}}
 
   - id: "simple_context"
-    name: "简洁模板"
-    description: "简洁的上下文模板"
+    name: "Simple Template"
+    description: "Simple context template"
     has_knowledge_base: true
     content: |
-      参考资料：
+      Reference materials:
       {{contexts}}
 
-      问题：{{query}}
+      Question: {{query}}
 
-      请回答上述问题。
+      Please answer the above question. IMPORTANT: Respond in the same language as the question.
 
   - id: "qa_context"
-    name: "问答模板"
-    description: "问答场景专用模板"
+    name: "Q&A Template"
+    description: "Template specialized for Q&A scenarios"
     has_knowledge_base: true
     content: |
-      你需要回答一个问题。以下是可能相关的资料：
+      You need to answer a question. Below are potentially relevant materials:
 
       {{contexts}}
 
-      用户的问题是：{{query}}
+      The user's question is: {{query}}
 
-      请基于以上资料回答问题。回答要求：
-      - 直接回答问题，不要重复问题
-      - 如果资料中没有相关信息，请说明
-      - 保持回答简洁准确
+      Please answer the question based on the above materials. Requirements:
+      - Answer the question directly, do not repeat the question
+      - If the materials do not contain relevant information, state so
+      - Keep the answer concise and accurate
+      - IMPORTANT: Always respond in the same language as the user's question

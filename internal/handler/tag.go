@@ -94,7 +94,7 @@ func (h *TagHandler) resolveTagIDWithCtx(c *gin.Context, ctx context.Context) (s
 	tagIDParam := secutils.SanitizeForLog(c.Param("tag_id"))
 
 	if seqID, err := strconv.ParseInt(tagIDParam, 10, 64); err == nil {
-		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+		tenantID := types.MustTenantIDFromContext(ctx)
 		tag, err := h.tagRepo.GetBySeqID(ctx, tenantID, seqID)
 		if err != nil {
 			return "", errors.NewNotFoundError("标签不存在")

@@ -218,9 +218,9 @@ func formatConversationHistory(historyList []*types.History) string {
 	var builder strings.Builder
 	for _, h := range historyList {
 		builder.WriteString("------BEGIN------\n")
-		builder.WriteString("用户的问题是：")
+		builder.WriteString("User question: ")
 		builder.WriteString(h.Query)
-		builder.WriteString("\n助手的回答是：")
+		builder.WriteString("\nAssistant answer: ")
 		builder.WriteString(h.Answer)
 		builder.WriteString("\n------END------\n")
 	}

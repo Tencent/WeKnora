@@ -32,7 +32,7 @@ type knowledgeBaseService struct {
 	tenantRepo     interfaces.TenantRepository
 	fileSvc        interfaces.FileService
 	graphEngine    interfaces.RetrieveGraphRepository
-	asynqClient    *asynq.Client
+	asynqClient    interfaces.TaskEnqueuer
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -46,7 +46,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	tenantRepo interfaces.TenantRepository,
 	fileSvc interfaces.FileService,
 	graphEngine interfaces.RetrieveGraphRepository,
-	asynqClient *asynq.Client,
+	asynqClient interfaces.TaskEnqueuer,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:           repo,
@@ -82,7 +82,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.ID = uuid.New().String()
 	}
 	kb.CreatedAt = time.Now()
-	kb.TenantID = ctx.Value(types.TenantIDContextKey).(uint64)
+	kb.TenantID = types.MustTenantIDFromContext(ctx)
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
 
@@ -158,7 +158,7 @@ func (s *knowledgeBaseService) GetKnowledgeBasesByIDsOnly(ctx context.Context, i
 
 // ListKnowledgeBases returns all knowledge bases for a tenant
 func (s *knowledgeBaseService) ListKnowledgeBases(ctx context.Context) ([]*types.KnowledgeBase, error) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	kbs, err := s.repo.ListKnowledgeBasesByTenantID(ctx, tenantID)
 	if err != nil {
@@ -312,6 +312,23 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	return kb, nil
 }
 
+// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+func (s *knowledgeBaseService) TogglePinKnowledgeBase(ctx context.Context, id string) (*types.KnowledgeBase, error) {
+	if id == "" {
+		return nil, errors.New("knowledge base ID cannot be empty")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	kb, err := s.repo.TogglePinKnowledgeBase(ctx, id, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_id": id,
+		})
+		return nil, err
+	}
+	logger.Infof(ctx, "Knowledge base pin toggled, ID: %s, is_pinned: %v", id, kb.IsPinned)
+	return kb, nil
+}
+
 // DeleteKnowledgeBase deletes a knowledge base by its ID
 // This method marks the knowledge base as deleted and enqueues an async task
 // to handle the heavy cleanup operations (embeddings, chunks, files, graph data)
@@ -324,8 +341,8 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	logger.Infof(ctx, "Deleting knowledge base, ID: %s", id)
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 
 	// Step 1: Delete the knowledge base record first (mark as deleted)
 	logger.Infof(ctx, "Deleting knowledge base from database")
@@ -543,7 +560,7 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	srcKB string, dstKB string,
 ) (*types.KnowledgeBase, *types.KnowledgeBase, error) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	// Load source KB with tenant scope to prevent cross-tenant cloning
 	sourceKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, srcKB, tenantID)
 	if err != nil {
@@ -575,6 +592,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			EmbeddingModelID:      sourceKB.EmbeddingModelID,
 			SummaryModelID:        sourceKB.SummaryModelID,
 			VLMConfig:             sourceKB.VLMConfig,
+			StorageProviderConfig: sourceKB.StorageProviderConfig,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
 		}
@@ -593,8 +611,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 ) ([]*types.SearchResult, error) {
 	logger.Infof(ctx, "Hybrid search parameters, knowledge base ID: %s, query text: %s", id, params.QueryText)
 
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	currentTenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
+	currentTenantID := types.MustTenantIDFromContext(ctx)
 
 	// Create a composite retrieval engine with tenant's configured retrievers
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
@@ -615,7 +633,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	matchCount := params.MatchCount * 3
+	// Use 5x over-retrieval to ensure sufficient candidates for RRF fusion and reranking.
+	// Minimum 50 to handle large knowledge bases with diverse content.
+	matchCount := max(params.MatchCount*5, 50)
 
 	// Add vector retrieval params if supported
 	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch {
@@ -789,14 +809,16 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			}
 		}
 
-		// Compute RRF scores
+		// Compute weighted RRF scores (vector retrieval weighted higher for semantic relevance)
+		const vectorWeight = 0.7
+		const keywordWeight = 0.3
 		for chunkID := range chunkInfoMap {
 			rrfScore := 0.0
 			if rank, ok := vectorRanks[chunkID]; ok {
-				rrfScore += 1.0 / float64(rrfK+rank)
+				rrfScore += vectorWeight / float64(rrfK+rank)
 			}
 			if rank, ok := keywordRanks[chunkID]; ok {
-				rrfScore += 1.0 / float64(rrfK+rank)
+				rrfScore += keywordWeight / float64(rrfK+rank)
 			}
 			rrfScores[chunkID] = rrfScore
 		}
@@ -857,7 +879,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks)
+	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
 }
 
 // iterativeRetrieveWithDeduplication performs iterative retrieval until enough unique chunks are found
@@ -880,7 +902,7 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 	filteredOutChunks := make(map[string]struct{})
 
 	queryTextLower := strings.ToLower(strings.TrimSpace(queryText))
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	for i := 0; i < maxIterations; i++ {
 		// Update TopK in retrieve params
@@ -1017,7 +1039,7 @@ func (s *knowledgeBaseService) filterByNegativeQuestions(ctx context.Context,
 		return chunks
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Collect chunk IDs
 	chunkIDs := make([]string, 0, len(chunks))
@@ -1099,12 +1121,13 @@ func (s *knowledgeBaseService) matchesNegativeQuestions(queryTextLower string, n
 // processSearchResults handles the processing of search results, optimizing database queries
 func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	chunks []*types.IndexWithScore,
+	skipEnrichment bool,
 ) ([]*types.SearchResult, error) {
 	if len(chunks) == 0 {
 		return nil, nil
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Prepare data structures for efficient processing
 	var knowledgeIDs []string
@@ -1156,34 +1179,36 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 		chunkMap[chunk.ID] = chunk
 		processedChunkIDs[chunk.ID] = true
 
-		// Collect parent chunks
-		if chunk.ParentChunkID != "" && !processedChunkIDs[chunk.ParentChunkID] {
-			additionalChunkIDs = append(additionalChunkIDs, chunk.ParentChunkID)
-			processedChunkIDs[chunk.ParentChunkID] = true
+		if !skipEnrichment {
+			// Collect parent chunks
+			if chunk.ParentChunkID != "" && !processedChunkIDs[chunk.ParentChunkID] {
+				additionalChunkIDs = append(additionalChunkIDs, chunk.ParentChunkID)
+				processedChunkIDs[chunk.ParentChunkID] = true
 
-			// Pass score to parent
-			chunkScores[chunk.ParentChunkID] = chunkScores[chunk.ID]
-			chunkMatchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
-		}
-
-		// Collect related chunks
-		relationChunkIDs := s.collectRelatedChunkIDs(chunk, processedChunkIDs)
-		for _, chunkID := range relationChunkIDs {
-			additionalChunkIDs = append(additionalChunkIDs, chunkID)
-			chunkMatchTypes[chunkID] = types.MatchTypeRelationChunk
-		}
-
-		// Add nearby chunks (prev and next)
-		if slices.Contains([]string{types.ChunkTypeText}, chunk.ChunkType) {
-			if chunk.NextChunkID != "" && !processedChunkIDs[chunk.NextChunkID] {
-				additionalChunkIDs = append(additionalChunkIDs, chunk.NextChunkID)
-				processedChunkIDs[chunk.NextChunkID] = true
-				chunkMatchTypes[chunk.NextChunkID] = types.MatchTypeNearByChunk
+				// Pass score to parent
+				chunkScores[chunk.ParentChunkID] = chunkScores[chunk.ID]
+				chunkMatchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
 			}
-			if chunk.PreChunkID != "" && !processedChunkIDs[chunk.PreChunkID] {
-				additionalChunkIDs = append(additionalChunkIDs, chunk.PreChunkID)
-				processedChunkIDs[chunk.PreChunkID] = true
-				chunkMatchTypes[chunk.PreChunkID] = types.MatchTypeNearByChunk
+
+			// Collect related chunks
+			relationChunkIDs := s.collectRelatedChunkIDs(chunk, processedChunkIDs)
+			for _, chunkID := range relationChunkIDs {
+				additionalChunkIDs = append(additionalChunkIDs, chunkID)
+				chunkMatchTypes[chunkID] = types.MatchTypeRelationChunk
+			}
+
+			// Add nearby chunks (prev and next)
+			if slices.Contains([]string{types.ChunkTypeText}, chunk.ChunkType) {
+				if chunk.NextChunkID != "" && !processedChunkIDs[chunk.NextChunkID] {
+					additionalChunkIDs = append(additionalChunkIDs, chunk.NextChunkID)
+					processedChunkIDs[chunk.NextChunkID] = true
+					chunkMatchTypes[chunk.NextChunkID] = types.MatchTypeNearByChunk
+				}
+				if chunk.PreChunkID != "" && !processedChunkIDs[chunk.PreChunkID] {
+					additionalChunkIDs = append(additionalChunkIDs, chunk.PreChunkID)
+					processedChunkIDs[chunk.PreChunkID] = true
+					chunkMatchTypes[chunk.PreChunkID] = types.MatchTypeNearByChunk
+				}
 			}
 		}
 	}
@@ -1234,26 +1259,28 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	}
 
 	// Second pass: Add additional chunks (parent, nearby, relation) that weren't in original input
-	for chunkID, chunk := range chunkMap {
-		if addedChunkIDs[chunkID] || !s.isValidTextChunk(chunk) {
-			continue
-		}
-
-		score, hasScore := chunkScores[chunkID]
-		if !hasScore || score <= 0 {
-			score = 0.0
-		}
-
-		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
-			matchType := types.MatchTypeParentChunk
-			if specificType, exists := chunkMatchTypes[chunkID]; exists {
-				matchType = specificType
-			} else {
-				logger.Warnf(ctx, "Unkonwn match type for chunk: %s", chunkID)
+	if !skipEnrichment {
+		for chunkID, chunk := range chunkMap {
+			if addedChunkIDs[chunkID] || !s.isValidTextChunk(chunk) {
 				continue
 			}
-			matchedContent := chunkMatchedContents[chunkID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+
+			score, hasScore := chunkScores[chunkID]
+			if !hasScore || score <= 0 {
+				score = 0.0
+			}
+
+			if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
+				matchType := types.MatchTypeParentChunk
+				if specificType, exists := chunkMatchTypes[chunkID]; exists {
+					matchType = specificType
+				} else {
+					logger.Warnf(ctx, "Unkonwn match type for chunk: %s", chunkID)
+					continue
+				}
+				matchedContent := chunkMatchedContents[chunkID]
+				searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			}
 		}
 	}
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))

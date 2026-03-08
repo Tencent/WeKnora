@@ -132,6 +132,10 @@ type sqlValidator struct {
 	enableTenantInjection bool
 	tenantID              uint64
 	tablesWithTenantID    map[string]bool
+
+	// Soft delete filtering
+	enableSoftDeleteInjection bool
+	tablesWithDeletedAt       map[string]bool
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -574,6 +578,26 @@ func WithTenantIsolation(tenantID uint64, tables ...string) SQLValidationOption 
 	}
 }
 
+// WithSoftDeleteFilter enables automatic deleted_at IS NULL injection.
+func WithSoftDeleteFilter(tables ...string) SQLValidationOption {
+	return func(v *sqlValidator) {
+		v.enableSoftDeleteInjection = true
+		v.tablesWithDeletedAt = make(map[string]bool)
+		if len(tables) == 0 {
+			// Default tables with soft-delete support.
+			v.tablesWithDeletedAt = map[string]bool{
+				"knowledge_bases": true,
+				"knowledges":      true,
+				"chunks":          true,
+			}
+		} else {
+			for _, table := range tables {
+				v.tablesWithDeletedAt[strings.ToLower(table)] = true
+			}
+		}
+	}
+}
+
 // WithSecurityDefaults applies a comprehensive set of security validations
 func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -608,6 +632,7 @@ func ValidateSQL(sql string, opts ...SQLValidationOption) (*SQLParseResult, *SQL
 		allowedTables:      make(map[string]bool),
 		allowedFunctions:   make(map[string]bool),
 		tablesWithTenantID: make(map[string]bool),
+		tablesWithDeletedAt: make(map[string]bool),
 		minLength:          6,
 		maxLength:          4096,
 	}
@@ -772,13 +797,14 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	// Find validator config to check if tenant injection is enabled
 	validator := &sqlValidator{
 		tablesWithTenantID: make(map[string]bool),
+		tablesWithDeletedAt: make(map[string]bool),
 	}
 	for _, opt := range opts {
 		opt(validator)
 	}
 
-	// If tenant injection is not enabled, return original SQL
-	if !validator.enableTenantInjection {
+	// If no SQL rewriting is enabled, return original SQL
+	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection {
 		return sql, validationResult, nil
 	}
 
@@ -802,8 +828,35 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 
 	// Inject tenant conditions
 	securedSQL := validator.injectTenantConditions(normalizedSQL, tablesInQuery)
+	// Inject deleted_at IS NULL conditions
+	securedSQL = validator.injectSoftDeleteConditions(securedSQL, tablesInQuery)
 
 	return securedSQL, validationResult, nil
+}
+
+// InjectAndConditions injects filter conditions into a SQL statement using AND semantics.
+// If WHERE exists, the original WHERE predicates will be wrapped in parentheses.
+func InjectAndConditions(sql, filter string) string {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return sql
+	}
+
+	// Check if WHERE clause exists
+	wherePattern := regexp.MustCompile(`(?i)\bWHERE\b`)
+	if wherePattern.MatchString(sql) {
+		// Add filter and wrap existing conditions in parentheses to prevent OR precedence issues
+		return wherePattern.ReplaceAllString(sql, fmt.Sprintf("WHERE %s AND (", filter)) + ")"
+	}
+
+	// Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
+	clausePattern := regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
+	if loc := clausePattern.FindStringIndex(sql); loc != nil {
+		return sql[:loc[0]] + fmt.Sprintf(" WHERE %s ", filter) + sql[loc[0]:]
+	}
+
+	// Add WHERE clause at the end
+	return fmt.Sprintf("%s WHERE %s", sql, filter)
 }
 
 // injectTenantConditions adds tenant_id filtering to the query
@@ -829,24 +882,27 @@ func (v *sqlValidator) injectTenantConditions(sql string, tablesInQuery map[stri
 	}
 
 	tenantFilter := strings.Join(conditions, " AND ")
+	return InjectAndConditions(sql, tenantFilter)
+}
 
-	// Check if WHERE clause exists
-	wherePattern := regexp.MustCompile(`(?i)\bWHERE\b`)
-	if wherePattern.MatchString(sql) {
-		// Add tenant filter and wrap existing conditions in parentheses to prevent OR injection
-		// This ensures: WHERE tenant_filter AND (original_conditions)
-		// Instead of: WHERE tenant_filter AND original_conditions OR malicious_condition
-		return wherePattern.ReplaceAllString(sql, fmt.Sprintf("WHERE %s AND (", tenantFilter)) + ")"
+// injectSoftDeleteConditions adds deleted_at IS NULL filtering to the query.
+func (v *sqlValidator) injectSoftDeleteConditions(sql string, tablesInQuery map[string]string) string {
+	if !v.enableSoftDeleteInjection {
+		return sql
 	}
 
-	// Add new WHERE clause before ORDER BY, GROUP BY, LIMIT, etc.
-	clausePattern := regexp.MustCompile(`(?i)\b(GROUP BY|ORDER BY|LIMIT|OFFSET|HAVING|FETCH)\b`)
-	if loc := clausePattern.FindStringIndex(sql); loc != nil {
-		return sql[:loc[0]] + fmt.Sprintf(" WHERE %s ", tenantFilter) + sql[loc[0]:]
+	var conditions []string
+	for tableName, alias := range tablesInQuery {
+		if v.tablesWithDeletedAt[tableName] {
+			conditions = append(conditions, fmt.Sprintf("%s.deleted_at IS NULL", alias))
+		}
 	}
 
-	// Add WHERE clause at the end
-	return fmt.Sprintf("%s WHERE %s", sql, tenantFilter)
+	if len(conditions) == 0 {
+		return sql
+	}
+
+	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
 }
 
 // checkSQLInjectionRisks checks for common SQL injection patterns in WHERE clause

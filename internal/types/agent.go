@@ -16,7 +16,7 @@ type AgentConfig struct {
 	Temperature       float64  `json:"temperature"`             // LLM temperature for agent
 	KnowledgeBases    []string `json:"knowledge_bases"`         // Accessible knowledge base IDs
 	KnowledgeIDs      []string `json:"knowledge_ids"`           // Accessible knowledge IDs (individual documents)
-	SystemPrompt      string   `json:"system_prompt,omitempty"` // Unified system prompt (uses {{web_search_status}} placeholder for dynamic behavior)
+	SystemPrompt      string   `json:"system_prompt,omitempty"` // Unified system prompt (uses web_search_status placeholder for dynamic behavior)
 	// Deprecated: Use SystemPrompt instead. Kept for backward compatibility during migration.
 	SystemPromptWebEnabled  string        `json:"system_prompt_web_enabled,omitempty"`  // Deprecated: Custom prompt when web search is enabled
 	SystemPromptWebDisabled string        `json:"system_prompt_web_disabled,omitempty"` // Deprecated: Custom prompt when web search is disabled
@@ -35,9 +35,9 @@ type AgentConfig struct {
 	RetrieveKBOnlyWhenMentioned bool `json:"retrieve_kb_only_when_mentioned"`
 
 	// Skills configuration (Progressive Disclosure pattern)
-	SkillsEnabled  bool     `json:"skills_enabled"`   // Whether skills are enabled (default: false)
-	SkillDirs      []string `json:"skill_dirs"`       // Directories to search for skills
-	AllowedSkills  []string `json:"allowed_skills"`   // Skill names whitelist (empty = allow all)
+	SkillsEnabled bool     `json:"skills_enabled"` // Whether skills are enabled (default: false)
+	SkillDirs     []string `json:"skill_dirs"`     // Directories to search for skills
+	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
 }
 
 // SessionAgentConfig represents session-level agent configuration

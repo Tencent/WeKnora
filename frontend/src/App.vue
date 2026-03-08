@@ -20,6 +20,7 @@ html,
         Microsoft YaHei, SimSun, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: #f8f9fa;
+    background: var(--td-bg-color-page);
+    color: var(--td-text-color-primary);
 }
 </style>

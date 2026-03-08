@@ -9,30 +9,36 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/duckdb/duckdb-go/v2"
 	esv7 "github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/panjf2000/ants/v2"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
+	"google.golang.org/grpc"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/Tencent/WeKnora/docreader/client"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
+	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
 	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
+	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
@@ -45,6 +51,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -81,6 +88,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(initAntsPool))
 	must(container.Provide(initContextStorage))
 
+	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
+	must(container.Invoke(registerTracerCleanup))
+
 	// Register goroutine pool cleanup handler
 	must(container.Invoke(registerPoolCleanup))
 
@@ -91,6 +101,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// External service clients
 	logger.Debugf(ctx, "[Container] Registering external service clients...")
 	must(container.Provide(initDocReaderClient))
+	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
 	must(container.Provide(stream.NewStreamManager))
@@ -143,6 +154,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Extract services - register individual extracters with names
 	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
+	must(container.Provide(service.NewImageMultimodalService, dig.Name("imageMultimodal")))
 
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMCPServiceService))
@@ -166,9 +178,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
 
-	logger.Debugf(ctx, "[Container] Registering asynq client and server...")
-	must(container.Provide(router.NewAsyncqClient))
-	must(container.Provide(router.NewAsynqServer))
+	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
+	redisAvailable := os.Getenv("REDIS_ADDR") != ""
+	if redisAvailable {
+		must(container.Provide(router.NewAsyncqClient, dig.As(new(interfaces.TaskEnqueuer))))
+		must(container.Provide(router.NewAsynqServer))
+	} else {
+		syncExec := router.NewSyncTaskExecutor()
+		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
+		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
+	}
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
@@ -215,9 +234,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Router configuration
-	logger.Debugf(ctx, "[Container] Registering router and starting asynq server...")
+	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
 	must(container.Provide(router.NewRouter))
-	must(container.Invoke(router.RunAsynqServer))
+	if redisAvailable {
+		must(container.Invoke(router.RunAsynqServer))
+	} else {
+		must(container.Invoke(router.RegisterSyncHandlers))
+	}
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
@@ -246,19 +269,23 @@ func initTracer() (*tracing.Tracer, error) {
 }
 
 func initRedisClient() (*redis.Client, error) {
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		logger.Infof(context.Background(), "[Redis] No REDIS_ADDR configured, Redis disabled (Lite mode)")
+		return nil, nil
+	}
 	db, err := strconv.Atoi(os.Getenv("REDIS_DB"))
 	if err != nil {
-		return nil, err
+		db = 0
 	}
 
 	client := redis.NewClient(&redis.Options{
-		Addr:     os.Getenv("REDIS_ADDR"),
+		Addr:     redisAddr,
 		Username: os.Getenv("REDIS_USERNAME"),
 		Password: os.Getenv("REDIS_PASSWORD"),
 		DB:       db,
 	})
 
-	// 验证连接
 	_, err = client.Ping(context.Background()).Result()
 	if err != nil {
 		return nil, fmt.Errorf("连接Redis失败: %w", err)
@@ -268,6 +295,10 @@ func initRedisClient() (*redis.Client, error) {
 }
 
 func initContextStorage(redisClient *redis.Client) (llmcontext.ContextStorage, error) {
+	if redisClient == nil {
+		logger.Infof(context.Background(), "[ContextStorage] Redis not available, using in-memory storage")
+		return llmcontext.NewMemoryStorage(), nil
+	}
 	storage, err := llmcontext.NewRedisStorage(redisClient, 24*time.Hour, "context:")
 	if err != nil {
 		return nil, err
@@ -331,12 +362,37 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
 		)
+	case "sqlite":
+		dbPath := os.Getenv("DB_PATH")
+		if dbPath == "" {
+			dbPath = "./data/weknora.db"
+		}
+		if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create SQLite data directory %s: %w", dir, err)
+			}
+		}
+		sqlite_vec.Auto()
+		dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
+		dialector = sqlite.Open(dsn)
+		migrateDSN = "sqlite3://" + dbPath
+		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, err
+	}
+
+	if os.Getenv("DB_DRIVER") == "sqlite" {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
+		}
+		if err := sqlDB.Ping(); err != nil {
+			return nil, fmt.Errorf("failed to ping SQLite database: %w", err)
+		}
 	}
 
 	// Run database migrations automatically (optional, can be disabled via env var)
@@ -360,6 +416,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 				"Continuing with application startup. Please run migrations manually if needed.",
 			)
 		}
+
+		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
+		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
+		// we replace that with the actual STORAGE_TYPE from the environment.
+		resolveStorageProviderPending(db)
 	} else {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
@@ -371,10 +432,38 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	// Configure connection pool parameters
-	sqlDB.SetMaxIdleConns(10)
+	if os.Getenv("DB_DRIVER") == "sqlite" {
+		// SQLite only supports one concurrent writer even in WAL mode.
+		// Limiting to a single open connection serialises all DB access and
+		// prevents "database is locked" errors from concurrent goroutines.
+		sqlDB.SetMaxOpenConns(1)
+	} else {
+		sqlDB.SetMaxIdleConns(10)
+	}
 	sqlDB.SetConnMaxLifetime(time.Duration(10) * time.Minute)
 
 	return db, nil
+}
+
+// resolveStorageProviderPending replaces the "__pending_env__" sentinel in
+// knowledge_bases.storage_provider_config with the actual STORAGE_TYPE from the environment.
+// This runs once after SQL migrations to bind historical KBs to their real storage provider.
+func resolveStorageProviderPending(db *gorm.DB) {
+	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
+	if storageType == "" {
+		storageType = "local"
+	}
+	storageType = strings.ToLower(storageType)
+
+	result := db.Exec(
+		`UPDATE knowledge_bases SET storage_provider_config = ? WHERE storage_provider_config IS NOT NULL AND storage_provider_config->>'provider' = '__pending_env__'`,
+		fmt.Sprintf(`{"provider":"%s"}`, storageType),
+	)
+	if result.Error != nil {
+		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
+	}
 }
 
 // initFileService initializes file storage service
@@ -387,7 +476,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 //   - Configured file service implementation
 //   - Error if initialization fails
 func initFileService(cfg *config.Config) (interfaces.FileService, error) {
-	switch os.Getenv("STORAGE_TYPE") {
+	storageType := strings.TrimSpace(os.Getenv("STORAGE_TYPE"))
+	if storageType == "" {
+		storageType = "local"
+	}
+	switch storageType {
 	case "minio":
 		if os.Getenv("MINIO_ENDPOINT") == "" ||
 			os.Getenv("MINIO_ACCESS_KEY_ID") == "" ||
@@ -416,8 +509,8 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("COS_SECRET_ID"),
 			os.Getenv("COS_SECRET_KEY"),
 			os.Getenv("COS_PATH_PREFIX"),
-			os.Getenv("COS_TEMP_BUCKET_NAME"), // 可选：临时桶名称（桶需配置生命周期规则自动过期）
-			os.Getenv("COS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
+			os.Getenv("COS_TEMP_BUCKET_NAME"),
+			os.Getenv("COS_TEMP_REGION"),
 		)
 	case "tos":
 		if os.Getenv("TOS_ENDPOINT") == "" ||
@@ -438,11 +531,15 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("TOS_TEMP_REGION"),      // 可选：临时桶 region，默认与主桶相同
 		)
 	case "local":
-		return file.NewLocalFileService(os.Getenv("LOCAL_STORAGE_BASE_DIR")), nil
+		baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+		if baseDir == "" {
+			baseDir = "/data/files"
+		}
+		return file.NewLocalFileService(baseDir), nil
 	case "dummy":
 		return file.NewDummyFileService(), nil
 	default:
-		return nil, fmt.Errorf("unsupported storage type: %s", os.Getenv("STORAGE_TYPE"))
+		return nil, fmt.Errorf("unsupported storage type: %s", storageType)
 	}
 }
 
@@ -469,6 +566,16 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			log.Errorf("Register postgres retrieve engine failed: %v", err)
 		} else {
 			log.Infof("Register postgres retrieve engine success")
+		}
+	}
+	if slices.Contains(retrieveDriver, "sqlite") {
+		sqliteRepo := sqliteRetrieverRepo.NewSQLiteRetrieveEngineRepository(db)
+		if err := registry.Register(
+			retriever.NewKVHybridRetrieveEngine(sqliteRepo, types.SQLiteRetrieverEngineType),
+		); err != nil {
+			log.Errorf("Register sqlite retrieve engine failed: %v", err)
+		} else {
+			log.Infof("Register sqlite retrieve engine success")
 		}
 	}
 	if slices.Contains(retrieveDriver, "elasticsearch_v8") {
@@ -562,6 +669,43 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			}
 		}
 	}
+	if slices.Contains(retrieveDriver, "milvus") {
+		milvusCfg := milvusclient.ClientConfig{
+			DialOptions: []grpc.DialOption{grpc.WithTimeout(5 * time.Second)},
+		}
+		milvusAddress := os.Getenv("MILVUS_ADDRESS")
+		if milvusAddress == "" {
+			milvusAddress = "localhost:19530"
+		}
+		milvusCfg.Address = milvusAddress
+		milvusUsername := os.Getenv("MILVUS_USERNAME")
+		if milvusUsername != "" {
+			milvusCfg.Username = milvusUsername
+		}
+		milvusPassword := os.Getenv("MILVUS_PASSWORD")
+		if milvusPassword != "" {
+			milvusCfg.Password = milvusPassword
+		}
+		milvusDBName := os.Getenv("MILVUS_DB_NAME")
+		if milvusDBName != "" {
+			milvusCfg.DBName = milvusDBName
+		}
+		milvusCli, err := milvusclient.New(context.Background(), &milvusCfg)
+		if err != nil {
+			log.Errorf("Create milvus client failed: %v", err)
+		} else {
+			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli)
+			if err := registry.Register(
+				retriever.NewKVHybridRetrieveEngine(
+					milvusRepository, types.MilvusRetrieverEngineType,
+				),
+			); err != nil {
+				log.Errorf("Register milvus retrieve engine failed: %v", err)
+			} else {
+				log.Infof("Register milvus retrieve engine success")
+			}
+		}
+	}
 	return registry, nil
 }
 
@@ -599,21 +743,39 @@ func registerPoolCleanup(pool *ants.Pool, cleaner interfaces.ResourceCleaner) {
 	})
 }
 
-// initDocReaderClient initializes the document reader client
-// Creates a client for interacting with the document reader service
+// registerTracerCleanup registers the tracer for cleanup
+// Ensures proper cleanup of the tracer when application shuts down
 // Parameters:
-//   - cfg: Application configuration
-//
-// Returns:
-//   - Configured document reader client
-//   - Error if initialization fails
-func initDocReaderClient(cfg *config.Config) (*client.Client, error) {
-	// Use the DocReader URL from environment or config
-	docReaderURL := os.Getenv("DOCREADER_ADDR")
-	if docReaderURL == "" && cfg.DocReader != nil {
-		docReaderURL = cfg.DocReader.Addr
+//   - tracer: Tracer instance
+//   - cleaner: Resource cleaner
+func registerTracerCleanup(tracer *tracing.Tracer, cleaner interfaces.ResourceCleaner) {
+	// Register the cleanup function - actual context will be provided during cleanup
+	cleaner.RegisterWithName("Tracer", func() error {
+		// Create context for cleanup with longer timeout for tracer shutdown
+		return tracer.Cleanup(context.Background())
+	})
+}
+
+// initDocReaderClient initializes the DocumentReader client (lightweight API).
+func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) {
+	addr := strings.TrimSpace(os.Getenv("DOCREADER_ADDR"))
+	transport := strings.TrimSpace(os.Getenv("DOCREADER_TRANSPORT"))
+	if transport == "" {
+		transport = "grpc"
 	}
-	return client.NewClient(docReaderURL)
+	if addr == "" {
+		logger.Infof(context.Background(), "[DocConverter] No DOCREADER_ADDR configured, starting disconnected")
+	}
+	transport = strings.ToLower(transport)
+	switch transport {
+	case "http", "https":
+		if addr != "" && !strings.HasPrefix(addr, "http://") && !strings.HasPrefix(addr, "https://") {
+			addr = "http://" + addr
+		}
+		return docparser.NewHTTPDocumentReader(addr)
+	default:
+		return docparser.NewGRPCDocumentReader(addr)
+	}
 }
 
 // initOllamaService initializes the Ollama service client

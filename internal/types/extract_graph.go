@@ -11,6 +11,7 @@ const (
 	TypeKBDelete            = "kb:delete"             // 知识库删除任务
 	TypeKnowledgeListDelete = "knowledge:list_delete" // 批量删除知识任务
 	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
+	TypeImageMultimodal     = "image:multimodal"      // 图片多模态处理任务（OCR + VLM Caption）
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -30,6 +31,7 @@ type DocumentProcessPayload struct {
 	FileName                 string   `json:"file_name,omitempty"` // 文件名（文件导入时使用）
 	FileType                 string   `json:"file_type,omitempty"` // 文件类型（文件导入时使用）
 	URL                      string   `json:"url,omitempty"`       // URL（URL导入时使用）
+	FileURL                  string   `json:"file_url,omitempty"`  // 文件资源链接（file_url导入时使用）
 	Passages                 []string `json:"passages,omitempty"`  // 文本段落（文本导入时使用）
 	EnableMultimodel         bool     `json:"enable_multimodel"`
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
@@ -94,6 +96,18 @@ type KBDeletePayload struct {
 type KnowledgeListDeletePayload struct {
 	TenantID     uint64   `json:"tenant_id"`
 	KnowledgeIDs []string `json:"knowledge_ids"`
+}
+
+// ImageMultimodalPayload represents the image multimodal processing task payload.
+type ImageMultimodalPayload struct {
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	ChunkID         string `json:"chunk_id"`          // parent text chunk
+	ImageURL        string `json:"image_url"`          // provider:// URL (e.g. local://..., minio://...)
+	ImageLocalPath  string `json:"image_local_path"`   // deprecated: kept for backward compat with in-flight tasks
+	EnableOCR       bool   `json:"enable_ocr"`
+	EnableCaption   bool   `json:"enable_caption"`
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

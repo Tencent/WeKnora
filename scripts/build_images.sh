@@ -165,6 +165,7 @@ build_docreader_image() {
         --platform $PLATFORM \
         --build-arg PLATFORM=$PLATFORM \
         --build-arg TARGETARCH=$TARGETARCH \
+        --build-arg APT_MIRROR=${APT_MIRROR:-} \
         -f docker/Dockerfile.docreader \
         -t wechatopenai/weknora-docreader:latest \
         .

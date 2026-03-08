@@ -45,13 +45,13 @@ var webFetchTool = BaseTool{
 
 // WebFetchInput defines the input parameters for web fetch tool
 type WebFetchInput struct {
-	Items []WebFetchItem `json:"items" jsonschema:"批量抓取任务，每项包含 url 与 prompt"`
+	Items []WebFetchItem `json:"items" jsonschema:"Batch fetch tasks, each containing a url and prompt"`
 }
 
 // WebFetchItem represents a single web fetch task
 type WebFetchItem struct {
-	URL    string `json:"url" jsonschema:"待抓取的网页 URL，需来自 web_search 结果"`
-	Prompt string `json:"prompt" jsonschema:"分析该网页内容时使用的提示词"`
+	URL    string `json:"url" jsonschema:"URL of the web page to fetch, should come from web_search results"`
+	Prompt string `json:"prompt" jsonschema:"Prompt for analyzing the fetched web page content"`
 }
 
 // webFetchParams is the parameters for the web fetch tool
@@ -147,7 +147,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 						"prompt": p.Prompt,
 						"error":  err.Error(),
 					},
-					output: fmt.Sprintf("URL: %s\n错误: %v\n\n", p.URL, err),
+					output: fmt.Sprintf("URL: %s\nError: %v\n\n", p.URL, err),
 				}
 				return
 			}
@@ -176,7 +176,7 @@ func (t *WebFetchTool) Execute(ctx context.Context, args json.RawMessage) (*type
 			if firstErr == nil {
 				firstErr = fmt.Errorf("fetch item %d returned nil", idx)
 			}
-			builder.WriteString(fmt.Sprintf("#%d: 无结果（内部错误）\n\n", idx+1))
+			builder.WriteString(fmt.Sprintf("#%d: No result (internal error)\n\n", idx+1))
 			continue
 		}
 
@@ -317,7 +317,7 @@ func (t *WebFetchTool) executeFetch(
 	htmlContent, method, err := t.fetchHTMLContent(ctx, vp)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][WebFetch] 获取页面失败 url=%s err=%v", vp.URL, err)
-		return fmt.Sprintf("URL: %s\n错误: %v\n", displayURL, err),
+		return fmt.Sprintf("URL: %s\nError: %v\n", displayURL, err),
 			map[string]interface{}{
 				"url":    displayURL,
 				"prompt": vp.Prompt,
@@ -364,11 +364,11 @@ func (t *WebFetchTool) processWithLLM(ctx context.Context, params webFetchParams
 		return "", fmt.Errorf("chat model not available for web_fetch")
 	}
 
-	systemMessage := "你是一名擅长阅读网页内容的智能助手，请根据提供的网页文本回答用户需求，严禁编造未在文本中出现的信息。"
-	userTemplate := `用户请求:
+	systemMessage := "You are an intelligent assistant skilled at reading web page content. Answer the user's request based on the provided web page text. Never fabricate information that does not appear in the text."
+	userTemplate := `User request:
 %s
 
-网页内容:
+Web page content:
 %s`
 
 	messages := []chat.Message{

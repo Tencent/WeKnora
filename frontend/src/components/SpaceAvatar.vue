@@ -112,7 +112,7 @@ const letterStyle = computed(() => {
   height: 32px;
   border-radius: 8px;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--td-shadow-2);
   overflow: hidden;
 
   &.space-avatar-small {
@@ -177,7 +177,7 @@ const letterStyle = computed(() => {
 .space-avatar-letter {
   position: relative;
   z-index: 1;
-  color: #fff;
+  color: var(--td-text-color-anti);
   font-size: 14px;
   font-weight: 600;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

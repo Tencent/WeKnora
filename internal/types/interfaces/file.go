@@ -9,6 +9,9 @@ import (
 // FileService is the interface for file services.
 // FileService provides methods to save, retrieve, and delete files.
 type FileService interface {
+	// CheckConnectivity verifies that the storage backend is reachable and
+	// properly configured (e.g. bucket exists, credentials valid).
+	CheckConnectivity(ctx context.Context) error
 	// SaveFile saves a file.
 	SaveFile(ctx context.Context, file *multipart.FileHeader, tenantID uint64, knowledgeID string) (string, error)
 	// SaveBytes saves bytes data to a file and returns the file path.

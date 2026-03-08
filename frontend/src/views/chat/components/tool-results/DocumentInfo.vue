@@ -132,8 +132,8 @@ const formatMetadataValue = (value: unknown) => {
 
 .meta-chip {
   font-size: 11px;
-  color: #6b7280;
-  background: #f9fafb;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
   border: 1px solid @card-border;
   border-radius: 10px;
   padding: 2px 8px;
@@ -156,18 +156,18 @@ const formatMetadataValue = (value: unknown) => {
 
   .doc-index {
     font-weight: 600;
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 
   .doc-title {
     font-size: 13px;
     font-weight: 500;
-    color: #374151;
+    color: var(--td-text-color-primary);
   }
 
   .status-pill {
     font-size: 11px;
-    color: #07c05f;
+    color: var(--td-brand-color);
     border: 1px solid rgba(7, 192, 95, 0.3);
     border-radius: 10px;
     padding: 2px 8px;
@@ -192,14 +192,14 @@ const formatMetadataValue = (value: unknown) => {
   line-height: 1.5;
 
   .field-label {
-    color: #6b7280;
+    color: var(--td-text-color-secondary);
     min-width: 90px;
     font-weight: 500;
   }
 
   .field-value {
     flex: 1;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.5;
   }
 }
@@ -219,38 +219,38 @@ const formatMetadataValue = (value: unknown) => {
 
   li {
     font-size: 11px;
-    color: #374151;
+    color: var(--td-text-color-primary);
     line-height: 1.5;
   }
 
   .metadata-key {
     font-weight: 600;
     margin-right: 4px;
-    color: #6b7280;
+    color: var(--td-text-color-secondary);
   }
 
   .metadata-value {
     font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-    color: #374151;
+    color: var(--td-text-color-primary);
   }
 }
 
 .empty-state {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   text-align: center;
   padding: 14px;
   border: 1px dashed @card-border;
   border-radius: @card-radius;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 code {
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
   font-size: 10px;
-  background: #f3f4f6;
+  background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 2px;
-  color: #374151;
+  color: var(--td-text-color-primary);
 }
 </style>

@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/docreader/client"
-	"github.com/Tencent/WeKnora/docreader/proto"
 	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -57,7 +55,7 @@ type InitializationHandler struct {
 	kbRepository     interfaces.KnowledgeBaseRepository
 	knowledgeService interfaces.KnowledgeService
 	ollamaService    *ollama.OllamaService
-	docReaderClient  *client.Client
+	documentReader   interfaces.DocumentReader
 	pooler           embedding.EmbedderPooler
 }
 
@@ -70,7 +68,7 @@ func NewInitializationHandler(
 	kbRepository interfaces.KnowledgeBaseRepository,
 	knowledgeService interfaces.KnowledgeService,
 	ollamaService *ollama.OllamaService,
-	docReaderClient *client.Client,
+	documentReader interfaces.DocumentReader,
 	pooler embedding.EmbedderPooler,
 ) *InitializationHandler {
 	return &InitializationHandler{
@@ -81,7 +79,7 @@ func NewInitializationHandler(
 		kbRepository:     kbRepository,
 		knowledgeService: knowledgeService,
 		ollamaService:    ollamaService,
-		docReaderClient:  docReaderClient,
+		documentReader:   documentReader,
 		pooler:           pooler,
 	}
 }
@@ -94,29 +92,22 @@ type KBModelConfigRequest struct {
 
 	// 文档分块配置
 	DocumentSplitting struct {
-		ChunkSize    int      `json:"chunkSize"`
-		ChunkOverlap int      `json:"chunkOverlap"`
-		Separators   []string `json:"separators"`
+		ChunkSize         int                      `json:"chunkSize"`
+		ChunkOverlap      int                      `json:"chunkOverlap"`
+		Separators        []string                 `json:"separators"`
+		ParserEngineRules []types.ParserEngineRule `json:"parserEngineRules,omitempty"`
+		EnableParentChild bool                     `json:"enableParentChild"`
+		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
+		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
 	} `json:"documentSplitting"`
 
-	// 多模态配置
+	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
 	Multimodal struct {
-		Enabled     bool   `json:"enabled"`
-		StorageType string `json:"storageType"` // "cos" or "minio"
-		COS         *struct {
-			SecretID   string `json:"secretId"`
-			SecretKey  string `json:"secretKey"`
-			Region     string `json:"region"`
-			BucketName string `json:"bucketName"`
-			AppID      string `json:"appId"`
-			PathPrefix string `json:"pathPrefix"`
-		} `json:"cos"`
-		Minio *struct {
-			BucketName string `json:"bucketName"`
-			UseSSL     bool   `json:"useSSL"`
-			PathPrefix string `json:"pathPrefix"`
-		} `json:"minio"`
+		Enabled bool `json:"enabled"`
 	} `json:"multimodal"`
+
+	// 存储引擎选择（"local" | "minio" | "cos"），影响文档上传与文档内图片存储，参数从全局设置读取
+	StorageProvider string `json:"storageProvider"`
 
 	// 知识图谱配置
 	NodeExtract struct {
@@ -300,37 +291,41 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if len(req.DocumentSplitting.Separators) > 0 {
 		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
 	}
+	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
+	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
+	if req.DocumentSplitting.ParentChunkSize > 0 {
+		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
+	}
+	if req.DocumentSplitting.ChildChunkSize > 0 {
+		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
+	}
 
 	// 更新多模态配置
 	if req.Multimodal.Enabled {
-		switch strings.ToLower(req.Multimodal.StorageType) {
-		case "cos":
-			if req.Multimodal.COS != nil {
-				kb.StorageConfig = types.StorageConfig{
-					SecretID:   req.Multimodal.COS.SecretID,
-					SecretKey:  req.Multimodal.COS.SecretKey,
-					Region:     req.Multimodal.COS.Region,
-					BucketName: req.Multimodal.COS.BucketName,
-					AppID:      req.Multimodal.COS.AppID,
-					PathPrefix: req.Multimodal.COS.PathPrefix,
-					Provider:   "cos",
-				}
-			}
-		case "minio":
-			if req.Multimodal.Minio != nil {
-				kb.StorageConfig = types.StorageConfig{
-					BucketName: req.Multimodal.Minio.BucketName,
-					PathPrefix: req.Multimodal.Minio.PathPrefix,
-					Provider:   "minio",
-					SecretID:   os.Getenv("MINIO_ACCESS_KEY_ID"),
-					SecretKey:  os.Getenv("MINIO_SECRET_ACCESS_KEY"),
-				}
-			}
-		}
+		// VLM model already set above
 	} else {
-		// 多模态未启用时，清空存储配置
-		kb.StorageConfig = types.StorageConfig{}
+		kb.VLMConfig.ModelID = ""
 	}
+
+	// 存储引擎：仅写入 provider 到新字段，参数从租户全局 StorageEngineConfig 读取
+	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
+	if provider == "" {
+		provider = "local"
+	}
+	oldProvider := kb.GetStorageProvider()
+	if oldProvider == "" {
+		oldProvider = "local"
+	}
+	if oldProvider != provider {
+		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
+			kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, "", "", "")
+		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
+			logger.Error(ctx, "Cannot change storage engine when files exist")
+			c.Error(errors.NewBadRequestError("知识库中已有文件，无法切换存储引擎"))
+			return
+		}
+	}
+	kb.SetStorageProvider(provider)
 
 	// 更新知识图谱配置
 	if req.NodeExtract.Enabled {
@@ -726,6 +721,8 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 		switch req.Multimodal.StorageType {
 		case "cos":
 			if req.Multimodal.COS != nil {
+				kb.SetStorageProvider("cos")
+				// Legacy: also write to cos_config for backward compat with old code paths
 				kb.StorageConfig = types.StorageConfig{
 					Provider:   req.Multimodal.StorageType,
 					BucketName: req.Multimodal.COS.BucketName,
@@ -738,6 +735,8 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 			}
 		case "minio":
 			if req.Multimodal.Minio != nil {
+				kb.SetStorageProvider("minio")
+				// Legacy: also write to cos_config for backward compat with old code paths
 				kb.StorageConfig = types.StorageConfig{
 					Provider:   req.Multimodal.StorageType,
 					BucketName: req.Multimodal.Minio.BucketName,
@@ -749,6 +748,7 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 		}
 	} else {
 		kb.VLMConfig = types.VLMConfig{}
+		kb.SetStorageProvider("")
 		kb.StorageConfig = types.StorageConfig{}
 	}
 
@@ -1348,15 +1348,16 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 		}
 	}
 
-	// 判断多模态是否启用：有VLM模型ID或有存储配置
+	// 判断多模态是否启用：有VLM模型ID或有存储配置（兼容新旧字段）
+	storageProvider := kb.GetStorageProvider()
 	hasMultimodal := (kb.VLMConfig.IsEnabled() ||
-		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "")
+		kb.StorageConfig.SecretID != "" || kb.StorageConfig.BucketName != "" ||
+		(storageProvider != "" && storageProvider != "local"))
 	if config["multimodal"] == nil {
 		config["multimodal"] = map[string]interface{}{
 			"enabled": hasMultimodal,
 		}
 	} else {
-		// 如果已经设置过 multimodal，更新 enabled 状态
 		config["multimodal"].(map[string]interface{})["enabled"] = hasMultimodal
 	}
 
@@ -1378,16 +1379,17 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 			"separators":   kb.ChunkingConfig.Separators,
 		}
 
-		// 添加多模态的COS配置信息
-		if kb.StorageConfig.SecretID != "" {
+		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
+		effectiveProvider := kb.GetStorageProvider()
+		if kb.StorageConfig.SecretID != "" || (effectiveProvider != "" && effectiveProvider != "local") {
 			if config["multimodal"] == nil {
 				config["multimodal"] = map[string]interface{}{
 					"enabled": true,
 				}
 			}
 			multimodal := config["multimodal"].(map[string]interface{})
-			multimodal["storageType"] = kb.StorageConfig.Provider
-			switch kb.StorageConfig.Provider {
+			multimodal["storageType"] = effectiveProvider
+			switch effectiveProvider {
 			case "cos":
 				multimodal["cos"] = map[string]interface{}{
 					"secretId":   kb.StorageConfig.SecretID,
@@ -1910,97 +1912,43 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 	})
 }
 
-// testMultimodalWithDocReader 调用docreader服务进行多模态处理
+// testMultimodalWithDocReader uses DocumentReader.Read for document reading,
+// then returns basic information about the result.
 func (h *InitializationHandler) testMultimodalWithDocReader(
 	ctx context.Context,
 	imageContent []byte, filename string,
 	chunkSize, chunkOverlap int32, separators []string,
 	req *testMultimodalForm,
 ) (map[string]string, error) {
-	// 获取文件扩展名
 	fileExt := ""
 	if idx := strings.LastIndex(filename, "."); idx != -1 {
 		fileExt = strings.ToLower(filename[idx+1:])
 	}
 
-	// 检查docreader服务配置
-	if h.docReaderClient == nil {
+	if h.documentReader == nil {
 		return nil, fmt.Errorf("DocReader service not configured")
 	}
 
-	// 构造请求
-	request := &proto.ReadFromFileRequest{
+	requestID, _ := types.RequestIDFromContext(ctx)
+
+	readResult, err := h.documentReader.Read(ctx, &types.ReadRequest{
 		FileContent: imageContent,
 		FileName:    filename,
 		FileType:    fileExt,
-		ReadConfig: &proto.ReadConfig{
-			ChunkSize:        chunkSize,
-			ChunkOverlap:     chunkOverlap,
-			Separators:       separators,
-			EnableMultimodal: true, // 启用多模态处理
-			VlmConfig: &proto.VLMConfig{
-				ModelName:     req.VLMModel,
-				BaseUrl:       req.VLMBaseURL,
-				ApiKey:        req.VLMAPIKey,
-				InterfaceType: req.VLMInterfaceType,
-			},
-		},
-		RequestId: ctx.Value(types.RequestIDContextKey).(string),
-	}
-
-	// 设置对象存储配置（通用）
-	switch strings.ToLower(req.StorageType) {
-	case "cos":
-		request.ReadConfig.StorageConfig = &proto.StorageConfig{
-			Provider:        proto.StorageProvider_COS,
-			Region:          req.COSRegion,
-			BucketName:      req.COSBucketName,
-			AccessKeyId:     req.COSSecretID,
-			SecretAccessKey: req.COSSecretKey,
-			AppId:           req.COSAppID,
-			PathPrefix:      req.COSPathPrefix,
-		}
-	case "minio":
-		request.ReadConfig.StorageConfig = &proto.StorageConfig{
-			Provider:        proto.StorageProvider_MINIO,
-			BucketName:      req.MinioBucketName,
-			PathPrefix:      req.MinioPathPrefix,
-			AccessKeyId:     os.Getenv("MINIO_ACCESS_KEY_ID"),
-			SecretAccessKey: os.Getenv("MINIO_SECRET_ACCESS_KEY"),
-		}
-	}
-
-	// 调用docreader服务
-	response, err := h.docReaderClient.ReadFromFile(ctx, request)
+		RequestID:   requestID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("调用DocReader服务失败: %v", err)
 	}
-
-	if response.Error != "" {
-		return nil, fmt.Errorf("DocReader服务返回错误: %s", response.Error)
+	if readResult.Error != "" {
+		return nil, fmt.Errorf("DocReader服务返回错误: %s", readResult.Error)
 	}
 
-	// 处理响应，提取Caption和OCR信息
-	result := make(map[string]string)
-	var allCaptions, allOCRTexts []string
-
-	for _, chunk := range response.Chunks {
-		if len(chunk.Images) > 0 {
-			for _, image := range chunk.Images {
-				if image.Caption != "" {
-					allCaptions = append(allCaptions, image.Caption)
-				}
-				if image.OcrText != "" {
-					allOCRTexts = append(allOCRTexts, image.OcrText)
-				}
-			}
-		}
+	result := map[string]string{
+		"markdown": readResult.MarkdownContent,
+		"caption":  "",
+		"ocr":      "",
 	}
-
-	// 合并所有Caption和OCR结果
-	result["caption"] = strings.Join(allCaptions, "; ")
-	result["ocr"] = strings.Join(allOCRTexts, "; ")
-
 	return result, nil
 }
 

@@ -114,7 +114,7 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 	}
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Retrieving session, ID: %s, tenant ID: %d", id, tenantID)
 
 	// Get session from repository
@@ -134,7 +134,7 @@ func (s *sessionService) GetSession(ctx context.Context, id string) (*types.Sess
 // GetSessionsByTenant retrieves all sessions for the current tenant
 func (s *sessionService) GetSessionsByTenant(ctx context.Context) ([]*types.Session, error) {
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Retrieving all sessions for tenant, tenant ID: %d", tenantID)
 
 	// Get sessions from repository
@@ -157,7 +157,7 @@ func (s *sessionService) GetPagedSessionsByTenant(ctx context.Context,
 	pagination *types.Pagination,
 ) (*types.PageResult, error) {
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	// Get paged sessions from repository
 	sessions, total, err := s.sessionRepo.GetPagedByTenantID(ctx, tenantID, pagination)
 	if err != nil {
@@ -203,7 +203,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	}
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Cleanup temporary KB stored in Redis for this session
 	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
@@ -236,7 +236,7 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	}
 
 	// Get tenant ID from context
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Cleanup associated resources for each session
 	for _, id := range ids {
@@ -257,6 +257,36 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		return err
 	}
 
+	return nil
+}
+
+// DeleteAllSessions deletes all sessions for the current tenant
+func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
+	tenantID := types.MustTenantIDFromContext(ctx)
+	logger.Infof(ctx, "Deleting all sessions for tenant %d", tenantID)
+
+	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
+	} else {
+		for _, session := range sessions {
+			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
+			}
+			if err := s.sessionStorage.Delete(ctx, session.ID); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup conversation context for session %s: %v", session.ID, err)
+			}
+		}
+	}
+
+	if err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		return err
+	}
+
+	logger.Infof(ctx, "All sessions deleted for tenant %d", tenantID)
 	return nil
 }
 
@@ -473,7 +503,7 @@ func (s *sessionService) KnowledgeQA(
 		knowledgeIDs = nil
 		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
 	} else {
-		knowledgeBaseIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)
+		knowledgeBaseIDs = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, session.TenantID)
 	}
 
 	// Determine chat model ID: prioritize request's summaryModelID, then Remote models
@@ -643,7 +673,7 @@ func (s *sessionService) KnowledgeQA(
 	)
 
 	// Get UserID from context
-	userID, _ := ctx.Value(types.UserIDContextKey).(string)
+	userID, _ := types.UserIDFromContext(ctx)
 
 	chatManage := &types.ChatManage{
 		Query:                query,
@@ -790,7 +820,7 @@ func (s *sessionService) selectChatModelID(
 ) (string, error) {
 	// If no knowledge base IDs but have knowledge IDs, derive KB IDs from knowledge IDs (include shared KB files)
 	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) > 0 {
-		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+		tenantID := types.MustTenantIDFromContext(ctx)
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge batch for model selection: %v", err)
@@ -861,7 +891,11 @@ func (s *sessionService) selectChatModelID(
 	return "", errors.New("no chat model ID available: no knowledge bases configured and no available models")
 }
 
-// resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode
+// resolveKnowledgeBasesFromAgent resolves knowledge base IDs based on agent's KBSelectionMode.
+// sessionTenantID is the tenant of the current session (caller); it is compared with
+// customAgent.TenantID to detect the shared-agent scenario and avoid leaking the
+// current user's personal shared KBs into the agent's retrieval scope.
+//
 // Returns the resolved knowledge base IDs based on the selection mode:
 //   - "all": fetches all knowledge bases for the tenant
 //   - "selected": uses the explicitly configured knowledge bases
@@ -870,6 +904,7 @@ func (s *sessionService) selectChatModelID(
 func (s *sessionService) resolveKnowledgeBasesFromAgent(
 	ctx context.Context,
 	customAgent *types.CustomAgent,
+	sessionTenantID uint64,
 ) []string {
 	if customAgent == nil {
 		return nil
@@ -877,7 +912,7 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 
 	switch customAgent.Config.KBSelectionMode {
 	case "all":
-		// Get own knowledge bases
+		// Get own knowledge bases (uses ctx TenantID = agent's tenant)
 		allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list all knowledge bases: %v", err)
@@ -889,23 +924,31 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 			kbIDSet[kb.ID] = true
 		}
 
-		// Also include shared knowledge bases the user has access to
-		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-		userIDVal := ctx.Value(types.UserIDContextKey)
-		if userIDVal != nil {
-			if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
-				sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
-				if err != nil {
-					logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
-				} else {
-					for _, info := range sharedList {
-						if info != nil && info.KnowledgeBase != nil && !kbIDSet[info.KnowledgeBase.ID] {
-							kbIDs = append(kbIDs, info.KnowledgeBase.ID)
-							kbIDSet[info.KnowledgeBase.ID] = true
+		// For shared agents (session tenant != agent tenant), only use the agent
+		// tenant's own KBs. Including the current user's shared KBs would leak
+		// unrelated KBs from other organisations into the agent's retrieval scope.
+		isSharedAgent := sessionTenantID != 0 && sessionTenantID != customAgent.TenantID
+		if !isSharedAgent {
+			tenantID := types.MustTenantIDFromContext(ctx)
+			userIDVal := ctx.Value(types.UserIDContextKey)
+			if userIDVal != nil {
+				if userID, ok := userIDVal.(string); ok && userID != "" && s.kbShareService != nil {
+					sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, userID, tenantID)
+					if err != nil {
+						logger.Warnf(ctx, "Failed to list shared knowledge bases: %v", err)
+					} else {
+						for _, info := range sharedList {
+							if info != nil && info.KnowledgeBase != nil && !kbIDSet[info.KnowledgeBase.ID] {
+								kbIDs = append(kbIDs, info.KnowledgeBase.ID)
+								kbIDSet[info.KnowledgeBase.ID] = true
+							}
 						}
 					}
 				}
 			}
+		} else {
+			logger.Infof(ctx, "Shared agent detected (session tenant %d != agent tenant %d): skipping user's shared KBs",
+				sessionTenantID, customAgent.TenantID)
 		}
 
 		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
@@ -1008,7 +1051,7 @@ func (s *sessionService) buildSearchTargets(
 				kbByID[kb.ID] = kb
 			}
 		}
-		userID, _ := ctx.Value(types.UserIDContextKey).(string)
+		userID, _ := types.UserIDFromContext(ctx)
 		for _, kbID := range knowledgeBaseIDs {
 			fullKBSet[kbID] = true
 			kb := kbByID[kbID]
@@ -1101,7 +1144,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	// Set up tracing attributes
 	logger.Infof(ctx, "Trigger event list: %v", methods)
 	span.SetAttributes(
-		attribute.String("request_id", ctx.Value(types.RequestIDContextKey).(string)),
+		attribute.String("request_id", func() string { id, _ := types.RequestIDFromContext(ctx); return id }()),
 		attribute.String("query", chatManage.Query),
 		attribute.String("method", strings.Join(methods, ",")),
 	)
@@ -1150,7 +1193,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		knowledgeBaseIDs, knowledgeIDs, query)
 
 	// Get tenant ID from context
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		logger.Error(ctx, "Failed to get tenant ID from context")
 		return nil, fmt.Errorf("tenant ID not found in context")
@@ -1168,7 +1211,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Create default retrieval parameters
-	userID, _ := ctx.Value(types.UserIDContextKey).(string)
+	userID, _ := types.UserIDFromContext(ctx)
 	chatManage := &types.ChatManage{
 		Query:            query,
 		RewriteQuery:     query,
@@ -1352,7 +1395,7 @@ func (s *sessionService) AgentQA(
 		logger.Infof(ctx, "RetrieveKBOnlyWhenMentioned is enabled and no @ mention found, KB retrieval disabled for this request")
 	} else {
 		// Use agent's configured knowledge bases based on KBSelectionMode
-		agentConfig.KnowledgeBases = s.resolveKnowledgeBasesFromAgent(ctx, customAgent)
+		agentConfig.KnowledgeBases = s.resolveKnowledgeBasesFromAgent(ctx, customAgent, session.TenantID)
 	}
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
@@ -1515,7 +1558,7 @@ func (s *sessionService) getContextManagerForSession(
 	chatModel chat.Chat,
 ) interfaces.ContextManager {
 	// Get tenant to access global context configuration
-	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenant, _ := types.TenantInfoFromContext(ctx)
 	// Determine which context config to use: tenant-level or default
 	var contextConfig *types.ContextConfig
 	if tenant != nil && tenant.ContextConfig != nil {
@@ -1666,8 +1709,9 @@ func (s *sessionService) consumeFallbackStream(
 				Type:      types.EventType(event.EventAgentFinalAnswer),
 				SessionID: chatManage.SessionID,
 				Data: event.AgentFinalAnswerData{
-					Content: response.Content,
-					Done:    response.Done,
+					Content:    response.Content,
+					Done:       response.Done,
+					IsFallback: true,
 				},
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
@@ -1702,8 +1746,9 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 		Type:      types.EventType(event.EventAgentFinalAnswer),
 		SessionID: chatManage.SessionID,
 		Data: event.AgentFinalAnswerData{
-			Content: content,
-			Done:    true,
+			Content:    content,
+			Done:       true,
+			IsFallback: true,
 		},
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to emit fallback answer event: %v", err)

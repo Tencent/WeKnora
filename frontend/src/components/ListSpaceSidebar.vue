@@ -1,15 +1,68 @@
 <template>
-  <aside class="list-space-sidebar">
-    <div class="sidebar-header-row">
-      <span class="sidebar-title">{{ $t('listSpaceSidebar.title') }}</span>
-      <div v-if="$slots.actions" class="sidebar-actions">
-        <slot name="actions" />
-      </div>
+  <div
+    ref="sidebarRef"
+    class="list-space-sidebar"
+    :class="{ expanded: isExpanded, dragging: isDragging }"
+    :style="{ width: isDragging ? `${dragWidth}px` : undefined }"
+  >
+    <!-- Collapsed: icon strip -->
+    <div v-if="!isExpanded" class="icon-strip">
+      <template v-if="mode === 'resource'">
+        <t-tooltip v-if="!hideAll" :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'all' }" @click="select('all')">
+            <t-icon name="layers" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
+          </div>
+        </t-tooltip>
+        <t-tooltip :content="tooltipText($t('listSpaceSidebar.mine'), countMine)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'mine' }" @click="select('mine')">
+            <t-icon name="user" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.mine') }}</span>
+          </div>
+        </t-tooltip>
+        <t-tooltip v-if="!hideShared" :content="tooltipText($t('listSpaceSidebar.sharedToMe'), countShared)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'shared' }" @click="select('shared')">
+            <t-icon name="share" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
+          </div>
+        </t-tooltip>
+        <template v-if="organizationsWithCount.length">
+          <div class="icon-strip-divider" />
+          <t-tooltip v-for="org in organizationsWithCount" :key="org.id" :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
+            <div class="icon-item-labeled" :class="{ active: selected === org.id }" @click="select(org.id)">
+              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
+              <span class="icon-label">{{ truncateLabel(org.name) }}</span>
+            </div>
+          </t-tooltip>
+        </template>
+      </template>
+
+      <template v-else>
+        <t-tooltip :content="tooltipText($t('listSpaceSidebar.all'), countAll)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'all' }" @click="select('all')">
+            <t-icon name="layers" size="16px" />
+            <span class="icon-label">{{ $t('listSpaceSidebar.all') }}</span>
+          </div>
+        </t-tooltip>
+        <t-tooltip :content="tooltipText($t('organization.createdByMe'), countCreated)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'created' }" @click="select('created')">
+            <t-icon name="usergroup-add" size="16px" />
+            <span class="icon-label">{{ $t('organization.createdByMe') }}</span>
+          </div>
+        </t-tooltip>
+        <t-tooltip :content="tooltipText($t('organization.joinedByMe'), countJoined)" placement="right" :show-arrow="false">
+          <div class="icon-item-labeled" :class="{ active: selected === 'joined' }" @click="select('joined')">
+            <t-icon name="usergroup" size="16px" />
+            <span class="icon-label">{{ $t('organization.joinedByMe') }}</span>
+          </div>
+        </t-tooltip>
+      </template>
     </div>
-    <nav class="sidebar-nav">
-      <!-- 全部：仅组织模式显示；知识库/智能体列表不展示「全部」 -->
+
+    <!-- Expanded: full nav panel -->
+    <nav v-else class="expanded-panel">
       <div
-        v-if="mode !== 'resource'"
+        v-if="!hideAll"
         class="sidebar-item"
         :class="{ active: selected === 'all' }"
         @click="select('all')"
@@ -20,7 +73,7 @@
         </div>
         <span v-if="countAll !== undefined" class="item-count">{{ countAll }}</span>
       </div>
-      <!-- 资源列表模式：我的 + 共享给我 + 空间列表 -->
+
       <template v-if="mode === 'resource'">
         <div
           class="sidebar-item"
@@ -34,7 +87,7 @@
           <span v-if="countMine !== undefined" class="item-count">{{ countMine }}</span>
         </div>
         <div
-          v-if="countShared !== undefined && countShared > 0"
+          v-if="!hideShared"
           class="sidebar-item"
           :class="{ active: selected === 'shared' }"
           @click="select('shared')"
@@ -43,7 +96,7 @@
             <t-icon name="share" class="item-icon" />
             <span class="item-label">{{ $t('listSpaceSidebar.sharedToMe') }}</span>
           </div>
-          <span class="item-count">{{ countShared }}</span>
+          <span v-if="countShared !== undefined && countShared > 0" class="item-count">{{ countShared }}</span>
         </div>
         <template v-if="organizationsWithCount.length">
           <div class="sidebar-section">
@@ -64,7 +117,7 @@
           </div>
         </template>
       </template>
-      <!-- 共享空间列表模式：我创建的 + 我加入的 -->
+
       <template v-else>
         <div
           class="sidebar-item"
@@ -90,35 +143,90 @@
         </div>
       </template>
     </nav>
-  </aside>
+
+    <!-- Drag handle on the right edge -->
+    <div
+      class="resize-handle"
+      @mousedown.prevent="onDragStart"
+    >
+      <div class="resize-handle-line" />
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Icon as TIcon } from 'tdesign-vue-next'
 import SpaceAvatar from './SpaceAvatar.vue'
 import { useOrganizationStore } from '@/stores/organization'
 
+const COLLAPSED_WIDTH = 56
+const EXPANDED_WIDTH = 208
+const SNAP_THRESHOLD = 120
+
 const props = withDefaults(
   defineProps<{
-    /** resource = 知识库/智能体（全部+我的+共享给我+空间列表）；organization = 共享空间（全部+我创建的+我加入的） */
     mode?: 'resource' | 'organization'
     modelValue: string
-    /** 全部数量（可选） */
+    collapsedKey?: string
     countAll?: number
-    /** 我的数量（resource 模式） */
     countMine?: number
-    /** 共享给我的数量（resource 模式） */
     countShared?: number
-    /** 各空间下的数量（resource 模式），key 为 organization_id */
     countByOrg?: Record<string, number>
-    /** 我创建的数量（organization 模式） */
     countCreated?: number
-    /** 我加入的数量（organization 模式） */
     countJoined?: number
+    hideAll?: boolean
+    hideShared?: boolean
   }>(),
-  { mode: 'resource', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined }
+  { mode: 'resource', collapsedKey: 'sidebar-collapsed-list', countAll: undefined, countMine: undefined, countShared: undefined, countByOrg: () => ({}), countCreated: undefined, countJoined: undefined, hideAll: false, hideShared: false }
 )
+
+const storageKey = props.collapsedKey + '-expanded'
+const sidebarRef = ref<HTMLElement | null>(null)
+const isExpanded = ref(localStorage.getItem(storageKey) === 'true')
+const isDragging = ref(false)
+const dragWidth = ref(isExpanded.value ? EXPANDED_WIDTH : COLLAPSED_WIDTH)
+
+let startX = 0
+let startWidth = 0
+
+function onDragStart(e: MouseEvent) {
+  isDragging.value = true
+  startX = e.clientX
+  startWidth = isExpanded.value ? EXPANDED_WIDTH : COLLAPSED_WIDTH
+  dragWidth.value = startWidth
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', onDragEnd)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onDragMove(e: MouseEvent) {
+  const delta = e.clientX - startX
+  const newWidth = Math.max(COLLAPSED_WIDTH, Math.min(EXPANDED_WIDTH + 20, startWidth + delta))
+  dragWidth.value = newWidth
+}
+
+function onDragEnd() {
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+
+  const shouldExpand = dragWidth.value >= SNAP_THRESHOLD
+  isExpanded.value = shouldExpand
+  localStorage.setItem(storageKey, String(shouldExpand))
+  isDragging.value = false
+  dragWidth.value = shouldExpand ? EXPANDED_WIDTH : COLLAPSED_WIDTH
+}
+
+function tooltipText(name: string, count?: number): string {
+  return count !== undefined ? `${name} (${count})` : name
+}
+
+function truncateLabel(text: string, max = 4): string {
+  return text.length > max ? text.slice(0, max) : text
+}
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -132,7 +240,6 @@ const selected = computed({
 
 const organizations = computed(() => orgStore.organizations || [])
 
-/** 资源模式下只展示数量大于 0 的空间 */
 const organizationsWithCount = computed(() => {
   if (props.mode !== 'resource') return organizations.value
   return organizations.value.filter((org) => (props.countByOrg?.[org.id] ?? 0) > 0)
@@ -150,95 +257,71 @@ function getOrgCount(orgId: string): number | undefined {
 onMounted(() => {
   orgStore.fetchOrganizations()
 })
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+})
 </script>
 
 <style scoped lang="less">
-// 筛选区：白底卡片感（与右侧内容区风格对调），细分界保持统一
 .list-space-sidebar {
-  width: 200px;
+  width: 56px;
   flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #e7ebf0;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
-  padding: 16px;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  z-index: 10;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &.expanded {
+    width: 208px;
+    margin-right: 0;
+  }
+
+  &.dragging {
+    transition: none;
+  }
 }
 
-.sidebar-header-row {
+/* ========== Drag handle ========== */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 12;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-  flex-shrink: 0;
-  min-height: 28px;
+  justify-content: center;
 
-  .sidebar-title {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.4;
-    color: #1d2129;
+  &:hover .resize-handle-line,
+  .dragging & .resize-handle-line {
+    opacity: 1;
+    background: var(--td-brand-color);
   }
 }
 
-.sidebar-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-
-  :deep(.t-button) {
-    padding: 0;
-    min-width: 24px;
-    width: 24px;
-    height: 24px;
-    font-size: 12px;
-    gap: 0;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    background: #f2f3f5 !important;
-    border: 1px solid #e5e9f2 !important;
-    color: #4e5969;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
-    &:hover {
-      background: #e5e9f2 !important;
-      border-color: #c9cdd4 !important;
-      color: #1d2129;
-    }
-  }
-  :deep(.t-button .t-button__icon),
-  :deep(.t-button .btn-icon-wrapper) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  :deep(.t-button .t-icon),
-  :deep(.t-button .btn-icon-wrapper) {
-    color: #07c05f;
-  }
-  :deep(.t-button:hover .t-icon),
-  :deep(.t-button:hover .btn-icon-wrapper) {
-    color: #07c05f;
-  }
-  :deep(.t-button .t-icon + .t-button__text:not(:empty)) {
-    margin-left: 0;
-  }
-  :deep(.sidebar-org-icon) {
-    width: 16px;
-    height: 16px;
-  }
+.resize-handle-line {
+  width: 2px;
+  height: 40px;
+  border-radius: 1px;
+  background: var(--td-bg-color-component-disabled);
+  opacity: 0.45;
+  transition: opacity 0.2s ease, background 0.2s ease;
 }
 
-.sidebar-nav {
+/* ========== Icon strip (collapsed) ========== */
+.icon-strip {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  gap: 4px;
+  width: 56px;
+  padding: 16px 0 8px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -250,15 +333,94 @@ onMounted(() => {
   }
 }
 
+.icon-item-labeled {
+  width: 46px;
+  padding: 6px 0 3px;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  color: var(--td-text-color-secondary);
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+  }
+
+  &.active {
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color);
+
+    &:hover {
+      background: var(--td-success-color-light);
+    }
+
+    .icon-label {
+      color: var(--td-brand-color);
+      font-weight: 520;
+    }
+  }
+
+  :deep(.space-avatar) {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+  }
+}
+
+.icon-label {
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--td-text-color-secondary);
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  transition: color 0.15s ease;
+}
+
+.icon-strip-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--td-bg-color-secondarycontainer);
+  margin: 4px 0;
+  flex-shrink: 0;
+}
+
+/* ========== Expanded panel ========== */
+.expanded-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 16px 10px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  border-right: 1px solid var(--td-component-stroke);
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ========== Nav items inside expanded panel ========== */
 .sidebar-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 12px;
-  border-radius: 6px;
-  color: #2d3139;
+  padding: 8px 10px;
+  border-radius: 7px;
+  color: var(--td-text-color-primary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -273,9 +435,9 @@ onMounted(() => {
 
   .item-icon {
     flex-shrink: 0;
-    color: #5c6470;
+    color: var(--td-text-color-secondary);
     font-size: 14px;
-    transition: color 0.2s ease;
+    transition: color 0.15s ease;
   }
 
   .item-avatar {
@@ -288,46 +450,44 @@ onMounted(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14px;
-    font-weight: 450;
+    font-size: 13px;
+    font-weight: 430;
     line-height: 1.4;
     letter-spacing: 0.01em;
   }
 
   .item-count {
     font-size: 12px;
-    color: #5c6470;
+    color: var(--td-text-color-secondary);
     font-weight: 500;
-    padding: 3px 7px;
+    padding: 2px 7px;
     border-radius: 8px;
-    background: #eef0f3;
+    background: var(--td-bg-color-secondarycontainer);
     margin-left: 6px;
     flex-shrink: 0;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
   }
 
   &:hover {
-    background: #f2f4f7;
-    color: #1d2129;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
 
     .item-icon {
-      color: #1d2129;
+      color: var(--td-text-color-primary);
     }
 
     .item-count {
-      background: #e5e9f2;
-      color: #1d2129;
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
     }
   }
 
   &.active {
-    background: #e6f7ec;
-    color: #07c05f;
-    font-weight: 500;
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color);
 
     .item-icon {
-      color: #07c05f;
+      color: var(--td-brand-color);
     }
 
     .item-label {
@@ -335,25 +495,25 @@ onMounted(() => {
     }
 
     .item-count {
-      background: #b8f0d3;
-      color: #07c05f;
-      font-weight: 600;
+      background: var(--td-success-color-light);
+      color: var(--td-brand-color);
+      font-weight: 520;
     }
 
     &:hover {
-      background: #d4f4e3;
+      background: var(--td-success-color-light);
     }
   }
 }
 
 .sidebar-section {
-  padding: 10px 8px 2px;
-  margin-top: 4px;
-  border-top: 1px solid #e7ebf0;
+  padding: 10px 8px 3px;
+  margin-top: 2px;
+  border-top: 1px solid var(--td-component-stroke);
 
   .section-title {
     font-size: 12px;
-    color: #86909c;
+    color: var(--td-text-color-secondary);
     font-weight: 600;
     line-height: 1.4;
   }

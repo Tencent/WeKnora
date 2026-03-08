@@ -107,16 +107,19 @@ services:
     restart: "no"
 
   docreader:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.docreader
     image: wechatopenai/weknora-docreader:latest
     container_name: WeKnora-docreader-dev
     ports:
       - "${DOCREADER_PORT:-50051}:50051"
+    volumes:
+      - docreader-tmp-dev:/tmp/docreader
     environment:
-      - MINIO_ENDPOINT=minio:9000
-      - STORAGE_TYPE=${STORAGE_TYPE:-}
-      - MINIO_PUBLIC_ENDPOINT=http://localhost:${MINIO_PORT:-9000}
+      - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
       - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
       interval: 30s
@@ -165,4 +168,5 @@ volumes:
   neo4j-data-dev:
   jaeger_data_dev:
   qdrant_data_dev:
+  docreader-tmp-dev:
 

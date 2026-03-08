@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.3.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.3.3-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -49,6 +49,33 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 **Website:** https://weknora.weixin.qq.com
 
 ## ✨ Latest Updates
+
+**v0.3.3 Highlights:**
+
+- 🧩 **Parent-Child Chunking**: Hierarchical parent-child chunking strategy for enhanced context management and more accurate retrieval
+- 📌 **Knowledge Base Pinning**: Pin frequently-used knowledge bases for quick access
+- 🔄 **Fallback Response**: Fallback response handling with UI indicators when no relevant results are found
+- 🖼️ **Image Icon Detection**: Automatic image icon detection and filtering in document processing
+- 🧹 **Passage Cleaning for Rerank**: Passage cleaning for rerank model to improve relevance scoring accuracy
+- 🐳 **Docker & Skill Management**: Enhanced Docker setup with entrypoint script and skill management
+- 🗄️ **Storage Auto-Creation**: Storage engine connectivity check with auto-creation of buckets
+- 🎨 **UI Consistency**: Standardized border styles, updated theme and component styles across the application
+- ⚡ **Chunk Size Tuning**: Updated chunk size configurations for knowledge base processing
+
+**v0.3.2 Highlights:**
+
+- 🔍 **Knowledge Search**: New "Knowledge Search" entry point with semantic retrieval, supporting bringing search results directly into the conversation window
+- ⚙️ **Parser & Storage Engine Configuration**: Configure document parser engines and storage engines for different sources in settings, with per-file-type parser selection in knowledge base
+- 🖼️ **Image Rendering in Local Storage**: Support image rendering during conversations in local storage mode, with optimized streaming image placeholders
+- 📄 **Document Preview**: Embedded document preview component for previewing user-uploaded original files
+- 🎨 **UI Optimization**: Knowledge base, agent, and shared space list page interaction redesign
+- 🗄️ **Milvus Support**: Added Milvus as a new vector database backend for knowledge retrieval
+- 🌋 **Volcengine TOS**: Added Volcengine TOS object storage support
+- 📊 **Mermaid Rendering**: Support mermaid diagram rendering in chat with fullscreen viewer, zoom, pan, toolbar and export
+- 💬 **Batch Conversation Management**: Batch management and delete all sessions functionality
+- 🔗 **Remote URL Knowledge**: Support creating knowledge entries from remote file URLs
+- 🧠 **Memory Graph Preview**: Preview of user-level memory graph visualization
+- 🔄 **Async Re-parse**: Async API for re-processing existing knowledge documents
 
 **v0.3.0 Highlights:**
 

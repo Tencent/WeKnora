@@ -78,6 +78,8 @@ type Message struct {
 	MentionedItems MentionedItems `json:"mentioned_items,omitempty" gorm:"type:jsonb,column:mentioned_items"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
+	// Whether this response is a fallback (no knowledge base match found)
+	IsFallback bool `json:"is_fallback,omitempty"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

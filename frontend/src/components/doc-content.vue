@@ -3,13 +3,50 @@
 import { marked } from "marked";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
-import { onMounted, ref, nextTick, onUnmounted, onUpdated, watch } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion } from "@/api/knowledge-base/index";
+import mermaid from "mermaid";
+import { onMounted, ref, nextTick, onUnmounted, watch } from "vue";
+import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
-import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL } from '@/utils/security';
+import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
+import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
+import DocumentPreview from '@/components/document-preview.vue';
 
 const { t } = useI18n();
+
+// Mermaid 初始化计数器，用于生成唯一ID
+let mermaidRenderCount = 0;
+
+// 初始化 Mermaid
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  securityLevel: 'strict',
+  fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: true,
+    curve: 'basis'
+  },
+  sequence: {
+    useMaxWidth: true,
+    diagramMarginX: 8,
+    diagramMarginY: 8,
+    actorMargin: 50,
+    width: 150,
+    height: 65
+  },
+  gantt: {
+    useMaxWidth: true,
+    leftPadding: 75,
+    gridLineStartPadding: 35,
+    barHeight: 20,
+    barGap: 4,
+    topPadding: 50
+  }
+});
+const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
+const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 marked.use({
   mangle: false,
@@ -19,14 +56,16 @@ marked.use({
 });
 const renderer = new marked.Renderer();
 let page = 1;
+let loadingChunks = false;
+let pendingRequestedPage: number | null = null;
+let pendingChunksBeforeLoad = 0;
 let doc = null;
 let down = ref()
 let mdContentWrap = ref()
 let url = ref('')
-// 视图模式：chunks / original / merged
-const viewMode = ref<'chunks' | 'original' | 'merged'>('merged');
-const originalContent = ref<string>('');
-const loadingOriginal = ref(false);
+// 视图模式：chunks / merged / preview
+// file 类型默认「预览」，URL / 手动创建 默认「全文」
+const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
 
 // 合并后的文档内容
 const mergedContent = ref<string>('');
@@ -102,9 +141,27 @@ onMounted(() => {
     doc.addEventListener('scroll', handleDetailsScroll);
   })
 })
-onUpdated(() => {
-  page = 1
-})
+watch(() => props.details?.id, () => {
+  page = 1;
+  loadingChunks = false;
+  pendingRequestedPage = null;
+  pendingChunksBeforeLoad = 0;
+});
+watch(() => props.details?.chunkLoading, (val) => {
+  if (val === false) {
+    if (pendingRequestedPage !== null) {
+      const currentLength = props.details?.md?.length || 0;
+      const hasError = Boolean(props.details?.chunkLoadError);
+      if (hasError && currentLength <= pendingChunksBeforeLoad) {
+        page = Math.max(1, pendingRequestedPage - 1);
+        MessagePlugin.warning(props.details?.chunkLoadError);
+      }
+    }
+    pendingRequestedPage = null;
+    pendingChunksBeforeLoad = 0;
+    loadingChunks = false;
+  }
+});
 onUnmounted(() => {
   doc.removeEventListener('scroll', handleDetailsScroll);
 })
@@ -133,6 +190,15 @@ renderer.image = function (href, title, text) {
 // 自定义代码块渲染器，只显示语言标签
 renderer.code = function (code, infostring) {
   const lang = (infostring || '').trim();
+
+  // Mermaid 图表处理
+  if (lang === 'mermaid') {
+    // 生成唯一ID
+    const id = `mermaid-${++mermaidRenderCount}`;
+    // 返回带有 mermaid 类的 div，后续由 mermaid.run() 处理
+    return `<div class="mermaid" id="${id}">${code}</div>`;
+  }
+
   let detectedLang = lang;
   let highlighted = '';
   if (lang && hljs.getLanguage(lang)) {
@@ -157,9 +223,6 @@ renderer.code = function (code, infostring) {
     </div>
   `;
 };
-const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"]);
-const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
-
 // 监听 chunks 变化，自动更新合并内容
 watch(() => props.details?.md, (newChunks) => {
   if (newChunks && newChunks.length > 0) {
@@ -168,6 +231,31 @@ watch(() => props.details?.md, (newChunks) => {
     mergedContent.value = '';
   }
 }, { immediate: true, deep: true });
+
+const previewSupportedTypes = new Set([
+  'pdf', 'docx', 'pptx', 'ppt', 'xlsx', 'xls', 'csv',
+  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg',
+  'txt', 'md', 'markdown', 'json', 'xml', 'html', 'css', 'js', 'ts',
+  'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml',
+  'ini', 'conf', 'log', 'sql', 'rs', 'rb', 'php', 'swift', 'kt',
+  'scala', 'r', 'lua', 'pl', 'toml',
+]);
+
+const canPreview = (): boolean => {
+  if (props.details?.type !== 'file') return false;
+  const ft = props.details?.file_type?.toLowerCase();
+  return !!ft && previewSupportedTypes.has(ft);
+};
+
+// 当文档详情加载完成时，file 类型自动切换到「预览」
+watch(() => props.details?.id, (newId) => {
+  if (!newId) return;
+  if (props.details?.type === 'file' && canPreview()) {
+    viewMode.value = 'preview';
+  } else {
+    viewMode.value = 'merged';
+  }
+});
 
 const isTextFile = (fileType?: string): boolean => {
   if (!fileType) return false;
@@ -179,38 +267,87 @@ const isMarkdownFile = (fileType?: string): boolean => {
   const markdownTypes = ['md', 'markdown'];
   return markdownTypes.includes(fileType.toLowerCase());
 };
-const loadOriginalContent = async () => {
-  if (!props.details.id || !props.details.type || props.details.type !== 'file') return;
-  const fileType = props.details.file_type?.toLowerCase();
-  if (!isTextFile(fileType)) {
-    MessagePlugin.warning(t('knowledgeBase.originalFileNotSupported') || '该文件类型不支持原文件展示，请下载查看');
-    return;
+const runMarkdownPostRenderPipeline = async () => {
+  await nextTick();
+  const renderRoot = mdContentWrap.value as ParentNode;
+  await hydrateProtectedFileImages(renderRoot);
+  const images = renderRoot?.querySelectorAll?.('img.markdown-image') as NodeListOf<HTMLImageElement> | undefined;
+  if (images) {
+    images.forEach(async item => {
+      const isValid = await checkImage(item.src);
+      if (!isValid) {
+        item.remove();
+      }
+    })
   }
-  loadingOriginal.value = true;
+  // 渲染 Mermaid 图表
+  await renderMermaidDiagrams();
+};
+
+watch(() => props.details.md, (newVal) => {
+  runMarkdownPostRenderPipeline();
+}, { immediate: true, deep: true })
+
+watch(() => viewMode.value, (mode) => {
+  if ((mode === 'chunks' || mode === 'merged') && props.visible) {
+    runMarkdownPostRenderPipeline();
+  }
+});
+
+watch(() => props.visible, (visible) => {
+  if (visible && (viewMode.value === 'chunks' || viewMode.value === 'merged')) {
+    runMarkdownPostRenderPipeline();
+  }
+});
+
+// 渲染 Mermaid 图表的函数
+const renderMermaidDiagrams = async () => {
   try {
-    const blob = await downKnowledgeDetails(props.details.id);
-    const text = await blob.text();
-    originalContent.value = text;
-  } catch (error: any) {
-    console.error('Failed to load original content:', error);
-    MessagePlugin.error(error?.message || t('knowledgeBase.loadOriginalFailed') || '加载原文件内容失败');
-  } finally {
-    loadingOriginal.value = false;
+    const mermaidElements = mdContentWrap.value?.querySelectorAll('.mermaid');
+    console.log('[Mermaid] Found mermaid elements:', mermaidElements?.length);
+    if (mermaidElements && mermaidElements.length > 0) {
+      await mermaid.run({
+        nodes: mermaidElements
+      });
+      console.log('[Mermaid] Rendering complete');
+      // 渲染完成后绑定点击事件
+      nextTick(() => {
+        bindMermaidClickEvents();
+      });
+    }
+  } catch (error) {
+    console.error('Mermaid rendering error:', error);
   }
 };
-watch(() => props.details.md, (newVal) => {
-  nextTick(async () => {
-    const images = mdContentWrap.value.querySelectorAll('img.markdown-image');
-    if (images) {
-      images.forEach(async item => {
-        const isValid = await checkImage(item.src);
-        if (!isValid) {
-          item.remove();
-        }
-      })
-    }
-  })
-}, { immediate: true, deep: true })
+
+// Mermaid 点击处理函数 - 必须在 bindMermaidClickEvents 之前定义
+const handleMermaidClick = (e: Event) => {
+  e.stopPropagation();
+  const target = e.currentTarget as HTMLElement;
+  const svg = target.querySelector('svg');
+  if (svg) {
+    openMermaidFullscreen(svg.outerHTML);
+  }
+};
+
+// 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
+const bindMermaidClickEvents = () => {
+  if (!mdContentWrap.value) {
+    console.log('[Mermaid] mdContentWrap is null');
+    return;
+  }
+  // 绑定在 .mermaid div 上，而不是 SVG 上
+  const mermaidDivs = mdContentWrap.value.querySelectorAll('.mermaid');
+  console.log('[Mermaid] Found mermaid divs:', mermaidDivs.length);
+  mermaidDivs.forEach((div, index) => {
+    const divEl = div as HTMLElement;
+    divEl.style.cursor = 'pointer';
+    // 移除旧的事件监听器（避免重复绑定）
+    divEl.removeEventListener('click', handleMermaidClick);
+    divEl.addEventListener('click', handleMermaidClick);
+    console.log(`[Mermaid] Bound click event to div ${index}`);
+  });
+};
 
 // 安全地处理 Markdown 内容（使用 marked）
 const processMarkdown = (markdownText) => {
@@ -252,7 +389,6 @@ const handleClose = () => {
   emit("closeDoc", false);
   doc.scrollTop = 0;
   viewMode.value = 'merged';
-  originalContent.value = '';
 };
 
 // 获取显示标题
@@ -271,11 +407,11 @@ const getDisplayTitle = () => {
 const getTypeLabel = () => {
   switch (props.details.type) {
     case 'url':
-      return t('knowledgeBase.typeURL') || '网页';
+      return t('knowledgeBase.typeURL');
     case 'manual':
-      return t('knowledgeBase.typeManual') || '手动创建';
+      return t('knowledgeBase.typeManual');
     case 'file':
-      return props.details.file_type ? props.details.file_type.toUpperCase() : t('knowledgeBase.typeFile') || '文件';
+      return props.details.file_type ? props.details.file_type.toUpperCase() : t('knowledgeBase.typeFile');
     default:
       return '';
   }
@@ -299,12 +435,12 @@ const getTypeTheme = () => {
 const getContentLabel = () => {
   switch (props.details.type) {
     case 'url':
-      return t('knowledgeBase.webContent') || '网页内容';
+      return t('knowledgeBase.webContent');
     case 'manual':
-      return t('knowledgeBase.documentContent') || '文档内容';
+      return t('knowledgeBase.documentContent');
     case 'file':
     default:
-      return t('knowledgeBase.fileContent') || '文件内容';
+      return t('knowledgeBase.fileContent');
   }
 };
 
@@ -312,12 +448,12 @@ const getContentLabel = () => {
 const getTimeLabel = () => {
   switch (props.details.type) {
     case 'url':
-      return t('knowledgeBase.importTime') || '导入时间';
+      return t('knowledgeBase.importTime');
     case 'manual':
-      return t('knowledgeBase.createTime') || '创建时间';
+      return t('knowledgeBase.createTime');
     case 'file':
     default:
-      return t('knowledgeBase.uploadTime') || '上传时间';
+      return t('knowledgeBase.uploadTime');
   }
 };
 
@@ -331,7 +467,7 @@ const getChunkMeta = (item: any) => {
   if (!item) return '';
   const parts = [];
   if (item.char_count) {
-    parts.push(`${item.char_count} ${t('knowledgeBase.characters') || '字符'}`);
+    parts.push(`${item.char_count} ${t('knowledgeBase.characters')}`);
   }
   if (item.token_count) {
     parts.push(`${item.token_count} tokens`);
@@ -385,27 +521,27 @@ const deletingQuestion = ref<{ chunkIndex: number; questionId: string } | null>(
 // 删除生成的问题
 const handleDeleteQuestion = async (item: any, chunkIndex: number, question: GeneratedQuestion) => {
   if (!item || !item.id) {
-    MessagePlugin.error(t('common.error') || '操作失败');
+    MessagePlugin.error(t('common.error'));
     return;
   }
 
   // 检查是否是旧格式数据（无法删除）
   if (question.id.startsWith('legacy-')) {
-    MessagePlugin.warning(t('knowledgeBase.legacyQuestionCannotDelete') || '旧格式问题无法删除，请重新生成问题');
+    MessagePlugin.warning(t('knowledgeBase.legacyQuestionCannotDelete'));
     return;
   }
 
   const confirmDialog = DialogPlugin.confirm({
-    header: t('common.confirmDelete') || '确认删除',
-    body: t('knowledgeBase.confirmDeleteQuestion') || '确定要删除这个问题吗？删除后将同时移除对应的向量索引。',
-    confirmBtn: t('common.confirm') || '确认',
-    cancelBtn: t('common.cancel') || '取消',
+    header: t('common.confirmDelete'),
+    body: t('knowledgeBase.confirmDeleteQuestion'),
+    confirmBtn: t('common.confirm'),
+    cancelBtn: t('common.cancel'),
     onConfirm: async () => {
       confirmDialog.hide();
       deletingQuestion.value = { chunkIndex, questionId: question.id };
       try {
         await deleteGeneratedQuestion(item.id, question.id);
-        MessagePlugin.success(t('common.deleteSuccess') || '删除成功');
+        MessagePlugin.success(t('common.deleteSuccess'));
         
         // 更新本地数据
         const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
@@ -420,7 +556,7 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
         // 通知父组件刷新数据
         emit('questionDeleted', { chunkId: item.id, questionId: question.id });
       } catch (error: any) {
-        MessagePlugin.error(error?.message || t('common.deleteFailed') || '删除失败');
+        MessagePlugin.error(error?.message || t('common.deleteFailed'));
       } finally {
         deletingQuestion.value = null;
       }
@@ -434,6 +570,50 @@ const handleDeleteQuestion = async (item: any, chunkIndex: number, question: Gen
 // 检查是否正在删除某个问题
 const isDeleting = (chunkIndex: number, questionId: string) => {
   return deletingQuestion.value?.chunkIndex === chunkIndex && deletingQuestion.value?.questionId === questionId;
+};
+
+// 父 Chunk 上下文展开状态
+const parentContextExpanded = ref<Set<number>>(new Set());
+const parentContextCache = ref<Map<string, string>>(new Map());
+const parentContextLoading = ref<Set<number>>(new Set());
+
+const hasParentChunk = (item: any) => !!item?.parent_chunk_id;
+
+const isParentExpanded = (index: number) => parentContextExpanded.value.has(index);
+
+const toggleParentContext = async (item: any, index: number) => {
+  if (parentContextExpanded.value.has(index)) {
+    parentContextExpanded.value.delete(index);
+    parentContextExpanded.value = new Set(parentContextExpanded.value);
+    return;
+  }
+  
+  const parentId = item.parent_chunk_id;
+  if (!parentContextCache.value.has(parentId)) {
+    parentContextLoading.value.add(index);
+    parentContextLoading.value = new Set(parentContextLoading.value);
+    try {
+      const result: any = await getChunkByIdOnly(parentId);
+      if (result.success && result.data) {
+        parentContextCache.value.set(parentId, result.data.content || '');
+        parentContextCache.value = new Map(parentContextCache.value);
+      }
+    } catch (err) {
+      MessagePlugin.error(t('knowledgeBase.parentContextLoadFailed'));
+      return;
+    } finally {
+      parentContextLoading.value.delete(index);
+      parentContextLoading.value = new Set(parentContextLoading.value);
+    }
+  }
+  
+  parentContextExpanded.value.add(index);
+  parentContextExpanded.value = new Set(parentContextExpanded.value);
+  await runMarkdownPostRenderPipeline();
+};
+
+const getParentContent = (item: any) => {
+  return parentContextCache.value.get(item.parent_chunk_id) || '';
 };
 
 const downloadFile = () => {
@@ -460,12 +640,15 @@ const downloadFile = () => {
     });
 };
 const handleDetailsScroll = () => {
-  if (doc) {
-    let pageNum = Math.ceil(props.details.total / 20);
+  if (doc && !loadingChunks) {
+    let pageNum = Math.ceil(props.details.total / 25);
     const { scrollTop, scrollHeight, clientHeight } = doc;
-    if (scrollTop + clientHeight >= scrollHeight) {
-      page++;
-      if (props.details.md.length < props.details.total && page <= pageNum) {
+    if (scrollTop + clientHeight >= scrollHeight - 8) {
+      if (props.details.md.length < props.details.total && page + 1 <= pageNum) {
+        page++;
+        loadingChunks = true;
+        pendingRequestedPage = page;
+        pendingChunksBeforeLoad = props.details.md.length;
         emit("getDoc", page);
       }
     }
@@ -498,7 +681,7 @@ const handleDetailsScroll = () => {
       
       <!-- URL类型专属区域 -->
       <div v-else-if="details.type === 'url'" class="url_box">
-        <span class="label">{{ $t('knowledgeBase.urlSource') || '来源网址' }}</span>
+        <span class="label">{{ $t('knowledgeBase.urlSource') }}</span>
         <div class="url_link_box">
           <a :href="details.source" target="_blank" class="url_link">
             <t-icon name="link" size="14px" />
@@ -510,7 +693,7 @@ const handleDetailsScroll = () => {
       
       <!-- 手动创建类型专属区域 -->
       <div v-else-if="details.type === 'manual'" class="manual_box">
-        <span class="label">{{ $t('knowledgeBase.documentTitle') || '文档标题' }}</span>
+        <span class="label">{{ $t('knowledgeBase.documentTitle') }}</span>
         <div class="manual_title_box">
           <span class="manual_title">{{ details.title }}</span>
         </div>
@@ -521,20 +704,31 @@ const handleDetailsScroll = () => {
           <div class="title-row">
             <span class="label">{{ getContentLabel() }}</span>
             <span v-if="details.total > 0" class="chunk-count">
-              {{ $t('knowledgeBase.chunkCount', { count: details.total }) || `共 ${details.total} 个片段` }}
+              {{ $t('knowledgeBase.chunkCount', { count: details.total }) }}
             </span>
           </div>
           <div class="meta-row">
             <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
             <div class="view-mode-buttons">
               <t-button 
+                v-if="canPreview()"
+                size="small" 
+                :variant="viewMode === 'preview' ? 'base' : 'outline'" 
+                :theme="viewMode === 'preview' ? 'primary' : 'default'"
+                @click="viewMode = 'preview'"
+                class="view-mode-btn"
+              >
+                {{ $t('preview.tab') }}
+              </t-button>
+              <t-button 
+                v-if="!canPreview()"
                 size="small" 
                 :variant="viewMode === 'merged' ? 'base' : 'outline'" 
                 :theme="viewMode === 'merged' ? 'primary' : 'default'"
                 @click="viewMode = 'merged'"
                 class="view-mode-btn"
               >
-                {{ $t('knowledgeBase.viewMerged') || '全文' }}
+                {{ $t('knowledgeBase.viewMerged') }}
               </t-button>
               <t-button 
                 size="small" 
@@ -543,9 +737,8 @@ const handleDetailsScroll = () => {
                 @click="viewMode = 'chunks'"
                 class="view-mode-btn"
               >
-                {{ $t('knowledgeBase.viewChunks') || '分块' }}
+                {{ $t('knowledgeBase.viewChunks') }}
               </t-button>
-
             </div>
           </div>
         </div>
@@ -567,26 +760,46 @@ const handleDetailsScroll = () => {
             :class="getChunkClass(index)"
           >
             <div class="chunk-header">
-              <span class="chunk-index">{{ $t('knowledgeBase.segment') || '片段' }} {{ index + 1 }}</span>
+              <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
               <div class="chunk-header-right">
+                <t-tag 
+                  v-if="hasParentChunk(item)" 
+                  size="small" 
+                  theme="primary" 
+                  variant="light"
+                >
+                  {{ $t('knowledgeBase.childChunk') }}
+                </t-tag>
                 <t-tag 
                   v-if="getGeneratedQuestions(item).length > 0" 
                   size="small" 
                   theme="success" 
                   variant="light"
                 >
-                  {{ $t('knowledgeBase.questions') || '问题' }} {{ getGeneratedQuestions(item).length }}
+                  {{ $t('knowledgeBase.questions') }} {{ getGeneratedQuestions(item).length }}
                 </t-tag>
                 <span class="chunk-meta">{{ getChunkMeta(item) }}</span>
               </div>
             </div>
             <div class="md-content" v-html="processMarkdown(item.content)"></div>
             
+            <!-- 父 Chunk 上下文展开 -->
+            <div v-if="hasParentChunk(item)" class="parent-context-section">
+              <div class="parent-context-toggle" @click="toggleParentContext(item, index)">
+                <t-icon v-if="!parentContextLoading.has(index)" :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
+                <t-loading v-else size="small" style="width: 14px; height: 14px;" />
+                <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
+              </div>
+              <div v-show="isParentExpanded(index)" class="parent-context-content">
+                <div class="md-content" v-html="processMarkdown(getParentContent(item))"></div>
+              </div>
+            </div>
+            
             <!-- 生成的问题展示 -->
             <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
               <div class="questions-toggle" @click="toggleQuestions(index)">
                 <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                <span>{{ $t('knowledgeBase.generatedQuestions') || '生成的问题' }} ({{ getGeneratedQuestions(item).length }})</span>
+                <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ getGeneratedQuestions(item).length }})</span>
               </div>
               <div v-show="isExpanded(index)" class="questions-list">
                 <div 
@@ -615,6 +828,16 @@ const handleDetailsScroll = () => {
         </div>
       </div>
       
+      <!-- 文档预览视图 -->
+      <div v-else-if="viewMode === 'preview'">
+        <DocumentPreview
+          :knowledgeId="details.id"
+          :fileType="details.file_type"
+          :fileName="details.title"
+          :active="viewMode === 'preview'"
+        />
+      </div>
+      
       <template #footer>
         <t-button @click="handleClose">{{ $t('common.confirm') }}</t-button>
         <t-button theme="default" @click="handleClose">{{ $t('common.cancel') }}</t-button>
@@ -632,9 +855,9 @@ const handleDetailsScroll = () => {
 // 代码块样式
 :deep(.code-block-wrapper) {
   margin: 12px 0;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--td-component-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--td-bg-color-container);
   overflow: hidden;
   box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 
@@ -642,17 +865,17 @@ const handleDetailsScroll = () => {
     display: flex;
     align-items: center;
     padding: 8px 12px;
-    background: #f3f4f6;
-    border-bottom: 1px solid #e5e7eb;
+    background: var(--td-bg-color-secondarycontainer);
+    border-bottom: 1px solid var(--td-component-stroke);
     font-size: 12px;
     font-weight: 600;
-    color: #1f2937;
+    color: var(--td-text-color-primary);
   }
 
   .code-block-pre {
     margin: 0;
     padding: 12px;
-    background: #f6f8fa;
+    background: var(--td-bg-color-secondarycontainer);
     overflow: auto;
     font-size: 13px;
     line-height: 1.5;
@@ -696,7 +919,7 @@ const handleDetailsScroll = () => {
 }
 
 .label {
-  color: #000000e6;
+  color: var(--td-text-color-primary);
   font-size: 14px;
   font-style: normal;
   font-weight: 500;
@@ -716,8 +939,8 @@ const handleDetailsScroll = () => {
   padding: 5px 8px;
   align-items: center;
   border-radius: 3px;
-  border: 1px solid #dcdcdc;
-  background: #30323605;
+  border: 1px solid var(--td-component-border);
+  background: var(--td-bg-color-container-hover);
   word-break: break-all;
   text-align: justify;
 }
@@ -726,7 +949,7 @@ const handleDetailsScroll = () => {
   margin-left: 18px;
   display: flex;
   overflow: hidden;
-  color: #07c05f;
+  color: var(--td-brand-color);
 
   .download_box {
     width: 16px;
@@ -740,21 +963,21 @@ const handleDetailsScroll = () => {
 // URL链接区域
 .url_link_box {
   border-radius: 4px;
-  border: 1px solid #d0e8dc;
-  background: #f0fdf4;
+  border: 1px solid var(--td-success-color-focus);
+  background: var(--td-success-color-light);
   padding: 8px 12px;
   
   .url_link {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #059669;
+    color: var(--td-brand-color-active);
     text-decoration: none;
     transition: all 0.2s ease;
     
     &:hover {
-      color: #07c05f;
-      background: #e6f7ed;
+      color: var(--td-brand-color);
+      background: var(--td-success-color-light);
       border-radius: 3px;
       padding: 4px 6px;
       margin: -4px -6px;
@@ -773,7 +996,7 @@ const handleDetailsScroll = () => {
     .jump-icon {
       transition: transform 0.2s ease;
       flex-shrink: 0;
-      color: #059669;
+      color: var(--td-brand-color-active);
     }
   }
 }
@@ -781,12 +1004,12 @@ const handleDetailsScroll = () => {
 // 手动创建标题区域
 .manual_title_box {
   border-radius: 4px;
-  border: 1px solid #dcdcdc;
-  background: #f0fdf4;
+  border: 1px solid var(--td-component-border);
+  background: var(--td-success-color-light);
   padding: 8px 12px;
   
   .manual_title {
-    color: #1d2129;
+    color: var(--td-text-color-primary);
     font-size: 14px;
     font-weight: 500;
     word-break: break-word;
@@ -821,9 +1044,9 @@ const handleDetailsScroll = () => {
   }
 
   .chunk-count {
-    color: #07c05f;
+    color: var(--td-brand-color);
     font-size: 12px;
-    background: #07c05f14;
+    background: var(--td-brand-color)14;
     padding: 4px 8px;
     border-radius: 12px;
   }
@@ -844,7 +1067,7 @@ const handleDetailsScroll = () => {
 }
 
 .time {
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-size: 12px;
   font-style: normal;
   font-weight: 400;
@@ -853,10 +1076,10 @@ const handleDetailsScroll = () => {
 
 .no_content {
   margin-top: 12px;
-  color: #00000066;
+  color: var(--td-text-color-disabled);
   font-size: 12px;
   padding: 16px;
-  background: #fbfbfb;
+  background: var(--td-bg-color-container);
   text-align: center;
 }
 
@@ -874,15 +1097,15 @@ const handleDetailsScroll = () => {
   border: 1px solid transparent;
   
   &.chunk-even {
-    background: #3032360f;
+    background: var(--td-bg-color-container-hover);
   }
   
   &.chunk-odd {
-    background: #07c05f0d;
+    background: var(--td-brand-color)0d;
   }
   
   &:hover {
-    border-color: #07c05f;
+    border-color: var(--td-brand-color);
     box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
   }
 }
@@ -893,10 +1116,10 @@ const handleDetailsScroll = () => {
   justify-content: space-between;
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #e7e7e7;
+  border-bottom: 1px solid var(--td-component-stroke);
   
   .chunk-index {
-    color: #00000099;
+    color: var(--td-text-color-placeholder);
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.5px;
@@ -909,8 +1132,44 @@ const handleDetailsScroll = () => {
   }
   
   .chunk-meta {
-    color: #00000066;
+    color: var(--td-text-color-disabled);
     font-size: 11px;
+  }
+}
+
+// 父 Chunk 上下文样式
+.parent-context-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--td-component-stroke);
+}
+
+.parent-context-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--td-brand-color);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+  
+  &:hover {
+    color: var(--td-brand-color);
+  }
+}
+
+.parent-context-content {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--td-brand-color-light);
+  border-radius: 4px;
+  border-left: 3px solid var(--td-brand-color);
+  
+  .md-content {
+    color: var(--td-text-color-secondary);
+    font-size: 13px;
   }
 }
 
@@ -918,7 +1177,7 @@ const handleDetailsScroll = () => {
 .questions-section {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px dashed #e0e0e0;
+  border-top: 1px dashed var(--td-component-stroke);
 }
 
 .questions-toggle {
@@ -926,14 +1185,14 @@ const handleDetailsScroll = () => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  color: #059669;
+  color: var(--td-brand-color-active);
   font-size: 12px;
   font-weight: 500;
   padding: 4px 0;
   transition: color 0.2s ease;
   
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -948,15 +1207,15 @@ const handleDetailsScroll = () => {
   gap: 8px;
   padding: 6px 8px;
   margin-bottom: 4px;
-  background: #f0fdf4;
+  background: var(--td-success-color-light);
   border-radius: 4px;
   font-size: 13px;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
   line-height: 1.5;
   transition: background-color 0.2s ease;
   
   &:hover {
-    background: #e6f7ed;
+    background: var(--td-success-color-light);
     
     .delete-question-btn {
       opacity: 1;
@@ -964,7 +1223,7 @@ const handleDetailsScroll = () => {
   }
   
   .question-icon {
-    color: #059669;
+    color: var(--td-brand-color-active);
     flex-shrink: 0;
     margin-top: 2px;
   }
@@ -977,11 +1236,11 @@ const handleDetailsScroll = () => {
   .delete-question-btn {
     opacity: 0;
     flex-shrink: 0;
-    color: #999;
+    color: var(--td-text-color-placeholder);
     transition: opacity 0.2s ease, color 0.2s ease;
     
     &:hover {
-      color: #e34d59;
+      color: var(--td-error-color);
     }
   }
 }
@@ -989,7 +1248,7 @@ const handleDetailsScroll = () => {
 .md-content {
   word-break: break-word;
   line-height: 1.6;
-  color: #1d2129;
+  color: var(--td-text-color-primary);
 }
 
 // 保留旧样式作为兼容（已被chunk-item替代）

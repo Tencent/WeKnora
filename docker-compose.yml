@@ -37,6 +37,7 @@ services:
       - "${APP_PORT:-8080}:8080"
     volumes:
       - data-files:/data/files
+      - docreader-tmp:/tmp/docreader:ro
       # Optional: mount custom config file
       # - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
@@ -81,7 +82,10 @@ services:
       - QDRANT_COLLECTION=${QDRANT_COLLECTION:-weknora_embeddings}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
       - QDRANT_USE_TLS=${QDRANT_USE_TLS:-false}
-      - DOCREADER_ADDR=docreader:50051
+      - MILVUS_ADDRESS=milvus:19530
+      - MILVUS_COLLECTION=${MILVUS_COLLECTION:-weknora_embeddings}
+      - DOCREADER_ADDR=${DOCREADER_ADDR:-docreader:50051}
+      - DOCREADER_TRANSPORT=${DOCREADER_TRANSPORT:-grpc}
       - STORAGE_TYPE=${STORAGE_TYPE:-}
       - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-}
       - AUTO_RECOVER_DIRTY=${AUTO_RECOVER_DIRTY:-true}
@@ -141,13 +145,15 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.docreader
+      args:
+        - APT_MIRROR=${APT_MIRROR:-}
     container_name: WeKnora-docreader
     ports:
       - "${DOCREADER_PORT:-50051}:50051"
+    volumes:
+      - docreader-tmp:/tmp/docreader
     environment:
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_PUBLIC_ENDPOINT=http://localhost:${MINIO_PORT:-9000}
-      - MINERU_ENDPOINT=${MINERU_ENDPOINT:-}
+      - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
     healthcheck:
       test: ["CMD", "grpc_health_probe", "-addr=:50051"]
@@ -275,6 +281,34 @@ services:
       - qdrant
       - full
 
+  milvus:
+    image: milvusdb/milvus:v2.6.11
+    container_name: WeKnora-milvus
+    security_opt:
+      - seccomp:unconfined
+    command: ["milvus", "run", "standalone"]
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+      - DEPLOY_MODE=STANDALONE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    profiles:
+      - milvus
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -282,7 +316,9 @@ networks:
 volumes:
   postgres-data:
   data-files:
+  docreader-tmp:
   jaeger_data:
   minio_data:
   neo4j-data:
   qdrant_data:
+  milvus_data:

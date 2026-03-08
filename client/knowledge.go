@@ -188,25 +188,35 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 	return &response.Data, nil
 }
 
-// CreateKnowledgeFromURL creates a knowledge entry from a web URL
+// CreateKnowledgeFromURLRequest contains the parameters for creating a knowledge entry from a URL.
+// When FileName or FileType is provided (or the URL path has a known file extension such as .pdf/.docx/.doc/.txt/.md),
+// the server automatically switches to file-download mode instead of web-page crawling.
+type CreateKnowledgeFromURLRequest struct {
+	// URL is the target URL (required)
+	URL string `json:"url"`
+	// FileName is the optional file name; used to hint file-download mode when URL has no extension
+	FileName string `json:"file_name,omitempty"`
+	// FileType is the optional file type (e.g. "pdf"); used to hint file-download mode
+	FileType string `json:"file_type,omitempty"`
+	// EnableMultimodel is the optional flag to enable multimodal processing
+	EnableMultimodel *bool `json:"enable_multimodel,omitempty"`
+	// Title is the optional title for the knowledge entry
+	Title string `json:"title,omitempty"`
+	// TagID is the optional tag ID to associate with the knowledge entry
+	TagID string `json:"tag_id,omitempty"`
+}
+
+// CreateKnowledgeFromURL creates a knowledge entry from a URL.
+// When req.FileName or req.FileType is provided (or the URL path has a known file extension),
+// the server automatically switches to file-download mode instead of web-page crawling.
 func (c *Client) CreateKnowledgeFromURL(
 	ctx context.Context,
 	knowledgeBaseID string,
-	url string,
-	enableMultimodel *bool,
-	title string,
+	req CreateKnowledgeFromURLRequest,
 ) (*Knowledge, error) {
 	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/url", knowledgeBaseID)
 
-	reqBody := struct {
-		URL              string `json:"url"`
-		EnableMultimodel *bool  `json:"enable_multimodel"`
-		Title            string `json:"title"`
-	}{
-		URL:              url,
-		EnableMultimodel: enableMultimodel,
-		Title:            title,
-	}
+	reqBody := req
 
 	resp, err := c.doRequest(ctx, http.MethodPost, path, reqBody, nil)
 	if err != nil {

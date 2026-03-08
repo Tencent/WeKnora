@@ -436,7 +436,7 @@ function handleGoToOrgSettings(orgId: string) {
     align-items: center;
     gap: 3px;
     padding: 0px 4px;
-    background: #f0f0f0;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 4px;
   }
 
@@ -471,7 +471,7 @@ function handleGoToOrgSettings(orgId: string) {
   max-height: 320px;
   overflow-y: auto;
   border-radius: 6px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--td-shadow-2);
 }
 
 .org-select-dropdown-popup .t-select-option {

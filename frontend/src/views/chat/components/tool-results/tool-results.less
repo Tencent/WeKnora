@@ -4,15 +4,15 @@
  */
 
 // Color scheme for relevance levels
-@relevance-high: #00a870;
-@relevance-medium: #ff9800;
-@relevance-low: #757575;
-@relevance-weak: #bdbdbd;
+@relevance-high: var(--td-success-color);
+@relevance-medium: var(--td-warning-color);
+@relevance-low: var(--td-text-color-placeholder);
+@relevance-weak: var(--td-text-color-disabled);
 
 // Card colors
-@card-bg: #ffffff;
-@card-border: #e5e7eb;
-@card-hover-border: #07c05f;
+@card-bg: var(--td-bg-color-container);
+@card-border: var(--td-component-stroke);
+@card-hover-border: var(--td-brand-color);
 @card-radius: 6px;
 @card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 @card-shadow-hover: 0 2px 6px rgba(7, 192, 95, 0.08);
@@ -43,7 +43,7 @@
 
   &.medium {
     background-color: rgba(255, 152, 0, 0.12);
-    color: #d67700;
+    color: var(--td-warning-color);
   }
 
   &.low {
@@ -53,7 +53,7 @@
 
   &.weak {
     background-color: rgba(189, 189, 189, 0.12);
-    color: #666;
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -64,8 +64,8 @@
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 10px;
-  background-color: #f3f4f6;
-  color: #6b7280;
+  background-color: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   gap: 2px;
   line-height: 1.4;
 }
@@ -122,14 +122,14 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
 
 .result-content {
   padding: 0;
   border-top: 1px solid @card-border;
-  background: white;
+  background: var(--td-bg-color-container);
   max-height: 0;
   opacity: 0;
   overflow: hidden;
@@ -144,7 +144,7 @@
 
 .expand-icon {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   transition: transform 0.15s ease, color 0.15s ease;
 
   &.expanded {
@@ -164,7 +164,7 @@
 .info-section-title {
   font-size: 11px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 8px;
@@ -178,14 +178,14 @@
   line-height: 1.5;
 
   .field-label {
-    color: #6b7280;
+    color: var(--td-text-color-secondary);
     min-width: 80px;
     flex-shrink: 0;
     font-weight: 500;
   }
 
   .field-value {
-    color: #374151;
+    color: var(--td-text-color-primary);
     flex: 1;
     word-break: break-word;
   }
@@ -203,7 +203,7 @@
 .stats-title {
   font-size: 12px;
   font-weight: 600;
-  color: #374151;
+  color: var(--td-text-color-primary);
   margin-bottom: 6px;
 }
 
@@ -215,7 +215,7 @@
 
 .stats-item {
   font-size: 11px;
-  color: #6b7280;
+  color: var(--td-text-color-secondary);
   display: flex;
   justify-content: space-between;
   line-height: 1.5;
@@ -235,7 +235,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px 0;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -245,7 +245,7 @@
 // Content preview (truncated)
 .content-preview {
   font-size: 12px;
-  color: #374151;
+  color: var(--td-text-color-primary);
   line-height: 1.6;
   max-height: 60px;
   overflow: hidden;
@@ -258,12 +258,12 @@
 // Full content
 .full-content {
   font-size: 12px;
-  color: #374151;
+  color: var(--td-text-color-primary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   padding: 10px;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: 4px;
   border: 1px solid @card-border;
 }
@@ -274,8 +274,8 @@
   font-size: 11px;
   border-radius: 4px;
   border: 1px solid @card-border;
-  background: white;
-  color: #6b7280;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
   font-weight: 500;
@@ -291,10 +291,10 @@
 .empty-state {
   padding: 20px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--td-text-color-placeholder);
   font-size: 12px;
   font-style: italic;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   border-radius: @card-radius;
   border: 1px dashed @card-border;
 }
@@ -303,7 +303,7 @@
 .code-block {
   font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
   font-size: 11px;
-  background: #f9fafb;
+  background: var(--td-bg-color-secondarycontainer);
   padding: 8px;
   border-radius: 4px;
   border: 1px solid @card-border;

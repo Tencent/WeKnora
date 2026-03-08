@@ -6,6 +6,21 @@
         cursor: pointer;
     }
 
+    // Mermaid 图表样式
+    .mermaid {
+        margin: 16px 0;
+        padding: 16px;
+        background: var(--td-bg-color-secondarycontainer);
+        border-radius: 8px;
+        overflow-x: auto;
+        text-align: center;
+
+        svg {
+            max-width: 100%;
+            height: auto;
+        }
+    }
+
     h1,
     h2,
     h3,
@@ -14,7 +29,7 @@
     h6 {
         margin-top: 5px;
         font-weight: bold;
-        color: #00000099;
+        color: var(--td-text-color-placeholder);
         font-family: "PingFang SC", "Cascadia Code";
         transition: all 0.2s ease-out;
         font-size: 20px;
@@ -65,7 +80,7 @@
 
     h2 a,
     h3 a {
-        color: #34495e;
+        color: var(--td-text-color-primary);
     }
 
     p,
@@ -101,7 +116,7 @@
     hr {
         padding: 0;
         margin: 32px 0;
-        border-top: 0.5rem dotted #0590ff57;
+        border-top: 0.5rem dotted var(--td-brand-color-focus);
         overflow: hidden;
         box-sizing: content-box;
     }
@@ -180,8 +195,8 @@
         padding: 0.8em 1.4rem;
         margin: 1em 0;
         font-weight: 400;
-        border-left: 4px solid #2196f3;
-        background-color: #2196f321;
+        border-left: 4px solid var(--td-brand-color);
+        background-color: var(--td-brand-color)21;
         border-radius: 0px 8px 8px 0px;
         box-shadow: rgb(149 149 149 / 13%) 0px 5px 10px;
     }
@@ -196,19 +211,19 @@
     }
 
     table tr {
-        border-top: 1px solid #2196f31f;
+        border-top: 1px solid var(--td-brand-color-focus);
         margin: 0;
         padding: 0;
     }
 
     table tr:nth-child(2n),
     thead {
-        background-color: #fafafa;
+        background-color: var(--td-bg-color-secondarycontainer);
     }
 
     table tr th {
         font-weight: bold;
-        border: 1px solid #9b9b9b3b;
+        border: 1px solid var(--td-component-stroke);
         border-bottom: 0;
         text-align: left;
         margin: 0;
@@ -216,7 +231,7 @@
     }
 
     table tr td {
-        border: 1px solid #9b9b9b3b;
+        border: 1px solid var(--td-component-stroke);
         text-align: left;
         margin: 0;
         padding: 6px 13px;
@@ -241,7 +256,7 @@
         border-radius: 8px;
         margin-left: 0;
         margin-right: 0;
-        background: #fff;
+        background: var(--td-bg-color-container);
     }
 
 
@@ -266,7 +281,7 @@
     }
 
     .md-fences {
-        background-color: #f8f8f8;
+        background-color: var(--td-bg-color-secondarycontainer);
     }
 
     .md-diagram-panel {
@@ -335,27 +350,27 @@
     }
 
     .md-lang {
-        color: #b4654d;
+        color: var(--td-warning-color);
     }
 
     .html-for-mac .context-menu {
-        --item-hover-bg-color: #e6f0fe;
+        --item-hover-bg-color: var(--td-brand-color-light);
     }
 
     .pin-outline #outline-content .outline-active strong,
     .pin-outline .outline-active {
-        color: #2196f3;
+        color: var(--td-brand-color);
     }
 
     .code-tooltip {
         border-radius: 4px;
-        border: 1px solid #ededed;
-        background-color: #f8f8f8;
+        border: 1px solid var(--td-component-stroke);
+        background-color: var(--td-bg-color-secondarycontainer);
     }
 
     .cm-s-inner .cm-comment,
     .cm-s-inner.cm-comment {
-        color: #57a64a;
+        color: var(--td-success-color);
         font-style: italic;
         /* font-family: 'PingFang'; */
     }
@@ -366,7 +381,7 @@
     h4.md-end-block.md-heading:after,
     h5.md-end-block.md-heading:after,
     h6.md-end-block.md-heading:after {
-        color: #bfbfbf !important;
+        color: var(--td-text-color-disabled) !important;
         border: 1px solid;
         border-radius: 4px;
         position: absolute;

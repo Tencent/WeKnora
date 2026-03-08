@@ -254,6 +254,7 @@ start_app() {
     # 设置本地开发环境变量（覆盖 Docker 容器地址）
     export DB_HOST=localhost
     export DOCREADER_ADDR=localhost:50051
+    export DOCREADER_TRANSPORT=grpc
     export MINIO_ENDPOINT=localhost:9000
     export REDIS_ADDR=localhost:6379
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
@@ -269,6 +270,9 @@ start_app() {
     log_info "环境变量已设置，启动应用..."
     log_info "数据库地址: $DB_HOST:${DB_PORT:-5432}"
     
+    export CGO_CFLAGS="-Wno-deprecated-declarations -Wno-gnu-folding-constant"
+    export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+
     # 检查是否安装了 Air（热重载工具）
     if command -v air &> /dev/null; then
         log_success "检测到 Air，使用热重载模式启动..."
@@ -278,8 +282,8 @@ start_app() {
         log_info "未检测到 Air，使用普通模式启动"
         log_warning "提示: 安装 Air 可以实现代码修改后自动重启"
         log_info "安装命令: go install github.com/air-verse/air@latest"
-        # 运行应用
-        go run cmd/server/main.go
+        LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
+        go run -ldflags="$LDFLAGS" cmd/server/main.go
     fi
 }
 

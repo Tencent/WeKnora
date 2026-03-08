@@ -181,15 +181,27 @@ func Auth(
 				return
 			}
 
-			// Store tenant ID in context
+			// 存储租户和用户信息到上下文
 			c.Set(types.TenantIDContextKey.String(), tenantID)
 			c.Set(types.TenantInfoContextKey.String(), t)
-			c.Request = c.Request.WithContext(
-				context.WithValue(
-					context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID),
-					types.TenantInfoContextKey, t,
-				),
+
+			ctx := context.WithValue(
+				context.WithValue(c.Request.Context(), types.TenantIDContextKey, tenantID),
+				types.TenantInfoContextKey, t,
 			)
+
+			// 通过 TenantID 关联查询用户
+			user, err := userService.GetUserByTenantID(c.Request.Context(), tenantID)
+			if err == nil && user != nil {
+				c.Set(types.UserContextKey.String(), user)
+				c.Set(types.UserIDContextKey.String(), user.ID)
+				ctx = context.WithValue(
+					context.WithValue(ctx, types.UserContextKey, user),
+					types.UserIDContextKey, user.ID,
+				)
+			}
+
+			c.Request = c.Request.WithContext(ctx)
 			c.Next()
 			return
 		}

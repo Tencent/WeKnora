@@ -9,6 +9,10 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"path"
 	"regexp"
 	"runtime"
 	"slices"
@@ -17,11 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/docreader/client"
-	"github.com/Tencent/WeKnora/docreader/proto"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -55,22 +60,23 @@ var (
 // knowledgeService implements the knowledge service interface
 // service 实现知识服务接口
 type knowledgeService struct {
-	config          *config.Config
-	retrieveEngine  interfaces.RetrieveEngineRegistry
-	repo            interfaces.KnowledgeRepository
-	kbService       interfaces.KnowledgeBaseService
-	tenantRepo      interfaces.TenantRepository
-	docReaderClient *client.Client
-	chunkService    interfaces.ChunkService
-	chunkRepo       interfaces.ChunkRepository
-	tagRepo         interfaces.KnowledgeTagRepository
-	tagService      interfaces.KnowledgeTagService
-	fileSvc         interfaces.FileService
-	modelService    interfaces.ModelService
-	task            *asynq.Client
-	graphEngine     interfaces.RetrieveGraphRepository
-	redisClient     *redis.Client
-	kbShareService  interfaces.KBShareService
+	config         *config.Config
+	retrieveEngine interfaces.RetrieveEngineRegistry
+	repo           interfaces.KnowledgeRepository
+	kbService      interfaces.KnowledgeBaseService
+	tenantRepo     interfaces.TenantRepository
+	documentReader interfaces.DocumentReader
+	chunkService   interfaces.ChunkService
+	chunkRepo      interfaces.ChunkRepository
+	tagRepo        interfaces.KnowledgeTagRepository
+	tagService     interfaces.KnowledgeTagService
+	fileSvc        interfaces.FileService
+	modelService   interfaces.ModelService
+	task           interfaces.TaskEnqueuer
+	graphEngine    interfaces.RetrieveGraphRepository
+	redisClient    *redis.Client
+	kbShareService interfaces.KBShareService
+	imageResolver  *docparser.ImageResolver
 }
 
 const (
@@ -83,7 +89,7 @@ const (
 func NewKnowledgeService(
 	config *config.Config,
 	repo interfaces.KnowledgeRepository,
-	docReaderClient *client.Client,
+	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
 	chunkService interfaces.ChunkService,
@@ -92,30 +98,43 @@ func NewKnowledgeService(
 	tagService interfaces.KnowledgeTagService,
 	fileSvc interfaces.FileService,
 	modelService interfaces.ModelService,
-	task *asynq.Client,
+	task interfaces.TaskEnqueuer,
 	graphEngine interfaces.RetrieveGraphRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	redisClient *redis.Client,
 	kbShareService interfaces.KBShareService,
+	imageResolver *docparser.ImageResolver,
 ) (interfaces.KnowledgeService, error) {
 	return &knowledgeService{
-		config:          config,
-		repo:            repo,
-		kbService:       kbService,
-		tenantRepo:      tenantRepo,
-		docReaderClient: docReaderClient,
-		chunkService:    chunkService,
-		chunkRepo:       chunkRepo,
-		tagRepo:         tagRepo,
-		tagService:      tagService,
-		fileSvc:         fileSvc,
-		modelService:    modelService,
-		task:            task,
-		graphEngine:     graphEngine,
-		retrieveEngine:  retrieveEngine,
-		redisClient:     redisClient,
-		kbShareService:  kbShareService,
+		config:         config,
+		repo:           repo,
+		kbService:      kbService,
+		tenantRepo:     tenantRepo,
+		documentReader: documentReader,
+		chunkService:   chunkService,
+		chunkRepo:      chunkRepo,
+		tagRepo:        tagRepo,
+		tagService:     tagService,
+		fileSvc:        fileSvc,
+		modelService:   modelService,
+		task:           task,
+		graphEngine:    graphEngine,
+		retrieveEngine: retrieveEngine,
+		redisClient:    redisClient,
+		kbShareService: kbShareService,
+		imageResolver:  imageResolver,
 	}, nil
+}
+
+// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context (e.g. MinerU endpoint, API key).
+// Used when building document ReadRequest so UI-configured values take precedence over env.
+func (s *knowledgeService) getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			return tenant.ParserEngineConfig.ToOverridesMap()
+		}
+	}
+	return nil
 }
 
 // GetRepository gets the knowledge repository
@@ -167,23 +186,40 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	}
 
 	// 检查多模态配置完整性 - 只在图片文件时校验
-	// 检查是否为图片文件
 	if !IsImageType(getFileType(fileName)) {
 		logger.Info(ctx, "Non-image file with multimodal enabled, skipping COS/VLM validation")
 	} else {
-		// 检查COS配置
-		switch kb.StorageConfig.Provider {
+		// 解析有效 provider：优先 KB 级别（新字段 > 旧字段），其次租户默认
+		provider := kb.GetStorageProvider()
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+			provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		}
+
+		// 根据 provider 校验租户级存储引擎配置
+		switch provider {
 		case "cos":
-			if kb.StorageConfig.SecretID == "" || kb.StorageConfig.SecretKey == "" ||
-				kb.StorageConfig.Region == "" || kb.StorageConfig.BucketName == "" ||
-				kb.StorageConfig.AppID == "" {
+			if tenant == nil || tenant.StorageEngineConfig == nil || tenant.StorageEngineConfig.COS == nil ||
+				tenant.StorageEngineConfig.COS.SecretID == "" || tenant.StorageEngineConfig.COS.SecretKey == "" ||
+				tenant.StorageEngineConfig.COS.Region == "" || tenant.StorageEngineConfig.COS.BucketName == "" {
 				logger.Error(ctx, "COS configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		case "minio":
-			if kb.StorageConfig.BucketName == "" {
+			ok := false
+			if tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.MinIO != nil {
+				m := tenant.StorageEngineConfig.MinIO
+				if m.Mode == "remote" {
+					ok = m.Endpoint != "" && m.AccessKeyID != "" && m.SecretAccessKey != "" && m.BucketName != ""
+				} else {
+					ok = os.Getenv("MINIO_ENDPOINT") != "" && os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
+						os.Getenv("MINIO_SECRET_ACCESS_KEY") != "" &&
+						(m.BucketName != "" || os.Getenv("MINIO_BUCKET_NAME") != "")
+				}
+			}
+			if !ok {
 				logger.Error(ctx, "MinIO configuration incomplete for image multimodal processing")
-				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往系统设置页面进行补全")
+				return nil, werrors.NewBadRequestError("上传图片文件需要完整的对象存储配置信息, 请前往知识库存储设置或系统设置页面进行补全")
 			}
 		}
 
@@ -284,9 +320,9 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Errorf(ctx, "Failed to create knowledge record, ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
 	}
-	// Save the file to storage
+	// Save the file to storage (use KB-level storage engine if configured)
 	logger.Infof(ctx, "Saving file, knowledge ID: %s", knowledge.ID)
-	filePath, err := s.fileSvc.SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
+	filePath, err := s.resolveFileService(ctx, kb).SaveFile(ctx, file, knowledge.TenantID, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to save file, knowledge ID: %s, error: %v", knowledge.ID, err)
 		return nil, err
@@ -338,7 +374,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue document process task: %v", err)
@@ -363,11 +399,32 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL source
 // tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
+// isFileURL reports whether the given URL should be treated as a direct file download.
+// Priority: URL path has a known file extension first, then fall back to user-provided fileName/fileType hints.
+func isFileURL(rawURL, fileName, fileType string) bool {
+	u, err := url.Parse(rawURL)
+	if err == nil {
+		ext := strings.ToLower(strings.TrimPrefix(path.Ext(u.Path), "."))
+		if ext != "" && allowedFileURLExtensions[ext] {
+			return true
+		}
+	}
+	// Fall back to user-provided hints
+	return fileName != "" || fileType != ""
+}
+
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, url string, enableMultimodel *bool, title string, tagID string,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
-	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, url)
+	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
+
+	// Route to file_url logic when the URL points to a downloadable file
+	if isFileURL(rawURL, fileName, fileType) {
+		return s.createKnowledgeFromFileURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID)
+	}
+
+	url := rawURL
 
 	// Get knowledge base configuration
 	logger.Info(ctx, "Getting knowledge base configuration")
@@ -482,7 +539,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return knowledge, nil
 	}
 
-	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 	info, err := s.task.Enqueue(task)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue URL process task: %v", err)
@@ -491,6 +548,215 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	logger.Infof(ctx, "Enqueued URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
 
 	logger.Infof(ctx, "Knowledge from URL created successfully, ID: %s", knowledge.ID)
+	return knowledge, nil
+}
+
+// allowedFileURLExtensions defines the supported file extensions for file URL import
+var allowedFileURLExtensions = map[string]bool{
+	"txt":  true,
+	"md":   true,
+	"pdf":  true,
+	"docx": true,
+	"doc":  true,
+}
+
+// maxFileURLSize is the maximum allowed file size for file URL import (10MB)
+const maxFileURLSize = 10 * 1024 * 1024
+
+// extractFileNameFromURL extracts the filename from a URL path
+func extractFileNameFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	base := path.Base(u.Path)
+	if base == "." || base == "/" {
+		return ""
+	}
+	return base
+}
+
+// extractFileNameFromContentDisposition extracts filename from Content-Disposition header
+func extractFileNameFromContentDisposition(header string) string {
+	// e.g. attachment; filename="document.pdf" or filename*=UTF-8''document.pdf
+	for _, part := range strings.Split(header, ";") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(strings.ToLower(part), "filename=") {
+			name := strings.TrimPrefix(part, "filename=")
+			name = strings.TrimPrefix(part[len("filename="):], "")
+			name = strings.Trim(name, `"'`)
+			if name != "" {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// createKnowledgeFromFileURL is the internal implementation for file URL knowledge creation.
+// Called by CreateKnowledgeFromURL when the URL is detected as a direct file download.
+func (s *knowledgeService) createKnowledgeFromFileURL(
+	ctx context.Context,
+	kbID string,
+	fileURL string,
+	fileName string,
+	fileType string,
+	enableMultimodel *bool,
+	title string,
+	tagID string,
+) (*types.Knowledge, error) {
+	logger.Info(ctx, "Start creating knowledge from file URL")
+	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
+
+	// Get knowledge base configuration
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
+		return nil, err
+	}
+
+	// Validate URL format and security (static check only, no HEAD request)
+	if !isValidURL(fileURL) || !secutils.IsValidURL(fileURL) {
+		logger.Error(ctx, "Invalid or unsafe file URL format")
+		return nil, ErrInvalidURL
+	}
+	if safe, reason := secutils.IsSSRFSafeURL(fileURL); !safe {
+		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, reason: %s", fileURL, reason)
+		return nil, ErrInvalidURL
+	}
+
+	// Resolve fileName: user-provided > extracted from URL path
+	if fileName == "" {
+		fileName = extractFileNameFromURL(fileURL)
+	}
+
+	// Resolve fileType: user-provided > inferred from fileName
+	if fileType == "" && fileName != "" {
+		fileType = getFileType(fileName)
+	}
+
+	// Validate file extension against whitelist (if we can determine it)
+	if fileType != "" {
+		if !allowedFileURLExtensions[strings.ToLower(fileType)] {
+			logger.Errorf(ctx, "Unsupported file type for file URL import: %s", fileType)
+			return nil, werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s，仅支持 txt, md, pdf, docx, doc", fileType))
+		}
+	}
+
+	// Use title as display name if fileName is still empty
+	displayName := fileName
+	if displayName == "" {
+		displayName = title
+	}
+	if displayName == "" {
+		// Fallback: use last segment of URL
+		displayName = extractFileNameFromURL(fileURL)
+	}
+	if displayName == "" {
+		displayName = fileURL
+	}
+
+	// Check for duplicate (by URL hash)
+	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	fileHash := calculateStr(fileURL)
+	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+		Type:     "file_url",
+		URL:      fileURL,
+		FileHash: fileHash,
+	})
+	if err != nil {
+		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
+		return nil, err
+	}
+	if exists {
+		logger.Infof(ctx, "File URL already exists: %s", fileURL)
+		existingKnowledge.CreatedAt = time.Now()
+		existingKnowledge.UpdatedAt = time.Now()
+		if err := s.repo.UpdateKnowledge(ctx, existingKnowledge); err != nil {
+			logger.Errorf(ctx, "Failed to update existing knowledge: %v", err)
+			return nil, err
+		}
+		return existingKnowledge, types.NewDuplicateURLError(existingKnowledge)
+	}
+
+	// Check storage quota
+	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenantInfo.StorageQuota > 0 && tenantInfo.StorageUsed >= tenantInfo.StorageQuota {
+		logger.Error(ctx, "Storage quota exceeded")
+		return nil, types.NewStorageQuotaExceededError()
+	}
+
+	// Create knowledge record
+	knowledge := &types.Knowledge{
+		ID:               uuid.New().String(),
+		TenantID:         tenantID,
+		KnowledgeBaseID:  kbID,
+		Type:             "file_url",
+		Title:            title,
+		FileName:         displayName,
+		FileType:         fileType,
+		Source:           fileURL,
+		FileHash:         fileHash,
+		ParseStatus:      "pending",
+		EnableStatus:     "disabled",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		EmbeddingModelID: kb.EmbeddingModelID,
+		TagID:            tagID,
+	}
+	if knowledge.Title == "" {
+		knowledge.Title = displayName
+	}
+
+	if err := s.repo.CreateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "Failed to create knowledge record: %v", err)
+		return nil, err
+	}
+
+	// Build async task payload
+	enableMultimodelValue := false
+	if enableMultimodel != nil {
+		enableMultimodelValue = *enableMultimodel
+	} else {
+		enableMultimodelValue = kb.IsMultimodalEnabled()
+	}
+
+	enableQuestionGeneration := false
+	questionCount := 3
+	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+		enableQuestionGeneration = true
+		if kb.QuestionGenerationConfig.QuestionCount > 0 {
+			questionCount = kb.QuestionGenerationConfig.QuestionCount
+		}
+	}
+
+	taskPayload := types.DocumentProcessPayload{
+		TenantID:                 tenantID,
+		KnowledgeID:              knowledge.ID,
+		KnowledgeBaseID:          kbID,
+		FileURL:                  fileURL,
+		FileName:                 fileName,
+		FileType:                 fileType,
+		EnableMultimodel:         enableMultimodelValue,
+		EnableQuestionGeneration: enableQuestionGeneration,
+		QuestionCount:            questionCount,
+	}
+
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
+		return knowledge, nil
+	}
+
+	task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+	info, err := s.task.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue file URL process task: %v", err)
+		return knowledge, nil
+	}
+	logger.Infof(ctx, "Enqueued file URL process task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, knowledge.ID)
+
+	logger.Infof(ctx, "Knowledge from file URL created successfully, ID: %s", knowledge.ID)
 	return knowledge, nil
 }
 
@@ -687,7 +953,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			return knowledge, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue passage process task: %v", err)
@@ -761,6 +1027,10 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 		logger.Infof(ctx, "Marked knowledge %s as deleting (previous status: %s)", id, originalStatus)
 	}
 
+	// Resolve file service for this KB before spawning goroutines
+	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	kbFileSvc := s.resolveFileService(ctx, kb)
+
 	wg := errgroup.Group{}
 	// Delete knowledge embeddings from vector store
 	wg.Go(func() error {
@@ -797,7 +1067,7 @@ func (s *knowledgeService) DeleteKnowledge(ctx context.Context, id string) error
 	// Delete the physical file if it exists
 	wg.Go(func() error {
 		if knowledge.FilePath != "" {
-			if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+			if err := kbFileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
 				logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
 			}
 		}
@@ -849,6 +1119,15 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		}
 	}
 	logger.Infof(ctx, "Marked %d knowledge entries as deleting", len(knowledgeList))
+
+	// Pre-resolve file services per KB so goroutines don't need DB access
+	kbFileServices := make(map[string]interfaces.FileService)
+	for _, knowledge := range knowledgeList {
+		if _, ok := kbFileServices[knowledge.KnowledgeBaseID]; !ok {
+			kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			kbFileServices[knowledge.KnowledgeBaseID] = s.resolveFileService(ctx, kb)
+		}
+	}
 
 	wg := errgroup.Group{}
 	// 2. Delete knowledge embeddings from vector store
@@ -902,7 +1181,8 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
 			if knowledge.FilePath != "" {
-				if err := s.fileSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
+				fSvc := kbFileServices[knowledge.KnowledgeBaseID]
+				if err := fSvc.DeleteFile(ctx, knowledge.FilePath); err != nil {
 					logger.GetLogger(ctx).WithField("error", err).Errorf("DeleteKnowledge delete file failed")
 				}
 			}
@@ -1010,21 +1290,20 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	}
 
 	// Convert passages to chunks
-	chunks := make([]*proto.Chunk, 0, len(passage))
+	chunks := make([]types.ParsedChunk, 0, len(passage))
 	start, end := 0, 0
 	for i, p := range passage {
 		if p == "" {
 			continue
 		}
 		end += len([]rune(p))
-		chunk := &proto.Chunk{
+		chunks = append(chunks, types.ParsedChunk{
 			Content: p,
-			Seq:     int32(i),
-			Start:   int32(start),
-			End:     int32(end),
-		}
+			Seq:     i,
+			Start:   start,
+			End:     end,
+		})
 		start = end
-		chunks = append(chunks, chunk)
 	}
 	// Process and store chunks
 	s.processChunks(ctx, kb, knowledge, chunks)
@@ -1034,11 +1313,41 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 type ProcessChunksOptions struct {
 	EnableQuestionGeneration bool
 	QuestionCount            int
+	EnableMultimodel         bool
+	StoredImages             []docparser.StoredImage
+	// ParentChunks holds parent chunk data when parent-child chunking is enabled.
+	// When set, the chunks passed to processChunks are child chunks, and each
+	// child's ParentIndex references an entry in this slice.
+	ParentChunks []types.ParsedParentChunk
+}
+
+// buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
+// The base config (already validated with defaults) is used for separators.
+func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
+	parentSize := cc.ParentChunkSize
+	if parentSize <= 0 {
+		parentSize = 4096
+	}
+	childSize := cc.ChildChunkSize
+	if childSize <= 0 {
+		childSize = 384
+	}
+	parent = chunker.SplitterConfig{
+		ChunkSize:    parentSize,
+		ChunkOverlap: base.ChunkOverlap, // reuse configured overlap for parents
+		Separators:   base.Separators,
+	}
+	child = chunker.SplitterConfig{
+		ChunkSize:    childSize,
+		ChunkOverlap: childSize / 5, // ~20% overlap for child chunks
+		Separators:   base.Separators,
+	}
+	return
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
-	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []*proto.Chunk,
+	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
 ) {
 	// Get options
@@ -1130,8 +1439,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		// 打印图片详细信息
 		for imgIdx, img := range chunkData.Images {
-			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.Url)
-			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalUrl)
+			logger.Infof(ctx, "[DocReader]   图片 #%d: URL=%s", imgIdx, img.URL)
+			logger.Infof(ctx, "[DocReader]   图片 #%d: OriginalURL=%s", imgIdx, img.OriginalURL)
 			if img.Caption != "" {
 				captionPreview := img.Caption
 				if len(captionPreview) > 100 {
@@ -1139,8 +1448,8 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				}
 				logger.Infof(ctx, "[DocReader]   图片 #%d: Caption=%s", imgIdx, captionPreview)
 			}
-			if img.OcrText != "" {
-				ocrPreview := img.OcrText
+			if img.OCRText != "" {
+				ocrPreview := img.OCRText
 				if len(ocrPreview) > 100 {
 					ocrPreview = ocrPreview[:100] + "..."
 				}
@@ -1166,10 +1475,46 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		}
 	}
 
-	// 重新分配容量，考虑图片相关的Chunk
-	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount)
+	// === Parent-Child Chunking: create parent chunks first ===
+	hasParentChild := len(options.ParentChunks) > 0
+	var parentDBChunks []*types.Chunk // indexed by ParsedParentChunk position
+	if hasParentChild {
+		parentDBChunks = make([]*types.Chunk, len(options.ParentChunks))
+		for i, pc := range options.ParentChunks {
+			parentDBChunks[i] = &types.Chunk{
+				ID:              uuid.New().String(),
+				TenantID:        knowledge.TenantID,
+				KnowledgeID:     knowledge.ID,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				Content:         pc.Content,
+				ChunkIndex:      pc.Seq,
+				IsEnabled:       true,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+				StartAt:         pc.Start,
+				EndAt:           pc.End,
+				ChunkType:       types.ChunkTypeParentText,
+			}
+		}
+		// Set prev/next links for parent chunks
+		for i := range parentDBChunks {
+			if i > 0 {
+				parentDBChunks[i-1].NextChunkID = parentDBChunks[i].ID
+				parentDBChunks[i].PreChunkID = parentDBChunks[i-1].ID
+			}
+		}
+		logger.Infof(ctx, "Created %d parent chunks for parent-child strategy", len(parentDBChunks))
+	}
 
-	for _, chunkData := range chunks {
+	// 重新分配容量，考虑图片相关的Chunk + parent chunks
+	parentCount := len(options.ParentChunks)
+	insertChunks := make([]*types.Chunk, 0, len(chunks)+imageChunkCount+parentCount)
+	// Add parent chunks first (they go into DB but NOT into the vector index)
+	if hasParentChild {
+		insertChunks = append(insertChunks, parentDBChunks...)
+	}
+
+	for idx, chunkData := range chunks {
 		if strings.TrimSpace(chunkData.Content) == "" {
 			continue
 		}
@@ -1189,84 +1534,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
 		}
-		var chunkImages []types.ImageInfo
-		insertChunks = append(insertChunks, textChunk)
 
-		// 处理图片信息
-		if len(chunkData.Images) > 0 {
-			logger.GetLogger(ctx).Infof("Processing %d images in chunk #%d", len(chunkData.Images), chunkData.Seq)
-
-			for i, img := range chunkData.Images {
-				// 保存图片信息到文本Chunk
-				imageInfo := types.ImageInfo{
-					URL:         img.Url,
-					OriginalURL: img.OriginalUrl,
-					StartPos:    int(img.Start),
-					EndPos:      int(img.End),
-					OCRText:     img.OcrText,
-					Caption:     img.Caption,
-				}
-				chunkImages = append(chunkImages, imageInfo)
-
-				// 将ImageInfo序列化为JSON
-				imageInfoJSON, err := json.Marshal([]types.ImageInfo{imageInfo})
-				if err != nil {
-					logger.GetLogger(ctx).WithField("error", err).Errorf("Failed to marshal image info to JSON")
-					continue
-				}
-
-				// 如果有OCR文本，创建OCR Chunk
-				if img.OcrText != "" {
-					ocrChunk := &types.Chunk{
-						ID:              uuid.New().String(),
-						TenantID:        knowledge.TenantID,
-						KnowledgeID:     knowledge.ID,
-						KnowledgeBaseID: knowledge.KnowledgeBaseID,
-						Content:         img.OcrText,
-						ChunkIndex:      maxSeq + i*100 + 1, // 使用不冲突的索引方式
-						IsEnabled:       true,
-						CreatedAt:       time.Now(),
-						UpdatedAt:       time.Now(),
-						StartAt:         int(img.Start),
-						EndAt:           int(img.End),
-						ChunkType:       types.ChunkTypeImageOCR,
-						ParentChunkID:   textChunk.ID,
-						ImageInfo:       string(imageInfoJSON),
-					}
-					insertChunks = append(insertChunks, ocrChunk)
-					logger.GetLogger(ctx).Infof("Created OCR chunk for image %d in chunk #%d", i, chunkData.Seq)
-				}
-
-				// 如果有图片描述，创建Caption Chunk
-				if img.Caption != "" {
-					captionChunk := &types.Chunk{
-						ID:              uuid.New().String(),
-						TenantID:        knowledge.TenantID,
-						KnowledgeID:     knowledge.ID,
-						KnowledgeBaseID: knowledge.KnowledgeBaseID,
-						Content:         img.Caption,
-						ChunkIndex:      maxSeq + i*100 + 2, // 使用不冲突的索引方式
-						IsEnabled:       true,
-						CreatedAt:       time.Now(),
-						UpdatedAt:       time.Now(),
-						StartAt:         int(img.Start),
-						EndAt:           int(img.End),
-						ChunkType:       types.ChunkTypeImageCaption,
-						ParentChunkID:   textChunk.ID,
-						ImageInfo:       string(imageInfoJSON),
-					}
-					insertChunks = append(insertChunks, captionChunk)
-					logger.GetLogger(ctx).Infof("Created caption chunk for image %d in chunk #%d", i, chunkData.Seq)
-				}
-			}
-
-			imageInfoJSON, err := json.Marshal(chunkImages)
-			if err != nil {
-				logger.GetLogger(ctx).WithField("error", err).Errorf("Failed to marshal image info to JSON")
-				continue
-			}
-			textChunk.ImageInfo = string(imageInfoJSON)
+		// Wire up ParentChunkID for child chunks
+		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
+			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
 		}
+
+		chunks[idx].ChunkID = textChunk.ID
+		insertChunks = append(insertChunks, textChunk)
 	}
 
 	// Sort chunks by index for proper ordering
@@ -1274,35 +1549,49 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return insertChunks[i].ChunkIndex < insertChunks[j].ChunkIndex
 	})
 
-	// 仅为文本类型的Chunk设置前后关系
+	// 仅为文本类型的Chunk设置前后关系（child chunks only, parents already linked above）
 	textChunks := make([]*types.Chunk, 0, len(chunks))
 	for _, chunk := range insertChunks {
-		if chunk.ChunkType == types.ChunkTypeText {
+		if chunk.ChunkType == types.ChunkTypeText && chunk.ParentChunkID != "" {
+			// This is a child chunk in parent-child mode
+			textChunks = append(textChunks, chunk)
+		} else if chunk.ChunkType == types.ChunkTypeText && !hasParentChild {
+			// Normal flat chunk (no parent-child mode)
 			textChunks = append(textChunks, chunk)
 		}
 	}
 
-	// 设置文本Chunk之间的前后关系
-	for i, chunk := range textChunks {
-		if i > 0 {
-			textChunks[i-1].NextChunkID = chunk.ID
-		}
-		if i < len(textChunks)-1 {
-			textChunks[i+1].PreChunkID = chunk.ID
+	// 设置文本Chunk之间的前后关系 (skip if parent-child, children don't need prev/next links)
+	if !hasParentChild {
+		for i, chunk := range textChunks {
+			if i > 0 {
+				textChunks[i-1].NextChunkID = chunk.ID
+			}
+			if i < len(textChunks)-1 {
+				textChunks[i+1].PreChunkID = chunk.ID
+			}
 		}
 	}
 
-	// Create index information for each chunk (without generated questions for now)
-	indexInfoList := make([]*types.IndexInfo, 0, len(insertChunks))
-	for _, chunk := range insertChunks {
-		// Add original chunk content to index
+	// Create index information — only for child/flat chunks, NOT parent chunks.
+	// Parent chunks are stored for context retrieval but do not need vector embeddings.
+	// Prepend the document title to improve semantic alignment between
+	// question-style queries and statement-style chunk content.
+	indexInfoList := make([]*types.IndexInfo, 0, len(textChunks))
+	titlePrefix := ""
+	if t := strings.TrimSpace(knowledge.Title); t != "" {
+		titlePrefix = t + "\n"
+	}
+	for _, chunk := range textChunks {
+		indexContent := titlePrefix + chunk.Content
 		indexInfoList = append(indexInfoList, &types.IndexInfo{
-			Content:         chunk.Content,
+			Content:         indexContent,
 			SourceID:        chunk.ID,
 			SourceType:      types.ChunkSourceType,
 			ChunkID:         chunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			IsEnabled:       true,
 		})
 	}
 
@@ -1411,8 +1700,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return
 	}
 
-	// Update knowledge status to completed
-	knowledge.ParseStatus = types.ParseStatusCompleted
+	// Skip summary/question generation for image-type knowledge — the text chunk
+	// is just a markdown image reference, so LLM summary would be useless.
+	// The multimodal task will provide a caption as the description instead.
+	isImage := IsImageType(knowledge.FileType)
+	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
+
+	// For image files with pending multimodal processing, keep "processing" status
+	// so the frontend waits until the description is ready before showing "completed".
+	if pendingMultimodal {
+		knowledge.ParseStatus = types.ParseStatusProcessing
+	} else {
+		knowledge.ParseStatus = types.ParseStatusCompleted
+	}
 	knowledge.EnableStatus = "enabled"
 	knowledge.StorageSize = totalStorageSize
 	now := time.Now()
@@ -1420,7 +1720,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	knowledge.UpdatedAt = now
 
 	// Set summary status based on whether summary generation will be triggered
-	if len(textChunks) > 0 {
+	if len(textChunks) > 0 && !isImage {
 		knowledge.SummaryStatus = types.SummaryStatusPending
 	} else {
 		knowledge.SummaryStatus = types.SummaryStatusNone
@@ -1431,7 +1731,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue question generation task if enabled (async, non-blocking)
-	if options.EnableQuestionGeneration && len(textChunks) > 0 {
+	if options.EnableQuestionGeneration && len(textChunks) > 0 && !isImage {
 		questionCount := options.QuestionCount
 		if questionCount <= 0 {
 			questionCount = 3
@@ -1443,8 +1743,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue summary generation task (async, non-blocking)
-	if len(textChunks) > 0 {
+	if len(textChunks) > 0 && !isImage {
 		s.enqueueSummaryGenerationTask(ctx, knowledge.KnowledgeBaseID, knowledge.ID)
+	}
+
+	// Enqueue multimodal tasks for images (async, non-blocking)
+	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks)
 	}
 
 	// Update tenant's storage usage
@@ -1504,10 +1809,10 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		var imageAnnotations string
 		for _, img := range allImageInfos {
 			if img.Caption != "" {
-				imageAnnotations += fmt.Sprintf("\n[图片描述: %s]", img.Caption)
+				imageAnnotations += fmt.Sprintf("\n[Image Description: %s]", img.Caption)
 			}
 			if img.OCRText != "" {
-				imageAnnotations += fmt.Sprintf("\n[图片文字: %s]", img.OCRText)
+				imageAnnotations += fmt.Sprintf("\n[Image OCR Text: %s]", img.OCRText)
 			}
 		}
 
@@ -1524,15 +1829,15 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 
 	// Add knowledge metadata if available
 	if knowledge != nil {
-		metadataIntro := fmt.Sprintf("文档类型: %s\n文件名称: %s\n", knowledge.FileType, knowledge.FileName)
+		metadataIntro := fmt.Sprintf("Document Type: %s\nFile Name: %s\n", knowledge.FileType, knowledge.FileName)
 
 		// Add additional metadata if available
 		if knowledge.Type != "" {
-			metadataIntro += fmt.Sprintf("知识类型: %s\n", knowledge.Type)
+			metadataIntro += fmt.Sprintf("Knowledge Type: %s\n", knowledge.Type)
 		}
 
 		// Prepend metadata to content
-		contentWithMetadata = metadataIntro + "\n内容:\n" + contentWithMetadata
+		contentWithMetadata = metadataIntro + "\nContent:\n" + contentWithMetadata
 	}
 
 	// Generate summary using AI model
@@ -1730,7 +2035,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# 文档名称\n%s\n\n# 摘要\n%s", knowledge.FileName, summary),
+			Content:         fmt.Sprintf("# Document\n%s\n\n# Summary\n%s", knowledge.FileName, summary),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -1774,6 +2079,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			ChunkID:         summaryChunk.ID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
+			IsEnabled:       true,
 		}}
 
 		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
@@ -1941,6 +2247,7 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 				ChunkID:         chunk.ID,
 				KnowledgeID:     knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID,
+				IsEnabled:       true,
 			})
 		}
 		logger.Debugf(ctx, "Generated %d questions for chunk %s", len(questions), chunk.ID)
@@ -1975,12 +2282,12 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	// Build context section
 	var contextSection string
 	if prevContent != "" || nextContent != "" {
-		contextSection = "## 上下文信息（仅供参考，帮助理解主要内容）\n"
+		contextSection = "## Context Information (for reference only, to help understand the main content)\n"
 		if prevContent != "" {
-			contextSection += fmt.Sprintf("【前文】%s\n", prevContent)
+			contextSection += fmt.Sprintf("[Preceding Context] %s\n", prevContent)
 		}
 		if nextContent != "" {
-			contextSection += fmt.Sprintf("【后文】%s\n", nextContent)
+			contextSection += fmt.Sprintf("[Following Context] %s\n", nextContent)
 		}
 		contextSection += "\n"
 	}
@@ -2028,32 +2335,38 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 }
 
 // Default prompt for question generation with context support
-const defaultQuestionGenerationPrompt = `你是一个专业的问题生成助手。你的任务是根据给定的【主要内容】生成用户可能会问的相关问题。
+const defaultQuestionGenerationPrompt = `You are a professional question generation assistant. Your task is to generate related questions that users might ask based on the given [Main Content].
 
 {{context}}
-## 主要内容（请基于此内容生成问题）
-文档名称：{{doc_name}}
-文档内容：
+## Main Content (generate questions based on this content)
+Document name: {{doc_name}}
+Document content:
 {{content}}
 
-## 核心要求
-- 生成的问题必须与【主要内容】直接相关
-- 问题中禁止使用任何代词或指代词（如"它"、"这个"、"该文档"、"本文"、"文中"、"其"等），必须用具体名称替代
-- 问题必须是完整独立的，脱离上下文也能被理解
-- 问题应该是用户在实际场景中可能会提出的自然问题
-- 问题应该多样化，覆盖内容的不同方面
-- 每个问题应该简洁明了，长度控制在30字以内
-- 生成的问题数量为 {{question_count}} 个
+## Core Requirements
+- Generated questions must be directly related to the [Main Content]
+- Questions must NOT use any pronouns or referential words (such as "it", "this", "that document", "this article", "the text", "its", etc.); use specific names instead
+- Questions must be complete and self-contained, understandable without additional context
+- Questions should be natural questions that users would likely ask in real scenarios
+- Questions should be diverse, covering different aspects of the content
+- Each question should be concise and clear, within 30 words
+- Generate {{question_count}} questions
 
-## 问题类型建议
-- 定义类：什么是...？...是什么？
-- 原因类：为什么...？...的原因是什么？
-- 方法类：如何...？怎样...？
-- 比较类：...和...有什么区别？
-- 应用类：...可以用于什么场景？
+## Suggested Question Types
+- Definition: What is...? What does... mean?
+- Reason: Why...? What is the reason for...?
+- Method: How to...? What is the way to...?
+- Comparison: What is the difference between... and...?
+- Application: What scenarios can... be used for?
 
-## 输出格式
-直接输出问题列表，每行一个问题，不要有序号或其他前缀。`
+## Output Format
+Output the question list directly, one question per line, without numbering or other prefixes.
+
+## CRITICAL: Language Rule
+- Generate questions in the SAME LANGUAGE as the source document
+- If the document is in Korean, generate questions in Korean
+- If the document is in English, generate questions in English
+- If the document is in Chinese, generate questions in Chinese`
 
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
@@ -2064,8 +2377,9 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 		return nil, "", err
 	}
 
-	// Get the file from storage
-	file, err := s.fileSvc.GetFile(ctx, knowledge.FilePath)
+	// Resolve KB-level file service with FilePath fallback protection
+	kb, _ := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+	file, err := s.resolveFileServiceForPath(ctx, kb, knowledge.FilePath).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
 		return nil, "", err
 	}
@@ -2288,7 +2602,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue reparse task: %v", err)
@@ -2300,6 +2614,51 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		if slices.Contains([]string{"csv", "xlsx", "xls"}, getFileType(existing.FileName)) {
 			NewDataTableSummaryTask(ctx, s.task, tenantID, existing.ID, kb.SummaryModelID, kb.EmbeddingModelID)
 		}
+
+		return existing, nil
+	}
+
+	// For file-URL-based knowledge, enqueue document processing task with FileURL field
+	if existing.Type == "file_url" && existing.Source != "" {
+		tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+
+		enableMultimodel := kb.IsMultimodalEnabled()
+
+		// Check question generation config
+		enableQuestionGeneration := false
+		questionCount := 3
+		if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+			enableQuestionGeneration = true
+			if kb.QuestionGenerationConfig.QuestionCount > 0 {
+				questionCount = kb.QuestionGenerationConfig.QuestionCount
+			}
+		}
+
+		taskPayload := types.DocumentProcessPayload{
+			TenantID:                 tenantID,
+			KnowledgeID:              existing.ID,
+			KnowledgeBaseID:          existing.KnowledgeBaseID,
+			FileURL:                  existing.Source,
+			FileName:                 existing.FileName,
+			FileType:                 existing.FileType,
+			EnableMultimodel:         enableMultimodel,
+			EnableQuestionGeneration: enableQuestionGeneration,
+			QuestionCount:            questionCount,
+		}
+
+		payloadBytes, err := json.Marshal(taskPayload)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to marshal file URL reparse task payload: %v", err)
+			return existing, nil
+		}
+
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		info, err := s.task.Enqueue(task)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to enqueue file URL reparse task: %v", err)
+			return existing, nil
+		}
+		logger.Infof(ctx, "Enqueued file URL reparse task: id=%s queue=%s knowledge_id=%s", info.ID, info.Queue, existing.ID)
 
 		return existing, nil
 	}
@@ -2336,7 +2695,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			return existing, nil
 		}
 
-		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"))
+		task := asynq.NewTask(types.TypeDocumentProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 		info, err := s.task.Enqueue(task)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to enqueue URL reparse task: %v", err)
@@ -2354,7 +2713,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
-	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls":
+	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt":
 		return true
 	default:
 		return false
@@ -2487,7 +2846,7 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 		g.Go(func() error {
 			err := s.DeleteKnowledgeList(gctx, ids)
 			if err != nil {
-				logger.Errorf(gctx, "delete partial knowledge %v: %w", ids, err)
+				logger.Errorf(gctx, "delete partial knowledge %v: %v", ids, err)
 				return err
 			}
 			return nil
@@ -2506,12 +2865,12 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 		g.Go(func() error {
 			srcKn, err := s.repo.GetKnowledgeByID(gctx, srcKB.TenantID, knowledge)
 			if err != nil {
-				logger.Errorf(gctx, "get knowledge %s: %w", knowledge, err)
+				logger.Errorf(gctx, "get knowledge %s: %v", knowledge, err)
 				return err
 			}
 			err = s.cloneKnowledge(gctx, srcKn, dstKB)
 			if err != nil {
-				logger.Errorf(gctx, "clone knowledge %s: %w", knowledge, err)
+				logger.Errorf(gctx, "clone knowledge %s: %v", knowledge, err)
 				return err
 			}
 			return nil
@@ -2551,6 +2910,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			ChunkID:         chunk.ID,
 			KnowledgeID:     chunk.KnowledgeID,
 			KnowledgeBaseID: chunk.KnowledgeBaseID,
+			IsEnabled:       true,
 		})
 		ids = append(ids, chunk.ID)
 	}
@@ -2760,7 +3120,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	tagIDMapping := map[string]string{} // srcTagID -> dstTagID
 	targetChunks := make([]*types.Chunk, 0, 10)
 	chunkType := []types.ChunkType{
-		types.ChunkTypeText, types.ChunkTypeSummary,
+		types.ChunkTypeText, types.ChunkTypeParentText, types.ChunkTypeSummary,
 		types.ChunkTypeImageCaption, types.ChunkTypeImageOCR,
 	}
 	for {
@@ -5952,6 +6312,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 				KnowledgeType:   types.KnowledgeTypeFAQ,
 				TagID:           chunk.TagID,
 				IsEnabled:       chunk.IsEnabled,
+				IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 			},
 		}, nil
 	}
@@ -5980,6 +6341,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 		KnowledgeType:   types.KnowledgeTypeFAQ,
 		TagID:           chunk.TagID,
 		IsEnabled:       chunk.IsEnabled,
+		IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 	})
 
 	// 每个相似问创建一个索引项
@@ -6005,6 +6367,7 @@ func (s *knowledgeService) buildFAQIndexInfoList(
 			KnowledgeType:   types.KnowledgeTypeFAQ,
 			TagID:           chunk.TagID,
 			IsEnabled:       chunk.IsEnabled,
+			IsRecommended:   chunk.Flags.HasFlag(types.ChunkFlagRecommended),
 		})
 	}
 
@@ -6329,82 +6692,70 @@ func ensureManualFileName(title string) string {
 }
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
-	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, sync bool,
+	kb *types.KnowledgeBase, knowledge *types.Knowledge, content string, doSync bool,
 ) {
 	clean := strings.TrimSpace(content)
 	if clean == "" {
 		return
 	}
 
-	// 使用 docreader 按照 MD 格式处理，并使用知识库配置的分隔符
-	contentBytes := []byte(clean)
-	fileName := ensureManualFileName(knowledge.Title)
-	fileType := "md"
-
-	// 检查是否需要启用多模态（对于手动内容通常不需要，但保持一致性）
-	enableMultimodel := kb.IsMultimodalEnabled() && kb.StorageConfig.Provider != ""
-
-	var vlmConfig *proto.VLMConfig
-	if enableMultimodel {
-		cfg, cfgErr := s.getVLMProtoConfig(ctx, kb)
-		if cfgErr != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", cfgErr).Errorf("triggerManualProcessing build VLM config failed")
-			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = cfgErr.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
-			return
-		}
-		if cfg == nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				Error("triggerManualProcessing enable multimodal but VLM config missing")
-		}
-		vlmConfig = cfg
+	// Manual content is markdown - chunk directly with Go chunker
+	chunkCfg := chunker.SplitterConfig{
+		ChunkSize:    kb.ChunkingConfig.ChunkSize,
+		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
+		Separators:   kb.ChunkingConfig.Separators,
+	}
+	if chunkCfg.ChunkSize <= 0 {
+		chunkCfg.ChunkSize = 512
+	}
+	if chunkCfg.ChunkOverlap <= 0 {
+		chunkCfg.ChunkOverlap = 50
+	}
+	if len(chunkCfg.Separators) == 0 {
+		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
 	}
 
-	// 调用 docreader 解析 markdown 内容
-	resp, err := s.docReaderClient.ReadFromFile(ctx, &proto.ReadFromFileRequest{
-		FileContent: contentBytes,
-		FileName:    fileName,
-		FileType:    fileType,
-		ReadConfig: &proto.ReadConfig{
-			ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-			ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-			Separators:       kb.ChunkingConfig.Separators,
-			EnableMultimodal: enableMultimodel,
-			StorageConfig: &proto.StorageConfig{
-				Provider: proto.StorageProvider(
-					proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)],
-				),
-				Region:          kb.StorageConfig.Region,
-				BucketName:      kb.StorageConfig.BucketName,
-				AccessKeyId:     kb.StorageConfig.SecretID,
-				SecretAccessKey: kb.StorageConfig.SecretKey,
-				AppId:           kb.StorageConfig.AppID,
-				PathPrefix:      kb.StorageConfig.PathPrefix,
-			},
-			VlmConfig: vlmConfig,
-		},
-		RequestId: ctx.Value(types.RequestIDContextKey).(string),
-	})
-	if err != nil {
-		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-			WithField("error", err).Errorf("triggerManualProcessing read file failed")
-		knowledge.ParseStatus = "failed"
-		knowledge.ErrorMessage = err.Error()
-		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
-		return
+	var parsed []types.ParsedChunk
+	var opts ProcessChunksOptions
+
+	if kb.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+		pcResult := chunker.SplitTextParentChild(clean, parentCfg, childCfg)
+		parsed = make([]types.ParsedChunk, len(pcResult.Children))
+		for i, c := range pcResult.Children {
+			parsed[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				ParentIndex: c.ParentIndex,
+			}
+		}
+		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
+		for i, p := range pcResult.Parents {
+			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+		}
+		opts.ParentChunks = parentChunks
+	} else {
+		splitChunks := chunker.SplitText(clean, chunkCfg)
+		parsed = make([]types.ParsedChunk, len(splitChunks))
+		for i, c := range splitChunks {
+			parsed[i] = types.ParsedChunk{
+				Content: c.Content,
+				Seq:     c.Seq,
+				Start:   c.Start,
+				End:     c.End,
+			}
+		}
 	}
 
-	if sync {
-		s.processChunks(ctx, kb, knowledge, resp.Chunks)
+	if doSync {
+		s.processChunks(ctx, kb, knowledge, parsed, opts)
 		return
 	}
 
 	newCtx := logger.CloneContext(ctx)
-	go s.processChunks(newCtx, kb, knowledge, resp.Chunks)
+	go s.processChunks(newCtx, kb, knowledge, parsed, opts)
 }
 
 func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowledge *types.Knowledge) error {
@@ -6466,16 +6817,16 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	return cleanupErr
 }
 
-func (s *knowledgeService) getVLMProtoConfig(ctx context.Context, kb *types.KnowledgeBase) (*proto.VLMConfig, error) {
+func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.KnowledgeBase) (*types.DocParserVLMConfig, error) {
 	if kb == nil {
 		return nil, nil
 	}
 	// 兼容老版本：直接使用 ModelName 和 BaseURL
 	if kb.VLMConfig.ModelName != "" && kb.VLMConfig.BaseURL != "" {
-		return &proto.VLMConfig{
+		return &types.DocParserVLMConfig{
 			ModelName:     kb.VLMConfig.ModelName,
-			BaseUrl:       kb.VLMConfig.BaseURL,
-			ApiKey:        kb.VLMConfig.APIKey,
+			BaseURL:       kb.VLMConfig.BaseURL,
+			APIKey:        kb.VLMConfig.APIKey,
 			InterfaceType: kb.VLMConfig.InterfaceType,
 		}, nil
 	}
@@ -6495,12 +6846,158 @@ func (s *knowledgeService) getVLMProtoConfig(ctx context.Context, kb *types.Know
 		interfaceType = "openai"
 	}
 
-	return &proto.VLMConfig{
+	return &types.DocParserVLMConfig{
 		ModelName:     model.Name,
-		BaseUrl:       model.Parameters.BaseURL,
-		ApiKey:        model.Parameters.APIKey,
+		BaseURL:       model.Parameters.BaseURL,
+		APIKey:        model.Parameters.APIKey,
 		InterfaceType: interfaceType,
 	}, nil
+}
+
+func (s *knowledgeService) buildStorageConfig(ctx context.Context, kb *types.KnowledgeBase) *types.DocParserStorageConfig {
+	provider := kb.GetStorageProvider()
+	if provider == "" {
+		provider = "local"
+	}
+
+	// Backward compatibility: if legacy cos_config has full params for the chosen provider, use them.
+	sc := &kb.StorageConfig
+	hasKBFull := false
+	switch provider {
+	case "cos":
+		hasKBFull = sc.SecretID != "" && sc.BucketName != ""
+	case "minio":
+		hasKBFull = sc.BucketName != ""
+	case "local":
+		hasKBFull = false
+	}
+
+	if hasKBFull {
+		logger.Infof(ctx, "[storage] buildStorageConfig use legacy kb config: kb=%s provider=%s bucket=%s path_prefix=%s",
+			kb.ID, provider, sc.BucketName, sc.PathPrefix)
+		return &types.DocParserStorageConfig{
+			Provider:        strings.ToUpper(provider),
+			Region:          sc.Region,
+			BucketName:      sc.BucketName,
+			AccessKeyID:     sc.SecretID,
+			SecretAccessKey: sc.SecretKey,
+			AppID:           sc.AppID,
+			PathPrefix:      sc.PathPrefix,
+		}
+	}
+
+	// Merge from tenant's StorageEngineConfig.
+	var out types.DocParserStorageConfig
+	out.Provider = strings.ToUpper(provider)
+
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant != nil && tenant.StorageEngineConfig != nil {
+		sec := tenant.StorageEngineConfig
+		if sec.DefaultProvider != "" && provider == "" {
+			provider = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
+			out.Provider = strings.ToUpper(provider)
+		}
+		switch provider {
+		case "local":
+			if sec.Local != nil {
+				out.PathPrefix = sec.Local.PathPrefix
+			}
+		case "minio":
+			if sec.MinIO != nil {
+				out.BucketName = sec.MinIO.BucketName
+				out.PathPrefix = sec.MinIO.PathPrefix
+				if sec.MinIO.Mode == "remote" {
+					out.Endpoint = sec.MinIO.Endpoint
+					out.AccessKeyID = sec.MinIO.AccessKeyID
+					out.SecretAccessKey = sec.MinIO.SecretAccessKey
+				} else {
+					out.Endpoint = os.Getenv("MINIO_ENDPOINT")
+					out.AccessKeyID = os.Getenv("MINIO_ACCESS_KEY_ID")
+					out.SecretAccessKey = os.Getenv("MINIO_SECRET_ACCESS_KEY")
+				}
+			}
+		case "cos":
+			if sec.COS != nil {
+				out.Region = sec.COS.Region
+				out.BucketName = sec.COS.BucketName
+				out.AccessKeyID = sec.COS.SecretID
+				out.SecretAccessKey = sec.COS.SecretKey
+				out.AppID = sec.COS.AppID
+				out.PathPrefix = sec.COS.PathPrefix
+			}
+		}
+	}
+
+	logger.Infof(ctx, "[storage] buildStorageConfig use merged tenant/global config: kb=%s provider=%s bucket=%s path_prefix=%s endpoint=%s",
+		kb.ID, strings.ToLower(out.Provider), out.BucketName, out.PathPrefix, out.Endpoint)
+	return &out
+}
+
+// resolveFileService returns the FileService for the given knowledge base,
+// based on the KB's StorageProviderConfig (or legacy StorageConfig.Provider) and the tenant's StorageEngineConfig.
+// Falls back to the global fileSvc when no tenant-level storage config is found.
+func (s *knowledgeService) resolveFileService(ctx context.Context, kb *types.KnowledgeBase) interfaces.FileService {
+	if kb == nil {
+		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=nil")
+		return s.fileSvc
+	}
+
+	provider := kb.GetStorageProvider()
+
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+
+	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
+		logger.Infof(ctx, "[storage] resolveFileService fallback default: kb=%s provider=%q tenant_cfg=%v",
+			kb.ID, provider, tenant != nil && tenant.StorageEngineConfig != nil)
+		return s.fileSvc
+	}
+
+	sec := tenant.StorageEngineConfig
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+	svc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, sec, baseDir)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create %s file service from tenant config: %v, falling back to default", provider, err)
+		return s.fileSvc
+	}
+	logger.Infof(ctx, "[storage] resolveFileService selected: kb=%s provider=%s", kb.ID, resolvedProvider)
+	return svc
+}
+
+// resolveFileServiceForPath is like resolveFileService but adds a safety check:
+// if the resolved provider doesn't match what the filePath implies, fall back to
+// the provider inferred from the file path. This protects historical data when
+// tenant/KB config changes but files were stored under the old provider.
+func (s *knowledgeService) resolveFileServiceForPath(ctx context.Context, kb *types.KnowledgeBase, filePath string) interfaces.FileService {
+	svc := s.resolveFileService(ctx, kb)
+	if filePath == "" {
+		return svc
+	}
+
+	inferred := types.InferStorageFromFilePath(filePath)
+	if inferred == "" {
+		return svc
+	}
+
+	configured := kb.GetStorageProvider()
+	if configured == "" {
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant != nil && tenant.StorageEngineConfig != nil {
+			configured = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+		}
+	}
+	if configured == "" {
+		configured = strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_TYPE")))
+	}
+
+	if configured != "" && configured != inferred {
+		logger.Warnf(ctx, "[storage] FilePath format mismatch: configured=%s inferred=%s filePath=%s, using global fallback",
+			configured, inferred, filePath)
+		return s.fileSvc
+	}
+	return svc
 }
 
 func IsImageType(fileType string) bool {
@@ -6510,6 +7007,70 @@ func IsImageType(fileType string) bool {
 	default:
 		return false
 	}
+}
+
+// downloadFileFromURL downloads a remote file to a temp file and returns its binary content.
+// payloadFileName and payloadFileType are in/out pointers: if they point to an empty string,
+// the function resolves the value from Content-Disposition / URL path and writes it back.
+// It does NOT perform SSRF validation — callers are responsible for that.
+func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, payloadFileType *string) ([]byte, error) {
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request for file URL: %w", err)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download file from URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("remote server returned status %d", resp.StatusCode)
+	}
+
+	// Reject oversized files early via Content-Length
+	if contentLength := resp.ContentLength; contentLength > maxFileURLSize {
+		return nil, fmt.Errorf("file size %d bytes exceeds limit of %d bytes (10MB)", contentLength, maxFileURLSize)
+	}
+
+	// Resolve fileName: payload > Content-Disposition > URL path
+	if *payloadFileName == "" {
+		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+			*payloadFileName = extractFileNameFromContentDisposition(cd)
+		}
+	}
+	if *payloadFileName == "" {
+		*payloadFileName = extractFileNameFromURL(fileURL)
+	}
+	if *payloadFileType == "" && *payloadFileName != "" {
+		*payloadFileType = getFileType(*payloadFileName)
+	}
+
+	// Stream response body into a temp file, capped at maxFileURLSize
+	tmpFile, err := os.CreateTemp("", "weknora-fileurl-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	limiter := &io.LimitedReader{R: resp.Body, N: maxFileURLSize + 1}
+	written, err := io.Copy(tmpFile, limiter)
+	tmpFile.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if written > maxFileURLSize {
+		return nil, fmt.Errorf("file size exceeds limit of 10MB")
+	}
+
+	contentBytes, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read temp file: %w", err)
+	}
+
+	return contentBytes, nil
 }
 
 // ProcessDocument handles Asynq document processing tasks
@@ -6599,20 +7160,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 构建VLM配置（如果需要）
-	var vlmConfig *proto.VLMConfig
-	if payload.EnableMultimodel {
-		vlmConfig, err = s.getVLMProtoConfig(ctx, kb)
-		if err != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", err).Errorf("processDocument build VLM config failed")
-		}
-		if vlmConfig == nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				Warn("processDocument enable multimodal but VLM config missing")
-		}
-	}
-
 	// 检查多模态配置（仅对文件导入）
 	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
@@ -6624,149 +7171,354 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
-	// 处理不同类型的导入：文件、URL、文本段落
-	var chunks []*proto.Chunk
-	if payload.URL != "" {
-		// URL导入 - 再次进行 SSRF 验证（防止 DNS 重绑定攻击）
-		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
-			logger.Errorf(ctx, "URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.URL, reason)
+	// New pipeline: convert -> store images -> chunk -> vectorize -> multimodal tasks
+	var convertResult *types.ReadResult
+	var chunks []types.ParsedChunk
+
+	if payload.FileURL != "" {
+		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
+		if safe, reason := secutils.IsSSRFSafeURL(payload.FileURL); !safe {
+			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.FileURL, reason)
 			knowledge.ParseStatus = "failed"
-			knowledge.ErrorMessage = "URL is not allowed for security reasons"
+			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
 			return nil
 		}
 
-		urlResp, err := s.docReaderClient.ReadFromURL(ctx, &proto.ReadFromURLRequest{
-			Url:   payload.URL,
-			Title: knowledge.Title,
-			ReadConfig: &proto.ReadConfig{
-				ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-				ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-				Separators:       kb.ChunkingConfig.Separators,
-				EnableMultimodal: payload.EnableMultimodel,
-				StorageConfig: &proto.StorageConfig{
-					Provider: proto.StorageProvider(
-						proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)],
-					),
-					Region:          kb.StorageConfig.Region,
-					BucketName:      kb.StorageConfig.BucketName,
-					AccessKeyId:     kb.StorageConfig.SecretID,
-					SecretAccessKey: kb.StorageConfig.SecretKey,
-					AppId:           kb.StorageConfig.AppID,
-					PathPrefix:      kb.StorageConfig.PathPrefix,
-				},
-				VlmConfig: vlmConfig,
-			},
-			RequestId: payload.RequestId,
-		})
+		resolvedFileName := payload.FileName
+		resolvedFileType := payload.FileType
+		contentBytes, err := downloadFileFromURL(ctx, payload.FileURL, &resolvedFileName, &resolvedFileType)
 		if err != nil {
-			// 如果是最后一次重试，更新状态为失败
+			logger.Errorf(ctx, "Failed to download file from URL: %s, error: %v", payload.FileURL, err)
 			if isLastRetry {
 				knowledge.ParseStatus = "failed"
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
 			}
-			return fmt.Errorf("failed to read from URL: %w", err)
+			return fmt.Errorf("failed to download file from URL: %w", err)
 		}
-		chunks = urlResp.Chunks
+
+		if resolvedFileType != "" && !allowedFileURLExtensions[strings.ToLower(resolvedFileType)] {
+			logger.Errorf(ctx, "Unsupported file type resolved from file URL: %s", resolvedFileType)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = fmt.Sprintf("unsupported file type: %s", resolvedFileType)
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+
+		if resolvedFileName != "" && knowledge.FileName == "" {
+			knowledge.FileName = resolvedFileName
+		}
+		if resolvedFileType != "" && knowledge.FileType == "" {
+			knowledge.FileType = resolvedFileType
+			s.repo.UpdateKnowledge(ctx, knowledge)
+		}
+
+		fileSvc := s.resolveFileService(ctx, kb)
+		filePath, err := fileSvc.SaveBytes(ctx, contentBytes, payload.TenantID, resolvedFileName, true)
+		if err != nil {
+			if isLastRetry {
+				knowledge.ParseStatus = "failed"
+				knowledge.ErrorMessage = err.Error()
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+			}
+			return fmt.Errorf("failed to save downloaded file: %w", err)
+		}
+
+		payload.FilePath = filePath
+		payload.FileName = resolvedFileName
+		payload.FileType = resolvedFileType
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		if err != nil {
+			return err
+		}
+		if convertResult == nil {
+			return nil
+		}
+	} else if payload.URL != "" {
+		// URL import
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
+		if err != nil {
+			return err
+		}
+		if convertResult == nil {
+			return nil
+		}
 	} else if len(payload.Passages) > 0 {
-		// 文本段落导入
-		chunks := make([]*proto.Chunk, 0, len(payload.Passages))
+		// Text passage import - direct chunking, no conversion needed
+		passageChunks := make([]types.ParsedChunk, 0, len(payload.Passages))
 		start, end := 0, 0
 		for i, p := range payload.Passages {
 			if p == "" {
 				continue
 			}
 			end += len([]rune(p))
-			chunk := &proto.Chunk{
+			passageChunks = append(passageChunks, types.ParsedChunk{
 				Content: p,
-				Seq:     int32(i),
-				Start:   int32(start),
-				End:     int32(end),
-			}
+				Seq:     i,
+				Start:   start,
+				End:     end,
+			})
 			start = end
-			chunks = append(chunks, chunk)
 		}
-		// 直接处理chunks，不需要调用docReader
-		s.processChunks(ctx, kb, knowledge, chunks)
+		s.processChunks(ctx, kb, knowledge, passageChunks)
 		return nil
 	} else {
-		// 文件导入
-		fileReader, err := s.fileSvc.GetFile(ctx, payload.FilePath)
+		// File import
+		convertResult, err = s.convert(ctx, payload, kb, knowledge, isLastRetry)
 		if err != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", err).Errorf("processDocument get file failed")
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to get file: %w", err)
+			return err
 		}
-		defer fileReader.Close()
-
-		// 读取文件内容
-		contentBytes, err := io.ReadAll(fileReader)
-		if err != nil {
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to read file: %w", err)
+		if convertResult == nil {
+			return nil
 		}
-
-		// 调用docReader处理文件
-		fileResp, err := s.docReaderClient.ReadFromFile(ctx, &proto.ReadFromFileRequest{
-			FileContent: contentBytes,
-			FileName:    payload.FileName,
-			FileType:    payload.FileType,
-			ReadConfig: &proto.ReadConfig{
-				ChunkSize:        int32(kb.ChunkingConfig.ChunkSize),
-				ChunkOverlap:     int32(kb.ChunkingConfig.ChunkOverlap),
-				Separators:       kb.ChunkingConfig.Separators,
-				EnableMultimodal: payload.EnableMultimodel,
-				StorageConfig: &proto.StorageConfig{
-					Provider:        proto.StorageProvider(proto.StorageProvider_value[strings.ToUpper(kb.StorageConfig.Provider)]),
-					Region:          kb.StorageConfig.Region,
-					BucketName:      kb.StorageConfig.BucketName,
-					AccessKeyId:     kb.StorageConfig.SecretID,
-					SecretAccessKey: kb.StorageConfig.SecretKey,
-					AppId:           kb.StorageConfig.AppID,
-					PathPrefix:      kb.StorageConfig.PathPrefix,
-				},
-				VlmConfig: vlmConfig,
-			},
-			RequestId: payload.RequestId,
-		})
-		if err != nil {
-			logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
-				WithField("error", err).Errorf("processDocument read file failed")
-			// 如果是最后一次重试，更新状态为失败
-			if isLastRetry {
-				knowledge.ParseStatus = "failed"
-				knowledge.ErrorMessage = err.Error()
-				knowledge.UpdatedAt = time.Now()
-				s.repo.UpdateKnowledge(ctx, knowledge)
-			}
-			return fmt.Errorf("failed to read file from docreader: %w", err)
-		}
-		chunks = fileResp.Chunks
 	}
 
-	// 处理chunks（这会更新状态为completed）
-	s.processChunks(ctx, kb, knowledge, chunks, ProcessChunksOptions{
+	// Step 2: Store images and update markdown references
+	var storedImages []docparser.StoredImage
+	if s.imageResolver != nil && convertResult != nil {
+		fileSvc := s.resolveFileService(ctx, kb)
+		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
+		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
+		if resolveErr != nil {
+			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
+		}
+		if updatedMarkdown != "" {
+			convertResult.MarkdownContent = updatedMarkdown
+		}
+		storedImages = images
+		logger.Infof(ctx, "Resolved %d images for knowledge %s", len(storedImages), knowledge.ID)
+	}
+
+	// Step 3: Split into chunks using Go chunker
+	chunkCfg := chunker.SplitterConfig{
+		ChunkSize:    kb.ChunkingConfig.ChunkSize,
+		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
+		Separators:   kb.ChunkingConfig.Separators,
+	}
+	if chunkCfg.ChunkSize <= 0 {
+		chunkCfg.ChunkSize = 512
+	}
+	if chunkCfg.ChunkOverlap <= 0 {
+		chunkCfg.ChunkOverlap = 50
+	}
+	if len(chunkCfg.Separators) == 0 {
+		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+
+	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
-	})
+		EnableMultimodel:         payload.EnableMultimodel,
+		StoredImages:             storedImages,
+	}
+
+	if kb.ChunkingConfig.EnableParentChild {
+		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
+		pcResult := chunker.SplitTextParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
+		chunks = make([]types.ParsedChunk, len(pcResult.Children))
+		for i, c := range pcResult.Children {
+			chunks[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				ParentIndex: c.ParentIndex,
+			}
+		}
+		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
+		for i, p := range pcResult.Parents {
+			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+		}
+		processOpts.ParentChunks = parentChunks
+		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
+			len(pcResult.Parents), len(pcResult.Children), knowledge.ID)
+	} else {
+		splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
+		chunks = make([]types.ParsedChunk, len(splitChunks))
+		for i, c := range splitChunks {
+			chunks[i] = types.ParsedChunk{
+				Content: c.Content,
+				Seq:     c.Seq,
+				Start:   c.Start,
+				End:     c.End,
+			}
+		}
+		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
+	}
+
+	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
+	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
+}
+
+// convert handles both file and URL reading using a unified ReadRequest.
+func (s *knowledgeService) convert(
+	ctx context.Context,
+	payload types.DocumentProcessPayload,
+	kb *types.KnowledgeBase,
+	knowledge *types.Knowledge,
+	isLastRetry bool,
+) (*types.ReadResult, error) {
+	isURL := payload.URL != ""
+	fileType := payload.FileType
+	overrides := s.getParserEngineOverridesFromContext(ctx)
+
+	if isURL {
+		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
+			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, reason: %s", payload.URL, reason)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = "URL is not allowed for security reasons"
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil, nil
+		}
+	}
+
+	parserEngine := kb.ChunkingConfig.ResolveParserEngine(fileType)
+	if isURL {
+		parserEngine = kb.ChunkingConfig.ResolveParserEngine("url")
+	}
+
+	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
+		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
+
+	var reader interfaces.DocReader = s.resolveDocReader(parserEngine, fileType, isURL, overrides)
+	if reader == nil {
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil, nil
+	}
+
+	req := &types.ReadRequest{
+		URL:                   payload.URL,
+		Title:                 knowledge.Title,
+		ParserEngine:          parserEngine,
+		RequestID:             payload.RequestId,
+		ParserEngineOverrides: overrides,
+	}
+
+	if !isURL {
+		fileReader, err := s.resolveFileServiceForPath(ctx, kb, payload.FilePath).GetFile(ctx, payload.FilePath)
+		if err != nil {
+			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to get file: %v", err)
+		}
+		defer fileReader.Close()
+		contentBytes, err := io.ReadAll(fileReader)
+		if err != nil {
+			return s.failKnowledge(ctx, knowledge, isLastRetry, "failed to read file: %v", err)
+		}
+		req.FileContent = contentBytes
+		req.FileName = payload.FileName
+		req.FileType = fileType
+	}
+
+	result, err := reader.Read(ctx, req)
+	if err != nil {
+		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
+	}
+	if result.Error != "" {
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = result.Error
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil, nil
+	}
+	return result, nil
+}
+
+// resolveDocReader returns the appropriate DocReader for the given engine.
+// Returns nil when the required service is unavailable.
+func (s *knowledgeService) resolveDocReader(engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
+	switch engine {
+	case docparser.SimpleEngineName:
+		return &docparser.SimpleFormatReader{}
+	case "mineru":
+		return docparser.NewMinerUReader(overrides)
+	case "mineru_cloud":
+		return docparser.NewMinerUCloudReader(overrides)
+	default:
+		if !isURL && docparser.IsSimpleFormat(fileType) {
+			return &docparser.SimpleFormatReader{}
+		}
+		return s.documentReader
+	}
+}
+
+// failKnowledge marks knowledge as failed (only on last retry) and returns an error.
+func (s *knowledgeService) failKnowledge(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	isLastRetry bool,
+	format string,
+	args ...interface{},
+) (*types.ReadResult, error) {
+	errMsg := fmt.Sprintf(format, args...)
+	if isLastRetry {
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = errMsg
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+	}
+	return nil, fmt.Errorf(format, args...)
+}
+
+// enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
+func (s *knowledgeService) enqueueImageMultimodalTasks(
+	ctx context.Context,
+	knowledge *types.Knowledge,
+	kb *types.KnowledgeBase,
+	images []docparser.StoredImage,
+	chunks []types.ParsedChunk,
+) {
+	if s.task == nil || len(images) == 0 {
+		return
+	}
+
+	for _, img := range images {
+		// Match image to the ParsedChunk whose content contains the image URL.
+		// ChunkID was populated by processChunks with the real DB UUID.
+		chunkID := ""
+		for _, c := range chunks {
+			if strings.Contains(c.Content, img.ServingURL) {
+				chunkID = c.ChunkID
+				break
+			}
+		}
+		if chunkID == "" && len(chunks) > 0 {
+			chunkID = chunks[0].ChunkID
+		}
+
+		payload := types.ImageMultimodalPayload{
+			TenantID:        knowledge.TenantID,
+			KnowledgeID:     knowledge.ID,
+			KnowledgeBaseID: kb.ID,
+			ChunkID:         chunkID,
+			ImageURL:        img.ServingURL,
+			EnableOCR:       true,
+			EnableCaption:   true,
+		}
+
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to marshal image multimodal payload: %v", err)
+			continue
+		}
+
+		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes)
+		if _, err := s.task.Enqueue(task); err != nil {
+			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
+		} else {
+			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+		}
+	}
 }
 
 // ProcessFAQImport handles Asynq FAQ import tasks (including dry run mode)

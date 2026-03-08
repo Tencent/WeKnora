@@ -1,5 +1,7 @@
 # 忽略.env文件和其他包含敏感信息的配置文件
 .env
+.env.lite
+.cursor/
 # 但不忽略示例文件
 !.env.example
 *.pem
@@ -27,9 +29,15 @@ logs/
 *.pid
 
 WeKnora
+WeKnora-lite
 /models/
 test/data/mswag.txt
 data/files/
+data/weknora.db
+data/weknora.db-wal
+data/weknora.db-shm
+
+web/
 
 .venv/
 **/__pycache__

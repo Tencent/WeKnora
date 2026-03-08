@@ -126,6 +126,9 @@ type SearchResult struct {
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`
+
+	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }
 
 // SearchParams represents the search parameters
@@ -139,6 +142,10 @@ type SearchParams struct {
 	KnowledgeIDs         []string `json:"knowledge_ids"`
 	TagIDs               []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
 	OnlyRecommended      bool     `json:"only_recommended"`
+	// SkipContextEnrichment skips fetching parent, nearby, and relation chunks
+	// in processSearchResults. Used by the chat pipeline where context assembly
+	// is handled separately in the merge stage.
+	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

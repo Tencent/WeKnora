@@ -2,6 +2,9 @@
  * Tool Icons Utility
  * Maps tool names and match types to icons for better UI display
  */
+import i18n from '@/i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 // Tool name to icon mapping
 export const toolIcons: Record<string, string> = {
@@ -17,15 +20,26 @@ export const toolIcons: Record<string, string> = {
     todo_write: '📋',
 };
 
-// Match type to icon mapping
+// Match type internal keys for icon mapping
+const matchTypeIconKeys: Record<string, string> = {
+    vector: '🎯',
+    keyword: '🔤',
+    adjacent: '📌',
+    history: '📜',
+    parent: '⬆️',
+    relation: '🔗',
+    graph: '🕸️',
+};
+
+// Match type to icon mapping (keys match backend API response)
 export const matchTypeIcons: Record<string, string> = {
-    '向量匹配': '🎯',
-    '关键词匹配': '🔤',
-    '相邻块匹配': '📌',
-    '历史匹配': '📜',
-    '父块匹配': '⬆️',
-    '关系块匹配': '🔗',
-    '图谱匹配': '🕸️',
+    'Vector Match': '🎯',
+    'Keyword Match': '🔤',
+    'Adjacent Chunk Match': '📌',
+    'History Match': '📜',
+    'Parent Chunk Match': '⬆️',
+    'Relation Chunk Match': '🔗',
+    'Graph Match': '🕸️',
 };
 
 // Get icon for a tool name
@@ -35,23 +49,26 @@ export function getToolIcon(toolName: string): string {
 
 // Get icon for a match type
 export function getMatchTypeIcon(matchType: string): string {
-    return matchTypeIcons[matchType] || '📍';
+    return matchTypeIcons[matchType] || matchTypeIconKeys[matchType] || '📍';
 }
 
-// Get tool display name (user-friendly)
+// Tool name to i18n key mapping
+const toolDisplayNameKeys: Record<string, string> = {
+    multi_kb_search: 'tools.multiKbSearch',
+    knowledge_search: 'tools.knowledgeSearch',
+    grep_chunks: 'tools.grepChunks',
+    get_chunk_detail: 'tools.getChunkDetail',
+    list_knowledge_chunks: 'tools.listKnowledgeChunks',
+    list_knowledge_bases: 'tools.listKnowledgeBases',
+    get_document_info: 'tools.getDocumentInfo',
+    query_knowledge_graph: 'tools.queryKnowledgeGraph',
+    think: 'tools.think',
+    todo_write: 'tools.todoWrite',
+};
+
+// Get tool display name (user-friendly, localized)
 export function getToolDisplayName(toolName: string): string {
-    const displayNames: Record<string, string> = {
-        multi_kb_search: '跨库搜索',
-        knowledge_search: '知识库搜索',
-        grep_chunks: '文本模式搜索',
-        get_chunk_detail: '获取片段详情',
-        list_knowledge_chunks: '查看知识分块',
-        list_knowledge_bases: '列出知识库',
-        get_document_info: '获取文档信息',
-        query_knowledge_graph: '查询知识图谱',
-        think: '深度思考',
-        todo_write: '制定计划',
-    };
-    return displayNames[toolName] || toolName;
+    const key = toolDisplayNameKeys[toolName];
+    return key ? t(key) : toolName;
 }
 

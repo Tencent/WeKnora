@@ -32,6 +32,7 @@ type MCPService struct {
 	AdvancedConfig *MCPAdvancedConfig `json:"advanced_config"        gorm:"type:json"`
 	StdioConfig    *MCPStdioConfig    `json:"stdio_config,omitempty" gorm:"type:json"` // Required for stdio transport
 	EnvVars        MCPEnvVars         `json:"env_vars,omitempty"     gorm:"type:json"` // Environment variables for stdio
+	IsBuiltin      bool               `json:"is_builtin"             gorm:"default:false"`         // Whether this is a builtin MCP service (visible to all tenants)
 	CreatedAt      time.Time          `json:"created_at"`
 	UpdatedAt      time.Time          `json:"updated_at"`
 	DeletedAt      gorm.DeletedAt     `json:"deleted_at"             gorm:"index"`
@@ -215,6 +216,21 @@ func (m *MCPService) MaskSensitiveData() {
 			m.AuthConfig.Token = maskString(m.AuthConfig.Token)
 		}
 	}
+}
+
+// HideSensitiveInfo returns a copy of the MCP service with sensitive fields cleared for builtin services
+func (m *MCPService) HideSensitiveInfo() *MCPService {
+	if !m.IsBuiltin {
+		return m
+	}
+
+	copy := *m
+	copy.URL = nil
+	copy.AuthConfig = nil
+	copy.Headers = nil
+	copy.EnvVars = nil
+	copy.StdioConfig = nil
+	return &copy
 }
 
 // maskString masks a string, showing only first 4 and last 4 characters

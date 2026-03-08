@@ -1,8 +1,15 @@
 package router
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -12,7 +19,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
 	_ "github.com/Tencent/WeKnora/docs" // swagger docs
@@ -55,6 +64,7 @@ type RouterParams struct {
 // NewRouter 创建新的路由
 func NewRouter(params RouterParams) *gin.Engine {
 	r := gin.New()
+	r.ContextWithFallback = true
 
 	// CORS 中间件应放在最前面
 	r.Use(cors.New(cors.Config{
@@ -88,11 +98,19 @@ func NewRouter(params RouterParams) *gin.Engine {
 		))
 	}
 
+	// 前端静态文件（仅 Lite 版本内嵌前端）
+	if handler.Edition == "lite" {
+		serveFrontendStatic(r)
+	}
+
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
 
+	// 文件服务：统一代理本地/MinIO/COS/TOS存储后端（需要认证）
+	serveFiles(r)
+
 	// 添加OpenTelemetry追踪中间件
-	r.Use(middleware.TracingMiddleware())
+	// r.Use(middleware.TracingMiddleware())
 
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")
@@ -148,7 +166,7 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	{
 		// 从文件创建知识
 		kb.POST("/file", handler.CreateKnowledgeFromFile)
-		// 从URL创建知识
+		// 从URL创建知识（支持网页URL和文件URL，传 file_name/file_type 或 URL 含已知扩展名时自动切换为文件下载模式）
 		kb.POST("/url", handler.CreateKnowledgeFromURL)
 		// 手工 Markdown 录入
 		kb.POST("/manual", handler.CreateManualKnowledge)
@@ -173,6 +191,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.POST("/:id/reparse", handler.ReparseKnowledge)
 		// 获取知识文件
 		k.GET("/:id/download", handler.DownloadKnowledgeFile)
+		// 预览知识文件（内联显示，返回正确 Content-Type）
+		k.GET("/:id/preview", handler.PreviewKnowledgeFile)
 		// 更新图像分块信息
 		k.PUT("/image/:id/:chunk_id", handler.UpdateImageInfo)
 		// 批量更新知识标签
@@ -226,6 +246,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.PUT("/:id", handler.UpdateKnowledgeBase)
 		// 删除知识库
 		kb.DELETE("/:id", handler.DeleteKnowledgeBase)
+		// 置顶/取消置顶知识库
+		kb.PUT("/:id/pin", handler.TogglePinKnowledgeBase)
 		// 混合搜索
 		kb.GET("/:id/hybrid-search", handler.HybridSearch)
 		// 拷贝知识库
@@ -389,6 +411,11 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 	systemRoutes := r.Group("/system")
 	{
 		systemRoutes.GET("/info", handler.GetSystemInfo)
+		systemRoutes.GET("/parser-engines", handler.ListParserEngines)
+		systemRoutes.POST("/parser-engines/check", handler.CheckParserEngines)
+		systemRoutes.POST("/docreader/reconnect", handler.ReconnectDocReader)
+		systemRoutes.GET("/storage-engine-status", handler.GetStorageEngineStatus)
+		systemRoutes.POST("/storage-engine-check", handler.CheckStorageEngine)
 		systemRoutes.GET("/minio/buckets", handler.ListMinioBuckets)
 	}
 }
@@ -537,4 +564,123 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Shared agents route
 	r.GET("/shared-agents", orgHandler.ListSharedAgents)
 	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
+}
+
+// serveFrontendStatic registers a middleware that serves the frontend SPA
+// from the ./web directory if it exists. Must be called BEFORE auth middleware
+// so static files are served without authentication.
+func serveFrontendStatic(r *gin.Engine) {
+	webDir := os.Getenv("WEKNORA_WEB_DIR")
+	if webDir == "" {
+		webDir = "./web"
+	}
+	absDir, _ := filepath.Abs(webDir)
+	indexPath := filepath.Join(absDir, "index.html")
+	if _, err := os.Stat(indexPath); err != nil {
+		return
+	}
+
+	logger.Infof(context.Background(), "[Router] Serving frontend static files from %s", absDir)
+
+	fs := http.Dir(absDir)
+	fileServer := http.FileServer(fs)
+
+	r.Use(func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.Next()
+			return
+		}
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") {
+			c.Next()
+			return
+		}
+		fullPath := filepath.Join(absDir, path)
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+		c.File(indexPath)
+		c.Abort()
+	})
+}
+
+// serveFiles serves files via query parameters and tenant storage settings.
+// It is registered after auth middleware, so tenant context comes from authentication.
+//
+// Route:
+//   - /files?file_path=<provider://...>
+func serveFiles(r *gin.Engine) {
+	baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
+	if baseDir == "" {
+		baseDir = "/data/files"
+	}
+	absDir, _ := filepath.Abs(baseDir)
+	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
+		if err := os.MkdirAll(absDir, 0o755); err != nil {
+			logger.Warnf(context.Background(), "[Router] Cannot create local storage dir %s: %v", absDir, err)
+		}
+	}
+
+	logger.Infof(context.Background(), "[Router] Serving files from /files (local base: %s)", absDir)
+
+	r.GET("/files", func(c *gin.Context) {
+		filePath := strings.TrimSpace(c.Query("file_path"))
+		if filePath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
+			return
+		}
+
+		provider := types.ParseProviderScheme(filePath)
+
+		tenant, _ := c.Request.Context().Value(types.TenantInfoContextKey).(*types.Tenant)
+		if tenant == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: tenant context missing"})
+			return
+		}
+
+		fileSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, tenant.StorageEngineConfig, absDir)
+		if err != nil {
+			logger.Warnf(context.Background(), "[Router] /files resolve file service failed: tenant_id=%d provider=%s err=%v", tenant.ID, provider, err)
+			c.Status(http.StatusBadRequest)
+			return
+		}
+
+		reader, err := fileSvc.GetFile(c.Request.Context(), filePath)
+		if err != nil {
+			logger.Warnf(context.Background(), "[Router] /files get file failed: tenant_id=%d provider=%s path=%q err=%v", tenant.ID, resolvedProvider, filePath, err)
+			c.Status(http.StatusNotFound)
+			return
+		}
+		defer reader.Close()
+
+		ext := filepath.Ext(filePath)
+		contentType := "application/octet-stream"
+		switch strings.ToLower(ext) {
+		case ".png":
+			contentType = "image/png"
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".gif":
+			contentType = "image/gif"
+		case ".webp":
+			contentType = "image/webp"
+		case ".bmp":
+			contentType = "image/bmp"
+		case ".svg":
+			contentType = "image/svg+xml"
+		case ".pdf":
+			contentType = "application/pdf"
+		case ".csv":
+			contentType = "text/csv; charset=utf-8"
+		}
+
+		c.Header("Content-Type", contentType)
+		c.Header("Cache-Control", "public, max-age=86400")
+		c.Status(http.StatusOK)
+		if _, err := io.Copy(c.Writer, reader); err != nil {
+			logger.Warnf(context.Background(), "[Router] /files write response failed: %v", err)
+		}
+	})
 }

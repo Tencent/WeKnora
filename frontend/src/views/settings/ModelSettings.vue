@@ -9,14 +9,14 @@
         <div class="info-box">
           <div class="info-header">
             <t-icon name="info-circle" class="info-icon" />
-            <span class="info-title">内置模型</span>
+            <span class="info-title">{{ $t('modelSettings.builtinModels.title') }}</span>
           </div>
           <div class="info-content">
-            <p>内置模型对所有租户可见，敏感信息会被隐藏，且不可编辑或删除。</p>
+            <p>{{ $t('modelSettings.builtinModels.description') }}</p>
             <p class="doc-link">
               <t-icon name="link" class="link-icon" />
               <a href="https://github.com/Tencent/WeKnora/blob/main/docs/BUILTIN_MODELS.md" target="_blank" rel="noopener noreferrer">
-                查看内置模型管理指南
+                {{ $t('modelSettings.builtinModels.viewGuide') }}
               </a>
             </p>
           </div>
@@ -44,7 +44,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
@@ -93,7 +93,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
@@ -143,7 +143,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.remote') }}</span>
@@ -192,7 +192,7 @@
           <div class="model-info">
             <div class="model-name">
               {{ model.name }}
-              <t-tag v-if="model.isBuiltin" theme="primary" size="small">内置</t-tag>
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
             </div>
             <div class="model-meta">
               <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
@@ -214,9 +214,9 @@
         </div>
       </div>
       <div v-else class="empty-state">
-        <p class="empty-text">暂无 VLLM 视觉模型</p>
+        <p class="empty-text">{{ $t('modelSettings.vllm.empty') }}</p>
         <t-button theme="default" variant="outline" size="small" @click="openAddDialog('vllm')">
-          添加模型
+          {{ $t('modelSettings.actions.addModel') }}
         </t-button>
       </div>
     </div>
@@ -330,7 +330,7 @@ const loadModels = async () => {
     allModels.value = models
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
-    MessagePlugin.error(error.message || '加载模型列表失败')
+    MessagePlugin.error(error.message)
   } finally {
     loading.value = false
   }
@@ -347,7 +347,7 @@ const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm') => {
 const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: any) => {
   // 内置模型不能编辑
   if (model.isBuiltin) {
-    MessagePlugin.warning('内置模型不能编辑')
+    MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
     return
   }
   currentModelType.value = type
@@ -435,7 +435,7 @@ const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model
   // 检查是否是内置模型
   const model = allModels.value.find(m => m.id === modelId)
   if (model?.is_builtin) {
-    MessagePlugin.warning('内置模型不能删除')
+    MessagePlugin.warning(t('modelSettings.toasts.builtinCannotDelete'))
     return
   }
   
@@ -517,13 +517,13 @@ onMounted(() => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0 0 20px 0;
     line-height: 1.5;
   }
@@ -532,7 +532,7 @@ onMounted(() => {
 .model-category-section {
   margin-bottom: 32px;
   padding-bottom: 32px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     margin-bottom: 0;
@@ -553,13 +553,13 @@ onMounted(() => {
     h3 {
       font-size: 15px;
       font-weight: 500;
-      color: #333333;
+      color: var(--td-text-color-primary);
       margin: 0 0 4px 0;
     }
 
     p {
       font-size: 13px;
-      color: #666666;
+      color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.5;
     }
@@ -595,39 +595,39 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   transition: all 0.15s ease;
   position: relative;
   overflow: visible;
 
   &:hover {
-    border-color: #07C05F;
-    background: #f9fdfb;
+    border-color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
     box-shadow: 0 1px 4px rgba(7, 192, 95, 0.08);
   }
 
   // 内置模型样式
   &.builtin-model {
-    background: #f8f9fa;
-    border-color: #d9d9d9;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-border);
 
     &:hover {
-      border-color: #c0c0c0;
-      background: #f5f6f7;
+      border-color: var(--td-component-stroke);
+      background: var(--td-bg-color-secondarycontainer);
       box-shadow: none;
     }
 
     .model-info {
       .model-name {
-        color: #666666;
+        color: var(--td-text-color-secondary);
       }
 
       .model-meta {
         .source-tag {
-          background: #e5e5e5;
-          color: #999999;
+          background: var(--td-bg-color-secondarycontainer);
+          color: var(--td-text-color-placeholder);
         }
       }
     }
@@ -641,7 +641,7 @@ onMounted(() => {
   .model-name {
     font-size: 14px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin-bottom: 6px;
     display: flex;
     align-items: center;
@@ -653,11 +653,11 @@ onMounted(() => {
     align-items: center;
     gap: 12px;
     font-size: 12px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
 
     .source-tag {
       padding: 2px 8px;
-      background: #e5e7eb;
+      background: var(--td-component-stroke);
       border-radius: 3px;
       font-size: 11px;
       font-weight: 500;
@@ -665,11 +665,11 @@ onMounted(() => {
 
     .model-id {
       font-family: monospace;
-      color: #666666;
+      color: var(--td-text-color-secondary);
     }
 
     .dimension {
-      color: #999999;
+      color: var(--td-text-color-placeholder);
     }
   }
 }
@@ -685,12 +685,12 @@ onMounted(() => {
   z-index: 1001;
 
   .more-btn {
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     padding: 4px;
 
     &:hover {
-      background: #f5f7fa;
-      color: #333333;
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-primary);
     }
   }
 }
@@ -705,7 +705,7 @@ onMounted(() => {
 
   .empty-text {
     font-size: 13px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     margin: 0 0 16px 0;
   }
 }
@@ -714,9 +714,9 @@ onMounted(() => {
   margin-top: 16px;
 
   .info-box {
-    background: #f0fdf6;
-    border: 1px solid #d1fae5;
-    border-left: 3px solid #07C05F;
+    background: var(--td-success-color-light);
+    border: 1px solid var(--td-success-color-focus);
+    border-left: 3px solid var(--td-brand-color);
     border-radius: 6px;
     padding: 16px;
   }
@@ -729,21 +729,21 @@ onMounted(() => {
 
     .info-icon {
       font-size: 16px;
-      color: #07C05F;
+      color: var(--td-brand-color);
       flex-shrink: 0;
     }
 
     .info-title {
       font-size: 14px;
       font-weight: 500;
-      color: #059669;
+      color: var(--td-brand-color-active);
     }
   }
 
   .info-content {
     font-size: 13px;
     line-height: 1.6;
-    color: #065f46;
+    color: var(--td-success-color);
 
     p {
       margin: 0 0 6px 0;
@@ -760,18 +760,18 @@ onMounted(() => {
 
         .link-icon {
           font-size: 13px;
-          color: #07C05F;
+          color: var(--td-brand-color);
           flex-shrink: 0;
         }
 
         a {
-          color: #07C05F;
+          color: var(--td-brand-color);
           text-decoration: none;
           font-weight: 500;
           transition: color 0.15s;
 
           &:hover {
-            color: #059669;
+            color: var(--td-brand-color-active);
             text-decoration: underline;
           }
         }
@@ -788,13 +788,13 @@ onMounted(() => {
     transition: all 0.15s ease;
 
     &:hover {
-      background: #06b04d;
-      border-color: #06b04d;
+      background: var(--td-brand-color);
+      border-color: var(--td-brand-color);
     }
 
     &:active {
-      background: #059642;
-      border-color: #059642;
+      background: var(--td-brand-color-active);
+      border-color: var(--td-brand-color-active);
     }
   }
 
@@ -805,12 +805,12 @@ onMounted(() => {
     border-radius: 6px;
 
     &.t-button--variant-outline {
-      color: #666666;
-      border-color: #d9d9d9;
+      color: var(--td-text-color-secondary);
+      border-color: var(--td-component-stroke);
 
       &:hover {
-        color: #07C05F;
-        border-color: #07C05F;
+        color: var(--td-brand-color);
+        border-color: var(--td-brand-color);
         background: rgba(7, 192, 95, 0.04);
       }
     }
@@ -826,13 +826,13 @@ onMounted(() => {
   border: none;
 
   &.t-tag--theme-primary {
-    background: #e0f2fe;
-    color: #0369a1;
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
   }
 
   &.t-tag--theme-success {
-    background: #dcfce7;
-    color: #059669;
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color-active);
   }
 
   &.t-size-s {
@@ -844,8 +844,8 @@ onMounted(() => {
 // Dropdown 菜单样式优化
 :deep(.t-popup__content) {
   .t-dropdown__menu {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-component-stroke);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
     padding: 4px;
@@ -857,31 +857,31 @@ onMounted(() => {
     border-radius: 4px;
     margin: 2px 0;
     font-size: 13px;
-    color: #333333;
+    color: var(--td-text-color-primary);
     transition: all 0.15s ease;
     cursor: pointer;
 
     &:hover {
-      background: #f5f7fa;
-      color: #07C05F;
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-brand-color);
     }
 
     &:active {
-      background: #e8f5ed;
+      background: var(--td-success-color-light);
     }
 
     // 删除按钮特殊样式 - 覆盖默认 hover 样式
     &.t-dropdown__item--theme-error {
-      color: #f56c6c;
+      color: var(--td-error-color);
 
       &:hover {
-        background: #fef0f0;
-        color: #e53e3e !important; // 使用 !important 确保覆盖默认样式
+        background: var(--td-error-color-light);
+        color: var(--td-error-color) !important; // 使用 !important 确保覆盖默认样式
       }
 
       &:active {
-        background: #fde2e2;
-        color: #c53030;
+        background: var(--td-error-color-light);
+        color: var(--td-error-color);
       }
     }
   }

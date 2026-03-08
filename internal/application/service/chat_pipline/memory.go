@@ -104,12 +104,12 @@ func (p *MemoryPlugin) handleStorage(
 			{Role: "user", Content: chatManage.Query},
 			{Role: "assistant", Content: chatManage.ChatResponse.Content},
 		}
-		// Capture UserID and SessionID for goroutine
 		userID := chatManage.UserID
 		sessionID := chatManage.SessionID
+		bgCtx := context.WithoutCancel(ctx)
 		go func() {
-			if err := p.memoryService.AddEpisode(ctx, userID, sessionID, messages); err != nil {
-				logger.Errorf(ctx, "failed to add episode: %v", err)
+			if err := p.memoryService.AddEpisode(bgCtx, userID, sessionID, messages); err != nil {
+				logger.Errorf(bgCtx, "failed to add episode: %v", err)
 			}
 		}()
 		return nil
@@ -118,11 +118,11 @@ func (p *MemoryPlugin) handleStorage(
 	// If streaming, subscribe to events
 	if chatManage.EventBus != nil {
 		var fullResponse string
-		// Capture UserID and SessionID for closure
 		userID := chatManage.UserID
 		sessionID := chatManage.SessionID
+		bgCtx := context.WithoutCancel(ctx)
 
-		chatManage.EventBus.On(types.EventType(event.EventAgentFinalAnswer), func(ctx context.Context, evt types.Event) error {
+		chatManage.EventBus.On(types.EventType(event.EventAgentFinalAnswer), func(_ context.Context, evt types.Event) error {
 			data, ok := evt.Data.(event.AgentFinalAnswerData)
 			if !ok {
 				return nil
@@ -134,8 +134,8 @@ func (p *MemoryPlugin) handleStorage(
 					{Role: "assistant", Content: fullResponse},
 				}
 				go func() {
-					if err := p.memoryService.AddEpisode(ctx, userID, sessionID, messages); err != nil {
-						logger.Errorf(ctx, "failed to add episode: %v", err)
+					if err := p.memoryService.AddEpisode(bgCtx, userID, sessionID, messages); err != nil {
+						logger.Errorf(bgCtx, "failed to add episode: %v", err)
 					}
 				}()
 			}

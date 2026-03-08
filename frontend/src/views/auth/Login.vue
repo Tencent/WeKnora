@@ -608,7 +608,7 @@ onBeforeUnmount(() => {
 const handleLogin = async () => {
   try {
     const valid = await formRef.value?.validate()
-    if (!valid) return
+    if (valid !== true) return
 
     loading.value = true
     
@@ -664,7 +664,7 @@ const handleLogin = async () => {
 const handleRegister = async () => {
   try {
     const valid = await registerFormRef.value?.validate()
-    if (!valid) return
+    if (valid !== true) return
 
     loading.value = true
     
@@ -1006,7 +1006,7 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px);
   border-radius: 20px;
-  color: #ffffff;
+  color: var(--td-text-color-anti);
   font-size: 14px;
   font-weight: 500;
   font-family: "PingFang SC", sans-serif;
@@ -1044,7 +1044,7 @@ onMounted(() => {
   }
 
   :deep(.swiper-pagination-bullet-active) {
-    background: #ffffff;
+    background: var(--td-bg-color-container);
     width: 28px;
     border-radius: 5px;
   }
@@ -1053,7 +1053,7 @@ onMounted(() => {
 .slide-content {
   width: 100%;
   height: 100%;
-  background: #ffffff;
+  background: var(--td-bg-color-container);
   border-radius: 16px;
   overflow: hidden;
   display: flex;
@@ -1130,7 +1130,7 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  color: #ffffff;
+  color: var(--td-text-color-anti);
   text-decoration: none;
   font-size: 13px;
     font-weight: 600;
@@ -1139,7 +1139,7 @@ onMounted(() => {
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
   position: relative;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--td-shadow-2);
 
   svg {
     flex-shrink: 0;
@@ -1153,7 +1153,7 @@ onMounted(() => {
   &:hover {
     background: rgba(255, 255, 255, 0.3);
     border-color: rgba(255, 255, 255, 0.4);
-    color: #ffffff;
+    color: var(--td-text-color-anti);
     transform: translateY(-2px);
     box-shadow: 
       0 4px 16px rgba(0, 0, 0, 0.15),
@@ -1177,7 +1177,7 @@ onMounted(() => {
     background: rgba(255, 255, 255, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.25);
     backdrop-filter: blur(8px);
-    color: #ffffff;
+    color: var(--td-text-color-anti);
 
     .lang-flag-icon {
     font-size: 16px;
@@ -1188,7 +1188,7 @@ onMounted(() => {
     &:hover {
       background: rgba(255, 255, 255, 0.3);
       border-color: rgba(255, 255, 255, 0.4);
-      color: #ffffff;
+      color: var(--td-text-color-anti);
       box-shadow: 
         0 4px 16px rgba(0, 0, 0, 0.15),
         0 0 0 1px rgba(255, 255, 255, 0.2);
@@ -1213,7 +1213,7 @@ onMounted(() => {
   min-width: 160px;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(14px);
-  border: 1px solid #E5E7EB;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   overflow: hidden;
@@ -1230,7 +1230,7 @@ onMounted(() => {
   transition: all 0.2s;
   font-size: 13px;
   font-family: "PingFang SC", sans-serif;
-  color: #374151;
+  color: var(--td-text-color-primary);
 
   .lang-flag {
     font-size: 16px;
@@ -1242,19 +1242,19 @@ onMounted(() => {
   }
 
   .check-icon {
-    color: #10B981;
+    color: var(--td-success-color);
     font-weight: 700;
     font-size: 14px;
     flex-shrink: 0;
   }
 
   &:hover {
-    background: #F3F4F6;
+    background: var(--td-bg-color-secondarycontainer);
   }
 
   &.active {
-    background: #F0FDF4;
-    color: #059669;
+    background: var(--td-success-color-light);
+    color: var(--td-brand-color-active);
   }
 }
 
@@ -1289,21 +1289,21 @@ onMounted(() => {
 .form-title {
   font-size: 24px;
     font-weight: 600;
-  color: #111827;
+  color: var(--td-text-color-primary);
   margin: 0 0 6px 0;
   font-family: "PingFang SC", sans-serif;
 }
 
 .form-welcome {
   font-size: 13px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
     margin: 0;
   font-family: "PingFang SC", sans-serif;
 }
 
 .form-subtitle {
   font-size: 13px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   margin: 0;
   font-family: "PingFang SC", sans-serif;
 }
@@ -1311,7 +1311,7 @@ onMounted(() => {
 .form-content {
   :deep(.t-form-item__label) {
     font-size: 14px;
-    color: #111827;
+    color: var(--td-text-color-primary);
     font-weight: 500;
     margin-bottom: 8px;
     font-family: "PingFang SC", sans-serif;
@@ -1320,18 +1320,18 @@ onMounted(() => {
   }
 
   :deep(.t-input) {
-    border: 1px solid #E7E7E7;
+    border: 1px solid var(--td-component-stroke);
     border-radius: 8px;
-    background: #fff;
+    background: var(--td-bg-color-container);
     transition: all 0.2s;
     
     &:focus-within {
-      border-color: #07C05F;
+      border-color: var(--td-brand-color);
       box-shadow: 0 0 0 3px rgba(7, 192, 95, 0.1);
     }
     
     &:hover {
-      border-color: #07C05F;
+      border-color: var(--td-brand-color);
     }
     
     .t-input__inner {
@@ -1378,12 +1378,12 @@ onMounted(() => {
   transition: all 0.3s;
 
   :deep(.t-button) {
-    background-color: #07C05F;
-    border-color: #07C05F;
+    background-color: var(--td-brand-color);
+    border-color: var(--td-brand-color);
 
     &:hover {
-      background-color: #06a855;
-      border-color: #06a855;
+      background-color: var(--td-brand-color);
+      border-color: var(--td-brand-color);
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(7, 192, 95, 0.3);
     }
@@ -1397,21 +1397,21 @@ onMounted(() => {
 .form-footer {
   text-align: center;
   font-size: 14px;
-  color: #6B7280;
+  color: var(--td-text-color-secondary);
   font-family: "PingFang SC", sans-serif;
   margin-top: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #E5E7EB;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   .link-button {
-    color: #07C05F;
+    color: var(--td-brand-color);
     text-decoration: none;
     margin-left: 4px;
     font-weight: 500;
     transition: all 0.2s;
 
     &:hover {
-      color: #06a855;
+      color: var(--td-brand-color);
       text-decoration: underline;
     }
   }
@@ -1426,7 +1426,7 @@ onMounted(() => {
     align-items: center;
     margin-bottom: 12px;
     font-size: 13px;
-    color: #4B5563;
+    color: var(--td-text-color-secondary);
     font-family: "PingFang SC", sans-serif;
 
     &:last-child {
@@ -1437,8 +1437,8 @@ onMounted(() => {
       width: 20px;
       height: 20px;
       border-radius: 50%;
-      background: #D1FAE5;
-      color: #059669;
+      background: var(--td-success-color-light);
+      color: var(--td-brand-color-active);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1608,6 +1608,113 @@ onMounted(() => {
 
   .form-header {
     margin-bottom: 24px;
+  }
+}
+</style>
+
+<style lang="less">
+html[theme-mode="dark"] {
+  // 整体背景：更深的绿色渐变
+  .login-layout {
+    background: linear-gradient(225deg, #011a14 0%, #032e22 15%, #043a2c 25%, #05503d 38%, #046647 50%, #038a56 65%, #049b60 78%, #06a06a 90%, #07b074 100%);
+
+    &::before {
+      background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
+                  radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
+    }
+  }
+
+  // 知识图谱节点：降低发光强度
+  .knowledge-node {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 0 10px rgba(255, 255, 255, 0.2),
+      0 0 20px rgba(16, 185, 129, 0.2),
+      inset 0 0 10px rgba(255, 255, 255, 0.05);
+  }
+
+  .knowledge-node:hover {
+    box-shadow:
+      0 0 15px rgba(255, 255, 255, 0.3),
+      0 0 30px rgba(16, 185, 129, 0.3),
+      inset 0 0 15px rgba(255, 255, 255, 0.1);
+  }
+
+  .connection-line {
+    stroke: rgba(255, 255, 255, 0.3);
+  }
+
+  // Logo 反色
+  .header-logo .logo-image {
+    filter: invert(1) hue-rotate(180deg) brightness(1.1) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+  }
+
+  .header-logo:hover .logo-image {
+    filter: invert(1) hue-rotate(180deg) brightness(1.2) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.6));
+  }
+
+  // 顶部链接按钮：降低玻璃效果亮度
+  .header-link {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+  }
+
+  .language-switch button {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.15);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+  }
+
+  // 语言下拉菜单
+  .language-dropdown {
+    background: rgba(36, 36, 36, 0.95) !important;
+    border-color: var(--td-component-stroke) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  // 特性标签：降低白色亮度
+  .tag {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  // 表单卡片
+  .form-card {
+    background: rgba(36, 36, 36, 0.92) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+  }
+
+  // 表单输入框：确保深色背景下有边框对比
+  .form-content .t-input {
+    background: var(--td-bg-color-page) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+
+    &:hover {
+      border-color: var(--td-brand-color) !important;
+    }
+
+    &:focus-within {
+      border-color: var(--td-brand-color) !important;
+    }
+  }
+
+  // 轮播分页：深色模式下用白色圆点确保可见
+  .screenshot-swiper .swiper-pagination-bullet-active {
+    background: rgba(255, 255, 255, 0.9) !important;
+  }
+
+  // 特性列表图标背景
+  .login-features .feature-icon {
+    background: rgba(6, 176, 77, 0.15);
   }
 }
 </style>

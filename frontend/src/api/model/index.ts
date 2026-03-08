@@ -1,4 +1,7 @@
 import { get, post, put, del } from '../../utils/request';
+import i18n from '@/i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 // 模型类型定义
 export interface ModelConfig {
@@ -36,11 +39,11 @@ export function createModel(data: ModelConfig): Promise<ModelConfig> {
         if (response.success && response.data) {
           resolve(response.data);
         } else {
-          reject(new Error(response.message || '创建模型失败'));
+          reject(new Error(response.message || t('error.model.createFailed')));
         }
       })
       .catch((error: any) => {
-        console.error('创建模型失败:', error);
+        console.error('Failed to create model:', error);
         reject(error);
       });
   });
@@ -62,7 +65,7 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
         }
       })
       .catch((error: any) => {
-        console.error('获取模型列表失败:', error);
+        console.error('Failed to list models:', error);
         resolve([]);
       });
   });
@@ -76,11 +79,11 @@ export function getModel(id: string): Promise<ModelConfig> {
         if (response.success && response.data) {
           resolve(response.data);
         } else {
-          reject(new Error(response.message || '获取模型失败'));
+          reject(new Error(response.message || t('error.model.getFailed')));
         }
       })
       .catch((error: any) => {
-        console.error('获取模型失败:', error);
+        console.error('Failed to get model:', error);
         reject(error);
       });
   });
@@ -94,11 +97,11 @@ export function updateModel(id: string, data: Partial<ModelConfig>): Promise<Mod
         if (response.success && response.data) {
           resolve(response.data);
         } else {
-          reject(new Error(response.message || '更新模型失败'));
+          reject(new Error(response.message || t('error.model.updateFailed')));
         }
       })
       .catch((error: any) => {
-        console.error('更新模型失败:', error);
+        console.error('Failed to update model:', error);
         reject(error);
       });
   });
@@ -112,11 +115,11 @@ export function deleteModel(id: string): Promise<void> {
         if (response.success) {
           resolve();
         } else {
-          reject(new Error(response.message || '删除模型失败'));
+          reject(new Error(response.message || t('error.model.deleteFailed')));
         }
       })
       .catch((error: any) => {
-        console.error('删除模型失败:', error);
+        console.error('Failed to delete model:', error);
         reject(error);
       });
   });

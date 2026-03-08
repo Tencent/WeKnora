@@ -19,7 +19,7 @@
         <div class="model-option">
           <t-icon name="check-circle-filled" class="model-icon" />
           <span class="model-name">{{ model.name }}</span>
-          <t-tag v-if="model.is_builtin" size="small" theme="primary">内置</t-tag>
+          <t-tag v-if="model.is_builtin" size="small" theme="primary">{{ $t('model.builtinTag') }}</t-tag>
           <t-tag v-if="model.is_default" size="small" theme="success">{{ $t('model.defaultTag') }}</t-tag>
         </div>
       </t-option>
@@ -144,12 +144,12 @@ onMounted(() => {
   
   .model-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .add-icon {
     font-size: 14px;
-    color: #07C05F;
+    color: var(--td-brand-color);
   }
   
   .model-name {
@@ -159,7 +159,7 @@ onMounted(() => {
   
   &.add {
     .model-name {
-      color: #07C05F;
+      color: var(--td-brand-color);
       font-weight: 500;
     }
   }

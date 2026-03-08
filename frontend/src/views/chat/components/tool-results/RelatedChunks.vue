@@ -66,13 +66,13 @@ const props = defineProps<{
       
       .field-label {
         font-size: 11px;
-        color: #8b8b8b;
+        color: var(--td-text-color-placeholder);
         min-width: 70px;
       }
       
       .field-value {
         font-size: 11px;
-        color: #666;
+        color: var(--td-text-color-secondary);
       }
     }
   }
@@ -102,7 +102,7 @@ const props = defineProps<{
   transition: color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   
   &:hover {
-    color: #07c05f;
+    color: var(--td-brand-color);
   }
 }
 
@@ -117,14 +117,14 @@ const props = defineProps<{
 
 .chunk-index {
   font-size: 12px;
-  color: #333;
+  color: var(--td-text-color-primary);
   font-weight: 600;
   flex-shrink: 0;
 }
 
 .chunk-position {
   font-size: 11px;
-  color: #8b8b8b;
+  color: var(--td-text-color-placeholder);
 }
 
 
@@ -137,7 +137,7 @@ const props = defineProps<{
     overflow-x: hidden;
     padding: 0;
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: var(--td-shadow-3);
     word-wrap: break-word;
     word-break: break-word;
   }
@@ -146,7 +146,7 @@ const props = defineProps<{
 code {
   font-family: 'Monaco', 'Courier New', monospace;
   font-size: 11px;
-  background: #f0f0f0;
+  background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 3px;
 }

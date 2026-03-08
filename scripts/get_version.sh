@@ -4,6 +4,7 @@
 
 # 设置默认值
 VERSION="unknown"
+EDITION="${EDITION:-standard}"
 COMMIT_ID="unknown"
 BUILD_TIME="unknown"
 GO_VERSION="unknown"
@@ -41,6 +42,7 @@ case "${1:-env}" in
     "env")
         # 输出环境变量格式，对包含空格的值进行转义
         echo "VERSION=$VERSION"
+        echo "EDITION=$EDITION"
         echo "COMMIT_ID=$COMMIT_ID"
         echo "BUILD_TIME=\"$BUILD_TIME\""
         echo "GO_VERSION=\"$GO_VERSION\""
@@ -50,6 +52,7 @@ case "${1:-env}" in
         cat << EOF
 {
   "version": "$VERSION",
+  "edition": "$EDITION",
   "commit_id": "$COMMIT_ID",
   "build_time": "$BUILD_TIME",
   "go_version": "$GO_VERSION"
@@ -65,11 +68,12 @@ EOF
         ;;
     "ldflags")
         # 输出Go ldflags格式
-        echo "-X 'github.com/Tencent/WeKnora/internal/handler.Version=$VERSION' -X 'github.com/Tencent/WeKnora/internal/handler.CommitID=$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/handler.BuildTime=$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/handler.GoVersion=$GO_VERSION'"
+        echo "-X 'github.com/Tencent/WeKnora/internal/handler.Version=$VERSION' -X 'github.com/Tencent/WeKnora/internal/handler.Edition=$EDITION' -X 'github.com/Tencent/WeKnora/internal/handler.CommitID=$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/handler.BuildTime=$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/handler.GoVersion=$GO_VERSION'"
         ;;
     "info")
         # 输出信息格式
         echo "版本信息: $VERSION"
+        echo "版本类型: $EDITION"
         echo "Commit ID: $COMMIT_ID"
         echo "构建时间: $BUILD_TIME"
         echo "Go版本: $GO_VERSION"

@@ -86,7 +86,7 @@ func (s *chunkService) CreateChunks(ctx context.Context, chunks []*types.Chunk) 
 //   - *types.Chunk: Retrieved chunk if found
 //   - error: Any error encountered during retrieval
 func (s *chunkService) GetChunkByID(ctx context.Context, id string) (*types.Chunk, error) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Getting chunk by ID, ID: %s, tenant ID: %d", id, tenantID)
 	chunk, err := s.chunkRepository.GetChunkByID(ctx, tenantID, id)
 	if err != nil {
@@ -126,7 +126,7 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 	logger.Info(ctx, "Start listing chunks by knowledge ID")
 	logger.Infof(ctx, "Knowledge ID: %s", knowledgeID)
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	chunks, err := s.chunkRepository.ListChunksByKnowledgeID(ctx, tenantID, knowledgeID)
@@ -155,7 +155,7 @@ func (s *chunkService) ListChunksByKnowledgeID(ctx context.Context, knowledgeID 
 func (s *chunkService) ListPagedChunksByKnowledgeID(ctx context.Context,
 	knowledgeID string, page *types.Pagination, chunkType []types.ChunkType,
 ) (*types.PageResult, error) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	chunks, total, err := s.chunkRepository.ListPagedChunksByKnowledgeID(
 		ctx,
 		tenantID,
@@ -236,7 +236,7 @@ func (s *chunkService) UpdateChunks(ctx context.Context, chunks []*types.Chunk) 
 // Returns:
 //   - error: Any error encountered during deletion
 func (s *chunkService) DeleteChunk(ctx context.Context, id string) error {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	err := s.chunkRepository.DeleteChunk(ctx, tenantID, id)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -263,7 +263,7 @@ func (s *chunkService) DeleteChunks(ctx context.Context, ids []string) error {
 	logger.Info(ctx, "Start deleting chunks in batch")
 	logger.Infof(ctx, "Deleting %d chunks", len(ids))
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	err := s.chunkRepository.DeleteChunks(ctx, tenantID, ids)
@@ -291,7 +291,7 @@ func (s *chunkService) DeleteChunksByKnowledgeID(ctx context.Context, knowledgeI
 	logger.Info(ctx, "Start deleting all chunks by knowledge ID")
 	logger.Infof(ctx, "Knowledge ID: %s", knowledgeID)
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	err := s.chunkRepository.DeleteChunksByKnowledgeID(ctx, tenantID, knowledgeID)
@@ -311,7 +311,7 @@ func (s *chunkService) DeleteByKnowledgeList(ctx context.Context, ids []string) 
 	logger.Info(ctx, "Start deleting all chunks by knowledge IDs")
 	logger.Infof(ctx, "Knowledge IDs: %v", ids)
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	err := s.chunkRepository.DeleteByKnowledgeList(ctx, tenantID, ids)
@@ -353,7 +353,7 @@ func (s *chunkService) ListChunkByParentID(
 func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error {
 	logger.Infof(ctx, "Deleting generated question, chunk ID: %s, question ID: %s", chunkID, questionID)
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// 1. Get the chunk
 	chunk, err := s.chunkRepository.GetChunkByID(ctx, tenantID, chunkID)
@@ -404,7 +404,7 @@ func (s *chunkService) DeleteGeneratedQuestion(ctx context.Context, chunkID stri
 	// The source_id format is: {chunk_id}-{question_id}
 	sourceID := fmt.Sprintf("%s-%s", chunkID, questionID)
 
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	tenantInfo, _ := types.TenantInfoFromContext(ctx)
 	retrieveEngine, err := retriever.NewCompositeRetrieveEngine(s.retrieveEngine, tenantInfo.GetEffectiveEngines())
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

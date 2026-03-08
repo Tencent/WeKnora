@@ -71,31 +71,31 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		pipelineWarn(ctx, "IntoChatMessage", "invalid_query", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
-		return ErrTemplateExecute.WithError(fmt.Errorf("用户查询包含非法内容"))
+		return ErrTemplateExecute.WithError(fmt.Errorf("user query contains invalid content"))
 	}
 
 	// Prepare weekday names
-	weekdayName := []string{"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"}
+	weekdayName := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
 
 	var contextsBuilder strings.Builder
 
 	// Build contexts string based on FAQ priority strategy
 	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
 		// Build structured context with FAQ prioritization
-		contextsBuilder.WriteString("### 资料来源 1：标准问答库 (FAQ)\n")
-		contextsBuilder.WriteString("【高置信度 - 请优先参考】\n")
+		contextsBuilder.WriteString("### Source 1: FAQ Knowledge Base\n")
+		contextsBuilder.WriteString("[High Confidence - Prioritize these results]\n")
 		for i, result := range faqResults {
 			passage := getEnrichedPassageForChat(ctx, result)
 			if hasHighConfidenceFAQ && i == 0 {
-				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] ⭐ 精准匹配: %s\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] Exact Match: %s\n", i+1, passage))
 			} else {
 				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] %s\n", i+1, passage))
 			}
 		}
 
 		if len(docResults) > 0 {
-			contextsBuilder.WriteString("\n### 资料来源 2：参考文档\n")
-			contextsBuilder.WriteString("【补充资料 - 仅在FAQ无法解答时参考】\n")
+			contextsBuilder.WriteString("\n### Source 2: Reference Documents\n")
+			contextsBuilder.WriteString("[Supplementary - Use only when FAQ cannot answer the question]\n")
 			for i, result := range docResults {
 				passage := getEnrichedPassageForChat(ctx, result)
 				contextsBuilder.WriteString(fmt.Sprintf("[DOC-%d] %s\n", i+1, passage))
@@ -208,10 +208,10 @@ func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJS
 		if found && imgInfo != nil {
 			replacement := match[0] + "\n"
 			if imgInfo.Caption != "" {
-				replacement += fmt.Sprintf("图片描述: %s\n", imgInfo.Caption)
+				replacement += fmt.Sprintf("Image Caption: %s\n", imgInfo.Caption)
 			}
 			if imgInfo.OCRText != "" {
-				replacement += fmt.Sprintf("图片文本: %s\n", imgInfo.OCRText)
+				replacement += fmt.Sprintf("Image Text: %s\n", imgInfo.OCRText)
 			}
 			content = strings.Replace(content, match[0], replacement, 1)
 		}
@@ -227,10 +227,10 @@ func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJS
 
 		var imgTexts []string
 		if imgInfo.Caption != "" {
-			imgTexts = append(imgTexts, fmt.Sprintf("图片 %s 的描述信息: %s", imgInfo.URL, imgInfo.Caption))
+			imgTexts = append(imgTexts, fmt.Sprintf("Image %s caption: %s", imgInfo.URL, imgInfo.Caption))
 		}
 		if imgInfo.OCRText != "" {
-			imgTexts = append(imgTexts, fmt.Sprintf("图片 %s 的文本: %s", imgInfo.URL, imgInfo.OCRText))
+			imgTexts = append(imgTexts, fmt.Sprintf("Image %s text: %s", imgInfo.URL, imgInfo.OCRText))
 		}
 
 		if len(imgTexts) > 0 {
@@ -243,7 +243,7 @@ func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJS
 		if content != "" {
 			content += "\n\n"
 		}
-		content += "附加图片信息:\n" + strings.Join(additionalImageTexts, "\n")
+		content += "Additional Image Info:\n" + strings.Join(additionalImageTexts, "\n")
 	}
 
 	pipelineInfo(ctx, "IntoChatMessage", "image_enrich_summary", map[string]interface{}{

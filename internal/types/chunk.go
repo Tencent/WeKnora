@@ -14,6 +14,8 @@ type ChunkType = string
 const (
 	// ChunkTypeText 表示普通的文本 Chunk
 	ChunkTypeText ChunkType = "text"
+	// ChunkTypeParentText 表示父子分块策略中的父文本 Chunk（仅用于上下文，不参与向量索引）
+	ChunkTypeParentText ChunkType = "parent_text"
 	// ChunkTypeImageOCR 表示图片 OCR 文本的 Chunk
 	ChunkTypeImageOCR ChunkType = "image_ocr"
 	// ChunkTypeImageCaption 表示图片描述的 Chunk

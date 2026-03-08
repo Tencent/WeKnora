@@ -48,6 +48,10 @@ export async function batchDelSessions(ids: string[]) {
   return del(`/api/v1/sessions/batch`, { ids });
 }
 
+export async function deleteAllSessions() {
+  return del(`/api/v1/sessions/batch`, { delete_all: true });
+}
+
 export async function getSession(session_id: string) {
   return get(`/api/v1/sessions/${session_id}`);
 }

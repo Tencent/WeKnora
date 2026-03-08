@@ -76,20 +76,20 @@ const toggleResult = (chunkId: string) => {
 
 const getRelevanceClass = (level: RelevanceLevel): string => {
   const classMap: Record<RelevanceLevel, string> = {
-    '高相关': 'high',
-    '中相关': 'medium',
-    '低相关': 'low',
-    '弱相关': 'weak',
+    'High Relevance': 'high',
+    'Medium Relevance': 'medium',
+    'Low Relevance': 'low',
+    'Weak Relevance': 'weak',
   };
   return classMap[level] || 'weak';
 };
 
 const getRelevanceLabel = (level: RelevanceLevel): string => {
   const labelMap: Record<RelevanceLevel, string> = {
-    '高相关': t('chat.relevanceHigh'),
-    '中相关': t('chat.relevanceMedium'),
-    '低相关': t('chat.relevanceLow'),
-    '弱相关': t('chat.relevanceWeak'),
+    'High Relevance': t('chat.relevanceHigh'),
+    'Medium Relevance': t('chat.relevanceMedium'),
+    'Low Relevance': t('chat.relevanceLow'),
+    'Weak Relevance': t('chat.relevanceWeak'),
   };
   return labelMap[level] || level;
 };
@@ -113,25 +113,25 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 .results-header {
   font-size: 13px;
   font-weight: 600;
-  color: #333;
+  color: var(--td-text-color-primary);
   padding: 4px 0;
 }
 
 .result-index {
   font-size: 13px;
-  color: #8b8b8b;
+  color: var(--td-text-color-placeholder);
   font-weight: 600;
 }
 
 .knowledge-title {
   font-size: 13px;
-  color: #333;
+  color: var(--td-text-color-primary);
   flex: 1;
 }
 
 .score {
   font-size: 12px;
-  color: #8b8b8b;
+  color: var(--td-text-color-placeholder);
   font-weight: 500;
 }
 </style>

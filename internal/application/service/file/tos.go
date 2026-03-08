@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/volcengine/ve-tos-golang-sdk/v2/tos"
 	"github.com/volcengine/ve-tos-golang-sdk/v2/tos/enum"
@@ -24,6 +25,8 @@ type tosFileService struct {
 	bucketName     string
 	tempBucketName string
 }
+
+const tosScheme = "tos://"
 
 // NewTosFileService creates a TOS file service.
 func NewTosFileService(endpoint, region, accessKey, secretKey, bucketName, pathPrefix string) (interfaces.FileService, error) {
@@ -71,6 +74,34 @@ func NewTosFileServiceWithTempBucket(endpoint, region, accessKey, secretKey, buc
 	}, nil
 }
 
+// CheckConnectivity verifies TOS is reachable by performing a HeadBucket request.
+func (s *tosFileService) CheckConnectivity(ctx context.Context) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err := s.client.HeadBucket(checkCtx, &tos.HeadBucketInput{
+		Bucket: s.bucketName,
+	})
+	return err
+}
+
+// CheckTosConnectivity tests TOS connectivity using the provided credentials.
+func CheckTosConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
+	client, err := tos.NewClientV2(
+		endpoint,
+		tos.WithRegion(region),
+		tos.WithCredentials(tos.NewStaticCredentials(accessKey, secretKey)),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize TOS client: %w", err)
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err = client.HeadBucket(checkCtx, &tos.HeadBucketInput{
+		Bucket: bucketName,
+	})
+	return err
+}
+
 func ensureTOSBucket(client *tos.ClientV2, bucketName string) error {
 	_, err := client.HeadBucket(context.Background(), &tos.HeadBucketInput{
 		Bucket: bucketName,
@@ -108,12 +139,11 @@ func joinTOSObjectKey(parts ...string) string {
 }
 
 func parseTOSFilePath(filePath string) (bucketName string, objectKey string, err error) {
-	const prefix = "tos://"
-	if !strings.HasPrefix(filePath, prefix) {
+	if !strings.HasPrefix(filePath, tosScheme) {
 		return "", "", fmt.Errorf("invalid TOS file path: %s", filePath)
 	}
 
-	rest := strings.TrimPrefix(filePath, prefix)
+	rest := strings.TrimPrefix(filePath, tosScheme)
 	parts := strings.SplitN(rest, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("invalid TOS file path: %s", filePath)
@@ -152,7 +182,11 @@ func (s *tosFileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 }
 
 func (s *tosFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool) (string, error) {
-	ext := filepath.Ext(fileName)
+	safeName, err := utils.SafeFileName(fileName)
+	if err != nil {
+		return "", fmt.Errorf("invalid file name: %w", err)
+	}
+	ext := filepath.Ext(safeName)
 	reader := bytes.NewReader(data)
 
 	targetBucket := s.bucketName
@@ -172,7 +206,7 @@ func (s *tosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		)
 	}
 
-	_, err := s.client.PutObjectV2(ctx, &tos.PutObjectV2Input{
+	_, err = s.client.PutObjectV2(ctx, &tos.PutObjectV2Input{
 		PutObjectBasicInput: tos.PutObjectBasicInput{
 			Bucket:      targetBucket,
 			Key:         objectName,
@@ -192,6 +226,9 @@ func (s *tosFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return nil, fmt.Errorf("invalid file path: %w", err)
+	}
 
 	output, err := s.client.GetObjectV2(ctx, &tos.GetObjectV2Input{
 		Bucket: bucketName,
@@ -208,6 +245,9 @@ func (s *tosFileService) DeleteFile(ctx context.Context, filePath string) error 
 	if err != nil {
 		return err
 	}
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return fmt.Errorf("invalid file path: %w", err)
+	}
 
 	_, err = s.client.DeleteObjectV2(ctx, &tos.DeleteObjectV2Input{
 		Bucket: bucketName,
@@ -223,6 +263,9 @@ func (s *tosFileService) GetFileURL(ctx context.Context, filePath string) (strin
 	bucketName, objectName, err := parseTOSFilePath(filePath)
 	if err != nil {
 		return "", err
+	}
+	if err := utils.SafeObjectKey(objectName); err != nil {
+		return "", fmt.Errorf("invalid file path: %w", err)
 	}
 
 	output, err := s.client.PreSignedURL(&tos.PreSignedURLInput{

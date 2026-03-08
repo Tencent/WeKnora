@@ -797,6 +797,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 
+			isEnabled := true
+			if v, ok := payload[fieldIsEnabled]; ok {
+				isEnabled = v.GetBoolValue()
+			}
 			newPayload := qdrant.NewValueMap(map[string]any{
 				fieldContent:         payload[fieldContent].GetStringValue(),
 				fieldSourceID:        targetSourceID,
@@ -804,7 +808,8 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				fieldChunkID:         targetChunkID,
 				fieldKnowledgeID:     targetKnowledgeID,
 				fieldKnowledgeBaseID: targetKnowledgeBaseID,
-				fieldIsEnabled:       true,
+				fieldTagID:           payload[fieldTagID].GetStringValue(),
+				fieldIsEnabled:       isEnabled,
 			})
 
 			var vectors *qdrant.Vectors
@@ -923,7 +928,7 @@ func toQdrantVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		KnowledgeID:     embedding.KnowledgeID,
 		KnowledgeBaseID: embedding.KnowledgeBaseID,
 		TagID:           embedding.TagID,
-		IsEnabled:       true, // Default to enabled
+		IsEnabled:       embedding.IsEnabled,
 	}
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), fieldEmbedding) {
 		if embeddingMap, ok := additionalParams[fieldEmbedding].(map[string][]float32); ok {

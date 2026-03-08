@@ -52,7 +52,7 @@ const processedContent = computed(() => {
   flex-direction: column;
   max-height: 400px;
   max-width: 500px;
-  border: 1px solid #07C05F;
+  border: 1px solid var(--td-brand-color);
   border-radius: 4px;
   word-wrap: break-word;
   word-break: break-word;
@@ -68,7 +68,7 @@ const processedContent = computed(() => {
   
   .full-content {
     font-size: 13px;
-    color: #333;
+    color: var(--td-text-color-primary);
     line-height: 1.8;
     white-space: pre-wrap;
     word-break: break-word;
@@ -90,8 +90,8 @@ const processedContent = computed(() => {
   .info-section {
     flex-shrink: 0;
     padding: 8px 12px;
-    border-top: 1px solid #e7e7e7;
-    background: #fafafa;
+    border-top: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-secondarycontainer);
   }
   
   .info-field {
@@ -101,19 +101,19 @@ const processedContent = computed(() => {
     font-size: 11px;
     
     .field-label {
-      color: #8b8b8b;
+      color: var(--td-text-color-placeholder);
       min-width: 60px;
       flex-shrink: 0;
     }
     
     .field-value {
-      color: #666;
+      color: var(--td-text-color-secondary);
       flex: 1;
       
       code {
         font-family: 'Monaco', 'Courier New', monospace;
         font-size: 10px;
-        background: #f0f0f0;
+        background: var(--td-bg-color-secondarycontainer);
         padding: 1px 4px;
         border-radius: 2px;
       }

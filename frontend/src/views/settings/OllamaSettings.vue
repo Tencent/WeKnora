@@ -253,21 +253,19 @@ const formatSize = (bytes: number): string => {
 
 // 格式化日期
 const formatDate = (dateStr: string): string => {
-  if (!dateStr) return '未知'
-  
+  if (!dateStr) return t('ollama.unknown')
+
   const date = new Date(dateStr)
-  // 检查日期是否有效
-  if (isNaN(date.getTime())) return '未知'
-  
+  if (isNaN(date.getTime())) return t('ollama.unknown')
+
   const now = new Date()
   const diff = now.getTime() - date.getTime()
   const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  
-  if (days === 0) return '今天'
-  if (days === 1) return '昨天'
-  if (days < 7) return `${days} 天前`
-  if (days < 0) return date.toLocaleDateString('zh-CN')
-  return date.toLocaleDateString('zh-CN')
+
+  if (days === 0) return t('ollama.today')
+  if (days === 1) return t('ollama.yesterday')
+  if (days < 7) return t('ollama.daysAgo', { days })
+  return date.toLocaleDateString()
 }
 
 // 下载模型
@@ -376,13 +374,13 @@ onMounted(async () => {
   h2 {
     font-size: 20px;
     font-weight: 600;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin: 0 0 8px 0;
   }
 
   .section-description {
     font-size: 14px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
@@ -399,7 +397,7 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   padding: 20px 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &:last-child {
     border-bottom: none;
@@ -413,14 +411,14 @@ onMounted(async () => {
   label {
     font-size: 15px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     display: block;
     margin-bottom: 4px;
   }
 
   .desc {
     font-size: 13px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.6;
   }
@@ -456,7 +454,7 @@ onMounted(async () => {
   margin-top: 32px;
   margin-bottom: 32px;
   padding-top: 32px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--td-component-stroke);
 
   &:first-of-type {
     margin-top: 24px;
@@ -480,19 +478,19 @@ onMounted(async () => {
     h3 {
       font-size: 17px;
       font-weight: 600;
-      color: #333333;
+      color: var(--td-text-color-primary);
       margin: 0 0 6px 0;
     }
 
     p {
       font-size: 13px;
-      color: #999999;
+      color: var(--td-text-color-placeholder);
       margin: 0;
       line-height: 1.5;
     }
 
     .model-link {
-      color: #07C05F;
+      color: var(--td-brand-color);
       text-decoration: none;
       font-weight: 500;
       display: inline-flex;
@@ -501,7 +499,7 @@ onMounted(async () => {
       transition: all 0.2s ease;
 
       &:hover {
-        color: #05a04f;
+        color: var(--td-brand-color-active);
         text-decoration: underline;
       }
 
@@ -518,7 +516,7 @@ onMounted(async () => {
   justify-content: center;
   gap: 8px;
   padding: 48px 0;
-  color: #999999;
+  color: var(--td-text-color-placeholder);
   font-size: 14px;
 }
 
@@ -537,14 +535,14 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
-  background: #fafafa;
+  background: var(--td-bg-color-secondarycontainer);
   transition: all 0.2s;
 
   &:hover {
-    border-color: #07C05F;
-    background: #ffffff;
+    border-color: var(--td-brand-color);
+    background: var(--td-bg-color-container);
   }
 }
 
@@ -555,7 +553,7 @@ onMounted(async () => {
   .model-name {
     font-size: 14px;
     font-weight: 500;
-    color: #333333;
+    color: var(--td-text-color-primary);
     margin-bottom: 4px;
     font-family: monospace;
   }
@@ -564,7 +562,7 @@ onMounted(async () => {
     display: flex;
     gap: 12px;
     font-size: 12px;
-    color: #666666;
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -581,16 +579,16 @@ onMounted(async () => {
 
   .download-progress {
     padding: 16px;
-    background: #f8f9fa;
+    background: var(--td-bg-color-secondarycontainer);
     border-radius: 8px;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--td-component-stroke);
 
     .progress-info {
       display: flex;
       justify-content: space-between;
       margin-bottom: 10px;
       font-size: 13px;
-      color: #333333;
+      color: var(--td-text-color-primary);
       font-weight: 500;
     }
   }
@@ -602,7 +600,7 @@ onMounted(async () => {
 
   .empty-text {
     font-size: 14px;
-    color: #999999;
+    color: var(--td-text-color-placeholder);
     margin: 0;
   }
 }

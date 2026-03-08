@@ -992,7 +992,7 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 		// only draw if there are multiple entities or at least one relationship in the subgraph
 		if hasRelations {
 			subgraphCount++
-			sb.WriteString(fmt.Sprintf("\n  subgraph 子图%d\n", subgraphCount))
+			sb.WriteString(fmt.Sprintf("\n  subgraph Subgraph%d\n", subgraphCount))
 
 			// add all entities in this subgraph
 			entitiesInComponent := make(map[string]bool)

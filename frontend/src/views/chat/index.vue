@@ -156,9 +156,9 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
 
 // Reconstruct agentEventStream from agent_steps stored in database
 // This allows the frontend to restore the exact conversation state including all agent reasoning steps
-const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted = false) => {
+const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted = false, isFallback = false) => {
     const events = [];
-    
+
     // Process agent steps if they exist
     if (agentSteps && Array.isArray(agentSteps) && agentSteps.length > 0) {
     agentSteps.forEach((step) => {
@@ -201,19 +201,23 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
     // 总是添加 answer 事件如果有内容（无论是否有 agent_steps）
     // 这样可以确保最终答案始终被渲染
     if (messageContent && messageContent.trim()) {
-        events.push({
+        const answerEvent = {
             type: 'answer',
             content: messageContent,
             done: true
-        });
+        };
+        if (isFallback) answerEvent.is_fallback = true;
+        events.push(answerEvent);
     } else if (isCompleted) {
         // 如果消息已完成但 content 为空（Agent 模式常见情况），添加一个空的 answer 事件标记完成
         // 这样可以确保 isConversationDone 返回 true，不显示 loading-indicator
-        events.push({
+        const answerEvent = {
             type: 'answer',
             content: '',
             done: true
-        });
+        };
+        if (isFallback) answerEvent.is_fallback = true;
+        events.push(answerEvent);
     }
     
     return events;
@@ -232,7 +236,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         if (item.agent_steps && Array.isArray(item.agent_steps) && item.agent_steps.length > 0) {
             console.log('[Message Load] Reconstructing agent steps for message:', item.id, 'steps:', item.agent_steps.length);
             item.isAgentMode = true;
-            item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed);
+            item.agentEventStream = reconstructEventStreamFromSteps(item.agent_steps, item.content, item.is_completed, item.is_fallback);
             // 隐藏最终答案内容，因为它已经包含在 agentEventStream 的 answer 事件中
             item.hideContent = true;
             console.log('[Message Load] Reconstructed', item.agentEventStream.length, 'events from agent steps');
@@ -515,6 +519,11 @@ onChunk((data) => {
     
     fullContent.value += data.content;
     let obj = { ...data, content: '', role: 'assistant', showThink: false, is_completed: false };
+
+    // 检查是否为 fallback 回答（未从知识库检索到内容）
+    if (data.data?.is_fallback) {
+        obj.is_fallback = true;
+    }
 
     if (fullContent.value.includes('<think>') && !fullContent.value.includes('<\/think>')) {
         obj.thinking = true;
@@ -811,6 +820,12 @@ const handleAgentChunk = (data) => {
                 answerEvent.content = message.content;
                 console.log('[Answer] answerEvent.content updated, length:', answerEvent.content.length);
             }
+
+            // 检查是否为 fallback 回答
+            if (data.data?.is_fallback) {
+                answerEvent.is_fallback = true;
+                message.is_fallback = true;
+            }
             
             // 只在第一次收到 done:true 时标记完成，忽略后续重复的完成事件
             if (data.done && !answerEvent.done) {
@@ -873,6 +888,10 @@ const updateAssistantSession = (payload) => {
         message.thinkContent = payload.thinkContent;
         message.showThink = payload.showThink;
         message.knowledge_references = message.knowledge_references ? message.knowledge_references : payload.knowledge_references;
+        // 更新 fallback 状态
+        if (payload.is_fallback) {
+            message.is_fallback = true;
+        }
         // 更新完成状态
         if (payload.is_completed) {
             message.is_completed = true;
@@ -978,8 +997,8 @@ onBeforeRouteUpdate((to, from, next) => {
     align-items: center;
     gap: 8px;
     padding: 8px 16px;
-    background: linear-gradient(135deg, #e6f7ff 0%, #bae7ff 100%);
-    border: 1px solid #91d5ff;
+    background: var(--td-brand-color-light);
+    border: 1px solid var(--td-brand-color-focus);
     border-radius: 6px;
     margin-bottom: 12px;
     max-width: 800px;
@@ -992,7 +1011,7 @@ onBeforeRouteUpdate((to, from, next) => {
     .agent-text {
         font-size: 14px;
         font-weight: 500;
-        color: #0050b3;
+        color: var(--td-brand-color);
         flex: 1;
     }
 }
@@ -1021,7 +1040,7 @@ onBeforeRouteUpdate((to, from, next) => {
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: #07c05f;
+            background: var(--td-brand-color);
             animation: typingBounce 1.4s ease-in-out infinite;
             
             &:nth-child(1) {

@@ -1,4 +1,7 @@
 import { get } from '@/utils/request'
+import i18n from '@/i18n'
+
+const t = (key: string) => i18n.global.t(key)
 
 // 租户信息接口
 export interface TenantInfo {
@@ -45,7 +48,7 @@ export async function listAllTenants(): Promise<{ success: boolean; data?: { ite
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '获取租户列表失败'
+      message: error.message || t('error.tenant.listFailed')
     }
   }
 }
@@ -76,7 +79,7 @@ export async function searchTenants(params: SearchTenantsParams = {}): Promise<S
   } catch (error: any) {
     return {
       success: false,
-      message: error.message || '搜索租户失败'
+      message: error.message || t('error.tenant.searchFailed')
     }
   }
 }

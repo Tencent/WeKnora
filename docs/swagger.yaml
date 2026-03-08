@@ -54,11 +54,19 @@ definitions:
     - ErrAgentInvalidTemperature
   github_com_Tencent_WeKnora_internal_types.AgentConfig:
     properties:
+      allowed_skills:
+        description: Skill names whitelist (empty = allow all)
+        items:
+          type: string
+        type: array
       allowed_tools:
         description: List of allowed tool names
         items:
           type: string
         type: array
+      history_turns:
+        description: Number of history turns to keep in context
+        type: integer
       knowledge_bases:
         description: Accessible knowledge base IDs
         items:
@@ -72,18 +80,50 @@ definitions:
       max_iterations:
         description: Maximum number of ReAct iterations
         type: integer
+      mcp_selection_mode:
+        description: MCP service selection
+        type: string
+      mcp_services:
+        description: Selected MCP service IDs (when mode is "selected")
+        items:
+          type: string
+        type: array
+      multi_turn_enabled:
+        description: Whether multi-turn conversation is enabled
+        type: boolean
       reflection_enabled:
         description: Whether to enable reflection
         type: boolean
+      retrieve_kb_only_when_mentioned:
+        description: 'Whether to retrieve knowledge base only when explicitly mentioned
+          with @ (default: false)'
+        type: boolean
+      skill_dirs:
+        description: Directories to search for skills
+        items:
+          type: string
+        type: array
+      skills_enabled:
+        description: Skills configuration (Progressive Disclosure pattern)
+        type: boolean
+      system_prompt:
+        description: Unified system prompt (uses web_search_status placeholder for
+          dynamic behavior)
+        type: string
       system_prompt_web_disabled:
-        description: Custom prompt when web search is disabled
+        description: 'Deprecated: Custom prompt when web search is disabled'
         type: string
       system_prompt_web_enabled:
-        description: Custom prompt when web search is enabled
+        description: 'Deprecated: Use SystemPrompt instead. Kept for backward compatibility
+          during migration.'
         type: string
       temperature:
         description: LLM temperature for agent
         type: number
+      thinking:
+        description: Whether to enable thinking mode (for models that support extended
+          thinking)
+        type: boolean
       use_custom_system_prompt:
         description: Whether to use custom system prompt instead of default
         type: boolean
@@ -191,6 +231,7 @@ definitions:
         description: Retrieval & strategy parameters
         type: integer
       prompt:
+        description: Prompt is the system prompt for normal mode
         type: string
       rerank_model_id:
         type: string
@@ -209,13 +250,192 @@ definitions:
       temperature:
         description: Temperature controls the randomness of the model output
         type: number
-      use_custom_context_template:
-        type: boolean
-      use_custom_system_prompt:
-        description: Prompt is the system prompt for normal mode
-        type: boolean
       vector_threshold:
         type: number
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest:
+    properties:
+      avatar:
+        description: optional avatar URL
+        maxLength: 512
+        type: string
+      description:
+        maxLength: 1000
+        type: string
+      invite_code_validity_days:
+        description: 'optional: 0=never, 1, 7, 30; default 7'
+        type: integer
+      member_limit:
+        description: 'optional: max members; 0=unlimited; default 50'
+        type: integer
+      name:
+        maxLength: 255
+        minLength: 1
+        type: string
+    required:
+    - name
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CustomAgentConfig:
+    properties:
+      agent_mode:
+        description: |-
+          ===== Basic Settings =====
+          Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
+        type: string
+      allowed_tools:
+        description: Allowed tools (only for agent type)
+        items:
+          type: string
+        type: array
+      context_template:
+        description: Context template for normal mode (how to format retrieved chunks)
+        type: string
+      embedding_top_k:
+        description: |-
+          ===== Retrieval Strategy Settings (for both modes) =====
+          Embedding/Vector retrieval top K
+        type: integer
+      enable_query_expansion:
+        description: |-
+          ===== Advanced Settings (mainly for normal mode) =====
+          Whether to enable query expansion
+        type: boolean
+      enable_rewrite:
+        description: Whether to enable query rewrite for multi-turn conversations
+        type: boolean
+      fallback_prompt:
+        description: Fallback prompt (when FallbackStrategy is "model")
+        type: string
+      fallback_response:
+        description: Fixed fallback response (when FallbackStrategy is "fixed")
+        type: string
+      fallback_strategy:
+        description: 'Fallback strategy: "fixed" for fixed response, "model" for model
+          generation'
+        type: string
+      faq_direct_answer_threshold:
+        description: FAQ direct answer threshold - if similarity > this value, use
+          FAQ answer directly
+        type: number
+      faq_priority_enabled:
+        description: |-
+          ===== FAQ Strategy Settings =====
+          Whether FAQ priority strategy is enabled (FAQ answers prioritized over document chunks)
+        type: boolean
+      faq_score_boost:
+        description: FAQ score boost multiplier - FAQ results score multiplied by
+          this factor
+        type: number
+      history_turns:
+        description: Number of history turns to keep in context
+        type: integer
+      kb_selection_mode:
+        description: |-
+          ===== Knowledge Base Settings =====
+          Knowledge base selection mode: "all" = all KBs, "selected" = specific KBs, "none" = no KB
+        type: string
+      keyword_threshold:
+        description: Keyword retrieval threshold
+        type: number
+      knowledge_bases:
+        description: Associated knowledge base IDs (only used when KBSelectionMode
+          is "selected")
+        items:
+          type: string
+        type: array
+      max_completion_tokens:
+        description: Maximum completion tokens (only for normal mode)
+        type: integer
+      max_iterations:
+        description: |-
+          ===== Agent Mode Settings =====
+          Maximum iterations for ReAct loop (only for agent type)
+        type: integer
+      mcp_selection_mode:
+        description: 'MCP service selection mode: "all" = all enabled MCP services,
+          "selected" = specific services, "none" = no MCP'
+        type: string
+      mcp_services:
+        description: Selected MCP service IDs (only used when MCPSelectionMode is
+          "selected")
+        items:
+          type: string
+        type: array
+      model_id:
+        description: |-
+          ===== Model Settings =====
+          Model ID to use for conversations
+        type: string
+      multi_turn_enabled:
+        description: |-
+          ===== Multi-turn Conversation Settings =====
+          Whether multi-turn conversation is enabled
+        type: boolean
+      reflection_enabled:
+        description: Whether reflection is enabled (only for agent type)
+        type: boolean
+      rerank_model_id:
+        description: ReRank model ID for retrieval
+        type: string
+      rerank_threshold:
+        description: Rerank threshold
+        type: number
+      rerank_top_k:
+        description: Rerank top K
+        type: integer
+      retrieve_kb_only_when_mentioned:
+        description: |-
+          Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
+          When true, knowledge base retrieval only happens if user explicitly mentions KB/files with @
+          When false, knowledge base retrieval happens according to KBSelectionMode
+        type: boolean
+      rewrite_prompt_system:
+        description: Rewrite prompt system message
+        type: string
+      rewrite_prompt_user:
+        description: Rewrite prompt user message template
+        type: string
+      selected_skills:
+        description: Selected skill names (only used when SkillsSelectionMode is "selected")
+        items:
+          type: string
+        type: array
+      skills_selection_mode:
+        description: |-
+          ===== Skills Settings (only for smart-reasoning mode) =====
+          Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
+        type: string
+      supported_file_types:
+        description: |-
+          ===== File Type Restriction Settings =====
+          Supported file types for this agent (e.g., ["csv", "xlsx", "xls"])
+          Empty means all file types are supported
+          When set, only files with matching extensions can be used with this agent
+        items:
+          type: string
+        type: array
+      system_prompt:
+        description: System prompt for the agent (unified prompt, uses web_search_status
+          placeholder for dynamic behavior)
+        type: string
+      temperature:
+        description: Temperature for LLM (0-1)
+        type: number
+      thinking:
+        description: Whether to enable thinking mode (for models that support extended
+          thinking)
+        type: boolean
+      vector_threshold:
+        description: Vector retrieval threshold
+        type: number
+      web_search_enabled:
+        description: |-
+          ===== Web Search Settings =====
+          Whether web search is enabled
+        type: boolean
+      web_search_max_results:
+        description: Maximum web search results
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.EmbeddingParameters:
     properties:
@@ -245,6 +465,9 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.FAQBatchUpsertPayload:
     properties:
+      dry_run:
+        description: 仅验证，不实际导入
+        type: boolean
       entries:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload'
@@ -255,6 +478,9 @@ definitions:
         enum:
         - append
         - replace
+        type: string
+      task_id:
+        description: 可选，如果不传则自动生成UUID
         type: string
     required:
     - entries
@@ -271,13 +497,18 @@ definitions:
       by_id:
         additionalProperties:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate'
-        description: ByID 按条目ID更新，key为条目ID
+        description: ByID 按条目ID更新，key为条目ID (seq_id)
         type: object
       by_tag:
         additionalProperties:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate'
-        description: ByTag 按Tag批量更新，key为TagID（空字符串表示未分类）
+        description: ByTag 按Tag批量更新，key为TagID (seq_id)
         type: object
+      exclude_ids:
+        description: ExcludeIDs 在ByTag操作中需要排除的ID列表 (seq_id)
+        items:
+          type: integer
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate:
     properties:
@@ -286,7 +517,7 @@ definitions:
       is_recommended:
         type: boolean
       tag_id:
-        type: string
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.FAQEntryPayload:
     properties:
@@ -296,6 +527,9 @@ definitions:
         items:
           type: string
         type: array
+      id:
+        description: ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
+        type: integer
       is_enabled:
         type: boolean
       is_recommended:
@@ -311,7 +545,7 @@ definitions:
       standard_question:
         type: string
       tag_id:
-        type: string
+        type: integer
       tag_name:
         type: string
     required:
@@ -336,29 +570,28 @@ definitions:
     - FAQQuestionIndexModeSeparate
   github_com_Tencent_WeKnora_internal_types.FAQSearchRequest:
     properties:
+      first_priority_tag_ids:
+        description: 第一优先级标签ID列表，限定命中范围，优先级最高
+        items:
+          type: integer
+        type: array
       match_count:
         type: integer
+      only_recommended:
+        description: 是否仅返回推荐的条目
+        type: boolean
       query_text:
         type: string
+      second_priority_tag_ids:
+        description: 第二优先级标签ID列表，限定命中范围，优先级低于第一优先级
+        items:
+          type: integer
+        type: array
       vector_threshold:
         type: number
     required:
     - query_text
     type: object
-  github_com_Tencent_WeKnora_internal_types.FallbackStrategy:
-    enum:
-    - fixed
-    - model
-    type: string
-    x-enum-comments:
-      FallbackStrategyFixed: Fixed response
-      FallbackStrategyModel: Model fallback response
-    x-enum-descriptions:
-    - Fixed response
-    - Model fallback response
-    x-enum-varnames:
-    - FallbackStrategyFixed
-    - FallbackStrategyModel
   github_com_Tencent_WeKnora_internal_types.GraphNode:
     properties:
       attributes:
@@ -386,6 +619,43 @@ definitions:
       model_id:
         description: Model ID
         type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.InviteMemberRequest:
+    properties:
+      role:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+        description: 'Role to assign: admin/editor/viewer'
+      user_id:
+        description: User ID to invite
+        type: string
+    required:
+    - role
+    - user_id
+    type: object
+  github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest:
+    properties:
+      message:
+        description: Optional message for join request
+        maxLength: 500
+        type: string
+      organization_id:
+        type: string
+      role:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+        description: 'Optional: requested role (admin/editor/viewer); default viewer'
+    required:
+    - organization_id
+    type: object
+  github_com_Tencent_WeKnora_internal_types.JoinOrganizationRequest:
+    properties:
+      invite_code:
+        maxLength: 32
+        minLength: 8
+        type: string
+    required:
+    - invite_code
     type: object
   github_com_Tencent_WeKnora_internal_types.Knowledge:
     properties:
@@ -432,6 +702,11 @@ definitions:
       knowledge_base_name:
         description: Knowledge base name (not stored in database, populated on query)
         type: string
+      last_faq_import_result:
+        description: Last FAQ import result (for FAQ type knowledge only)
+        items:
+          type: integer
+        type: array
       metadata:
         description: Metadata of the knowledge
         items:
@@ -533,6 +808,10 @@ definitions:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
         description: QuestionGenerationConfig stores question generation configuration
           for document knowledge bases
+      share_count:
+        description: ShareCount indicates the number of organizations this knowledge
+          base is shared with (not stored in database)
+        type: integer
       summary_model_id:
         description: Summary model ID
         type: string
@@ -564,6 +843,75 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig'
         description: Image processing configuration
+    type: object
+  github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse:
+    properties:
+      chunk_count:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: string
+      knowledge_base_id:
+        type: string
+      knowledge_base_name:
+        type: string
+      knowledge_base_type:
+        type: string
+      knowledge_count:
+        type: integer
+      my_permission:
+        description: Effective permission for current user = min(Permission, MyRoleInOrg)
+        type: string
+      my_role_in_org:
+        description: Current user's role in this organization (admin/editor/viewer)
+        type: string
+      organization_id:
+        type: string
+      organization_name:
+        type: string
+      permission:
+        description: 'Share permission (what the space was granted: viewer/editor)'
+        type: string
+      require_approval:
+        type: boolean
+      shared_by_user_id:
+        type: string
+      shared_by_username:
+        type: string
+      source_tenant_id:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
+    properties:
+      members:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrganizationMemberResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ListOrganizationsResponse:
+    properties:
+      organizations:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrganizationResponse'
+        type: array
+      resource_counts:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ResourceCountsByOrgResponse'
+        description: 各空间内知识库/智能体数量，供列表侧栏展示
+      total:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ListSharesResponse:
+    properties:
+      shares:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse'
+        type: array
+      total:
+        type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.LoginRequest:
     properties:
@@ -695,6 +1043,8 @@ definitions:
         type: string
       status:
         type: string
+      tag_id:
+        type: string
       title:
         type: string
     type: object
@@ -709,8 +1059,10 @@ definitions:
     - 6
     - 7
     - 8
+    - 9
     type: integer
     x-enum-comments:
+      MatchTypeDataAnalysis: 数据分析匹配类型
       MatchTypeDirectLoad: 直接加载匹配类型
       MatchTypeParentChunk: 父Chunk匹配类型
       MatchTypeRelationChunk: 关系Chunk匹配类型
@@ -725,6 +1077,7 @@ definitions:
     - ""
     - 网络搜索匹配类型
     - 直接加载匹配类型
+    - 数据分析匹配类型
     x-enum-varnames:
     - MatchTypeEmbedding
     - MatchTypeKeywords
@@ -735,6 +1088,7 @@ definitions:
     - MatchTypeGraph
     - MatchTypeWebSearch
     - MatchTypeDirectLoad
+    - MatchTypeDataAnalysis
   github_com_Tencent_WeKnora_internal_types.MentionedItem:
     properties:
       id:
@@ -807,10 +1161,18 @@ definitions:
         type: string
       embedding_parameters:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EmbeddingParameters'
+      extra_config:
+        additionalProperties:
+          type: string
+        description: Provider-specific configuration
+        type: object
       interface_type:
         type: string
       parameter_size:
         description: Ollama model parameter size (e.g., "7B", "13B", "70B")
+        type: string
+      provider:
+        description: 'Provider identifier: openai, aliyun, zhipu, generic'
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ModelSource:
@@ -818,19 +1180,63 @@ definitions:
     - local
     - remote
     - aliyun
+    - zhipu
+    - volcengine
+    - deepseek
+    - hunyuan
+    - minimax
+    - openai
+    - gemini
+    - mimo
+    - siliconflow
+    - jina
+    - openrouter
     type: string
     x-enum-comments:
       ModelSourceAliyun: Aliyun DashScope model
+      ModelSourceDeepseek: Deepseek model
+      ModelSourceGemini: Gemini model
+      ModelSourceHunyuan: Hunyuan model
+      ModelSourceJina: Jina AI model
       ModelSourceLocal: Local model
+      ModelSourceMimo: Mimo model
+      ModelSourceMinimax: Minimax mode
+      ModelSourceOpenAI: OpenAI model
+      ModelSourceOpenRouter: OpenRouter model
       ModelSourceRemote: Remote model
+      ModelSourceSiliconFlow: SiliconFlow model
+      ModelSourceVolcengine: Volcengine model
+      ModelSourceZhipu: Zhipu model
     x-enum-descriptions:
     - Local model
     - Remote model
     - Aliyun DashScope model
+    - Zhipu model
+    - Volcengine model
+    - Deepseek model
+    - Hunyuan model
+    - Minimax mode
+    - OpenAI model
+    - Gemini model
+    - Mimo model
+    - SiliconFlow model
+    - Jina AI model
+    - OpenRouter model
     x-enum-varnames:
     - ModelSourceLocal
     - ModelSourceRemote
     - ModelSourceAliyun
+    - ModelSourceZhipu
+    - ModelSourceVolcengine
+    - ModelSourceDeepseek
+    - ModelSourceHunyuan
+    - ModelSourceMinimax
+    - ModelSourceOpenAI
+    - ModelSourceGemini
+    - ModelSourceMimo
+    - ModelSourceSiliconFlow
+    - ModelSourceJina
+    - ModelSourceOpenRouter
   github_com_Tencent_WeKnora_internal_types.ModelType:
     enum:
     - Embedding
@@ -853,6 +1259,83 @@ definitions:
     - ModelTypeRerank
     - ModelTypeKnowledgeQA
     - ModelTypeVLLM
+  github_com_Tencent_WeKnora_internal_types.OrgMemberRole:
+    enum:
+    - admin
+    - editor
+    - viewer
+    type: string
+    x-enum-varnames:
+    - OrgRoleAdmin
+    - OrgRoleEditor
+    - OrgRoleViewer
+  github_com_Tencent_WeKnora_internal_types.OrganizationMemberResponse:
+    properties:
+      avatar:
+        type: string
+      email:
+        type: string
+      id:
+        type: string
+      joined_at:
+        type: string
+      role:
+        type: string
+      tenant_id:
+        type: integer
+      user_id:
+        type: string
+      username:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.OrganizationResponse:
+    properties:
+      agent_share_count:
+        description: 共享到该组织的智能体数量
+        type: integer
+      avatar:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      has_pending_upgrade:
+        description: 当前用户是否有待处理的权限升级申请
+        type: boolean
+      id:
+        type: string
+      invite_code:
+        type: string
+      invite_code_expires_at:
+        type: string
+      invite_code_validity_days:
+        type: integer
+      is_owner:
+        type: boolean
+      member_count:
+        type: integer
+      member_limit:
+        description: 0 = unlimited
+        type: integer
+      my_role:
+        type: string
+      name:
+        type: string
+      owner_id:
+        type: string
+      pending_join_request_count:
+        description: 待审批加入申请数（仅管理员可见）
+        type: integer
+      require_approval:
+        type: boolean
+      searchable:
+        type: boolean
+      share_count:
+        description: 共享到该组织的知识库数量
+        type: integer
+      updated_at:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
       enabled:
@@ -888,6 +1371,36 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant'
       user:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.User'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.RequestRoleUpgradeRequest:
+    properties:
+      message:
+        description: Optional message explaining the reason
+        maxLength: 500
+        type: string
+      requested_role:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+        description: The role user wants to upgrade to
+    required:
+    - requested_role
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ResourceCountsByOrgResponse:
+    properties:
+      agents:
+        properties:
+          by_organization:
+            additionalProperties:
+              type: integer
+            type: object
+        type: object
+      knowledge_bases:
+        properties:
+          by_organization:
+            additionalProperties:
+              type: integer
+            type: object
+        type: object
     type: object
   github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams:
     properties:
@@ -939,6 +1452,19 @@ definitions:
     - KeywordsRetrieverType
     - VectorRetrieverType
     - WebSearchRetrieverType
+  github_com_Tencent_WeKnora_internal_types.ReviewJoinRequestRequest:
+    properties:
+      approved:
+        type: boolean
+      message:
+        maxLength: 500
+        type: string
+      role:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+        description: 'Optional: role to assign when approving; overrides applicant''s
+          requested role'
+    type: object
   github_com_Tencent_WeKnora_internal_types.SearchParams:
     properties:
       disable_keywords_match:
@@ -953,8 +1479,15 @@ definitions:
         type: array
       match_count:
         type: integer
+      only_recommended:
+        type: boolean
       query_text:
         type: string
+      tag_ids:
+        description: Tag IDs for filtering (used for FAQ priority filtering)
+        items:
+          type: string
+        type: array
       vector_threshold:
         type: number
     type: object
@@ -1003,6 +1536,11 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType'
         description: Match type
+      matched_content:
+        description: |-
+          MatchedContent is the actual content that was matched in vector search
+          For FAQ: this is the matched question text (standard or similar question)
+        type: string
       metadata:
         additionalProperties:
           type: string
@@ -1028,14 +1566,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.Session:
     properties:
-      agent_config:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionAgentConfig'
-        description: Agent 配置（会话级别，仅存储enabled和knowledge_bases）
-      context_config:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig'
-        description: 上下文管理配置（可选）
       created_at:
         type: string
       deleted_at:
@@ -1043,47 +1573,9 @@ definitions:
       description:
         description: Description
         type: string
-      embedding_top_k:
-        description: 向量召回TopK
-        type: integer
-      enable_rewrite:
-        description: 多轮改写开关
-        type: boolean
-      fallback_response:
-        description: 固定回复内容
-        type: string
-      fallback_strategy:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FallbackStrategy'
-        description: 兜底策略
       id:
         description: ID
         type: string
-      keyword_threshold:
-        description: 关键词召回阈值
-        type: number
-      knowledge_base_id:
-        description: Strategy configuration
-        type: string
-      max_rounds:
-        description: 多轮保持轮数
-        type: integer
-      rerank_model_id:
-        description: 排序模型ID
-        type: string
-      rerank_threshold:
-        description: 排序阈值
-        type: number
-      rerank_top_k:
-        description: 排序TopK
-        type: integer
-      summary_model_id:
-        description: 总结模型ID
-        type: string
-      summary_parameters:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SummaryConfig'
-        description: 总结模型参数
       tenant_id:
         description: Tenant ID
         type: integer
@@ -1092,28 +1584,16 @@ definitions:
         type: string
       updated_at:
         type: string
-      vector_threshold:
-        description: 向量召回阈值
-        type: number
     type: object
-  github_com_Tencent_WeKnora_internal_types.SessionAgentConfig:
+  github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest:
     properties:
-      agent_mode_enabled:
-        description: Whether agent mode is enabled for this session
-        type: boolean
-      knowledge_bases:
-        description: Accessible knowledge base IDs for this session
-        items:
-          type: string
-        type: array
-      knowledge_ids:
-        description: Accessible knowledge IDs (individual documents) for this session
-        items:
-          type: string
-        type: array
-      web_search_enabled:
-        description: Whether web search is enabled for this session
-        type: boolean
+      organization_id:
+        type: string
+      permission:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+    required:
+    - organization_id
+    - permission
     type: object
   github_com_Tencent_WeKnora_internal_types.StorageConfig:
     properties:
@@ -1139,51 +1619,31 @@ definitions:
         description: Secret Key
         type: string
     type: object
-  github_com_Tencent_WeKnora_internal_types.SummaryConfig:
+  github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest:
     properties:
-      context_template:
-        description: Context template
+      invite_code:
+        maxLength: 32
+        minLength: 8
         type: string
-      frequency_penalty:
-        description: Frequency penalty
-        type: number
-      max_completion_tokens:
-        description: Max completion tokens
-        type: integer
-      max_tokens:
-        description: Max tokens
-        type: integer
-      no_match_prefix:
-        description: No match prefix
+      message:
+        maxLength: 500
         type: string
-      presence_penalty:
-        description: Presence penalty
-        type: number
-      prompt:
-        description: Prompt
-        type: string
-      repeat_penalty:
-        description: Repeat penalty
-        type: number
-      seed:
-        description: Seed
-        type: integer
-      temperature:
-        description: Temperature
-        type: number
-      top_k:
-        description: TopK
-        type: integer
-      top_p:
-        description: TopP
-        type: number
+      role:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+        description: 'Optional: role the applicant requests (admin/editor/viewer);
+          default viewer'
+    required:
+    - invite_code
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
       agent_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AgentConfig'
-        description: Global Agent configuration for this tenant (default for all sessions)
+        description: |-
+          Deprecated: AgentConfig is deprecated, use CustomAgent (builtin-smart-reasoning) config instead.
+          This field is kept for backward compatibility and will be removed in future versions.
       api_key:
         description: API key
         type: string
@@ -1198,8 +1658,9 @@ definitions:
       conversation_config:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ConversationConfig'
-        description: Global Conversation configuration for this tenant (default for
-          normal mode sessions)
+        description: |-
+          Deprecated: ConversationConfig is deprecated, use CustomAgent (builtin-quick-answer) config instead.
+          This field is kept for backward compatibility and will be removed in future versions.
       created_at:
         description: Creation time
         type: string
@@ -1276,6 +1737,45 @@ definitions:
       success:
         description: Whether the tool executed successfully
         type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest:
+    properties:
+      role:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+    required:
+    - role
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UpdateOrganizationRequest:
+    properties:
+      avatar:
+        description: optional avatar URL
+        maxLength: 512
+        type: string
+      description:
+        maxLength: 1000
+        type: string
+      invite_code_validity_days:
+        description: 0=never, 1, 7, 30
+        type: integer
+      member_limit:
+        description: max members; 0=unlimited
+        type: integer
+      name:
+        maxLength: 255
+        minLength: 1
+        type: string
+      require_approval:
+        type: boolean
+      searchable:
+        description: open for search so others can discover and join
+        type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.UpdateSharePermissionRequest:
+    properties:
+      permission:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole'
+    required:
+    - permission
     type: object
   github_com_Tencent_WeKnora_internal_types.User:
     properties:
@@ -1385,8 +1885,23 @@ definitions:
         type: string
       target_id:
         type: string
+      task_id:
+        type: string
     required:
     - source_id
+    type: object
+  internal_handler.CreateAgentRequest:
+    properties:
+      avatar:
+        type: string
+      config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig'
+      description:
+        type: string
+      name:
+        type: string
+    required:
+    - name
     type: object
   internal_handler.CreateModelRequest:
     properties:
@@ -1405,6 +1920,14 @@ definitions:
     - parameters
     - source
     - type
+    type: object
+  internal_handler.DeleteTagRequest:
+    properties:
+      exclude_ids:
+        description: Chunk seq_ids to exclude from deletion
+        items:
+          type: integer
+        type: array
     type: object
   internal_handler.EvaluationRequest:
     properties:
@@ -1545,6 +2068,23 @@ definitions:
       source:
         type: string
     type: object
+  internal_handler.ListMinioBucketsResponse:
+    properties:
+      buckets:
+        items:
+          $ref: '#/definitions/internal_handler.MinioBucketInfo'
+        type: array
+    type: object
+  internal_handler.MinioBucketInfo:
+    properties:
+      created_at:
+        type: string
+      name:
+        type: string
+      policy:
+        description: '"public", "private", "custom"'
+        type: string
+    type: object
   internal_handler.RemoteModelCheckRequest:
     properties:
       apiKey:
@@ -1570,6 +2110,17 @@ definitions:
     required:
     - tags
     - text
+    type: object
+  internal_handler.UpdateAgentRequest:
+    properties:
+      avatar:
+        type: string
+      config:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig'
+      description:
+        type: string
+      name:
+        type: string
     type: object
   internal_handler.UpdateChunkRequest:
     properties:
@@ -1615,10 +2166,40 @@ definitions:
       type:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType'
     type: object
+  internal_handler.addSimilarQuestionsRequest:
+    properties:
+      similar_questions:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - similar_questions
+    type: object
+  internal_handler.updateLastFAQImportResultDisplayStatusRequest:
+    properties:
+      display_status:
+        enum:
+        - open
+        - close
+        type: string
+    required:
+    - display_status
+    type: object
   internal_handler_session.CreateKnowledgeQARequest:
     properties:
       agent_enabled:
         description: Whether agent mode is enabled for this request
+        type: boolean
+      agent_id:
+        description: Selected custom agent ID (backend resolves shared agent and its
+          tenant from share relation)
+        type: string
+      disable_title:
+        description: Whether to disable auto title generation
+        type: boolean
+      enable_memory:
+        description: Whether memory feature is enabled for this request
         type: boolean
       knowledge_base_ids:
         description: Selected knowledge base ID for this request
@@ -1650,19 +2231,12 @@ definitions:
     type: object
   internal_handler_session.CreateSessionRequest:
     properties:
-      agent_config:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SessionAgentConfig'
-        description: 'Agent configuration (optional, session-level config only: enabled
-          and knowledge_bases)'
-      knowledge_base_id:
-        description: ID of the associated knowledge base (optional, can be set/changed
-          during queries)
+      description:
+        description: Description for the session (optional)
         type: string
-      session_strategy:
-        allOf:
-        - $ref: '#/definitions/internal_handler_session.SessionStrategy'
-        description: Session strategy configuration
+      title:
+        description: Title for the session (optional)
+        type: string
     type: object
   internal_handler_session.GenerateTitleRequest:
     properties:
@@ -1708,56 +2282,22 @@ definitions:
     required:
     - query
     type: object
-  internal_handler_session.SessionStrategy:
-    properties:
-      embedding_top_k:
-        description: Number of top results to retrieve from vector search
-        type: integer
-      enable_rewrite:
-        description: Whether to enable query rewrite for multi-round conversations
-        type: boolean
-      fallback_response:
-        description: Fixed response content for fallback
-        type: string
-      fallback_strategy:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.FallbackStrategy'
-        description: Strategy to use when no relevant knowledge is found
-      keyword_threshold:
-        description: Threshold for keyword-based retrieval
-        type: number
-      max_rounds:
-        description: Maximum number of conversation rounds to maintain
-        type: integer
-      no_match_prefix:
-        description: Prefix for responses when no match is found
-        type: string
-      rerank_model_id:
-        description: ID of the model used for reranking results
-        type: string
-      rerank_threshold:
-        description: Threshold for reranking results
-        type: number
-      rerank_top_k:
-        description: Number of top results after reranking
-        type: integer
-      summary_model_id:
-        description: ID of the model used for summarization
-        type: string
-      summary_parameters:
-        allOf:
-        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SummaryConfig'
-        description: Parameters for the summary model
-      vector_threshold:
-        description: Threshold for vector-based retrieval
-        type: number
-    type: object
   internal_handler_session.StopSessionRequest:
     properties:
       message_id:
         type: string
     required:
     - message_id
+    type: object
+  internal_handler_session.batchDeleteRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - ids
     type: object
 info:
   contact:
@@ -1768,6 +2308,217 @@ info:
   title: WeKnora API
   version: "1.0"
 paths:
+  /agents:
+    get:
+      consumes:
+      - application/json
+      description: 获取当前租户的所有智能体（包括内置智能体）
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 智能体列表
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取智能体列表
+      tags:
+      - 智能体
+    post:
+      consumes:
+      - application/json
+      description: 创建新的自定义智能体
+      parameters:
+      - description: 智能体信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 创建的智能体
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建智能体
+      tags:
+      - 智能体
+  /agents/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: 删除指定的智能体
+      parameters:
+      - description: 智能体ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无法删除内置智能体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 智能体不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除智能体
+      tags:
+      - 智能体
+    get:
+      consumes:
+      - application/json
+      description: 根据ID获取智能体详情
+      parameters:
+      - description: 智能体ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 智能体详情
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 智能体不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取智能体详情
+      tags:
+      - 智能体
+    put:
+      consumes:
+      - application/json
+      description: 更新智能体的名称、描述和配置
+      parameters:
+      - description: 智能体ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.UpdateAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的智能体
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无法修改内置智能体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新智能体
+      tags:
+      - 智能体
+  /agents/{id}/copy:
+    post:
+      consumes:
+      - application/json
+      description: 复制指定的智能体
+      parameters:
+      - description: 智能体ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 复制成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 智能体不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 复制智能体
+      tags:
+      - 智能体
+  /agents/placeholders:
+    get:
+      consumes:
+      - application/json
+      description: 获取所有可用的提示词占位符定义，按字段类型分组
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 占位符定义
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取占位符定义
+      tags:
+      - 智能体
   /auth/change-password:
     post:
       consumes:
@@ -2106,7 +2857,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 仅通过分块ID获取分块详情（不需要knowledge_id）
+      description: 仅通过分块ID获取分块详情（不需要knowledge_id）；支持共享知识库下的分块访问
       parameters:
       - description: 分块ID
         in: path
@@ -2743,7 +3494,12 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前租户的所有知识库
+      description: 获取当前租户的所有知识库；或当传入 agent_id（共享智能体）时，校验权限后返回该智能体配置的知识库范围（用于 @ 提及）
+      parameters:
+      - description: 共享智能体 ID（传入时返回该智能体可用的知识库）
+        in: query
+        name: agent_id
+        type: string
       produces:
       - application/json
       responses:
@@ -2823,12 +3579,16 @@ paths:
     get:
       consumes:
       - application/json
-      description: 根据ID获取知识库详情
+      description: 根据ID获取知识库详情。当使用共享智能体时，可传 agent_id 以校验该智能体是否有权访问该知识库。
       parameters:
       - description: 知识库ID
         in: path
         name: id
         required: true
+        type: string
+      - description: 共享智能体 ID（用于校验智能体是否有权访问该知识库）
+        in: query
+        name: agent_id
         type: string
       produces:
       - application/json
@@ -2897,7 +3657,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: 要删除的FAQ ID列表
+      - description: 要删除的FAQ ID列表(seq_id)
         in: body
         name: request
         required: true
@@ -2905,7 +3665,7 @@ paths:
           properties:
             ids:
               items:
-                type: string
+                type: integer
               type: array
           type: object
       produces:
@@ -2944,10 +3704,10 @@ paths:
         in: query
         name: page_size
         type: integer
-      - description: 标签ID筛选
+      - description: 标签ID筛选(seq_id)
         in: query
         name: tag_id
-        type: string
+        type: integer
       - description: 关键词搜索
         in: query
         name: keyword
@@ -2982,7 +3742,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 异步批量更新或插入FAQ条目
+      description: |-
+        异步批量更新或插入FAQ条目。支持 dry_run 模式（设置 dry_run=true），异步验证不实际导入。
+        dry_run 模式是异步操作，返回 task_id，通过 /faq/import/progress/{task_id} 查询进度和结果。
+        验证内容包括：1) 条目基本格式 2) 重复问题（批次内和知识库已有） 3) 内容安全检查。
       parameters:
       - description: 知识库ID
         in: path
@@ -3024,11 +3787,11 @@ paths:
         name: id
         required: true
         type: string
-      - description: FAQ条目ID
+      - description: FAQ条目ID(seq_id)
         in: path
         name: entry_id
         required: true
-        type: string
+        type: integer
       produces:
       - application/json
       responses:
@@ -3061,11 +3824,11 @@ paths:
         name: id
         required: true
         type: string
-      - description: FAQ条目ID
+      - description: FAQ条目ID(seq_id)
         in: path
         name: entry_id
         required: true
-        type: string
+        type: integer
       - description: FAQ条目
         in: body
         name: request
@@ -3088,6 +3851,50 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 更新FAQ条目
+      tags:
+      - FAQ管理
+  /knowledge-bases/{id}/faq/entries/{entry_id}/similar-questions:
+    post:
+      consumes:
+      - application/json
+      description: 向指定的FAQ条目添加相似问题
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: FAQ条目ID(seq_id)
+        in: path
+        name: entry_id
+        required: true
+        type: integer
+      - description: 相似问列表
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.addSimilarQuestionsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的FAQ条目
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 条目不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 添加相似问
       tags:
       - FAQ管理
   /knowledge-bases/{id}/faq/entries/export:
@@ -3223,11 +4030,50 @@ paths:
       summary: 创建单个FAQ条目
       tags:
       - FAQ管理
+  /knowledge-bases/{id}/faq/import/last-result/display:
+    put:
+      consumes:
+      - application/json
+      description: 更新FAQ知识库导入结果统计卡片的显示或隐藏状态
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 状态更新请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.updateLastFAQImportResultDisplayStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新成功
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识库不存在或无导入记录
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 更新FAQ最后一次导入结果显示状态
+      tags:
+      - FAQ管理
   /knowledge-bases/{id}/faq/search:
     post:
       consumes:
       - application/json
-      description: 使用混合搜索在FAQ中搜索
+      description: 使用混合搜索在FAQ中搜索，支持两级优先级标签召回：first_priority_tag_ids优先级最高，second_priority_tag_ids次之
       parameters:
       - description: 知识库ID
         in: path
@@ -3432,7 +4278,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 从指定URL抓取内容并创建知识条目
+      description: 从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式
       parameters:
       - description: 知识库ID
         in: path
@@ -3447,6 +4293,12 @@ paths:
           properties:
             enable_multimodel:
               type: boolean
+            file_name:
+              type: string
+            file_type:
+              type: string
+            tag_id:
+              type: string
             title:
               type: string
             url:
@@ -3475,6 +4327,127 @@ paths:
       summary: 从URL创建知识
       tags:
       - 知识管理
+  /knowledge-bases/{id}/shares:
+    get:
+      description: 获取知识库的所有共享记录
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ListSharesResponse'
+      security:
+      - Bearer: []
+      summary: 获取知识库的共享列表
+      tags:
+      - 知识库共享
+    post:
+      consumes:
+      - application/json
+      description: 将知识库共享到指定组织
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 共享信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 共享知识库到组织
+      tags:
+      - 知识库共享
+  /knowledge-bases/{id}/shares/{share_id}:
+    delete:
+      description: 取消知识库的共享
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 共享记录ID
+        in: path
+        name: share_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 取消共享
+      tags:
+      - 知识库共享
+    put:
+      consumes:
+      - application/json
+      description: 更新知识库共享的权限级别
+      parameters:
+      - description: 知识库ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 共享记录ID
+        in: path
+        name: share_id
+        required: true
+        type: string
+      - description: 权限信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateSharePermissionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 更新共享权限
+      tags:
+      - 知识库共享
   /knowledge-bases/{id}/tags:
     get:
       consumes:
@@ -3568,7 +4541,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: 标签ID
+      - description: 标签ID (UUID或seq_id)
         in: path
         name: tag_id
         required: true
@@ -3581,6 +4554,11 @@ paths:
         in: query
         name: content_only
         type: boolean
+      - description: 删除选项
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_handler.DeleteTagRequest'
       produces:
       - application/json
       responses:
@@ -3609,7 +4587,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: 标签ID
+      - description: 标签ID (UUID或seq_id)
         in: path
         name: tag_id
         required: true
@@ -3820,11 +4798,44 @@ paths:
       summary: 下载知识文件
       tags:
       - 知识管理
+  /knowledge/{id}/reparse:
+    post:
+      consumes:
+      - application/json
+      description: 删除知识中现有的文档内容并重新解析，使用异步任务方式处理
+      parameters:
+      - description: 知识ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 重新解析任务已提交
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 重新解析知识
+      tags:
+      - 知识管理
   /knowledge/batch:
     get:
       consumes:
       - application/json
-      description: 根据ID列表批量获取知识条目
+      description: 根据ID列表批量获取知识条目。可选 kb_id：指定时按该知识库校验权限并用于共享知识库的租户解析；可选 agent_id：使用共享智能体时传此参数，后端按智能体所属租户查询（用于刷新后恢复共享知识库下的文件）
       parameters:
       - collectionFormat: csv
         description: 知识ID列表
@@ -3834,6 +4845,14 @@ paths:
         name: ids
         required: true
         type: array
+      - description: 可选，知识库ID（用于共享知识库时指定范围）
+        in: query
+        name: kb_id
+        type: string
+      - description: 可选，共享智能体ID（用于按智能体租户批量拉取文件详情）
+        in: query
+        name: agent_id
+        type: string
       produces:
       - application/json
       responses:
@@ -3934,7 +4953,8 @@ paths:
     get:
       consumes:
       - application/json
-      description: Search knowledge files by keyword across all knowledge bases
+      description: Search knowledge files by keyword. When agent_id is set (shared
+        agent), scope is the agent's configured knowledge bases.
       parameters:
       - description: Keyword to search
         in: query
@@ -3948,6 +4968,14 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: Comma-separated file extensions to filter (e.g., csv,xlsx)
+        in: query
+        name: file_types
+        type: string
+      - description: Shared agent ID (search within agent's KB scope)
+        in: query
+        name: agent_id
+        type: string
       produces:
       - application/json
       responses:
@@ -3970,9 +4998,9 @@ paths:
     put:
       consumes:
       - application/json
-      description: 批量更新知识条目的标签
+      description: 批量更新知识条目的标签。可选 kb_id：指定时按该知识库校验编辑权限并用于共享知识库的租户解析
       parameters:
-      - description: 标签更新请求
+      - description: 标签更新请求（updates 必填，kb_id 可选）
         in: body
         name: request
         required: true
@@ -4441,6 +5469,670 @@ paths:
       summary: 更新模型
       tags:
       - 模型管理
+  /models/providers:
+    get:
+      consumes:
+      - application/json
+      description: 根据模型类型获取支持的厂商列表及配置信息
+      parameters:
+      - description: 模型类型 (chat, embedding, rerank, vllm)
+        in: query
+        name: model_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 厂商列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取模型厂商列表
+      tags:
+      - 模型管理
+  /organizations:
+    get:
+      description: 获取当前用户所属的所有组织，并附带各空间内知识库/智能体数量
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ListOrganizationsResponse'
+      security:
+      - Bearer: []
+      summary: 获取我的组织列表
+      tags:
+      - 组织管理
+    post:
+      consumes:
+      - application/json
+      description: 创建新的组织，创建者自动成为管理员
+      parameters:
+      - description: 组织信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 创建组织
+      tags:
+      - 组织管理
+  /organizations/{id}:
+    delete:
+      description: 删除组织（仅组织创建者可操作）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 删除组织
+      tags:
+      - 组织管理
+    get:
+      description: 根据ID获取组织详情
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取组织详情
+      tags:
+      - 组织管理
+    put:
+      consumes:
+      - application/json
+      description: 更新组织信息（需要管理员权限）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 更新信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateOrganizationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 更新组织
+      tags:
+      - 组织管理
+  /organizations/{id}/invite:
+    post:
+      consumes:
+      - application/json
+      description: 管理员直接添加用户为组织成员
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 邀请信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.InviteMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 邀请成员
+      tags:
+      - 组织管理
+  /organizations/{id}/invite-code:
+    post:
+      description: 生成新的组织邀请码（需要管理员权限）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 生成邀请码
+      tags:
+      - 组织管理
+  /organizations/{id}/join-requests:
+    get:
+      description: 获取组织的待审核加入申请（仅管理员）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 获取待审核加入申请列表
+      tags:
+      - 组织管理
+  /organizations/{id}/join-requests/{request_id}/review:
+    put:
+      consumes:
+      - application/json
+      description: 通过或拒绝加入申请（仅管理员）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 申请ID
+        in: path
+        name: request_id
+        required: true
+        type: string
+      - description: 审核结果
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ReviewJoinRequestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 审核加入申请
+      tags:
+      - 组织管理
+  /organizations/{id}/leave:
+    post:
+      description: 退出指定组织
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 退出组织
+      tags:
+      - 组织管理
+  /organizations/{id}/members:
+    get:
+      description: 获取组织的所有成员
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ListMembersResponse'
+      security:
+      - Bearer: []
+      summary: 获取组织成员列表
+      tags:
+      - 组织管理
+  /organizations/{id}/members/{user_id}:
+    delete:
+      description: 从组织中移除成员（需要管理员权限）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 用户ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 移除成员
+      tags:
+      - 组织管理
+    put:
+      consumes:
+      - application/json
+      description: 更新组织成员的角色（需要管理员权限）
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 用户ID
+        in: path
+        name: user_id
+        required: true
+        type: string
+      - description: 角色信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 更新成员角色
+      tags:
+      - 组织管理
+  /organizations/{id}/request-upgrade:
+    post:
+      consumes:
+      - application/json
+      description: 现有成员申请更高权限
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 申请信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.RequestRoleUpgradeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 申请权限升级
+      tags:
+      - 组织管理
+  /organizations/{id}/search-users:
+    get:
+      description: 搜索用户（排除已有成员）用于邀请加入组织
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 搜索关键词（用户名或邮箱）
+        in: query
+        name: q
+        required: true
+        type: string
+      - default: 10
+        description: 返回数量限制
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 搜索可邀请的用户
+      tags:
+      - 组织管理
+  /organizations/{id}/shared-agents:
+    get:
+      description: 获取指定空间下所有共享智能体，包含他人共享的与我共享的，用于列表页空间视角
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取空间内全部智能体（含我共享的）
+      tags:
+      - 组织管理
+  /organizations/{id}/shared-knowledge-bases:
+    get:
+      description: 获取指定空间下所有共享知识库，包含直接共享的与通过共享智能体可见的，用于列表页空间视角
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取空间内全部知识库（含我共享的、含智能体携带的）
+      tags:
+      - 组织管理
+  /organizations/{id}/shares:
+    get:
+      description: 获取共享到指定组织的所有知识库
+      parameters:
+      - description: 组织ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ListSharesResponse'
+      security:
+      - Bearer: []
+      summary: 获取组织的共享知识库列表
+      tags:
+      - 组织管理
+  /organizations/join:
+    post:
+      consumes:
+      - application/json
+      description: 使用邀请码加入组织
+      parameters:
+      - description: 邀请码
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.JoinOrganizationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 通过邀请码加入组织
+      tags:
+      - 组织管理
+  /organizations/join-by-id:
+    post:
+      consumes:
+      - application/json
+      description: 加入已开放可被搜索的空间，无需邀请码
+      parameters:
+      - description: 空间 ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 通过空间 ID 加入（可搜索空间）
+      tags:
+      - 组织管理
+  /organizations/join-request:
+    post:
+      consumes:
+      - application/json
+      description: 对需要审核的组织提交加入申请
+      parameters:
+      - description: 申请信息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 提交加入申请
+      tags:
+      - 组织管理
+  /organizations/preview/{code}:
+    get:
+      description: 通过邀请码获取组织基本信息（不加入）
+      parameters:
+      - description: 邀请码
+        in: path
+        name: code
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 通过邀请码预览组织
+      tags:
+      - 组织管理
+  /organizations/search:
+    get:
+      description: 搜索已开放可被搜索的空间，用于发现并加入
+      parameters:
+      - description: 搜索关键词（空间名称或描述）
+        in: query
+        name: q
+        type: string
+      - default: 20
+        description: 返回数量限制
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 搜索可加入的空间
+      tags:
+      - 组织管理
   /sessions:
     get:
       consumes:
@@ -4767,6 +6459,36 @@ paths:
       summary: 生成会话标题
       tags:
       - 会话
+  /sessions/batch:
+    delete:
+      consumes:
+      - application/json
+      description: 根据ID列表批量删除对话会话
+      parameters:
+      - description: 批量删除请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.batchDeleteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 批量删除会话
+      tags:
+      - 会话
   /sessions/search:
     post:
       consumes:
@@ -4797,6 +6519,45 @@ paths:
       summary: 知识搜索
       tags:
       - 问答
+  /shared-knowledge-bases:
+    get:
+      description: 获取通过组织共享给当前用户的所有知识库
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取共享给我的知识库列表
+      tags:
+      - 知识库共享
+  /skills:
+    get:
+      consumes:
+      - application/json
+      description: 获取所有预装的Agent Skills元数据
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Skills列表
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取预装Skills列表
+      tags:
+      - Skills
   /system/info:
     get:
       consumes:
@@ -4810,6 +6571,31 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler.GetSystemInfoResponse'
       summary: 获取系统信息
+      tags:
+      - 系统
+  /system/minio/buckets:
+    get:
+      consumes:
+      - application/json
+      description: 获取所有 MinIO 存储桶及其访问权限
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 存储桶列表
+          schema:
+            $ref: '#/definitions/internal_handler.ListMinioBucketsResponse'
+        "400":
+          description: MinIO 未启用
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: 服务器错误
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 列出 MinIO 存储桶
       tags:
       - 系统
   /tenants:
@@ -5084,6 +6870,29 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取租户对话配置
+      tags:
+      - 租户管理
+  /tenants/kv/prompt-templates:
+    get:
+      consumes:
+      - application/json
+      description: 获取系统配置的提示词模板列表
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 提示词模板配置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取提示词模板
       tags:
       - 租户管理
   /tenants/kv/web-search-config:

@@ -23,6 +23,8 @@ type SessionService interface {
 	DeleteSession(ctx context.Context, id string) error
 	// BatchDeleteSessions deletes multiple sessions by IDs
 	BatchDeleteSessions(ctx context.Context, ids []string) error
+	// DeleteAllSessions deletes all sessions for the current tenant
+	DeleteAllSessions(ctx context.Context) error
 	// GenerateTitle generates a title for the current conversation
 	// modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 	GenerateTitle(ctx context.Context, session *types.Session, messages []types.Message, modelID string) (string, error)
@@ -84,4 +86,6 @@ type SessionRepository interface {
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// BatchDelete deletes multiple sessions by IDs
 	BatchDelete(ctx context.Context, tenantID uint64, ids []string) error
+	// DeleteAllByTenantID deletes all sessions for a tenant
+	DeleteAllByTenantID(ctx context.Context, tenantID uint64) error
 }

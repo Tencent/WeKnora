@@ -61,35 +61,41 @@ const props = defineProps({
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
-    border-radius: 6px;
+    padding: 3px 8px;
+    border-radius: 5px;
     font-size: 12px;
     font-weight: 500;
     max-width: 200px;
     cursor: default;
     transition: all 0.15s;
-    background: var(--td-bg-color-secondarycontainer, #f3f3f3);
-    border: 1px solid transparent;
-    color: var(--td-text-color-primary, #333);
-    
-    /* 知识库 / 文件 - 无背景，与整体一致 */
-    &.kb-tag,
-    &.faq-tag,
-    &.file-tag {
-        background: transparent;
-        color: var(--td-text-color-primary, #333);
-        
+    background: rgba(7, 192, 95, 0.06);
+    border: 1px solid rgba(7, 192, 95, 0.2);
+    color: var(--td-text-color-primary);
+
+    &.kb-tag {
         .tag_icon {
-            color: var(--td-text-color-secondary, #666);
+            color: var(--td-brand-color);
         }
     }
-    
+
+    &.faq-tag {
+        .tag_icon {
+            color: var(--td-warning-color);
+        }
+    }
+
+    &.file-tag {
+        .tag_icon {
+            color: var(--td-text-color-secondary);
+        }
+    }
+
     .tag_icon {
-        font-size: 14px;
+        font-size: 13px;
         display: flex;
         align-items: center;
     }
-    
+
     .tag_name {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -112,10 +118,17 @@ const props = defineProps({
     background: #8CE97F;
     margin-left: auto;
     color: #000000e6;
-    font-size: 16px;
+    font-size: 15px;
     text-align: justify;
     word-break: break-all;
     max-width: 100%;
     box-sizing: border-box;
+}
+
+html[theme-mode="dark"] {
+    .user_msg {
+        background: var(--td-brand-color-3);
+        color: rgba(255, 255, 255, 0.9);
+    }
 }
 </style>

@@ -25,10 +25,12 @@ func (r *mcpServiceRepository) Create(ctx context.Context, service *types.MCPSer
 }
 
 // GetByID retrieves an MCP service by ID and tenant ID
+// Builtin MCP services are visible to all tenants
 func (r *mcpServiceRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.MCPService, error) {
 	var service types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("id = ? AND tenant_id = ?", id, tenantID).
+		Where("id = ?", id).
+		Where("tenant_id = ? OR is_builtin = true", tenantID).
 		First(&service).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -41,10 +43,11 @@ func (r *mcpServiceRepository) GetByID(ctx context.Context, tenantID uint64, id 
 }
 
 // List retrieves all MCP services for a tenant
+// Includes builtin MCP services visible to all tenants
 func (r *mcpServiceRepository) List(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
+		Where("tenant_id = ? OR is_builtin = true", tenantID).
 		Order("created_at DESC").
 		Find(&services).Error
 	if err != nil {
@@ -55,10 +58,11 @@ func (r *mcpServiceRepository) List(ctx context.Context, tenantID uint64) ([]*ty
 }
 
 // ListEnabled retrieves all enabled MCP services for a tenant
+// Includes enabled builtin MCP services visible to all tenants
 func (r *mcpServiceRepository) ListEnabled(ctx context.Context, tenantID uint64) ([]*types.MCPService, error) {
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND enabled = ?", tenantID, true).
+		Where("(tenant_id = ? OR is_builtin = true) AND enabled = ?", tenantID, true).
 		Order("created_at DESC").
 		Find(&services).Error
 	if err != nil {
@@ -69,6 +73,7 @@ func (r *mcpServiceRepository) ListEnabled(ctx context.Context, tenantID uint64)
 }
 
 // ListByIDs retrieves MCP services by multiple IDs for a tenant
+// Includes builtin MCP services visible to all tenants
 func (r *mcpServiceRepository) ListByIDs(
 	ctx context.Context,
 	tenantID uint64,
@@ -80,7 +85,7 @@ func (r *mcpServiceRepository) ListByIDs(
 
 	var services []*types.MCPService
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id IN ?", tenantID, ids).
+		Where("(tenant_id = ? OR is_builtin = true) AND id IN ?", tenantID, ids).
 		Find(&services).Error
 	if err != nil {
 		return nil, err

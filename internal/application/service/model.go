@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -103,7 +104,7 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Fetch model from repository
 	model, err := s.repo.GetByID(ctx, tenantID, id)
@@ -147,7 +148,7 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 	logger.Info(ctx, "Start listing models")
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Listing models for tenant ID: %d", tenantID)
 
 	// List models from repository with no additional filters
@@ -169,7 +170,7 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	logger.Infof(ctx, "Updating model ID: %s, name: %s", model.ID, model.Name)
 
 	// Check if the model is builtin - builtin models cannot be updated
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	existingModel, err := s.repo.GetByID(ctx, tenantID, model.ID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -201,7 +202,7 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 	logger.Info(ctx, "Start deleting model")
 	logger.Infof(ctx, "Deleting model ID: %s", id)
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Tenant ID: %d", tenantID)
 
 	// Check if the model is builtin - builtin models cannot be deleted
@@ -367,7 +368,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		return nil, errors.New("model ID cannot be empty")
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	tenantID := types.MustTenantIDFromContext(ctx)
 
 	// Get the model directly from repository to avoid status checks
 	model, err := s.repo.GetByID(ctx, tenantID, modelId)
@@ -403,6 +404,57 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 	}
 
 	return chatModel, nil
+}
+
+// GetVLMModel retrieves and initializes a vision language model instance.
+func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error) {
+	if modelId == "" {
+		return nil, errors.New("model ID cannot be empty")
+	}
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":  modelId,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+
+	if model == nil {
+		return nil, ErrModelNotFound
+	}
+
+	logger.Infof(ctx, "Getting VLM model: %s, source: %s", model.Name, model.Source)
+
+	ifType := model.Parameters.InterfaceType
+	if ifType == "" {
+		if model.Source == types.ModelSourceLocal {
+			ifType = "ollama"
+		} else {
+			ifType = "openai"
+		}
+	}
+
+	vlmModel, err := vlm.NewVLM(&vlm.Config{
+		ModelID:       model.ID,
+		APIKey:        model.Parameters.APIKey,
+		BaseURL:       model.Parameters.BaseURL,
+		ModelName:     model.Name,
+		Source:        model.Source,
+		InterfaceType: ifType,
+	}, s.ollamaService)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   model.ID,
+			"model_name": model.Name,
+		})
+		return nil, err
+	}
+
+	return vlmModel, nil
 }
 
 // Note: default model selection logic has been removed; models no longer
