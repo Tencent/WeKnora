@@ -2978,6 +2978,8 @@ export default {
     retry: "重试",
     unsupported: "该文件类型暂不支持在线预览",
     unsupportedHint: "请下载文件后使用本地应用查看",
+    fullscreen: "全屏预览",
+    exitFullscreen: "退出全屏",
   },
   knowledgeSearch: {
     title: "搜索",

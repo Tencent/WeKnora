@@ -2981,6 +2981,8 @@ export default {
     retry: 'Retry',
     unsupported: 'This file type does not support online preview',
     unsupportedHint: 'Please download and open with a local application',
+    fullscreen: 'Fullscreen',
+    exitFullscreen: 'Exit Fullscreen',
   },
   knowledgeSearch: {
     title: 'Search',

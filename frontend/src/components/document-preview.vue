@@ -1,6 +1,6 @@
 // @ts-nocheck
 <script setup lang="ts">
-import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent, onMounted } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { MessagePlugin } from 'tdesign-vue-next';
 import hljs from 'highlight.js';
@@ -31,6 +31,32 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+
+const isFullscreen = ref(false);
+const previewContainerRef = ref<HTMLElement | null>(null);
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    if (previewContainerRef.value?.requestFullscreen) {
+      previewContainerRef.value.requestFullscreen().catch((err: any) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    }
+  } else {
+    if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  }
+}
+
+function handleFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement;
+}
+
+onMounted(() => {
+  document.addEventListener('fullscreenchange', handleFullscreenChange);
+});
+
 
 const fileTypeMap: Record<string, typeof previewType.value> = {};
 ['pdf'].forEach(t => fileTypeMap[t] = 'pdf');
@@ -296,12 +322,24 @@ watch(
 );
 
 onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange);
   cleanup();
 });
 </script>
 
 <template>
-  <div class="document-preview">
+  <div ref="previewContainerRef" class="document-preview" :class="{ 'is-fullscreen': isFullscreen }">
+    <!-- Toolbar -->
+    <div class="preview-toolbar" v-if="!loading && !error && previewType !== 'unsupported'">
+      <t-space size="small">
+        <t-tooltip :content="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')" placement="bottom">
+          <t-button theme="default" variant="text" shape="square" @click="toggleFullscreen">
+            <template #icon><t-icon :name="isFullscreen ? 'fullscreen-exit' : 'fullscreen'" /></template>
+          </t-button>
+        </t-tooltip>
+      </t-space>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="preview-loading">
       <t-loading size="medium" />
@@ -397,6 +435,51 @@ onUnmounted(() => {
 
 .document-preview {
   min-height: 200px;
+  position: relative;
+}
+
+.is-fullscreen {
+  background: var(--td-bg-color-container);
+  padding: 0;
+  overflow-y: auto;
+  z-index: 1000;
+
+  .preview-container {
+    max-height: 100vh;
+  }
+
+  .preview-pdf, .preview-pptx {
+    height: 100vh;
+  }
+
+  .preview-docx {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    .docx-container {
+      max-height: 100vh;
+      height: 100%;
+      flex: 1;
+    }
+  }
+}
+
+.preview-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 24px;
+  z-index: 10;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--td-radius-default);
+  box-shadow: var(--td-shadow-1);
+  padding: 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 1;
+  }
 }
 
 // ── States ──

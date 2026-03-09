@@ -2580,7 +2580,9 @@ export default {
     loadFailed: 'Не удалось загрузить предпросмотр документа',
     retry: 'Повторить',
     unsupported: 'Этот тип файла не поддерживает онлайн-просмотр',
-    unsupportedHint: 'Скачайте файл и откройте локально'
+    unsupportedHint: 'Скачайте файл и откройте локально',
+    fullscreen: 'Полноэкранный режим',
+    exitFullscreen: 'Выйти из полноэкранного режима',
   },
   knowledgeSearch: {
     title: 'Поиск',

@@ -3049,6 +3049,8 @@ export default {
     retry: '재시도',
     unsupported: '이 파일 유형은 온라인 미리보기를 지원하지 않습니다',
     unsupportedHint: '파일을 다운로드하여 로컬 앱으로 열어주세요',
+    fullscreen: '전체 화면',
+    exitFullscreen: '전체 화면 종료',
   },
   knowledgeSearch: {
     title: '검색',
