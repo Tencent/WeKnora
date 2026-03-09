@@ -466,6 +466,7 @@ export default {
       engineLocal: "Local（本地）",
       engineCos: "腾讯云 COS",
       engineTos: "火山引擎 TOS",
+      engineS3: "AWS S3",
       localTitle: "Local（本地存储）",
       localDesc: "使用服务器本地文件系统存储文件，仅适合单机部署。",
       available: "可用",
@@ -494,6 +495,10 @@ export default {
       tosDesc: "火山引擎对象存储服务（TOS），适合公有云部署。",
       tosAccessKeyPlaceholder: "火山引擎 Access Key",
       tosSecretKeyPlaceholder: "火山引擎 Secret Key",
+      s3Title: "AWS S3",
+      s3Desc: "AWS S3 及兼容的对象存储服务，适合公有云部署。",
+      s3AccessKeyPlaceholder: "AWS Access Key",
+      s3SecretKeyPlaceholder: "AWS Secret Key",
       console: "控制台",
       docs: "文档",
       testConnection: "测试连接",
@@ -3021,6 +3026,8 @@ export default {
       engineCosDesc: "公有云部署，支持 CDN 加速",
       engineTos: "火山引擎 TOS",
       engineTosDesc: "火山引擎对象存储，适合公有云部署",
+      engineS3: "AWS S3",
+      engineS3Desc: "AWS S3 及兼容存储，适合公有云部署",
     },
     parser: {
       title: "解析引擎",
@@ -3039,6 +3046,20 @@ export default {
       fileTypeCsv: "CSV 文件",
       fileTypeText: "纯文本",
       fileTypeImage: "图片",
+      engines: {
+        simple: {
+          name: "Simple",
+          desc: "简单格式 & 图片解析（无需外部服务）",
+        },
+        mineru: {
+          name: "MinerU",
+          desc: "MinerU 自部署服务",
+        },
+        mineru_cloud: {
+          name: "MinerU Cloud",
+          desc: "MinerU Cloud API",
+        },
+      },
     },
     supportedFormats: "支持格式",
   },

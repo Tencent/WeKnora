@@ -469,6 +469,7 @@ export default {
       engineLocal: 'Local（로컬）',
       engineCos: 'Tencent Cloud COS',
       engineTos: 'Volcengine TOS',
+      engineS3: 'AWS S3',
       localTitle: 'Local（로컬 스토리지）',
       localDesc: '서버 로컬 파일시스템에 파일을 저장합니다. 단일 노드 배포에만 적합합니다.',
       available: '사용 가능',
@@ -497,6 +498,10 @@ export default {
       tosDesc: 'Volcengine 오브젝트 스토리지(TOS), 퍼블릭 클라우드 배포에 적합합니다.',
       tosAccessKeyPlaceholder: 'Volcengine Access Key',
       tosSecretKeyPlaceholder: 'Volcengine Secret Key',
+      s3Title: 'AWS S3',
+      s3Desc: 'AWS S3 및 호환 오브젝트 스토리지 서비스, 퍼블릭 클라우드 배포에 적합합니다.',
+      s3AccessKeyPlaceholder: 'AWS Access Key',
+      s3SecretKeyPlaceholder: 'AWS Secret Key',
       console: '콘솔',
       docs: '문서',
       testConnection: '연결 테스트',
@@ -3092,6 +3097,8 @@ export default {
       engineCosDesc: '퍼블릭 클라우드 배포, CDN 가속 지원',
       engineTos: 'Volcengine TOS',
       engineTosDesc: 'Volcengine 오브젝트 스토리지, 퍼블릭 클라우드 배포에 적합',
+      engineS3: 'AWS S3',
+      engineS3Desc: 'AWS S3 및 호환 스토리지, 퍼블릭 클라우드 배포에 적합',
     },
     parser: {
       title: '파서 엔진',
@@ -3110,6 +3117,20 @@ export default {
       fileTypeCsv: 'CSV 파일',
       fileTypeText: '일반 텍스트',
       fileTypeImage: '이미지',
+      engines: {
+        simple: {
+          name: 'Simple',
+          desc: '간단한 형식 및 이미지 파싱 (외부 서비스 불필요)',
+        },
+        mineru: {
+          name: 'MinerU',
+          desc: 'MinerU 자체 호스팅 서비스',
+        },
+        mineru_cloud: {
+          name: 'MinerU Cloud',
+          desc: 'MinerU Cloud API',
+        },
+      },
     },
     supportedFormats: '지원 형식',
   },

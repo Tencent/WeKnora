@@ -601,6 +601,7 @@ export default {
       engineLocal: 'Локальное',
       engineCos: 'Tencent Cloud COS',
       engineTos: 'Volcengine TOS',
+      engineS3: 'AWS S3',
       localTitle: 'Локальное хранилище',
       localDesc: 'Хранение файлов в локальной файловой системе сервера. Подходит только для однонодового развёртывания.',
       available: 'Доступно',
@@ -629,6 +630,10 @@ export default {
       tosDesc: 'Объектное хранилище Volcengine (TOS) для публичного облака.',
       tosAccessKeyPlaceholder: 'Volcengine Access Key',
       tosSecretKeyPlaceholder: 'Volcengine Secret Key',
+      s3Title: 'AWS S3',
+      s3Desc: 'AWS S3 и совместимые сервисы объектного хранилища для публичного облака.',
+      s3AccessKeyPlaceholder: 'AWS Access Key',
+      s3SecretKeyPlaceholder: 'AWS Secret Key',
       console: 'Консоль',
       docs: 'Документация',
       testConnection: 'Тест подключения',
@@ -2622,7 +2627,9 @@ export default {
       engineCos: 'Tencent Cloud COS',
       engineCosDesc: 'Публичное облако, поддержка CDN-ускорения',
       engineTos: 'Volcengine TOS',
-      engineTosDesc: 'Объектное хранилище Volcengine, для публичного облака'
+      engineTosDesc: 'Объектное хранилище Volcengine, для публичного облака',
+      engineS3: 'AWS S3',
+      engineS3Desc: 'AWS S3 и совместимые хранилища, для публичного облака',
     },
     parser: {
       title: 'Парсер',
@@ -2640,7 +2647,21 @@ export default {
       fileTypeExcel: 'Таблицы Excel',
       fileTypeCsv: 'Файлы CSV',
       fileTypeText: 'Текстовые файлы',
-      fileTypeImage: 'Изображения'
+      fileTypeImage: 'Изображения',
+      engines: {
+        simple: {
+          name: 'Simple',
+          desc: 'Простой формат и анализ изображений (внешний сервис не требуется)',
+        },
+        mineru: {
+          name: 'MinerU',
+          desc: 'Самостоятельно развёрнутый сервис MinerU',
+        },
+        mineru_cloud: {
+          name: 'MinerU Cloud',
+          desc: 'MinerU Cloud API',
+        },
+      },
     },
     supportedFormats: 'Поддерживаемые форматы'
   },

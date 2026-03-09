@@ -616,6 +616,7 @@ export default {
       engineLocal: 'Local',
       engineCos: 'Tencent Cloud COS',
       engineTos: 'Volcengine TOS',
+      engineS3: 'AWS S3',
       localTitle: 'Local Storage',
       localDesc: 'Store files on the server local filesystem, suitable for single-node deployment only.',
       available: 'Available',
@@ -644,6 +645,10 @@ export default {
       tosDesc: 'Volcengine Object Storage Service (TOS), suitable for public cloud deployment.',
       tosAccessKeyPlaceholder: 'Volcengine Access Key',
       tosSecretKeyPlaceholder: 'Volcengine Secret Key',
+      s3Title: 'AWS S3',
+      s3Desc: 'AWS S3 and S3-compatible object storage services, suitable for public cloud deployment.',
+      s3AccessKeyPlaceholder: 'AWS Access Key',
+      s3SecretKeyPlaceholder: 'AWS Secret Key',
       console: 'Console',
       docs: 'Docs',
       testConnection: 'Test Connection',
@@ -3024,6 +3029,8 @@ export default {
       engineCosDesc: 'Public cloud deployment, supports CDN acceleration',
       engineTos: 'Volcengine TOS',
       engineTosDesc: 'Volcengine object storage, for public cloud deployment',
+      engineS3: 'AWS S3',
+      engineS3Desc: 'AWS S3 and compatible storage, for public cloud deployment',
     },
     parser: {
       title: 'Parser Engine',
@@ -3042,6 +3049,20 @@ export default {
       fileTypeCsv: 'CSV Files',
       fileTypeText: 'Plain Text',
       fileTypeImage: 'Images',
+      engines: {
+        simple: {
+          name: 'Simple',
+          desc: 'Simple format & image parsing (no external service required)',
+        },
+        mineru: {
+          name: 'MinerU',
+          desc: 'MinerU self-hosted service',
+        },
+        mineru_cloud: {
+          name: 'MinerU Cloud',
+          desc: 'MinerU Cloud API',
+        },
+      },
     },
     supportedFormats: 'Supported formats',
   },

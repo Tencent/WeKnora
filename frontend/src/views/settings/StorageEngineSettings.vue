@@ -33,6 +33,7 @@
               <t-option value="minio" label="MinIO" />
               <t-option value="cos" :label="$t('settings.storage.engineCos')" />
               <t-option value="tos" :label="$t('settings.storage.engineTos')" />
+              <t-option value="s3" label="AWS S3" />
             </t-select>
           </div>
         </div>
@@ -347,6 +348,80 @@
         </div>
       </div>
 
+      <!-- S3 -->
+      <div class="engine-section" data-model-type="s3">
+        <div class="engine-header">
+          <div class="engine-header-info">
+            <div class="engine-title-row">
+              <h3>{{ $t('settings.storage.s3Title') }}</h3>
+              <t-tag theme="success" variant="light" size="small">{{ $t('settings.storage.configurable') }}</t-tag>
+            </div>
+            <p>
+              {{ $t('settings.storage.s3Desc') }}
+              <a class="engine-link" href="https://aws.amazon.com/s3/" target="_blank" rel="noopener">{{ $t('settings.storage.console') }} ↗</a>
+              <a class="engine-link" href="https://docs.aws.amazon.com/s3/" target="_blank" rel="noopener">{{ $t('settings.storage.docs') }} ↗</a>
+            </p>
+          </div>
+        </div>
+        <div class="engine-form">
+          <div class="form-field">
+            <label>Endpoint</label>
+            <t-input
+              v-model="config.s3.endpoint"
+              placeholder="e.g. https://s3.amazonaws.com"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Region</label>
+            <t-input
+              v-model="config.s3.region"
+              placeholder="e.g. us-east-1"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Access Key</label>
+            <t-input
+              v-model="config.s3.access_key"
+              :placeholder="$t('settings.storage.s3AccessKeyPlaceholder')"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>Secret Key</label>
+            <t-input
+              v-model="config.s3.secret_key"
+              type="password"
+              :placeholder="$t('settings.storage.s3SecretKeyPlaceholder')"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>{{ $t('settings.storage.bucketName') }}</label>
+            <t-input
+              v-model="config.s3.bucket_name"
+              :placeholder="$t('settings.storage.bucketPlaceholder')"
+              clearable
+            />
+          </div>
+          <div class="form-field">
+            <label>{{ $t('settings.storage.pathPrefix') }}</label>
+            <t-input
+              v-model="config.s3.path_prefix"
+              :placeholder="$t('settings.storage.prefixPlaceholder')"
+              clearable
+            />
+          </div>
+        </div>
+        <div class="test-bar">
+          <t-button size="small" variant="outline" :loading="checkingS3" @click="onCheckS3">{{ $t('settings.storage.testConnection') }}</t-button>
+          <span v-if="s3CheckResult" :class="['test-msg', s3CheckResult.ok ? 'success' : 'error']">
+            {{ s3CheckResult.message }}
+          </span>
+        </div>
+      </div>
+
       <!-- Save -->
       <div class="save-bar">
         <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('settings.storage.saveConfig') }}</t-button>
@@ -393,6 +468,14 @@ const defaultConfig = (): StorageEngineConfig => ({
     bucket_name: '',
     path_prefix: '',
   },
+  s3: {
+    endpoint: '',
+    region: '',
+    access_key: '',
+    secret_key: '',
+    bucket_name: '',
+    path_prefix: '',
+  },
 })
 
 const loading = ref(true)
@@ -416,6 +499,8 @@ const checkingCos = ref(false)
 const cosCheckResult = ref<{ ok: boolean; message: string } | null>(null)
 const checkingTos = ref(false)
 const tosCheckResult = ref<{ ok: boolean; message: string } | null>(null)
+const checkingS3 = ref(false)
+const s3CheckResult = ref<{ ok: boolean; message: string } | null>(null)
 
 const minioAvailable = computed(() => {
   if (config.value.minio?.mode === 'remote') {
@@ -463,6 +548,16 @@ async function loadConfig() {
               path_prefix: d.tos.path_prefix || '',
             }
           : defaultConfig().tos!,
+        s3: d.s3
+          ? {
+              endpoint: d.s3.endpoint || '',
+              region: d.s3.region || '',
+              access_key: d.s3.access_key || '',
+              secret_key: d.s3.secret_key || '',
+              bucket_name: d.s3.bucket_name || '',
+              path_prefix: d.s3.path_prefix || '',
+            }
+          : defaultConfig().s3!,
       }
     }
   } catch {
@@ -546,6 +641,14 @@ function buildPayload(): StorageEngineConfig {
       bucket_name: (config.value.tos?.bucket_name || '').trim(),
       path_prefix: (config.value.tos?.path_prefix || '').trim(),
     },
+    s3: {
+      endpoint: (config.value.s3?.endpoint || '').trim(),
+      region: (config.value.s3?.region || '').trim(),
+      access_key: (config.value.s3?.access_key || '').trim(),
+      secret_key: (config.value.s3?.secret_key || '').trim(),
+      bucket_name: (config.value.s3?.bucket_name || '').trim(),
+      path_prefix: (config.value.s3?.path_prefix || '').trim(),
+    },
   }
 }
 
@@ -608,6 +711,20 @@ async function onCheckTos() {
     tosCheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
   } finally {
     checkingTos.value = false
+  }
+}
+
+async function onCheckS3() {
+  checkingS3.value = true
+  s3CheckResult.value = null
+  try {
+    const payload = buildPayload()
+    const res = await checkStorageEngine({ provider: 's3', s3: payload.s3 })
+    s3CheckResult.value = res?.data ?? { ok: false, message: t('settings.storage.unknownError') }
+  } catch (e: unknown) {
+    s3CheckResult.value = { ok: false, message: e instanceof Error ? e.message : t('settings.storage.requestFailed') }
+  } finally {
+    checkingS3.value = false
   }
 }
 

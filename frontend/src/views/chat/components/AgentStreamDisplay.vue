@@ -33,7 +33,7 @@
                   <div class="action-header" @click="toggleEvent(event.event_id)">
                     <div class="action-title">
                       <img class="action-title-icon" :src="thinkingIcon" alt="" />
-                      <span class="action-name">深度思考</span>
+                      <span class="action-name">{{ $t('agent.think') }}</span>
                       <span v-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
                     </div>
                     <div v-if="event.content" class="action-show-icon">
@@ -54,7 +54,7 @@
                   <div class="action-header" @click="toggleEvent(event.tool_call_id)">
                     <div class="action-title">
                       <img class="action-title-icon" :src="thinkingIcon" alt="" />
-                      <span class="action-name">深度思考</span>
+                      <span class="action-name">{{ $t('agent.think') }}</span>
                       <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
                       <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
                     </div>
@@ -168,7 +168,7 @@
             <div class="action-header" @click="toggleEvent(event.event_id)">
               <div class="action-title">
                 <img class="action-title-icon" :src="thinkingIcon" alt="" />
-                <span class="action-name">深度思考</span>
+                <span class="action-name">{{ $t('agent.think') }}</span>
                 <span v-if="getThinkingSummary(event) && !isEventExpanded(event.event_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
               </div>
               <div v-if="event.content" class="action-show-icon">
@@ -189,7 +189,7 @@
             <div class="action-header" @click="toggleEvent(event.tool_call_id)">
               <div class="action-title">
                 <img class="action-title-icon" :src="thinkingIcon" alt="" />
-                <span class="action-name">深度思考</span>
+                <span class="action-name">{{ $t('agent.think') }}</span>
                 <span v-if="event.tool_data?.thought_number" class="action-badge">{{ event.tool_data.thought_number }}/{{ event.tool_data.total_thoughts }}</span>
                 <span v-if="getThinkingSummary(event) && !isEventExpanded(event.tool_call_id)" class="action-summary">{{ getThinkingSummary(event) }}</span>
               </div>

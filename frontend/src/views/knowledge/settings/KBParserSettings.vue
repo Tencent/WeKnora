@@ -51,7 +51,7 @@
               >
                 <div class="engine-option">
                   <div class="engine-option-top">
-                    <span class="engine-option-name">{{ opt.value }}</span>
+                    <span class="engine-option-name">{{ getEngineDisplayName(opt.value) }}</span>
                     <t-tag
                       v-if="opt.isDefault"
                       theme="primary"
@@ -65,7 +65,7 @@
                       size="small"
                     >{{ $t('kbSettings.parser.unavailable') }}</t-tag>
                   </div>
-                  <div class="engine-option-desc">{{ opt.desc }}</div>
+                  <div class="engine-option-desc">{{ getEngineDisplayDesc(opt.value, opt.desc) }}</div>
                   <div v-if="opt.disabled && opt.reason" class="engine-option-reason">
                     {{ opt.reason }}
                     <a class="go-settings" @click.stop.prevent="goToParserSettings">{{ $t('kbSettings.parser.goSettings') }}</a>
@@ -91,6 +91,18 @@ import { useUIStore } from '@/stores/ui'
 import { storeToRefs } from 'pinia'
 
 const { t } = useI18n()
+
+function getEngineDisplayName(engineName: string): string {
+  const key = `kbSettings.parser.engines.${engineName}.name`
+  const translated = t(key)
+  return translated !== key ? translated : engineName
+}
+
+function getEngineDisplayDesc(engineName: string, fallback: string): string {
+  const key = `kbSettings.parser.engines.${engineName}.desc`
+  const translated = t(key)
+  return translated !== key ? translated : fallback
+}
 
 export interface ParserEngineRule {
   file_types: string[]
@@ -176,7 +188,7 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
   const defaultName = raw.find(e => e.available)?.name ?? ''
   return raw.map(e => ({
     value: e.name,
-    selectLabel: `${e.name}  —  ${e.desc}`,
+    selectLabel: `${getEngineDisplayName(e.name)}  —  ${getEngineDisplayDesc(e.name, e.desc)}`,
     desc: e.desc,
     fileTypes: e.fileTypes,
     disabled: !e.available,
