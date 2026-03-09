@@ -901,10 +901,11 @@ func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding
 		dimensions := int64(len(embedding.Embedding))
 		vectorSizeBytes = dimensions * 4
 
-		// IVF_FLAT index: dimensions × (nlist × 4 + 4) bytes
-		// Default nlist=16384, so: dimensions × (65536 + 4) ≈ dimensions × 65540
-		const nlist = 16384
-		indexBytes = dimensions * (nlist*4 + 4)
+		// IVF_FLAT index: vectors are duplicated in inverted lists (grouped by cluster),
+		// plus a small per-vector overhead for cluster assignment and list management.
+		// The centroid table (nlist × dim × 4) is a shared structure and should NOT
+		// be counted per-vector.
+		indexBytes = vectorSizeBytes + 16
 	}
 
 	// ID tracker and metadata: ~32 bytes per vector

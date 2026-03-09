@@ -971,10 +971,11 @@ func (w *weaviateRepository) calculateStorageSize(embedding *WeaviateVectorEmbed
 		dimensions := int64(len(embedding.Embedding))
 		vectorSizeBytes = dimensions * 4
 
-		// HNSW index: dimensions × (M × 2) × 4 bytes
-		// Default M=32, so: dimensions × 64 × 4 = dimensions × 256
+		// HNSW graph links per vector: M×2 neighbors in layer 0, ~8 bytes per link
+		// (4 bytes for neighbor ID + multi-layer amortization).
+		// Graph link count depends on M, NOT on vector dimensions.
 		const hnswM = 32
-		hnswIndexBytes = dimensions * (hnswM * 2) * 4
+		hnswIndexBytes = hnswM * 2 * 8
 	}
 
 	// ID tracker metadata: 24 bytes per vector
