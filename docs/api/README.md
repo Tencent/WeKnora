@@ -59,6 +59,7 @@ WeKnora API 按功能分为以下几类：
 
 | 分类 | 描述 | 文档链接 |
 |------|------|----------|
+| 认证管理 | 用户注册、登录、令牌管理 | [auth.md](./auth.md) |
 | 租户管理 | 创建和管理租户账户 | [tenant.md](./tenant.md) |
 | 知识库管理 | 创建、查询和管理知识库 | [knowledge-base.md](./knowledge-base.md) |
 | 知识管理 | 上传、检索和管理知识内容 | [knowledge.md](./knowledge.md) |
@@ -72,3 +73,9 @@ WeKnora API 按功能分为以下几类：
 | 聊天功能 | 基于知识库和 Agent 进行问答 | [chat.md](./chat.md) |
 | 消息管理 | 获取和管理对话消息 | [message.md](./message.md) |
 | 评估功能 | 评估模型性能 | [evaluation.md](./evaluation.md) |
+| 初始化管理 | 知识库模型配置与 Ollama 管理 | [initialization.md](./initialization.md) |
+| 系统管理 | 系统信息、解析引擎、存储引擎 | [system.md](./system.md) |
+| MCP 服务 | MCP 工具服务管理 | [mcp-service.md](./mcp-service.md) |
+| 组织管理 | 组织、成员、知识库/智能体共享 | [organization.md](./organization.md) |
+| Skills | 预装智能体技能 | [skill.md](./skill.md) |
+| 网络搜索 | 网络搜索服务商 | [web-search.md](./web-search.md) |

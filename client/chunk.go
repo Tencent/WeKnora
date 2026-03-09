@@ -154,6 +154,39 @@ func (c *Client) DeleteChunk(ctx context.Context, knowledgeID string, chunkID st
 	return parseResponse(resp, &response)
 }
 
+// GetChunkByIDOnly retrieves a chunk by its ID without requiring knowledge ID
+func (c *Client) GetChunkByIDOnly(ctx context.Context, chunkID string) (*Chunk, error) {
+	path := fmt.Sprintf("/api/v1/chunks/get-by-id/%s", chunkID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response ChunkResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// DeleteGeneratedQuestion deletes a generated question from a chunk
+func (c *Client) DeleteGeneratedQuestion(ctx context.Context, chunkID string, questionID string) error {
+	path := fmt.Sprintf("/api/v1/chunks/%s/delete-question", chunkID)
+	req := map[string]string{"question_id": questionID}
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, req, nil)
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message,omitempty"`
+	}
+
+	return parseResponse(resp, &response)
+}
+
 // DeleteChunksByKnowledgeID deletes all chunks under a knowledge document
 // Batch deletes all chunks under the specified knowledge document
 // Parameters:

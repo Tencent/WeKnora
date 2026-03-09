@@ -147,6 +147,25 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	return parseResponse(resp, &response)
 }
 
+// BatchDeleteSessions deletes multiple sessions by their IDs.
+func (c *Client) BatchDeleteSessions(ctx context.Context, sessionIDs []string) error {
+	request := struct {
+		IDs []string `json:"ids"`
+	}{IDs: sessionIDs}
+
+	resp, err := c.doRequest(ctx, http.MethodDelete, "/api/v1/sessions/batch", request, nil)
+	if err != nil {
+		return err
+	}
+
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message,omitempty"`
+	}
+
+	return parseResponse(resp, &response)
+}
+
 // GenerateTitleRequest title generation request
 type GenerateTitleRequest struct {
 	Messages []Message `json:"messages"`

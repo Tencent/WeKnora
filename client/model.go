@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 )
 
 // ModelType model type
@@ -152,4 +153,41 @@ func (c *Client) DeleteModel(ctx context.Context, modelID string) error {
 	}
 
 	return parseResponse(resp, &response)
+}
+
+// ModelProvider represents a model provider with its supported types and default URLs
+type ModelProvider struct {
+	Value       string            `json:"value"`
+	Label       string            `json:"label"`
+	Description string            `json:"description"`
+	DefaultURLs map[string]string `json:"defaultUrls"`
+	ModelTypes  []string          `json:"modelTypes"`
+}
+
+// ModelProviderListResponse represents the API response for listing model providers
+type ModelProviderListResponse struct {
+	Success bool            `json:"success"`
+	Data    []ModelProvider `json:"data"`
+}
+
+// ListModelProviders retrieves the list of supported model providers.
+// modelType is optional and can be used to filter by type: "chat", "embedding", "rerank", "vllm".
+func (c *Client) ListModelProviders(ctx context.Context, modelType string) ([]ModelProvider, error) {
+	var queryParams url.Values
+	if modelType != "" {
+		queryParams = url.Values{}
+		queryParams.Add("model_type", modelType)
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/models/providers", nil, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	var response ModelProviderListResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return response.Data, nil
 }
