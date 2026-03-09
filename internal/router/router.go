@@ -199,6 +199,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/tags", handler.UpdateKnowledgeTagBatch)
 		// 搜索知识
 		k.GET("/search", handler.SearchKnowledge)
+		// 移动知识到其他知识库
+		k.POST("/move", handler.MoveKnowledge)
+		// 获取知识移动进度
+		k.GET("/move/progress/:task_id", handler.GetKnowledgeMoveProgress)
 	}
 }
 
@@ -254,6 +258,8 @@ func RegisterKnowledgeBaseRoutes(r *gin.RouterGroup, handler *handler.KnowledgeB
 		kb.POST("/copy", handler.CopyKnowledgeBase)
 		// 获取知识库复制进度
 		kb.GET("/copy/progress/:task_id", handler.GetKBCloneProgress)
+		// 获取可移动目标知识库列表
+		kb.GET("/:id/move-targets", handler.ListMoveTargets)
 	}
 }
 
