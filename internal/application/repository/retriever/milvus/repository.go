@@ -901,10 +901,10 @@ func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding
 		dimensions := int64(len(embedding.Embedding))
 		vectorSizeBytes = dimensions * 4
 
-		// IVF_FLAT index: dimensions × (nlist × 4 + 4) bytes
-		// Default nlist=16384, so: dimensions × (65536 + 4) ≈ dimensions × 65540
-		const nlist = 16384
-		indexBytes = dimensions * (nlist*4 + 4)
+		// HNSW index: dimensions × (M × 2) × 4 bytes
+		// Default M=32, so: dimensions × 64 × 4 = dimensions × 256
+		const hnswM = 32
+		indexBytes = dimensions * (hnswM * 2) * 4
 	}
 
 	// ID tracker and metadata: ~32 bytes per vector
