@@ -902,8 +902,8 @@ func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding
 		vectorSizeBytes = dimensions * 4
 
 		// HNSW index: dimensions × (M × 2) × 4 bytes
-		// Default M=32, so: dimensions × 64 × 4 = dimensions × 256
-		const hnswM = 32
+		// M=16, so: dimensions × 32 × 4 = dimensions × 128
+		const hnswM = 16
 		indexBytes = dimensions * (hnswM * 2) * 4
 	}
 
