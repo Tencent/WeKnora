@@ -101,6 +101,8 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 		return NewZhipuReranker(config)
 	case provider.ProviderJina:
 		return NewJinaReranker(config)
+	case provider.ProviderNvidia:
+		return NewNvidiaReranker(config)
 	default:
 		return NewOpenAIReranker(config)
 	}

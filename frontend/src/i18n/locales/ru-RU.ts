@@ -1395,7 +1395,11 @@ export default {
         lkeap: {
           label: 'Tencent Cloud LKEAP',
           description: 'DeepSeek-R1, DeepSeek-V3 с поддержкой цепочки рассуждений'
-        }
+        },
+        nvidia: {
+          label: "NVIDIA",
+          description: "deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.",
+        },
       }
     },
     builtinTag: 'Built-in'

@@ -53,6 +53,8 @@ const (
 	ProviderLongCat ProviderName = "longcat"
 	// 腾讯云 LKEAP (知识引擎原子能力)
 	ProviderLKEAP ProviderName = "lkeap"
+	// NVIDIA
+	ProviderNvidia ProviderName = "nvidia"
 )
 
 // AllProviders 返回所有注册的提供者名称
@@ -78,6 +80,7 @@ func AllProviders() []ProviderName {
 		ProviderLongCat,
 		ProviderLKEAP,
 		ProviderGPUStack,
+		ProviderNvidia,
 	}
 }
 
@@ -243,6 +246,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderLongCat
 	case containsAny(baseURL, "lkeap.cloud.tencent.com", "api.lkeap"):
 		return ProviderLKEAP
+	case containsAny(baseURL, "nvidia.com"):
+		return ProviderNvidia
 	default:
 		return ProviderGeneric
 	}

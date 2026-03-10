@@ -1526,6 +1526,10 @@ export default {
           label: "腾讯云 LKEAP",
           description: "DeepSeek-R1, DeepSeek-V3 系列模型，支持思维链",
         },
+        nvidia: {
+            label: "NVIDIA",
+            description: "deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.",
+        },
       },
     },
     builtinTag: "内置",

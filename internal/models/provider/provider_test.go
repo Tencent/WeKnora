@@ -48,6 +48,8 @@ func TestDetectProvider(t *testing.T) {
 		{"https://api.xiaomimimo.com/v1", ProviderMimo},
 		{"https://custom-endpoint.example.com/v1", ProviderGeneric},
 		{"http://localhost:11434/v1", ProviderGeneric},
+		{"https://integrate.api.nvidia.com/v1", ProviderNvidia},
+		{"https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking", ProviderNvidia},
 	}
 
 	for _, tt := range tests {

@@ -356,6 +356,18 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.jina.description'),
     modelTypes: ['embedding', 'rerank']
   },
+  {
+    value: 'nvidia',
+    label: t('model.editor.providers.nvidia.label'),
+    defaultUrls: {
+      chat: 'https://integrate.api.nvidia.com/v1',
+      embedding: 'https://integrate.api.nvidia.com/v1',
+      rerank: 'https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking',
+      vllm: 'https://integrate.api.nvidia.com/v1',
+    },
+    description: t('model.editor.providers.nvidia.description'),
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
+  },
   { 
     value: 'generic', 
     label: t('model.editor.providers.generic.label'), 

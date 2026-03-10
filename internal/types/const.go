@@ -19,6 +19,8 @@ const (
 	// SessionTenantIDContextKey is the context key for session owner's tenant ID.
 	// When set (e.g. in pipeline with shared agent), session/message lookups use this instead of TenantIDContextKey.
 	SessionTenantIDContextKey ContextKey = "SessionTenantID"
+	// EmbedQueryContextKey is the context key for embedding query text
+	EmbedQueryContextKey ContextKey = "EmbedQuery"
 )
 
 // String returns the string representation of the context key

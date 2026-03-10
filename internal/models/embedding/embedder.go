@@ -126,6 +126,14 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 				config.ModelID,
 				pooler)
 			return embedder, err
+		case provider.ProviderNvidia:
+			embedder, err = NewNvidiaEmbedder(config.APIKey,
+				config.BaseURL,
+				config.ModelName,
+				config.Dimensions,
+				config.ModelID,
+				pooler)
+			return embedder, err
 		default:
 			// Use OpenAI-compatible embedder for other providers
 			embedder, err = NewOpenAIEmbedder(config.APIKey,

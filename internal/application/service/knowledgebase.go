@@ -660,7 +660,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 
 		// Generate embedding vector for the query text
 		logger.Info(ctx, "Starting to generate query embedding")
-		queryEmbedding, err := embeddingModel.Embed(ctx, params.QueryText)
+		queryEmbedding, err := embeddingModel.Embed(context.WithValue(ctx, types.EmbedQueryContextKey, true), params.QueryText)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to embed query text, query text: %s, error: %v", params.QueryText, err)
 			return nil, err
