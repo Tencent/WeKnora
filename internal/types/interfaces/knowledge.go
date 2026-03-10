@@ -139,12 +139,18 @@ type KnowledgeService interface {
 	ProcessSummaryGeneration(ctx context.Context, t *asynq.Task) error
 	// ProcessKBClone handles Asynq knowledge base clone tasks
 	ProcessKBClone(ctx context.Context, t *asynq.Task) error
+	// ProcessKnowledgeMove handles Asynq knowledge move tasks
+	ProcessKnowledgeMove(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeListDelete handles Asynq knowledge list delete tasks
 	ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error
 	// GetKBCloneProgress retrieves the progress of a knowledge base clone task
 	GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error)
 	// SaveKBCloneProgress saves the progress of a knowledge base clone task
 	SaveKBCloneProgress(ctx context.Context, progress *types.KBCloneProgress) error
+	// GetKnowledgeMoveProgress retrieves the progress of a knowledge move task
+	GetKnowledgeMoveProgress(ctx context.Context, taskID string) (*types.KnowledgeMoveProgress, error)
+	// SaveKnowledgeMoveProgress saves the progress of a knowledge move task
+	SaveKnowledgeMoveProgress(ctx context.Context, progress *types.KnowledgeMoveProgress) error
 	// GetFAQImportProgress retrieves the progress of an FAQ import task
 	GetFAQImportProgress(ctx context.Context, taskID string) (*types.FAQImportProgress, error)
 	// UpdateLastFAQImportResultDisplayStatus updates the display status of FAQ import result

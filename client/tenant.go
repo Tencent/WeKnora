@@ -6,8 +6,11 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -137,4 +140,91 @@ func (c *Client) ListTenants(ctx context.Context) ([]Tenant, error) {
 	}
 
 	return response.Data.Items, nil
+}
+
+// ListAllTenants retrieves all tenants in the system (requires cross-tenant access)
+func (c *Client) ListAllTenants(ctx context.Context) ([]Tenant, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/tenants/all", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response TenantListResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return response.Data.Items, nil
+}
+
+// TenantSearchResponse represents the API response for searching tenants
+type TenantSearchResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Items    []Tenant `json:"items"`
+		Total    int64    `json:"total"`
+		Page     int      `json:"page"`
+		PageSize int      `json:"page_size"`
+	} `json:"data"`
+}
+
+// SearchTenants searches tenants with pagination (requires cross-tenant access)
+func (c *Client) SearchTenants(ctx context.Context, keyword string, tenantID uint64, page, pageSize int) ([]Tenant, int64, error) {
+	queryParams := url.Values{}
+	if keyword != "" {
+		queryParams.Set("keyword", keyword)
+	}
+	if tenantID > 0 {
+		queryParams.Set("tenant_id", strconv.FormatUint(tenantID, 10))
+	}
+	queryParams.Set("page", strconv.Itoa(page))
+	queryParams.Set("page_size", strconv.Itoa(pageSize))
+
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/tenants/search", nil, queryParams)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var response TenantSearchResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, 0, err
+	}
+
+	return response.Data.Items, response.Data.Total, nil
+}
+
+// GetTenantKV retrieves a tenant KV configuration by key
+func (c *Client) GetTenantKV(ctx context.Context, key string) (json.RawMessage, error) {
+	path := fmt.Sprintf("/api/v1/tenants/kv/%s", key)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// UpdateTenantKV updates a tenant KV configuration by key
+func (c *Client) UpdateTenantKV(ctx context.Context, key string, value any) (json.RawMessage, error) {
+	path := fmt.Sprintf("/api/v1/tenants/kv/%s", key)
+	resp, err := c.doRequest(ctx, http.MethodPut, path, value, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
 }

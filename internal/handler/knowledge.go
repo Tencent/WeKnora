@@ -8,16 +8,20 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	goerrors "errors"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 )
 
 // KnowledgeHandler processes HTTP requests related to knowledge resources
@@ -26,6 +30,7 @@ type KnowledgeHandler struct {
 	kbService         interfaces.KnowledgeBaseService
 	kbShareService    interfaces.KBShareService
 	agentShareService interfaces.AgentShareService
+	asynqClient       interfaces.TaskEnqueuer
 }
 
 // NewKnowledgeHandler creates a new knowledge handler instance
@@ -34,12 +39,14 @@ func NewKnowledgeHandler(
 	kbService interfaces.KnowledgeBaseService,
 	kbShareService interfaces.KBShareService,
 	agentShareService interfaces.AgentShareService,
+	asynqClient interfaces.TaskEnqueuer,
 ) *KnowledgeHandler {
 	return &KnowledgeHandler{
 		kgService:         kgService,
 		kbService:         kbService,
 		kbShareService:    kbShareService,
 		agentShareService: agentShareService,
+		asynqClient:       asynqClient,
 	}
 }
 
@@ -1282,5 +1289,188 @@ func (h *KnowledgeHandler) SearchKnowledge(c *gin.Context) {
 		"success":  true,
 		"data":     knowledges,
 		"has_more": hasMore,
+	})
+}
+
+// MoveKnowledgeRequest defines the request for moving knowledge items
+type MoveKnowledgeRequest struct {
+	KnowledgeIDs []string `json:"knowledge_ids" binding:"required,min=1"`
+	SourceKBID   string   `json:"source_kb_id"  binding:"required"`
+	TargetKBID   string   `json:"target_kb_id"  binding:"required"`
+	Mode         string   `json:"mode"          binding:"required,oneof=reuse_vectors reparse"`
+}
+
+// MoveKnowledgeResponse defines the response for move knowledge
+type MoveKnowledgeResponse struct {
+	TaskID         string `json:"task_id"`
+	SourceKBID     string `json:"source_kb_id"`
+	TargetKBID     string `json:"target_kb_id"`
+	KnowledgeCount int    `json:"knowledge_count"`
+	Message        string `json:"message"`
+}
+
+// MoveKnowledge moves knowledge items from one knowledge base to another (async task).
+func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req MoveKnowledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "MoveKnowledge: failed to parse request", err)
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	// Validate source != target
+	if req.SourceKBID == req.TargetKBID {
+		c.Error(errors.NewBadRequestError("Source and target knowledge base cannot be the same"))
+		return
+	}
+
+	tenantID, exists := c.Get(types.TenantIDContextKey.String())
+	if !exists {
+		c.Error(errors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	// Validate source KB
+	sourceKB, err := h.kbService.GetKnowledgeBaseByID(ctx, req.SourceKBID)
+	if err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != tenantID.(uint64) {
+		c.Error(errors.NewForbiddenError("No permission to access source knowledge base"))
+		return
+	}
+
+	// Validate target KB
+	targetKB, err := h.kbService.GetKnowledgeBaseByID(ctx, req.TargetKBID)
+	if err != nil {
+		if goerrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Target knowledge base not found"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if targetKB.TenantID != tenantID.(uint64) {
+		c.Error(errors.NewForbiddenError("No permission to access target knowledge base"))
+		return
+	}
+
+	// Validate type match
+	if sourceKB.Type != targetKB.Type {
+		c.Error(errors.NewBadRequestError("Source and target knowledge bases must be the same type"))
+		return
+	}
+
+	// Validate embedding model match
+	if sourceKB.EmbeddingModelID != targetKB.EmbeddingModelID {
+		c.Error(errors.NewBadRequestError("Source and target must use the same embedding model"))
+		return
+	}
+
+	// Validate all knowledge IDs belong to source KB and are in completed status
+	for _, kID := range req.KnowledgeIDs {
+		knowledge, err := h.kgService.GetKnowledgeByID(ctx, kID)
+		if err != nil {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Knowledge item %s not found", kID)))
+			return
+		}
+		if knowledge.KnowledgeBaseID != req.SourceKBID {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Knowledge item %s does not belong to the source knowledge base", kID)))
+			return
+		}
+		if knowledge.ParseStatus != types.ParseStatusCompleted {
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Knowledge item %s is not in completed status (current: %s)", kID, knowledge.ParseStatus)))
+			return
+		}
+	}
+
+	// Generate task ID
+	taskID := utils.GenerateTaskID("kg_move", tenantID.(uint64), req.SourceKBID)
+
+	// Create move payload
+	payload := types.KnowledgeMovePayload{
+		TenantID:     tenantID.(uint64),
+		TaskID:       taskID,
+		KnowledgeIDs: req.KnowledgeIDs,
+		SourceKBID:   req.SourceKBID,
+		TargetKBID:   req.TargetKBID,
+		Mode:         req.Mode,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Errorf(ctx, "MoveKnowledge: failed to marshal payload: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to create task"))
+		return
+	}
+
+	// Enqueue move task
+	task := asynq.NewTask(types.TypeKnowledgeMove, payloadBytes,
+		asynq.TaskID(taskID), asynq.Queue("default"), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		logger.Errorf(ctx, "MoveKnowledge: failed to enqueue task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue task"))
+		return
+	}
+
+	logger.Infof(ctx, "MoveKnowledge: task enqueued: %s, asynq_id: %s, source: %s, target: %s, count: %d",
+		taskID, info.ID, secutils.SanitizeForLog(req.SourceKBID), secutils.SanitizeForLog(req.TargetKBID), len(req.KnowledgeIDs))
+
+	// Save initial progress
+	initialProgress := &types.KnowledgeMoveProgress{
+		TaskID:     taskID,
+		SourceKBID: req.SourceKBID,
+		TargetKBID: req.TargetKBID,
+		Status:     types.KBCloneStatusPending,
+		Total:      len(req.KnowledgeIDs),
+		Progress:   0,
+		Message:    "Task queued, waiting to start...",
+		CreatedAt:  time.Now().Unix(),
+		UpdatedAt:  time.Now().Unix(),
+	}
+	if err := h.kgService.SaveKnowledgeMoveProgress(ctx, initialProgress); err != nil {
+		logger.Warnf(ctx, "MoveKnowledge: failed to save initial progress: %v", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": MoveKnowledgeResponse{
+			TaskID:         taskID,
+			SourceKBID:     req.SourceKBID,
+			TargetKBID:     req.TargetKBID,
+			KnowledgeCount: len(req.KnowledgeIDs),
+			Message:        "Knowledge move task started",
+		},
+	})
+}
+
+// GetKnowledgeMoveProgress retrieves the progress of a knowledge move task.
+func (h *KnowledgeHandler) GetKnowledgeMoveProgress(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	taskID := c.Param("task_id")
+	if taskID == "" {
+		c.Error(errors.NewBadRequestError("Task ID cannot be empty"))
+		return
+	}
+
+	progress, err := h.kgService.GetKnowledgeMoveProgress(ctx, taskID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    progress,
 	})
 }

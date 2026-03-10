@@ -151,3 +151,96 @@ func (r *messageRepository) GetMessageByRequestID(
 
 	return &message, nil
 }
+
+// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
+func (r *messageRepository) SearchMessagesByKeyword(
+	ctx context.Context, tenantID uint64, keyword string, sessionIDs []string, limit int,
+) ([]*types.MessageWithSession, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	var results []*types.MessageWithSession
+
+	query := r.db.WithContext(ctx).
+		Table("messages").
+		Select("messages.*, sessions.title as session_title").
+		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
+		Where("sessions.tenant_id = ?", tenantID).
+		Where("messages.deleted_at IS NULL").
+		Where("messages.content ILIKE ?", "%"+keyword+"%")
+
+	if len(sessionIDs) > 0 {
+		query = query.Where("messages.session_id IN ?", sessionIDs)
+	}
+
+	if err := query.Order("messages.created_at DESC").Limit(limit).Find(&results).Error; err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
+func (r *messageRepository) GetMessagesByKnowledgeIDs(
+	ctx context.Context, knowledgeIDs []string,
+) ([]*types.MessageWithSession, error) {
+	if len(knowledgeIDs) == 0 {
+		return nil, nil
+	}
+	var results []*types.MessageWithSession
+	if err := r.db.WithContext(ctx).
+		Table("messages").
+		Select("messages.*, sessions.title as session_title").
+		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
+		Where("messages.deleted_at IS NULL").
+		Where("messages.knowledge_id IN ?", knowledgeIDs).
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// GetMessagesByRequestIDs retrieves messages by their request IDs (used to fetch Q&A pair partners)
+func (r *messageRepository) GetMessagesByRequestIDs(
+	ctx context.Context, requestIDs []string,
+) ([]*types.MessageWithSession, error) {
+	if len(requestIDs) == 0 {
+		return nil, nil
+	}
+	var results []*types.MessageWithSession
+	if err := r.db.WithContext(ctx).
+		Table("messages").
+		Select("messages.*, sessions.title as session_title").
+		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
+		Where("messages.deleted_at IS NULL").
+		Where("messages.request_id IN ?", requestIDs).
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
+// GetKnowledgeIDsBySessionID retrieves all knowledge IDs for messages in a session
+func (r *messageRepository) GetKnowledgeIDsBySessionID(
+	ctx context.Context, sessionID string,
+) ([]string, error) {
+	var knowledgeIDs []string
+	if err := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("session_id = ? AND knowledge_id != '' AND knowledge_id IS NOT NULL AND deleted_at IS NULL", sessionID).
+		Pluck("knowledge_id", &knowledgeIDs).Error; err != nil {
+		return nil, err
+	}
+	return knowledgeIDs, nil
+}
+
+// UpdateMessageKnowledgeID updates the knowledge_id field for a message
+func (r *messageRepository) UpdateMessageKnowledgeID(
+	ctx context.Context, messageID string, knowledgeID string,
+) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("id = ?", messageID).
+		Update("knowledge_id", knowledgeID).Error
+}

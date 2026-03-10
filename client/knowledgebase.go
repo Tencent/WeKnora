@@ -311,6 +311,46 @@ func (c *Client) HybridSearch(ctx context.Context, knowledgeBaseID string, param
 	return response.Data, nil
 }
 
+// TogglePinKnowledgeBase toggles the pin status of a knowledge base
+func (c *Client) TogglePinKnowledgeBase(ctx context.Context, knowledgeBaseID string) (*KnowledgeBase, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/pin", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodPost, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeBaseResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
+// MoveTarget represents a knowledge base that can receive moved knowledge
+type MoveTarget struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+// ListMoveTargets lists knowledge bases eligible as move targets for the given source KB
+func (c *Client) ListMoveTargets(ctx context.Context, knowledgeBaseID string) ([]KnowledgeBase, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/move-targets", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response KnowledgeBaseListResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return response.Data, nil
+}
+
 // CopyKnowledgeBase copies a knowledge base asynchronously and returns task info
 func (c *Client) CopyKnowledgeBase(ctx context.Context, request *CopyKnowledgeBaseRequest) (*CopyKnowledgeBaseResponse, error) {
 	path := "/api/v1/knowledge-bases/copy"

@@ -10,6 +10,7 @@ const (
 	TypeIndexDelete         = "index:delete"          // 索引删除任务
 	TypeKBDelete            = "kb:delete"             // 知识库删除任务
 	TypeKnowledgeListDelete = "knowledge:list_delete" // 批量删除知识任务
+	TypeKnowledgeMove       = "knowledge:move"        // 知识移动任务
 	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
 	TypeImageMultimodal     = "image:multimodal"      // 图片多模态处理任务（OCR + VLM Caption）
 )
@@ -96,6 +97,32 @@ type KBDeletePayload struct {
 type KnowledgeListDeletePayload struct {
 	TenantID     uint64   `json:"tenant_id"`
 	KnowledgeIDs []string `json:"knowledge_ids"`
+}
+
+// KnowledgeMovePayload represents the knowledge move task payload
+type KnowledgeMovePayload struct {
+	TenantID     uint64   `json:"tenant_id"`
+	TaskID       string   `json:"task_id"`
+	KnowledgeIDs []string `json:"knowledge_ids"`
+	SourceKBID   string   `json:"source_kb_id"`
+	TargetKBID   string   `json:"target_kb_id"`
+	Mode         string   `json:"mode"` // "reuse_vectors" or "reparse"
+}
+
+// KnowledgeMoveProgress represents the progress of a knowledge move task
+type KnowledgeMoveProgress struct {
+	TaskID     string            `json:"task_id"`
+	SourceKBID string            `json:"source_kb_id"`
+	TargetKBID string            `json:"target_kb_id"`
+	Status     KBCloneTaskStatus `json:"status"`
+	Progress   int               `json:"progress"`  // 0-100
+	Total      int               `json:"total"`      // 总知识数
+	Processed  int               `json:"processed"`  // 已处理数
+	Failed     int               `json:"failed"`     // 失败数
+	Message    string            `json:"message"`    // 状态消息
+	Error      string            `json:"error"`      // 错误信息
+	CreatedAt  int64             `json:"created_at"` // 任务创建时间
+	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.

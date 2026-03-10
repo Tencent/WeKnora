@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
-	"github.com/Tencent/WeKnora/internal/agent/tools"
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -26,7 +26,7 @@ func generateEventID(suffix string) string {
 // AgentEngine is the core engine for running ReAct agents
 type AgentEngine struct {
 	config               *types.AgentConfig
-	toolRegistry         *tools.ToolRegistry
+	toolRegistry         *agenttools.ToolRegistry
 	chatModel            chat.Chat
 	eventBus             *event.EventBus
 	knowledgeBasesInfo   []*KnowledgeBaseInfo      // Detailed knowledge base information for prompt
@@ -50,7 +50,7 @@ func listToolNames(ts []chat.Tool) []string {
 func NewAgentEngine(
 	config *types.AgentConfig,
 	chatModel chat.Chat,
-	toolRegistry *tools.ToolRegistry,
+	toolRegistry *agenttools.ToolRegistry,
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
 	selectedDocs []*SelectedDocumentInfo,
@@ -78,7 +78,7 @@ func NewAgentEngine(
 func NewAgentEngineWithSkills(
 	config *types.AgentConfig,
 	chatModel chat.Chat,
-	toolRegistry *tools.ToolRegistry,
+	toolRegistry *agenttools.ToolRegistry,
 	eventBus *event.EventBus,
 	knowledgeBasesInfo []*KnowledgeBaseInfo,
 	selectedDocs []*SelectedDocumentInfo,
@@ -237,7 +237,27 @@ func (e *AgentEngine) executeLoop(
 		})
 
 		// 1. Think: Call LLM with function calling and stream thinking through EventBus
-		logger.Infof(ctx, "[Agent][Round-%d] Calling LLM with %d tools available...", state.CurrentRound+1, len(tools))
+		logger.Infof(ctx, "[Agent][Round-%d] Calling LLM with %d messages, %d tools", state.CurrentRound+1, len(messages), len(tools))
+		for i, msg := range messages {
+			contentPreview := msg.Content
+			if len(contentPreview) > 200 {
+				contentPreview = contentPreview[:200] + "..."
+			}
+			if msg.Role == "tool" {
+				logger.Infof(ctx, "[Agent][Round-%d] messages[%d]: role=tool, name=%s, tool_call_id=%s, content_len=%d",
+					state.CurrentRound+1, i, msg.Name, msg.ToolCallID, len(msg.Content))
+			} else if len(msg.ToolCalls) > 0 {
+				tcNames := make([]string, len(msg.ToolCalls))
+				for j, tc := range msg.ToolCalls {
+					tcNames[j] = tc.Function.Name
+				}
+				logger.Infof(ctx, "[Agent][Round-%d] messages[%d]: role=%s, content_len=%d, tool_calls=%v",
+					state.CurrentRound+1, i, msg.Role, len(msg.Content), tcNames)
+			} else {
+				logger.Infof(ctx, "[Agent][Round-%d] messages[%d]: role=%s, content_len=%d, content=%s",
+					state.CurrentRound+1, i, msg.Role, len(msg.Content), contentPreview)
+			}
+		}
 		common.PipelineInfo(ctx, "Agent", "think_start", map[string]interface{}{
 			"iteration": state.CurrentRound,
 			"round":     state.CurrentRound + 1,
@@ -260,17 +280,15 @@ func (e *AgentEngine) executeLoop(
 			"content_len":   len(response.Content),
 		})
 
-		// Debug: log finish reason and tool call count from LLM
-		logger.Infof(ctx, "[Agent][Round-%d] LLM response received: finish_reason=%s, tool_calls=%d, content_length=%d",
-			state.CurrentRound+1, response.FinishReason, len(response.ToolCalls), len(response.Content))
-		logger.Debugf(
-			ctx,
-			"[Agent] LLM response finish=%s, toolCalls=%d",
-			response.FinishReason,
-			len(response.ToolCalls),
-		)
+		// Log LLM response summary
+		logger.Infof(ctx, "[Agent][Round-%d] LLM response: finish_reason=%s, content_len=%d, tool_calls=%d",
+			state.CurrentRound+1, response.FinishReason, len(response.Content), len(response.ToolCalls))
 		if response.Content != "" {
-			logger.Debugf(ctx, "[Agent][Round-%d] LLM thought content:\n%s", state.CurrentRound+1, response.Content)
+			logger.Infof(ctx, "[Agent][Round-%d] LLM content:\n%s", state.CurrentRound+1, response.Content)
+		}
+		for i, tc := range response.ToolCalls {
+			logger.Infof(ctx, "[Agent][Round-%d] tool_call[%d]: %s(%s)",
+				state.CurrentRound+1, i, tc.Function.Name, tc.Function.Arguments)
 		}
 
 		// Create agent step
@@ -313,7 +331,53 @@ func (e *AgentEngine) executeLoop(
 			break
 		}
 
-		// 3. Act: Execute tool calls if any
+		// 3. Check for final_answer tool call - if present, agent is done
+		hasFinalAnswer := false
+		if len(response.ToolCalls) > 0 {
+			for _, tc := range response.ToolCalls {
+				if tc.Function.Name == agenttools.ToolFinalAnswer {
+					var faArgs struct {
+						Answer string `json:"answer"`
+					}
+					if err := json.Unmarshal([]byte(tc.Function.Arguments), &faArgs); err != nil {
+						logger.Warnf(ctx, "[Agent][Round-%d] Failed to parse final_answer args: %v", state.CurrentRound+1, err)
+					} else {
+						logger.Infof(ctx, "[Agent][Round-%d] final_answer tool called, answer length: %d",
+							state.CurrentRound+1, len(faArgs.Answer))
+						state.FinalAnswer = faArgs.Answer
+						state.IsComplete = true
+						hasFinalAnswer = true
+
+						// Emit answer done marker (content was already streamed via processToolCallsDelta)
+						e.eventBus.Emit(ctx, event.Event{
+							ID:        generateEventID("answer-done"),
+							Type:      event.EventAgentFinalAnswer,
+							SessionID: sessionID,
+							Data: event.AgentFinalAnswerData{
+								Content: "",
+								Done:    true,
+							},
+						})
+
+						common.PipelineInfo(ctx, "Agent", "final_answer_tool", map[string]interface{}{
+							"iteration":  state.CurrentRound,
+							"round":      state.CurrentRound + 1,
+							"answer_len": len(faArgs.Answer),
+						})
+					}
+					break
+				}
+			}
+		}
+
+		if hasFinalAnswer {
+			state.RoundSteps = append(state.RoundSteps, step)
+			logger.Infof(ctx, "[Agent][Round-%d] Duration: %dms (final_answer tool)",
+				state.CurrentRound+1, time.Since(roundStart).Milliseconds())
+			break
+		}
+
+		// 4. Act: Execute tool calls if any
 		if len(response.ToolCalls) > 0 {
 			logger.Infof(
 				ctx,
@@ -664,7 +728,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 		chunkCount++
 
 		if chunk.Content != "" {
-			fullContent += chunk.Content
+			// Only accumulate LLM's own text output, not content extracted from tool arguments
+			// (e.g. final_answer's answer or thinking tool's thought are streamed separately)
+			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
+			if !isExtracted {
+				fullContent += chunk.Content
+			}
 		}
 
 		// Collect tool calls if present
@@ -754,9 +823,12 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	logger.Debug(context.Background(), "[Agent] streamLLM opts tool_choice=auto temperature=", e.config.Temperature)
 
 	pendingToolCalls := make(map[string]bool)
+	thinkingToolIDs := make(map[string]string) // tool_call_id -> event ID for thinking tool streams
 
 	// Generate a single ID for this entire thinking stream
 	thinkingID := generateEventID("thinking")
+	// Generate a single ID for final_answer streaming (if applicable)
+	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][Thinking][Iteration-%d] ThinkingID: %s", iteration+1, thinkingID)
 
 	fullContent, toolCalls, err := e.streamLLMToEventBus(
@@ -780,6 +852,45 @@ func (e *AgentEngine) streamThinkingToEventBus(
 							Iteration:  iteration,
 						},
 					})
+				}
+			}
+
+			// Handle final_answer tool's streaming answer content
+			if chunk.ResponseType == types.ResponseTypeAnswer {
+				if source, _ := chunk.Data["source"].(string); source == "final_answer_tool" {
+					e.eventBus.Emit(ctx, event.Event{
+						ID:        answerID,
+						Type:      event.EventAgentFinalAnswer,
+						SessionID: sessionID,
+						Data: event.AgentFinalAnswerData{
+							Content: chunk.Content,
+							Done:    false,
+						},
+					})
+					return
+				}
+			}
+
+			// Handle thinking tool's streaming thought content
+			if chunk.ResponseType == types.ResponseTypeThinking && chunk.Data != nil {
+				if source, _ := chunk.Data["source"].(string); source == "thinking_tool" {
+					toolCallID, _ := chunk.Data["tool_call_id"].(string)
+					eventID, exists := thinkingToolIDs[toolCallID]
+					if !exists {
+						eventID = generateEventID("thinking-tool")
+						thinkingToolIDs[toolCallID] = eventID
+					}
+					e.eventBus.Emit(ctx, event.Event{
+						ID:        eventID,
+						Type:      event.EventAgentThought,
+						SessionID: sessionID,
+						Data: event.AgentThoughtData{
+							Content:   chunk.Content,
+							Iteration: iteration,
+							Done:      false,
+						},
+					})
+					return
 				}
 			}
 

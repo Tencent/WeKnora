@@ -45,6 +45,26 @@ export function copyKnowledgeBase(data: { source_id: string; target_id?: string 
   return post(`/api/v1/knowledge-bases/copy`, data);
 }
 
+// 获取可移动目标知识库列表（同类型、同Embedding模型）
+export function listMoveTargets(sourceKbId: string) {
+  return get(`/api/v1/knowledge-bases/${sourceKbId}/move-targets`);
+}
+
+// 移动知识到其他知识库
+export function moveKnowledge(data: {
+  knowledge_ids: string[];
+  source_kb_id: string;
+  target_kb_id: string;
+  mode: 'reuse_vectors' | 'reparse';
+}) {
+  return post('/api/v1/knowledge/move', data);
+}
+
+// 获取知识移动进度
+export function getKnowledgeMoveProgress(taskId: string) {
+  return get(`/api/v1/knowledge/move/progress/${taskId}`);
+}
+
 export function togglePinKnowledgeBase(id: string) {
   return put(`/api/v1/knowledge-bases/${id}/pin`);
 }

@@ -7,7 +7,7 @@
         class="result-row"
       >
         <div class="result-row__index">#{{ index + 1 }}</div>
-        <div class="result-row__title">{{ result.knowledge_title || 'Untitled' }}</div>
+        <div class="result-row__title">{{ result.knowledge_title || $t('knowledge.untitledDocument') }}</div>
       </div>
     </div>
 

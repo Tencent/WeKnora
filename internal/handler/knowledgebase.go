@@ -778,3 +778,66 @@ func validateExtractConfig(config *types.ExtractConfig) error {
 
 	return nil
 }
+
+// ListMoveTargets returns knowledge bases eligible as move targets for the given source KB.
+// Filters: same Type, same EmbeddingModelID, different ID, not temporary.
+func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	sourceKBID := c.Param("id")
+	if sourceKBID == "" {
+		c.Error(apperrors.NewBadRequestError("Knowledge base ID is required"))
+		return
+	}
+
+	tenantID, exists := c.Get(types.TenantIDContextKey.String())
+	if !exists {
+		c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
+		return
+	}
+
+	// Get source knowledge base
+	sourceKB, err := h.service.GetKnowledgeBaseByID(ctx, sourceKBID)
+	if err != nil {
+		if stderrors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			c.Error(errors.NewNotFoundError("Source knowledge base not found"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if sourceKB.TenantID != tenantID.(uint64) {
+		c.Error(errors.NewForbiddenError("No permission to access this knowledge base"))
+		return
+	}
+
+	// Get all knowledge bases
+	allKBs, err := h.service.ListKnowledgeBases(ctx)
+	if err != nil {
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	// Filter eligible targets
+	targets := make([]*types.KnowledgeBase, 0)
+	for _, kb := range allKBs {
+		if kb.ID == sourceKBID {
+			continue
+		}
+		if kb.IsTemporary {
+			continue
+		}
+		if kb.Type != sourceKB.Type {
+			continue
+		}
+		if kb.EmbeddingModelID != sourceKB.EmbeddingModelID {
+			continue
+		}
+		targets = append(targets, kb)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    targets,
+	})
+}

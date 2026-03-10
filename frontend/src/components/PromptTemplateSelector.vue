@@ -25,7 +25,7 @@
               @click="selectTemplate(template)"
             >
               <div class="template-item-header">
-                <span class="template-name">{{ template.name }}</span>
+                <span class="template-name">{{ getTemplateName(template) }}</span>
                 <span v-if="template.has_knowledge_base" class="template-tag kb-tag">
                   <t-icon name="folder" size="12px" />
                   {{ $t('promptTemplate.withKnowledgeBase') }}
@@ -35,7 +35,7 @@
                   {{ $t('promptTemplate.withWebSearch') }}
                 </span>
               </div>
-              <p class="template-desc">{{ template.description }}</p>
+              <p class="template-desc">{{ getTemplateDesc(template) }}</p>
             </div>
           </div>
         </div>
@@ -55,7 +55,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { getPromptTemplates, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   type: 'systemPrompt' | 'contextTemplate' | 'rewriteSystem' | 'rewriteUser' | 'fallback';
@@ -70,6 +73,57 @@ const emit = defineEmits<{
 const popupVisible = ref(false);
 const loading = ref(false);
 const templatesConfig = ref<PromptTemplatesConfig | null>(null);
+
+const templateI18nKeyMap: Record<string, Record<string, string>> = {
+  systemPrompt: {
+    default_kb: 'defaultKB',
+    expert_assistant: 'expert',
+    customer_service: 'customerService',
+    technical_support: 'techSupport',
+    pure_chat: 'pureChat',
+    web_search_assistant: 'webSearch',
+  },
+  contextTemplate: {
+    default_context: 'default',
+    detailed_context: 'detailed',
+    simple_context: 'simple',
+    qa_context: 'qa',
+  },
+  rewriteSystem: {
+    default_rewrite_system: 'default',
+    strict_rewrite_system: 'strict',
+  },
+  rewriteUser: {
+    default_rewrite_user: 'default',
+    detailed_rewrite_user: 'detailed',
+  },
+  fallback: {
+    default_fallback: 'default',
+    polite_fallback: 'polite',
+    brief_fallback: 'brief',
+    model_fallback: 'model',
+  },
+};
+
+function getTemplateName(template: PromptTemplate): string {
+  const key = templateI18nKeyMap[props.type]?.[template.id];
+  if (key) {
+    const i18nKey = `promptTemplate.${props.type}.${key}.name`;
+    const translated = t(i18nKey);
+    if (translated !== i18nKey) return translated;
+  }
+  return template.name;
+}
+
+function getTemplateDesc(template: PromptTemplate): string {
+  const key = templateI18nKeyMap[props.type]?.[template.id];
+  if (key) {
+    const i18nKey = `promptTemplate.${props.type}.${key}.desc`;
+    const translated = t(i18nKey);
+    if (translated !== i18nKey) return translated;
+  }
+  return template.description;
+}
 
 const handleVisibleChange = async (visible: boolean) => {
   popupVisible.value = visible;

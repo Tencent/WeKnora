@@ -102,6 +102,76 @@ func (c *Client) GetMessagesBefore(
 	return c.LoadMessages(ctx, sessionID, limit, &beforeTime)
 }
 
+// SearchMessagesRequest defines the request structure for searching messages
+type SearchMessagesRequest struct {
+	Query      string   `json:"query"`
+	Mode       string   `json:"mode"`
+	Limit      int      `json:"limit"`
+	SessionIDs []string `json:"session_ids,omitempty"`
+}
+
+// MessageSearchGroupItem represents a grouped search result item
+type MessageSearchGroupItem struct {
+	RequestID    string    `json:"request_id"`
+	SessionID    string    `json:"session_id"`
+	SessionTitle string    `json:"session_title"`
+	QueryContent string    `json:"query_content"`
+	AnswerContent string   `json:"answer_content"`
+	Score        float64   `json:"score"`
+	MatchType    string    `json:"match_type"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// MessageSearchResult represents the result of a message search
+type MessageSearchResult struct {
+	Items []*MessageSearchGroupItem `json:"items"`
+	Total int                       `json:"total"`
+}
+
+// ChatHistoryKBStats represents statistics about the chat history knowledge base
+type ChatHistoryKBStats struct {
+	Enabled             bool   `json:"enabled"`
+	EmbeddingModelID    string `json:"embedding_model_id,omitempty"`
+	KnowledgeBaseID     string `json:"knowledge_base_id,omitempty"`
+	KnowledgeBaseName   string `json:"knowledge_base_name,omitempty"`
+	IndexedMessageCount int64  `json:"indexed_message_count"`
+	HasIndexedMessages  bool   `json:"has_indexed_messages"`
+}
+
+// SearchMessages searches chat history messages
+func (c *Client) SearchMessages(ctx context.Context, req *SearchMessagesRequest) (*MessageSearchResult, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/messages/search", req, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool                 `json:"success"`
+		Data    *MessageSearchResult `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
+// GetChatHistoryKBStats gets chat history knowledge base statistics
+func (c *Client) GetChatHistoryKBStats(ctx context.Context) (*ChatHistoryKBStats, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/messages/chat-history-stats", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Success bool                `json:"success"`
+		Data    *ChatHistoryKBStats `json:"data"`
+	}
+	if err := parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	return result.Data, nil
+}
+
 // DeleteMessage deletes a message
 func (c *Client) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
 	path := fmt.Sprintf("/api/v1/messages/%s/%s", sessionID, messageID)

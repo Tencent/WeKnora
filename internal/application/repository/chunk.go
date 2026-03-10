@@ -420,6 +420,13 @@ func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID ui
 	).Delete(&types.Chunk{}).Error
 }
 
+// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
+func (r *chunkRepository) MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error {
+	return r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Update("knowledge_base_id", targetKBID).Error
+}
+
 // DeleteChunksByTagID deletes all chunks with the specified tag ID
 // Returns the IDs of deleted chunks for index cleanup
 func (r *chunkRepository) DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, excludeIDs []string) ([]string, error) {

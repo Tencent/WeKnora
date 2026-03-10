@@ -1,9 +1,10 @@
-# 忽略.env文件和其他包含敏感信息的配置文件
-.env
-.env.lite
-.cursor/
+# 忽略所有隐藏文件和目录
+.*
 # 但不忽略示例文件
 !.env.example
+!.gitignore
+
+# 敏感文件
 *.pem
 *_key
 *_secret
@@ -11,8 +12,6 @@
 *.crt
 
 # IDE和编辑器文件
-.idea/
-.vscode/
 *.swp
 *.swo
 
@@ -39,13 +38,7 @@ data/weknora.db-shm
 
 web/
 
-.venv/
 **/__pycache__
-.python-version
-
-### macOS
-# General
-.DS_Store
 /scripts/scale_dev_jobs.sh
 server
 frontend/.vite

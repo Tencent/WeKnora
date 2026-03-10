@@ -197,6 +197,35 @@ func (c *OllamaChat) ChatStream(
 					ToolCalls:    c.toolCallTo(resp.Message.ToolCalls),
 					Done:         false,
 				}
+
+				// Extract and stream content from special tools (complete, not incremental)
+				for _, tc := range resp.Message.ToolCalls {
+					switch tc.Function.Name {
+					case "final_answer":
+						if answer, ok := tc.Function.Arguments["answer"].(string); ok && answer != "" {
+							streamChan <- types.StreamResponse{
+								ResponseType: types.ResponseTypeAnswer,
+								Content:      answer,
+								Done:         false,
+								Data: map[string]interface{}{
+									"source": "final_answer_tool",
+								},
+							}
+						}
+					case "thinking":
+						if thought, ok := tc.Function.Arguments["thought"].(string); ok && thought != "" {
+							streamChan <- types.StreamResponse{
+								ResponseType: types.ResponseTypeThinking,
+								Content:      thought,
+								Done:         false,
+								Data: map[string]interface{}{
+									"source":       "thinking_tool",
+									"tool_call_id": tooli2s(tc.Function.Index),
+								},
+							}
+						}
+					}
+				}
 			}
 
 			if resp.Done {

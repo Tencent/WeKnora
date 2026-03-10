@@ -6,6 +6,8 @@
 | ------ | ---------------------------- | ------------------------ |
 | GET    | `/messages/:session_id/load` | 获取最近的会话消息列表   |
 | DELETE | `/messages/:session_id/:id`  | 删除消息                 |
+| POST   | `/messages/search`           | 搜索历史对话             |
+| GET    | `/messages/chat-history-stats` | 获取聊天历史知识库统计 |
 
 ## GET `/messages/:session_id/load` - 获取最近的会话消息列表
 
@@ -175,6 +177,81 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/messages/ceb9babb
 ```json
 {
     "message": "Message deleted successfully",
+    "success": true
+}
+```
+
+## POST `/messages/search` - 搜索历史对话
+
+搜索历史对话消息，支持混合搜索、关键词搜索和向量搜索模式。
+
+**请求参数**:
+- `query`: 搜索关键词（必填）
+- `mode`: 搜索模式，可选 `hybrid`、`keyword`、`vector`（可选，默认 `hybrid`）
+- `limit`: 返回结果数量（可选，默认 20）
+- `session_ids`: 限定搜索的会话ID列表（可选）
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/messages/search' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "query": "彗星的结构",
+    "mode": "hybrid",
+    "limit": 20,
+    "session_ids": []
+}'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "items": [
+            {
+                "request_id": "3475c004-0ada-4306-9d30-d7f5efce50d2",
+                "session_id": "ceb9babb-1e30-41d7-817d-fd584954304b",
+                "session_title": "彗星知识问答",
+                "query_content": "彗尾的形状",
+                "answer_content": "彗尾的形状主要取决于...",
+                "score": 0.85,
+                "match_type": "hybrid",
+                "created_at": "2025-08-12T14:30:39.732246+08:00"
+            }
+        ],
+        "total": 1
+    },
+    "success": true
+}
+```
+
+## GET `/messages/chat-history-stats` - 获取聊天历史知识库统计
+
+获取当前租户的聊天历史知识库索引统计信息。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/messages/chat-history-stats' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "enabled": true,
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "knowledge_base_id": "kb-chat-00000001",
+        "knowledge_base_name": "聊天历史知识库",
+        "indexed_message_count": 1024,
+        "has_indexed_messages": true
+    },
     "success": true
 }
 ```

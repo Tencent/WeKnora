@@ -7,11 +7,16 @@
 | GET    | `/knowledge-bases/:id/faq/entries`          | 获取FAQ条目列表          |
 | POST   | `/knowledge-bases/:id/faq/entries`          | 批量导入FAQ条目          |
 | POST   | `/knowledge-bases/:id/faq/entry`            | 创建单个FAQ条目          |
+| GET    | `/knowledge-bases/:id/faq/entries/:entry_id`| 获取单个FAQ条目          |
 | PUT    | `/knowledge-bases/:id/faq/entries/:entry_id`| 更新单个FAQ条目          |
-| PUT    | `/knowledge-bases/:id/faq/entries/status`   | 批量更新FAQ启用状态      |
+| POST   | `/knowledge-bases/:id/faq/entries/:entry_id/similar-questions` | 添加相似问题 |
+| PUT    | `/knowledge-bases/:id/faq/entries/fields`   | 批量更新FAQ字段          |
 | PUT    | `/knowledge-bases/:id/faq/entries/tags`     | 批量更新FAQ标签          |
 | DELETE | `/knowledge-bases/:id/faq/entries`          | 批量删除FAQ条目          |
 | POST   | `/knowledge-bases/:id/faq/search`           | 混合搜索FAQ              |
+| GET    | `/knowledge-bases/:id/faq/entries/export`   | 导出FAQ条目(CSV)         |
+| GET    | `/faq/import/progress/:task_id`             | 获取FAQ导入进度          |
+| PUT    | `/knowledge-bases/:id/faq/import/last-result/display` | 更新导入结果显示状态 |
 
 ## GET `/knowledge-bases/:id/faq/entries` - 获取FAQ条目列表
 
@@ -209,20 +214,109 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 }
 ```
 
-## PUT `/knowledge-bases/:id/faq/entries/status` - 批量更新FAQ启用状态
+## GET `/knowledge-bases/:id/faq/entries/:entry_id` - 获取单个FAQ条目
+
+根据 seq_id 获取单个 FAQ 条目的详细信息。
 
 **请求**:
 
 ```curl
-curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries/status' \
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries/1' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "id": "faq-00000001",
+        "seq_id": 1,
+        "chunk_id": "chunk-00000001",
+        "knowledge_id": "knowledge-00000001",
+        "knowledge_base_id": "kb-00000001",
+        "tag_id": "tag-00000001",
+        "is_enabled": true,
+        "standard_question": "如何重置密码？",
+        "similar_questions": ["忘记密码怎么办", "密码找回"],
+        "negative_questions": [],
+        "answers": ["您可以通过点击登录页面的'忘记密码'链接来重置密码。"],
+        "index_mode": "hybrid",
+        "chunk_type": "faq",
+        "created_at": "2025-08-12T10:00:00+08:00",
+        "updated_at": "2025-08-12T10:00:00+08:00"
+    },
+    "success": true
+}
+```
+
+## POST `/knowledge-bases/:id/faq/entries/:entry_id/similar-questions` - 添加相似问题
+
+为指定的 FAQ 条目追加相似问法。
+
+**请求参数**:
+- `similar_questions`: 要追加的相似问题数组（必填）
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries/1/similar-questions' \
 --header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
 --header 'Content-Type: application/json' \
 --data '{
-    "updates": {
-        "faq-00000001": true,
-        "faq-00000002": false,
-        "faq-00000003": true
-    }
+    "similar_questions": ["怎样修改密码", "密码重置方法"]
+}'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "id": "faq-00000001",
+        "seq_id": 1,
+        "standard_question": "如何重置密码？",
+        "similar_questions": ["忘记密码怎么办", "密码找回", "怎样修改密码", "密码重置方法"],
+        "answers": ["您可以通过点击登录页面的'忘记密码'链接来重置密码。"],
+        "is_enabled": true,
+        "chunk_type": "faq",
+        "created_at": "2025-08-12T10:00:00+08:00",
+        "updated_at": "2025-08-12T11:00:00+08:00"
+    },
+    "success": true
+}
+```
+
+## PUT `/knowledge-bases/:id/faq/entries/fields` - 批量更新FAQ字段
+
+支持按条目ID或按标签ID批量更新 FAQ 条目的多个字段（启用状态、推荐状态、标签等）。
+
+**请求参数**:
+- `by_id`: 按条目 seq_id 更新（可选），键为 seq_id，值为要更新的字段
+- `by_tag`: 按标签 seq_id 更新（可选），键为 tag_seq_id，值为要更新的字段
+- `exclude_ids`: 排除的条目 seq_id 列表（与 by_tag 配合使用，可选）
+
+每个更新对象支持的字段：
+- `is_enabled`: 是否启用（可选）
+- `is_recommended`: 是否推荐（可选）
+- `tag_id`: 标签ID（可选）
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries/fields' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "by_id": {
+        "1": {"is_enabled": true, "is_recommended": false},
+        "2": {"is_enabled": false}
+    },
+    "by_tag": {
+        "100": {"is_enabled": true}
+    },
+    "exclude_ids": [3, 4]
 }'
 ```
 
@@ -324,6 +418,85 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/se
             "updated_at": "2025-08-12T10:00:00+08:00"
         }
     ],
+    "success": true
+}
+```
+
+## GET `/knowledge-bases/:id/faq/entries/export` - 导出FAQ条目
+
+将知识库下的所有 FAQ 条目导出为 CSV 文件。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries/export' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--output faq_export.csv
+```
+
+**响应**:
+
+CSV 文件下载（Content-Type: text/csv）
+
+## GET `/faq/import/progress/:task_id` - 获取FAQ导入进度
+
+查询异步 FAQ 导入任务的执行进度。任务 ID 由批量导入接口返回。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/faq/import/progress/task-00000001' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "task_id": "task-00000001",
+        "status": "completed",
+        "total": 100,
+        "success_count": 98,
+        "failed_count": 2,
+        "failed_entries": [
+            {
+                "index": 5,
+                "standard_question": "重复的问题",
+                "error": "标准问与已有FAQ重复"
+            }
+        ],
+        "success_entries": []
+    },
+    "success": true
+}
+```
+
+注：`status` 可能的值为 `pending`、`processing`、`completed`、`failed`。
+
+## PUT `/knowledge-bases/:id/faq/import/last-result/display` - 更新导入结果显示状态
+
+更新上一次 FAQ 导入结果的显示状态，用于控制前端是否展示导入结果提示。
+
+**请求参数**:
+- `display_status`: 显示状态（如 `"dismissed"`）
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/import/last-result/display' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "display_status": "dismissed"
+}'
+```
+
+**响应**:
+
+```json
+{
     "success": true
 }
 ```

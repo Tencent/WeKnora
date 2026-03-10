@@ -43,7 +43,7 @@ type simpleEngine struct{}
 
 func (e *simpleEngine) Name() string { return SimpleEngineName }
 func (e *simpleEngine) Description() string {
-	return "简单格式 & 图片解析（无需外部服务）"
+	return "Simple format & image parsing (no external service required)"
 }
 func (e *simpleEngine) FileTypes(_ bool) []string {
 	return []string{"md", "markdown", "txt", "csv", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"}
@@ -59,14 +59,14 @@ func (e *simpleEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string
 type mineruEngine struct{}
 
 func (e *mineruEngine) Name() string        { return "mineru" }
-func (e *mineruEngine) Description() string { return "MinerU 自部署服务" }
+func (e *mineruEngine) Description() string { return "MinerU self-hosted service" }
 func (e *mineruEngine) FileTypes(_ bool) []string {
 	return []string{"pdf", "jpg", "jpeg", "png", "bmp", "tiff", "doc", "docx", "ppt", "pptx"}
 }
 func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	endpoint := strings.TrimSpace(overrides["mineru_endpoint"])
 	if endpoint == "" {
-		return false, "未配置 MinerU 服务"
+		return false, "MinerU service not configured"
 	}
 	return PingMinerU(endpoint)
 }
@@ -85,7 +85,7 @@ func (e *mineruCloudEngine) FileTypes(_ bool) []string {
 func (e *mineruCloudEngine) CheckAvailable(_ bool, overrides map[string]string) (bool, string) {
 	apiKey := strings.TrimSpace(overrides["mineru_api_key"])
 	if apiKey == "" {
-		return false, "未配置 MinerU API Key"
+		return false, "MinerU API Key not configured"
 	}
 	return PingMinerUCloud(apiKey)
 }

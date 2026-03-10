@@ -334,7 +334,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, customReq any
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	logger.Infof(ctx, "[LLM Stream] model=%s, raw HTTP request:\n%s", c.modelName, string(jsonData))
+	logger.Infof(ctx, "[LLM Stream] model=%s", c.modelName)
 
 	endpoint := c.baseURL + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
@@ -456,6 +456,7 @@ type streamState struct {
 	lastFunctionName map[int]string
 	nameNotified     map[int]bool
 	hasThinking      bool
+	fieldExtractors  map[int]*jsonFieldExtractor // per tool-call-index extractors for streaming field extraction
 }
 
 func newStreamState() *streamState {
@@ -464,6 +465,7 @@ func newStreamState() *streamState {
 		lastFunctionName: make(map[int]string),
 		nameNotified:     make(map[int]bool),
 		hasThinking:      false,
+		fieldExtractors:  make(map[int]*jsonFieldExtractor),
 	}
 }
 
@@ -587,6 +589,47 @@ func (c *RemoteAPIChat) processToolCallsDelta(toolCalls []openai.ToolCall, state
 		}
 
 		state.lastFunctionName[toolCallIndex] = currName
+
+		// Stream final_answer tool arguments as answer-type chunks
+		if toolCallEntry.Function.Name == "final_answer" && argsUpdated {
+			extractor, exists := state.fieldExtractors[toolCallIndex]
+			if !exists {
+				extractor = newJSONFieldExtractor("answer")
+				state.fieldExtractors[toolCallIndex] = extractor
+			}
+			answerChunk := extractor.Feed(tc.Function.Arguments)
+			if answerChunk != "" {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      answerChunk,
+					Done:         false,
+					Data: map[string]interface{}{
+						"source": "final_answer_tool",
+					},
+				}
+			}
+		}
+
+		// Stream thinking tool's thought field as thinking-type chunks
+		if toolCallEntry.Function.Name == "thinking" && argsUpdated {
+			extractor, exists := state.fieldExtractors[toolCallIndex]
+			if !exists {
+				extractor = newJSONFieldExtractor("thought")
+				state.fieldExtractors[toolCallIndex] = extractor
+			}
+			thoughtChunk := extractor.Feed(tc.Function.Arguments)
+			if thoughtChunk != "" {
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeThinking,
+					Content:      thoughtChunk,
+					Done:         false,
+					Data: map[string]interface{}{
+						"source":       "thinking_tool",
+						"tool_call_id": toolCallEntry.ID,
+					},
+				}
+			}
+		}
 	}
 }
 

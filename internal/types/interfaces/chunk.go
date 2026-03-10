@@ -58,6 +58,8 @@ type ChunkRepository interface {
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
+	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
+	MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error
 	// DeleteChunksByTagID deletes all chunks with the specified tag ID
 	// Returns the IDs of deleted chunks for index cleanup
 	DeleteChunksByTagID(ctx context.Context, tenantID uint64, kbID string, tagID string, excludeIDs []string) ([]string, error)

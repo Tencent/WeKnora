@@ -37,7 +37,7 @@ Each thought can build on, question, or revise previous insights as understandin
 - Generates a solution hypothesis
 - Verifies the hypothesis based on the Chain of Thought steps
 - Repeats the process until satisfied
-- Provides a correct answer
+- When thinking is complete, you can call the final_answer tool to deliver your answer if all your thinking is complete. NEVER include the final answer directly in a thought.
 
 ## Parameters Explained
 
@@ -78,8 +78,8 @@ Each thought can build on, question, or revise previous insights as understandin
 7. Generate a solution hypothesis when appropriate
 8. Verify the hypothesis based on the Chain of Thought steps
 9. Repeat the process until satisfied with the solution
-10. Provide a single, ideally correct answer as the final output
-11. Only set next_thought_needed to false when truly done and a satisfactory answer is reached`,
+10. Only set next_thought_needed to false when truly done and a satisfactory answer is reached
+11. NEVER include the final answer in the thought content. When thinking is complete, you can call the final_answer tool to deliver the final answer to the user`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {

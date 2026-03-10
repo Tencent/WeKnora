@@ -171,7 +171,7 @@ func (h *Handler) setupStopEventHandler(
 		assistantMessage.Content = "用户停止了本次对话"
 		// Use session's tenant for message update (ctx may have effectiveTenantID when using shared agent)
 		updateCtx := context.WithValue(ctx, types.TenantIDContextKey, sessionTenantID)
-		h.completeAssistantMessage(updateCtx, assistantMessage)
+		h.completeAssistantMessage(updateCtx, assistantMessage, "") // empty query: stopped conversations are not indexed
 		return nil
 	})
 }

@@ -10,7 +10,10 @@
 | PUT    | `/knowledge-bases/:id`               | 更新知识库               |
 | DELETE | `/knowledge-bases/:id`               | 删除知识库               |
 | POST   | `/knowledge-bases/copy`              | 拷贝知识库               |
+| GET    | `/knowledge-bases/copy/progress/:task_id` | 获取拷贝进度      |
 | GET    | `/knowledge-bases/:id/hybrid-search` | 混合搜索（向量+关键词）  |
+| POST   | `/knowledge-bases/:id/pin`           | 置顶/取消置顶知识库      |
+| GET    | `/knowledge-bases/:id/move-targets`  | 获取可迁移目标知识库列表 |
 
 ## POST `/knowledge-bases` - 创建知识库
 
@@ -316,6 +319,68 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/b
 }
 ```
 
+## POST `/knowledge-bases/copy` - 拷贝知识库
+
+异步拷贝一个知识库，包括知识库配置和所有知识内容。返回任务ID用于查询拷贝进度。
+
+**请求参数**:
+- `source_id`: 源知识库ID（必填）
+- `name`: 新知识库名称（可选，默认使用原名称加"(副本)"后缀）
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/copy' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json' \
+--data '{
+    "source_id": "kb-00000001",
+    "name": "知识库副本"
+}'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "task_id": "task-copy-00000001",
+        "target_id": "kb-00000002"
+    },
+    "success": true
+}
+```
+
+## GET `/knowledge-bases/copy/progress/:task_id` - 获取拷贝进度
+
+查询知识库拷贝任务的执行进度。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/copy/progress/task-copy-00000001' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "task_id": "task-copy-00000001",
+        "status": "completed",
+        "total": 10,
+        "finished": 10,
+        "source_id": "kb-00000001",
+        "target_id": "kb-00000002"
+    },
+    "success": true
+}
+```
+
+注：`status` 可能的值为 `pending`、`processing`、`completed`、`failed`。
+
 ## GET `/knowledge-bases/:id/hybrid-search` - 混合搜索
 
 执行向量搜索和关键词搜索的混合检索。
@@ -363,6 +428,66 @@ curl --location --request GET 'http://localhost:8080/api/v1/knowledge-bases/kb-0
             "metadata": {},
             "knowledge_filename": "guide.pdf",
             "knowledge_source": "file"
+        }
+    ],
+    "success": true
+}
+```
+
+## POST `/knowledge-bases/:id/pin` - 置顶/取消置顶知识库
+
+切换知识库的置顶状态。无需请求体，每次调用会自动切换当前置顶状态。
+
+**请求**:
+
+```curl
+curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/pin' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "id": "kb-00000001",
+        "name": "Default Knowledge Base",
+        "description": "System Default Knowledge Base",
+        "tenant_id": 1,
+        "is_pinned": true,
+        "created_at": "2025-08-11T20:10:41.817794+08:00",
+        "updated_at": "2025-08-12T15:00:00.000000+08:00",
+        "deleted_at": null
+    },
+    "success": true
+}
+```
+
+## GET `/knowledge-bases/:id/move-targets` - 获取可迁移目标知识库列表
+
+获取当前知识库可以迁移知识到的目标知识库列表。返回结果会排除当前知识库本身。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/move-targets' \
+--header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
+--header 'Content-Type: application/json'
+```
+
+**响应**:
+
+```json
+{
+    "data": [
+        {
+            "id": "kb-00000002",
+            "name": "技术文档知识库",
+            "description": "技术文档相关知识",
+            "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "created_at": "2025-08-12T11:30:09.206238+08:00",
+            "updated_at": "2025-08-12T11:30:09.206238+08:00"
         }
     ],
     "success": true

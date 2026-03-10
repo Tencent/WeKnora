@@ -9,6 +9,10 @@
 | PUT    | `/tenants/:id` | 更新租户信息          |
 | DELETE | `/tenants/:id` | 删除租户              |
 | GET    | `/tenants`     | 获取租户列表          |
+| GET    | `/tenants/all` | 获取所有租户列表（需跨租户权限） |
+| GET    | `/tenants/search` | 搜索租户（需跨租户权限）      |
+| GET    | `/tenants/kv/:key` | 获取租户KV配置               |
+| PUT    | `/tenants/kv/:key` | 更新租户KV配置               |
 
 ## POST `/tenants` - 创建新租户
 
@@ -237,6 +241,158 @@ curl --location 'http://localhost:8080/api/v1/tenants' \
                 "deleted_at": null
             }
         ]
+    },
+    "success": true
+}
+```
+
+## GET `/tenants/all` - 获取所有租户列表
+
+获取系统中所有租户列表，需要跨租户权限。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants/all' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-An7_t_izCKFIJ4iht9Xjcjnj_MC48ILvwezEDki9ScfIa7KA'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "items": [
+            {
+                "id": 10001,
+                "name": "weknora-1",
+                "description": "weknora tenants 1",
+                "status": "active",
+                "business": "wechat",
+                "created_at": "2025-08-11T20:37:28.39698+08:00",
+                "updated_at": "2025-08-11T20:37:28.405693+08:00"
+            },
+            {
+                "id": 10002,
+                "name": "weknora-2",
+                "description": "weknora tenants 2",
+                "status": "active",
+                "business": "wechat",
+                "created_at": "2025-08-11T20:52:58.05679+08:00",
+                "updated_at": "2025-08-11T20:52:58.060495+08:00"
+            }
+        ]
+    },
+    "success": true
+}
+```
+
+## GET `/tenants/search` - 搜索租户
+
+按关键词搜索租户，需要跨租户权限。
+
+**查询参数**:
+- `keyword`: 搜索关键词（可选）
+- `tenant_id`: 按租户ID筛选（可选）
+- `page`: 页码（默认 1）
+- `page_size`: 每页条数（默认 20）
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants/search?keyword=weknora&page=1&page_size=10' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-An7_t_izCKFIJ4iht9Xjcjnj_MC48ILvwezEDki9ScfIa7KA'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "items": [
+            {
+                "id": 10002,
+                "name": "weknora",
+                "description": "weknora tenants",
+                "status": "active",
+                "business": "wechat",
+                "created_at": "2025-08-11T20:52:58.05679+08:00",
+                "updated_at": "2025-08-11T20:52:58.060495+08:00"
+            }
+        ],
+        "total": 1,
+        "page": 1,
+        "page_size": 10
+    },
+    "success": true
+}
+```
+
+## GET `/tenants/kv/:key` - 获取租户KV配置
+
+获取指定键名的租户配置项。
+
+**支持的 key 值**:
+- `agent-config`: Agent 配置
+- `web-search-config`: 网页搜索配置
+- `conversation-config`: 对话配置
+- `prompt-templates`: 提示词模板
+- `parser-engine-config`: 解析引擎配置
+- `storage-engine-config`: 存储引擎配置
+- `chat-history-config`: 聊天历史配置
+- `retrieval-config`: 检索配置
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/tenants/kv/agent-config' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-An7_t_izCKFIJ4iht9Xjcjnj_MC48ILvwezEDki9ScfIa7KA'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "key": "agent-config",
+        "value": {
+            "enabled": true,
+            "max_iterations": 10
+        }
+    },
+    "success": true
+}
+```
+
+## PUT `/tenants/kv/:key` - 更新租户KV配置
+
+更新指定键名的租户配置项。请求体内容根据不同的 key 值而有所不同。
+
+**请求**:
+
+```curl
+curl --location --request PUT 'http://localhost:8080/api/v1/tenants/kv/agent-config' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: sk-An7_t_izCKFIJ4iht9Xjcjnj_MC48ILvwezEDki9ScfIa7KA' \
+--data '{
+    "enabled": true,
+    "max_iterations": 20
+}'
+```
+
+**响应**:
+
+```json
+{
+    "data": {
+        "key": "agent-config",
+        "value": {
+            "enabled": true,
+            "max_iterations": 20
+        }
     },
     "success": true
 }

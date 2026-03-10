@@ -423,7 +423,7 @@
 
             <!-- Loading -->
             <div v-else-if="invitePreviewLoading" class="invite-preview-body invite-preview-loading">
-              <t-loading size="large" />
+              <t-loading size="medium" />
               <span class="invite-preview-loading-text">{{ $t('organization.invite.loading') }}</span>
             </div>
 
@@ -444,7 +444,7 @@
                   <div class="preview-detail-header">
                     <div class="preview-detail-header-left">
                       <div class="preview-detail-avatar">
-                        <SpaceAvatar :name="invitePreviewData.name" :avatar="invitePreviewData.avatar" size="large" />
+                        <SpaceAvatar :name="invitePreviewData.name" :avatar="invitePreviewData.avatar" size="medium" />
                       </div>
                       <div class="preview-detail-title-block">
                         <h2 class="preview-detail-name">{{ invitePreviewData.name }}</h2>

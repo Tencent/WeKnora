@@ -30,6 +30,7 @@ import {
   reparseKnowledge,
 } from "@/api/knowledge-base/index";
 import FAQEntryManager from './components/FAQEntryManager.vue';
+import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
@@ -151,7 +152,13 @@ const kbLastUpdated = computed(() => {
 });
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
-let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
+let { cardList, total, moreIndex, details, getKnowled, delKnowledge, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
+const onVisibleChange = (visible: boolean) => {
+  _onVisibleChange(visible);
+  if (!visible) {
+    moveMenuMode.value = 'normal';
+  }
+};
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setInterval> | null = null;
 let delDialog = ref(false)
@@ -160,6 +167,17 @@ let knowledgeIndex = ref(-1)
 let knowledgeScroll = ref()
 let page = 1;
 let pageSize = 35;
+
+// Move state — inline in card menu
+const moveMenuMode = ref<'normal' | 'targets' | 'confirm'>('normal');
+const moveKnowledgeId = ref('');
+const moveTargetKbs = ref<any[]>([]);
+const moveTargetsLoading = ref(false);
+const moveSelectedTargetId = ref('');
+const moveSelectedTargetName = ref('');
+const moveMode = ref<'reuse_vectors' | 'reparse'>('reuse_vectors');
+const moveSubmitting = ref(false);
+let movePollTimer: ReturnType<typeof setInterval> | null = null;
 
 const selectedTagId = ref<string>('');
 const tagList = ref<any[]>([]);
@@ -659,6 +677,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('knowledgeFileUploaded', handleFileUploaded as EventListener);
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
+  stopMovePoll();
 });
 watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
@@ -781,6 +800,99 @@ const delCard = (index: number, item: KnowledgeCard) => {
   knowledgeIndex.value = index;
   knowledge.value = item;
   delDialog.value = true;
+};
+
+const handleMoveKnowledge = async (item: KnowledgeCard) => {
+  moveKnowledgeId.value = item.id;
+  moveMenuMode.value = 'targets';
+  moveTargetsLoading.value = true;
+  moveTargetKbs.value = [];
+  try {
+    const res: any = await listMoveTargets(kbId.value);
+    moveTargetKbs.value = res.data || [];
+  } catch {
+    moveTargetKbs.value = [];
+  } finally {
+    moveTargetsLoading.value = false;
+  }
+};
+
+const handleMoveSelectTarget = (kb: any) => {
+  moveSelectedTargetId.value = kb.id;
+  moveSelectedTargetName.value = kb.name;
+  moveMode.value = 'reuse_vectors';
+  moveMenuMode.value = 'confirm';
+};
+
+const handleMoveBack = () => {
+  if (moveMenuMode.value === 'confirm') {
+    moveMenuMode.value = 'targets';
+  } else {
+    moveMenuMode.value = 'normal';
+  }
+};
+
+const handleMoveConfirm = async () => {
+  if (!moveSelectedTargetId.value || moveSubmitting.value) return;
+  moveSubmitting.value = true;
+  try {
+    const res: any = await moveKnowledge({
+      knowledge_ids: [moveKnowledgeId.value],
+      source_kb_id: kbId.value,
+      target_kb_id: moveSelectedTargetId.value,
+      mode: moveMode.value,
+    });
+    const taskId = res.data?.task_id;
+    MessagePlugin.info(t('knowledgeBase.moveStarted'));
+    // Close the card menu
+    moveMenuMode.value = 'normal';
+    cardList.value.forEach(c => { c.isMore = false; });
+
+    if (taskId) {
+      startMovePoll(taskId);
+    } else {
+      moveSubmitting.value = false;
+      loadKnowledgeFiles(kbId.value);
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.moveFailed'));
+    moveSubmitting.value = false;
+  }
+};
+
+const startMovePoll = (taskId: string) => {
+  if (movePollTimer) clearInterval(movePollTimer);
+  movePollTimer = setInterval(async () => {
+    try {
+      const res: any = await getKnowledgeMoveProgress(taskId);
+      const data = res.data;
+      if (!data) return;
+      if (data.status === 'completed') {
+        stopMovePoll();
+        moveSubmitting.value = false;
+        const failed = data.failed || 0;
+        if (failed > 0) {
+          MessagePlugin.warning(t('knowledgeBase.moveCompletedWithErrors', { success: (data.processed || 0) - failed, failed }));
+        } else {
+          MessagePlugin.success(t('knowledgeBase.moveCompleted'));
+        }
+        loadKnowledgeFiles(kbId.value);
+      } else if (data.status === 'failed') {
+        stopMovePoll();
+        moveSubmitting.value = false;
+        MessagePlugin.error(t('knowledgeBase.moveFailed'));
+      }
+    } catch {
+      // ignore poll errors
+    }
+  }, 2000);
+};
+
+const stopMovePoll = () => {
+  if (movePollTimer) {
+    clearInterval(movePollTimer);
+    movePollTimer = null;
+  }
 };
 
 const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {
@@ -1605,7 +1717,8 @@ async function createNewSession(value: string): Promise<void> {
                             <img class="more" src="@/assets/img/more.png" alt="" />
                           </div>
                           <template #content>
-                            <div class="card-menu">
+                            <!-- Normal menu -->
+                            <div v-if="moveMenuMode === 'normal'" class="card-menu">
                               <div
                                 v-if="item.type === 'manual'"
                                 class="card-menu-item"
@@ -1618,9 +1731,79 @@ async function createNewSession(value: string): Promise<void> {
                                 <t-icon class="icon" name="refresh" />
                                 <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                               </div>
+                              <div class="card-menu-item" @click.stop="handleMoveKnowledge(item)">
+                                <t-icon class="icon" name="swap" />
+                                <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                              </div>
                               <div class="card-menu-item danger" @click.stop="delCard(index, item)">
                                 <t-icon class="icon" name="delete" />
                                 <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                              </div>
+                            </div>
+
+                            <!-- Move: target KB list -->
+                            <div v-else-if="moveMenuMode === 'targets'" class="card-menu move-menu">
+                              <div class="move-menu-header" @click.stop="handleMoveBack">
+                                <t-icon name="chevron-left" size="16px" />
+                                <span>{{ t('knowledgeBase.moveToKnowledgeBase') }}</span>
+                              </div>
+                              <div v-if="moveTargetsLoading" class="move-menu-loading">
+                                <t-loading size="small" />
+                              </div>
+                              <div v-else-if="moveTargetKbs.length === 0" class="move-menu-empty">
+                                {{ t('knowledgeBase.moveNoTargets') }}
+                              </div>
+                              <template v-else>
+                                <div
+                                  v-for="kb in moveTargetKbs"
+                                  :key="kb.id"
+                                  class="card-menu-item"
+                                  @click.stop="handleMoveSelectTarget(kb)"
+                                >
+                                  <t-icon class="icon" name="root-list" />
+                                  <span class="move-target-name">{{ kb.name }}</span>
+                                  <span v-if="kb.knowledge_count !== undefined" class="move-target-count">{{ kb.knowledge_count }}</span>
+                                </div>
+                              </template>
+                            </div>
+
+                            <!-- Move: confirm with mode selection -->
+                            <div v-else-if="moveMenuMode === 'confirm'" class="card-menu move-menu">
+                              <div class="move-menu-header" @click.stop="handleMoveBack">
+                                <t-icon name="chevron-left" size="16px" />
+                                <span>{{ t('knowledgeBase.moveConfirmTitle') }}</span>
+                              </div>
+                              <div class="move-confirm-body">
+                                <div class="move-target-info">
+                                  <t-icon name="arrow-right" size="14px" />
+                                  <span>{{ moveSelectedTargetName }}</span>
+                                </div>
+                                <div
+                                  class="move-mode-item"
+                                  :class="{ active: moveMode === 'reuse_vectors' }"
+                                  @click.stop="moveMode = 'reuse_vectors'"
+                                >
+                                  <t-radio :checked="moveMode === 'reuse_vectors'" />
+                                  <div class="move-mode-text">
+                                    <span class="move-mode-label">{{ t('knowledgeBase.moveModeReuseVectors') }}</span>
+                                    <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReuseVectorsDesc') }}</span>
+                                  </div>
+                                </div>
+                                <div
+                                  class="move-mode-item"
+                                  :class="{ active: moveMode === 'reparse' }"
+                                  @click.stop="moveMode = 'reparse'"
+                                >
+                                  <t-radio :checked="moveMode === 'reparse'" />
+                                  <div class="move-mode-text">
+                                    <span class="move-mode-label">{{ t('knowledgeBase.moveModeReparse') }}</span>
+                                    <span class="move-mode-desc">{{ t('knowledgeBase.moveModeReparseDesc') }}</span>
+                                  </div>
+                                </div>
+                                <div class="move-confirm-actions">
+                                  <t-button size="small" variant="outline" @click.stop="handleMoveBack">{{ t('common.cancel') }}</t-button>
+                                  <t-button size="small" theme="primary" :loading="moveSubmitting" @click.stop="handleMoveConfirm">{{ t('knowledgeBase.moveConfirm') }}</t-button>
+                                </div>
                               </div>
                             </div>
                           </template>
@@ -1750,7 +1933,7 @@ async function createNewSession(value: string): Promise<void> {
               </div>
             </div>
           </t-dialog>
-          
+
           <!-- URL 导入对话框 -->
           <t-dialog
             v-model:visible="urlDialogVisible"
@@ -1805,7 +1988,8 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .card-more .t-popup__content {
-  width: 180px;
+  min-width: 180px;
+  width: auto;
   padding: 6px 0;
   margin-top: 4px !important;
   color: var(--td-text-color-primary);
@@ -2782,6 +2966,115 @@ async function createNewSession(value: string): Promise<void> {
 
   &.danger {
     color: var(--td-error-color);
+  }
+}
+
+.move-menu {
+  min-width: 220px;
+  max-width: 280px;
+  max-height: 360px;
+  overflow-y: auto;
+
+  .move-menu-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    border-bottom: 1px solid var(--td-component-stroke);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--td-bg-color-container-hover);
+    }
+  }
+
+  .move-menu-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 0;
+  }
+
+  .move-menu-empty {
+    padding: 12px 16px;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .move-target-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .move-target-count {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .move-confirm-body {
+    padding: 8px;
+
+    .move-target-info {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      background: var(--td-bg-color-container-hover);
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--td-text-color-secondary);
+      margin-bottom: 8px;
+    }
+
+    .move-mode-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-bottom: 4px;
+
+      &:hover {
+        background: var(--td-bg-color-container-hover);
+      }
+
+      &.active {
+        background: var(--td-brand-color-light);
+      }
+
+      .move-mode-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+
+        .move-mode-label {
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--td-text-color-primary);
+        }
+
+        .move-mode-desc {
+          font-size: 11px;
+          color: var(--td-text-color-placeholder);
+          line-height: 1.4;
+        }
+      }
+    }
+
+    .move-confirm-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
   }
 }
 

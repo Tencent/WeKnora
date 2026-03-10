@@ -16,7 +16,7 @@
           <t-switch
             v-model="localQuestionGeneration.enabled"
             @change="handleQuestionGenerationToggle"
-            size="large"
+            size="medium"
           />
         </div>
       </div>
@@ -52,7 +52,7 @@
           <t-switch
             v-model="localMultimodal.enabled"
             @change="handleMultimodalToggle"
-            size="large"
+            size="medium"
           />
         </div>
       </div>

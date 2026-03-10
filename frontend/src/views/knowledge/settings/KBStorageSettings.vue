@@ -108,6 +108,13 @@ const engineOptions = computed(() => {
       available: statusMap.tos,
       disabled: statusMap.tos === false,
     },
+    {
+      value: 's3',
+      label: t('kbSettings.storage.engineS3'),
+      desc: t('kbSettings.storage.engineS3Desc'),
+      available: statusMap.s3,
+      disabled: statusMap.s3 === false,
+    },
   ]
 })
 
@@ -139,7 +146,7 @@ async function load() {
     engineStatus.value = engines
     defaultProvider.value = configRes?.data?.default_provider || 'local'
     const d = configRes?.data
-    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name)
+    hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name)
     if (!localProvider.value || localProvider.value === '') {
       localProvider.value = defaultProvider.value
       emit('update:storageProvider', localProvider.value)

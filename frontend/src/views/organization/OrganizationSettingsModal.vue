@@ -61,7 +61,7 @@
                             overlay-class-name="avatar-emoji-popover"
                           >
                             <div class="avatar-trigger-wrap">
-                              <SpaceAvatar :name="formData.name || '?'" :avatar="formData.avatar" size="large" />
+                              <SpaceAvatar :name="formData.name || '?'" :avatar="formData.avatar" size="medium" />
                               <span v-if="isAdmin" class="avatar-change-hint">{{ $t('organization.avatar') }}</span>
                             </div>
                             <template #content>
