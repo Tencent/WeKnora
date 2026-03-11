@@ -587,6 +587,34 @@ onUnmounted(() => {
 
 :deep(.docx-preview-wrapper) {
   padding: 20px;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto; // 如果内容过宽，允许水平滚动而不是溢出
+  
+  // 约束所有子元素的宽度
+  * {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  
+  // 特别处理表格
+  table {
+    width: 100%;
+    table-layout: auto;
+    word-wrap: break-word;
+  }
+  
+  // 处理图片
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+  
+  // 处理可能的固定宽度元素
+  [style*="width"] {
+    max-width: 100% !important;
+  }
 }
 
 :deep(.vue-office-pptx) {
