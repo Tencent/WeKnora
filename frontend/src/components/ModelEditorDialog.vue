@@ -360,7 +360,7 @@ const fallbackProviderOptions = computed(() => [
     value: 'nvidia',
     label: t('model.editor.providers.nvidia.label'),
     defaultUrls: {
-      chat: 'https://integrate.api.nvidia.com/v1',
+      chat: 'https://integrate.api.nvidia.com/v1/chat/completions',
       embedding: 'https://integrate.api.nvidia.com/v1',
       rerank: 'https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking',
       vllm: 'https://integrate.api.nvidia.com/v1',

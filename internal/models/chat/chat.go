@@ -121,6 +121,9 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 	case provider.ProviderGeneric:
 		// Generic provider (如 vLLM) 使用 ChatTemplateKwargs
 		return NewGenericChat(config)
+	case provider.ProviderNvidia:
+		// NVIDIA provider 使用BaseURL为请求地址
+		return NewNvidiaChat(config)
 	default:
 		// 其他 provider 使用标准 OpenAI 兼容实现
 		return NewRemoteAPIChat(config)

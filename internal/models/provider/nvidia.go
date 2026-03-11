@@ -8,7 +8,7 @@ import (
 
 const (
 	// NvidiaChatBaseURL NVIDIA Chat 的默认 BaseURL
-	NvidiaChatBaseURL = "https://integrate.api.nvidia.com/v1"
+	NvidiaChatBaseURL = "https://integrate.api.nvidia.com/v1/chat/completions"
 	// NvidiaRerankBaseURL NVIDIA Rerank 的默认 BaseURL
 	NvidiaRerankBaseURL = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
 )
