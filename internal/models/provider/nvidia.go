@@ -9,6 +9,8 @@ import (
 const (
 	// NvidiaChatBaseURL NVIDIA Chat 的默认 BaseURL
 	NvidiaChatBaseURL = "https://integrate.api.nvidia.com/v1/chat/completions"
+	// NvidiaVLMBaseURL NVIDIA VLM 的默认 BaseURL
+	NvidiaVLMBaseURL = "https://integrate.api.nvidia.com/v1"
 	// NvidiaRerankBaseURL NVIDIA Rerank 的默认 BaseURL
 	NvidiaRerankBaseURL = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
 )
@@ -30,7 +32,7 @@ func (p *NvidiaProvider) Info() ProviderInfo {
 			types.ModelTypeKnowledgeQA: NvidiaChatBaseURL,
 			types.ModelTypeEmbedding:   NvidiaChatBaseURL,
 			types.ModelTypeRerank:      NvidiaRerankBaseURL,
-			types.ModelTypeVLLM:        NvidiaChatBaseURL,
+			types.ModelTypeVLLM:        NvidiaVLMBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
