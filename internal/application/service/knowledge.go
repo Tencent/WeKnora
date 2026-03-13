@@ -7449,7 +7449,11 @@ func (s *knowledgeService) resolveDocReader(engine, fileType string, isURL bool,
 		return docparser.NewMinerUReader(overrides)
 	case "mineru_cloud":
 		return docparser.NewMinerUCloudReader(overrides)
+	case "builtin":
+		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
+		return s.documentReader
 	default:
+		// 未指定引擎时的兜底逻辑：simple format 使用 Go 原生处理，其他使用 docreader
 		if !isURL && docparser.IsSimpleFormat(fileType) {
 			return &docparser.SimpleFormatReader{}
 		}
