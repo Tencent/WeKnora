@@ -167,7 +167,11 @@ func SplitText(text string, cfg SplitterConfig) []Chunk {
 // buildUnitsWithProtection splits text into units, preserving protected spans as atomic.
 // Start/End positions in the returned units are rune offsets (not byte offsets),
 // because downstream merge logic indexes content via []rune slicing.
+// If a protected span exceeds maxProtectedSize, it will be forcibly split to prevent
+// creating chunks that are too large for downstream processing (e.g., embedding APIs).
 func buildUnitsWithProtection(text string, protected []span, separators []string) []splitUnit {
+	const maxProtectedSize = 7500 // Maximum size for a protected unit (留余量给标题等)
+
 	var units []splitUnit
 	bytePos := 0
 	runePos := 0
@@ -191,11 +195,43 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 
 		protText := text[p.start:p.end]
 		protRuneLen := runeLen(protText)
-		units = append(units, splitUnit{
-			text:  protText,
-			start: runePos,
-			end:   runePos + protRuneLen,
-		})
+
+		// If protected content is too large, forcibly split it
+		if protRuneLen > maxProtectedSize {
+			// Split into smaller chunks at line breaks or spaces
+			runes := []rune(protText)
+			offset := 0
+			for offset < len(runes) {
+				chunkEnd := offset + maxProtectedSize
+				if chunkEnd > len(runes) {
+					chunkEnd = len(runes)
+				} else {
+					// Try to break at a newline or space
+					for i := chunkEnd - 1; i > offset && i > chunkEnd-200; i-- {
+						if runes[i] == '\n' || runes[i] == ' ' {
+							chunkEnd = i + 1
+							break
+						}
+					}
+				}
+
+				chunkText := string(runes[offset:chunkEnd])
+				chunkLen := chunkEnd - offset
+				units = append(units, splitUnit{
+					text:  chunkText,
+					start: runePos + offset,
+					end:   runePos + offset + chunkLen,
+				})
+				offset = chunkEnd
+			}
+		} else {
+			// Normal case: keep protected content as a single unit
+			units = append(units, splitUnit{
+				text:  protText,
+				start: runePos,
+				end:   runePos + protRuneLen,
+			})
+		}
 		runePos += protRuneLen
 		bytePos = p.end
 	}
@@ -219,10 +255,14 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 }
 
 // mergeUnits combines split units into chunks with overlap tracking.
+// Enforces an absolute maximum chunk size to prevent exceeding downstream limits (e.g., embedding APIs).
 func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 	if len(units) == 0 {
 		return nil
 	}
+
+	// Absolute maximum chunk size (留余量给标题等额外内容)
+	const absoluteMaxSize = 7500
 
 	var chunks []Chunk
 	var current []splitUnit
@@ -231,12 +271,60 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 	for _, u := range units {
 		uLen := runeLen(u.text)
 
+		// If this single unit exceeds absolute max, force split it further
+		if uLen > absoluteMaxSize {
+			// Flush current chunk if any
+			if len(current) > 0 {
+				chunks = append(chunks, buildChunk(current, len(chunks)))
+				current = nil
+				curLen = 0
+			}
+
+			// Split this oversized unit into smaller chunks
+			runes := []rune(u.text)
+			offset := 0
+			for offset < len(runes) {
+				chunkEnd := offset + absoluteMaxSize
+				if chunkEnd > len(runes) {
+					chunkEnd = len(runes)
+				} else {
+					// Try to break at a newline or space
+					for i := chunkEnd - 1; i > offset && i > chunkEnd-200; i-- {
+						if runes[i] == '\n' || runes[i] == ' ' {
+							chunkEnd = i + 1
+							break
+						}
+					}
+				}
+
+				chunkText := string(runes[offset:chunkEnd])
+				chunks = append(chunks, Chunk{
+					Content: chunkText,
+					Seq:     len(chunks),
+					Start:   u.start + offset,
+					End:     u.start + chunkEnd,
+				})
+				offset = chunkEnd
+			}
+			continue
+		}
+
 		// If adding this unit exceeds chunk size and we have content, flush
 		if curLen+uLen > chunkSize && len(current) > 0 {
 			chunks = append(chunks, buildChunk(current, len(chunks)))
 
 			// Keep overlap from the end of current
 			current, curLen = computeOverlap(current, chunkOverlap, chunkSize, uLen)
+		}
+
+		// Check if adding this unit would exceed absolute max
+		if curLen+uLen > absoluteMaxSize {
+			// Flush current and start fresh
+			if len(current) > 0 {
+				chunks = append(chunks, buildChunk(current, len(chunks)))
+				current = nil
+				curLen = 0
+			}
 		}
 
 		current = append(current, u)
