@@ -149,6 +149,34 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	// Log request details for debugging
+	logger.GetLogger(ctx).Debugf("OpenAIEmbedder BatchEmbed: model=%s, input_count=%d, truncate_tokens=%d",
+		e.modelName, len(texts), e.truncatePromptTokens)
+
+	// Check for invalid input lengths and log details
+	hasInvalidLength := false
+	for i, text := range texts {
+		textLen := len(text)
+		textPreview := text
+		if len(textPreview) > 200 {
+			textPreview = textPreview[:200] + "..."
+		}
+
+		// Log warning if length is outside valid range [1, 8192]
+		if textLen == 0 || textLen > 8192 {
+			hasInvalidLength = true
+			logger.GetLogger(ctx).Errorf("OpenAIEmbedder BatchEmbed input[%d]: INVALID length=%d (must be [1, 8192]), preview=%s",
+				i, textLen, textPreview)
+		} else {
+			logger.GetLogger(ctx).Debugf("OpenAIEmbedder BatchEmbed input[%d]: length=%d, preview=%s",
+				i, textLen, textPreview)
+		}
+	}
+
+	if hasInvalidLength {
+		logger.GetLogger(ctx).Errorf("OpenAIEmbedder BatchEmbed: Found invalid input lengths, this will likely cause API error")
+	}
+
 	// Send request (passing jsonData instead of constructing http.Request)
 	resp, err := e.doRequestWithRetry(ctx, jsonData)
 	if err != nil {
@@ -167,8 +195,13 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s", resp.Status)
-		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s", resp.Status)
+		// Log detailed error response from OpenAI API
+		bodyStr := string(body)
+		if len(bodyStr) > 1000 {
+			bodyStr = bodyStr[:1000] + "... (truncated)"
+		}
+		logger.GetLogger(ctx).Errorf("OpenAIEmbedder EmbedBatch API error: Http Status %s, Response Body: %s", resp.Status, bodyStr)
+		return nil, fmt.Errorf("EmbedBatch API error: Http Status %s, Response: %s", resp.Status, bodyStr)
 	}
 
 	// Parse response
