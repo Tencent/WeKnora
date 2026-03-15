@@ -960,11 +960,19 @@ func registerIMAdapters(cfg *config.Config, imService *imPkg.Service) {
 	// Register WeCom
 	if cfg.IM.WeCom != nil && cfg.IM.WeCom.Enabled {
 		registerWeComAdapter(ctx, cfg.IM.WeCom, imService)
+		if cfg.IM.WeCom.OutputMode == "full" {
+			imService.SetStreamDisabled(imPkg.PlatformWeCom, true)
+			logger.Infof(ctx, "[IM] WeCom streaming disabled (output_mode=full)")
+		}
 	}
 
 	// Register Feishu
 	if cfg.IM.Feishu != nil && cfg.IM.Feishu.Enabled {
 		registerFeishuAdapter(ctx, cfg.IM.Feishu, imService)
+		if cfg.IM.Feishu.OutputMode == "full" {
+			imService.SetStreamDisabled(imPkg.PlatformFeishu, true)
+			logger.Infof(ctx, "[IM] Feishu streaming disabled (output_mode=full)")
+		}
 	}
 }
 
@@ -976,7 +984,7 @@ func registerWeComAdapter(ctx context.Context, cfg *config.WeComIMConfig, imServ
 
 	switch mode {
 	case "webhook":
-		adapter, err := wecom.NewAdapter(
+		adapter, err := wecom.NewWebhookAdapter(
 			cfg.CorpID,
 			cfg.AgentSecret,
 			cfg.Token,
@@ -999,7 +1007,7 @@ func registerWeComAdapter(ctx context.Context, cfg *config.WeComIMConfig, imServ
 		client := wecom.NewLongConnClient(cfg.BotID, cfg.BotSecret, handler)
 
 		// Register a BotAdapter so the service can send replies via WebSocket
-		imService.RegisterAdapter(wecom.NewBotAdapter(client))
+		imService.RegisterAdapter(wecom.NewWSAdapter(client))
 		logger.Infof(ctx, "[IM] WeCom adapter registered (mode=websocket, bot_id=%s)", cfg.BotID)
 
 		// Start the long connection in a goroutine

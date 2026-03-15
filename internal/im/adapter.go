@@ -74,3 +74,18 @@ type Adapter interface {
 	// Returns true if this request is a verification request and has been handled.
 	HandleURLVerification(c *gin.Context) bool
 }
+
+// StreamSender is an optional interface that adapters can implement to support streaming replies.
+// When an adapter implements StreamSender, the IM service will push answer chunks in real-time
+// instead of waiting for the full answer.
+type StreamSender interface {
+	// StartStream initializes a streaming reply session (e.g., creates a streaming card).
+	// Returns a platform-specific stream ID for subsequent chunk/end calls.
+	StartStream(ctx context.Context, incoming *IncomingMessage) (string, error)
+
+	// SendStreamChunk appends a content chunk to an ongoing stream.
+	SendStreamChunk(ctx context.Context, incoming *IncomingMessage, streamID string, content string) error
+
+	// EndStream finalizes a streaming reply.
+	EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error
+}

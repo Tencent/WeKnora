@@ -207,11 +207,15 @@ conversation:
       - If the user asks in Chinese, respond in Chinese
 
     context_template: |
-      The following is retrieved information:
+      The following is retrieved information that may or may not be relevant:
       {{contexts}}
 
-      Based on the above retrieved information, answer the following question:
-      {{query}}
+      User question: {{query}}
+
+      Instructions:
+      - If the retrieved information is relevant to the user's question, use it to provide an accurate answer.
+      - If the retrieved information is NOT relevant (e.g., the user is greeting, chatting, or asking something unrelated), ignore it and respond naturally as a helpful assistant.
+      - Do not mention "retrieved information" or "reference materials" in your response unless the user explicitly asks about sources.
   extract_entities_prompt: |
     ## Task
     Extract all entities from the user-provided text that match the following entity types:
@@ -553,9 +557,10 @@ im:
     enabled: true
     tenant_id: 10000                              # WeKnora tenant ID to use
     agent_id: ""                              # Default agent ID (optional)
-    knowledge_base_ids: 
-      - ""                   # Default knowledge bases (optional)
+    knowledge_base_ids:
+      - "2f046c68-869c-460f-866a-b149ac9a5195"                   # Default knowledge bases (optional)
     mode: "websocket"                           # "webhook" or "websocket"
+    output_mode: "stream"                       # "stream" (default, real-time) or "full" (wait for complete answer)
     # --- websocket mode (智能机器人长连接) ---
     bot_id: "${WECOM_BOT_ID}"              # 智能机器人 Bot ID
     bot_secret: "${WECOM_BOT_SECRET}"      # 智能机器人 Secret
@@ -570,8 +575,9 @@ im:
     tenant_id: 10000                           # WeKnora tenant ID to use
     agent_id: ""                              # Default agent ID (optional)
     knowledge_base_ids:                        # Default knowledge bases
-      - ""
+      - "2f046c68-869c-460f-866a-b149ac9a5195"
     mode: "websocket"                         # "webhook" or "websocket"
+    output_mode: "stream"                     # "stream" (default, real-time) or "full" (wait for complete answer)
     app_id: "${FEISHU_APP_ID}"                # 飞书 App ID
     app_secret: "${FEISHU_APP_SECRET}"        # 飞书 App Secret
     # --- 以下仅 webhook 模式需要，websocket 模式可留空 ---

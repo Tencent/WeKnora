@@ -35,8 +35,9 @@ import (
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-// Adapter implements im.Adapter for WeCom.
-type Adapter struct {
+// WebhookAdapter implements im.Adapter for WeCom in webhook (self-built app callback) mode.
+// Messages arrive via HTTP callback; replies are sent via the WeCom REST API.
+type WebhookAdapter struct {
 	corpID         string
 	token          string
 	encodingAESKey string
@@ -50,15 +51,15 @@ type Adapter struct {
 	tokenExpAt time.Time
 }
 
-// NewAdapter creates a new WeCom adapter.
-func NewAdapter(corpID, agentSecret, token, encodingAESKey string, corpAgentID int) (*Adapter, error) {
+// NewWebhookAdapter creates a new WeCom webhook adapter.
+func NewWebhookAdapter(corpID, agentSecret, token, encodingAESKey string, corpAgentID int) (*WebhookAdapter, error) {
 	// Decode the AES key from base64
 	aesKey, err := base64.StdEncoding.DecodeString(encodingAESKey + "=")
 	if err != nil {
 		return nil, fmt.Errorf("decode encoding_aes_key: %w", err)
 	}
 
-	return &Adapter{
+	return &WebhookAdapter{
 		corpID:         corpID,
 		token:          token,
 		encodingAESKey: encodingAESKey,
@@ -69,12 +70,12 @@ func NewAdapter(corpID, agentSecret, token, encodingAESKey string, corpAgentID i
 }
 
 // Platform returns the platform identifier.
-func (a *Adapter) Platform() im.Platform {
+func (a *WebhookAdapter) Platform() im.Platform {
 	return im.PlatformWeCom
 }
 
 // VerifyCallback verifies the WeCom callback signature.
-func (a *Adapter) VerifyCallback(c *gin.Context) error {
+func (a *WebhookAdapter) VerifyCallback(c *gin.Context) error {
 	timestamp := c.Query("timestamp")
 	nonce := c.Query("nonce")
 	msgSignature := c.Query("msg_signature")
@@ -105,7 +106,7 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 }
 
 // HandleURLVerification handles the WeCom URL verification (GET request).
-func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
+func (a *WebhookAdapter) HandleURLVerification(c *gin.Context) bool {
 	if c.Request.Method != http.MethodGet {
 		return false
 	}
@@ -128,7 +129,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 }
 
 // ParseCallback parses a WeCom callback into a unified IncomingMessage.
-func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
+func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
@@ -181,7 +182,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 // SendReply sends a reply message via WeCom API.
 // For simplicity, this uses the "应用消息" API to proactively send messages.
 // A production implementation would integrate with the streaming callback model.
-func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
+func (a *WebhookAdapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
 	// Get access token
 	accessToken, err := a.getAccessToken(ctx)
 	if err != nil {
@@ -235,7 +236,7 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 
 // getAccessToken retrieves the WeCom access token with caching.
 // WeCom tokens expire in 7200 seconds (2 hours); we cache with a safety margin.
-func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
+func (a *WebhookAdapter) getAccessToken(ctx context.Context) (string, error) {
 	a.tokenMu.Lock()
 	defer a.tokenMu.Unlock()
 
@@ -282,7 +283,7 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 }
 
 // verifySignature verifies the WeCom callback signature using constant-time comparison.
-func (a *Adapter) verifySignature(signature, timestamp, nonce, encrypt string) bool {
+func (a *WebhookAdapter) verifySignature(signature, timestamp, nonce, encrypt string) bool {
 	parts := []string{a.token, timestamp, nonce, encrypt}
 	sort.Strings(parts)
 	combined := strings.Join(parts, "")
@@ -295,7 +296,7 @@ func (a *Adapter) verifySignature(signature, timestamp, nonce, encrypt string) b
 }
 
 // decrypt decrypts a WeCom AES-encrypted message.
-func (a *Adapter) decrypt(encrypted string) ([]byte, error) {
+func (a *WebhookAdapter) decrypt(encrypted string) ([]byte, error) {
 	ciphertext, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
 		return nil, fmt.Errorf("base64 decode: %w", err)

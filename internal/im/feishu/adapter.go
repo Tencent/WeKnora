@@ -29,6 +29,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Compile-time check that Adapter implements im.StreamSender.
+var _ im.StreamSender = (*Adapter)(nil)
+
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 // Adapter implements im.Adapter for Feishu/Lark.
@@ -321,6 +324,329 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 		return fmt.Errorf("feishu api error: code=%d msg=%s", result.Code, result.Msg)
 	}
 
+	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Feishu CardKit v1 streaming implementation (official best practice)
+//
+// Flow:
+//  1. POST  /cardkit/v1/cards                                      — create card entity
+//  2. POST  /im/v1/messages  content={"type":"card","data":{"card_id":"…"}} — send card
+//  3. PUT   /cardkit/v1/cards/{id}/elements/{eid}/content          — stream element content
+//  4. PATCH /cardkit/v1/cards/{id}/settings                        — set streaming_mode=false
+//
+// Reference: https://github.com/larksuite/openclaw-lark (official Lark plugin)
+//            https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview
+// ──────────────────────────────────────────────────────────────────────
+
+const (
+	// streamingElementID is the element_id used in the card JSON for streaming content.
+	streamingElementID = "streaming_content"
+)
+
+// feishuStreamState tracks per-stream accumulated content.
+type feishuStreamState struct {
+	mu      sync.Mutex
+	content strings.Builder
+	seq     int64 // strictly incrementing sequence for CardKit API
+}
+
+var (
+	feishuStreamsMu sync.Mutex
+	feishuStreams    = map[string]*feishuStreamState{}
+)
+
+func (s *feishuStreamState) nextSeq() int {
+	s.seq++
+	return int(s.seq)
+}
+
+// buildStreamingCardJSON builds a Card JSON 2.0 with streaming_mode enabled.
+func buildStreamingCardJSON() string {
+	card := map[string]interface{}{
+		"schema": "2.0",
+		"config": map[string]interface{}{
+			"streaming_mode": true,
+			"summary":        map[string]string{"content": "正在思考..."},
+		},
+		"header": map[string]interface{}{
+			"template": "blue",
+			"title":    map[string]string{"tag": "plain_text", "content": "WeKnora"},
+		},
+		"body": map[string]interface{}{
+			"elements": []map[string]interface{}{
+				{
+					"tag":        "markdown",
+					"content":    "",
+					"text_size":  "normal",
+					"element_id": streamingElementID,
+				},
+			},
+		},
+	}
+	b, _ := json.Marshal(card)
+	return string(b)
+}
+
+// StartStream creates a CardKit card entity, sends it as a message, and returns the card_id.
+func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get access token: %w", err)
+	}
+
+	// 1. Create card entity via CardKit API
+	cardJSON := buildStreamingCardJSON()
+	cardID, err := a.cardkitCreate(ctx, accessToken, cardJSON)
+	if err != nil {
+		return "", fmt.Errorf("create card: %w", err)
+	}
+
+	// 2. Send the card as a message (content type="card")
+	if err := a.sendCardByCardID(ctx, accessToken, incoming, cardID); err != nil {
+		return "", fmt.Errorf("send card message: %w", err)
+	}
+
+	// 3. Track stream state
+	feishuStreamsMu.Lock()
+	feishuStreams[cardID] = &feishuStreamState{}
+	feishuStreamsMu.Unlock()
+
+	logger.Infof(ctx, "[Feishu] Streaming started: card_id=%s", cardID)
+	return cardID, nil
+}
+
+// SendStreamChunk accumulates content and pushes it to the card element.
+func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	if content == "" {
+		return nil
+	}
+
+	feishuStreamsMu.Lock()
+	state, ok := feishuStreams[streamID]
+	feishuStreamsMu.Unlock()
+	if !ok {
+		return fmt.Errorf("unknown stream ID: %s", streamID)
+	}
+
+	state.mu.Lock()
+	state.content.WriteString(content)
+	fullContent := state.content.String()
+	seq := state.nextSeq()
+	state.mu.Unlock()
+
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return fmt.Errorf("get access token: %w", err)
+	}
+
+	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, fullContent, seq)
+}
+
+// EndStream disables streaming_mode and cleans up state.
+func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
+	feishuStreamsMu.Lock()
+	state, ok := feishuStreams[streamID]
+	delete(feishuStreams, streamID)
+	feishuStreamsMu.Unlock()
+
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return fmt.Errorf("get access token: %w", err)
+	}
+
+	var seq int
+	if ok {
+		state.mu.Lock()
+		seq = state.nextSeq()
+		state.mu.Unlock()
+	}
+
+	// Turn off streaming_mode to remove loading indicator
+	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, seq); err != nil {
+		logger.Warnf(ctx, "[Feishu] Failed to disable streaming_mode: %v", err)
+	}
+
+	logger.Infof(ctx, "[Feishu] Streaming ended: card_id=%s", streamID)
+	return nil
+}
+
+// ── CardKit v1 API helpers ──
+
+// cardkitCreate creates a card entity and returns the card_id.
+// POST /open-apis/cardkit/v1/cards
+func (a *Adapter) cardkitCreate(ctx context.Context, accessToken, cardJSON string) (string, error) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "card_json",
+		"data": cardJSON,
+	})
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://open.feishu.cn/open-apis/cardkit/v1/cards", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	var result struct {
+		Code int             `json:"code"`
+		Msg  string          `json:"msg"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("decode: %w (body: %s)", err, string(respBody))
+	}
+	if result.Code != 0 {
+		return "", fmt.Errorf("code=%d msg=%s", result.Code, result.Msg)
+	}
+
+	var data struct {
+		CardID string `json:"card_id"`
+	}
+	if err := json.Unmarshal(result.Data, &data); err != nil {
+		return "", fmt.Errorf("parse card_id: %w (raw: %s)", err, string(result.Data))
+	}
+	return data.CardID, nil
+}
+
+// sendCardByCardID sends a card_id as an interactive message.
+// POST /open-apis/im/v1/messages  with content={"type":"card","data":{"card_id":"…"}}
+func (a *Adapter) sendCardByCardID(ctx context.Context, accessToken string, incoming *im.IncomingMessage, cardID string) error {
+	receiveIDType := "open_id"
+	receiveID := incoming.UserID
+	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
+		receiveIDType = "chat_id"
+		receiveID = incoming.ChatID
+	}
+
+	// Key: type must be "card" (not "card_id")
+	content, _ := json.Marshal(map[string]interface{}{
+		"type": "card",
+		"data": map[string]string{"card_id": cardID},
+	})
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"receive_id": receiveID,
+		"msg_type":   "interactive",
+		"content":    string(content),
+	})
+
+	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=%s", receiveIDType)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return fmt.Errorf("decode: %w (body: %s)", err, string(respBody))
+	}
+	if result.Code != 0 {
+		return fmt.Errorf("send card error: code=%d msg=%s", result.Code, result.Msg)
+	}
+	return nil
+}
+
+// cardkitUpdateElement updates a card element's content for streaming.
+// PUT /open-apis/cardkit/v1/cards/:card_id/elements/:element_id/content
+func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID, elementID, content string, sequence int) error {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"content":  content,
+		"sequence": sequence,
+	})
+
+	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/cardkit/v1/cards/%s/elements/%s/content",
+		cardID, elementID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, apiURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	if result.Code != 0 {
+		return fmt.Errorf("update element error: code=%d msg=%s", result.Code, result.Msg)
+	}
+	return nil
+}
+
+// cardkitSetStreaming updates the card's streaming_mode setting.
+// PATCH /open-apis/cardkit/v1/cards/:card_id/settings
+func (a *Adapter) cardkitSetStreaming(ctx context.Context, accessToken, cardID string, streaming bool, sequence int) error {
+	settings, _ := json.Marshal(map[string]interface{}{
+		"streaming_mode": streaming,
+	})
+	payload, _ := json.Marshal(map[string]interface{}{
+		"settings": string(settings),
+		"sequence": sequence,
+	})
+
+	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/cardkit/v1/cards/%s/settings", cardID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, apiURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+	if result.Code != 0 {
+		return fmt.Errorf("set streaming error: code=%d msg=%s", result.Code, result.Msg)
+	}
 	return nil
 }
 

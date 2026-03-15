@@ -24,6 +24,9 @@ const (
 	dedupCleanupInterval = 1 * time.Minute
 	// maxContentLength is the maximum allowed message content length.
 	maxContentLength = 4096
+	// streamFlushInterval is how often buffered stream content is flushed to the IM platform.
+	// This prevents API rate-limiting while keeping perceived latency low.
+	streamFlushInterval = 300 * time.Millisecond
 )
 
 // Service orchestrates IM message handling:
@@ -44,6 +47,9 @@ type Service struct {
 	// processedMsgs tracks recently processed message IDs to prevent duplicate handling.
 	processedMsgs sync.Map
 
+	// streamDisabled tracks platforms where streaming is explicitly disabled via output_mode config.
+	streamDisabled map[Platform]bool
+
 	stopCh chan struct{}
 }
 
@@ -62,6 +68,7 @@ func NewService(
 		tenantService:  tenantService,
 		agentService:   agentService,
 		adapters:       make(map[Platform]Adapter),
+		streamDisabled: make(map[Platform]bool),
 		stopCh:         make(chan struct{}),
 	}
 
@@ -101,6 +108,15 @@ func (s *Service) RegisterAdapter(adapter Adapter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.adapters[adapter.Platform()] = adapter
+}
+
+// SetStreamDisabled disables streaming output for a specific platform.
+// When disabled, the service will always collect the full answer before sending,
+// even if the adapter implements StreamSender.
+func (s *Service) SetStreamDisabled(platform Platform, disabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.streamDisabled[platform] = disabled
 }
 
 // GetAdapter returns the adapter for a given platform.
@@ -163,17 +179,28 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, tenan
 		}
 	}
 
-	// 5. Run the QA pipeline and collect the full answer
+	// 5. Get the platform adapter
+	adapter, ok := s.GetAdapter(msg.Platform)
+	if !ok {
+		return fmt.Errorf("no adapter for platform: %s", msg.Platform)
+	}
+
+	// 6. If the adapter supports streaming and streaming is not disabled, use streaming mode;
+	//    otherwise collect full answer.
+	s.mu.RLock()
+	disabled := s.streamDisabled[msg.Platform]
+	s.mu.RUnlock()
+	if !disabled {
+		if streamer, ok := adapter.(StreamSender); ok {
+			return s.handleMessageStream(sessionCtx, msg, session, customAgent, kbIDs, streamer)
+		}
+	}
+
+	// Non-streaming fallback: collect full answer then send
 	answer, err := s.runQA(sessionCtx, session, msg.Content, customAgent, kbIDs)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
-	}
-
-	// 6. Send the reply back via the platform adapter
-	adapter, ok := s.GetAdapter(msg.Platform)
-	if !ok {
-		return fmt.Errorf("no adapter for platform: %s", msg.Platform)
 	}
 
 	reply := &ReplyMessage{
@@ -247,6 +274,202 @@ func (s *Service) resolveSession(ctx context.Context, msg *IncomingMessage, tena
 		msg.Platform, msg.UserID, msg.ChatID, createdSession.ID)
 
 	return &cs, nil
+}
+
+// handleMessageStream runs the QA pipeline and streams answer chunks to the IM platform
+// in real-time via the StreamSender interface. Chunks are batched at streamFlushInterval
+// to avoid API rate-limiting.
+func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, streamer StreamSender) error {
+	// Start the stream on the IM platform (e.g., create Feishu streaming card)
+	streamID, err := streamer.StartStream(ctx, msg)
+	if err != nil {
+		logger.Warnf(ctx, "[IM] StartStream failed, falling back to non-streaming: %v", err)
+		return s.fallbackNonStream(ctx, msg, session, customAgent, kbIDs)
+	}
+
+	// Prepare the QA pipeline
+	qaCtx, qaCancel := context.WithTimeout(ctx, qaTimeout)
+	defer qaCancel()
+
+	eventBus := event.NewEventBus()
+
+	var (
+		bufMu         sync.Mutex
+		buf           strings.Builder // buffered content awaiting flush (answer only)
+		answerBuilder strings.Builder // full answer for DB persistence (includes <think>)
+		qaErr         error
+		done          = make(chan struct{})
+		closeOnce     sync.Once
+		inThinking    bool // tracks whether we're inside a <think> block
+	)
+	closeDone := func() { closeOnce.Do(func() { close(done) }) }
+
+	// Subscribe to answer chunks
+	eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentFinalAnswerData)
+		if !ok {
+			return nil
+		}
+
+		bufMu.Lock()
+		// Always persist the full content (including thinking)
+		answerBuilder.WriteString(data.Content)
+
+		// Filter <think>...</think> blocks from the streamed output.
+		// The pipeline emits: <think>..chunks..</think> then answer chunks.
+		content := data.Content
+		if !inThinking {
+			if strings.HasPrefix(content, "<think>") {
+				inThinking = true
+				content = "" // skip this chunk for streaming
+			}
+		}
+		if inThinking {
+			if idx := strings.Index(content, "</think>"); idx >= 0 {
+				inThinking = false
+				// Keep anything after </think>
+				content = strings.TrimSpace(content[idx+len("</think>"):])
+			} else {
+				content = "" // still inside thinking block
+			}
+		}
+
+		if content != "" {
+			buf.WriteString(content)
+		}
+		bufMu.Unlock()
+
+		if data.Done {
+			closeDone()
+		}
+		return nil
+	})
+
+	eventBus.On(event.EventError, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.ErrorData)
+		if !ok {
+			return nil
+		}
+		logger.Errorf(ctx, "[IM] QA stream error: %s", data.Error)
+		bufMu.Lock()
+		qaErr = fmt.Errorf("QA pipeline error: %s", data.Error)
+		bufMu.Unlock()
+		closeDone()
+		return nil
+	})
+
+	// Determine whether to use agent mode
+	useAgent := customAgent != nil && customAgent.IsAgentMode()
+	requestID := uuid.New().String()
+
+	// Create user message
+	if _, err := s.messageService.CreateMessage(qaCtx, &types.Message{
+		SessionID: session.ID, Role: "user", Content: msg.Content,
+		RequestID: requestID, CreatedAt: time.Now(), IsCompleted: true,
+	}); err != nil {
+		return fmt.Errorf("create user message: %w", err)
+	}
+
+	// Create placeholder assistant message
+	assistantMsg, err := s.messageService.CreateMessage(qaCtx, &types.Message{
+		SessionID: session.ID, Role: "assistant",
+		RequestID: requestID, CreatedAt: time.Now(), IsCompleted: false,
+	})
+	if err != nil {
+		return fmt.Errorf("create assistant message: %w", err)
+	}
+
+	// Run QA async
+	go func() {
+		var err error
+		if useAgent {
+			err = s.sessionService.AgentQA(qaCtx, session, msg.Content, assistantMsg.ID, "", eventBus, customAgent, kbIDs, nil)
+		} else {
+			err = s.sessionService.KnowledgeQA(qaCtx, session, msg.Content, kbIDs, nil, assistantMsg.ID, "", false, eventBus, customAgent, false)
+		}
+		if err != nil {
+			logger.Errorf(ctx, "[IM] QA stream execution error: %v", err)
+			bufMu.Lock()
+			qaErr = fmt.Errorf("QA execution error: %w", err)
+			bufMu.Unlock()
+			closeDone()
+		}
+	}()
+
+	// Flush loop: periodically send buffered content to the IM platform
+	ticker := time.NewTicker(streamFlushInterval)
+	defer ticker.Stop()
+
+	flush := func() {
+		bufMu.Lock()
+		chunk := buf.String()
+		buf.Reset()
+		bufMu.Unlock()
+
+		if chunk != "" {
+			if err := streamer.SendStreamChunk(ctx, msg, streamID, chunk); err != nil {
+				logger.Warnf(ctx, "[IM] SendStreamChunk failed: %v", err)
+			}
+		}
+	}
+
+loop:
+	for {
+		select {
+		case <-ticker.C:
+			flush()
+		case <-done:
+			break loop
+		case <-qaCtx.Done():
+			break loop
+		}
+	}
+
+	// Final flush of any remaining content
+	flush()
+
+	// End the stream
+	if err := streamer.EndStream(ctx, msg, streamID); err != nil {
+		logger.Warnf(ctx, "[IM] EndStream failed: %v", err)
+	}
+
+	// Persist the full answer
+	bufMu.Lock()
+	answer := answerBuilder.String()
+	finalErr := qaErr
+	bufMu.Unlock()
+
+	if answer == "" && finalErr != nil {
+		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+	}
+	if answer == "" {
+		answer = "抱歉，我暂时无法回答这个问题。"
+	}
+
+	assistantMsg.Content = answer
+	assistantMsg.IsCompleted = true
+	if err := s.messageService.UpdateMessage(ctx, assistantMsg); err != nil {
+		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
+	}
+
+	logger.Infof(ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d", msg.Platform, msg.UserID, len(answer))
+	return nil
+}
+
+// fallbackNonStream is used when streaming initialization fails.
+func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string) error {
+	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
+		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+	}
+
+	adapter, ok := s.GetAdapter(msg.Platform)
+	if !ok {
+		return fmt.Errorf("no adapter for platform: %s", msg.Platform)
+	}
+
+	return adapter.SendReply(ctx, msg, &ReplyMessage{Content: answer, IsFinal: true})
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.

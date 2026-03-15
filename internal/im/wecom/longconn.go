@@ -89,6 +89,12 @@ type LongConnClient struct {
 	mu     sync.Mutex
 	closed atomic.Bool
 	reqSeq atomic.Int64
+
+	// streamBufs tracks accumulated content per stream ID.
+	// WeCom stream protocol is replace-based: each frame's content replaces
+	// the previously displayed text, so we must send the full accumulated text.
+	streamBufsMu sync.Mutex
+	streamBufs   map[string]*strings.Builder
 }
 
 // NewLongConnClient creates a WeCom long connection client.
@@ -164,6 +170,86 @@ func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMes
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("marshal reply body: %w", err)
+	}
+
+	frame := wsFrame{
+		Cmd:     cmdResponse,
+		Headers: map[string]string{"req_id": reqID},
+		Body:    bodyBytes,
+	}
+
+	return c.writeJSON(frame)
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Streaming support: send answer chunks over WebSocket in real-time
+// ──────────────────────────────────────────────────────────────────────
+
+// StartStream begins a streaming reply session.
+// Returns a stream ID that must be used in subsequent chunk/end calls.
+func (c *LongConnClient) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
+	if _, ok := incoming.Extra["req_id"]; !ok {
+		return "", fmt.Errorf("missing req_id in incoming message extra")
+	}
+	streamID := fmt.Sprintf("stream_%d", c.reqSeq.Add(1))
+
+	// Initialize the accumulation buffer for this stream
+	c.streamBufsMu.Lock()
+	if c.streamBufs == nil {
+		c.streamBufs = make(map[string]*strings.Builder)
+	}
+	c.streamBufs[streamID] = &strings.Builder{}
+	c.streamBufsMu.Unlock()
+
+	return streamID, nil
+}
+
+// SendStreamChunk accumulates the content and sends the full text so far.
+// WeCom stream protocol is replace-based: each frame replaces the previous display.
+func (c *LongConnClient) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
+	if content == "" {
+		return nil
+	}
+
+	// Accumulate
+	c.streamBufsMu.Lock()
+	buf, ok := c.streamBufs[streamID]
+	if !ok {
+		c.streamBufsMu.Unlock()
+		return fmt.Errorf("unknown stream ID: %s", streamID)
+	}
+	buf.WriteString(content)
+	fullContent := buf.String()
+	c.streamBufsMu.Unlock()
+
+	return c.sendStreamFrame(incoming, streamID, fullContent, false)
+}
+
+// EndStream sends the final frame with the full accumulated content and cleans up.
+func (c *LongConnClient) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
+	c.streamBufsMu.Lock()
+	buf, ok := c.streamBufs[streamID]
+	var fullContent string
+	if ok {
+		fullContent = buf.String()
+		delete(c.streamBufs, streamID)
+	}
+	c.streamBufsMu.Unlock()
+
+	return c.sendStreamFrame(incoming, streamID, fullContent, true)
+}
+
+func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID, content string, finish bool) error {
+	reqID := incoming.Extra["req_id"]
+
+	body := streamReplyBody{MsgType: "stream"}
+	body.Stream.ID = streamID
+	body.Stream.Finish = finish
+	body.Stream.Content = content
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal stream body: %w", err)
 	}
 
 	frame := wsFrame{

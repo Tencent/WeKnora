@@ -44,6 +44,8 @@ type WeComIMConfig struct {
 	KnowledgeBases []string `yaml:"knowledge_base_ids" json:"knowledge_base_ids"`
 	// Mode: "webhook" (default, requires public domain) or "websocket" (long connection via intelligent bot, no public domain needed)
 	Mode string `yaml:"mode" json:"mode"`
+	// OutputMode: "stream" (default, real-time streaming) or "full" (wait for complete answer then send)
+	OutputMode string `yaml:"output_mode" json:"output_mode"`
 	// --- Webhook mode fields (self-built app callback) ---
 	CorpID         string `yaml:"corp_id"          json:"corp_id"`
 	AgentSecret    string `yaml:"agent_secret"     json:"agent_secret"`
@@ -67,6 +69,8 @@ type FeishuIMConfig struct {
 	EncryptKey        string   `yaml:"encrypt_key"        json:"encrypt_key"`
 	// Mode: "websocket" (default, long connection, no public domain needed) or "webhook" (requires public domain)
 	Mode string `yaml:"mode" json:"mode"`
+	// OutputMode: "stream" (default, real-time streaming) or "full" (wait for complete answer then send)
+	OutputMode string `yaml:"output_mode" json:"output_mode"`
 }
 
 // DocReaderConfig configures the document parser client (gRPC or HTTP).
