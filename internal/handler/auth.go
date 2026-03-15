@@ -87,7 +87,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	user, err := h.userService.Register(ctx, &req)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to register user: %v", err)
-		appErr := errors.NewBadRequestError("Registration failed").WithDetails(err.Error())
+		appErr := errors.NewBadRequestError(err.Error())
 		c.Error(appErr)
 		return
 	}
