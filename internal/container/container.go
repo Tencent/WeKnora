@@ -52,6 +52,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
+	imPkg "github.com/Tencent/WeKnora/internal/im"
+	"github.com/Tencent/WeKnora/internal/im/feishu"
+	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -235,6 +238,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
+
+	// IM integration
+	logger.Debugf(ctx, "[Container] Registering IM integration...")
+	must(container.Provide(imPkg.NewService))
+	must(container.Invoke(registerIMAdapters))
+	must(container.Provide(handler.NewIMHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Router configuration
@@ -936,4 +945,116 @@ func registerWebSearchProviders(registry *web_search.Registry) {
 	registry.Register(web_search.BingProviderInfo(), func() (interfaces.WebSearchProvider, error) {
 		return web_search.NewBingProvider()
 	})
+}
+
+// registerIMAdapters registers IM platform adapters based on configuration.
+// For "websocket" mode, it also starts a long connection client in a goroutine.
+func registerIMAdapters(cfg *config.Config, imService *imPkg.Service) {
+	if cfg.IM == nil {
+		logger.Infof(context.Background(), "[IM] No IM configuration found, skipping adapter registration")
+		return
+	}
+
+	ctx := context.Background()
+
+	// Register WeCom
+	if cfg.IM.WeCom != nil && cfg.IM.WeCom.Enabled {
+		registerWeComAdapter(ctx, cfg.IM.WeCom, imService)
+	}
+
+	// Register Feishu
+	if cfg.IM.Feishu != nil && cfg.IM.Feishu.Enabled {
+		registerFeishuAdapter(ctx, cfg.IM.Feishu, imService)
+	}
+}
+
+func registerWeComAdapter(ctx context.Context, cfg *config.WeComIMConfig, imService *imPkg.Service) {
+	mode := cfg.Mode
+	if mode == "" {
+		mode = "websocket"
+	}
+
+	switch mode {
+	case "webhook":
+		adapter, err := wecom.NewAdapter(
+			cfg.CorpID,
+			cfg.AgentSecret,
+			cfg.Token,
+			cfg.EncodingAESKey,
+			cfg.CorpAgentID,
+		)
+		if err != nil {
+			logger.Warnf(ctx, "[IM] Failed to create WeCom webhook adapter: %v", err)
+			return
+		}
+		imService.RegisterAdapter(adapter)
+		logger.Infof(ctx, "[IM] WeCom adapter registered (mode=webhook, corp_id=%s)", cfg.CorpID)
+
+	case "websocket":
+		// Build the message handler that delegates to imService.HandleMessage
+		handler := func(msgCtx context.Context, msg *imPkg.IncomingMessage) error {
+			return imService.HandleMessage(msgCtx, msg, cfg.TenantID, cfg.AgentID, cfg.KnowledgeBases)
+		}
+
+		client := wecom.NewLongConnClient(cfg.BotID, cfg.BotSecret, handler)
+
+		// Register a BotAdapter so the service can send replies via WebSocket
+		imService.RegisterAdapter(wecom.NewBotAdapter(client))
+		logger.Infof(ctx, "[IM] WeCom adapter registered (mode=websocket, bot_id=%s)", cfg.BotID)
+
+		// Start the long connection in a goroutine
+		go func() {
+			if err := client.Start(context.Background()); err != nil {
+				logger.Errorf(context.Background(), "[IM] WeCom long connection stopped: %v", err)
+			}
+		}()
+
+	default:
+		logger.Warnf(ctx, "[IM] Unknown WeCom mode: %s (expected 'webhook' or 'websocket')", mode)
+	}
+}
+
+func registerFeishuAdapter(ctx context.Context, cfg *config.FeishuIMConfig, imService *imPkg.Service) {
+	mode := cfg.Mode
+	if mode == "" {
+		mode = "websocket"
+	}
+
+	// Always register the HTTP adapter (needed for SendReply in both modes)
+	adapter := feishu.NewAdapter(
+		cfg.AppID,
+		cfg.AppSecret,
+		cfg.VerificationToken,
+		cfg.EncryptKey,
+	)
+	imService.RegisterAdapter(adapter)
+
+	switch mode {
+	case "webhook":
+		logger.Infof(ctx, "[IM] Feishu adapter registered (mode=webhook, app_id=%s)", cfg.AppID)
+
+	case "websocket":
+		logger.Infof(ctx, "[IM] Feishu adapter registered (mode=websocket, app_id=%s)", cfg.AppID)
+
+		// Build the message handler
+		handler := func(msgCtx context.Context, msg *imPkg.IncomingMessage) error {
+			return imService.HandleMessage(msgCtx, msg, cfg.TenantID, cfg.AgentID, cfg.KnowledgeBases)
+		}
+
+		client := feishu.NewLongConnClient(
+			cfg.AppID,
+			cfg.AppSecret,
+			handler,
+		)
+
+		// Start the long connection in a goroutine
+		go func() {
+			if err := client.Start(context.Background()); err != nil {
+				logger.Errorf(context.Background(), "[IM] Feishu long connection stopped: %v", err)
+			}
+		}()
+
+	default:
+		logger.Warnf(ctx, "[IM] Unknown Feishu mode: %s (expected 'webhook' or 'websocket')", mode)
+	}
 }

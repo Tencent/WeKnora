@@ -38,8 +38,8 @@ services:
     volumes:
       - data-files:/data/files
       - docreader-tmp:/tmp/docreader:ro
-      # Optional: mount custom config file
-      # - ./config/config.yaml:/app/config/config.yaml
+      # Mount custom config file (required for IM integration)
+      - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
     healthcheck:
@@ -114,6 +114,11 @@ services:
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
+      # IM integration
+      - FEISHU_APP_ID=${FEISHU_APP_ID:-}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - WECOM_BOT_ID=${WECOM_BOT_ID:-}
+      - WECOM_BOT_SECRET=${WECOM_BOT_SECRET:-}
       # File size limit (in MB)
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       # Agent Skills Sandbox

@@ -206,7 +206,12 @@ conversation:
       - If the user asks in English, respond in English
       - If the user asks in Chinese, respond in Chinese
 
-    context_template: "{{query}}"
+    context_template: |
+      The following is retrieved information:
+      {{contexts}}
+
+      Based on the above retrieved information, answer the following question:
+      {{query}}
   extract_entities_prompt: |
     ## Task
     Extract all entities from the user-provided text that match the following entity types:
@@ -536,3 +541,39 @@ extract:
 tenant:
   # Enable cross-tenant access (can be enabled for intranet environments)
   enable_cross_tenant_access: false
+
+# IM integration configuration (optional)
+# Uncomment and configure to enable WeCom/Feishu bot integration
+#
+# mode:
+#   "webhook"   — (default) platform pushes events to your callback URL, requires public domain
+#   "websocket" — long connection, no public domain needed, SDK maintains persistent connection
+im:
+  wecom:
+    enabled: true
+    tenant_id: 10000                              # WeKnora tenant ID to use
+    agent_id: ""                              # Default agent ID (optional)
+    knowledge_base_ids: 
+      - ""                   # Default knowledge bases (optional)
+    mode: "websocket"                           # "webhook" or "websocket"
+    # --- websocket mode (智能机器人长连接) ---
+    bot_id: "${WECOM_BOT_ID}"              # 智能机器人 Bot ID
+    bot_secret: "${WECOM_BOT_SECRET}"      # 智能机器人 Secret
+    # --- webhook mode (自建应用回调) ---
+    # corp_id: "${WECOM_CORP_ID}"               # 企业微信 Corp ID
+    # agent_secret: "${WECOM_AGENT_SECRET}"     # 应用 Secret
+    # token: "${WECOM_TOKEN}"                   # 回调 Token
+    # encoding_aes_key: "${WECOM_AES_KEY}"      # 回调 EncodingAESKey
+    # corp_agent_id: 1000001                    # 应用 AgentID
+  feishu:
+    enabled: true
+    tenant_id: 10000                           # WeKnora tenant ID to use
+    agent_id: ""                              # Default agent ID (optional)
+    knowledge_base_ids:                        # Default knowledge bases
+      - ""
+    mode: "websocket"                         # "webhook" or "websocket"
+    app_id: "${FEISHU_APP_ID}"                # 飞书 App ID
+    app_secret: "${FEISHU_APP_SECRET}"        # 飞书 App Secret
+    # --- 以下仅 webhook 模式需要，websocket 模式可留空 ---
+    # verification_token: "${FEISHU_TOKEN}"   # 事件订阅 Verification Token (webhook only)
+    # encrypt_key: "${FEISHU_ENCRYPT_KEY}"    # 事件订阅 Encrypt Key (webhook only)

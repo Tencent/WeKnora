@@ -59,6 +59,7 @@ type RouterParams struct {
 	CustomAgentHandler    *handler.CustomAgentHandler
 	SkillHandler          *handler.SkillHandler
 	OrganizationHandler   *handler.OrganizationHandler
+	IMHandler             *handler.IMHandler
 }
 
 // NewRouter 创建新的路由
@@ -102,6 +103,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 	if handler.Edition == "lite" {
 		serveFrontendStatic(r)
 	}
+
+	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
+	RegisterIMRoutes(r, params.IMHandler)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
@@ -574,6 +578,19 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 	// Shared agents route
 	r.GET("/shared-agents", orgHandler.ListSharedAgents)
 	r.POST("/shared-agents/disabled", orgHandler.SetSharedAgentDisabledByMe)
+}
+
+// RegisterIMRoutes registers IM callback routes.
+// These are registered BEFORE auth middleware since IM platforms use their own signature verification.
+func RegisterIMRoutes(r *gin.Engine, imHandler *handler.IMHandler) {
+	im := r.Group("/api/v1/im")
+	{
+		// WeCom callback (supports both GET for URL verification and POST for message events)
+		im.GET("/callback/wecom", imHandler.WeComCallback)
+		im.POST("/callback/wecom", imHandler.WeComCallback)
+		// Feishu callback (POST for both URL verification challenge and message events)
+		im.POST("/callback/feishu", imHandler.FeishuCallback)
+	}
 }
 
 // serveFrontendStatic registers a middleware that serves the frontend SPA

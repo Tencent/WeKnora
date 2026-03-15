@@ -27,6 +27,46 @@ type Config struct {
 	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
 	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
+	IM              *IMConfig              `yaml:"im"               json:"im"`
+}
+
+// IMConfig IM 集成配置
+type IMConfig struct {
+	WeCom  *WeComIMConfig  `yaml:"wecom"  json:"wecom"`
+	Feishu *FeishuIMConfig `yaml:"feishu" json:"feishu"`
+}
+
+// WeComIMConfig 企业微信配置
+type WeComIMConfig struct {
+	Enabled        bool     `yaml:"enabled"          json:"enabled"`
+	TenantID       uint64   `yaml:"tenant_id"        json:"tenant_id"`
+	AgentID        string   `yaml:"agent_id"         json:"agent_id"`
+	KnowledgeBases []string `yaml:"knowledge_base_ids" json:"knowledge_base_ids"`
+	// Mode: "webhook" (default, requires public domain) or "websocket" (long connection via intelligent bot, no public domain needed)
+	Mode string `yaml:"mode" json:"mode"`
+	// --- Webhook mode fields (self-built app callback) ---
+	CorpID         string `yaml:"corp_id"          json:"corp_id"`
+	AgentSecret    string `yaml:"agent_secret"     json:"agent_secret"`
+	Token          string `yaml:"token"            json:"token"`
+	EncodingAESKey string `yaml:"encoding_aes_key" json:"encoding_aes_key"`
+	CorpAgentID    int    `yaml:"corp_agent_id"    json:"corp_agent_id"`
+	// --- WebSocket mode fields (intelligent bot long connection) ---
+	BotID     string `yaml:"bot_id"     json:"bot_id"`
+	BotSecret string `yaml:"bot_secret" json:"bot_secret"`
+}
+
+// FeishuIMConfig 飞书配置
+type FeishuIMConfig struct {
+	Enabled           bool     `yaml:"enabled"            json:"enabled"`
+	TenantID          uint64   `yaml:"tenant_id"          json:"tenant_id"`
+	AgentID           string   `yaml:"agent_id"           json:"agent_id"`
+	KnowledgeBases    []string `yaml:"knowledge_base_ids" json:"knowledge_base_ids"`
+	AppID             string   `yaml:"app_id"             json:"app_id"`
+	AppSecret         string   `yaml:"app_secret"         json:"app_secret"`
+	VerificationToken string   `yaml:"verification_token" json:"verification_token"`
+	EncryptKey        string   `yaml:"encrypt_key"        json:"encrypt_key"`
+	// Mode: "websocket" (default, long connection, no public domain needed) or "webhook" (requires public domain)
+	Mode string `yaml:"mode" json:"mode"`
 }
 
 // DocReaderConfig configures the document parser client (gRPC or HTTP).
