@@ -613,6 +613,8 @@ var cosFieldPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 func sanitizeStorageCheckError(err error) string {
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "Endpoint url cannot have fully qualified paths"):
+		return "Endpoint 地址格式错误：请去除 http:// 或 https:// 前缀，只填写域名或 IP 地址和端口（例如：minio.example.com:9000）"
 	case strings.Contains(msg, "no such host"):
 		return "DNS 解析失败，请检查地址是否正确"
 	case strings.Contains(msg, "connection refused"):
