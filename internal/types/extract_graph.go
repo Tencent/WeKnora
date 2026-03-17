@@ -66,6 +66,7 @@ type SummaryGenerationPayload struct {
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
+	Language        string `json:"language,omitempty"`
 }
 
 // KBClonePayload represents the knowledge base clone task payload

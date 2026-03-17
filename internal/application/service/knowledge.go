@@ -1931,10 +1931,12 @@ func (s *knowledgeService) enqueueSummaryGenerationTask(ctx context.Context,
 	kbID, knowledgeID string,
 ) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	lang, _ := types.LanguageFromContext(ctx)
 	payload := types.SummaryGenerationPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
 		KnowledgeID:     knowledgeID,
+		Language:        lang,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -1962,8 +1964,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 
 	logger.Infof(ctx, "Processing summary generation for knowledge: %s", payload.KnowledgeID)
 
-	// Set tenant context
+	// Set tenant and language context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 
 	// Get knowledge base
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
