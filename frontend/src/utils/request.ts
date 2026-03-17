@@ -19,6 +19,11 @@ const instance = axios.create({
   },
 });
 
+// 获取当前用户语言（用于 Accept-Language header）
+function getCurrentLanguage(): string {
+  return i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN'
+}
+
 
 instance.interceptors.request.use(
   (config) => {
@@ -27,6 +32,9 @@ instance.interceptors.request.use(
     if (token) {
       config.headers["Authorization"] = `Bearer ${token}`;
     }
+    
+    // 添加用户语言偏好
+    config.headers["Accept-Language"] = getCurrentLanguage();
     
     // 添加跨租户访问请求头（如果选择了其他租户）
     const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');

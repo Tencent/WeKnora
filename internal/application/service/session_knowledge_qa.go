@@ -124,6 +124,7 @@ func (s *sessionService) KnowledgeQA(
 		ImageDescription:        req.ImageDescription,
 		VLMModelID:              vlmModelID,
 		ChatModelSupportsVision: chatModelSupportsVision,
+		Language:                types.LanguageNameFromContext(ctx),
 	}
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
@@ -729,7 +730,10 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 	if rq := strings.TrimSpace(chatManage.RewriteQuery); rq != "" {
 		query = rq
 	}
-	result := strings.ReplaceAll(chatManage.FallbackPrompt, "{{query}}", query)
+	result := types.RenderPromptPlaceholders(chatManage.FallbackPrompt, types.PlaceholderValues{
+		"query":    query,
+		"language": chatManage.Language,
+	})
 
 	if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
 		result += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription

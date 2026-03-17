@@ -203,6 +203,7 @@ func (s *agentService) CreateAgentEngine(
 		sessionID,
 		systemPromptTemplate,
 	)
+	engine.SetAppConfig(s.cfg)
 
 	// Initialize skills manager if skills are enabled
 	if config.SkillsEnabled && len(config.SkillDirs) > 0 {

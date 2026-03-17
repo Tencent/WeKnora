@@ -79,6 +79,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// 基础中间件（不需要认证）
 	r.Use(middleware.RequestID())
+	r.Use(middleware.Language())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())

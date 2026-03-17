@@ -504,7 +504,7 @@ func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 				"reflection_enabled":       agent.DefaultAgentReflectionEnabled,
 				"allowed_tools":            agenttools.DefaultAllowedTools(),
 				"temperature":              agent.DefaultAgentTemperature,
-				"system_prompt":            agent.ProgressiveRAGSystemPrompt,
+				"system_prompt":            agent.GetProgressiveRAGSystemPrompt(h.config),
 				"use_custom_system_prompt": false,
 				"available_tools":          availableTools,
 				"available_placeholders":   availablePlaceholders,
@@ -516,7 +516,7 @@ func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 	// Get system prompt, use default if empty
 	systemPrompt := tenant.AgentConfig.ResolveSystemPrompt(true) // webSearchEnabled doesn't matter for unified prompt
 	if systemPrompt == "" {
-		systemPrompt = agent.ProgressiveRAGSystemPrompt
+		systemPrompt = agent.GetProgressiveRAGSystemPrompt(h.config)
 	}
 
 	logger.Infof(ctx, "Retrieved tenant agent config successfully, Tenant ID: %d", tenant.ID)
@@ -1023,9 +1023,24 @@ func (h *TenantHandler) GetPromptTemplates(c *gin.Context) {
 		templates = &config.PromptTemplatesConfig{}
 	}
 
+	// Determine user language from context (set by Language middleware)
+	lang, _ := types.LanguageFromContext(c.Request.Context())
+
+	// Build a localized copy so the original config is never mutated
+	localized := &config.PromptTemplatesConfig{
+		SystemPrompt:         config.LocalizeTemplates(templates.SystemPrompt, lang),
+		ContextTemplate:      config.LocalizeTemplates(templates.ContextTemplate, lang),
+		Rewrite:              config.LocalizeTemplates(templates.Rewrite, lang),
+		Fallback:             config.LocalizeTemplates(templates.Fallback, lang),
+		GenerateSessionTitle: templates.GenerateSessionTitle,
+		GenerateSummary:      templates.GenerateSummary,
+		KeywordsExtraction:   templates.KeywordsExtraction,
+		AgentSystemPrompt:    config.LocalizeTemplates(templates.AgentSystemPrompt, lang),
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    templates,
+		"data":    localized,
 	})
 }
 

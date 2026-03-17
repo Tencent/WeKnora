@@ -471,6 +471,30 @@ func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Co
 }
 
 func (h *InitializationHandler) validateInitializationConfigs(ctx context.Context, req *InitializationRequest) error {
+	// SSRF validation for all user-supplied BaseURLs
+	urlsToCheck := []struct {
+		label string
+		url   string
+	}{
+		{"LLM BaseURL", req.LLM.BaseURL},
+		{"Embedding BaseURL", req.Embedding.BaseURL},
+		{"Rerank BaseURL", req.Rerank.BaseURL},
+	}
+	if req.Multimodal.VLM != nil {
+		urlsToCheck = append(urlsToCheck, struct {
+			label string
+			url   string
+		}{"VLM BaseURL", req.Multimodal.VLM.BaseURL})
+	}
+	for _, u := range urlsToCheck {
+		if u.url != "" {
+			if err := utils.ValidateURLForSSRF(u.url); err != nil {
+				logger.Warnf(ctx, "SSRF validation failed for %s: %v", u.label, err)
+				return errors.NewBadRequestError(fmt.Sprintf("%s 未通过安全校验: %v", u.label, err))
+			}
+		}
+	}
+
 	if err := h.validateMultimodalConfig(ctx, req); err != nil {
 		return err
 	}
@@ -1461,6 +1485,13 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		return
 	}
 
+	// SSRF validation
+	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for remote model BaseURL: %v", err)
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		return
+	}
+
 	// 创建模型配置进行测试
 	modelConfig := &types.Model{
 		Name:   req.ModelName,
@@ -1516,6 +1547,15 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse embedding test request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
+	}
+
+	// SSRF validation for embedding BaseURL
+	if req.BaseURL != "" {
+		if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+			logger.Warnf(ctx, "SSRF validation failed for embedding BaseURL: %v", err)
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			return
+		}
 	}
 
 	// 检查是否是阿里云多模态 embedding 模型（暂不支持）
@@ -1705,6 +1745,13 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 		return
 	}
 
+	// SSRF validation
+	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for rerank BaseURL: %v", err)
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		return
+	}
+
 	// 检查Rerank模型连接和功能
 	available, message := h.checkRerankModelConnection(
 		ctx, req.ModelName, req.BaseURL, req.APIKey,
@@ -1788,6 +1835,14 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("VLM模型名称和Base URL不能为空"))
 		return
 	}
+
+	// SSRF validation for VLM BaseURL
+	if err := utils.ValidateURLForSSRF(req.VLMBaseURL); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for VLM BaseURL: %v", err)
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("VLM Base URL 未通过安全校验: %v", err)))
+		return
+	}
+
 	switch req.StorageType {
 	case "cos":
 		// 必填：SecretID/SecretKey/Region/BucketName/AppID；PathPrefix 可选

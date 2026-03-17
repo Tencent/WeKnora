@@ -2637,90 +2637,10 @@ export default {
     noTemplates: 'No templates available',
     selectTemplate: 'Select Template',
     useTemplate: 'Use Template',
+    resetDefault: 'Reset Default',
+    default: 'Default',
     withKnowledgeBase: 'KB',
     withWebSearch: 'Web Search',
-    systemPrompt: {
-      defaultKB: {
-        name: 'Knowledge Base Assistant',
-        desc: 'Basic knowledge base Q&A template for most scenarios',
-      },
-      expert: {
-        name: 'Domain Expert',
-        desc: 'Professional and in-depth answers for technical domains',
-      },
-      customerService: {
-        name: 'Customer Service',
-        desc: 'Friendly and warm service style for customer support',
-      },
-      techSupport: {
-        name: 'Technical Support',
-        desc: 'Professional technical problem solving with code examples',
-      },
-      pureChat: {
-        name: 'General Chat',
-        desc: 'General conversation assistant without knowledge base',
-      },
-      webSearch: {
-        name: 'Web Search Assistant',
-        desc: 'Combines web search for up-to-date information',
-      },
-    },
-    contextTemplate: {
-      default: {
-        name: 'Standard Template',
-        desc: 'Basic context template with clear references and questions',
-      },
-      detailed: {
-        name: 'Detailed Template',
-        desc: 'Complete template with detailed instructions and requirements',
-      },
-      simple: {
-        name: 'Simple Template',
-        desc: 'Minimal template format for simple Q&A scenarios',
-      },
-      qa: {
-        name: 'Q&A Template',
-        desc: 'Optimized template for Q&A scenarios',
-      },
-    },
-    rewriteSystem: {
-      default: {
-        name: 'Standard Rewrite',
-        desc: 'Standard rules for resolving references and completing omissions',
-      },
-      strict: {
-        name: 'Strict Rewrite',
-        desc: 'Stricter requirements for complete and independent questions',
-      },
-    },
-    rewriteUser: {
-      default: {
-        name: 'Standard Format',
-        desc: 'Standard format with conversation history and current question',
-      },
-      detailed: {
-        name: 'Detailed Format',
-        desc: 'Detailed format with task instructions',
-      },
-    },
-    fallback: {
-      default: {
-        name: 'Standard Fallback',
-        desc: 'Friendly message with suggestions when unable to answer',
-      },
-      polite: {
-        name: 'Polite Fallback',
-        desc: 'More polite and detailed unable-to-answer message',
-      },
-      brief: {
-        name: 'Brief Fallback',
-        desc: 'Short unable-to-answer message',
-      },
-      model: {
-        name: 'Model Fallback Prompt',
-        desc: 'Prompt to guide model to answer with general knowledge',
-      },
-    },
   },
   organization: {
     title: 'Shared Spaces',

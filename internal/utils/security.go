@@ -7,9 +7,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -810,4 +812,159 @@ func ssrfSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 		KeepAlive: 30 * time.Second,
 	}
 	return dialer.DialContext(ctx, network, addr)
+}
+
+// ---------------------------------------------------------------------------
+// SSRF Whitelist mechanism
+// ---------------------------------------------------------------------------
+//
+// The environment variable SSRF_WHITELIST accepts a comma-separated list of
+// allowed host patterns. Each entry can be:
+//   - An exact domain: "example.com"
+//   - A wildcard domain: "*.example.com" (matches all subdomains)
+//   - An IP address: "203.0.113.5"
+//   - A CIDR range: "10.0.0.0/8"
+//
+// Whitelisted entries bypass the normal SSRF checks performed by IsSSRFSafeURL.
+
+var (
+	ssrfWhitelistOnce sync.Once
+	ssrfWhitelist     *ssrfWhitelistConfig
+)
+
+type ssrfWhitelistConfig struct {
+	exactHosts  map[string]bool // lowercase exact hostnames / IPs
+	suffixHosts []string        // suffix matches (from "*.example.com" → ".example.com")
+	cidrNets    []*net.IPNet    // CIDR ranges
+}
+
+// loadSSRFWhitelist parses the SSRF_WHITELIST environment variable once.
+func loadSSRFWhitelist() *ssrfWhitelistConfig {
+	ssrfWhitelistOnce.Do(func() {
+		ssrfWhitelist = &ssrfWhitelistConfig{
+			exactHosts: make(map[string]bool),
+		}
+		raw := os.Getenv("SSRF_WHITELIST")
+		if raw == "" {
+			return
+		}
+		for _, entry := range strings.Split(raw, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			// CIDR range
+			if strings.Contains(entry, "/") {
+				_, ipNet, err := net.ParseCIDR(entry)
+				if err == nil {
+					ssrfWhitelist.cidrNets = append(ssrfWhitelist.cidrNets, ipNet)
+					continue
+				}
+			}
+			// Wildcard domain: *.example.com
+			if strings.HasPrefix(entry, "*.") {
+				suffix := strings.ToLower(entry[1:]) // ".example.com"
+				ssrfWhitelist.suffixHosts = append(ssrfWhitelist.suffixHosts, suffix)
+				continue
+			}
+			// Exact host or IP
+			ssrfWhitelist.exactHosts[strings.ToLower(entry)] = true
+		}
+	})
+	return ssrfWhitelist
+}
+
+// IsSSRFWhitelisted checks whether the given hostname (or IP string) is
+// covered by the SSRF_WHITELIST environment variable.
+func IsSSRFWhitelisted(hostname string) bool {
+	wl := loadSSRFWhitelist()
+	if wl == nil {
+		return false
+	}
+	lower := strings.ToLower(hostname)
+
+	// Exact match
+	if wl.exactHosts[lower] {
+		return true
+	}
+
+	// Suffix / wildcard match
+	for _, suffix := range wl.suffixHosts {
+		if strings.HasSuffix(lower, suffix) || lower == suffix[1:] {
+			return true
+		}
+	}
+
+	// CIDR match (only when hostname looks like an IP)
+	if ip := net.ParseIP(hostname); ip != nil {
+		for _, cidr := range wl.cidrNets {
+			if cidr.Contains(ip) {
+				return true
+			}
+		}
+	}
+
+	// Also resolve and check resolved IPs against CIDR whitelist
+	if net.ParseIP(hostname) == nil && len(wl.cidrNets) > 0 {
+		if ips, err := net.LookupIP(hostname); err == nil {
+			for _, ip := range ips {
+				for _, cidr := range wl.cidrNets {
+					if cidr.Contains(ip) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// ResetSSRFWhitelistForTest resets the whitelist singleton so tests can
+// re-read the environment variable. NOT for production use.
+func ResetSSRFWhitelistForTest() {
+	ssrfWhitelistOnce = sync.Once{}
+	ssrfWhitelist = nil
+}
+
+// ValidateURLForSSRF is the centralised entry-point that all handlers should
+// call to validate a user-supplied URL. It first checks the SSRF_WHITELIST;
+// whitelisted hosts skip the full IsSSRFSafeURL check.
+//
+// rawURL may be a full URL ("https://example.com/v1") or a bare host/host:port
+// (for cases like ReconnectDocReader). If a scheme is missing the function
+// prepends "https://" before parsing so that net/url can extract the host.
+//
+// Returns nil when the URL is safe, or an error describing the problem.
+func ValidateURLForSSRF(rawURL string) error {
+	if rawURL == "" {
+		return nil // callers that require non-empty should validate separately
+	}
+
+	// Normalise: if no scheme, prepend https:// so url.Parse works correctly.
+	normalized := rawURL
+	if !strings.Contains(normalized, "://") {
+		normalized = "https://" + normalized
+	}
+
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("URL has no hostname")
+	}
+
+	// If the host is whitelisted, skip the heavy checks.
+	if IsSSRFWhitelisted(hostname) {
+		return nil
+	}
+
+	// Delegate to the full SSRF validation (uses the normalised URL).
+	if safe, reason := IsSSRFSafeURL(normalized); !safe {
+		return fmt.Errorf("SSRF validation failed: %s", reason)
+	}
+	return nil
 }

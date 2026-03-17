@@ -1,0 +1,16 @@
+# Generate session title prompt templates
+templates:
+  - id: "default_session_title"
+    name: "Standard Title"
+    description: "Generate a concise session title from user's question"
+    default: true
+    content: |
+      Generate a short session title based on the user's question.
+
+      Requirements:
+      - 3-8 words
+      - Extract the core topic
+      - Output only the title, no explanation needed
+      - IMPORTANT: Use {{language}} for the title
+
+      User question:

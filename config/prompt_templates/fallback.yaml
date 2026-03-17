@@ -1,8 +1,23 @@
-# Fallback prompt templates
+# Fallback templates
+# Contains both fixed-response templates and model-fallback prompt templates.
+# Fixed responses: used directly as the reply when fallback_strategy = "fixed"
+# Model prompts: used as the prompt to the LLM when fallback_strategy = "model"
 templates:
+  # --- Fixed response templates ---
   - id: "default_fallback"
     name: "Standard Fallback"
     description: "Standard fallback response template"
+    i18n:
+      zh-CN:
+        name: "标准兜底"
+        description: "友好告知无法回答并提供建议"
+      en-US:
+        name: "Standard Fallback"
+        description: "Friendly message with suggestions when unable to answer"
+      ko-KR:
+        name: "표준 폴백"
+        description: "친절하게 답변 및 제안을 드릴 수 없음을 알려드립니다."
+    default: true
     content: |
       Sorry, I could not find content directly related to your question in the knowledge base.
 
@@ -16,6 +31,16 @@ templates:
   - id: "polite_fallback"
     name: "Polite Fallback"
     description: "More polite and friendly fallback response"
+    i18n:
+      zh-CN:
+        name: "礼貌兜底"
+        description: "更加礼貌详细的无法回答提示"
+      en-US:
+        name: "Polite Fallback"
+        description: "More polite and detailed unable-to-answer message"
+      ko-KR:
+        name: "정중한 폴백"
+        description: "더 정중하고 자세한 답변 불가 프롬프트"
     content: |
       I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
       - The question is beyond my knowledge scope
@@ -31,11 +56,33 @@ templates:
   - id: "brief_fallback"
     name: "Brief Fallback"
     description: "Short fallback response"
+    i18n:
+      zh-CN:
+        name: "简洁兜底"
+        description: "简短的无法回答提示"
+      en-US:
+        name: "Brief Fallback"
+        description: "Short unable-to-answer message"
+      ko-KR:
+        name: "간단한 폴백"
+        description: "대답할 수 없는 짧은 프롬프트"
     content: "Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support."
 
+  # --- Model fallback prompt templates (for fallback_strategy = "model") ---
   - id: "model_fallback"
     name: "Model Fallback"
     description: "Fallback prompt that delegates to the model for generation"
+    i18n:
+      zh-CN:
+        name: "模型兜底提示"
+        description: "引导模型基于通用知识回答的提示词"
+      en-US:
+        name: "Model Fallback Prompt"
+        description: "Prompt to guide model to answer with general knowledge"
+      ko-KR:
+        name: "모델 폴백 프롬프트"
+        description: "일반 지식을 바탕으로 모델이 답변하도록 안내하는 프롬프트"
+    mode: "model"
     content: |
       No content directly related to the user's question was found in the knowledge base. Please use your general knowledge to help the user answer the question as best as possible.
 
@@ -43,6 +90,35 @@ templates:
       1. Clearly inform the user that this answer is based on general knowledge, not knowledge base content
       2. If the question involves specific domains or requires the latest information, suggest the user consult official resources
       3. Maintain accuracy and objectivity in the response
-      4. IMPORTANT: Always respond in the same language as the user's question
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
 
       User question: {{query}}
+
+  - id: "default_fallback_prompt"
+    name: "Standard Fallback Prompt"
+    description: "Default prompt that delegates to the model when KB has no relevant results"
+    i18n:
+      zh-CN:
+        name: "标准兜底 Prompt"
+        description: "知识库无相关结果时引导模型回答的默认提示词"
+      en-US:
+        name: "Standard Fallback Prompt"
+        description: "Default prompt that delegates to the model when KB has no relevant results"
+      ko-KR:
+        name: "표준 폴백 프롬프트"
+        description: "KB에 관련 결과가 없을 때 모델에 위임하는 기본 프롬프트"
+    mode: "model"
+    content: |
+      You are a professional and friendly AI assistant. Please answer the user's question based on your knowledge.
+
+      ## Response Requirements
+      - Answer the user's question directly
+      - Be concise, clear, and substantive
+      - If real-time data or personal privacy information is involved, honestly state that it cannot be obtained
+      - Use a polite and professional tone
+      - IMPORTANT: Always respond in {{language}}
+
+      ## User's question:
+      {{query}}

@@ -138,10 +138,11 @@
                             class="system-prompt-textarea"
                           />
                           <PromptTemplateSelector 
-                            type="systemPrompt" 
+                            type="agentSystemPrompt" 
                             position="corner"
                             :hasKnowledgeBase="hasKnowledgeBase"
                             @select="handleSystemPromptTemplateSelect"
+                            @reset-default="handleSystemPromptTemplateSelect"
                           />
                         </div>
                         <!-- 普通模式：单个提示词 -->
@@ -159,6 +160,7 @@
                             position="corner"
                             :hasKnowledgeBase="hasKnowledgeBase"
                             @select="handleSystemPromptTemplateSelect"
+                            @reset-default="handleSystemPromptTemplateSelect"
                           />
                         </div>
                         <!-- 占位符提示下拉框 -->
@@ -225,6 +227,7 @@
                             position="corner"
                             :hasKnowledgeBase="hasKnowledgeBase"
                             @select="handleContextTemplateSelect"
+                            @reset-default="handleContextTemplateSelect"
                           />
                         </div>
                         <!-- 上下文模板占位符提示下拉框 -->
@@ -467,9 +470,10 @@
                             @input="handleRewriteSystemInput"
                           />
                           <PromptTemplateSelector 
-                            type="rewriteSystem" 
+                            type="rewrite" 
                             position="corner"
-                            @select="handleRewriteSystemTemplateSelect"
+                            @select="handleRewriteTemplateSelect"
+                            @reset-default="handleRewriteTemplateSelect"
                           />
                         </div>
                         <Teleport to="body">
@@ -530,9 +534,10 @@
                             @input="handleRewriteUserInput"
                           />
                           <PromptTemplateSelector 
-                            type="rewriteUser" 
+                            type="rewrite" 
                             position="corner"
-                            @select="handleRewriteUserTemplateSelect"
+                            @select="handleRewriteTemplateSelect"
+                            @reset-default="handleRewriteTemplateSelect"
                           />
                         </div>
                         <Teleport to="body">
@@ -1039,7 +1044,9 @@
                             <PromptTemplateSelector 
                               type="fallback" 
                               position="corner"
+                              fallbackMode="fixed"
                               @select="handleFallbackResponseTemplateSelect"
+                              @reset-default="handleFallbackResponseTemplateSelect"
                             />
                           </div>
                         </div>
@@ -1079,7 +1086,9 @@
                             <PromptTemplateSelector 
                               type="fallback" 
                               position="corner"
+                              fallbackMode="model"
                               @select="handleFallbackPromptTemplateSelect"
+                              @reset-default="handleFallbackPromptTemplateSelect"
                             />
                           </div>
                           <Teleport to="body">
@@ -1155,7 +1164,7 @@ import { listModels, type ModelConfig } from '@/api/model';
 import { listKnowledgeBases } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { listSkills, type SkillInfo } from '@/api/skill';
-import { getAgentConfig, getConversationConfig, getStorageEngineStatus, type StorageEngineStatusItem } from '@/api/system';
+import { getAgentConfig, getConversationConfig, getStorageEngineStatus, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import AgentAvatar from '@/components/AgentAvatar.vue';
@@ -1560,9 +1569,33 @@ watch(() => props.visible, async (val) => {
       newFormData.config.rerank_threshold = defaultRerankThreshold.value;
       newFormData.config.max_completion_tokens = defaultMaxCompletionTokens.value;
       newFormData.config.temperature = defaultTemperature.value;
-      // 应用系统默认上下文模板
-      if (defaultContextTemplate.value) {
-        newFormData.config.context_template = defaultContextTemplate.value;
+      // 应用系统默认提示词（根据模式填充）
+      const isAgent = newFormData.config.agent_mode === 'smart-reasoning';
+      if (isAgent) {
+        // Agent 模式使用 agent-config 的默认系统提示词
+        if (defaultAgentSystemPrompt.value) {
+          newFormData.config.system_prompt = defaultAgentSystemPrompt.value;
+        }
+      } else {
+        // 快速问答模式使用 conversation-config 的默认提示词
+        if (defaultNormalSystemPrompt.value) {
+          newFormData.config.system_prompt = defaultNormalSystemPrompt.value;
+        }
+        if (defaultContextTemplate.value) {
+          newFormData.config.context_template = defaultContextTemplate.value;
+        }
+        if (defaultRewritePromptSystem.value) {
+          newFormData.config.rewrite_prompt_system = defaultRewritePromptSystem.value;
+        }
+        if (defaultRewritePromptUser.value) {
+          newFormData.config.rewrite_prompt_user = defaultRewritePromptUser.value;
+        }
+        if (defaultFallbackPrompt.value) {
+          newFormData.config.fallback_prompt = defaultFallbackPrompt.value;
+        }
+        if (defaultFallbackResponse.value) {
+          newFormData.config.fallback_response = defaultFallbackResponse.value;
+        }
       }
       formData.value = newFormData;
       kbSelectionMode.value = 'none';
@@ -1686,7 +1719,7 @@ watch(skillsSelectionMode, (mode) => {
 });
 
 // 监听模式变化，自动调整配置
-watch(agentMode, (val) => {
+watch(agentMode, (val, _oldVal) => {
   if (val === 'smart-reasoning') {
     // 切换到 Agent 模式，根据知识库配置启用工具
     if (formData.value.config.allowed_tools.length === 0) {
@@ -1710,10 +1743,40 @@ watch(agentMode, (val) => {
     if (formData.value.config.max_iterations <= 1) {
       formData.value.config.max_iterations = 10;
     }
+    // 切换到 Agent 模式时，如果系统提示词是快速问答的默认值或为空，替换为 Agent 默认提示词
+    if (defaultAgentSystemPrompt.value) {
+      const isDefaultNormalPrompt = formData.value.config.system_prompt === defaultNormalSystemPrompt.value;
+      if (!formData.value.config.system_prompt || isDefaultNormalPrompt) {
+        formData.value.config.system_prompt = defaultAgentSystemPrompt.value;
+      }
+    }
   } else {
     // 切换到普通模式，清空工具
     formData.value.config.allowed_tools = [];
     formData.value.config.max_iterations = 1; // 设置为1表示单轮 RAG
+    // 切换到快速问答模式时，如果系统提示词是 Agent 的默认值或为空，替换为快速问答默认提示词
+    if (defaultNormalSystemPrompt.value) {
+      const isDefaultAgentPrompt = formData.value.config.system_prompt === defaultAgentSystemPrompt.value;
+      if (!formData.value.config.system_prompt || isDefaultAgentPrompt) {
+        formData.value.config.system_prompt = defaultNormalSystemPrompt.value;
+      }
+    }
+    // 其他提示词只在为空时填充
+    if (!formData.value.config.context_template && defaultContextTemplate.value) {
+      formData.value.config.context_template = defaultContextTemplate.value;
+    }
+    if (!formData.value.config.rewrite_prompt_system && defaultRewritePromptSystem.value) {
+      formData.value.config.rewrite_prompt_system = defaultRewritePromptSystem.value;
+    }
+    if (!formData.value.config.rewrite_prompt_user && defaultRewritePromptUser.value) {
+      formData.value.config.rewrite_prompt_user = defaultRewritePromptUser.value;
+    }
+    if (!formData.value.config.fallback_prompt && defaultFallbackPrompt.value) {
+      formData.value.config.fallback_prompt = defaultFallbackPrompt.value;
+    }
+    if (!formData.value.config.fallback_response && defaultFallbackResponse.value) {
+      formData.value.config.fallback_response = defaultFallbackResponse.value;
+    }
   }
 });
 
@@ -2646,28 +2709,28 @@ watch(() => props.visible, (val) => {
 });
 
 // 模板选择处理函数
-const handleSystemPromptTemplateSelect = (template: string) => {
-  formData.value.config.system_prompt = template;
+const handleSystemPromptTemplateSelect = (template: PromptTemplate) => {
+  formData.value.config.system_prompt = template.content;
 };
 
-const handleContextTemplateSelect = (template: string) => {
-  formData.value.config.context_template = template;
+const handleContextTemplateSelect = (template: PromptTemplate) => {
+  formData.value.config.context_template = template.content;
 };
 
-const handleRewriteSystemTemplateSelect = (template: string) => {
-  formData.value.config.rewrite_prompt_system = template;
+const handleRewriteTemplateSelect = (template: PromptTemplate) => {
+  // Rewrite templates contain both content (system) and user fields
+  formData.value.config.rewrite_prompt_system = template.content;
+  if (template.user) {
+    formData.value.config.rewrite_prompt_user = template.user;
+  }
 };
 
-const handleRewriteUserTemplateSelect = (template: string) => {
-  formData.value.config.rewrite_prompt_user = template;
+const handleFallbackResponseTemplateSelect = (template: PromptTemplate) => {
+  formData.value.config.fallback_response = template.content;
 };
 
-const handleFallbackResponseTemplateSelect = (template: string) => {
-  formData.value.config.fallback_response = template;
-};
-
-const handleFallbackPromptTemplateSelect = (template: string) => {
-  formData.value.config.fallback_prompt = template;
+const handleFallbackPromptTemplateSelect = (template: PromptTemplate) => {
+  formData.value.config.fallback_prompt = template.content;
 };
 
 // 辅助函数：检查提示词是否包含指定占位符
@@ -2700,28 +2763,9 @@ const handleSave = async () => {
     }
   }
 
-  // 校验占位符（普通模式 + 开启知识库）
-  if (!isAgentMode.value && hasKnowledgeBase.value) {
-    const contextTemplate = formData.value.config.context_template || '';
-    if (!hasPlaceholder(contextTemplate, 'contexts')) {
-      MessagePlugin.error(t('agent.editor.contextsMissing'));
-      currentSection.value = 'basic';
-      return;
-    }
-    if (!hasPlaceholder(contextTemplate, 'query')) {
-      MessagePlugin.error(t('agent.editor.queryMissingInContext'));
-      currentSection.value = 'basic';
-      return;
-    }
-  }
 
-  // 校验占位符（Agent 模式 + 开启知识库）
-  if (isAgentMode.value && hasKnowledgeBase.value) {
-    const systemPrompt = formData.value.config.system_prompt || '';
-    if (!hasPlaceholder(systemPrompt, 'knowledge_bases')) {
-      MessagePlugin.warning(t('agent.editor.knowledgeBasesMissing'));
-    }
-  }
+
+
 
   // 校验占位符（普通模式 + 开启多轮对话改写）
   if (!isAgentMode.value && formData.value.config.multi_turn_enabled && formData.value.config.enable_rewrite) {

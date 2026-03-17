@@ -1,0 +1,232 @@
+# Graph extraction prompt templates
+# Used for knowledge graph entity and relationship extraction
+templates:
+  - id: "default_extract_entities"
+    name: "Entity Extraction"
+    description: "Extract entities from text for knowledge graph construction"
+    default: true
+    content: |
+      ## Task
+      Extract all entities from the user-provided text that match the following entity types:
+      EntityTypes: [Person, Organization, Location, Product, Event, Date, Work, Concept, Resource, Category, Operation]
+
+      ## Requirements
+      1. Output must be in JSON array format
+      2. Each entity must contain title and type fields; the description field is optional but strongly recommended
+      3. The type field value must be strictly selected from the EntityTypes list; do not create new types
+      4. If the entity type cannot be determined, do not force a classification; it is better to skip that entity
+      5. Do not output any explanation or additional content; output only the JSON array
+      6. All field values must not contain HTML tags or other code
+      7. If an entity is ambiguous, specify the reference in the description
+      8. If no entities are found, return an empty array []
+
+      ## Entity Extraction Rules
+      - Person: Real or fictional characters, including historical figures, modern figures, literary characters, etc.
+      - Organization: Companies, government agencies, teams, schools, and other organizational entities
+      - Location: Geographic locations, landmarks, countries, cities, etc.
+      - Product: Goods, services, brands, and other commercial products
+      - Event: Events, conferences, festivals, historical events, etc.
+      - Date: Dates, time periods, eras, and other time-related information
+      - Work: Books, movies, music, artworks, and other creative works
+      - Concept: Abstract concepts, ideas, theories, etc.
+      - Resource: Natural resources, information resources, tools, etc.
+      - Category: Classifications, categories, fields, etc.
+      - Operation: Operations, actions, methods, processes, etc.
+
+      ## Extraction Steps
+      1. Carefully read the text and identify potential entities
+      2. For each identified entity, determine the most appropriate entity type (must be selected from EntityTypes)
+      3. Create a JSON object for each entity with the following fields:
+         - title: The standard name of the entity, without modifiers such as quotation marks
+         - type: The entity type selected from EntityTypes
+         - description: A brief description of the entity, based on the text content, in the same language as the source text
+      4. Verify that all fields of each entity are correct and properly formatted
+      5. Merge all entity objects into a single JSON array
+      6. Check that the final JSON is valid and meets requirements
+
+      ## CRITICAL: Language Rule
+      - Extract entity titles exactly as they appear in the source text
+      - Write descriptions in {{language}}
+
+      ## Example
+      [Input]
+      Text: "Romeo and Juliet" is a tragedy written by William Shakespeare early in his career about the romance between two Italian youths from feuding families. It was among Shakespeare's most popular plays during his lifetime and is one of his most frequently performed plays. The play is set in Verona, Italy. The two main characters, Romeo Montague and Juliet Capulet, fall deeply in love despite their families' bitter rivalry.
+
+      [Output]
+      [
+        {
+          "title": "Romeo and Juliet",
+          "type": "Work",
+          "description": "A tragedy written by William Shakespeare about the romance between two youths from feuding families"
+        },
+        {
+          "title": "William Shakespeare",
+          "type": "Person",
+          "description": "The author of Romeo and Juliet, who wrote the play early in his career"
+        },
+        {
+          "title": "Romeo Montague",
+          "type": "Person",
+          "description": "One of the two main characters in Romeo and Juliet, from the Montague family"
+        },
+        {
+          "title": "Juliet Capulet",
+          "type": "Person",
+          "description": "One of the two main characters in Romeo and Juliet, from the Capulet family"
+        },
+        {
+          "title": "Verona",
+          "type": "Location",
+          "description": "The Italian city where Romeo and Juliet is set"
+        },
+        {
+          "title": "Montague",
+          "type": "Organization",
+          "description": "One of the two feuding families in the play, Romeo's family"
+        },
+        {
+          "title": "Capulet",
+          "type": "Organization",
+          "description": "One of the two feuding families in the play, Juliet's family"
+        }
+      ]
+
+  - id: "default_extract_relationships"
+    name: "Relationship Extraction"
+    description: "Extract relationships between entities for knowledge graph construction"
+    default: true
+    content: |
+      ## Task
+      From the user-provided entity array, extract explicit relationships between entities to form a structured relationship network.
+
+      ## Requirements
+      1. Relationship extraction must be based on the provided text content; do not fabricate non-existent relationships
+      2. Output must be in JSON array format, with each relationship as an object in the array
+      3. Each relationship object must contain source, target, description, and strength fields
+      4. Do not output any explanation or additional content; output only the JSON array
+      5. If no relationships are found, return an empty array []
+
+      ## Relationship Extraction Rules
+      - Only relationships explicitly present in the text should be extracted
+      - Source entity and target entity must be entities already in the entity array
+      - Relationship description should concisely explain the specific relationship between the two entities
+      - Relationship strength should be determined based on the following criteria:
+        * 10: Direct creation/subordination relationship (e.g., author and work, inventor and invention, parent company and subsidiary)
+        * 9: Different manifestations of the same entity (e.g., alias, former name)
+        * 8: Closely related and mutually influential relationships (e.g., close partners, family members)
+        * 7: Clear but indirect relationships (e.g., characters in a work, members of an organization)
+        * 6: Indirect association with clear connection (e.g., colleague relationship, similar products)
+        * 5: Related but loosely connected (e.g., different concepts in the same field)
+
+      ## Extraction Steps
+      1. Carefully analyze the text content to determine which entities have explicit relationships
+      2. Only consider relationships explicitly mentioned in the text; do not fabricate
+      3. For each relationship found, determine:
+         - source: The title of the source entity (must be an entity already in the entity list)
+         - target: The title of the target entity (must be an entity already in the entity list)
+         - description: A concise and accurate relationship description
+         - strength: Relationship strength based on the above criteria (integer between 5-10)
+      4. Check whether each relationship is bidirectional:
+         - If the relationship is bidirectional (e.g., "A is B's friend" implies "B is also A's friend"), consider whether a reverse relationship should be created
+         - If the relationship is unidirectional (e.g., "A created B"), keep only the unidirectional relationship
+      5. Verify the consistency and reasonableness of all relationships:
+         - Ensure there are no contradictory relationships (e.g., A is simultaneously B's father and brother)
+         - Ensure relationship descriptions match relationship strengths
+      6. Organize all valid relationships into a JSON array
+
+      ## CRITICAL: Language Rule
+      - Write relationship descriptions in {{language}}
+
+      ## Example
+      [Input]
+      Entities: [
+        {
+          "title": "Romeo and Juliet",
+          "type": "Work",
+          "description": "A tragedy written by William Shakespeare about the romance between two youths from feuding families"
+        },
+        {
+          "title": "William Shakespeare",
+          "type": "Person",
+          "description": "The author of Romeo and Juliet, who wrote the play early in his career"
+        },
+        {
+          "title": "Romeo Montague",
+          "type": "Person",
+          "description": "One of the two main characters in Romeo and Juliet, from the Montague family"
+        },
+        {
+          "title": "Juliet Capulet",
+          "type": "Person",
+          "description": "One of the two main characters in Romeo and Juliet, from the Capulet family"
+        },
+        {
+          "title": "Verona",
+          "type": "Location",
+          "description": "The Italian city where Romeo and Juliet is set"
+        },
+        {
+          "title": "Montague",
+          "type": "Organization",
+          "description": "One of the two feuding families in the play, Romeo's family"
+        },
+        {
+          "title": "Capulet",
+          "type": "Organization",
+          "description": "One of the two feuding families in the play, Juliet's family"
+        }
+      ]
+
+      Text: "Romeo and Juliet" is a tragedy written by William Shakespeare early in his career about the romance between two Italian youths from feuding families. It was among Shakespeare's most popular plays during his lifetime and is one of his most frequently performed plays. The play is set in Verona, Italy. The two main characters, Romeo Montague and Juliet Capulet, fall deeply in love despite their families' bitter rivalry.
+
+      [Output]
+      [
+        {
+          "source": "William Shakespeare",
+          "target": "Romeo and Juliet",
+          "description": "William Shakespeare is the author of Romeo and Juliet",
+          "strength": 10
+        },
+        {
+          "source": "Romeo Montague",
+          "target": "Juliet Capulet",
+          "description": "Romeo and Juliet fall deeply in love despite their families' rivalry",
+          "strength": 8
+        },
+        {
+          "source": "Romeo Montague",
+          "target": "Montague",
+          "description": "Romeo is a member of the Montague family",
+          "strength": 8
+        },
+        {
+          "source": "Juliet Capulet",
+          "target": "Capulet",
+          "description": "Juliet is a member of the Capulet family",
+          "strength": 8
+        },
+        {
+          "source": "Romeo and Juliet",
+          "target": "Romeo Montague",
+          "description": "Romeo Montague is one of the main characters in the play",
+          "strength": 7
+        },
+        {
+          "source": "Romeo and Juliet",
+          "target": "Juliet Capulet",
+          "description": "Juliet Capulet is one of the main characters in the play",
+          "strength": 7
+        },
+        {
+          "source": "Romeo and Juliet",
+          "target": "Verona",
+          "description": "The play is set in Verona, Italy",
+          "strength": 6
+        },
+        {
+          "source": "Montague",
+          "target": "Capulet",
+          "description": "The Montague and Capulet families have a bitter rivalry",
+          "strength": 8
+        }
+      ]

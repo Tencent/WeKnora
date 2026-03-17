@@ -1873,11 +1873,14 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	}
 
 	// Generate summary using AI model
+	summaryPrompt := types.RenderPromptPlaceholders(s.config.Conversation.GenerateSummaryPrompt, types.PlaceholderValues{
+		"language": types.LanguageNameFromContext(ctx),
+	})
 	thinking := false
 	summary, err := summaryModel.Chat(ctx, []chat.Message{
 		{
 			Role:    "system",
-			Content: s.config.Conversation.GenerateSummaryPrompt,
+			Content: summaryPrompt,
 		},
 		{
 			Role:    "user",

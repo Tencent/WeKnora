@@ -103,8 +103,8 @@ func (s *customAgentService) GetAgentByID(ctx context.Context, id string) (*type
 			// Found in database, return with customized config
 			return agent, nil
 		}
-		// Not in database, return default built-in agent from registry
-		if builtinAgent := types.GetBuiltinAgent(id, tenantID); builtinAgent != nil {
+		// Not in database, return default built-in agent from registry (i18n-aware)
+		if builtinAgent := types.GetBuiltinAgentWithContext(ctx, id, tenantID); builtinAgent != nil {
 			return builtinAgent, nil
 		}
 	}
@@ -179,8 +179,8 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 				}
 			}
 		} else {
-			// Use default built-in agent
-			if agent := types.GetBuiltinAgent(builtinID, tenantID); agent != nil {
+			// Use default built-in agent (i18n-aware)
+			if agent := types.GetBuiltinAgentWithContext(ctx, builtinID, tenantID); agent != nil {
 				result = append(result, agent)
 			}
 		}
@@ -258,8 +258,8 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 
 // updateBuiltinAgent updates a built-in agent's configuration (but not basic info)
 func (s *customAgentService) updateBuiltinAgent(ctx context.Context, agent *types.CustomAgent, tenantID uint64) (*types.CustomAgent, error) {
-	// Get the default built-in agent from registry
-	defaultAgent := types.GetBuiltinAgent(agent.ID, tenantID)
+	// Get the default built-in agent from registry (i18n-aware)
+	defaultAgent := types.GetBuiltinAgentWithContext(ctx, agent.ID, tenantID)
 	if defaultAgent == nil {
 		return nil, ErrAgentNotFound
 	}

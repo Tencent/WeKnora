@@ -360,6 +360,14 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 		secutils.SanitizeForLog(req.FileName),
 		secutils.SanitizeForLog(req.FileType),
 	)
+
+	// SSRF validation for user-supplied URL
+	if err := secutils.ValidateURLForSSRF(req.URL); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for knowledge URL: %v", err)
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("URL 未通过安全校验: %v", err)))
+		return
+	}
+
 	logger.Infof(ctx,
 		"Creating knowledge from URL, knowledge base ID: %s, URL: %s",
 		secutils.SanitizeForLog(kbID),

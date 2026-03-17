@@ -404,9 +404,12 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	}
 
 	// Prepare messages for title generation
+	titlePrompt := types.RenderPromptPlaceholders(s.cfg.Conversation.GenerateSessionTitlePrompt, types.PlaceholderValues{
+		"language": types.LanguageNameFromContext(ctx),
+	})
 	var chatMessages []chat.Message
 	chatMessages = append(chatMessages,
-		chat.Message{Role: "system", Content: s.cfg.Conversation.GenerateSessionTitlePrompt},
+		chat.Message{Role: "system", Content: titlePrompt},
 	)
 	chatMessages = append(chatMessages,
 		chat.Message{Role: "user", Content: message.Content},

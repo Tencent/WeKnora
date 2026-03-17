@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -166,6 +167,13 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 	addr := strings.TrimSpace(req.Addr)
 	if addr == "" {
 		c.JSON(400, gin.H{"code": 1, "msg": "addr 不能为空"})
+		return
+	}
+
+	// SSRF validation for docreader address
+	if err := secutils.ValidateURLForSSRF(addr); err != nil {
+		logger.Warnf(c.Request.Context(), "SSRF validation failed for docreader addr: %v", err)
+		c.JSON(400, gin.H{"code": 1, "msg": fmt.Sprintf("地址未通过安全校验: %v", err)})
 		return
 	}
 
@@ -637,11 +645,18 @@ func sanitizeStorageCheckError(err error) string {
 // isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
 // address (cloud metadata, loopback, link-local). Unlike the stricter IsSSRFSafeURL,
 // this allows private IPs since MinIO is commonly deployed on internal networks.
+// It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {
 	host, _, err := net.SplitHostPort(endpoint)
 	if err != nil {
 		host = endpoint
 	}
+
+	// Check SSRF whitelist first – whitelisted hosts bypass the block check.
+	if secutils.IsSSRFWhitelisted(host) {
+		return false, ""
+	}
+
 	hostLower := strings.ToLower(host)
 
 	blockedHosts := []string{

@@ -1,0 +1,37 @@
+# Generate questions prompt templates
+# Used to generate questions for document chunks to improve recall
+templates:
+  - id: "default_generate_questions"
+    name: "Question Generation"
+    description: "Generate related questions from document chunks to improve retrieval recall"
+    default: true
+    content: |
+      You are a professional question generation assistant. Your task is to generate related questions that users might ask based on the given [Main Content].
+
+      {{context}}
+      ## Main Content (generate questions based on this content)
+      Document name: {{doc_name}}
+      Document content:
+      {{content}}
+
+      ## Core Requirements
+      - Generated questions must be directly related to the [Main Content]
+      - Questions must NOT use any pronouns or referential words (such as "it", "this", "that document", "this article", "the text", "its", etc.); use specific names instead
+      - Questions must be complete and self-contained, understandable without additional context
+      - Questions should be natural questions that users would likely ask in real scenarios
+      - Questions should be diverse, covering different aspects of the content
+      - Each question should be concise and clear, within 30 words
+      - Generate {{question_count}} questions
+
+      ## Suggested Question Types
+      - Definition: What is...? What does... mean?
+      - Reason: Why...? What is the reason for...?
+      - Method: How to...? What is the way to...?
+      - Comparison: What is the difference between... and...?
+      - Application: What scenarios can... be used for?
+
+      ## Output Format
+      Output the question list directly, one question per line, without numbering or other prefixes.
+
+      ## CRITICAL: Language Rule
+      - Generate questions in {{language}}

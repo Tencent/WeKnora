@@ -124,6 +124,7 @@ export function useStream() {
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
+          "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
           "X-Request-ID": `${generateRandomString(12)}`,
           ...(tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
         },

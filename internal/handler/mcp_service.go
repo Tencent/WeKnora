@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -52,6 +53,15 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 		return
 	}
 	service.TenantID = tenantID
+
+	// SSRF validation for MCP service URL
+	if service.URL != nil && *service.URL != "" {
+		if err := secutils.ValidateURLForSSRF(*service.URL); err != nil {
+			logger.Warnf(ctx, "SSRF validation failed for MCP service URL: %v", err)
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("MCP service URL 未通过安全校验: %v", err)))
+			return
+		}
+	}
 
 	if err := h.mcpServiceService.CreateMCPService(ctx, &service); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_name": secutils.SanitizeForLog(service.Name)})
@@ -207,6 +217,16 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		// Explicitly set to nil if provided as null/empty
 		service.URL = nil
 	}
+
+	// SSRF validation for updated MCP service URL
+	if service.URL != nil && *service.URL != "" {
+		if err := secutils.ValidateURLForSSRF(*service.URL); err != nil {
+			logger.Warnf(ctx, "SSRF validation failed for MCP service URL: %v", err)
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("MCP service URL 未通过安全校验: %v", err)))
+			return
+		}
+	}
+
 	if stdioConfig, ok := updateData["stdio_config"].(map[string]interface{}); ok {
 		config := &types.MCPStdioConfig{}
 		if command, ok := stdioConfig["command"].(string); ok {

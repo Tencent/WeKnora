@@ -64,7 +64,8 @@ services:
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
       - DB_NAME=${DB_NAME:-}
-      - TZ=Asia/Shanghai
+      - TZ=${TZ:-Asia/Shanghai}
+      - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
       - OTEL_EXPORTER_OTLP_ENDPOINT=jaeger:4317
       - OTEL_SERVICE_NAME=WeKnora
       - OTEL_TRACES_EXPORTER=otlp

@@ -354,18 +354,15 @@ func (p *PluginRewrite) buildPrompts(chatManage *types.ChatManage, historyList [
 	}
 
 	conversationText := formatConversationHistory(historyList)
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
-	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
 
-	replacePlaceholders := func(s string) string {
-		s = strings.ReplaceAll(s, "{{conversation}}", conversationText)
-		s = strings.ReplaceAll(s, "{{query}}", chatManage.Query)
-		s = strings.ReplaceAll(s, "{{current_time}}", currentTime)
-		s = strings.ReplaceAll(s, "{{yesterday}}", yesterday)
-		return s
+	vals := types.PlaceholderValues{
+		"conversation": conversationText,
+		"query":        chatManage.Query,
+		"language":     chatManage.Language,
 	}
 
-	return replacePlaceholders(systemPrompt), replacePlaceholders(userPrompt)
+	return types.RenderPromptPlaceholders(systemPrompt, vals),
+		types.RenderPromptPlaceholders(userPrompt, vals)
 }
 
 // parseRewriteOutput extracts intent classification, rewritten query, and

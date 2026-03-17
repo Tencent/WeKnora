@@ -63,16 +63,26 @@ export interface PromptTemplate {
   name: string
   description: string
   content: string
+  user?: string
   has_knowledge_base?: boolean
   has_web_search?: boolean
+  default?: boolean
+  mode?: string
 }
 
 export interface PromptTemplatesConfig {
   system_prompt: PromptTemplate[]
   context_template: PromptTemplate[]
-  rewrite_system: PromptTemplate[]
-  rewrite_user: PromptTemplate[]
+  // Rewrite templates — each template contains both content (system) + user fields
+  rewrite: PromptTemplate[]
+  // Fallback templates — fixed responses + model fallback prompts (mode: "model")
   fallback: PromptTemplate[]
+
+  generate_session_title?: PromptTemplate[]
+  generate_summary?: PromptTemplate[]
+  keywords_extraction?: PromptTemplate[]
+  chat_summary?: PromptTemplate[]
+  agent_system_prompt?: PromptTemplate[]
 }
 
 export function getSystemInfo(): Promise<{ data: SystemInfo }> {

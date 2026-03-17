@@ -43,29 +43,37 @@ type VectorDatabaseConfig struct {
 
 // ConversationConfig 对话服务配置
 type ConversationConfig struct {
-	MaxRounds                  int            `yaml:"max_rounds"                    json:"max_rounds"`
-	KeywordThreshold           float64        `yaml:"keyword_threshold"             json:"keyword_threshold"`
-	EmbeddingTopK              int            `yaml:"embedding_top_k"               json:"embedding_top_k"`
-	VectorThreshold            float64        `yaml:"vector_threshold"              json:"vector_threshold"`
-	RerankTopK                 int            `yaml:"rerank_top_k"                  json:"rerank_top_k"`
-	RerankThreshold            float64        `yaml:"rerank_threshold"              json:"rerank_threshold"`
-	FallbackStrategy           string         `yaml:"fallback_strategy"             json:"fallback_strategy"`
-	FallbackResponse           string         `yaml:"fallback_response"             json:"fallback_response"`
-	FallbackPrompt             string         `yaml:"fallback_prompt"               json:"fallback_prompt"`
-	EnableRewrite              bool           `yaml:"enable_rewrite"                json:"enable_rewrite"`
-	EnableQueryExpansion       bool           `yaml:"enable_query_expansion"        json:"enable_query_expansion"`
-	EnableRerank               bool           `yaml:"enable_rerank"                 json:"enable_rerank"`
-	Summary                    *SummaryConfig `yaml:"summary"                       json:"summary"`
-	GenerateSessionTitlePrompt string         `yaml:"generate_session_title_prompt" json:"generate_session_title_prompt"`
-	GenerateSummaryPrompt      string         `yaml:"generate_summary_prompt"       json:"generate_summary_prompt"`
-	RewritePromptSystem        string         `yaml:"rewrite_prompt_system"         json:"rewrite_prompt_system"`
-	RewritePromptUser          string         `yaml:"rewrite_prompt_user"           json:"rewrite_prompt_user"`
-	SimplifyQueryPrompt        string         `yaml:"simplify_query_prompt"         json:"simplify_query_prompt"`
-	SimplifyQueryPromptUser    string         `yaml:"simplify_query_prompt_user"    json:"simplify_query_prompt_user"`
-	ExtractEntitiesPrompt      string         `yaml:"extract_entities_prompt"       json:"extract_entities_prompt"`
-	ExtractRelationshipsPrompt string         `yaml:"extract_relationships_prompt"  json:"extract_relationships_prompt"`
-	// GenerateQuestionsPrompt is used to generate questions for document chunks to improve recall
-	GenerateQuestionsPrompt string `yaml:"generate_questions_prompt" json:"generate_questions_prompt"`
+	MaxRounds            int            `yaml:"max_rounds"                       json:"max_rounds"`
+	KeywordThreshold     float64        `yaml:"keyword_threshold"                json:"keyword_threshold"`
+	EmbeddingTopK        int            `yaml:"embedding_top_k"                  json:"embedding_top_k"`
+	VectorThreshold      float64        `yaml:"vector_threshold"                 json:"vector_threshold"`
+	RerankTopK           int            `yaml:"rerank_top_k"                     json:"rerank_top_k"`
+	RerankThreshold      float64        `yaml:"rerank_threshold"                 json:"rerank_threshold"`
+	FallbackStrategy     string         `yaml:"fallback_strategy"                json:"fallback_strategy"`
+	FallbackResponse     string         `yaml:"fallback_response"                json:"fallback_response"`
+	EnableRewrite        bool           `yaml:"enable_rewrite"                   json:"enable_rewrite"`
+	EnableQueryExpansion bool           `yaml:"enable_query_expansion"           json:"enable_query_expansion"`
+	EnableRerank         bool           `yaml:"enable_rerank"                    json:"enable_rerank"`
+	Summary              *SummaryConfig `yaml:"summary"                          json:"summary"`
+
+	// Prompt template ID fields — resolved to text by backfillConversationDefaults
+	FallbackPromptID               string `yaml:"fallback_prompt_id"                json:"fallback_prompt_id"`
+	RewritePromptID                string `yaml:"rewrite_prompt_id"                 json:"rewrite_prompt_id"`
+	GenerateSessionTitlePromptID   string `yaml:"generate_session_title_prompt_id"  json:"generate_session_title_prompt_id"`
+	GenerateSummaryPromptID        string `yaml:"generate_summary_prompt_id"        json:"generate_summary_prompt_id"`
+	ExtractEntitiesPromptID        string `yaml:"extract_entities_prompt_id"        json:"extract_entities_prompt_id"`
+	ExtractRelationshipsPromptID   string `yaml:"extract_relationships_prompt_id"   json:"extract_relationships_prompt_id"`
+	GenerateQuestionsPromptID      string `yaml:"generate_questions_prompt_id"      json:"generate_questions_prompt_id"`
+
+	// Resolved prompt text fields (populated by backfill, not from YAML)
+	FallbackPrompt             string `yaml:"-" json:"fallback_prompt"`
+	RewritePromptSystem        string `yaml:"-" json:"rewrite_prompt_system"`
+	RewritePromptUser          string `yaml:"-" json:"rewrite_prompt_user"`
+	GenerateSessionTitlePrompt string `yaml:"-" json:"generate_session_title_prompt"`
+	GenerateSummaryPrompt      string `yaml:"-" json:"generate_summary_prompt"`
+	ExtractEntitiesPrompt      string `yaml:"-" json:"extract_entities_prompt"`
+	ExtractRelationshipsPrompt string `yaml:"-" json:"extract_relationships_prompt"`
+	GenerateQuestionsPrompt    string `yaml:"-" json:"generate_questions_prompt"`
 }
 
 // SummaryConfig 摘要配置
@@ -76,13 +84,19 @@ type SummaryConfig struct {
 	TopP                float64 `yaml:"top_p"                 json:"top_p"`
 	FrequencyPenalty    float64 `yaml:"frequency_penalty"     json:"frequency_penalty"`
 	PresencePenalty     float64 `yaml:"presence_penalty"      json:"presence_penalty"`
-	Prompt              string  `yaml:"prompt"                json:"prompt"`
-	ContextTemplate     string  `yaml:"context_template"      json:"context_template"`
 	Temperature         float64 `yaml:"temperature"           json:"temperature"`
 	Seed                int     `yaml:"seed"                  json:"seed"`
 	MaxCompletionTokens int     `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	NoMatchPrefix       string  `yaml:"no_match_prefix"       json:"no_match_prefix"`
 	Thinking            *bool   `yaml:"thinking"              json:"thinking"`
+
+	// Prompt template ID fields — resolved to text by backfillConversationDefaults
+	PromptID          string `yaml:"prompt_id"           json:"prompt_id"`
+	ContextTemplateID string `yaml:"context_template_id" json:"context_template_id"`
+
+	// Resolved prompt text fields (populated by backfill, not from YAML)
+	Prompt          string `yaml:"-" json:"prompt"`
+	ContextTemplate string `yaml:"-" json:"context_template"`
 }
 
 // ServerConfig 服务器配置
@@ -116,23 +130,112 @@ type TenantConfig struct {
 	EnableCrossTenantAccess bool `yaml:"enable_cross_tenant_access" json:"enable_cross_tenant_access"`
 }
 
+// PromptTemplateI18n holds localized name and description for a prompt template.
+type PromptTemplateI18n struct {
+	Name        string `yaml:"name"        json:"name"`
+	Description string `yaml:"description" json:"description"`
+}
+
 // PromptTemplate 提示词模板
+//
+// 字段设计：每个模板最多由两部分组成 —— 系统侧 (content) 和用户侧 (user)。
+//   - content: 主要内容 / 系统 Prompt（所有模板都使用此字段）
+//   - user:    用户侧 Prompt（仅在需要 system+user 配对的模板中使用，如 rewrite、keywords_extraction）
+//   - i18n:    多语言 name/description，键为 locale（如 "zh-CN"、"en-US"、"ko-KR"），后端根据请求语言替换 Name/Description 再返回
 type PromptTemplate struct {
-	ID               string `yaml:"id"                 json:"id"`
-	Name             string `yaml:"name"               json:"name"`
-	Description      string `yaml:"description"        json:"description"`
-	Content          string `yaml:"content"            json:"content"`
-	HasKnowledgeBase bool   `yaml:"has_knowledge_base" json:"has_knowledge_base,omitempty"`
-	HasWebSearch     bool   `yaml:"has_web_search"     json:"has_web_search,omitempty"`
+	ID               string                         `yaml:"id"                 json:"id"`
+	Name             string                         `yaml:"name"               json:"name"`
+	Description      string                         `yaml:"description"        json:"description"`
+	Content          string                         `yaml:"content"            json:"content"`
+	User             string                         `yaml:"user"               json:"user,omitempty"`
+	HasKnowledgeBase bool                           `yaml:"has_knowledge_base" json:"has_knowledge_base,omitempty"`
+	HasWebSearch     bool                           `yaml:"has_web_search"     json:"has_web_search,omitempty"`
+	Default          bool                           `yaml:"default"            json:"default,omitempty"`
+	Mode             string                         `yaml:"mode"               json:"mode,omitempty"`
+	I18n             map[string]PromptTemplateI18n   `yaml:"i18n"               json:"-"`
 }
 
 // PromptTemplatesConfig 提示词模板配置
+//
+// 每种 Prompt 类型对应一个 YAML 文件，所有模板都在同一个字段（文件）中管理。
+// 每个模板使用 content (system prompt) + user (user prompt) 两个字段。
 type PromptTemplatesConfig struct {
 	SystemPrompt    []PromptTemplate `yaml:"system_prompt"    json:"system_prompt"`
 	ContextTemplate []PromptTemplate `yaml:"context_template" json:"context_template"`
-	RewriteSystem   []PromptTemplate `yaml:"rewrite_system"   json:"rewrite_system"`
-	RewriteUser     []PromptTemplate `yaml:"rewrite_user"     json:"rewrite_user"`
-	Fallback        []PromptTemplate `yaml:"fallback"         json:"fallback"`
+	// Rewrite 合并了前端可选模板和运行时默认模板，每个模板同时包含 content + user
+	Rewrite []PromptTemplate `yaml:"rewrite" json:"rewrite"`
+	// Fallback 合并了固定回复模板和模型兜底 prompt（通过 mode:"model" 区分）
+	Fallback []PromptTemplate `yaml:"fallback" json:"fallback"`
+
+	GenerateSessionTitle []PromptTemplate `yaml:"generate_session_title" json:"generate_session_title,omitempty"`
+	GenerateSummary      []PromptTemplate `yaml:"generate_summary"       json:"generate_summary,omitempty"`
+	KeywordsExtraction   []PromptTemplate `yaml:"keywords_extraction"    json:"keywords_extraction,omitempty"`
+	AgentSystemPrompt    []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
+	GraphExtraction      []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
+	GenerateQuestions    []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
+}
+
+// DefaultTemplate returns the first template marked as default in the list,
+// or the first template if none is marked, or nil if the list is empty.
+func DefaultTemplate(templates []PromptTemplate) *PromptTemplate {
+	for i := range templates {
+		if templates[i].Default {
+			return &templates[i]
+		}
+	}
+	if len(templates) > 0 {
+		return &templates[0]
+	}
+	return nil
+}
+
+// DefaultTemplateByMode returns the default template filtered by mode.
+func DefaultTemplateByMode(templates []PromptTemplate, mode string) *PromptTemplate {
+	for i := range templates {
+		if templates[i].Mode == mode && templates[i].Default {
+			return &templates[i]
+		}
+	}
+	for i := range templates {
+		if templates[i].Mode == mode {
+			return &templates[i]
+		}
+	}
+	return DefaultTemplate(templates)
+}
+
+// LocalizeTemplates returns a deep copy of the template list with Name and
+// Description replaced according to the given locale.  Fallback chain:
+//   locale → primary language (e.g. "zh" from "zh-CN") → original Name/Description.
+// The returned slice is safe to serialise directly; it never mutates the original.
+func LocalizeTemplates(templates []PromptTemplate, locale string) []PromptTemplate {
+	if len(templates) == 0 {
+		return templates
+	}
+	out := make([]PromptTemplate, len(templates))
+	copy(out, templates)
+	for i := range out {
+		if len(out[i].I18n) == 0 {
+			continue
+		}
+		// Try exact match first (e.g. "zh-CN"), then primary subtag (e.g. "zh")
+		l10n, ok := out[i].I18n[locale]
+		if !ok {
+			if idx := strings.IndexByte(locale, '-'); idx > 0 {
+				l10n, ok = out[i].I18n[locale[:idx]]
+			}
+		}
+		if !ok {
+			continue
+		}
+		if l10n.Name != "" {
+			out[i].Name = l10n.Name
+		}
+		if l10n.Description != "" {
+			out[i].Description = l10n.Description
+		}
+	}
+	return out
 }
 
 // ModelConfig 模型配置
@@ -231,7 +334,139 @@ func LoadConfig() (*Config, error) {
 		cfg.PromptTemplates = promptTemplates
 	}
 
+	// Back-fill conversation config from prompt templates defaults
+	// (so config.yaml can omit large prompt blocks and rely on template files)
+	if cfg.PromptTemplates != nil && cfg.Conversation != nil {
+		backfillConversationDefaults(&cfg)
+	}
+
+	// Load built-in agent definitions (i18n-aware) from builtin_agents.yaml
+	if err := types.LoadBuiltinAgentsConfig(configDir); err != nil {
+		fmt.Printf("Warning: failed to load builtin agents config: %v\n", err)
+	}
+
+	// Resolve prompt template ID references in builtin agent configs
+	// (e.g. system_prompt_id -> actual content from agent_system_prompt.yaml)
+	if cfg.PromptTemplates != nil {
+		resolveBuiltinAgentPromptIDs(cfg.PromptTemplates)
+	}
+
 	return &cfg, nil
+}
+
+// backfillConversationDefaults resolves prompt template ID references
+// into actual prompt text content. Only xxx_id fields are used;
+// no fallback to default templates.
+func backfillConversationDefaults(cfg *Config) {
+	pt := cfg.PromptTemplates
+	conv := cfg.Conversation
+
+	if conv.FallbackPromptID != "" {
+		if t := FindTemplateByID(pt, conv.FallbackPromptID); t != nil {
+			conv.FallbackPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: fallback_prompt_id %q not found\n", conv.FallbackPromptID)
+		}
+	}
+	if conv.RewritePromptID != "" {
+		if t := FindTemplateByID(pt, conv.RewritePromptID); t != nil {
+			conv.RewritePromptSystem = t.Content
+			conv.RewritePromptUser = t.User
+		} else {
+			fmt.Printf("Warning: rewrite_prompt_id %q not found\n", conv.RewritePromptID)
+		}
+	}
+	if conv.GenerateSessionTitlePromptID != "" {
+		if t := FindTemplateByID(pt, conv.GenerateSessionTitlePromptID); t != nil {
+			conv.GenerateSessionTitlePrompt = t.Content
+		} else {
+			fmt.Printf("Warning: generate_session_title_prompt_id %q not found\n", conv.GenerateSessionTitlePromptID)
+		}
+	}
+	if conv.GenerateSummaryPromptID != "" {
+		if t := FindTemplateByID(pt, conv.GenerateSummaryPromptID); t != nil {
+			conv.GenerateSummaryPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: generate_summary_prompt_id %q not found\n", conv.GenerateSummaryPromptID)
+		}
+	}
+	if conv.ExtractEntitiesPromptID != "" {
+		if t := FindTemplateByID(pt, conv.ExtractEntitiesPromptID); t != nil {
+			conv.ExtractEntitiesPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: extract_entities_prompt_id %q not found\n", conv.ExtractEntitiesPromptID)
+		}
+	}
+	if conv.ExtractRelationshipsPromptID != "" {
+		if t := FindTemplateByID(pt, conv.ExtractRelationshipsPromptID); t != nil {
+			conv.ExtractRelationshipsPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: extract_relationships_prompt_id %q not found\n", conv.ExtractRelationshipsPromptID)
+		}
+	}
+	if conv.GenerateQuestionsPromptID != "" {
+		if t := FindTemplateByID(pt, conv.GenerateQuestionsPromptID); t != nil {
+			conv.GenerateQuestionsPrompt = t.Content
+		} else {
+			fmt.Printf("Warning: generate_questions_prompt_id %q not found\n", conv.GenerateQuestionsPromptID)
+		}
+	}
+	if conv.Summary != nil {
+		if conv.Summary.PromptID != "" {
+			if t := FindTemplateByID(pt, conv.Summary.PromptID); t != nil {
+				conv.Summary.Prompt = t.Content
+			} else {
+				fmt.Printf("Warning: summary.prompt_id %q not found\n", conv.Summary.PromptID)
+			}
+		}
+		if conv.Summary.ContextTemplateID != "" {
+			if t := FindTemplateByID(pt, conv.Summary.ContextTemplateID); t != nil {
+				conv.Summary.ContextTemplate = t.Content
+			} else {
+				fmt.Printf("Warning: summary.context_template_id %q not found\n", conv.Summary.ContextTemplateID)
+			}
+		}
+	}
+}
+
+// FindTemplateByID searches across all template lists for a template with the given ID.
+// It returns the template if found, or nil otherwise.
+func FindTemplateByID(pt *PromptTemplatesConfig, id string) *PromptTemplate {
+	if pt == nil || id == "" {
+		return nil
+	}
+	// Search all template collections
+	for _, list := range [][]PromptTemplate{
+		pt.SystemPrompt,
+		pt.ContextTemplate,
+		pt.Rewrite,
+		pt.Fallback,
+		pt.GenerateSessionTitle,
+		pt.GenerateSummary,
+		pt.KeywordsExtraction,
+		pt.AgentSystemPrompt,
+		pt.GraphExtraction,
+		pt.GenerateQuestions,
+	} {
+		for i := range list {
+			if list[i].ID == id {
+				return &list[i]
+			}
+		}
+	}
+	return nil
+}
+
+// resolveBuiltinAgentPromptIDs resolves system_prompt_id and context_template_id
+// references in builtin agent configs by looking up the actual content from
+// prompt template YAML files.
+func resolveBuiltinAgentPromptIDs(pt *PromptTemplatesConfig) {
+	types.ResolveBuiltinAgentPromptRefs(func(id string) string {
+		if t := FindTemplateByID(pt, id); t != nil {
+			return t.Content
+		}
+		return ""
+	})
 }
 
 // promptTemplateFile 用于解析模板文件
@@ -252,11 +487,16 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 
 	// 定义模板文件映射
 	templateFiles := map[string]*[]PromptTemplate{
-		"system_prompt.yaml":    &config.SystemPrompt,
-		"context_template.yaml": &config.ContextTemplate,
-		"rewrite_system.yaml":   &config.RewriteSystem,
-		"rewrite_user.yaml":     &config.RewriteUser,
-		"fallback.yaml":         &config.Fallback,
+		"system_prompt.yaml":          &config.SystemPrompt,
+		"context_template.yaml":       &config.ContextTemplate,
+		"rewrite.yaml":                &config.Rewrite,
+		"fallback.yaml":               &config.Fallback,
+		"generate_session_title.yaml": &config.GenerateSessionTitle,
+		"generate_summary.yaml":       &config.GenerateSummary,
+		"keywords_extraction.yaml":    &config.KeywordsExtraction,
+		"agent_system_prompt.yaml":    &config.AgentSystemPrompt,
+		"graph_extraction.yaml":       &config.GraphExtraction,
+		"generate_questions.yaml":     &config.GenerateQuestions,
 	}
 
 	// 加载每个模板文件

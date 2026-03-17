@@ -3,20 +3,42 @@ templates:
   - id: "default_context"
     name: "Standard Template"
     description: "Standard context formatting template"
+    i18n:
+      zh-CN:
+        name: "标准模板"
+        description: "基础的上下文模板，清晰展示参考资料和问题"
+      en-US:
+        name: "Standard Template"
+        description: "Basic context template with clear references and questions"
+      ko-KR:
+        name: "표준 템플릿"
+        description: "참조 및 질문을 명확하게 표시하는 기본 상황별 템플릿"
+    default: true
     has_knowledge_base: true
     content: |
-      Answer the user's question based on the following reference materials. IMPORTANT: Always respond in the same language as the user's question.
-
-      Reference materials:
+      The following is retrieved information that may or may not be relevant:
       {{contexts}}
 
       User question: {{query}}
 
-      Please answer based on the above reference materials. If the materials are insufficient to answer the question, clearly state so.
+      Instructions:
+      - If the retrieved information is relevant to the user's question, use it to provide an accurate answer.
+      - If the retrieved information is NOT relevant (e.g., the user is greeting, chatting, or asking something unrelated), ignore it and respond naturally as a helpful assistant.
+      - Do not mention "retrieved information" or "reference materials" in your response unless the user explicitly asks about sources.
 
   - id: "detailed_context"
     name: "Detailed Template"
     description: "Context template with detailed instructions"
+    i18n:
+      zh-CN:
+        name: "详细模板"
+        description: "包含详细说明和回答要求的完整模板"
+      en-US:
+        name: "Detailed Template"
+        description: "Complete template with detailed instructions and requirements"
+      ko-KR:
+        name: "상세 템플릿"
+        description: "자세한 지침과 답변 요구 사항이 포함된 완전한 템플릿"
     has_knowledge_base: true
     content: |
       ## Task Description
@@ -33,13 +55,25 @@ templates:
       2. If multiple materials conflict, provide a comprehensive analysis
       3. Cite sources appropriately to enhance credibility
       4. If materials are insufficient, clearly state so
-      5. IMPORTANT: Always respond in the same language as the user's question
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
 
       Current time: {{current_time}} {{current_week}}
 
   - id: "simple_context"
     name: "Simple Template"
     description: "Simple context template"
+    i18n:
+      zh-CN:
+        name: "简洁模板"
+        description: "精简的模板格式，适合简单问答场景"
+      en-US:
+        name: "Simple Template"
+        description: "Minimal template format for simple Q&A scenarios"
+      ko-KR:
+        name: "간단한 템플릿"
+        description: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식"
     has_knowledge_base: true
     content: |
       Reference materials:
@@ -47,11 +81,21 @@ templates:
 
       Question: {{query}}
 
-      Please answer the above question. IMPORTANT: Respond in the same language as the question.
+      Please answer the above question. IMPORTANT: ALWAYS respond in {{language}}.
 
   - id: "qa_context"
     name: "Q&A Template"
     description: "Template specialized for Q&A scenarios"
+    i18n:
+      zh-CN:
+        name: "问答模板"
+        description: "针对问答场景优化的模板"
+      en-US:
+        name: "Q&A Template"
+        description: "Optimized template for Q&A scenarios"
+      ko-KR:
+        name: "Q&A 템플릿"
+        description: "Q&A 시나리오에 최적화된 템플릿"
     has_knowledge_base: true
     content: |
       You need to answer a question. Below are potentially relevant materials:
@@ -64,4 +108,4 @@ templates:
       - Answer the question directly, do not repeat the question
       - If the materials do not contain relevant information, state so
       - Keep the answer concise and accurate
-      - IMPORTANT: Always respond in the same language as the user's question
+      - IMPORTANT: ALWAYS respond in {{language}}

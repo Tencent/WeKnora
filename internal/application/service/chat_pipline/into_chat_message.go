@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -74,9 +73,6 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		return ErrTemplateExecute.WithError(fmt.Errorf("user query contains invalid content"))
 	}
 
-	// Prepare weekday names
-	weekdayName := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
-
 	// Intent-based no-search path: bypass "reference materials" template entirely.
 	if chatManage.SkipKBSearch {
 		// Prefer rewritten query in no-search mode; fallback to original query.
@@ -140,11 +136,11 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	}
 
 	// Replace placeholders in context template
-	userContent := chatManage.SummaryConfig.ContextTemplate
-	userContent = strings.ReplaceAll(userContent, "{{query}}", safeQuery)
-	userContent = strings.ReplaceAll(userContent, "{{contexts}}", contextsBuilder.String())
-	userContent = strings.ReplaceAll(userContent, "{{current_time}}", time.Now().Format("2006-01-02 15:04:05"))
-	userContent = strings.ReplaceAll(userContent, "{{current_week}}", weekdayName[time.Now().Weekday()])
+	userContent := types.RenderPromptPlaceholders(chatManage.SummaryConfig.ContextTemplate, types.PlaceholderValues{
+		"query":    safeQuery,
+		"contexts": contextsBuilder.String(),
+		"language": chatManage.Language,
+	})
 
 	// Append image description as text fallback only when the chat model cannot
 	// process images directly. Vision-capable models see images via MultiContent.

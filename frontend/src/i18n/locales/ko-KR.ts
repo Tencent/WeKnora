@@ -2673,90 +2673,10 @@ export default {
     noTemplates: "아직 템플릿이 없습니다.",
     selectTemplate: "템플릿 선택",
     useTemplate: "템플릿 사용",
+    resetDefault: "기본값 복원",
+    default: "기본",
     withKnowledgeBase: "지식베이스",
     withWebSearch: "웹 검색",
-    systemPrompt: {
-      defaultKB: {
-        name: "지식베이스 Q&A 도우미",
-        desc: "대부분의 시나리오에 적합한 기본 지식베이스 Q&A 템플릿",
-      },
-      expert: {
-        name: "도메인 전문가 보조",
-        desc: "기술 또는 전문 분야에 적합한 전문적이고 심층적인 답변 스타일",
-      },
-      customerService: {
-        name: "고객 서비스 도우미",
-        desc: "고객 서비스 시나리오에 적합한 친절하고 열정적인 서비스 스타일",
-      },
-      techSupport: {
-        name: "기술지원",
-        desc: "코드 예제를 포함한 기술적인 질문에 대한 전문적인 답변",
-      },
-      pureChat: {
-        name: "일반적인 대화",
-        desc: "지식베이스에 의존하지 않는 보편적인 대화 도우미",
-      },
-      webSearch: {
-        name: "웹 검색 도우미",
-        desc: "웹 검색과 결합하여 최신 정보를 얻으세요",
-      },
-    },
-    contextTemplate: {
-      default: {
-        name: "표준 템플릿",
-        desc: "참조 및 질문을 명확하게 표시하는 기본 상황별 템플릿",
-      },
-      detailed: {
-        name: "상세 템플릿",
-        desc: "자세한 지침과 답변 요구 사항이 포함된 완전한 템플릿",
-      },
-      simple: {
-        name: "간단한 템플릿",
-        desc: "간단한 Q&A 시나리오에 적합한 간소화된 템플릿 형식",
-      },
-      qa: {
-        name: "Q&A 템플릿",
-        desc: "Q&A 시나리오에 최적화된 템플릿",
-      },
-    },
-    rewriteSystem: {
-      default: {
-        name: "표준 재작성",
-        desc: "참조를 제거하고 누락을 완료하기 위한 표준 재작성 규칙",
-      },
-      strict: {
-        name: "엄격하게 다시 작성됨",
-        desc: "문제가 완전하고 독립적인지 확인하기 위해 더 엄격한 재작성 요구 사항",
-      },
-    },
-    rewriteUser: {
-      default: {
-        name: "표준 형식",
-        desc: "대화 내용과 현안을 담은 표준 형식",
-      },
-      detailed: {
-        name: "자세한 형식",
-        desc: "작업 설명이 포함된 자세한 형식",
-      },
-    },
-    fallback: {
-      default: {
-        name: "표준 폴백",
-        desc: "친절하게 답변 및 제안을 드릴 수 없음을 알려드립니다.",
-      },
-      polite: {
-        name: "정중한 폴백",
-        desc: "더 정중하고 자세한 답변 불가 프롬프트",
-      },
-      brief: {
-        name: "간단한 폴백",
-        desc: "대답할 수 없는 짧은 프롬프트",
-      },
-      model: {
-        name: "모델 폴백 프롬프트",
-        desc: "일반 지식을 바탕으로 모델이 답변하도록 안내하는 프롬프트",
-      },
-    },
   },
   organization: {
     title: "공유 스페이스",

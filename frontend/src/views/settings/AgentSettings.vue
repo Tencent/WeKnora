@@ -149,17 +149,6 @@
           </div>
         </div>
         <div class="setting-control full-width" style="position: relative;">
-          <div class="prompt-header">
-            <t-button
-              theme="default"
-              variant="outline"
-              size="small"
-              @click="handleResetToDefault"
-              :loading="isResettingPrompt"
-            >
-              {{ $t('common.resetToDefault') }}
-            </t-button>
-          </div>
           <p class="prompt-tab-hint">
             {{ $t('agentSettings.systemPrompt.tabHintDetail') }}
           </p>
@@ -176,10 +165,11 @@
                 style="width: 100%; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px;"
               />
               <PromptTemplateSelector 
-                type="systemPrompt" 
+                type="agentSystemPrompt" 
                 position="corner"
                 :hasKnowledgeBase="true"
                 @select="handleAgentSystemPromptTemplateSelect"
+                @reset-default="handleAgentSystemPromptTemplateSelect"
               />
             </div>
           </div>
@@ -237,6 +227,7 @@
                     position="corner"
                     :hasKnowledgeBase="true"
                     @select="handleNormalSystemPromptTemplateSelect"
+                    @reset-default="handleNormalSystemPromptTemplateSelect"
                   />
                 </div>
               </div>
@@ -262,6 +253,7 @@
                     position="corner"
                     :hasKnowledgeBase="true"
                     @select="handleContextTemplateTemplateSelect"
+                    @reset-default="handleContextTemplateTemplateSelect"
                   />
                 </div>
               </div>
@@ -503,9 +495,10 @@
                 @blur="handleRewritePromptSystemChange"
               />
               <PromptTemplateSelector 
-                type="rewriteSystem" 
+                type="rewrite" 
                 position="corner"
-                @select="handleRewriteSystemTemplateSelect"
+                @select="handleRewriteTemplateSelect"
+                @reset-default="handleRewriteTemplateSelect"
               />
             </div>
           </div>
@@ -524,9 +517,10 @@
                 @blur="handleRewritePromptUserChange"
               />
               <PromptTemplateSelector 
-                type="rewriteUser" 
+                type="rewrite" 
                 position="corner"
-                @select="handleRewriteUserTemplateSelect"
+                @select="handleRewriteTemplateSelect"
+                @reset-default="handleRewriteTemplateSelect"
               />
             </div>
           </div>
@@ -562,7 +556,9 @@
               <PromptTemplateSelector 
                 type="fallback" 
                 position="corner"
+                fallbackMode="fixed"
                 @select="handleFallbackResponseTemplateSelect"
+                @reset-default="handleFallbackResponseTemplateSelect"
               />
             </div>
           </div>
@@ -584,7 +580,9 @@
               <PromptTemplateSelector 
                 type="fallback" 
                 position="corner"
+                fallbackMode="model"
                 @select="handleFallbackPromptTemplateSelect"
+                @reset-default="handleFallbackPromptTemplateSelect"
               />
             </div>
           </div>
@@ -642,7 +640,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { listModels, type ModelConfig } from '@/api/model'
-import { getAgentConfig, updateAgentConfig, getConversationConfig, updateConversationConfig, type AgentConfig, type ConversationConfig, type ToolDefinition, type PlaceholderDefinition } from '@/api/system'
+import { getAgentConfig, updateAgentConfig, getConversationConfig, updateConversationConfig, type AgentConfig, type ConversationConfig, type ToolDefinition, type PlaceholderDefinition, type PromptTemplate } from '@/api/system'
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue'
 
 const props = defineProps<{
@@ -1668,32 +1666,32 @@ const handleFallbackPromptChange = async () => {
 }
 
 // 模板选择处理函数
-const handleAgentSystemPromptTemplateSelect = (template: string) => {
-  localSystemPrompt.value = template
+const handleAgentSystemPromptTemplateSelect = (template: PromptTemplate) => {
+  localSystemPrompt.value = template.content
 }
 
-const handleNormalSystemPromptTemplateSelect = (template: string) => {
-  localSystemPromptNormal.value = template
+const handleNormalSystemPromptTemplateSelect = (template: PromptTemplate) => {
+  localSystemPromptNormal.value = template.content
 }
 
-const handleContextTemplateTemplateSelect = (template: string) => {
-  localContextTemplate.value = template
+const handleContextTemplateTemplateSelect = (template: PromptTemplate) => {
+  localContextTemplate.value = template.content
 }
 
-const handleRewriteSystemTemplateSelect = (template: string) => {
-  localRewritePromptSystem.value = template
+const handleRewriteTemplateSelect = (template: PromptTemplate) => {
+  // Rewrite templates contain both content (system) and user fields
+  localRewritePromptSystem.value = template.content
+  if (template.user) {
+    localRewritePromptUser.value = template.user
+  }
 }
 
-const handleRewriteUserTemplateSelect = (template: string) => {
-  localRewritePromptUser.value = template
+const handleFallbackResponseTemplateSelect = (template: PromptTemplate) => {
+  localFallbackResponse.value = template.content
 }
 
-const handleFallbackResponseTemplateSelect = (template: string) => {
-  localFallbackResponse.value = template
-}
-
-const handleFallbackPromptTemplateSelect = (template: string) => {
-  localFallbackPrompt.value = template
+const handleFallbackPromptTemplateSelect = (template: PromptTemplate) => {
+  localFallbackPrompt.value = template.content
 }
 
 const navigateToModelSettings = (subsection: 'chat' | 'rerank') => {

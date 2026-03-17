@@ -1,0 +1,142 @@
+# Built-in Agent Configuration with i18n support
+# Each agent has localized name, description, avatar, and config overrides per language.
+# The "default" locale is used as fallback when the user's language is not found.
+
+builtin_agents:
+  - id: "builtin-quick-answer"
+    avatar: ""
+    is_builtin: true
+    i18n:
+      default:
+        name: "Quick Answer"
+        description: "Knowledge base RAG Q&A for fast and accurate answers"
+      zh-CN:
+        name: "快速问答"
+        description: "基于知识库的 RAG 问答，快速准确地回答问题"
+      zh-TW:
+        name: "快速問答"
+        description: "基於知識庫的 RAG 問答，快速準確地回答問題"
+      ja-JP:
+        name: "クイック回答"
+        description: "ナレッジベース RAG Q&A による迅速で正確な回答"
+      ko-KR:
+        name: "빠른 답변"
+        description: "지식 베이스 RAG Q&A를 통한 빠르고 정확한 답변"
+    config:
+      agent_mode: "quick-answer"
+      system_prompt_id: "default_kb"
+      context_template_id: "default_context"
+      temperature: 0.7
+      max_completion_tokens: 2048
+      web_search_enabled: true
+      web_search_max_results: 5
+      multi_turn_enabled: true
+      history_turns: 5
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      faq_priority_enabled: true
+      faq_direct_answer_threshold: 0.9
+      faq_score_boost: 1.2
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+      enable_query_expansion: true
+      enable_rewrite: true
+      fallback_strategy: "model"
+
+  - id: "builtin-smart-reasoning"
+    avatar: ""
+    is_builtin: true
+    i18n:
+      default:
+        name: "Smart Reasoning"
+        description: "ReAct reasoning framework with multi-step thinking and tool calling"
+      zh-CN:
+        name: "智能推理"
+        description: "ReAct 推理框架，支持多步思考与工具调用"
+      zh-TW:
+        name: "智能推理"
+        description: "ReAct 推理框架，支援多步思考與工具呼叫"
+      ja-JP:
+        name: "スマート推論"
+        description: "ReAct 推論フレームワーク、マルチステップ思考とツール呼び出し対応"
+      ko-KR:
+        name: "스마트 추론"
+        description: "ReAct 추론 프레임워크, 다단계 사고 및 도구 호출 지원"
+    config:
+      agent_mode: "smart-reasoning"
+      system_prompt: ""
+      temperature: 0.7
+      max_completion_tokens: 2048
+      max_iterations: 50
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      allowed_tools:
+        - "thinking"
+        - "todo_write"
+        - "knowledge_search"
+        - "grep_chunks"
+        - "list_knowledge_chunks"
+        - "query_knowledge_graph"
+        - "get_document_info"
+      web_search_enabled: true
+      web_search_max_results: 5
+      reflection_enabled: false
+      multi_turn_enabled: true
+      history_turns: 5
+      faq_priority_enabled: true
+      faq_direct_answer_threshold: 0.9
+      faq_score_boost: 1.2
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+
+  - id: "builtin-data-analyst"
+    avatar: "📊"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Data Analyst"
+        description: "Professional data analysis agent with SQL query and statistical analysis for CSV/Excel files"
+      zh-CN:
+        name: "数据分析师"
+        description: "专业的数据分析智能体，支持对 CSV/Excel 文件进行 SQL 查询和统计分析"
+      zh-TW:
+        name: "數據分析師"
+        description: "專業的數據分析智能體，支援對 CSV/Excel 檔案進行 SQL 查詢和統計分析"
+      ja-JP:
+        name: "データアナリスト"
+        description: "CSV/Excel ファイルの SQL クエリと統計分析に対応するプロフェッショナルなデータ分析エージェント"
+      ko-KR:
+        name: "데이터 분석가"
+        description: "CSV/Excel 파일에 대한 SQL 쿼리 및 통계 분석을 지원하는 전문 데이터 분석 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      system_prompt_id: "data_analyst"
+      temperature: 0.3
+      max_completion_tokens: 4096
+      max_iterations: 30
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      supported_file_types:
+        - "csv"
+        - "xlsx"
+      allowed_tools:
+        - "thinking"
+        - "todo_write"
+        - "data_schema"
+        - "data_analysis"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: true
+      multi_turn_enabled: true
+      history_turns: 10
+      embedding_top_k: 5
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 5
+      rerank_threshold: 0.3

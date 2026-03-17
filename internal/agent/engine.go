@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
+	appconfig "github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -41,6 +42,7 @@ type AgentEngine struct {
 	sessionID            string                    // Session ID for context management
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
 	skillsManager        *skills.Manager           // Skills manager for Progressive Disclosure (optional)
+	appConfig            *appconfig.Config          // Application config for prompt template resolution (optional)
 }
 
 // listToolNames returns tool.function names for logging
@@ -108,6 +110,12 @@ func NewAgentEngineWithSkills(
 	return engine
 }
 
+// SetAppConfig sets the application config for prompt template resolution.
+// This allows the engine to read default prompts from config/prompt_templates/ YAML files.
+func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
+	e.appConfig = cfg
+}
+
 // SetSkillsManager sets the skills manager for the engine
 func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
 	e.skillsManager = manager
@@ -150,6 +158,8 @@ func (e *AgentEngine) Execute(
 
 	// Build system prompt using progressive RAG prompt
 	// If skills are enabled, include skills metadata (Level 1 - Progressive Disclosure)
+	// Extract user language from context for prompt placeholder
+	language := types.LanguageNameFromContext(ctx)
 	var systemPrompt string
 	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
 		skillsMetadata := e.skillsManager.GetAllMetadata()
@@ -159,14 +169,20 @@ func (e *AgentEngine) Execute(
 			e.selectedDocs,
 			&BuildSystemPromptOptions{
 				SkillsMetadata: skillsMetadata,
+				Language:       language,
+				Config:         e.appConfig,
 			},
 			e.systemPromptTemplate,
 		)
 	} else {
-		systemPrompt = BuildSystemPrompt(
+		systemPrompt = BuildSystemPromptWithOptions(
 			e.knowledgeBasesInfo,
 			e.config.WebSearchEnabled,
 			e.selectedDocs,
+			&BuildSystemPromptOptions{
+				Language: language,
+				Config:   e.appConfig,
+			},
 			e.systemPromptTemplate,
 		)
 	}
@@ -963,10 +979,15 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	})
 
 	// Build messages with all context
-	systemPrompt := BuildSystemPrompt(
+	language := types.LanguageNameFromContext(ctx)
+	systemPrompt := BuildSystemPromptWithOptions(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
 		e.selectedDocs,
+		&BuildSystemPromptOptions{
+			Language: language,
+			Config:   e.appConfig,
+		},
 		e.systemPromptTemplate,
 	)
 

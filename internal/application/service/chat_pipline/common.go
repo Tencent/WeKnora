@@ -3,7 +3,6 @@ package chatpipline
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -55,7 +54,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 // prepareMessagesWithHistory prepare complete messages including history
 func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	// Replace placeholders in system prompt
-	systemPrompt := renderSystemPromptPlaceholders(chatManage.SummaryConfig.Prompt)
+	systemPrompt := renderSystemPromptPlaceholders(chatManage.SummaryConfig.Prompt, chatManage.Language)
 	
 	chatMessages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
@@ -94,14 +93,11 @@ func extractImageCaptions(images types.MessageImages) string {
 // renderSystemPromptPlaceholders replaces placeholders in system prompt
 // Supported placeholders:
 //   - {{current_time}} -> current time in RFC3339 format
-func renderSystemPromptPlaceholders(prompt string) string {
-	result := prompt
-	
-	// Replace {{current_time}} placeholder
-	if strings.Contains(result, "{{current_time}}") {
-		currentTime := time.Now().Format(time.RFC3339)
-		result = strings.ReplaceAll(result, "{{current_time}}", currentTime)
+//   - {{language}} -> user language name (replaced if present; empty string if not set in ChatManage)
+func renderSystemPromptPlaceholders(prompt string, language ...string) string {
+	vals := types.PlaceholderValues{}
+	if len(language) > 0 {
+		vals["language"] = language[0]
 	}
-	
-	return result
+	return types.RenderPromptPlaceholders(prompt, vals)
 }

@@ -45,3 +45,49 @@ func SessionTenantIDFromContext(ctx context.Context) (uint64, bool) {
 	}
 	return TenantIDFromContext(ctx)
 }
+
+// LanguageFromContext extracts the language locale string from ctx (e.g. "zh-CN", "en-US").
+// Returns ("en-US", false) when the key is absent.
+func LanguageFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(LanguageContextKey).(string)
+	return v, ok && v != ""
+}
+
+// LanguageNameFromContext returns the human-readable language name for use in prompts.
+// e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
+func LanguageNameFromContext(ctx context.Context) string {
+	lang, ok := LanguageFromContext(ctx)
+	if !ok {
+		lang = "en-US"
+	}
+	return LanguageLocaleName(lang)
+}
+
+// LanguageLocaleName maps a locale code to a human-readable language name for LLM prompts.
+func LanguageLocaleName(locale string) string {
+	switch locale {
+	case "zh-CN", "zh", "zh-Hans":
+		return "Chinese (Simplified)"
+	case "zh-TW", "zh-HK", "zh-Hant":
+		return "Chinese (Traditional)"
+	case "en-US", "en", "en-GB":
+		return "English"
+	case "ko-KR", "ko":
+		return "Korean"
+	case "ja-JP", "ja":
+		return "Japanese"
+	case "ru-RU", "ru":
+		return "Russian"
+	case "fr-FR", "fr":
+		return "French"
+	case "de-DE", "de":
+		return "German"
+	case "es-ES", "es":
+		return "Spanish"
+	case "pt-BR", "pt":
+		return "Portuguese"
+	default:
+		// For unknown locales, return the locale itself
+		return locale
+	}
+}

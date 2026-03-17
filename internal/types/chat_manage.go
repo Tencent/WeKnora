@@ -68,6 +68,7 @@ type ChatManage struct {
 	VLMModelID              string   `json:"-"` // Agent-configured VLM model ID for image analysis
 	ChatModelSupportsVision bool     `json:"-"` // Whether the chat model accepts multimodal/image input
 	SkipKBSearch            bool     `json:"-"` // Set by rewrite intent classification: true = skip KB retrieval
+	Language                string   `json:"-"` // User language name for prompt placeholder (e.g. "Chinese (Simplified)", "English")
 }
 
 // Clone creates a deep copy of the ChatManage object
@@ -143,6 +144,7 @@ func (c *ChatManage) Clone() *ChatManage {
 		VLMModelID:               c.VLMModelID,
 		ChatModelSupportsVision:  c.ChatModelSupportsVision,
 		SkipKBSearch:             c.SkipKBSearch,
+		Language:                 c.Language,
 	}
 }
 
