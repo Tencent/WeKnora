@@ -8,7 +8,7 @@ templates:
       Generate a short session title based on the user's question.
 
       Requirements:
-      - 3-8 words
+      - 4-10 words
       - Only extract the intent of the user's question, don't answer about it
       - Output only the title, no explanation needed
       - IMPORTANT: Use {{language}} for the title
