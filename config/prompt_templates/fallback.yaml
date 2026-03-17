@@ -28,6 +28,9 @@ templates:
 
       If you have other questions, I'm happy to continue helping you.
 
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
+
   - id: "polite_fallback"
     name: "Polite Fallback"
     description: "More polite and friendly fallback response"
@@ -52,6 +55,9 @@ templates:
       3. Contact customer support for assistance
 
       Thank you for your understanding, and I look forward to helping you with other questions!
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
 
   - id: "brief_fallback"
     name: "Brief Fallback"

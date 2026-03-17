@@ -305,6 +305,9 @@ func CloneContext(ctx context.Context) context.Context {
 		types.TenantInfoContextKey,
 		types.UserIDContextKey,
 		types.UserContextKey,
+		types.LanguageContextKey,
+		types.SessionTenantIDContextKey,
+		types.EmbedQueryContextKey,
 	} {
 		if v := ctx.Value(k); v != nil {
 			newCtx = context.WithValue(newCtx, k, v)
