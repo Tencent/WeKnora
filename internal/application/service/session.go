@@ -454,6 +454,7 @@ func (s *sessionService) GenerateTitleAsync(
 	// sessionRepo.Update uses session.TenantID in WHERE, so the session row is updated correctly regardless of ctx.
 	tenantID := ctx.Value(types.TenantIDContextKey)
 	requestID := ctx.Value(types.RequestIDContextKey)
+	language := ctx.Value(types.LanguageContextKey)
 	go func() {
 		bgCtx := context.Background()
 		if tenantID != nil {
@@ -461,6 +462,9 @@ func (s *sessionService) GenerateTitleAsync(
 		}
 		if requestID != nil {
 			bgCtx = context.WithValue(bgCtx, types.RequestIDContextKey, requestID)
+		}
+		if language != nil {
+			bgCtx = context.WithValue(bgCtx, types.LanguageContextKey, language)
 		}
 
 		// Skip if title already exists

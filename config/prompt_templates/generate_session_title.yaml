@@ -9,8 +9,6 @@ templates:
 
       Requirements:
       - 3-8 words
-      - Extract the core topic
+      - Only extract the intent of the user's question, don't answer about it
       - Output only the title, no explanation needed
       - IMPORTANT: Use {{language}} for the title
-
-      User question:

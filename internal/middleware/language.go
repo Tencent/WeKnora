@@ -42,6 +42,7 @@ func Language() gin.HandlerFunc {
 		}
 
 		// Inject into context
+		c.Set(types.LanguageContextKey.String(), lang)
 		ctx := context.WithValue(c.Request.Context(), types.LanguageContextKey, lang)
 		c.Request = c.Request.WithContext(ctx)
 
