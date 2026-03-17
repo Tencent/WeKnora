@@ -402,9 +402,17 @@ func applyMMR(
 
 var (
 	// reMarkdownImage matches ![alt](url) — the entire construct is noise.
-	reMarkdownImage = regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
+	// URL group supports one level of balanced parentheses.
+	reMarkdownImage = regexp.MustCompile(`!\[[^\]]*\]\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`)
+	// reLinkedImage matches [![alt](img_url)](link_url) — unwrap to ![alt](img_url)
+	// so that the subsequent reMarkdownImage pass can remove the image.
+	reLinkedImage = regexp.MustCompile(
+		`\[!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)\]` +
+			`\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`,
+	)
 	// reMarkdownLink matches [text](url) — we keep the text, drop the URL.
-	reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	// URL group supports one level of balanced parentheses.
+	reMarkdownLink = regexp.MustCompile(`\[([^\]]+)\]\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`)
 	// reRawURL matches standalone http(s) URLs.
 	reRawURL = regexp.MustCompile(`https?://[^\s)\]>]+`)
 	// reCodeBlock matches fenced code blocks (```...```).
@@ -442,6 +450,9 @@ func cleanPassageForRerank(text string) string {
 	text = reLatexBlock.ReplaceAllString(text, "")
 	// 3. Remove HTML tags
 	text = reHTMLTag.ReplaceAllString(text, "")
+	// 3.5. Unwrap nested [![alt](img_url)](link_url) → ![alt](img_url)
+	//      so that the next step removes the full construct cleanly.
+	text = reLinkedImage.ReplaceAllString(text, "![$1]($2)")
 	// 4. Remove markdown image references entirely
 	text = reMarkdownImage.ReplaceAllString(text, "")
 	// 5. Convert markdown links to just their display text

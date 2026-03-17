@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 )
 
 // Chunk represents a piece of split text with position tracking.
@@ -451,9 +453,12 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 }
 
 // ExtractImageRefs extracts markdown image references from text.
-var imageRefPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+// The URL group supports one level of balanced parentheses so that URLs
+// like https://example.com/item_(abc)/123 are captured in full.
+var imageRefPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
 
 func ExtractImageRefs(text string) []ImageRef {
+	text = docparser.UnwrapLinkedImages(text)
 	matches := imageRefPattern.FindAllStringSubmatchIndex(text, -1)
 	var refs []ImageRef
 	for _, m := range matches {

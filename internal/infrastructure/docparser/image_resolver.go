@@ -77,7 +77,7 @@ func (r *ImageResolver) ResolveAndStore(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
-	markdown := result.MarkdownContent
+	markdown := UnwrapLinkedImages(result.MarkdownContent)
 	if len(result.ImageRefs) == 0 {
 		return markdown, nil, nil
 	}
@@ -88,8 +88,10 @@ func (r *ImageResolver) ResolveAndStore(
 		refMap[ref.OriginalRef] = ref
 	}
 
-	// Process each image reference found in the markdown
-	imgPattern := regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+	// Process each image reference found in the markdown.
+	// The URL group supports one level of balanced parentheses so that URLs
+	// like https://example.com/item_(abc)/123 are captured in full.
+	imgPattern := regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
 	matches := imgPattern.FindAllStringSubmatchIndex(markdown, -1)
 
 	// Process in reverse order to preserve positions when replacing
@@ -186,8 +188,27 @@ const (
 	remoteImageFetchTimeout = 15 * time.Second
 )
 
-// imgMarkdownPattern matches Markdown image syntax: ![alt](url)
-var imgMarkdownPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)\)`)
+// reLinkedImage matches the nested [![alt](img_url)](link_url) pattern where
+// an image is wrapped inside a Markdown link. We unwrap it to just ![alt](img_url)
+// so that downstream image-processing regexes only have to handle the flat form.
+// The URL groups support one level of balanced parentheses.
+var reLinkedImage = regexp.MustCompile(
+	`\[!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)\]` + // [![alt](img_url)]
+		`\([^()\s]*(?:\([^)]*\)[^()\s]*)*\)`, // (link_url) — captured but discarded
+)
+
+// UnwrapLinkedImages replaces all [![alt](img_url)](link_url) occurrences in
+// the markdown with just ![alt](img_url), stripping the outer link wrapper.
+// This should be called before any image-extraction regex so that only the
+// flat ![alt](url) form needs to be handled.
+func UnwrapLinkedImages(markdown string) string {
+	return reLinkedImage.ReplaceAllString(markdown, "![$1]($2)")
+}
+
+// imgMarkdownPattern matches Markdown image syntax: ![alt](url).
+// The URL group supports one level of balanced parentheses so that URLs
+// like https://example.com/item_(abc)/123 are captured in full.
+var imgMarkdownPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
 
 // ResolveRemoteImages scans a Markdown string for image references whose URL
 // is http:// or https://, downloads each one through an SSRF-safe HTTP client,
@@ -204,6 +225,8 @@ func (r *ImageResolver) ResolveRemoteImages(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
+	markdown = UnwrapLinkedImages(markdown)
+
 	matches := imgMarkdownPattern.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
 		return markdown, nil, nil
