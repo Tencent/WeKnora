@@ -10,14 +10,14 @@ import (
 )
 
 // DefaultLanguage is the fallback language when no preference is specified.
-const DefaultLanguage = "en-US"
+const DefaultLanguage = "zh-CN"
 
 // Language extracts the user's language preference and injects it into the request context.
 //
 // Priority (highest to lowest):
 //  1. Accept-Language HTTP header (first tag, e.g. "zh-CN,zh;q=0.9" → "zh-CN")
 //  2. WEKNORA_LANGUAGE environment variable
-//  3. DefaultLanguage ("en-US")
+//  3. DefaultLanguage ("zh-CN")
 func Language() gin.HandlerFunc {
 	// Read env var once at startup
 	envLang := strings.TrimSpace(os.Getenv("WEKNORA_LANGUAGE"))
@@ -51,7 +51,7 @@ func Language() gin.HandlerFunc {
 
 // parseFirstLanguageTag extracts the first language tag from an Accept-Language header value.
 // e.g. "zh-CN,zh;q=0.9,en;q=0.8" → "zh-CN"
-// e.g. "en-US" → "en-US"
+// e.g. "zh-CN" → "zh-CN"
 func parseFirstLanguageTag(header string) string {
 	// Split by comma and take the first entry
 	parts := strings.SplitN(header, ",", 2)
