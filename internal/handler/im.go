@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -39,12 +40,13 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	var req struct {
-		Platform    string         `json:"platform" binding:"required"`
-		Name        string         `json:"name"`
-		Mode        string         `json:"mode"`
-		OutputMode  string         `json:"output_mode"`
-		Credentials types.JSON     `json:"credentials"`
-		Enabled     *bool          `json:"enabled"`
+		Platform        string         `json:"platform" binding:"required"`
+		Name            string         `json:"name"`
+		Mode            string         `json:"mode"`
+		OutputMode      string         `json:"output_mode"`
+		KnowledgeBaseID string         `json:"knowledge_base_id"`
+		Credentials     types.JSON     `json:"credentials"`
+		Enabled         *bool          `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -57,14 +59,15 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	channel := &im.IMChannel{
-		TenantID:    tenantID,
-		AgentID:     agentID,
-		Platform:    req.Platform,
-		Name:        req.Name,
-		Mode:        req.Mode,
-		OutputMode:  req.OutputMode,
-		Credentials: req.Credentials,
-		Enabled:     true,
+		TenantID:        tenantID,
+		AgentID:         agentID,
+		Platform:        req.Platform,
+		Name:            req.Name,
+		Mode:            req.Mode,
+		OutputMode:      req.OutputMode,
+		KnowledgeBaseID: req.KnowledgeBaseID,
+		Credentials:     req.Credentials,
+		Enabled:         true,
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
@@ -81,6 +84,10 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 
 	if err := h.imService.CreateChannel(channel); err != nil {
 		logger.Errorf(c.Request.Context(), "[IM] Create channel failed: %v", err)
+		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
+			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create channel"})
 		return
 	}
@@ -96,7 +103,13 @@ func (h *IMHandler) ListIMChannels(c *gin.Context) {
 		return
 	}
 
-	channels, err := h.imService.ListChannelsByAgent(agentID)
+	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	channels, err := h.imService.ListChannelsByAgent(agentID, tenantID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list channels"})
 		return
@@ -113,18 +126,25 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		return
 	}
 
-	channel, err := h.imService.GetChannelByID(channelID)
+	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	channel, err := h.imService.GetChannelByIDAndTenant(channelID, tenantID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
 		return
 	}
 
 	var req struct {
-		Name        *string    `json:"name"`
-		Mode        *string    `json:"mode"`
-		OutputMode  *string    `json:"output_mode"`
-		Credentials types.JSON `json:"credentials"`
-		Enabled     *bool      `json:"enabled"`
+		Name            *string    `json:"name"`
+		Mode            *string    `json:"mode"`
+		OutputMode      *string    `json:"output_mode"`
+		KnowledgeBaseID *string    `json:"knowledge_base_id"`
+		Credentials     types.JSON `json:"credentials"`
+		Enabled         *bool      `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -140,6 +160,9 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	if req.OutputMode != nil {
 		channel.OutputMode = *req.OutputMode
 	}
+	if req.KnowledgeBaseID != nil {
+		channel.KnowledgeBaseID = *req.KnowledgeBaseID
+	}
 	if req.Credentials != nil {
 		channel.Credentials = req.Credentials
 	}
@@ -149,6 +172,10 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 
 	if err := h.imService.UpdateChannel(channel); err != nil {
 		logger.Errorf(c.Request.Context(), "[IM] Update channel failed: %v", err)
+		if strings.HasPrefix(err.Error(), "duplicate_bot:") {
+			c.JSON(http.StatusConflict, gin.H{"error": strings.TrimPrefix(err.Error(), "duplicate_bot: ")})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update channel"})
 		return
 	}
@@ -164,7 +191,13 @@ func (h *IMHandler) DeleteIMChannel(c *gin.Context) {
 		return
 	}
 
-	if err := h.imService.DeleteChannel(channelID); err != nil {
+	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	if err := h.imService.DeleteChannel(channelID, tenantID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete channel"})
 		return
 	}
@@ -180,7 +213,13 @@ func (h *IMHandler) ToggleIMChannel(c *gin.Context) {
 		return
 	}
 
-	channel, err := h.imService.ToggleChannel(channelID)
+	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	channel, err := h.imService.ToggleChannel(channelID, tenantID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to toggle channel"})
 		return

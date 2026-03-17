@@ -1,6 +1,8 @@
 package im
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -18,8 +20,10 @@ type IMChannel struct {
 	Name        string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
 	Enabled     bool           `json:"enabled"     gorm:"not null;default:true"`
 	Mode        string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
-	OutputMode  string         `json:"output_mode" gorm:"type:varchar(20);not null;default:'stream'"`
-	Credentials types.JSON     `json:"credentials" gorm:"type:jsonb;not null;default:'{}'"`
+	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
+	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
+	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
+	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
@@ -39,7 +43,56 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 	if ch.OutputMode == "" {
 		ch.OutputMode = "stream"
 	}
+	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
+}
+
+// BeforeSave ensures bot_identity is recomputed on every save (create + update).
+func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
+	ch.BotIdentity = ch.computeBotIdentity()
+	return nil
+}
+
+// computeBotIdentity derives a unique bot identity string from the channel's
+// platform, mode, and credentials. Returns "" if no identity can be extracted.
+func (ch *IMChannel) computeBotIdentity() string {
+	creds := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(ch.Credentials), &creds); err != nil {
+		return ""
+	}
+
+	str := func(key string) string {
+		if v, ok := creds[key]; ok {
+			switch val := v.(type) {
+			case string:
+				return val
+			case float64:
+				return fmt.Sprintf("%.0f", val)
+			}
+		}
+		return ""
+	}
+
+	switch ch.Platform {
+	case "wecom":
+		switch ch.Mode {
+		case "websocket":
+			if botID := str("bot_id"); botID != "" {
+				return "wecom:ws:" + botID
+			}
+		case "webhook":
+			corpID := str("corp_id")
+			agentID := str("corp_agent_id")
+			if corpID != "" && agentID != "" {
+				return "wecom:wh:" + corpID + ":" + agentID
+			}
+		}
+	case "feishu":
+		if appID := str("app_id"); appID != "" {
+			return "feishu:" + appID
+		}
+	}
+	return ""
 }
 
 // ChannelSession maps an IM channel (user+chat combination) to a WeKnora session.

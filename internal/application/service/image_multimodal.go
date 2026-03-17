@@ -29,7 +29,7 @@ const (
 		"4. Organize content in the original reading order\n" +
 		"5. Only output extracted text content, do not add any HTML tags\n" +
 		"If there is no recognizable text content in the image, reply: No text content."
-	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image"
+	vlmCaptionPrompt = "Provide a brief and concise description of the main content of the image in Chinese"
 )
 
 // ImageMultimodalService handles image:multimodal asynq tasks.

@@ -141,12 +141,8 @@ conversation:
     - Do not copy or reference any content from examples; ensure the summary is entirely based on the user's new article
     - Make every effort to extract key points and summarize for any text, regardless of length or complexity
 
-    ## CRITICAL: Language Rule
-    - Write the summary in the SAME LANGUAGE as the original document
-    - If the document is in Korean, write the summary in Korean
-    - If the document is in English, write the summary in English
-    - If the document is in Chinese, write the summary in Chinese
-    - NEVER translate the content to a different language
+    ## Requirements:
+    - Use the Chinese language for all outputs
 
     ## The following is the article information provided by the user:
 

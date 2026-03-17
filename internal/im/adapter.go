@@ -2,6 +2,7 @@ package im
 
 import (
 	"context"
+	"io"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,10 +15,21 @@ const (
 	PlatformFeishu Platform = "feishu"
 )
 
+// MessageType identifies the kind of IM message.
+type MessageType string
+
+const (
+	MessageTypeText  MessageType = "text"
+	MessageTypeFile  MessageType = "file"
+	MessageTypeImage MessageType = "image"
+)
+
 // IncomingMessage is the unified message parsed from an IM callback.
 type IncomingMessage struct {
 	// Platform identifies which IM platform the message comes from.
 	Platform Platform
+	// MessageType is "text" (default) or "file".
+	MessageType MessageType
 	// UserID is the IM-platform user identifier.
 	UserID string
 	// UserName is the display name of the user (optional).
@@ -26,10 +38,16 @@ type IncomingMessage struct {
 	ChatID string
 	// ChatType distinguishes direct message from group chat.
 	ChatType ChatType
-	// Content is the text content of the message.
+	// Content is the text content of the message (empty for file messages).
 	Content string
 	// MessageID is the IM-platform message identifier (for dedup).
 	MessageID string
+	// FileKey is the platform file identifier (for file messages).
+	FileKey string
+	// FileName is the original file name (for file messages).
+	FileName string
+	// FileSize is the file size in bytes (for file messages, optional).
+	FileSize int64
 	// Extra holds platform-specific fields (e.g., WeCom stream ID).
 	Extra map[string]string
 }
@@ -88,4 +106,14 @@ type StreamSender interface {
 
 	// EndStream finalizes a streaming reply.
 	EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error
+}
+
+// FileDownloader is an optional interface that adapters can implement to support
+// downloading file attachments from the IM platform. When the adapter implements
+// this interface and the IM channel has a knowledge_base_id configured, file
+// messages will be downloaded and saved to the specified knowledge base.
+type FileDownloader interface {
+	// DownloadFile downloads a file resource from the IM platform.
+	// Returns the file content reader, the resolved file name, and any error.
+	DownloadFile(ctx context.Context, msg *IncomingMessage) (io.ReadCloser, string, error)
 }

@@ -3305,6 +3305,9 @@ export default {
       feishuConsole: "Feishu 개발 플랫폼",
       modeHint: "WebSocket 방식이 설정이 더 간편하여 권장됩니다",
       consoleTip: "자격 증명 정보를 가져오세요",
+      fileKnowledgeBase: "파일 저장 지식 베이스",
+      fileKnowledgeBasePlaceholder: "지식 베이스 선택 (선택 사항)",
+      fileKnowledgeBaseHint: "설정 시 사용자가 보낸 파일이 자동으로 해당 지식 베이스에 저장됩니다",
     },
     tools: {
       thinking: '사고',

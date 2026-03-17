@@ -18,6 +18,12 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// llmPerCallTimeout is the maximum time allowed for a single LLM call (stream initiation + full response).
+	// This prevents a single slow call from consuming the entire pipeline deadline.
+	llmPerCallTimeout = 120 * time.Second
+)
+
 // generateEventID generates a unique event ID with type suffix for better traceability
 func generateEventID(suffix string) string {
 	return fmt.Sprintf("%s-%s", uuid.New().String()[:8], suffix)
@@ -719,7 +725,14 @@ func (e *AgentEngine) streamLLMToEventBus(
 ) (string, []types.LLMToolCall, error) {
 	logger.Debugf(ctx, "[Agent][Stream] Starting LLM stream with %d messages", len(messages))
 
-	stream, err := e.chatModel.ChatStream(ctx, messages, opts)
+	// Create a per-call timeout context so that a single LLM call gets a
+	// guaranteed time window even when the parent context's deadline is almost
+	// exhausted after previous iterations. The shorter of the two deadlines wins,
+	// so the parent pipeline timeout is still respected.
+	llmCtx, llmCancel := context.WithTimeout(ctx, llmPerCallTimeout)
+	defer llmCancel()
+
+	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
 		return "", nil, err

@@ -2858,6 +2858,9 @@ export default {
       feishuConsole: 'Платформа Feishu',
       modeHint: 'Рекомендуется WebSocket — проще настроить',
       consoleTip: 'для получения учётных данных',
+      fileKnowledgeBase: 'База знаний для файлов',
+      fileKnowledgeBasePlaceholder: 'Выберите базу знаний (необязательно)',
+      fileKnowledgeBaseHint: 'При настройке файлы, отправленные пользователями, автоматически сохраняются в эту базу знаний',
     },
     mcp: {
       label: 'MCP-сервисы',

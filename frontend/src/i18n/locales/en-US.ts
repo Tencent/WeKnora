@@ -3275,6 +3275,9 @@ export default {
       feishuConsole: 'Feishu Open Platform',
       modeHint: 'WebSocket is recommended for easier setup',
       consoleTip: 'to get credentials',
+      fileKnowledgeBase: 'File Storage Knowledge Base',
+      fileKnowledgeBasePlaceholder: 'Select a knowledge base (optional)',
+      fileKnowledgeBaseHint: 'When configured, files sent by users will be automatically saved to this knowledge base',
     },
     mcp: {
       label: 'MCP Services',

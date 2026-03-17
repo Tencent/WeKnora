@@ -187,6 +187,7 @@ export interface IMChannel {
   enabled: boolean;
   mode: 'webhook' | 'websocket';
   output_mode: 'stream' | 'full';
+  knowledge_base_id?: string;
   credentials: Record<string, any>;
   created_at?: string;
   updated_at?: string;

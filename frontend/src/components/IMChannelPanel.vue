@@ -116,6 +116,20 @@
           </t-radio-group>
         </div>
 
+        <!-- Knowledge base for file messages -->
+        <div class="form-item">
+          <label class="form-label">{{ $t('agentEditor.im.fileKnowledgeBase') }}</label>
+          <t-select
+            v-model="formData.knowledge_base_id"
+            :placeholder="$t('agentEditor.im.fileKnowledgeBasePlaceholder')"
+            clearable
+            filterable
+          >
+            <t-option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id" :label="kb.name" />
+          </t-select>
+          <p class="form-hint">{{ $t('agentEditor.im.fileKnowledgeBaseHint') }}</p>
+        </div>
+
         <!-- Credentials divider -->
         <div class="form-divider"></div>
 
@@ -200,6 +214,7 @@ import { ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel } from '@/api/agent';
+import { listKnowledgeBases } from '@/api/knowledge-base';
 import type { IMChannel } from '@/api/agent';
 
 const { t } = useI18n();
@@ -213,6 +228,9 @@ const loading = ref(false);
 const showCreateDialog = ref(false);
 const editingChannel = ref<IMChannel | null>(null);
 
+// Knowledge base options for file-to-KB feature
+const knowledgeBases = ref<{ id: string; name: string }[]>([]);
+
 const defaultCredentials = (): Record<string, any> => ({});
 
 const formData = ref({
@@ -220,14 +238,19 @@ const formData = ref({
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket',
   output_mode: 'stream' as 'stream' | 'full',
+  knowledge_base_id: '',
   credentials: defaultCredentials(),
 });
 
 async function loadChannels() {
   loading.value = true;
   try {
-    const res = await listIMChannels(props.agentId);
-    channels.value = res.data || [];
+    const [channelRes, kbRes] = await Promise.all([
+      listIMChannels(props.agentId),
+      listKnowledgeBases(),
+    ]);
+    channels.value = channelRes.data || [];
+    knowledgeBases.value = (kbRes.data || []).map((kb: any) => ({ id: kb.id, name: kb.name }));
   } catch {
     channels.value = [];
   } finally {
@@ -256,6 +279,7 @@ function editChannel(channel: IMChannel) {
     name: channel.name,
     mode: channel.mode,
     output_mode: channel.output_mode,
+    knowledge_base_id: channel.knowledge_base_id || '',
     credentials: { ...channel.credentials },
   };
   showCreateDialog.value = true;
@@ -268,6 +292,7 @@ function resetForm() {
     name: '',
     mode: 'websocket',
     output_mode: 'stream',
+    knowledge_base_id: '',
     credentials: defaultCredentials(),
   };
 }
@@ -279,6 +304,7 @@ async function handleSave() {
         name: formData.value.name,
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        knowledge_base_id: formData.value.knowledge_base_id,
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.updateSuccess'));
@@ -288,6 +314,7 @@ async function handleSave() {
         name: formData.value.name,
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        knowledge_base_id: formData.value.knowledge_base_id,
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));
@@ -296,7 +323,8 @@ async function handleSave() {
     resetForm();
     await loadChannels();
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('common.operationFailed'));
+    const msg = e?.message || (typeof e?.error === 'string' ? e.error : null) || t('common.operationFailed');
+    MessagePlugin.error(msg);
   }
 }
 

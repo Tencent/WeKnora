@@ -51,12 +51,14 @@ type wsFrame struct {
 }
 
 // botMessage is the body of an aibot_msg_callback frame.
+// Supports text, image, file, voice, and mixed message types.
+// Reference: https://developer.work.weixin.qq.com/document/path/100719
 type botMessage struct {
 	MsgID      string `json:"msgid"`
 	AiBotID    string `json:"aibotid"`
 	ChatID     string `json:"chatid"`
 	ChatType   string `json:"chattype"` // "single" or "group"
-	MsgType    string `json:"msgtype"`  // "text", "image", "event", ...
+	MsgType    string `json:"msgtype"`  // "text", "image", "file", "voice", "video", "mixed", "stream"
 	CreateTime int64  `json:"create_time"`
 	From       struct {
 		UserID string `json:"userid"`
@@ -64,6 +66,37 @@ type botMessage struct {
 	Text struct {
 		Content string `json:"content"`
 	} `json:"text"`
+	Image struct {
+		URL    string `json:"url"`    // encrypted download URL, valid for 5 minutes
+		AESKey string `json:"aeskey"` // per-message AES key for decrypting downloaded content
+	} `json:"image"`
+	File struct {
+		URL    string `json:"url"`    // encrypted download URL, valid for 5 minutes
+		AESKey string `json:"aeskey"` // per-message AES key for decrypting downloaded content
+	} `json:"file"`
+	Voice struct {
+		Content string `json:"content"` // speech-to-text result
+	} `json:"voice"`
+	Video struct {
+		URL    string `json:"url"`    // encrypted download URL, valid for 5 minutes
+		AESKey string `json:"aeskey"` // per-message AES key for decrypting downloaded content
+	} `json:"video"`
+	Mixed struct {
+		MsgItem []botMixedItem `json:"msg_item"`
+	} `json:"mixed"`
+	Quote *botMessage `json:"quote,omitempty"` // quoted message (optional)
+}
+
+// botMixedItem is one element in a mixed (text+image) message.
+type botMixedItem struct {
+	MsgType string `json:"msgtype"` // "text" or "image"
+	Text    struct {
+		Content string `json:"content"`
+	} `json:"text"`
+	Image struct {
+		URL    string `json:"url"`
+		AESKey string `json:"aeskey"`
+	} `json:"image"`
 }
 
 // streamReplyBody is the body for a streaming text reply.
@@ -380,17 +413,18 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context) {
 }
 
 func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
+	// Log raw message body for debugging
+	logger.Debugf(ctx, "[WeCom] Raw callback body: %s", string(frame.Body))
+
 	var msg botMessage
 	if err := json.Unmarshal(frame.Body, &msg); err != nil {
 		logger.Warnf(ctx, "[WeCom] Failed to unmarshal callback body: %v", err)
 		return
 	}
 
-	// Only handle text messages for now
-	if msg.MsgType != "text" {
-		logger.Infof(ctx, "[WeCom] Ignoring non-text message type: %s", msg.MsgType)
-		return
-	}
+	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s text=%q image_url=%q file_url=%q voice=%q mixed_items=%d",
+		msg.MsgID, msg.MsgType, msg.From.UserID, msg.ChatType,
+		msg.Text.Content, msg.Image.URL, msg.File.URL, msg.Voice.Content, len(msg.Mixed.MsgItem))
 
 	chatType := im.ChatTypeDirect
 	chatID := ""
@@ -405,20 +439,147 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 		reqID = frame.Headers["req_id"]
 	}
 
-	incoming := &im.IncomingMessage{
-		Platform:  im.PlatformWeCom,
-		UserID:    msg.From.UserID,
-		UserName:  msg.From.UserID,
-		ChatID:    chatID,
-		ChatType:  chatType,
-		Content:   strings.TrimSpace(msg.Text.Content),
-		MessageID: msg.MsgID,
-		Extra:     map[string]string{"req_id": reqID},
+	var incoming *im.IncomingMessage
+
+	switch msg.MsgType {
+	case "text":
+		incoming = &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeText,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			Content:     strings.TrimSpace(msg.Text.Content),
+			MessageID:   msg.MsgID,
+			Extra:       map[string]string{"req_id": reqID},
+		}
+
+	case "voice":
+		// WeCom returns speech-to-text content directly — treat as text query
+		if msg.Voice.Content == "" {
+			logger.Infof(ctx, "[WeCom] Ignoring voice message with empty content")
+			return
+		}
+		incoming = &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeText,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			Content:     strings.TrimSpace(msg.Voice.Content),
+			MessageID:   msg.MsgID,
+			Extra:       map[string]string{"req_id": reqID},
+		}
+
+	case "image":
+		if msg.Image.URL == "" {
+			logger.Infof(ctx, "[WeCom] Ignoring image message with empty URL")
+			return
+		}
+		incoming = &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeImage,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MsgID,
+			FileKey:     msg.Image.URL, // store encrypted URL in FileKey
+			FileName:    msg.MsgID + ".png",
+			Extra:       map[string]string{"req_id": reqID, "aes_key": msg.Image.AESKey},
+		}
+
+	case "file":
+		if msg.File.URL == "" {
+			logger.Infof(ctx, "[WeCom] Ignoring file message with empty URL")
+			return
+		}
+		incoming = &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeFile,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MsgID,
+			FileKey:     msg.File.URL, // store encrypted URL in FileKey
+			FileName:    msg.MsgID,    // WeCom doesn't provide file name directly
+			Extra:       map[string]string{"req_id": reqID, "aes_key": msg.File.AESKey},
+		}
+
+	case "mixed":
+		// Extract text parts for QA content, and detect if any images are present
+		incoming = convertMixedMessage(&msg, chatID, chatType, reqID)
+		if incoming == nil {
+			logger.Infof(ctx, "[WeCom] Ignoring empty mixed message")
+			return
+		}
+
+	default:
+		logger.Infof(ctx, "[WeCom] Ignoring unsupported message type: %s", msg.MsgType)
+		return
 	}
 
 	if err := c.handler(ctx, incoming); err != nil {
 		logger.Errorf(ctx, "[WeCom] Handle message error: %v", err)
 	}
+}
+
+// convertMixedMessage converts a WeCom mixed (text+image) message.
+// Extracts all text content for QA; if there's only images, treat as image message.
+func convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, reqID string) *im.IncomingMessage {
+	var textParts []string
+	var firstImageURL string
+	var firstImageAESKey string
+
+	for _, item := range msg.Mixed.MsgItem {
+		switch item.MsgType {
+		case "text":
+			if t := strings.TrimSpace(item.Text.Content); t != "" {
+				textParts = append(textParts, t)
+			}
+		case "image":
+			if firstImageURL == "" && item.Image.URL != "" {
+				firstImageURL = item.Image.URL
+				firstImageAESKey = item.Image.AESKey
+			}
+		}
+	}
+
+	// If there's text content, treat as text message (QA query)
+	if len(textParts) > 0 {
+		return &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeText,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			Content:     strings.Join(textParts, "\n"),
+			MessageID:   msg.MsgID,
+			Extra:       map[string]string{"req_id": reqID},
+		}
+	}
+
+	// Only images, treat as image message (save to KB)
+	if firstImageURL != "" {
+		return &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeImage,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MsgID,
+			FileKey:     firstImageURL,
+			FileName:    msg.MsgID + ".png",
+			Extra:       map[string]string{"req_id": reqID, "aes_key": firstImageAESKey},
+		}
+	}
+
+	return nil
 }
 
 func (c *LongConnClient) writeJSON(v interface{}) error {

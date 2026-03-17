@@ -3250,6 +3250,9 @@ export default {
       feishuConsole: "飞书开放平台",
       modeHint: "推荐使用 WebSocket 方式接入，配置更简单",
       consoleTip: "前往获取凭证信息",
+      fileKnowledgeBase: "文件保存知识库",
+      fileKnowledgeBasePlaceholder: "选择知识库（可选）",
+      fileKnowledgeBaseHint: "配置后，用户发送的文件将自动保存到该知识库中",
     },
     tools: {
       thinking: "思考",

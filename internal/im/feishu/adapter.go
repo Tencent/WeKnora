@@ -29,8 +29,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Compile-time check that Adapter implements im.StreamSender.
+// Compile-time check that Adapter implements im.StreamSender and im.FileDownloader.
 var _ im.StreamSender = (*Adapter)(nil)
+var _ im.FileDownloader = (*Adapter)(nil)
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
@@ -223,19 +224,6 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	}
 	msg := eventBody.Event.Message
 
-	if msg.MessageType != "text" {
-		logger.Infof(c.Request.Context(), "[Feishu] Ignoring non-text message type: %s", msg.MessageType)
-		return nil, nil
-	}
-
-	// Parse text content
-	var textContent struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal([]byte(msg.Content), &textContent); err != nil {
-		return nil, fmt.Errorf("unmarshal text content: %w", err)
-	}
-
 	// Determine chat type
 	chatType := im.ChatTypeDirect
 	chatID := ""
@@ -250,28 +238,146 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		openID = eventBody.Event.Sender.SenderID.OpenID
 	}
 
-	// Strip @bot mention from group messages
-	content := textContent.Text
-	if chatType == im.ChatTypeGroup {
-		// Feishu @mentions are in the format @_user_xxx
-		for strings.HasPrefix(content, "@_user_") {
-			idx := strings.Index(content, " ")
-			if idx >= 0 {
-				content = content[idx+1:]
-			} else {
-				break
+	switch msg.MessageType {
+	case "text":
+		// Parse text content
+		var textContent struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(msg.Content), &textContent); err != nil {
+			return nil, fmt.Errorf("unmarshal text content: %w", err)
+		}
+
+		// Strip @bot mention from group messages
+		content := textContent.Text
+		if chatType == im.ChatTypeGroup {
+			for strings.HasPrefix(content, "@_user_") {
+				idx := strings.Index(content, " ")
+				if idx >= 0 {
+					content = content[idx+1:]
+				} else {
+					break
+				}
 			}
 		}
-	}
 
-	return &im.IncomingMessage{
-		Platform:  im.PlatformFeishu,
-		UserID:    openID,
-		ChatID:    chatID,
-		ChatType:  chatType,
-		Content:   strings.TrimSpace(content),
-		MessageID: msg.MessageID,
-	}, nil
+		return &im.IncomingMessage{
+			Platform:    im.PlatformFeishu,
+			MessageType: im.MessageTypeText,
+			UserID:      openID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			Content:     strings.TrimSpace(content),
+			MessageID:   msg.MessageID,
+		}, nil
+
+	case "file":
+		var fileContent struct {
+			FileKey  string `json:"file_key"`
+			FileName string `json:"file_name"`
+		}
+		if err := json.Unmarshal([]byte(msg.Content), &fileContent); err != nil {
+			return nil, fmt.Errorf("unmarshal file content: %w", err)
+		}
+		if fileContent.FileKey == "" {
+			return nil, nil
+		}
+		return &im.IncomingMessage{
+			Platform:    im.PlatformFeishu,
+			MessageType: im.MessageTypeFile,
+			UserID:      openID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MessageID,
+			FileKey:     fileContent.FileKey,
+			FileName:    fileContent.FileName,
+		}, nil
+
+	case "image":
+		var imageContent struct {
+			ImageKey string `json:"image_key"`
+		}
+		if err := json.Unmarshal([]byte(msg.Content), &imageContent); err != nil {
+			return nil, fmt.Errorf("unmarshal image content: %w", err)
+		}
+		if imageContent.ImageKey == "" {
+			return nil, nil
+		}
+		return &im.IncomingMessage{
+			Platform:    im.PlatformFeishu,
+			MessageType: im.MessageTypeImage,
+			UserID:      openID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			MessageID:   msg.MessageID,
+			FileKey:     imageContent.ImageKey,
+			FileName:    imageContent.ImageKey + ".png",
+		}, nil
+
+	case "post":
+		// Rich text: extract plain text for QA
+		var postContent struct {
+			Title   string              `json:"title"`
+			Content [][]json.RawMessage `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(msg.Content), &postContent); err != nil {
+			return nil, fmt.Errorf("unmarshal post content: %w", err)
+		}
+
+		var textParts []string
+		if postContent.Title != "" {
+			textParts = append(textParts, postContent.Title)
+		}
+		for _, line := range postContent.Content {
+			var lineText strings.Builder
+			for _, elem := range line {
+				var tag struct {
+					Tag  string `json:"tag"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(elem, &tag); err != nil {
+					continue
+				}
+				switch tag.Tag {
+				case "text", "a":
+					lineText.WriteString(tag.Text)
+				}
+			}
+			if t := strings.TrimSpace(lineText.String()); t != "" {
+				textParts = append(textParts, t)
+			}
+		}
+
+		content := strings.Join(textParts, "\n")
+		if chatType == im.ChatTypeGroup {
+			for strings.HasPrefix(content, "@_user_") {
+				idx := strings.Index(content, " ")
+				if idx >= 0 {
+					content = content[idx+1:]
+				} else {
+					break
+				}
+			}
+		}
+		content = strings.TrimSpace(content)
+		if content == "" {
+			return nil, nil
+		}
+
+		return &im.IncomingMessage{
+			Platform:    im.PlatformFeishu,
+			MessageType: im.MessageTypeText,
+			UserID:      openID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			Content:     content,
+			MessageID:   msg.MessageID,
+		}, nil
+
+	default:
+		logger.Infof(c.Request.Context(), "[Feishu] Ignoring unsupported message type: %s", msg.MessageType)
+		return nil, nil
+	}
 }
 
 // SendReply sends a reply message via Feishu API.
@@ -325,6 +431,63 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 	}
 
 	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// File download support via Feishu GetMessageResource API
+// ──────────────────────────────────────────────────────────────────────
+
+// DownloadFile downloads a file or image attachment from a Feishu message.
+// Uses the GetMessageResource API: GET /open-apis/im/v1/messages/:message_id/resources/:file_key?type={file|image}
+func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
+	if msg.FileKey == "" || msg.MessageID == "" {
+		return nil, "", fmt.Errorf("file_key and message_id are required")
+	}
+
+	accessToken, err := a.getTenantAccessToken(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("get access token: %w", err)
+	}
+
+	// Determine resource type based on message type
+	resourceType := "file"
+	if msg.MessageType == im.MessageTypeImage {
+		resourceType = "image"
+	}
+
+	apiURL := fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/resources/%s?type=%s",
+		msg.MessageID, msg.FileKey, resourceType)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("download file: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, "", fmt.Errorf("download file failed: status=%d", resp.StatusCode)
+	}
+
+	// Use the original file name from the message, or extract from Content-Disposition
+	fileName := msg.FileName
+	if fileName == "" {
+		if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+			if idx := strings.Index(cd, "filename="); idx >= 0 {
+				fileName = strings.Trim(cd[idx+len("filename="):], "\" ")
+			}
+		}
+	}
+	if fileName == "" {
+		fileName = msg.FileKey
+	}
+
+	return resp.Body, fileName, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────
