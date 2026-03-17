@@ -129,6 +129,8 @@ type KnowledgeService interface {
 	UpdateFAQEntryTagBatch(ctx context.Context, kbID string, updates map[int64]*int64) error
 	// GetRepository gets the knowledge repository
 	GetRepository() KnowledgeRepository
+	// ProcessManualUpdate handles Asynq manual knowledge update tasks (cleanup + re-indexing)
+	ProcessManualUpdate(ctx context.Context, t *asynq.Task) error
 	// ProcessDocument handles Asynq document processing tasks
 	ProcessDocument(ctx context.Context, t *asynq.Task) error
 	// ProcessFAQImport handles Asynq FAQ import tasks

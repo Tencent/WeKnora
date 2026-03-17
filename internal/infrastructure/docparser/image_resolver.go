@@ -3,14 +3,22 @@ package docparser
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io"
 	"log"
+	"mime"
+	"net/http"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -156,11 +164,188 @@ func extFromMime(mime string) string {
 }
 
 // isProviderScheme checks if the path uses a provider:// scheme (local://, minio://, cos://, tos://).
-func isProviderScheme(path string) bool {
+func isProviderScheme(p string) bool {
 	for _, prefix := range []string{"local://", "minio://", "cos://", "tos://"} {
-		if strings.HasPrefix(path, prefix) {
+		if strings.HasPrefix(p, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Remote image resolution (for manual / web-clipped markdown content)
+// ---------------------------------------------------------------------------
+
+const (
+	// maxRemoteImageSize is the maximum allowed size for a single remote image download.
+	maxRemoteImageSize = 10 * 1024 * 1024 // 10 MB
+	// maxRemoteImages is the maximum number of remote images to process per document.
+	maxRemoteImages = 30
+	// remoteImageFetchTimeout is the per-image HTTP request timeout.
+	remoteImageFetchTimeout = 15 * time.Second
+)
+
+// imgMarkdownPattern matches Markdown image syntax: ![alt](url)
+var imgMarkdownPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)\)`)
+
+// ResolveRemoteImages scans a Markdown string for image references whose URL
+// is http:// or https://, downloads each one through an SSRF-safe HTTP client,
+// uploads the bytes via fileSvc, and replaces the original URL with the
+// provider:// serving URL.
+//
+// Images that fail SSRF validation, exceed size limits, or cannot be downloaded
+// are left unchanged (the original URL is preserved).
+//
+// Returns the updated Markdown and a list of successfully stored images.
+func (r *ImageResolver) ResolveRemoteImages(
+	ctx context.Context,
+	markdown string,
+	fileSvc interfaces.FileService,
+	tenantID uint64,
+) (updatedMarkdown string, images []StoredImage, err error) {
+	matches := imgMarkdownPattern.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return markdown, nil, nil
+	}
+
+	// Build a shared SSRF-safe HTTP client for all downloads.
+	httpClient := secutils.NewSSRFSafeHTTPClient(secutils.SSRFSafeHTTPClientConfig{
+		Timeout:      remoteImageFetchTimeout,
+		MaxRedirects: 5,
+	})
+
+	processed := 0
+
+	// Process in reverse order so that earlier indices stay valid after replacements.
+	for i := len(matches) - 1; i >= 0; i-- {
+		if processed >= maxRemoteImages {
+			break
+		}
+		m := matches[i]
+		imgURL := markdown[m[4]:m[5]] // group 2: the URL
+
+		// Only process remote http(s) URLs.
+		if !strings.HasPrefix(imgURL, "http://") && !strings.HasPrefix(imgURL, "https://") {
+			continue
+		}
+
+		// Already a provider scheme — skip.
+		if isProviderScheme(imgURL) {
+			continue
+		}
+
+		// --- SSRF check ---
+		if safe, reason := secutils.IsSSRFSafeURL(imgURL); !safe {
+			log.Printf("WARN: remote image blocked by SSRF check (%s): %s", reason, imgURL)
+			continue
+		}
+
+		// --- Download ---
+		data, mimeType, dlErr := downloadImage(ctx, httpClient, imgURL)
+		if dlErr != nil {
+			log.Printf("WARN: failed to download remote image %s: %v", imgURL, dlErr)
+			continue
+		}
+
+		// Filter out icons / tiny decorative images.
+		if isIconImage(data) {
+			continue
+		}
+
+		// Determine file extension.
+		ext := extFromMime(mimeType)
+		if ext == "" {
+			ext = extFromURLPath(imgURL)
+		}
+		if ext == "" {
+			ext = ".png" // safe default
+		}
+
+		// --- Upload to storage ---
+		fileName := uuid.New().String() + ext
+		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+		if saveErr != nil {
+			log.Printf("WARN: failed to save remote image %s: %v", imgURL, saveErr)
+			continue
+		}
+
+		images = append(images, StoredImage{
+			OriginalRef: imgURL,
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+		})
+
+		// Replace URL in markdown.
+		markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
+		processed++
+	}
+
+	return markdown, images, nil
+}
+
+// downloadImage fetches an image from remoteURL using the provided SSRF-safe
+// client. It validates Content-Type and enforces maxRemoteImageSize.
+func downloadImage(ctx context.Context, client *http.Client, remoteURL string) (data []byte, mimeType string, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("create request: %w", err)
+	}
+	// Some CDNs require a browser-like User-Agent.
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; WeKnora/1.0)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("HTTP GET: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	// Determine MIME type from Content-Type header.
+	ct := resp.Header.Get("Content-Type")
+	mimeType, _, _ = mime.ParseMediaType(ct)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	// Only allow image content types (or octet-stream which we sniff later).
+	if !strings.HasPrefix(mimeType, "image/") && mimeType != "application/octet-stream" {
+		return nil, "", fmt.Errorf("non-image content type: %s", mimeType)
+	}
+
+	// Read body with size limit.
+	limited := io.LimitReader(resp.Body, maxRemoteImageSize+1)
+	body, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, "", fmt.Errorf("read body: %w", err)
+	}
+	if len(body) > maxRemoteImageSize {
+		return nil, "", fmt.Errorf("image exceeds %d bytes limit", maxRemoteImageSize)
+	}
+
+	// If MIME was octet-stream, sniff the real type from body.
+	if mimeType == "application/octet-stream" {
+		detected := http.DetectContentType(body)
+		if strings.HasPrefix(detected, "image/") {
+			mimeType = detected
+		} else {
+			return nil, "", fmt.Errorf("downloaded data is not an image (sniffed: %s)", detected)
+		}
+	}
+
+	return body, mimeType, nil
+}
+
+// extFromURLPath extracts the image file extension from the URL path segment.
+func extFromURLPath(rawURL string) string {
+	p := path.Ext(path.Base(rawURL))
+	switch strings.ToLower(p) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg":
+		return strings.ToLower(p)
+	default:
+		return ""
+	}
 }

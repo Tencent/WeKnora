@@ -885,8 +885,14 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 	}
 
 	if status == types.ManualKnowledgeStatusPublish {
-		logger.Infof(ctx, "Manual knowledge created, scheduling indexing, ID: %s", knowledge.ID)
-		s.triggerManualProcessing(ctx, kb, knowledge, cleanContent, false)
+		logger.Infof(ctx, "Manual knowledge created, enqueuing async processing task, ID: %s", knowledge.ID)
+		if err := s.enqueueManualProcessing(ctx, knowledge, cleanContent, false); err != nil {
+			logger.Errorf(ctx, "Failed to enqueue manual processing task for new knowledge: %v", err)
+			// Non-fatal: mark as failed so user can retry
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = "Failed to enqueue processing task"
+			s.repo.UpdateKnowledge(ctx, knowledge)
+		}
 	}
 
 	return knowledge, nil
@@ -2471,6 +2477,8 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 }
 
 // UpdateManualKnowledge updates manual Markdown knowledge content.
+// For publish status, the heavy operations (cleanup old indexes, re-chunking,
+// re-embedding) are offloaded to an Asynq task so the HTTP response returns quickly.
 func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	knowledgeID string, payload *types.ManualKnowledgePayload,
 ) (*types.Knowledge, error) {
@@ -2540,14 +2548,6 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 	existing.Source = types.KnowledgeTypeManual
 	existing.EnableStatus = "disabled"
 	existing.UpdatedAt = time.Now()
-
-	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"knowledge_id": knowledgeID,
-		})
-		return nil, err
-	}
-
 	existing.EmbeddingModelID = kb.EmbeddingModelID
 
 	if status == types.ManualKnowledgeStatusDraft {
@@ -2562,6 +2562,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return existing, nil
 	}
 
+	// Publish: persist pending status and enqueue async task for cleanup + re-indexing
 	existing.ParseStatus = "pending"
 	existing.Description = ""
 	existing.ProcessedAt = nil
@@ -2571,9 +2572,43 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, err
 	}
 
-	logger.Infof(ctx, "Manual knowledge updated, scheduling indexing, ID: %s", existing.ID)
-	s.triggerManualProcessing(ctx, kb, existing, cleanContent, false)
+	logger.Infof(ctx, "Manual knowledge updated, enqueuing async processing task, ID: %s", existing.ID)
+	if err := s.enqueueManualProcessing(ctx, existing, cleanContent, true); err != nil {
+		logger.Errorf(ctx, "Failed to enqueue manual processing task: %v", err)
+		// Non-fatal: mark as failed so user can retry
+		existing.ParseStatus = "failed"
+		existing.ErrorMessage = "Failed to enqueue processing task"
+		s.repo.UpdateKnowledge(ctx, existing)
+		return nil, werrors.NewInternalServerError("Failed to submit processing task")
+	}
 	return existing, nil
+}
+
+// enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
+func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
+	knowledge *types.Knowledge, content string, needCleanup bool,
+) error {
+	requestID, _ := types.RequestIDFromContext(ctx)
+	payload := types.ManualProcessPayload{
+		RequestId:       requestID,
+		TenantID:        knowledge.TenantID,
+		KnowledgeID:     knowledge.ID,
+		KnowledgeBaseID: knowledge.KnowledgeBaseID,
+		Content:         content,
+		NeedCleanup:     needCleanup,
+	}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal manual process payload: %w", err)
+	}
+
+	task := asynq.NewTask(types.TypeManualProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
+	info, err := s.task.Enqueue(task)
+	if err != nil {
+		return fmt.Errorf("failed to enqueue manual process task: %w", err)
+	}
+	logger.Infof(ctx, "Enqueued manual process task: knowledge_id=%s, asynq_id=%s", knowledge.ID, info.ID)
+	return nil
 }
 
 // ReparseKnowledge deletes existing document content and re-parses the knowledge asynchronously.
@@ -2595,7 +2630,35 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 		return nil, err
 	}
 
-	// Step 1: Clean up existing resources (chunks, embeddings, graph data)
+	// For manual knowledge, use async manual processing (cleanup + re-indexing in worker)
+	if existing.IsManual() {
+		meta, metaErr := existing.ManualMetadata()
+		if metaErr != nil || meta == nil {
+			logger.Errorf(ctx, "Failed to get manual metadata for reparse: %v", metaErr)
+			return nil, werrors.NewBadRequestError("无法获取手工知识内容")
+		}
+
+		existing.ParseStatus = "pending"
+		existing.EnableStatus = "disabled"
+		existing.Description = ""
+		existing.ProcessedAt = nil
+		existing.EmbeddingModelID = kb.EmbeddingModelID
+
+		if err := s.repo.UpdateKnowledge(ctx, existing); err != nil {
+			logger.Errorf(ctx, "Failed to update knowledge status before reparse: %v", err)
+			return nil, err
+		}
+
+		if err := s.enqueueManualProcessing(ctx, existing, meta.Content, true); err != nil {
+			logger.Errorf(ctx, "Failed to enqueue manual reparse task: %v", err)
+			existing.ParseStatus = "failed"
+			existing.ErrorMessage = "Failed to enqueue processing task"
+			s.repo.UpdateKnowledge(ctx, existing)
+		}
+		return existing, nil
+	}
+
+	// For non-manual knowledge, cleanup synchronously then enqueue document processing
 	logger.Infof(ctx, "Cleaning up existing resources for knowledge: %s", knowledgeID)
 	if err := s.cleanupKnowledgeResources(ctx, existing); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -2618,17 +2681,6 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 
 	// Step 3: Trigger async re-parsing based on knowledge type
 	logger.Infof(ctx, "Knowledge status updated, scheduling async reparse, ID: %s, Type: %s", existing.ID, existing.Type)
-
-	// For manual knowledge, extract content from metadata and trigger manual processing
-	if existing.IsManual() {
-		meta, err := existing.ManualMetadata()
-		if err != nil || meta == nil {
-			logger.Errorf(ctx, "Failed to get manual metadata for reparse: %v", err)
-			return nil, werrors.NewBadRequestError("无法获取手工知识内容")
-		}
-		s.triggerManualProcessing(ctx, kb, existing, meta.Content, false)
-		return existing, nil
-	}
 
 	// For file-based knowledge, enqueue document processing task
 	if existing.FilePath != "" {
@@ -6779,6 +6831,22 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		return
 	}
 
+	// Resolve remote images: download http(s) images, upload to storage, replace URLs.
+	// This runs before chunking so that chunks contain stable provider:// URLs.
+	var resolvedImages []docparser.StoredImage
+	if s.imageResolver != nil {
+		fileSvc := s.resolveFileService(ctx, kb)
+		updatedContent, storedImages, resolveErr := s.imageResolver.ResolveRemoteImages(ctx, clean, fileSvc, knowledge.TenantID)
+		if resolveErr != nil {
+			logger.Warnf(ctx, "Remote image resolution partially failed: %v", resolveErr)
+		}
+		if len(storedImages) > 0 {
+			logger.Infof(ctx, "Resolved %d remote images for manual knowledge %s", len(storedImages), knowledge.ID)
+			clean = updatedContent
+			resolvedImages = storedImages
+		}
+	}
+
 	// Manual content is markdown - chunk directly with Go chunker
 	chunkCfg := chunker.SplitterConfig{
 		ChunkSize:    kb.ChunkingConfig.ChunkSize,
@@ -6796,7 +6864,12 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	}
 
 	var parsed []types.ParsedChunk
-	var opts ProcessChunksOptions
+	opts := ProcessChunksOptions{
+		// When the KB has VLM enabled and we resolved remote images, pass them
+		// through so processChunks will enqueue image:multimodal tasks (OCR + caption).
+		EnableMultimodel: kb.IsMultimodalEnabled() && len(resolvedImages) > 0,
+		StoredImages:     resolvedImages,
+	}
 
 	if kb.ChunkingConfig.EnableParentChild {
 		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
@@ -7151,6 +7224,83 @@ func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, p
 	}
 
 	return contentBytes, nil
+}
+
+// ProcessManualUpdate handles Asynq manual knowledge update tasks.
+// It performs cleanup of old indexes/chunks (when NeedCleanup is true) and re-indexes the content.
+func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Task) error {
+	var payload types.ManualProcessPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "failed to unmarshal manual process task payload: %v", err)
+		return nil
+	}
+
+	ctx = logger.WithRequestID(ctx, payload.RequestId)
+	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+
+	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "ProcessManualUpdate: failed to get tenant: %v", err)
+		return nil
+	}
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
+
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		logger.Errorf(ctx, "ProcessManualUpdate: failed to get knowledge: %v", err)
+		return nil
+	}
+	if knowledge == nil {
+		logger.Warnf(ctx, "ProcessManualUpdate: knowledge not found: %s", payload.KnowledgeID)
+		return nil
+	}
+
+	// Skip if already completed or being deleted
+	if knowledge.ParseStatus == types.ParseStatusCompleted {
+		logger.Infof(ctx, "ProcessManualUpdate: already completed, skipping: %s", payload.KnowledgeID)
+		return nil
+	}
+	if knowledge.ParseStatus == types.ParseStatusDeleting {
+		logger.Infof(ctx, "ProcessManualUpdate: being deleted, skipping: %s", payload.KnowledgeID)
+		return nil
+	}
+
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "ProcessManualUpdate: failed to get knowledge base: %v", err)
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = fmt.Sprintf("failed to get knowledge base: %v", err)
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil
+	}
+
+	// Update status to processing
+	knowledge.ParseStatus = "processing"
+	knowledge.UpdatedAt = time.Now()
+	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+		logger.Errorf(ctx, "ProcessManualUpdate: failed to update status to processing: %v", err)
+		return nil
+	}
+
+	// Cleanup old resources (indexes, chunks, graph) for update operations
+	if payload.NeedCleanup {
+		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"knowledge_id": payload.KnowledgeID,
+			})
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = fmt.Sprintf("failed to cleanup old resources: %v", err)
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+	}
+
+	// Run manual processing (image resolution + chunking + embedding) synchronously within the worker
+	s.triggerManualProcessing(ctx, kb, knowledge, payload.Content, true)
+	return nil
 }
 
 // ProcessDocument handles Asynq document processing tasks

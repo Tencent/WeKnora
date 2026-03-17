@@ -78,6 +78,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register document processing handler
 	mux.HandleFunc(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
 
+	// Register manual knowledge processing handler (cleanup + re-indexing)
+	mux.HandleFunc(types.TypeManualProcess, params.KnowledgeService.ProcessManualUpdate)
+
 	// Register FAQ import handler (includes dry run mode)
 	mux.HandleFunc(types.TypeFAQImport, params.KnowledgeService.ProcessFAQImport)
 

@@ -86,6 +86,7 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeChunkExtract, params.ChunkExtractor.Handle)
 	params.Executor.RegisterHandler(types.TypeDataTableSummary, params.DataTableSummary.Handle)
 	params.Executor.RegisterHandler(types.TypeDocumentProcess, params.KnowledgeService.ProcessDocument)
+	params.Executor.RegisterHandler(types.TypeManualProcess, params.KnowledgeService.ProcessManualUpdate)
 	params.Executor.RegisterHandler(types.TypeFAQImport, params.KnowledgeService.ProcessFAQImport)
 	params.Executor.RegisterHandler(types.TypeQuestionGeneration, params.KnowledgeService.ProcessQuestionGeneration)
 	params.Executor.RegisterHandler(types.TypeSummaryGeneration, params.KnowledgeService.ProcessSummaryGeneration)

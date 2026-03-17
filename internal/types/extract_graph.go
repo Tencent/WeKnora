@@ -13,6 +13,7 @@ const (
 	TypeKnowledgeMove       = "knowledge:move"        // 知识移动任务
 	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
 	TypeImageMultimodal     = "image:multimodal"      // 图片多模态处理任务（OCR + VLM Caption）
+	TypeManualProcess       = "manual:process"        // 手工知识更新任务（cleanup + 重新索引）
 )
 
 // ExtractChunkPayload represents the extract chunk task payload
@@ -124,6 +125,17 @@ type KnowledgeMoveProgress struct {
 	Error      string            `json:"error"`      // 错误信息
 	CreatedAt  int64             `json:"created_at"` // 任务创建时间
 	UpdatedAt  int64             `json:"updated_at"` // 最后更新时间
+}
+
+// ManualProcessPayload represents the manual knowledge processing task payload.
+// Used for both create (publish) and update operations.
+type ManualProcessPayload struct {
+	RequestId       string `json:"request_id"`
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Content         string `json:"content"`           // cleaned markdown content
+	NeedCleanup     bool   `json:"need_cleanup"`      // true for update, false for create
 }
 
 // ImageMultimodalPayload represents the image multimodal processing task payload.
