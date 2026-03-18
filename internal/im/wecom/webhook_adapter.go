@@ -212,21 +212,75 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 }
 
 // SendReply sends a reply message via WeCom API.
-// For simplicity, this uses the "应用消息" API to proactively send messages.
-// A production implementation would integrate with the streaming callback model.
+// For group chats, it tries the appchat API first to reply in the group,
+// then falls back to sending a direct message to the user.
 func (a *WebhookAdapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	// Get access token
 	accessToken, err := a.getAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	// Build message payload.
-	// Note: /cgi-bin/message/send only supports touser/toparty/totag — it does NOT
-	// support regular group chat IDs (chatid is only for appchat-created groups).
-	// So for both direct and group messages we reply to the user directly.
+	// For group chats, try sending to the group via appchat API first.
+	// This works for groups created via /cgi-bin/appchat/create.
+	if incoming.ChatType == im.ChatTypeGroup && incoming.ChatID != "" {
+		if err := a.sendToAppChat(ctx, accessToken, incoming.ChatID, reply); err == nil {
+			return nil
+		}
+		logger.Debugf(ctx, "[WeCom] appchat/send failed for chat=%s, falling back to touser: %v", incoming.ChatID, err)
+	}
+
+	// Fallback (or direct message): send to the user directly.
+	return a.sendToUser(ctx, accessToken, incoming.UserID, reply)
+}
+
+// sendToAppChat sends a message to a WeCom group chat via the appchat API.
+// Reference: https://developer.work.weixin.qq.com/document/path/90248
+func (a *WebhookAdapter) sendToAppChat(ctx context.Context, accessToken, chatID string, reply *im.ReplyMessage) error {
 	payload := map[string]interface{}{
-		"touser":  incoming.UserID,
+		"chatid":  chatID,
+		"msgtype": "markdown",
+		"markdown": map[string]string{
+			"content": reply.Content,
+		},
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+
+	sendURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/appchat/send?access_token=%s", accessToken)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send appchat message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	if result.ErrCode != 0 {
+		return fmt.Errorf("appchat api error: code=%d msg=%s", result.ErrCode, result.ErrMsg)
+	}
+
+	return nil
+}
+
+// sendToUser sends a message directly to a user via the application message API.
+// Reference: https://developer.work.weixin.qq.com/document/path/90236
+func (a *WebhookAdapter) sendToUser(ctx context.Context, accessToken, userID string, reply *im.ReplyMessage) error {
+	payload := map[string]interface{}{
+		"touser":  userID,
 		"msgtype": "markdown",
 		"agentid": a.corpAgentID,
 		"markdown": map[string]string{

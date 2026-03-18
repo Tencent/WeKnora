@@ -48,8 +48,9 @@ type AdapterFactory func(ctx context.Context, channel *IMChannel, msgHandler fun
 // Service orchestrates IM message handling:
 // 1. Receives a unified IncomingMessage from an Adapter
 // 2. Resolves or creates a WeKnora session for the IM channel
-// 3. Calls the WeKnora QA pipeline
-// 4. Collects the streaming answer and sends it back via the Adapter
+// 3. Dispatches slash-commands (/help, /kb, /clear, etc.) without entering QA
+// 4. Calls the WeKnora QA pipeline for normal messages
+// 5. Collects the streaming answer and sends it back via the Adapter
 type Service struct {
 	db             *gorm.DB
 	sessionService interfaces.SessionService
@@ -60,8 +61,14 @@ type Service struct {
 	// knowledgeService is used for saving IM file messages to knowledge bases.
 	knowledgeService interfaces.KnowledgeService
 
+	// kbService is used by slash-commands (/info) to list and inspect knowledge bases.
+	kbService interfaces.KnowledgeBaseService
+
 	// modelService is used to obtain the chat model for generating smart notification replies.
 	modelService interfaces.ModelService
+
+	// cmdRegistry holds all registered slash-commands.
+	cmdRegistry *CommandRegistry
 
 	// channels maps channel ID -> running channel state
 	channels map[string]*channelState
@@ -73,7 +80,24 @@ type Service struct {
 	// processedMsgs tracks recently processed message IDs to prevent duplicate handling.
 	processedMsgs sync.Map
 
+	// rateLimiter enforces per-user sliding window rate limiting.
+	rateLimiter *slidingWindowLimiter
+
+	// inflight tracks cancel functions for in-progress QA requests, keyed by
+	// "channelID:userID:chatID". This allows /stop to abort a running request.
+	inflight sync.Map // key -> context.CancelFunc
+
+	// qaQueue manages bounded queuing and worker-pool execution of QA requests,
+	// providing backpressure to protect downstream LLM resources.
+	qaQueue *qaQueue
+
 	stopCh chan struct{}
+}
+
+// makeUserKey builds the canonical key used to identify a user's request
+// across the queue, inflight map, and /stop command.
+func makeUserKey(channelID, userID, chatID string) string {
+	return fmt.Sprintf("%s:%s:%s", channelID, userID, chatID)
 }
 
 func buildIMQARequest(
@@ -84,6 +108,10 @@ func buildIMQARequest(
 	customAgent *types.CustomAgent,
 	kbIDs []string,
 ) *types.QARequest {
+	// WebSearchEnabled: the web handler passes this per-request from the
+	// frontend toggle; for IM channels the user has no per-message toggle,
+	// so we derive it from the agent config (the single source of truth).
+	webSearchEnabled := customAgent != nil && customAgent.Config.WebSearchEnabled
 	return &types.QARequest{
 		Session:            session,
 		Query:              query,
@@ -91,6 +119,7 @@ func buildIMQARequest(
 		CustomAgent:        customAgent,
 		KnowledgeBaseIDs:   kbIDs,
 		UserMessageID:      userMessageID,
+		WebSearchEnabled:   webSearchEnabled,
 	}
 }
 
@@ -102,8 +131,17 @@ func NewService(
 	tenantService interfaces.TenantService,
 	agentService interfaces.CustomAgentService,
 	knowledgeService interfaces.KnowledgeService,
+	kbService interfaces.KnowledgeBaseService,
 	modelService interfaces.ModelService,
 ) *Service {
+	// Build command registry.
+	registry := NewCommandRegistry()
+	registry.Register(newHelpCommand(registry))
+	registry.Register(newInfoCommand(kbService))
+	registry.Register(newSearchCommand(sessionService, kbService))
+	registry.Register(newStopCommand())
+	registry.Register(newClearCommand())
+
 	s := &Service{
 		db:               db,
 		sessionService:   sessionService,
@@ -111,14 +149,22 @@ func NewService(
 		tenantService:    tenantService,
 		agentService:     agentService,
 		knowledgeService: knowledgeService,
+		kbService:        kbService,
 		modelService:     modelService,
+		cmdRegistry:      registry,
 		channels:         make(map[string]*channelState),
 		adapterFactories: make(map[string]AdapterFactory),
+		rateLimiter:      newSlidingWindowLimiter(rateLimitWindow, rateLimitMaxRequests),
 		stopCh:           make(chan struct{}),
 	}
 
+	// Initialize the QA worker pool and bounded queue.
+	s.qaQueue = newQAQueue(defaultWorkers, defaultMaxQueueSize, defaultMaxPerUser, s.executeQARequest)
+	s.qaQueue.Start(s.stopCh)
+
 	// Start periodic dedup cleanup instead of per-message goroutines
 	go s.dedupCleanupLoop()
+	go s.rateLimiter.cleanupLoop(s.stopCh)
 
 	return s
 }
@@ -133,6 +179,7 @@ func (s *Service) RegisterAdapterFactory(platform string, factory AdapterFactory
 // Stop gracefully shuts down the service, stopping all channels and background goroutines.
 func (s *Service) Stop() {
 	close(s.stopCh)
+	s.qaQueue.Stop()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, cs := range s.channels {
@@ -283,7 +330,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		msg.Content = string(contentRunes[:maxContentLength])
 	}
 
-	// Get channel config
+	// Get channel config (moved before rate limit so we can reply to the user)
 	adapter, channel, ok := s.GetChannelAdapter(channelID)
 	if !ok {
 		// Try loading from DB (channel might have been created after service start)
@@ -298,6 +345,22 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		adapter, channel, ok = s.GetChannelAdapter(channelID)
 		if !ok {
 			return fmt.Errorf("channel adapter not available after start: %s", channelID)
+		}
+	}
+
+	// Rate limit: enforce per-user sliding window to prevent abuse.
+	// Slash-commands (/stop, /clear, etc.) bypass rate limiting so the user
+	// always retains control over the bot even under heavy messaging.
+	isCommand := s.cmdRegistry.IsRegistered(msg.Content)
+	if !isCommand {
+		rateLimitKey := makeUserKey(channelID, msg.UserID, msg.ChatID)
+		if !s.rateLimiter.Allow(rateLimitKey) {
+			logger.Warnf(ctx, "[IM] Rate limited: channel=%s user=%s chat=%s", channelID, msg.UserID, msg.ChatID)
+			_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+				Content: "您的消息发送过于频繁，请稍后再试。",
+				IsFinal: true,
+			})
+			return nil
 		}
 	}
 
@@ -330,13 +393,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		return fmt.Errorf("resolve session: %w", err)
 	}
 
-	// 3. Get the WeKnora session
-	session, err := s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
-	if err != nil {
-		return fmt.Errorf("get session: %w", err)
-	}
-
-	// 4. Resolve custom agent (optional)
+	// 3. Resolve custom agent (optional)
 	var customAgent *types.CustomAgent
 	if agentID != "" {
 		agent, err := s.agentService.GetAgentByID(sessionCtx, agentID)
@@ -347,22 +404,95 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		}
 	}
 
-	// 5. Resolve knowledge base IDs from agent config
-	var kbIDs []string
-	if customAgent != nil {
-		kbIDs = customAgent.Config.KnowledgeBases
+	// ── Slash-command dispatch ──
+	// Commands are handled before the QA pipeline so they respond instantly.
+	if cmd, args, ok := s.cmdRegistry.Parse(msg.Content); ok {
+		return s.handleCommand(sessionCtx, cmd, args, msg, adapter, channel, channelSession, customAgent)
+	}
+	// Unrecognised slash-word: show help hint instead of sending to QA.
+	if LooksLikeCommand(msg.Content) {
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "未知指令，发送 `/help` 查看所有可用指令。",
+			IsFinal: true,
+		})
+		return nil
 	}
 
-	// 6. If the adapter supports streaming and output_mode is not "full", use streaming
-	streamDisabled := channel.OutputMode == "full"
+	// 4. Get the WeKnora session
+	session, err := s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+	if err != nil {
+		return fmt.Errorf("get session: %w", err)
+	}
+
+	// 5. Enqueue the QA request into the bounded worker pool.
+	// The worker pool controls LLM concurrency and provides backpressure.
+	qaCtx, qaCancel := context.WithCancel(sessionCtx)
+	userKey := makeUserKey(channelID, msg.UserID, msg.ChatID)
+
+	req := &qaRequest{
+		ctx:       qaCtx,
+		cancel:    qaCancel,
+		msg:       msg,
+		session:   session,
+		agent:     customAgent,
+		adapter:   adapter,
+		channel:   channel,
+		channelID: channelID,
+		userKey:   userKey,
+	}
+
+	pos, enqueueErr := s.qaQueue.Enqueue(req)
+	if enqueueErr != nil {
+		qaCancel()
+		logger.Warnf(ctx, "[IM] Queue rejected: user=%s reason=%v", msg.UserID, enqueueErr)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "当前排队人数较多，请稍后再试。",
+			IsFinal: true,
+		})
+		return nil
+	}
+
+	if pos > 0 {
+		logger.Infof(ctx, "[IM] Enqueued: user=%s pos=%d depth=%d", msg.UserID, pos, s.qaQueue.Metrics().Depth)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: fmt.Sprintf("收到，前面还有 %d 条消息在处理，请稍候 ⏳", pos),
+			IsFinal: true,
+		})
+	} else {
+		logger.Infof(ctx, "[IM] Enqueued: user=%s pos=0 (immediate)", msg.UserID)
+	}
+
+	return nil
+}
+
+// executeQARequest is the worker handler that runs the QA pipeline for a queued request.
+// It is called by qaQueue workers and must not block indefinitely.
+func (s *Service) executeQARequest(req *qaRequest) {
+	ctx := req.ctx
+	defer req.cancel()
+
+	// Track in-flight request so /stop can cancel it.
+	s.inflight.Store(req.userKey, req.cancel)
+	defer s.inflight.Delete(req.userKey)
+
+	// kbIDs is left empty so the QA pipeline resolves them from the agent config.
+	var kbIDs []string
+
+	// Determine output mode from channel config.
+	streamDisabled := req.channel.OutputMode == "full"
+
+	// If the adapter supports streaming and output is not "full", use streaming.
 	if !streamDisabled {
-		if streamer, ok := adapter.(StreamSender); ok {
-			return s.handleMessageStream(sessionCtx, msg, session, customAgent, kbIDs, streamer, adapter)
+		if streamer, ok := req.adapter.(StreamSender); ok {
+			if err := s.handleMessageStream(ctx, req.msg, req.session, req.agent, kbIDs, streamer, req.adapter); err != nil {
+				logger.Errorf(ctx, "[IM] Stream QA failed: %v", err)
+			}
+			return
 		}
 	}
 
-	// Non-streaming fallback: collect full answer then send
-	answer, err := s.runQA(sessionCtx, session, msg.Content, customAgent, kbIDs)
+	// Non-streaming fallback: collect full answer then send.
+	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
@@ -372,12 +502,112 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		Content: answer,
 		IsFinal: true,
 	}
-	if err := adapter.SendReply(ctx, msg, reply); err != nil {
-		return fmt.Errorf("send reply: %w", err)
+	if err := req.adapter.SendReply(ctx, req.msg, reply); err != nil {
+		logger.Errorf(ctx, "[IM] Send reply failed: %v", err)
+		return
 	}
 
 	logger.Infof(ctx, "[IM] Reply sent: channel=%s platform=%s user=%s answer_len=%d",
-		channelID, msg.Platform, msg.UserID, len(answer))
+		req.channelID, req.msg.Platform, req.msg.UserID, len(answer))
+}
+
+// handleCommand executes a slash-command and sends the result back to the user.
+// It also handles side effects (ActionClear, ActionStop).
+func (s *Service) handleCommand(
+	ctx context.Context,
+	cmd Command,
+	args []string,
+	msg *IncomingMessage,
+	adapter Adapter,
+	channel *IMChannel,
+	channelSession *ChannelSession,
+	customAgent *types.CustomAgent,
+) error {
+	agentName := ""
+	if customAgent != nil {
+		agentName = customAgent.Name
+	}
+
+	cmdCtx := &CommandContext{
+		Incoming:          msg,
+		Session:           channelSession,
+		TenantID:          channel.TenantID,
+		AgentName:         agentName,
+		CustomAgent:       customAgent,
+		ChannelOutputMode: channel.OutputMode,
+	}
+
+	result, err := cmd.Execute(ctx, cmdCtx, args)
+	if err != nil {
+		logger.Errorf(ctx, "[IM] Command /%s error: %v", cmd.Name(), err)
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "抱歉，执行指令时出现了异常，请稍后再试。",
+			IsFinal: true,
+		})
+		return err
+	}
+
+	// Handle service-level side effects.
+	switch result.Action {
+	case ActionClear:
+		// Soft-delete the current ChannelSession and clear the LLM context
+		// so the next message creates a completely fresh conversation.
+		if err := s.db.Model(&ChannelSession{}).
+			Where("id = ?", channelSession.ID).
+			Update("deleted_at", time.Now()).Error; err != nil {
+			logger.Warnf(ctx, "[IM] Failed to soft-delete channel session: %v", err)
+		}
+		if err := s.sessionService.ClearContext(ctx, channelSession.SessionID); err != nil {
+			logger.Warnf(ctx, "[IM] Failed to clear session context: %v", err)
+		}
+	case ActionStop:
+		// Cancel the request — first check if it's queued, then check if it's in-flight.
+		inflightKey := makeUserKey(channel.ID, msg.UserID, msg.ChatID)
+		if s.qaQueue.Remove(inflightKey) {
+			logger.Infof(ctx, "[IM] Cancelled queued QA: key=%s", inflightKey)
+		} else if cancelFn, loaded := s.inflight.LoadAndDelete(inflightKey); loaded {
+			cancelFn.(context.CancelFunc)()
+			logger.Infof(ctx, "[IM] Cancelled in-flight QA: key=%s", inflightKey)
+		}
+	}
+
+	// Send the command reply, respecting the configured output mode.
+	sent := false
+	if channel.OutputMode != "full" {
+		if streamer, ok := adapter.(StreamSender); ok {
+			if err := s.sendStreamReply(ctx, msg, streamer, result.Content); err != nil {
+				logger.Warnf(ctx, "[IM] Stream reply for command /%s failed, falling back: %v", cmd.Name(), err)
+			} else {
+				sent = true
+			}
+		}
+	}
+	if !sent {
+		_ = adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: result.Content,
+			IsFinal: true,
+		})
+	}
+
+	logger.Infof(ctx, "[IM] Command /%s executed: channel=%s user=%s action=%d",
+		cmd.Name(), channel.ID, msg.UserID, result.Action)
+	return nil
+}
+
+// sendStreamReply sends a complete content string via the streaming interface
+// (StartStream → SendStreamChunk → EndStream). This is used for command replies
+// when the output mode is set to "stream", so they visually match QA responses.
+func (s *Service) sendStreamReply(ctx context.Context, msg *IncomingMessage, streamer StreamSender, content string) error {
+	streamID, err := streamer.StartStream(ctx, msg)
+	if err != nil {
+		return fmt.Errorf("start stream: %w", err)
+	}
+	if err := streamer.SendStreamChunk(ctx, msg, streamID, content); err != nil {
+		return fmt.Errorf("send stream chunk: %w", err)
+	}
+	if err := streamer.EndStream(ctx, msg, streamID); err != nil {
+		return fmt.Errorf("end stream: %w", err)
+	}
 	return nil
 }
 
@@ -576,6 +806,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		// (across flush boundaries) was '\n'. This lets ensureNewlineBefore
 		// work correctly even after buf has been Reset by a flush.
 		lastCharNewline = true
+		streamedAny     bool // whether any user-visible content was written to buf
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 
@@ -625,6 +856,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 
 		bufWrite(data.Content)
+		streamedAny = true
 		bufMu.Unlock()
 
 		if data.Done {
@@ -774,20 +1006,33 @@ loop:
 	// Final flush of any remaining content
 	flush()
 
+	// If no user-visible content was streamed (e.g., the entire response was
+	// in <think> blocks, or the QA pipeline errored), send a fallback message
+	// as the last chunk so the Feishu card doesn't end up empty.
+	bufMu.Lock()
+	answer := answerBuilder.String()
+	finalErr := qaErr
+	noVisibleContent := !streamedAny
+	bufMu.Unlock()
+
+	if noVisibleContent {
+		fallback := "抱歉，我暂时无法回答这个问题。"
+		if finalErr != nil {
+			fallback = "抱歉，处理您的问题时出现了异常，请稍后再试。"
+		}
+		if err := streamer.SendStreamChunk(ctx, msg, streamID, fallback); err != nil {
+			logger.Warnf(ctx, "[IM] SendStreamChunk fallback failed: %v", err)
+		}
+		if answer == "" {
+			answer = fallback
+		}
+	}
+
 	// End the stream
 	if err := streamer.EndStream(ctx, msg, streamID); err != nil {
 		logger.Warnf(ctx, "[IM] EndStream failed: %v", err)
 	}
 
-	// Persist the full answer
-	bufMu.Lock()
-	answer := answerBuilder.String()
-	finalErr := qaErr
-	bufMu.Unlock()
-
-	if answer == "" && finalErr != nil {
-		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
-	}
 	if answer == "" {
 		answer = "抱歉，我暂时无法回答这个问题。"
 	}
@@ -1434,20 +1679,20 @@ func (s *Service) watchAndSendSummary(
 			case types.ParseStatusCompleted:
 				// Parsing done. If summary generation is in progress, wait for it.
 				switch knowledge.SummaryStatus {
-			case types.SummaryStatusNone, "":
-				// No summary task configured. For image files the VLM caption
-				// is stored in Description by finalizeImageKnowledge, so we
-				// still show it if present.
-				if knowledge.Description != "" && knowledge.Description != fileName {
-				_ = s.sendSmartReply(ctx, adapter, msg, channel,
-					fmt.Sprintf("用户之前上传的文件「%s」已解析完成。以下是文件的完整摘要内容：\n%s\n\n请生成一条通知消息，包含：1) 告知文件已解析完成；2) 用 Markdown 格式（标题、列表、加粗等）结构化展示上述摘要内容，不要删减或概括；3) 提示用户可以针对该文件提问。", fileName, knowledge.Description),
-					fmt.Sprintf("📄 文件「%s」已解析完成。\n\n**摘要：**\n\n%s\n\n---\n可以针对该文件进行提问。", fileName, knowledge.Description))
-				} else {
-					_ = s.sendSmartReply(ctx, adapter, msg, channel,
-						fmt.Sprintf("用户之前上传的文件「%s」已解析完成，现在可以开始针对该文件进行提问了。", fileName),
-						fmt.Sprintf("📄 文件「%s」已解析完成，可以开始提问了！", fileName))
-				}
-				return
+				case types.SummaryStatusNone, "":
+					// No summary task configured. For image files the VLM caption
+					// is stored in Description by finalizeImageKnowledge, so we
+					// still show it if present.
+					if knowledge.Description != "" && knowledge.Description != fileName {
+						_ = s.sendSmartReply(ctx, adapter, msg, channel,
+							fmt.Sprintf("用户之前上传的文件「%s」已解析完成。以下是文件的完整摘要内容：\n%s\n\n请生成一条通知消息，包含：1) 告知文件已解析完成；2) 用 Markdown 格式（标题、列表、加粗等）结构化展示上述摘要内容，不要删减或概括；3) 提示用户可以针对该文件提问。", fileName, knowledge.Description),
+							fmt.Sprintf("📄 文件「%s」已解析完成。\n\n**摘要：**\n\n%s\n\n---\n可以针对该文件进行提问。", fileName, knowledge.Description))
+					} else {
+						_ = s.sendSmartReply(ctx, adapter, msg, channel,
+							fmt.Sprintf("用户之前上传的文件「%s」已解析完成，现在可以开始针对该文件进行提问了。", fileName),
+							fmt.Sprintf("📄 文件「%s」已解析完成，可以开始提问了！", fileName))
+					}
+					return
 
 				case types.SummaryStatusCompleted:
 					// Summary is ready — send it

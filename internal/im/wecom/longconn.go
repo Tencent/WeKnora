@@ -202,8 +202,11 @@ func (c *LongConnClient) Stop() {
 // SendReply sends a text reply through the WebSocket connection.
 // This is used by the IM service to reply to messages in long connection mode.
 func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	reqID, ok := incoming.Extra["req_id"]
-	if !ok || reqID == "" {
+	var reqID string
+	if incoming.Extra != nil {
+		reqID = incoming.Extra["req_id"]
+	}
+	if reqID == "" {
 		return fmt.Errorf("missing req_id in incoming message extra")
 	}
 
@@ -236,7 +239,7 @@ func (c *LongConnClient) SendReply(ctx context.Context, incoming *im.IncomingMes
 // StartStream begins a streaming reply session.
 // Returns a stream ID that must be used in subsequent chunk/end calls.
 func (c *LongConnClient) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
-	if _, ok := incoming.Extra["req_id"]; !ok {
+	if incoming.Extra == nil || incoming.Extra["req_id"] == "" {
 		return "", fmt.Errorf("missing req_id in incoming message extra")
 	}
 	streamID := fmt.Sprintf("stream_%d", c.reqSeq.Add(1))
@@ -288,7 +291,13 @@ func (c *LongConnClient) EndStream(ctx context.Context, incoming *im.IncomingMes
 }
 
 func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID, content string, finish bool) error {
-	reqID := incoming.Extra["req_id"]
+	var reqID string
+	if incoming.Extra != nil {
+		reqID = incoming.Extra["req_id"]
+	}
+	if reqID == "" {
+		return fmt.Errorf("missing req_id in incoming message extra")
+	}
 
 	body := streamReplyBody{MsgType: "stream"}
 	body.Stream.ID = streamID
@@ -324,6 +333,12 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		c.conn = nil
 		c.mu.Unlock()
 		_ = conn.Close()
+
+		// Clear in-flight stream buffers to prevent memory leaks on reconnect.
+		// Streams interrupted by a connection drop cannot be resumed.
+		c.streamBufsMu.Lock()
+		c.streamBufs = nil
+		c.streamBufsMu.Unlock()
 	}()
 
 	// Authenticate

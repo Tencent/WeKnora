@@ -50,11 +50,50 @@ type Adapter struct {
 
 // NewAdapter creates a new Feishu adapter.
 func NewAdapter(appID, appSecret, verificationToken, encryptKey string) *Adapter {
+	startStreamReaper()
 	return &Adapter{
 		appID:             appID,
 		appSecret:         appSecret,
 		verificationToken: verificationToken,
 		encryptKey:        encryptKey,
+	}
+}
+
+// startStreamReaper starts a background goroutine (once) that periodically
+// removes orphaned stream entries from feishuStreams. This prevents memory
+// leaks when EndStream is never called due to panics or pipeline errors.
+func startStreamReaper() {
+	startReaperOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(streamReaperInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cutoff := time.Now().Add(-streamOrphanTTL)
+					feishuStreamsMu.Lock()
+					for id, state := range feishuStreams {
+						if state.createdAt.Before(cutoff) {
+							delete(feishuStreams, id)
+						}
+					}
+					feishuStreamsMu.Unlock()
+				case <-reaperStopCh:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// StopStreamReaper stops the background stream reaper goroutine.
+// Should be called during application shutdown.
+func StopStreamReaper() {
+	select {
+	case <-reaperStopCh:
+		// already closed
+	default:
+		close(reaperStopCh)
 	}
 }
 
@@ -510,14 +549,27 @@ const (
 
 // feishuStreamState tracks per-stream accumulated content.
 type feishuStreamState struct {
-	mu      sync.Mutex
-	content strings.Builder
-	seq     int64 // strictly incrementing sequence for CardKit API
+	mu         sync.Mutex
+	content    strings.Builder
+	seq        int64     // strictly incrementing sequence for CardKit API
+	createdAt  time.Time // for orphan stream detection
+	firstChunk bool      // true after the first real content chunk clears the placeholder
 }
+
+const (
+	// streamOrphanTTL is the maximum lifetime of a stream entry before it's
+	// considered orphaned (e.g., EndStream was never called due to an error).
+	streamOrphanTTL = 5 * time.Minute
+	// streamReaperInterval is how often the reaper scans for orphaned streams.
+	streamReaperInterval = 1 * time.Minute
+)
 
 var (
 	feishuStreamsMu sync.Mutex
-	feishuStreams    = map[string]*feishuStreamState{}
+	feishuStreams   = map[string]*feishuStreamState{}
+
+	startReaperOnce sync.Once
+	reaperStopCh    = make(chan struct{})
 )
 
 func (s *feishuStreamState) nextSeq() int {
@@ -541,7 +593,7 @@ func buildStreamingCardJSON() string {
 			"elements": []map[string]interface{}{
 				{
 					"tag":        "markdown",
-					"content":    "",
+					"content":    "💭 正在思考...",
 					"text_size":  "normal",
 					"element_id": streamingElementID,
 				},
@@ -573,7 +625,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 
 	// 3. Track stream state
 	feishuStreamsMu.Lock()
-	feishuStreams[cardID] = &feishuStreamState{}
+	feishuStreams[cardID] = &feishuStreamState{createdAt: time.Now()}
 	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[Feishu] Streaming started: card_id=%s", cardID)
@@ -596,6 +648,11 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	}
 
 	state.mu.Lock()
+	if !state.firstChunk {
+		// Clear the "💭 正在思考..." placeholder on first real content
+		state.content.Reset()
+		state.firstChunk = true
+	}
 	state.content.WriteString(content)
 	fullContent := transformThinkBlocks(state.content.String())
 	seq := state.nextSeq()
