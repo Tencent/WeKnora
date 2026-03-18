@@ -39,6 +39,11 @@ const (
 	defaultReconnectBaseDelay   = 1 * time.Second
 	defaultReconnectMaxDelay    = 30 * time.Second
 	defaultMaxReconnectAttempts = -1 // infinite
+
+	// readTimeout is how long the receive loop waits for any message (including
+	// heartbeat pong) before treating the connection as dead. Set to 3× heartbeat
+	// interval so a single missed pong does not cause a spurious reconnect.
+	readTimeout = 3 * defaultHeartbeatInterval
 )
 
 // wsFrame is the JSON frame exchanged over the WeCom bot WebSocket.
@@ -85,6 +90,9 @@ type botMessage struct {
 		MsgItem []botMixedItem `json:"msg_item"`
 	} `json:"mixed"`
 	Quote *botMessage `json:"quote,omitempty"` // quoted message (optional)
+	Event struct {
+		EventType string `json:"eventtype"`
+	} `json:"event"`
 }
 
 // botMixedItem is one element in a mixed (text+image) message.
@@ -149,12 +157,19 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			return ctx.Err()
 		}
 
+		connectedAt := time.Now()
 		err := c.connectAndRun(ctx)
 		if c.closed.Load() {
 			return nil
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+
+		// If the connection was up for longer than the max backoff window,
+		// the disconnect is likely transient — reset so we retry quickly.
+		if time.Since(connectedAt) > defaultReconnectMaxDelay {
+			attempts = 0
 		}
 
 		attempts++
@@ -323,8 +338,12 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	defer heartbeatCancel()
 	go c.heartbeatLoop(heartbeatCtx)
 
-	// Message receive loop
+	// Message receive loop with read deadline.
+	// The deadline is reset on every successful read; if no message arrives
+	// within readTimeout (including heartbeat pong frames), the connection
+	// is considered dead and we fall through to reconnect.
 	for {
+		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			return fmt.Errorf("read message: %w", err)
@@ -405,7 +424,8 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context) {
 				Headers: map[string]string{"req_id": reqID},
 			}
 			if err := c.writeJSON(frame); err != nil {
-				logger.Warnf(ctx, "[WeCom] Heartbeat failed: %v", err)
+				logger.Warnf(ctx, "[WeCom] Heartbeat failed: %v, closing connection to trigger reconnect", err)
+				c.closeConn()
 				return
 			}
 		}
@@ -425,6 +445,18 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 	logger.Debugf(ctx, "[WeCom] Parsed message: msgid=%s msgtype=%s from=%s chattype=%s text=%q image_url=%q file_url=%q voice=%q mixed_items=%d",
 		msg.MsgID, msg.MsgType, msg.From.UserID, msg.ChatType,
 		msg.Text.Content, msg.Image.URL, msg.File.URL, msg.Voice.Content, len(msg.Mixed.MsgItem))
+
+	// Handle server-side events (e.g. disconnected_event) before normal messages.
+	if msg.MsgType == "event" {
+		switch msg.Event.EventType {
+		case "disconnected_event":
+			logger.Warnf(ctx, "[WeCom] Server sent disconnected_event, closing connection to trigger reconnect")
+			c.closeConn()
+		default:
+			logger.Infof(ctx, "[WeCom] Ignoring event type: %s", msg.Event.EventType)
+		}
+		return
+	}
 
 	chatType := im.ChatTypeDirect
 	chatID := ""
@@ -580,6 +612,16 @@ func convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, r
 	}
 
 	return nil
+}
+
+// closeConn forcibly closes the underlying WebSocket, which unblocks any
+// pending ReadMessage call in the receive loop and triggers a reconnection.
+func (c *LongConnClient) closeConn() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
 }
 
 func (c *LongConnClient) writeJSON(v interface{}) error {

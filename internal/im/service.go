@@ -494,18 +494,50 @@ func isToolVisibleToUser(toolName string) bool {
 	return !internalToolNames[toolName]
 }
 
-// formatToolCallStart returns a Markdown snippet announcing that a tool is being invoked.
+// formatToolCallStart returns a plain-text line for a tool invocation (inside <think> block).
 func formatToolCallStart(toolName string) string {
-	return fmt.Sprintf("\n\n> 🔧 正在调用工具: **%s** ...\n\n", friendlyToolName(toolName))
+	return fmt.Sprintf("⏳ %s\n", friendlyToolName(toolName))
 }
 
-// formatToolCallResult returns a Markdown snippet summarising a tool result.
-func formatToolCallResult(toolName string, success bool, durationMs int64) string {
+// formatToolCallResult returns a plain-text line for a tool result (inside <think> block).
+func formatToolCallResult(toolName string, success bool, output string) string {
 	friendly := friendlyToolName(toolName)
 	if success {
-		return fmt.Sprintf("> ✅ **%s** 完成 (%.1fs)\n\n", friendly, float64(durationMs)/1000)
+		if summary := briefToolSummary(output); summary != "" {
+			return fmt.Sprintf("✅ %s · %s\n", friendly, summary)
+		}
+		return fmt.Sprintf("✅ %s\n", friendly)
 	}
-	return fmt.Sprintf("> ⚠️ **%s** 失败 (%.1fs)\n\n", friendly, float64(durationMs)/1000)
+	return fmt.Sprintf("⚠️ %s 失败\n", friendly)
+}
+
+// briefToolSummary extracts a short human-readable summary from tool output.
+// Returns empty string if no suitable summary can be extracted.
+func briefToolSummary(output string) string {
+	const maxRunes = 40
+	if output == "" {
+		return ""
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return ""
+	}
+	// Skip structured data (JSON, XML, etc.)
+	if output[0] == '{' || output[0] == '[' || output[0] == '<' {
+		return ""
+	}
+	// Take first non-empty line
+	if idx := strings.IndexByte(output, '\n'); idx >= 0 {
+		output = strings.TrimSpace(output[:idx])
+	}
+	if output == "" {
+		return ""
+	}
+	runes := []rune(output)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "..."
+	}
+	return output
 }
 
 // handleMessageStream runs the QA pipeline and streams answer chunks to the IM platform
@@ -526,19 +558,30 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	eventBus := event.NewEventBus()
 
 	var (
-		bufMu         sync.Mutex
-		buf           strings.Builder // buffered content awaiting flush (answer only)
-		answerBuilder strings.Builder // full answer for DB persistence (includes <think>)
-		qaErr         error
-		done          = make(chan struct{})
-		closeOnce     sync.Once
-		inThinking    bool // tracks whether we're inside a <think> block
-		hasToolCalls  bool // whether any tool call events have been received
-		answerStarted bool // whether the final answer stream has begun
+		bufMu          sync.Mutex
+		buf            strings.Builder // buffered content awaiting flush
+		answerBuilder  strings.Builder // full answer for DB persistence (includes <think>)
+		qaErr          error
+		done           = make(chan struct{})
+		closeOnce      sync.Once
+		thinkBlockOpen bool // whether we've opened a <think> block (agent pipeline)
+		answerStarted  bool // whether the final answer stream has begun
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
 
-	// Subscribe to answer chunks
+	// ensureThinkOpen opens a <think> block if not already open.
+	// Used for agent pipeline to wrap thinking + tool calls. Must hold bufMu.
+	ensureThinkOpen := func() {
+		if !thinkBlockOpen {
+			thinkBlockOpen = true
+			buf.WriteString("<think>\n")
+		}
+	}
+
+	// Subscribe to answer chunks.
+	// Non-agent pipeline: content may contain <think>...</think> from the model — pass through as-is.
+	// Agent pipeline: we've already opened a <think> block via EventAgentThought/ToolCall,
+	// so we close it before streaming the answer.
 	eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentFinalAnswerData)
 		if !ok {
@@ -546,37 +589,14 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 
 		bufMu.Lock()
-		// Always persist the full content (including thinking)
 		answerBuilder.WriteString(data.Content)
 
-		// Filter <think>...</think> blocks from the streamed output.
-		// The pipeline emits: <think>..chunks..</think> then answer chunks.
-		content := data.Content
-		if !inThinking {
-			if strings.HasPrefix(content, "<think>") {
-				inThinking = true
-				content = "" // skip this chunk for streaming
-			}
-		}
-		if inThinking {
-			if idx := strings.Index(content, "</think>"); idx >= 0 {
-				inThinking = false
-				// Keep anything after </think>
-				content = strings.TrimSpace(content[idx+len("</think>"):])
-			} else {
-				content = "" // still inside thinking block
-			}
+		if thinkBlockOpen && !answerStarted {
+			answerStarted = true
+			buf.WriteString("\n</think>\n\n")
 		}
 
-		if content != "" {
-			// Insert a separator before the first answer content when tool calls were displayed,
-			// so the user can clearly distinguish the tool-call progress from the actual answer.
-			if hasToolCalls && !answerStarted {
-				answerStarted = true
-				buf.WriteString("---\n\n")
-			}
-			buf.WriteString(content)
-		}
+		buf.WriteString(data.Content)
 		bufMu.Unlock()
 
 		if data.Done {
@@ -598,7 +618,20 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		return nil
 	})
 
-	// Subscribe to agent tool call events — show "calling tool X..." in real-time
+	// Subscribe to agent thought events — stream thinking content into <think> block
+	eventBus.On(event.EventAgentThought, func(_ context.Context, evt event.Event) error {
+		data, ok := evt.Data.(event.AgentThoughtData)
+		if !ok {
+			return nil
+		}
+		bufMu.Lock()
+		ensureThinkOpen()
+		buf.WriteString(data.Content)
+		bufMu.Unlock()
+		return nil
+	})
+
+	// Subscribe to agent tool call events — write status line into <think> block
 	eventBus.On(event.EventAgentToolCall, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentToolCallData)
 		if !ok {
@@ -607,16 +640,15 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		if !isToolVisibleToUser(data.ToolName) {
 			return nil
 		}
-		snippet := formatToolCallStart(data.ToolName)
 		bufMu.Lock()
-		hasToolCalls = true
-		buf.WriteString(snippet)
+		ensureThinkOpen()
+		buf.WriteString(formatToolCallStart(data.ToolName))
 		bufMu.Unlock()
 		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s", data.ToolName)
 		return nil
 	})
 
-	// Subscribe to agent tool result events — show "tool X done" in real-time
+	// Subscribe to agent tool result events — write result line into <think> block
 	eventBus.On(event.EventAgentToolResult, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentToolResultData)
 		if !ok {
@@ -625,9 +657,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		if !isToolVisibleToUser(data.ToolName) {
 			return nil
 		}
-		snippet := formatToolCallResult(data.ToolName, data.Success, data.Duration)
 		bufMu.Lock()
-		buf.WriteString(snippet)
+		buf.WriteString(formatToolCallResult(data.ToolName, data.Success, data.Output))
 		bufMu.Unlock()
 		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool=%s success=%v duration=%dms",
 			data.ToolName, data.Success, data.Duration)
