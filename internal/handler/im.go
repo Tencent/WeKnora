@@ -53,8 +53,8 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		return
 	}
 
-	if req.Platform != "wecom" && req.Platform != "feishu" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom' or 'feishu'"})
+	if req.Platform != "wecom" && req.Platform != "feishu" && req.Platform != "slack" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu' or 'slack'"})
 		return
 	}
 

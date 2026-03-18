@@ -13,6 +13,7 @@ type Platform string
 const (
 	PlatformWeCom  Platform = "wecom"
 	PlatformFeishu Platform = "feishu"
+	PlatformSlack  Platform = "slack"
 )
 
 // MessageType identifies the kind of IM message.

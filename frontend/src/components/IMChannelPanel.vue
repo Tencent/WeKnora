@@ -23,7 +23,7 @@
             <div class="channel-info-top">
               <div class="channel-main">
                 <span class="platform-badge" :class="channel.platform">
-                  {{ channel.platform === 'wecom' ? $t('agentEditor.im.wecom') : $t('agentEditor.im.feishu') }}
+                  {{ channel.platform === 'wecom' ? $t('agentEditor.im.wecom') : channel.platform === 'feishu' ? $t('agentEditor.im.feishu') : $t('agentEditor.im.slack') }}
                 </span>
                 <span class="channel-name">{{ channel.name || $t('agentEditor.im.unnamed') }}</span>
               </div>
@@ -88,6 +88,7 @@
           <t-radio-group v-model="formData.platform" :disabled="!!editingChannel">
             <t-radio-button value="wecom">{{ $t('agentEditor.im.wecom') }}</t-radio-button>
             <t-radio-button value="feishu">{{ $t('agentEditor.im.feishu') }}</t-radio-button>
+            <t-radio-button value="slack">{{ $t('agentEditor.im.slack') }}</t-radio-button>
           </t-radio-group>
         </div>
 
@@ -204,6 +205,37 @@
             </div>
           </template>
         </template>
+
+        <!-- Slack credentials -->
+        <template v-if="formData.platform === 'slack'">
+          <div class="platform-link-hint">
+            <t-icon name="jump" class="hint-link-icon" />
+            <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="hint-link">
+              {{ $t('agentEditor.im.slackConsole') }}
+            </a>
+            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+          </div>
+          <template v-if="formData.mode === 'websocket'">
+            <div class="form-item">
+              <label class="form-label">App Token</label>
+              <t-input v-model="formData.credentials.app_token" type="password" placeholder="xapp-..." />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Bot Token</label>
+              <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
+            </div>
+          </template>
+          <template v-else>
+            <div class="form-item">
+              <label class="form-label">Bot Token</label>
+              <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
+            </div>
+            <div class="form-item">
+              <label class="form-label">Signing Secret</label>
+              <t-input v-model="formData.credentials.signing_secret" type="password" placeholder="Signing Secret" />
+            </div>
+          </template>
+        </template>
       </div>
     </t-dialog>
   </div>
@@ -234,7 +266,7 @@ const knowledgeBases = ref<{ id: string; name: string }[]>([]);
 const defaultCredentials = (): Record<string, any> => ({});
 
 const formData = ref({
-  platform: 'wecom' as 'wecom' | 'feishu',
+  platform: 'wecom' as 'wecom' | 'feishu' | 'slack',
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket',
   output_mode: 'stream' as 'stream' | 'full',
@@ -420,7 +452,6 @@ onMounted(() => {
   overflow-y: auto;
 }
 
-// --- Channel card (matches share-item pattern) ---
 .channel-item {
   display: flex;
   justify-content: space-between;
@@ -473,6 +504,11 @@ onMounted(() => {
   &.feishu {
     background: rgba(51, 112, 255, 0.08);
     color: #3370ff;
+  }
+
+  &.slack {
+    background: rgba(224, 30, 90, 0.08);
+    color: #e01e5a;
   }
 }
 
@@ -537,7 +573,6 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-// --- Add button ---
 .add-btn {
   margin-top: 4px;
 
@@ -548,7 +583,6 @@ onMounted(() => {
   }
 }
 
-// --- Dialog form (matches share form pattern) ---
 .dialog-form {
   display: flex;
   flex-direction: column;

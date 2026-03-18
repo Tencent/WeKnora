@@ -55,6 +55,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	imPkg "github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/im/feishu"
+	"github.com/Tencent/WeKnora/internal/im/slack"
 	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -66,6 +67,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	slackpkg "github.com/slack-go/slack"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
@@ -1048,6 +1050,47 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 
 		default:
 			return nil, nil, fmt.Errorf("unknown Feishu mode: %s", mode)
+		}
+	})
+
+	// Register Slack adapter factory
+	imService.RegisterAdapterFactory("slack", func(factoryCtx context.Context, channel *imPkg.IMChannel, msgHandler func(context.Context, *imPkg.IncomingMessage) error) (imPkg.Adapter, context.CancelFunc, error) {
+		creds, err := parseCredentials(channel.Credentials)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse slack credentials: %w", err)
+		}
+
+		mode := channel.Mode
+		if mode == "" {
+			mode = "websocket"
+		}
+
+		switch mode {
+		case "webhook":
+			api := slackpkg.New(getString(creds, "bot_token"))
+			adapter := slack.NewWebhookAdapter(api, getString(creds, "signing_secret"))
+			return adapter, func() {}, nil
+
+		case "websocket":
+			client := slack.NewLongConnClient(
+				getString(creds, "app_token"),
+				getString(creds, "bot_token"),
+				msgHandler,
+			)
+
+			adapter := slack.NewAdapter(client, client.GetAPI())
+
+			wsCtx, wsCancel := context.WithCancel(context.Background())
+			go func() {
+				if err := client.Start(wsCtx); err != nil && wsCtx.Err() == nil {
+					logger.Errorf(context.Background(), "[IM] Slack long connection stopped for channel %s: %v", channel.ID, err)
+				}
+			}()
+
+			return adapter, wsCancel, nil
+
+		default:
+			return nil, nil, fmt.Errorf("unsupported slack mode: %s", mode)
 		}
 	})
 
