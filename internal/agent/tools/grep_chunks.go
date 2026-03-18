@@ -273,30 +273,32 @@ func (t *GrepChunksTool) searchChunks(
 	knowledgeIDs []string,
 	kbTenantMap map[string]uint64,
 ) ([]chunkWithTitle, int64, error) {
-	// Safety check: must have either kbIDs or knowledgeIDs
 	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
 		logger.Warnf(ctx, "[Tool][GrepChunks] No kbIDs or knowledgeIDs specified, returning empty results")
 		return nil, 0, nil
 	}
 
-	// Build base query
-	// Use knowledge_base_id filter combined with tenant_id to ensure data isolation
+	// PostgreSQL uses ILIKE for case-insensitive matching;
+	// MySQL and SQLite LIKE is already case-insensitive under default collation.
+	likeOp := "LIKE"
+	if t.db.Dialector.Name() == "postgres" {
+		likeOp = "ILIKE"
+	}
+
 	query := t.db.Debug().WithContext(ctx).Table("chunks").
-		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, knowledges.title as knowledge_title, COUNT(*) OVER (PARTITION BY chunks.knowledge_id) AS total_chunk_count").
-		Joins("LEFT JOIN knowledges ON chunks.knowledge_id = knowledges.id").
+		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
+			"chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, "+
+			"knowledges.title as knowledge_title, "+
+			"COUNT(*) OVER (PARTITION BY chunks.knowledge_id) AS total_chunk_count").
+		Joins("JOIN knowledges ON chunks.knowledge_id = knowledges.id").
 		Where("chunks.is_enabled = ?", true).
 		Where("chunks.deleted_at IS NULL").
 		Where("knowledges.deleted_at IS NULL")
 
-	// Build tenant-aware KB filter: (kb_id = X AND tenant_id = Y) OR (kb_id = Z AND tenant_id = W) ...
-	// This ensures we only access chunks from KBs we have permission for, with correct tenant scope
 	if len(knowledgeIDs) > 0 {
-		// For specific knowledge IDs, filter directly by knowledge_id
-		// Permission already checked when building searchTargets
 		query = query.Where("chunks.knowledge_id IN ?", knowledgeIDs)
 		logger.Infof(ctx, "[Tool][GrepChunks] Filtering by %d specific knowledge IDs", len(knowledgeIDs))
 	} else if len(kbIDs) > 0 {
-		// Build OR conditions for each KB with its tenant
 		var conditions []string
 		var args []interface{}
 		for _, kbID := range kbIDs {
@@ -314,34 +316,27 @@ func (t *GrepChunksTool) searchChunks(
 		}
 	}
 
-	// Apply pattern matching (case-insensitive fixed string matching, OR logic for multiple patterns)
 	if len(patterns) == 1 {
-		query = query.Where("chunks.content ILIKE ?", "%"+patterns[0]+"%")
+		query = query.Where("chunks.content "+likeOp+" ?", "%"+patterns[0]+"%")
 	} else {
-		// Multiple patterns: use OR logic
 		var conditions []string
 		var args []interface{}
 		for _, pattern := range patterns {
-			conditions = append(conditions, "chunks.content ILIKE ?")
+			conditions = append(conditions, "chunks.content "+likeOp+" ?")
 			args = append(args, "%"+pattern+"%")
 		}
 		query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
 	}
 
-	// Count total matches first (for count_only mode)
-	var totalCount int64
-	if err := query.Count(&totalCount).Error; err != nil {
-		logger.Warnf(ctx, "[Tool][GrepChunks] Failed to count matches: %v", err)
-	}
+	const maxFetchLimit = 500
 
-	// Fetch results
 	var results []chunkWithTitle
-	if err := query.Order("chunks.created_at DESC").Find(&results).Error; err != nil {
+	if err := query.Order("chunks.created_at DESC").Limit(maxFetchLimit).Find(&results).Error; err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to fetch results: %v", err)
 		return nil, 0, err
 	}
 
-	return results, totalCount, nil
+	return results, int64(len(results)), nil
 }
 
 // formatOutput formats the search results for display (grep-style output)

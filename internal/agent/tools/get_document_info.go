@@ -91,14 +91,6 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 		}, fmt.Errorf("knowledge_ids is required")
 	}
 
-	// Validate max 10 documents
-	if len(knowledgeIDs) > 10 {
-		return &types.ToolResult{
-			Success: false,
-			Error:   "knowledge_ids must contain at least one valid knowledge ID",
-		}, fmt.Errorf("no valid knowledge IDs provided")
-	}
-
 	// Concurrently get info for each knowledge ID
 	type docInfo struct {
 		knowledge  *types.Knowledge
@@ -141,7 +133,7 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 			_, total, err := t.chunkService.GetRepository().
 				ListPagedChunksByKnowledgeID(ctx, knowledge.TenantID, id, &types.Pagination{
 					Page:     1,
-					PageSize: 1000,
+					PageSize: 1,
 				}, []types.ChunkType{"text"}, "", "", "", "", "")
 			if err != nil {
 				mu.Lock()
