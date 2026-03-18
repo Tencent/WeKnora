@@ -566,15 +566,43 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		closeOnce      sync.Once
 		thinkBlockOpen bool // whether we've opened a <think> block (agent pipeline)
 		answerStarted  bool // whether the final answer stream has begun
+
+		// seenToolCalls deduplicates EventAgentToolCall events.
+		// The engine emits tool calls twice: once during streaming (pending)
+		// and once at execution time. We only show the first occurrence.
+		seenToolCalls = make(map[string]bool)
+
+		// lastCharNewline tracks whether the most recently written character
+		// (across flush boundaries) was '\n'. This lets ensureNewlineBefore
+		// work correctly even after buf has been Reset by a flush.
+		lastCharNewline = true
 	)
 	closeDone := func() { closeOnce.Do(func() { close(done) }) }
+
+	// bufWrite appends s to buf and updates lastCharNewline. Must hold bufMu.
+	bufWrite := func(s string) {
+		if s == "" {
+			return
+		}
+		buf.WriteString(s)
+		lastCharNewline = s[len(s)-1] == '\n'
+	}
+
+	// ensureNewlineBefore guarantees a '\n' exists before the next write,
+	// even if the previous content was already flushed. Must hold bufMu.
+	ensureNewlineBefore := func() {
+		if !lastCharNewline {
+			buf.WriteByte('\n')
+			lastCharNewline = true
+		}
+	}
 
 	// ensureThinkOpen opens a <think> block if not already open.
 	// Used for agent pipeline to wrap thinking + tool calls. Must hold bufMu.
 	ensureThinkOpen := func() {
 		if !thinkBlockOpen {
 			thinkBlockOpen = true
-			buf.WriteString("<think>\n")
+			bufWrite("<think>\n")
 		}
 	}
 
@@ -593,10 +621,10 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 		if thinkBlockOpen && !answerStarted {
 			answerStarted = true
-			buf.WriteString("\n</think>\n\n")
+			bufWrite("\n</think>\n\n")
 		}
 
-		buf.WriteString(data.Content)
+		bufWrite(data.Content)
 		bufMu.Unlock()
 
 		if data.Done {
@@ -626,12 +654,14 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		}
 		bufMu.Lock()
 		ensureThinkOpen()
-		buf.WriteString(data.Content)
+		bufWrite(data.Content)
 		bufMu.Unlock()
 		return nil
 	})
 
-	// Subscribe to agent tool call events — write status line into <think> block
+	// Subscribe to agent tool call events — write status line into <think> block.
+	// The engine may emit this event twice per tool call (once during streaming,
+	// once at execution), so we deduplicate by ToolCallID.
 	eventBus.On(event.EventAgentToolCall, func(_ context.Context, evt event.Event) error {
 		data, ok := evt.Data.(event.AgentToolCallData)
 		if !ok {
@@ -641,10 +671,16 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			return nil
 		}
 		bufMu.Lock()
+		if seenToolCalls[data.ToolCallID] {
+			bufMu.Unlock()
+			return nil
+		}
+		seenToolCalls[data.ToolCallID] = true
 		ensureThinkOpen()
-		buf.WriteString(formatToolCallStart(data.ToolName))
+		ensureNewlineBefore()
+		bufWrite(formatToolCallStart(data.ToolName))
 		bufMu.Unlock()
-		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s", data.ToolName)
+		logger.Debugf(ctx, "[IM] Tool call streamed to IM: tool=%s id=%s", data.ToolName, data.ToolCallID)
 		return nil
 	})
 
@@ -658,7 +694,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 			return nil
 		}
 		bufMu.Lock()
-		buf.WriteString(formatToolCallResult(data.ToolName, data.Success, data.Output))
+		ensureNewlineBefore()
+		bufWrite(formatToolCallResult(data.ToolName, data.Success, data.Output))
 		bufMu.Unlock()
 		logger.Debugf(ctx, "[IM] Tool result streamed to IM: tool=%s success=%v duration=%dms",
 			data.ToolName, data.Success, data.Duration)

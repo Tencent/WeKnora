@@ -581,6 +581,8 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 }
 
 // SendStreamChunk accumulates content and pushes it to the card element.
+// Content containing <think>...</think> blocks is transformed into
+// Feishu-compatible markdown blockquotes before sending.
 func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMessage, streamID string, content string) error {
 	if content == "" {
 		return nil
@@ -595,7 +597,7 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 
 	state.mu.Lock()
 	state.content.WriteString(content)
-	fullContent := state.content.String()
+	fullContent := transformThinkBlocks(state.content.String())
 	seq := state.nextSeq()
 	state.mu.Unlock()
 
@@ -605,6 +607,77 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	}
 
 	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, fullContent, seq)
+}
+
+// transformThinkBlocks converts <think>...</think> blocks into Feishu-compatible
+// markdown blockquotes. Handles both complete blocks and in-progress blocks
+// (where </think> has not yet arrived during streaming).
+//
+// Output format (matching the OpenClaw Feishu convention):
+//
+//	> 💭 **思考过程**
+//	> thinking line 1
+//	> thinking line 2
+//
+//	---
+//
+//	answer text
+func transformThinkBlocks(content string) string {
+	const (
+		openTag  = "<think>"
+		closeTag = "</think>"
+	)
+
+	openIdx := strings.Index(content, openTag)
+	if openIdx < 0 {
+		return content
+	}
+
+	before := content[:openIdx]
+	after := content[openIdx+len(openTag):]
+
+	closeIdx := strings.Index(after, closeTag)
+	thinkClosed := closeIdx >= 0
+
+	var thinkContent, rest string
+	if thinkClosed {
+		thinkContent = after[:closeIdx]
+		rest = after[closeIdx+len(closeTag):]
+	} else {
+		thinkContent = after
+	}
+
+	thinkContent = strings.TrimSpace(thinkContent)
+
+	var result strings.Builder
+	result.WriteString(before)
+
+	if thinkContent == "" {
+		if !thinkClosed {
+			result.WriteString("> 💭 **思考中...**\n")
+			return result.String()
+		}
+		result.WriteString(strings.TrimLeft(rest, "\n"))
+		return result.String()
+	}
+
+	// Render each line as a blockquote
+	result.WriteString("> 💭 **思考过程**\n")
+	for _, line := range strings.Split(thinkContent, "\n") {
+		result.WriteString("> ")
+		result.WriteString(line)
+		result.WriteString("\n")
+	}
+
+	if thinkClosed {
+		rest = strings.TrimLeft(rest, "\n")
+		if rest != "" {
+			result.WriteString("\n---\n\n")
+			result.WriteString(rest)
+		}
+	}
+
+	return result.String()
 }
 
 // EndStream disables streaming_mode and cleans up state.

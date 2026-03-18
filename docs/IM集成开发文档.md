@@ -133,11 +133,40 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 **第二步：开通权限与事件**
 
 1. **添加应用能力**：在应用详情页 → **添加应用能力** → 添加 **机器人** 能力
-2. **配置权限**：在 **权限管理** 中搜索并开通以下权限：
-   - `im:message` — 获取与发送单聊、群组消息（读写权限）
-   - `im:message.group_at_msg` — 接收群聊中 @ 机器人消息
-   - `im:chat` — 获取群组信息（只读权限，群聊场景需要）
-   - `cardkit:card` — 创建和更新卡片（**流式输出必需**）
+2. **配置权限**：在 **权限管理** 中搜索并开通以下权限：你的应用 → 权限管理 → 批量导入，粘贴下面 JSON（原文内容不变）：
+{
+  "scopes": {
+    "tenant": [
+      "aily:file:read",
+      "aily:file:write",
+      "application:application.app_message_stats.overview:readonly",
+      "application:application:self_manage",
+      "application:bot.menu:write",
+      "cardkit:card:write",
+      "contact:user.employee_id:readonly",
+      "corehr:file:download",
+      "docs:document.content:read",
+      "event:ip_list",
+      "im:chat",
+      "im:chat.access_event.bot_p2p_chat:read",
+      "im:chat.members:bot_access",
+      "im:message",
+      "im:message.group_at_msg:readonly",
+      "im:message.group_msg",
+      "im:message.p2p_msg:readonly",
+      "im:message:readonly",
+      "im:message:send_as_bot",
+      "im:resource",
+      "sheets:spreadsheet",
+      "wiki:wiki:readonly"
+    ],
+    "user": [
+      "aily:file:read",
+      "aily:file:write",
+      "im:chat.access_event.bot_p2p_chat:read"
+    ]
+  }
+}
 3. **配置事件订阅**：
    - 在 **事件与回调** → **事件配置** 中，选择请求方式为 **使用长连接接收事件**
    - 添加事件 `im.message.receive_v1`（接收消息）
