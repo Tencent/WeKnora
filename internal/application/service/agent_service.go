@@ -102,6 +102,11 @@ func (s *agentService) CreateAgentEngine(
 	// Create tool registry
 	toolRegistry := tools.NewToolRegistry()
 
+	// Apply configurable tool output size limit
+	if config.MaxToolOutputChars > 0 {
+		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
+	}
+
 	// Register tools
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)

@@ -43,6 +43,15 @@ type AgentConfig struct {
 	VLMModelID string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
+
+	// Maximum character length for tool output (default: 16000).
+	// Outputs exceeding this limit are truncated with head + tail preservation.
+	MaxToolOutputChars int `json:"max_tool_output_chars,omitempty"`
+
+	// Maximum context window tokens for the agent (default: 0 = disabled).
+	// When set, the agent compresses older messages to stay within this limit,
+	// preserving tool_call/tool_result pairs.
+	MaxContextTokens int `json:"max_context_tokens,omitempty"`
 }
 
 // SessionAgentConfig represents session-level agent configuration

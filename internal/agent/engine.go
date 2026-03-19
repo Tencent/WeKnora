@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	agentmemory "github.com/Tencent/WeKnora/internal/agent/memory"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	appconfig "github.com/Tencent/WeKnora/internal/config"
@@ -77,8 +79,10 @@ type AgentEngine struct {
 	sessionID            string                    // Session ID for context management
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
 	skillsManager        *skills.Manager           // Skills manager for Progressive Disclosure (optional)
-	appConfig            *appconfig.Config          // Application config for prompt template resolution (optional)
-	imageDescriber       ImageDescriberFunc         // VLM function for describing images in tool results (optional)
+	appConfig            *appconfig.Config         // Application config for prompt template resolution (optional)
+	imageDescriber       ImageDescriberFunc        // VLM function for describing images in tool results (optional)
+	tokenEstimator       *agenttoken.Estimator     // Token estimator for context window management
+	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -109,7 +113,8 @@ func NewAgentEngine(
 	if eventBus == nil {
 		eventBus = event.NewEventBus()
 	}
-	return &AgentEngine{
+	tokenEst := agenttoken.NewEstimator(0)
+	engine := &AgentEngine{
 		config:               config,
 		toolRegistry:         toolRegistry,
 		chatModel:            chatModel,
@@ -119,7 +124,17 @@ func NewAgentEngine(
 		contextManager:       contextManager,
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
+		tokenEstimator:       tokenEst,
 	}
+
+	// Initialize memory consolidator if context window management is configured
+	if config.MaxContextTokens > 0 {
+		engine.memoryConsolidator = agentmemory.NewConsolidator(
+			chatModel, tokenEst, config.MaxContextTokens, 0,
+		)
+	}
+
+	return engine
 }
 
 // NewAgentEngineWithSkills creates a new agent engine with skills support
@@ -301,8 +316,37 @@ func (e *AgentEngine) executeLoop(
 	})
 	for state.CurrentRound < e.config.MaxIterations {
 		roundStart := time.Now()
-		logger.Infof(ctx, "========== Round %d/%d Started ==========", state.CurrentRound+1, e.config.MaxIterations)
-		logger.Infof(ctx, "[Agent][Round-%d] Message history size: %d messages", state.CurrentRound+1, len(messages))
+		logger.Infof(ctx, "========== Round %d/%d Started ==========",
+			state.CurrentRound+1, e.config.MaxIterations)
+
+		// Context window management: consolidate or compress messages if approaching token limit
+		if e.config.MaxContextTokens > 0 {
+			beforeLen := len(messages)
+
+			// Try LLM-powered consolidation first (preserves more semantic content)
+			if e.memoryConsolidator != nil && e.memoryConsolidator.ShouldConsolidate(messages) {
+				logger.Infof(ctx, "[Agent][Round-%d] Token threshold exceeded, consolidating memory",
+					state.CurrentRound+1)
+				consolidated, consolidateErr := e.memoryConsolidator.Consolidate(ctx, messages)
+				if consolidateErr != nil {
+					logger.Warnf(ctx, "[Agent][Round-%d] Memory consolidation failed: %v, "+
+						"falling back to simple compression", state.CurrentRound+1, consolidateErr)
+				} else {
+					messages = consolidated
+				}
+			}
+
+			// Fallback: simple context compression if still over the hard limit (80%)
+			messages = agenttoken.CompressContext(messages, e.tokenEstimator, e.config.MaxContextTokens)
+
+			if len(messages) < beforeLen {
+				logger.Infof(ctx, "[Agent][Round-%d] Context managed: %d → %d messages (max_tokens=%d)",
+					state.CurrentRound+1, beforeLen, len(messages), e.config.MaxContextTokens)
+			}
+		}
+
+		logger.Infof(ctx, "[Agent][Round-%d] Message history size: %d messages",
+			state.CurrentRound+1, len(messages))
 		common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 			"iteration":      state.CurrentRound,
 			"round":          state.CurrentRound + 1,
@@ -359,6 +403,25 @@ func (e *AgentEngine) executeLoop(
 				"iteration": state.CurrentRound,
 				"error":     err.Error(),
 			})
+
+			// Graceful degradation: if we have tool results from previous rounds,
+			// try to synthesize a final answer from them instead of losing everything.
+			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
+				logger.Warnf(ctx, "[Agent] LLM failed but have %d steps with %d tool calls — "+
+					"attempting final answer synthesis from existing results",
+					len(state.RoundSteps), totalTC)
+				common.PipelineWarn(ctx, "Agent", "llm_failed_synthesizing", map[string]interface{}{
+					"steps":      len(state.RoundSteps),
+					"tool_calls": totalTC,
+				})
+				if synthErr := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID); synthErr != nil {
+					logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: %v", synthErr)
+					return state, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
+				}
+				state.IsComplete = true
+				break
+			}
+
 			return state, fmt.Errorf("LLM call failed: %w", err)
 		}
 

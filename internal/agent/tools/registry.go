@@ -15,7 +15,8 @@ const toolErrorHint = "\n\n[Analyze the error above and try a different approach
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
-	tools map[string]types.Tool
+	tools             map[string]types.Tool
+	maxToolOutputSize int // maximum chars for tool output (0 = use DefaultMaxToolOutput)
 }
 
 // NewToolRegistry creates a new tool registry
@@ -23,6 +24,20 @@ func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
 		tools: make(map[string]types.Tool),
 	}
+}
+
+// SetMaxToolOutputSize sets the maximum character length for tool output.
+// Values <= 0 will use DefaultMaxToolOutput.
+func (r *ToolRegistry) SetMaxToolOutputSize(maxChars int) {
+	r.maxToolOutputSize = maxChars
+}
+
+// getMaxToolOutput returns the effective max tool output size.
+func (r *ToolRegistry) getMaxToolOutput() int {
+	if r.maxToolOutputSize > 0 {
+		return r.maxToolOutputSize
+	}
+	return DefaultMaxToolOutput
 }
 
 // RegisterTool adds a tool to the registry.
@@ -95,7 +110,28 @@ func (r *ToolRegistry) ExecuteTool(
 	// This handles common LLM quirks like returning "true" instead of true.
 	args = CastParams(args, tool.Parameters())
 
+	// Validate parameters against the tool's JSON Schema before execution.
+	// This catches invalid arguments early, avoiding a wasted tool execution + LLM round.
+	if validationErrs := ValidateParams(args, tool.Parameters()); len(validationErrs) > 0 {
+		errMsg := FormatValidationErrors(validationErrs) + toolErrorHint
+		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
+			"tool":   name,
+			"errors": errMsg,
+		})
+		return &types.ToolResult{
+			Success: false,
+			Error:   errMsg,
+		}, nil
+	}
+
 	result, execErr := tool.Execute(ctx, args)
+
+	// Truncate large tool outputs to prevent context window poisoning.
+	maxOutput := r.getMaxToolOutput()
+	if result != nil && len(result.Output) > maxOutput {
+		result.Output = TruncateToolOutput(result.Output, maxOutput)
+	}
+
 	fields := map[string]interface{}{
 		"tool": name,
 		"args": args,
