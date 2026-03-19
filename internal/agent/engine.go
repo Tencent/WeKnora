@@ -339,9 +339,24 @@ func (e *AgentEngine) executeLoop(
 			state.IsComplete = true
 			state.RoundSteps = append(state.RoundSteps, step)
 
-			// Emit final answer done marker
+			// When the LLM stops without calling final_answer tool, its response content
+			// was only streamed as thinking events. We must also emit it as an answer event
+			// so the frontend can render it in the main content area (UI depends on answer events).
+			answerID := generateEventID("answer")
+			if response.Content != "" {
+				e.eventBus.Emit(ctx, event.Event{
+					ID:        answerID,
+					Type:      event.EventAgentFinalAnswer,
+					SessionID: sessionID,
+					Data: event.AgentFinalAnswerData{
+						Content: response.Content,
+						Done:    false,
+					},
+				})
+			}
+
 			e.eventBus.Emit(ctx, event.Event{
-				ID:        generateEventID("answer-done"),
+				ID:        answerID,
 				Type:      event.EventAgentFinalAnswer,
 				SessionID: sessionID,
 				Data: event.AgentFinalAnswerData{
