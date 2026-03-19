@@ -25,6 +25,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hibiken/asynq v0.25.1
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
+	github.com/longbridgeapp/opencc v0.3.13
 	github.com/mark3labs/mcp-go v0.43.0
 	github.com/milvus-io/milvus/client/v2 v2.6.2
 	github.com/minio/minio-go/v7 v7.0.91
@@ -190,6 +191,8 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lib/pq v1.10.9 // indirect
+	github.com/liuzl/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
+	github.com/liuzl/da v0.0.0-20180704015230-14771aad5b1d // indirect
 	github.com/lufia/plan9stats v0.0.0-20251013123823-9fd1530e3ec3 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

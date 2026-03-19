@@ -4,9 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/longbridgeapp/opencc"
 )
 
 // FAQChunkMetadata 定义 FAQ 条目在 Chunk.Metadata 中的结构
@@ -75,21 +79,64 @@ func (c *Chunk) SetDocumentMetadata(meta *DocumentChunkMetadata) error {
 	return nil
 }
 
-// Normalize 清理空白与重复项
-func (m *FAQChunkMetadata) Normalize() {
+// Sanitize 对元数据进行基础清理（去除首尾空白、去重），保留原始内容
+// 用于 DB 存储，不做语义归一化
+func (m *FAQChunkMetadata) Sanitize() {
 	if m == nil {
 		return
 	}
 	m.StandardQuestion = strings.TrimSpace(m.StandardQuestion)
-	m.SimilarQuestions = normalizeStrings(m.SimilarQuestions)
-	m.NegativeQuestions = normalizeStrings(m.NegativeQuestions)
-	m.Answers = normalizeStrings(m.Answers)
+	m.SimilarQuestions = SanitizeStrings(m.SimilarQuestions)
+	m.NegativeQuestions = SanitizeStrings(m.NegativeQuestions)
+	m.Answers = SanitizeStrings(m.Answers)
 	if m.Version <= 0 {
 		m.Version = 1
 	}
 }
 
+// Normalize 返回归一化后的副本，用于 Hash 计算和向量索引
+// 原始数据不变，返回新的归一化副本
+func (m *FAQChunkMetadata) Normalize() *FAQChunkMetadata {
+	if m == nil {
+		return nil
+	}
+	return &FAQChunkMetadata{
+		StandardQuestion:  NormalizeQuestion(m.StandardQuestion),
+		SimilarQuestions:  normalizeQuestionStrings(m.SimilarQuestions),
+		NegativeQuestions: normalizeQuestionStrings(m.NegativeQuestions),
+		Answers:           SanitizeStrings(m.Answers), // 答案只做基础清理
+		AnswerStrategy:    m.AnswerStrategy,
+		Version:           m.Version,
+		Source:            m.Source,
+	}
+}
+
+// SanitizeStrings 对字符串列表进行基础清理（TrimSpace + 去重）
+func SanitizeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	dedup := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		dedup = append(dedup, trimmed)
+	}
+	if len(dedup) == 0 {
+		return nil
+	}
+	return dedup
+}
+
 // FAQMetadata 解析 Chunk 中的 FAQ 元数据
+// 返回原始数据（仅做基础清理）
 func (c *Chunk) FAQMetadata() (*FAQChunkMetadata, error) {
 	if c == nil || len(c.Metadata) == 0 {
 		return nil, nil
@@ -98,11 +145,12 @@ func (c *Chunk) FAQMetadata() (*FAQChunkMetadata, error) {
 	if err := json.Unmarshal(c.Metadata, &meta); err != nil {
 		return nil, err
 	}
-	meta.Normalize()
+	meta.Sanitize() // 只做基础清理，保留原始内容
 	return &meta, nil
 }
 
 // SetFAQMetadata 设置 Chunk 的 FAQ 元数据
+// DB 存储原始数据，ContentHash 基于归一化数据计算
 func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 	if c == nil {
 		return nil
@@ -112,14 +160,16 @@ func (c *Chunk) SetFAQMetadata(meta *FAQChunkMetadata) error {
 		c.ContentHash = ""
 		return nil
 	}
-	meta.Normalize()
+	// 基础清理后存储到 DB（保留原始内容）
+	meta.Sanitize()
 	bytes, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
 	c.Metadata = JSON(bytes)
-	// 计算并设置 ContentHash
-	c.ContentHash = CalculateFAQContentHash(meta)
+	// ContentHash 基于归一化后的数据计算，用于去重匹配
+	normalized := meta.Normalize()
+	c.ContentHash = CalculateFAQContentHash(normalized)
 	return nil
 }
 
@@ -208,7 +258,7 @@ type FAQEntryPayload struct {
 	StandardQuestion  string          `json:"standard_question"    binding:"required"`
 	SimilarQuestions  []string        `json:"similar_questions"`
 	NegativeQuestions []string        `json:"negative_questions"`
-	Answers           []string        `json:"answers"              binding:"required"`
+	Answers           []string        `json:"answers"`
 	AnswerStrategy    *AnswerStrategy `json:"answer_strategy,omitempty"`
 	TagID             int64           `json:"tag_id"`
 	TagName           string          `json:"tag_name"`
@@ -234,6 +284,7 @@ type FAQBatchUpsertPayload struct {
 type FAQFailedEntry struct {
 	Index             int      `json:"index"`                        // 条目在批次中的索引（从0开始）
 	Reason            string   `json:"reason"`                       // 失败原因
+	IsPartialFailure  bool     `json:"is_partial_failure,omitempty"` // 是否为部分失败（相似问/反例被移除，但整条仍可导入）
 	TagName           string   `json:"tag_name,omitempty"`           // 分类
 	StandardQuestion  string   `json:"standard_question"`            // 标准问题
 	SimilarQuestions  []string `json:"similar_questions,omitempty"`  // 相似问题
@@ -241,6 +292,9 @@ type FAQFailedEntry struct {
 	Answers           []string `json:"answers,omitempty"`            // 答案
 	AnswerAll         bool     `json:"answer_all,omitempty"`         // 是否全部回复
 	IsDisabled        bool     `json:"is_disabled,omitempty"`        // 是否停用
+	// 部分失败详情（当 IsPartialFailure 为 true 时）
+	RemovedSimilarQuestions  []string `json:"removed_similar_questions,omitempty"`  // 被移除的相似问及原因
+	RemovedNegativeQuestions []string `json:"removed_negative_questions,omitempty"` // 被移除的反例及原因
 }
 
 // FAQSuccessEntry 表示导入成功的条目简单信息
@@ -312,25 +366,26 @@ const (
 // FAQImportProgress represents the progress of an FAQ import task stored in Redis
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
-	TaskID            string              `json:"task_id"`                       // UUID for the import task
-	KBID              string              `json:"kb_id"`                         // Knowledge Base ID
-	KnowledgeID       string              `json:"knowledge_id"`                  // FAQ Knowledge ID
-	Status            FAQImportTaskStatus `json:"status"`                        // Task status
-	Progress          int                 `json:"progress"`                      // 0-100 percentage
-	Total             int                 `json:"total"`                         // Total entries to import
-	Processed         int                 `json:"processed"`                     // Entries processed so far
-	SuccessCount      int                 `json:"success_count"`                 // 成功导入/验证通过的条目数
-	FailedCount       int                 `json:"failed_count"`                  // 失败的条目数
-	SkippedCount      int                 `json:"skipped_count,omitempty"`       // 跳过的条目数（如重复等）
-	FailedEntries     []FAQFailedEntry    `json:"failed_entries,omitempty"`      // 失败条目详情（少量时直接返回）
-	FailedEntriesURL  string              `json:"failed_entries_url,omitempty"`  // 失败条目CSV下载URL（大量时返回URL）
-	SuccessEntries    []FAQSuccessEntry   `json:"success_entries,omitempty"`     // 成功条目简单信息（少量时直接返回）
-	ValidEntryIndices []int               `json:"valid_entry_indices,omitempty"` // 验证通过的条目索引（用于重试时跳过验证）
-	Message           string              `json:"message"`                       // Status message
-	Error             string              `json:"error"`                         // Error message if failed
-	CreatedAt         int64               `json:"created_at"`                    // Task creation timestamp
-	UpdatedAt         int64               `json:"updated_at"`                    // Last update timestamp
-	DryRun            bool                `json:"dry_run,omitempty"`             // 是否为 dry run 模式
+	TaskID             string              `json:"task_id"`                        // UUID for the import task
+	KBID               string              `json:"kb_id"`                          // Knowledge Base ID
+	KnowledgeID        string              `json:"knowledge_id"`                   // FAQ Knowledge ID
+	Status             FAQImportTaskStatus `json:"status"`                         // Task status
+	Progress           int                 `json:"progress"`                       // 0-100 percentage
+	Total              int                 `json:"total"`                          // Total entries to import
+	Processed          int                 `json:"processed"`                      // Entries processed so far
+	SuccessCount       int                 `json:"success_count"`                  // 完全成功的条目数（不包含部分成功/部分失败）
+	FailedCount        int                 `json:"failed_count"`                   // 失败的条目数
+	PartialFailedCount int                 `json:"partial_failed_count,omitempty"` // 部分失败的条目数（相似问/反例被移除）
+	SkippedCount       int                 `json:"skipped_count,omitempty"`        // 跳过的条目数（如重复等）
+	FailedEntries      []FAQFailedEntry    `json:"failed_entries,omitempty"`       // 失败条目详情（少量时直接返回）
+	FailedEntriesURL   string              `json:"failed_entries_url,omitempty"`   // 失败条目CSV下载URL（大量时返回URL）
+	SuccessEntries     []FAQSuccessEntry   `json:"success_entries,omitempty"`      // 成功条目简单信息（少量时直接返回）
+	ValidEntryIndices  []int               `json:"valid_entry_indices,omitempty"`  // 验证通过的条目索引（用于重试时跳过验证）
+	Message            string              `json:"message"`                        // Status message
+	Error              string              `json:"error"`                          // Error message if failed
+	CreatedAt          int64               `json:"created_at"`                     // Task creation timestamp
+	UpdatedAt          int64               `json:"updated_at"`                     // Last update timestamp
+	DryRun             bool                `json:"dry_run,omitempty"`              // 是否为 dry run 模式
 
 	// Result fields (populated when Status == "completed")
 	ImportMode     string    `json:"import_mode,omitempty"`     // 导入模式：append 或 replace
@@ -351,10 +406,11 @@ type FAQImportMetadata struct {
 // 这个信息是持久化的，不跟随进度状态，直到下次导入时被替换
 type FAQImportResult struct {
 	// 导入统计信息
-	TotalEntries int `json:"total_entries"` // 总条目数
-	SuccessCount int `json:"success_count"` // 成功导入的条目数
-	FailedCount  int `json:"failed_count"`  // 失败的条目数
-	SkippedCount int `json:"skipped_count"` // 跳过的条目数（如重复等）
+	TotalEntries       int `json:"total_entries"`        // 总条目数
+	SuccessCount       int `json:"success_count"`        // 完全成功的条目数（不包含部分成功/部分失败）
+	FailedCount        int `json:"failed_count"`         // 完全失败的条目数
+	PartialFailedCount int `json:"partial_failed_count"` // 部分失败的条目数（相似问/反例被移除但已导入）
+	SkippedCount       int `json:"skipped_count"`        // 跳过的条目数（如重复等）
 
 	// 导入模式和时间信息
 	ImportMode string    `json:"import_mode"` // 导入模式：append 或 replace
@@ -407,25 +463,269 @@ func ParseFAQImportMetadata(k *Knowledge) (*FAQImportMetadata, error) {
 	return &metadata, nil
 }
 
-func normalizeStrings(values []string) []string {
+// normalizeQuestionStrings 对问题列表进行归一化处理
+// 包括全角转半角、去除末尾标点、合并空格等，同时去重
+func normalizeQuestionStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
 	dedup := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, v := range values {
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
+		normalized := NormalizeQuestion(v)
+		if normalized == "" {
 			continue
 		}
-		if _, exists := seen[trimmed]; exists {
+		if _, exists := seen[normalized]; exists {
 			continue
 		}
-		seen[trimmed] = struct{}{}
-		dedup = append(dedup, trimmed)
+		seen[normalized] = struct{}{}
+		dedup = append(dedup, normalized)
 	}
 	if len(dedup) == 0 {
 		return nil
 	}
 	return dedup
+}
+
+// multiSpaceRegex 用于匹配多个连续空白字符
+var multiSpaceRegex = regexp.MustCompile(`\s+`)
+
+// urlRegex 用于匹配 URL
+var urlRegex = regexp.MustCompile(`https?://[^\s]+`)
+
+// URLNormMode 定义 URL 归一化模式
+type URLNormMode int
+
+const (
+	// URLRemove 完全移除 URL
+	URLRemove URLNormMode = iota
+	// URLPlaceholder 替换为占位符 <URL>
+	URLPlaceholder
+	// URLKeepDomain 只保留域名
+	URLKeepDomain
+	// URLKeepDomainAndPath 保留域名和路径
+	URLKeepDomainAndPath
+)
+
+// t2sConverter 繁体转简体转换器（单例）
+var t2sConverter *opencc.OpenCC
+
+func init() {
+	var err error
+	t2sConverter, err = opencc.New("t2s") // Traditional to Simplified
+	if err != nil {
+		// 初始化失败时使用空转换器，不影响其他功能
+		t2sConverter = nil
+	}
+}
+
+// NormalizeQuestion 对问题文本进行归一化处理以提高向量匹配命中率
+// 处理顺序参考: query = convert_st(trim_url(query.lower().strip().strip("？。，；、：""！?.,;!:'\"")), 1)
+// 1. 去除首尾空白
+// 2. 移除 URL
+// 3. 转小写
+// 4. 去除首尾标点
+// 5. 繁体转简体
+// 6. 全角符号转半角
+// 7. 智能空格处理（中文间去空格，英文/数字间保留）
+func NormalizeQuestion(q string) string {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return ""
+	}
+
+	// 1. 移除 URL
+	q = trimURL(q)
+
+	// 2. 转小写（对英文有效）
+	q = strings.ToLower(q)
+
+	// 3. 去除首尾标点符号
+	q = strings.Trim(q, `？。，；、：""！?.,;!:'""`)
+
+	// 4. 繁体转简体
+	q = toSimplified(q)
+
+	// 5. 全角字符转半角
+	q = toHalfWidth(q)
+
+	// 6. 智能空格处理：中文间去空格，英文/数字间保留
+	q = normalizeSpaces(q)
+
+	return strings.TrimSpace(q)
+}
+
+// normalizeSpaces 智能处理空格
+// 规则：
+// - 去除中文语境中的多余空格
+// - 保留英文/数字之间的必要空格
+// 示例：
+// - "怎么 绑定 手机" → "怎么绑定手机"
+// - "iphone 15 怎么 激活" → "iphone 15怎么激活"
+func normalizeSpaces(s string) string {
+	// 先合并多个连续空格为单个空格
+	s = multiSpaceRegex.ReplaceAllString(s, " ")
+
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(s))
+
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+
+		// 如果不是空格，直接写入
+		if r != ' ' {
+			builder.WriteRune(r)
+			continue
+		}
+
+		// 处理空格：检查前后字符决定是否保留
+		// 获取前一个非空字符
+		var prevRune rune
+		if i > 0 {
+			prevRune = runes[i-1]
+		}
+
+		// 获取后一个非空字符
+		var nextRune rune
+		for j := i + 1; j < len(runes); j++ {
+			if runes[j] != ' ' {
+				nextRune = runes[j]
+				break
+			}
+		}
+
+		// 只有当前后都是英文字母或数字时才保留空格
+		// 其他情况（包括中文）都去除空格
+		if isASCIIAlphaNum(prevRune) && isASCIIAlphaNum(nextRune) {
+			builder.WriteRune(' ')
+		}
+		// 否则跳过空格
+	}
+
+	return builder.String()
+}
+
+// isASCIIAlphaNum 判断是否为 ASCII 字母或数字
+func isASCIIAlphaNum(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+// trimURL 移除字符串中的 URL（使用默认的 URLRemove 模式）
+func trimURL(s string) string {
+	return NormalizeURL(s, URLRemove)
+}
+
+// NormalizeURL 根据指定模式处理文本中的 URL
+func NormalizeURL(text string, mode URLNormMode) string {
+	return urlRegex.ReplaceAllStringFunc(text, func(raw string) string {
+		switch mode {
+		case URLRemove:
+			return ""
+		case URLPlaceholder:
+			return "<URL>"
+		case URLKeepDomain:
+			domain, _ := parseURL(raw)
+			if domain != "" {
+				return domain
+			}
+			return "<URL>"
+		case URLKeepDomainAndPath:
+			domain, path := parseURL(raw)
+			if domain != "" {
+				return domain + path
+			}
+			return "<URL>"
+		default:
+			return "<URL>"
+		}
+	})
+}
+
+// parseURL 解析 URL，返回域名和路径
+func parseURL(raw string) (domain, path string) {
+	// 移除协议前缀
+	u := raw
+	if strings.HasPrefix(u, "https://") {
+		u = u[8:]
+	} else if strings.HasPrefix(u, "http://") {
+		u = u[7:]
+	}
+
+	// 分离域名和路径
+	slashIdx := strings.Index(u, "/")
+	if slashIdx == -1 {
+		// 没有路径，整个是域名（可能带查询参数）
+		queryIdx := strings.Index(u, "?")
+		if queryIdx != -1 {
+			domain = u[:queryIdx]
+		} else {
+			domain = u
+		}
+		return domain, ""
+	}
+
+	domain = u[:slashIdx]
+	path = u[slashIdx:]
+
+	// 移除查询参数和片段
+	if queryIdx := strings.Index(path, "?"); queryIdx != -1 {
+		path = path[:queryIdx]
+	}
+	if fragIdx := strings.Index(path, "#"); fragIdx != -1 {
+		path = path[:fragIdx]
+	}
+
+	return domain, path
+}
+
+// toSimplified 繁体中文转简体中文
+func toSimplified(s string) string {
+	if t2sConverter == nil {
+		return s
+	}
+	result, err := t2sConverter.Convert(s)
+	if err != nil {
+		return s
+	}
+	return result
+}
+
+// toHalfWidth 将全角字符转换为半角字符
+// 主要处理：全角空格、全角ASCII字符（包括标点符号）
+func toHalfWidth(s string) string {
+	var builder strings.Builder
+	builder.Grow(len(s))
+
+	for _, r := range s {
+		switch {
+		// 全角空格 -> 半角空格
+		case r == '\u3000':
+			builder.WriteRune(' ')
+		// 全角ASCII字符 (！到～，范围 0xFF01-0xFF5E) -> 半角 (0x0021-0x007E)
+		case r >= 0xFF01 && r <= 0xFF5E:
+			builder.WriteRune(r - 0xFF01 + 0x21)
+		// 其他字符保持不变
+		default:
+			builder.WriteRune(r)
+		}
+	}
+
+	return builder.String()
+}
+
+// NormalizeQueryText 对搜索查询文本进行归一化处理
+// 与 NormalizeQuestion 相同的处理逻辑，用于搜索时对查询文本进行归一化
+func NormalizeQueryText(q string) string {
+	return NormalizeQuestion(q)
+}
+
+// IsChineseChar 判断是否为中文字符
+func IsChineseChar(r rune) bool {
+	return unicode.Is(unicode.Han, r)
 }
