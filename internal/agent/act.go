@@ -1,0 +1,201 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// executeToolCalls runs every tool call in the LLM response, appending results to step.ToolCalls.
+// It also emits tool-call and tool-result events, and optionally runs reflection after each call.
+func (e *AgentEngine) executeToolCalls(
+	ctx context.Context, response *types.ChatResponse,
+	step *types.AgentStep, iteration int, sessionID string,
+) {
+	if len(response.ToolCalls) == 0 {
+		return
+	}
+
+	round := iteration + 1
+	logger.Infof(ctx, "[Agent][Round-%d] Executing %d tool call(s)", round, len(response.ToolCalls))
+
+	for i, tc := range response.ToolCalls {
+		// Normalize tool call ID for cross-provider compatibility
+		tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
+		toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%d)]",
+			round, tc.Function.Name, i+1, len(response.ToolCalls))
+
+		var args map[string]any
+		argsStr := tc.Function.Arguments
+		if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+			// Attempt JSON repair before giving up
+			repaired := agenttools.RepairJSON(argsStr)
+			if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
+				logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
+				step.ToolCalls = append(step.ToolCalls, types.ToolCall{
+					ID:   tc.ID,
+					Name: tc.Function.Name,
+					Args: map[string]any{"_raw": argsStr},
+					Result: &types.ToolResult{
+						Success: false,
+						Error: fmt.Sprintf(
+							"Failed to parse tool arguments: %v", err,
+						) + "\n\n[Analyze the error above and try a different approach.]",
+					},
+				})
+				continue
+			}
+			logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
+			tc.Function.Arguments = repaired
+		}
+
+		logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+
+		toolCallStartTime := time.Now()
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        tc.ID + "-tool-call",
+			Type:      event.EventAgentToolCall,
+			SessionID: sessionID,
+			Data: event.AgentToolCallData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Arguments:  args,
+				Iteration:  iteration,
+			},
+		})
+
+		// Execute tool with timeout to prevent indefinite hangs
+		common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
+			"iteration":    iteration,
+			"round":        round,
+			"tool":         tc.Function.Name,
+			"tool_call_id": tc.ID,
+			"tool_index":   fmt.Sprintf("%d/%d", i+1, len(response.ToolCalls)),
+		})
+		toolCtx, toolCancel := context.WithTimeout(ctx, defaultToolExecTimeout)
+		result, err := e.toolRegistry.ExecuteTool(
+			toolCtx, tc.Function.Name,
+			json.RawMessage(tc.Function.Arguments),
+		)
+		toolCancel()
+		duration := time.Since(toolCallStartTime).Milliseconds()
+
+		toolCall := types.ToolCall{
+			ID:       tc.ID,
+			Name:     tc.Function.Name,
+			Args:     args,
+			Result:   result,
+			Duration: duration,
+		}
+
+		if err != nil {
+			logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
+			toolCall.Result = &types.ToolResult{
+				Success: false,
+				Error:   err.Error(),
+			}
+		} else {
+			success := result != nil && result.Success
+			outputLen := 0
+			if result != nil {
+				outputLen = len(result.Output)
+			}
+			logger.Infof(ctx, "%s Completed in %dms: success=%v, output=%d chars",
+				toolTag, duration, success, outputLen)
+		}
+
+		// Pipeline event for monitoring
+		toolSuccess := toolCall.Result != nil && toolCall.Result.Success
+		pipelineFields := map[string]interface{}{
+			"iteration":    iteration,
+			"round":        round,
+			"tool":         tc.Function.Name,
+			"tool_call_id": tc.ID,
+			"duration_ms":  duration,
+			"success":      toolSuccess,
+		}
+		if toolCall.Result != nil && toolCall.Result.Error != "" {
+			pipelineFields["error"] = toolCall.Result.Error
+		}
+		if err != nil {
+			common.PipelineError(ctx, "Agent", "tool_call_result", pipelineFields)
+		} else if toolSuccess {
+			common.PipelineInfo(ctx, "Agent", "tool_call_result", pipelineFields)
+		} else {
+			common.PipelineWarn(ctx, "Agent", "tool_call_result", pipelineFields)
+		}
+
+		// Debug-level output preview
+		if toolCall.Result != nil && toolCall.Result.Output != "" {
+			preview := toolCall.Result.Output
+			if len(preview) > 500 {
+				preview = preview[:500] + "... (truncated)"
+			}
+			logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
+		}
+		if toolCall.Result != nil && toolCall.Result.Error != "" {
+			logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
+		}
+
+		// Store tool call
+		step.ToolCalls = append(step.ToolCalls, toolCall)
+
+		// Emit tool result event (include structured data from tool result)
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        tc.ID + "-tool-result",
+			Type:      event.EventAgentToolResult,
+			SessionID: sessionID,
+			Data: event.AgentToolResultData{
+				ToolCallID: tc.ID,
+				ToolName:   tc.Function.Name,
+				Output:     result.Output,
+				Error:      result.Error,
+				Success:    result.Success,
+				Duration:   duration,
+				Iteration:  iteration,
+				Data:       result.Data, // Pass structured data for frontend rendering
+			},
+		})
+
+		// Emit tool execution event (for internal monitoring)
+		e.eventBus.Emit(ctx, event.Event{
+			ID:        tc.ID + "-tool-exec",
+			Type:      event.EventAgentTool,
+			SessionID: sessionID,
+			Data: event.AgentActionData{
+				Iteration:  iteration,
+				ToolName:   tc.Function.Name,
+				ToolInput:  args,
+				ToolOutput: result.Output,
+				Success:    result.Success,
+				Error:      result.Error,
+				Duration:   duration,
+			},
+		})
+
+		// Optional: Reflection after each tool call (streaming)
+		if e.config.ReflectionEnabled && result != nil {
+			reflection, err := e.streamReflectionToEventBus(
+				ctx, tc.ID, tc.Function.Name, result.Output,
+				iteration, sessionID,
+			)
+			if err != nil {
+				logger.Warnf(ctx, "Reflection failed: %v", err)
+			} else if reflection != "" {
+				// Store reflection in the corresponding tool call
+				// Find the tool call we just added and update it
+				if len(step.ToolCalls) > 0 {
+					lastIdx := len(step.ToolCalls) - 1
+					step.ToolCalls[lastIdx].Reflection = reflection
+				}
+			}
+		}
+	}
+}
