@@ -398,12 +398,23 @@ func (r *chunkRepository) DeleteChunk(ctx context.Context, tenantID uint64, id s
 	return r.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.Chunk{}).Error
 }
 
-// DeleteChunks deletes chunks by IDs in batch
+// DeleteChunks deletes chunks by IDs in batch.
+// To avoid MySQL Error 1390 (too many placeholders), IDs are split into batches.
 func (r *chunkRepository) DeleteChunks(ctx context.Context, tenantID uint64, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids).Delete(&types.Chunk{}).Error
+	const batchSize = 5000
+	for i := 0; i < len(ids); i += batchSize {
+		end := i + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		if err := r.db.WithContext(ctx).Where("tenant_id = ? AND id IN ?", tenantID, ids[i:end]).Delete(&types.Chunk{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DeleteChunksByKnowledgeID deletes all chunks for a knowledge ID

@@ -131,9 +131,11 @@ func CalculateFAQContentHash(meta *FAQChunkMetadata) string {
 		return ""
 	}
 
-	// 创建副本并标准化
-	normalized := *meta
-	normalized.Normalize()
+	// Normalize() returns a new copy; the old code discarded the return value.
+	normalized := meta.Normalize()
+	if normalized == nil {
+		return ""
+	}
 
 	// 对数组进行排序（确保相同内容产生相同 hash）
 	similarQuestions := make([]string, len(normalized.SimilarQuestions))
