@@ -120,27 +120,20 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}
 
-	switch providerName {
-	case provider.ProviderLKEAP:
-		// LKEAP 有特殊的 thinking 参数格式
-		return NewLKEAPChat(config)
-	case provider.ProviderAliyun:
-		// 检查是否为 Qwen3 模型（需要特殊处理 enable_thinking）
-		if provider.IsQwen3Model(config.ModelName) {
-			return NewQwenChat(config)
-		}
-		return NewRemoteAPIChat(config)
-	case provider.ProviderDeepSeek:
-		// DeepSeek 不支持 tool_choice
-		return NewDeepSeekChat(config)
-	case provider.ProviderGeneric:
-		// Generic provider (如 vLLM) 使用 ChatTemplateKwargs
-		return NewGenericChat(config)
-	case provider.ProviderNvidia:
-		// NVIDIA provider 使用BaseURL为请求地址
-		return NewNvidiaChat(config)
-	default:
-		// 其他 provider 使用标准 OpenAI 兼容实现
-		return NewRemoteAPIChat(config)
+	remoteChat, err := NewRemoteAPIChat(config)
+	if err != nil {
+		return nil, err
 	}
+
+	// Look up provider-specific behavior from spec registry
+	if spec := findProviderSpec(providerName, config.ModelName); spec != nil {
+		if spec.RequestCustomizer != nil {
+			remoteChat.SetRequestCustomizer(spec.RequestCustomizer)
+		}
+		if spec.EndpointCustomizer != nil {
+			remoteChat.SetEndpointCustomizer(spec.EndpointCustomizer)
+		}
+	}
+
+	return remoteChat, nil
 }
