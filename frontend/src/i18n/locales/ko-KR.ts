@@ -3117,7 +3117,7 @@ export default {
     toolSummary: {
       getDocument: '문서 조회: {title}',
       document: '문서',
-      listChunks: '{title}의 {fetched}/{total}개 청크 보기',
+      listChunks: '보기 {title}',
       deepThinking: '깊은 사고',
     },
     plan: {

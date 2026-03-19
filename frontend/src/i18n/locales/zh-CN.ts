@@ -3059,7 +3059,7 @@ export default {
     toolSummary: {
       getDocument: "获取文档：{title}",
       document: "文档",
-      listChunks: "查看 {title} 的 {fetched}/{total} 个分块",
+      listChunks: "查看 {title}",
       deepThinking: "深度思考",
     },
     plan: {

@@ -2727,7 +2727,7 @@ export default {
     toolSummary: {
       getDocument: 'Получить документ: {title}',
       document: 'Документ',
-      listChunks: 'Просмотр {fetched}/{total} фрагментов {title}',
+      listChunks: 'Просмотр {title}',
       deepThinking: 'Глубокое размышление'
     },
     plan: {

@@ -3061,7 +3061,7 @@ export default {
     toolSummary: {
       getDocument: 'Get document: {title}',
       document: 'Document',
-      listChunks: 'Viewing {fetched}/{total} chunks of {title}',
+      listChunks: 'View {title}',
       deepThinking: 'Deep Thinking',
     },
     plan: {
