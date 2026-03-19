@@ -1,6 +1,14 @@
 -- Migration: Create "未分类" tag for each knowledge base that has untagged entries
 -- and update chunks, knowledges, and embeddings to reference the new tag
-ALTER EXTENSION pg_search UPDATE;
+DO $$
+BEGIN
+    IF current_setting('app.skip_embedding', true) = 'true' THEN
+        RAISE NOTICE 'Skipping pg_search update (app.skip_embedding=true)';
+        RETURN;
+    END IF;
+
+    ALTER EXTENSION pg_search UPDATE;
+END $$;
 
 DO $$
 DECLARE
