@@ -378,7 +378,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = datetime('now')
+				updated_at = NOW()
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
