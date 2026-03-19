@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.3.3-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.3.4-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,6 +50,20 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 
 ## ✨ Latest Updates
 
+**v0.3.4 Highlights:**
+
+- **IM Bot Integration**: WeCom, Feishu, and Slack IM channel support with WebSocket/Webhook modes, streaming, and knowledge base integration
+- **Multimodal Image Support**: Image upload and multimodal image processing with enhanced session management
+- **Manual Knowledge Download**: Download manual knowledge content as files with proper filename sanitization
+- **NVIDIA Model API**: Support NVIDIA chat model API with custom endpoint and VLM model configuration
+- **Weaviate Vector DB**: Added Weaviate as a new vector database backend for knowledge retrieval
+- **AWS S3 Storage**: Integrated AWS S3 storage adapter with configuration UI and database migrations
+- **AES-256-GCM Encryption**: API keys encrypted at rest with AES-256-GCM for enhanced security
+- **Built-in MCP Service**: Built-in MCP service support for extending agent capabilities
+- **Agent Streaming Panel**: Optimized AgentStreamDisplay with auto-scrolling, improved styling, and loading indicators
+- **Hybrid Search Optimization**: Grouped targets and reused query embeddings for better retrieval performance
+- **Final Answer Tool**: New final_answer tool with agent duration tracking for improved agent workflows
+
 **v0.3.3 Highlights:**
 
 - 🧩 **Parent-Child Chunking**: Hierarchical parent-child chunking strategy for enhanced context management and more accurate retrieval
@@ -61,6 +75,9 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 - 🗄️ **Storage Auto-Creation**: Storage engine connectivity check with auto-creation of buckets
 - 🎨 **UI Consistency**: Standardized border styles, updated theme and component styles across the application
 - ⚡ **Chunk Size Tuning**: Updated chunk size configurations for knowledge base processing
+
+<details>
+<summary><b>Earlier Releases</b></summary>
 
 **v0.3.2 Highlights:**
 
@@ -102,6 +119,8 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 - 🔌 **MCP Tool Integration**: Support for extending Agent capabilities through MCP, with built-in uvx and npx launchers, supporting multiple transport methods
 - 🎨 **New UI**: Optimized conversation interface with Agent mode/normal mode switching, tool call process display, and comprehensive knowledge base management interface upgrade
 - ⚡ **Infrastructure Upgrade**: Introduced MQ async task management, support for automatic database migration, and fast development mode
+
+</details>
 
 ## 🔒 Security Notice
 

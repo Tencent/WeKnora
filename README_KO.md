@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.3.3-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.3.4-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,6 +50,20 @@
 
 ## ✨ 최신 업데이트
 
+**v0.3.4 하이라이트:**
+
+- **IM 봇 통합**: 기업WeChat, Feishu, Slack IM 채널 지원, WebSocket/Webhook 모드, 스트리밍 및 지식베이스 통합
+- **멀티모달 이미지 지원**: 이미지 업로드 및 멀티모달 이미지 처리, 세션 관리 강화
+- **수동 지식 다운로드**: 수동 지식 콘텐츠를 파일로 다운로드, 파일명 정리 및 포맷 처리
+- **NVIDIA 모델 API**: NVIDIA 채팅 모델 API 지원, 커스텀 엔드포인트 및 VLM 모델 설정
+- **Weaviate 벡터 데이터베이스**: 지식 검색을 위한 Weaviate 벡터 데이터베이스 백엔드 추가
+- **AWS S3 스토리지**: AWS S3 스토리지 어댑터 통합, 설정 UI 및 데이터베이스 마이그레이션
+- **AES-256-GCM 암호화**: API 키를 AES-256-GCM으로 정적 암호화하여 보안 강화
+- **내장 MCP 서비스**: 내장 MCP 서비스 지원으로 Agent 기능 확장
+- **Agent 스트리밍 패널**: AgentStreamDisplay 컴포넌트 최적화, 자동 스크롤, 스타일 개선 및 로딩 인디케이터
+- **하이브리드 검색 최적화**: 타겟 그룹화 및 쿼리 임베딩 재사용으로 검색 성능 향상
+- **Final Answer 도구**: 새로운 final_answer 도구 및 Agent 소요 시간 추적으로 워크플로우 개선
+
 **v0.3.3 하이라이트:**
 
 - 🧩 **부모-자식 청킹**: 계층적 부모-자식 청킹 전략으로 컨텍스트 관리 및 검색 정확도 강화
@@ -61,6 +75,9 @@
 - 🗄️ **버킷 자동 생성**: 스토리지 엔진 연결 확인 강화, 버킷 자동 생성 지원
 - 🎨 **UI 일관성**: 테두리 스타일 통일, 테마 및 컴포넌트 스타일 업데이트로 시각적 일관성 향상
 - ⚡ **청크 크기 최적화**: 지식베이스 처리를 위한 청크 크기 구성 업데이트
+
+<details>
+<summary><b>이전 릴리스</b></summary>
 
 **v0.3.0 하이라이트:**
 
@@ -81,6 +98,8 @@
 - 🔌 **MCP 도구 통합**: MCP를 통한 Agent 기능 확장 지원, uvx/npx 런처 내장, 다양한 전송 방식 지원
 - 🎨 **새 UI**: Agent/일반 모드 전환, 도구 호출 과정 표시, 지식베이스 관리 인터페이스 전면 개선
 - ⚡ **인프라 업그레이드**: MQ 비동기 작업 관리 도입, 자동 DB 마이그레이션 및 고속 개발 모드 지원
+
+</details>
 
 ## 🔒 보안 공지
 

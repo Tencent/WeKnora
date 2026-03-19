@@ -2,6 +2,75 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2026-03-19
+
+### 🚀 New Features
+- **NEW**: IM Bot Integration — support WeCom, Feishu, and Slack IM channel integration with WebSocket/Webhook modes, streaming support, file upload, and knowledge base integration
+- **NEW**: Multimodal Image Support — implement image upload and multimodal image processing with enhanced session management
+- **NEW**: Manual Knowledge Download — support downloading manual knowledge content as files with proper filename sanitization and Content-Disposition handling
+- **NEW**: NVIDIA Model API — support NVIDIA chat model API with custom endpoint configuration and VLM model support
+- **NEW**: Weaviate Vector DB — add Weaviate as a new vector database backend for knowledge retrieval
+- **NEW**: AWS S3 Storage — integrate AWS S3 storage adapter with database migrations and configuration UI
+- **NEW**: AES-256-GCM Encryption — add AES-256-GCM encryption for API keys at rest for enhanced security
+- **NEW**: Built-in MCP Service — add built-in MCP service support for extending agent capabilities
+- **NEW**: Multi-Content Messages — enhance message structure to support multi-content messages
+- **NEW**: Web Search in AgentQA — add web search option to AgentQA functionality
+- **NEW**: Clear Session Messages — add functionality to clear session messages
+- **NEW**: Agent Management — add agent management functionality in the frontend
+- **NEW**: Knowledge Move — implement knowledge move functionality between knowledge bases
+- **NEW**: Chat History & Retrieval Settings — implement chat history and retrieval settings configuration
+- **NEW**: Final Answer Tool — introduce final_answer tool and enhance agent duration tracking
+- **NEW**: Batch Chunk Deletion — implement batch deletion for chunks to avoid MySQL placeholder limit
+
+### ⚡ Improvements
+- Optimized hybrid search by grouping targets and reusing query embeddings for better performance
+- Enhanced knowledge search by resolving embedding model keys
+- Enhanced AgentStreamDisplay with auto-scrolling, improved styling, and loading indicators
+- Enhanced chat model selection logic in session management
+- Enhanced input field component with improved handling and sanitization
+- Unified dropdown menu styles across components
+- Enhanced storage engine configuration and user notifications
+- Improved document preview with responsive design and localized fullscreen toggle
+- Enhanced agent event emission for final answers and fallback handling
+- Enhanced FAQ metadata normalization and sanitization
+- Updated LLM configuration to model ID in API and frontend
+- Added computed model status for LLM availability in GraphSettings
+- Added pulsing animation to stop button and improved loading indicators
+- Added language support to summary generation payload
+- Enabled parent-child chunking and question generation in KnowledgeBaseEditorModal
+- Standardized loading and avatar sizes across components
+- Updated storage size calculations for vector embeddings
+
+### 🐛 Bug Fixes
+- Fixed Milvus retriever related issues
+- Fixed docparser handling of nested linked images and URL parentheses
+- Fixed chunk timestamp update to use NOW() for consistency
+- Fixed NVIDIA VLM model API default BaseURL
+- Fixed auth error messages and unified username validation length
+- Enforced 7500 char limit in chunker to prevent embedding API errors
+- Fixed builtin engine handling of simple formats
+- Fixed dev-app command error on Linux
+- Fixed vue-i18n placeholder escaping, computed ref accessor, and missing ru-RU keys
+- Fixed multilingual support for TDesign components and locale key synchronization
+- Fixed session title word count requirement
+- Updated default language setting to Chinese
+- Fixed MinIO endpoint format error message
+- Fixed storage engine warning display and styling
+- Fixed manual download button layout and polish
+- Fixed sanitize tab chars and double .md extension in manual download filename
+
+### 📚 Documentation
+- Added documentation for Slack IM channel integration
+- Added design specification and implementation plan for manual knowledge download
+
+### 🔧 Refactoring
+- Streamlined agent document info retrieval and enhanced chunk search logic
+- Improved IM tool invocation and result formatting
+- Consolidated QA request handling and improved session service interface
+- Simplified fullscreen handling and improved styling in document preview
+- Updated conversation handling and image description requirements
+- Changed tokenization method for improved processing
+
 ## [0.3.3] - 2026-03-05
 
 ### 🚀 New Features
@@ -671,6 +740,7 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.3.4]: https://github.com/Tencent/WeKnora/tree/v0.3.4
 [0.3.3]: https://github.com/Tencent/WeKnora/tree/v0.3.3
 [0.3.2]: https://github.com/Tencent/WeKnora/tree/v0.3.2
 [0.3.1]: https://github.com/Tencent/WeKnora/tree/v0.3.1

@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.3.3-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.3.4-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,6 +50,20 @@
 
 ## ✨ 最新更新
 
+**v0.3.4 版本亮点：**
+
+- **IM机器人集成**：支持企业微信、飞书、Slack IM频道，WebSocket/Webhook双模式，流式回复与知识库集成
+- **多模态图片支持**：图片上传与多模态图片处理，增强会话管理能力
+- **手动知识下载**：支持手动知识内容导出下载，文件名清洗与格式化处理
+- **NVIDIA模型API**：支持NVIDIA聊天模型API，自定义端点及VLM模型配置
+- **Weaviate向量数据库**：新增Weaviate向量数据库后端，用于知识检索
+- **AWS S3存储**：集成AWS S3存储适配器，配置界面及数据库迁移
+- **AES-256-GCM加密**：API密钥静态加密，采用AES-256-GCM增强安全性
+- **内置MCP服务**：支持内置MCP服务，扩展Agent能力
+- **Agent流式交互面板**：优化AgentStreamDisplay组件，自动滚动、样式增强与加载指示器
+- **混合检索优化**：按目标分组并复用查询向量，提升检索性能
+- **Final Answer工具**：新增final_answer工具及Agent耗时跟踪，优化Agent工作流
+
 **v0.3.3 版本亮点：**
 
 - 🧩 **父子分块策略**：层级化的父子分块策略，增强上下文管理和检索精度
@@ -61,6 +75,9 @@
 - 🗄️ **存储桶自动创建**：存储引擎连通性检查增强，支持自动创建存储桶
 - 🎨 **UI一致性优化**：统一边框样式、更新主题和组件样式，全面提升视觉一致性
 - ⚡ **分块尺寸调优**：更新知识库处理中的分块大小配置
+
+<details>
+<summary><b>更早版本</b></summary>
 
 **v0.3.2 版本亮点：**
 
@@ -102,6 +119,8 @@
 - 🔌 **MCP工具集成**：支持通过MCP扩展Agent能力，内置uvx、npx启动工具，支持多种传输方式
 - 🎨 **全新UI**：优化对话界面，支持Agent模式/普通模式切换，展示工具调用过程，知识库管理界面全面升级
 - ⚡ **底层升级**：引入MQ异步任务管理，支持数据库自动迁移，提供快速开发模式
+
+</details>
 
 ## 🔒 安全声明
 
