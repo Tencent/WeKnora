@@ -25,10 +25,12 @@ func (p *OpenRouterProvider) Info() ProviderInfo {
 		Description: "openai/gpt-5.2-chat, google/gemini-3-flash-preview, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: OpenRouterBaseURL,
+			types.ModelTypeEmbedding:   OpenRouterBaseURL,
 			types.ModelTypeVLLM:        OpenRouterBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
+			types.ModelTypeEmbedding,
 			types.ModelTypeVLLM,
 		},
 		RequiresAuth: true,

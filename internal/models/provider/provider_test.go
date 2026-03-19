@@ -169,4 +169,20 @@ func TestListByModelType(t *testing.T) {
 		}
 		assert.True(t, found, "Aliyun should support rerank")
 	})
+
+	t.Run("embedding models include openrouter", func(t *testing.T) {
+		providers := ListByModelType(types.ModelTypeEmbedding)
+		assert.NotEmpty(t, providers)
+
+		found := false
+		for _, p := range providers {
+			if p.Name == ProviderOpenRouter {
+				found = true
+				assert.Equal(t, OpenRouterBaseURL, p.GetDefaultURL(types.ModelTypeEmbedding))
+				break
+			}
+		}
+
+		assert.True(t, found, "OpenRouter should support embedding")
+	})
 }

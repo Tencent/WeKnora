@@ -341,9 +341,12 @@ const fallbackProviderOptions = computed(() => [
   { 
     value: 'openrouter', 
     label: t('model.editor.providers.openrouter.label'), 
-    defaultUrls: { chat: 'https://openrouter.ai/api/v1' },
+    defaultUrls: {
+      chat: 'https://openrouter.ai/api/v1',
+      embedding: 'https://openrouter.ai/api/v1'
+    },
     description: t('model.editor.providers.openrouter.description'),
-    modelTypes: ['chat']
+    modelTypes: ['chat', 'embedding']
   },
   { 
     value: 'siliconflow', 
@@ -1608,4 +1611,3 @@ const handleOverlayMouseUp = () => {
   }
 }
 </style>
-
