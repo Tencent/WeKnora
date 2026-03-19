@@ -73,6 +73,35 @@ services:
       - qdrant
       - full
 
+  milvus:
+    image: milvusdb/milvus:v2.6.11
+    container_name: WeKnora-milvus-dev
+    security_opt:
+      - seccomp:unconfined
+    command: ["milvus", "run", "standalone"]
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - COMMON_STORAGETYPE=local
+      - DEPLOY_MODE=STANDALONE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "${MILVUS_PORT:-19530}:19530"
+      - "${MILVUS_HEALTH_PORT:-9091}:9091"
+    volumes:
+      - milvus_data_dev:/var/lib/milvus
+    networks:
+      - WeKnora-network-dev
+    restart: unless-stopped
+    profiles:
+      - milvus
+      - full
+
   neo4j:
     image: neo4j:latest
     container_name: WeKnora-neo4j-dev
@@ -168,5 +197,5 @@ volumes:
   neo4j-data-dev:
   jaeger_data_dev:
   qdrant_data_dev:
+  milvus_data_dev:
   docreader-tmp-dev:
-
