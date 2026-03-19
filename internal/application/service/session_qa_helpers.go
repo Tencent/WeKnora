@@ -118,7 +118,7 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.SummaryConfig.ContextTemplate = customAgent.Config.ContextTemplate
 		logger.Infof(ctx, "Using custom agent's context_template")
 	}
-	if customAgent.Config.Temperature > 0 {
+	if customAgent.Config.Temperature >= 0 {
 		cm.SummaryConfig.Temperature = customAgent.Config.Temperature
 		logger.Infof(ctx, "Using custom agent's temperature: %f", customAgent.Config.Temperature)
 	}

@@ -286,7 +286,7 @@ func (h *Handler) createDefaultSummaryConfig(ctx context.Context) *types.Summary
 		if tenant.ConversationConfig.ContextTemplate != "" {
 			cfg.ContextTemplate = tenant.ConversationConfig.ContextTemplate
 		}
-		if tenant.ConversationConfig.Temperature > 0 {
+		if tenant.ConversationConfig.Temperature >= 0 {
 			cfg.Temperature = tenant.ConversationConfig.Temperature
 		}
 		if tenant.ConversationConfig.MaxCompletionTokens > 0 {
@@ -344,7 +344,7 @@ func (h *Handler) fillSummaryConfigDefaults(ctx context.Context, config *types.S
 	if config.ContextTemplate == "" {
 		config.ContextTemplate = defaultContextTemplate
 	}
-	if config.Temperature == 0 {
+	if config.Temperature < 0 {
 		config.Temperature = defaultTemperature
 	}
 	if config.MaxCompletionTokens == 0 {

@@ -211,7 +211,7 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a == nil {
 		return
 	}
-	if a.Config.Temperature == 0 {
+	if a.Config.Temperature < 0 {
 		a.Config.Temperature = 0.7
 	}
 	if a.Config.MaxIterations == 0 {
