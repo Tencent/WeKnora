@@ -28,6 +28,10 @@ const (
 	// Can be overridden via AgentConfig.LLMCallTimeout.
 	defaultLLMCallTimeout = 120 * time.Second
 
+	// defaultToolExecTimeout is the default maximum time for a single tool execution.
+	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
+	defaultToolExecTimeout = 60 * time.Second
+
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
 )
@@ -315,6 +319,22 @@ func (e *AgentEngine) executeLoop(
 		"max_iterations": e.config.MaxIterations,
 	})
 	for state.CurrentRound < e.config.MaxIterations {
+		// Check for context cancellation (request timeout, user cancel, etc.)
+		select {
+		case <-ctx.Done():
+			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v",
+				state.CurrentRound+1, ctx.Err())
+			// Try to salvage existing results
+			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
+				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
+					totalTC)
+				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID)
+				state.IsComplete = true
+			}
+			return state, ctx.Err()
+		default:
+		}
+
 		roundStart := time.Now()
 		logger.Infof(ctx, "========== Round %d/%d Started ==========",
 			state.CurrentRound+1, e.config.MaxIterations)
@@ -382,6 +402,10 @@ func (e *AgentEngine) executeLoop(
 			"round":     state.CurrentRound + 1,
 			"tool_cnt":  len(tools),
 		})
+
+		// Sanitize messages before sending to LLM (fix consecutive roles, orphaned tool results)
+		messages = agenttools.SanitizeMessages(messages)
+
 		response, err := e.streamThinkingToEventBus(ctx, messages, tools, state.CurrentRound, sessionID)
 		if err != nil && isTransientError(err) {
 			// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
@@ -554,26 +578,41 @@ func (e *AgentEngine) executeLoop(
 			)
 
 			for i, tc := range response.ToolCalls {
+				// Normalize tool call ID for cross-provider compatibility
+				tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
+
 				logger.Infof(ctx, "[Agent][Round-%d][Tool-%d/%d] Tool: %s, ID: %s",
 					state.CurrentRound+1, i+1, len(response.ToolCalls), tc.Function.Name, tc.ID)
 
 				var args map[string]any
-				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
-					logger.Errorf(ctx, "[Agent][Round-%d][Tool-%d/%d] Failed to parse tool arguments: %v",
-						state.CurrentRound+1, i+1, len(response.ToolCalls), err)
-					// Record parse failure as a tool result so the LLM can see the error and adapt
-					parseFailCall := types.ToolCall{
-						ID:   tc.ID,
-						Name: tc.Function.Name,
-						Args: map[string]any{"_raw": tc.Function.Arguments},
-						Result: &types.ToolResult{
-							Success: false,
-							Error: fmt.Sprintf("Failed to parse tool arguments: %v", err) +
-								"\n\n[Analyze the error above and try a different approach.]",
-						},
+				argsStr := tc.Function.Arguments
+				if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+					// Attempt JSON repair before giving up
+					repaired := agenttools.RepairJSON(argsStr)
+					if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
+						logger.Errorf(ctx,
+							"[Agent][Round-%d][Tool-%d/%d] Failed to parse tool arguments "+
+								"(repair also failed): %v",
+							state.CurrentRound+1, i+1, len(response.ToolCalls), err)
+						parseFailCall := types.ToolCall{
+							ID:   tc.ID,
+							Name: tc.Function.Name,
+							Args: map[string]any{"_raw": argsStr},
+							Result: &types.ToolResult{
+								Success: false,
+								Error: fmt.Sprintf(
+									"Failed to parse tool arguments: %v", err,
+								) + "\n\n[Analyze the error above and " +
+									"try a different approach.]",
+							},
+						}
+						step.ToolCalls = append(step.ToolCalls, parseFailCall)
+						continue
 					}
-					step.ToolCalls = append(step.ToolCalls, parseFailCall)
-					continue
+					logger.Warnf(ctx,
+						"[Agent][Round-%d][Tool-%d/%d] Repaired malformed JSON arguments",
+						state.CurrentRound+1, i+1, len(response.ToolCalls))
+					tc.Function.Arguments = repaired
 				}
 
 				// Log the arguments in a readable format
@@ -595,7 +634,7 @@ func (e *AgentEngine) executeLoop(
 				})
 				logger.Debugf(ctx, "[Agent] ToolCall -> %s args=%s", tc.Function.Name, tc.Function.Arguments)
 
-				// Execute tool
+				// Execute tool with timeout to prevent indefinite hangs
 				logger.Infof(ctx, "[Agent][Round-%d][Tool-%d/%d] Executing tool: %s...",
 					state.CurrentRound+1, i+1, len(response.ToolCalls), tc.Function.Name)
 				common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
@@ -605,7 +644,12 @@ func (e *AgentEngine) executeLoop(
 					"tool_call_id": tc.ID,
 					"tool_index":   fmt.Sprintf("%d/%d", i+1, len(response.ToolCalls)),
 				})
-				result, err := e.toolRegistry.ExecuteTool(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+				toolCtx, toolCancel := context.WithTimeout(ctx, defaultToolExecTimeout)
+				result, err := e.toolRegistry.ExecuteTool(
+					toolCtx, tc.Function.Name,
+					json.RawMessage(tc.Function.Arguments),
+				)
+				toolCancel()
 				duration := time.Since(toolCallStartTime).Milliseconds()
 				logger.Infof(ctx, "[Agent][Round-%d][Tool-%d/%d] Tool execution completed in %dms",
 					state.CurrentRound+1, i+1, len(response.ToolCalls), duration)
