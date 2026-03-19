@@ -113,9 +113,11 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			if degradedThreshold < 0.3 {
 				degradedThreshold = 0.3
 			}
-			pipelineInfo(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
-				"original": originalThreshold,
-				"degraded": degradedThreshold,
+			pipelineWarn(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
+				"original":       originalThreshold,
+				"degraded":       degradedThreshold,
+				"candidate_cnt":  len(candidatesToRerank),
+				"reason":         "no results above original threshold, retrying with lower threshold",
 			})
 			chatManage.RerankThreshold = degradedThreshold
 			rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)

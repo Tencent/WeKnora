@@ -4,11 +4,49 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// estimateStringTokens provides a more accurate token estimation by distinguishing
+// CJK characters (≈1.5 tokens each) from Latin characters (≈4 chars per token).
+// This is significantly more accurate than the naive totalChars/4 approach,
+// especially for mixed Chinese-English content common in WeKnora.
+func estimateStringTokens(s string) int {
+	cjkChars := 0
+	otherChars := 0
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hangul, r) || unicode.Is(unicode.Katakana, r) || unicode.Is(unicode.Hiragana, r) {
+			cjkChars++
+		} else {
+			otherChars++
+		}
+	}
+	// CJK characters average ~1.5 tokens each; Latin ~0.25 tokens per char
+	return (cjkChars*3 + otherChars) / 2
+}
+
+// estimateMessageTokens estimates the token count for a list of messages.
+// Accounts for per-message overhead (role markers, special tokens) and tool call metadata.
+func estimateMessageTokens(messages []chat.Message) int {
+	totalTokens := 0
+	for _, msg := range messages {
+		totalTokens += estimateStringTokens(msg.Role) + estimateStringTokens(msg.Content)
+		// Per-message overhead: role markers, delimiters, special tokens
+		totalTokens += 4
+		if len(msg.ToolCalls) > 0 {
+			for _, tc := range msg.ToolCalls {
+				totalTokens += estimateStringTokens(tc.Function.Name) + estimateStringTokens(tc.Function.Arguments)
+				// Tool call overhead: function call structure tokens
+				totalTokens += 8
+			}
+		}
+	}
+	return totalTokens
+}
 
 // slidingWindowStrategy implements CompressionStrategy using sliding window
 type slidingWindowStrategy struct {
@@ -64,19 +102,9 @@ func (s *slidingWindowStrategy) Compress(
 	return result, nil
 }
 
-// EstimateTokens estimates token count (rough approximation: 4 characters ≈ 1 token)
+// EstimateTokens estimates token count using CJK-aware heuristics.
 func (s *slidingWindowStrategy) EstimateTokens(messages []chat.Message) int {
-	totalChars := 0
-	for _, msg := range messages {
-		totalChars += len(msg.Role) + len(msg.Content)
-		// Account for tool calls if present
-		if len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				totalChars += len(tc.Function.Name) + len(tc.Function.Arguments)
-			}
-		}
-	}
-	return totalChars / 4 // Rough approximation
+	return estimateMessageTokens(messages)
 }
 
 // smartCompressionStrategy implements CompressionStrategy using LLM summarization
@@ -151,12 +179,10 @@ func (s *smartCompressionStrategy) Compress(
 	// Summarize old messages using LLM
 	summary, err := s.summarizeMessages(ctx, oldMessages)
 	if err != nil {
-		logger.Warnf(ctx, "[SmartCompression] Failed to summarize messages: %v, falling back to old messages", err)
-		// Fallback: return all messages if summarization fails
-		result := make([]chat.Message, 0, len(systemMessages)+len(regularMessages))
-		result = append(result, systemMessages...)
-		result = append(result, regularMessages...)
-		return result, nil
+		logger.Warnf(ctx, "[SmartCompression] Failed to summarize messages: %v, falling back to sliding window", err)
+		// Fallback: use sliding window strategy to at least reduce message count
+		fallback := &slidingWindowStrategy{recentMessageCount: s.recentMessageCount}
+		return fallback.Compress(ctx, messages, maxTokens)
 	}
 
 	// Construct final message list: system + summary + recent
@@ -186,7 +212,7 @@ func (s *smartCompressionStrategy) summarizeMessages(ctx context.Context, messag
 	// Build conversation text
 	var sb strings.Builder
 	for i, msg := range messages {
-		sb.WriteString(fmt.Sprintf("[%s] %s\n", msg.Role, msg.Content))
+		fmt.Fprintf(&sb, "[%s] %s\n", msg.Role, msg.Content)
 		if i < len(messages)-1 {
 			sb.WriteString("\n")
 		}
@@ -226,17 +252,7 @@ func (s *smartCompressionStrategy) summarizeMessages(ctx context.Context, messag
 	return summary, nil
 }
 
-// EstimateTokens estimates token count (rough approximation: 4 characters ≈ 1 token)
+// EstimateTokens estimates token count using CJK-aware heuristics.
 func (s *smartCompressionStrategy) EstimateTokens(messages []chat.Message) int {
-	totalChars := 0
-	for _, msg := range messages {
-		totalChars += len(msg.Role) + len(msg.Content)
-		// Account for tool calls if present
-		if len(msg.ToolCalls) > 0 {
-			for _, tc := range msg.ToolCalls {
-				totalChars += len(tc.Function.Name) + len(tc.Function.Arguments)
-			}
-		}
-	}
-	return totalChars / 4 // Rough approximation
+	return estimateMessageTokens(messages)
 }

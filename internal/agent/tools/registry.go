@@ -6,8 +6,12 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// toolErrorHint is appended to tool error messages to guide the LLM to retry with a different approach.
+const toolErrorHint = "\n\n[Analyze the error above and try a different approach.]"
 
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
@@ -27,6 +31,8 @@ func NewToolRegistry() *ToolRegistry {
 func (r *ToolRegistry) RegisterTool(tool types.Tool) {
 	name := tool.Name()
 	if _, exists := r.tools[name]; exists {
+		logger.Warnf(context.Background(),
+			"[ToolRegistry] Duplicate tool registration rejected: %s (first-wins policy)", name)
 		return
 	}
 	r.tools[name] = tool
@@ -81,9 +87,13 @@ func (r *ToolRegistry) ExecuteTool(
 		})
 		return &types.ToolResult{
 			Success: false,
-			Error:   err.Error(),
+			Error:   err.Error() + toolErrorHint,
 		}, err
 	}
+
+	// Cast parameters to match expected schema types before execution.
+	// This handles common LLM quirks like returning "true" instead of true.
+	args = CastParams(args, tool.Parameters())
 
 	result, execErr := tool.Execute(ctx, args)
 	fields := map[string]interface{}{
@@ -100,6 +110,10 @@ func (r *ToolRegistry) ExecuteTool(
 		fields["error"] = execErr.Error()
 		common.PipelineError(ctx, "AgentTool", "execute_done", fields)
 	} else if result != nil && !result.Success {
+		// Append error hint to guide LLM to retry with a different approach
+		if result.Error != "" {
+			result.Error = result.Error + toolErrorHint
+		}
 		common.PipelineWarn(ctx, "AgentTool", "execute_done", fields)
 	} else {
 		common.PipelineInfo(ctx, "AgentTool", "execute_done", fields)
@@ -108,12 +122,13 @@ func (r *ToolRegistry) ExecuteTool(
 	return result, execErr
 }
 
-// Cleanup cleans up all registered tools that implement the Cleanup method
+// Cleanup cleans up all registered tools that implement the types.Cleanable interface.
+// This is called at the end of agent sessions to release tool-specific resources.
 func (r *ToolRegistry) Cleanup(ctx context.Context) {
-	// Check specifically for DataAnalysisTool
-	if tool, exists := r.tools[ToolDataAnalysis]; exists {
-		if dataAnalysisTool, ok := tool.(*DataAnalysisTool); ok {
-			dataAnalysisTool.Cleanup(ctx)
+	for name, tool := range r.tools {
+		if cleanable, ok := tool.(types.Cleanable); ok {
+			logger.Infof(ctx, "[ToolRegistry] Cleaning up tool: %s", name)
+			cleanable.Cleanup(ctx)
 		}
 	}
 }

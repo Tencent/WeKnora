@@ -379,7 +379,56 @@ func LoadConfig() (*Config, error) {
 		resolveBuiltinAgentPromptIDs(cfg.PromptTemplates)
 	}
 
+	// Validate configuration values
+	if err := ValidateConfig(&cfg); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
+}
+
+// ValidateConfig performs basic validation of the loaded configuration.
+// It checks for obviously invalid or missing values that would cause runtime failures.
+func ValidateConfig(cfg *Config) error {
+	var errs []string
+
+	if cfg.Conversation != nil {
+		if cfg.Conversation.EmbeddingTopK < 0 {
+			errs = append(errs, "conversation.embedding_top_k must be >= 0")
+		}
+		if cfg.Conversation.RerankTopK < 0 {
+			errs = append(errs, "conversation.rerank_top_k must be >= 0")
+		}
+		if cfg.Conversation.VectorThreshold < 0 || cfg.Conversation.VectorThreshold > 1 {
+			errs = append(errs, "conversation.vector_threshold must be between 0 and 1")
+		}
+		if cfg.Conversation.RerankThreshold < 0 || cfg.Conversation.RerankThreshold > 1 {
+			errs = append(errs, "conversation.rerank_threshold must be between 0 and 1")
+		}
+	}
+
+	if cfg.KnowledgeBase != nil {
+		if cfg.KnowledgeBase.ChunkSize <= 0 {
+			errs = append(errs, "knowledge_base.chunk_size must be > 0")
+		}
+		if cfg.KnowledgeBase.ChunkOverlap < 0 {
+			errs = append(errs, "knowledge_base.chunk_overlap must be >= 0")
+		}
+		if cfg.KnowledgeBase.ChunkOverlap >= cfg.KnowledgeBase.ChunkSize {
+			errs = append(errs, "knowledge_base.chunk_overlap must be less than chunk_size")
+		}
+	}
+
+	if cfg.Server != nil {
+		if cfg.Server.Port <= 0 || cfg.Server.Port > 65535 {
+			errs = append(errs, "server.port must be between 1 and 65535")
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("config validation errors: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // backfillConversationDefaults resolves prompt template ID references

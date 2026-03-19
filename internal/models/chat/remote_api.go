@@ -459,7 +459,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 	for {
 		response, err := stream.Recv()
 		if err != nil {
-			if err.Error() == "EOF" {
+			if err == io.EOF {
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      "",
@@ -493,7 +493,7 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 	for {
 		event, err := reader.ReadEvent()
 		if err != nil {
-			if err.Error() != "EOF" {
+			if err != io.EOF {
 				logger.Errorf(ctx, "Stream read error: %v", err)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeError,

@@ -41,6 +41,8 @@ type AgentConfig struct {
 
 	// Runtime-only fields (not persisted)
 	VLMModelID string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
+	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
+	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 }
 
 // SessionAgentConfig represents session-level agent configuration
@@ -137,12 +139,19 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (*ToolResult, error)
 }
 
+// Cleanable is an optional interface that tools can implement to release resources.
+// Tools implementing this interface will have their Cleanup method called during
+// registry cleanup (e.g., at the end of an agent session).
+type Cleanable interface {
+	Cleanup(ctx context.Context)
+}
+
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
-	Success bool                   `json:"success"`         // Whether the tool executed successfully
-	Output  string                 `json:"output"`          // Human-readable output
-	Data    map[string]interface{} `json:"data,omitempty"`  // Structured data for programmatic use
-	Error   string                 `json:"error,omitempty"` // Error message if execution failed
+	Success bool                   `json:"success"`          // Whether the tool executed successfully
+	Output  string                 `json:"output"`           // Human-readable output
+	Data    map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
+	Error   string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images  []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
 }
 

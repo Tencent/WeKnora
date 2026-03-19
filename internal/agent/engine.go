@@ -21,10 +21,44 @@ import (
 )
 
 const (
-	// llmPerCallTimeout is the maximum time allowed for a single LLM call (stream initiation + full response).
+	// defaultLLMCallTimeout is the default maximum time allowed for a single LLM call.
 	// This prevents a single slow call from consuming the entire pipeline deadline.
-	llmPerCallTimeout = 120 * time.Second
+	// Can be overridden via AgentConfig.LLMCallTimeout.
+	defaultLLMCallTimeout = 120 * time.Second
+
+	// maxLLMRetries is the maximum number of retries for transient LLM errors.
+	maxLLMRetries = 2
 )
+
+// transientErrorMarkers are substrings that indicate a transient (retryable) error.
+var transientErrorMarkers = []string{
+	"429", "rate limit",
+	"500", "502", "503", "504",
+	"overloaded", "timeout", "timed out",
+	"connection", "server error", "temporarily unavailable",
+}
+
+// isTransientError checks whether an error is likely transient and worth retrying.
+func isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	for _, marker := range transientErrorMarkers {
+		if strings.Contains(errStr, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// getLLMCallTimeout returns the configured LLM call timeout, falling back to default.
+func (e *AgentEngine) getLLMCallTimeout() time.Duration {
+	if e.config.LLMCallTimeout > 0 {
+		return time.Duration(e.config.LLMCallTimeout) * time.Second
+	}
+	return defaultLLMCallTimeout
+}
 
 // generateEventID generates a unique event ID with type suffix for better traceability
 func generateEventID(suffix string) string {
@@ -305,6 +339,20 @@ func (e *AgentEngine) executeLoop(
 			"tool_cnt":  len(tools),
 		})
 		response, err := e.streamThinkingToEventBus(ctx, messages, tools, state.CurrentRound, sessionID)
+		if err != nil && isTransientError(err) {
+			// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
+			for retry := 1; retry <= maxLLMRetries; retry++ {
+				retryDelay := time.Duration(retry) * time.Second
+				logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
+					state.CurrentRound+1, retry, maxLLMRetries, retryDelay, err)
+				time.Sleep(retryDelay)
+
+				response, err = e.streamThinkingToEventBus(ctx, messages, tools, state.CurrentRound, sessionID)
+				if err == nil || !isTransientError(err) {
+					break
+				}
+			}
+		}
 		if err != nil {
 			logger.Errorf(ctx, "[Agent][Round-%d] LLM call failed: %v", state.CurrentRound+1, err)
 			common.PipelineError(ctx, "Agent", "think_failed", map[string]interface{}{
@@ -450,6 +498,18 @@ func (e *AgentEngine) executeLoop(
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 					logger.Errorf(ctx, "[Agent][Round-%d][Tool-%d/%d] Failed to parse tool arguments: %v",
 						state.CurrentRound+1, i+1, len(response.ToolCalls), err)
+					// Record parse failure as a tool result so the LLM can see the error and adapt
+					parseFailCall := types.ToolCall{
+						ID:   tc.ID,
+						Name: tc.Function.Name,
+						Args: map[string]any{"_raw": tc.Function.Arguments},
+						Result: &types.ToolResult{
+							Success: false,
+							Error: fmt.Sprintf("Failed to parse tool arguments: %v", err) +
+								"\n\n[Analyze the error above and try a different approach.]",
+						},
+					}
+					step.ToolCalls = append(step.ToolCalls, parseFailCall)
 					continue
 				}
 
@@ -790,7 +850,7 @@ func (e *AgentEngine) streamLLMToEventBus(
 	// guaranteed time window even when the parent context's deadline is almost
 	// exhausted after previous iterations. The shorter of the two deadlines wins,
 	// so the parent pipeline timeout is still respected.
-	llmCtx, llmCancel := context.WithTimeout(ctx, llmPerCallTimeout)
+	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
