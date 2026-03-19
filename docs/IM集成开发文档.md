@@ -1,6 +1,6 @@
 # IM 集成开发文档
 
-WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
+WeKnora 的 IM 集成模块将企业即时通讯平台（企业微信、飞书、Slack）接入 WeKnora 知识问答管道，支持在 IM 中直接向 AI 提问并获得实时流式回答。
 
 IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置通过前端 Agent 编辑器管理，存储在数据库中。
 
@@ -9,6 +9,7 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 - [快速接入指南](#快速接入指南)
   - [企业微信接入](#企业微信接入)
   - [飞书接入](#飞书接入)
+  - [Slack 接入](#slack-接入)
 - [前端管理](#前端管理)
 - [架构总览](#架构总览)
 - [数据模型](#数据模型)
@@ -220,6 +221,106 @@ IM 渠道绑定到 Agent，一个 Agent 可接入多个 IM 渠道，所有配置
 
 ---
 
+### Slack 接入
+
+Slack 提供两种接入模式，推荐使用 WebSocket (Socket Mode) 模式，无需公网域名。
+
+#### 方式一：WebSocket 模式（Socket Mode，推荐）
+
+> 无需公网域名，适合快速验证和内网部署。
+
+**第一步：创建 Slack App**
+
+1. 登录 [Slack API](https://api.slack.com/apps) → **Create New App** → **From scratch**
+2. 填写 App Name 并选择要安装的 Workspace。
+
+**第二步：生成 App-Level Token**
+
+1. 在应用详情页左侧导航栏选择 **Basic Information**。
+2. 滚动到 **App-Level Tokens** 区域，点击 **Generate Token and Scopes**。
+3. 填写 Token Name，添加 `connections:write` scope。
+4. 点击 Generate，复制生成的 Token（以 `xapp-` 开头），这就是 **App Token**。
+
+**第三步：开启 Socket Mode**
+
+1. 在左侧导航栏选择 **Socket Mode**。
+2. 开启 **Enable Socket Mode** 开关。
+
+**第四步：配置 Event Subscriptions**
+
+1. 在左侧导航栏选择 **Event Subscriptions**。
+2. 开启 **Enable Events** 开关。
+3. 展开 **Subscribe to bot events**，添加以下事件：
+   - `app_mention` (在频道中 @ 机器人)
+   - `message.channels` (频道消息)
+   - `message.groups` (私有频道消息)
+   - `message.im` (私聊消息)
+   - `message.mpim` (多人私聊消息)
+4. 点击 **Save Changes**。
+
+**第五步：配置权限 (OAuth & Permissions)**
+
+1. 在左侧导航栏选择 **OAuth & Permissions**。
+2. 滚动到 **Scopes** -> **Bot Token Scopes**，确保包含以下权限（添加事件时通常会自动添加）：
+   - `app_mentions:read`
+   - `channels:history`
+   - `chat:write`
+   - `groups:history`
+   - `im:history`
+   - `mpim:history`
+   - `files:read` (用于接收文件)
+3. 滚动到顶部，点击 **Install to Workspace**。
+4. 授权后，复制 **Bot User OAuth Token**（以 `xoxb-` 开头），这就是 **Bot Token**。
+
+**第六步：在 WeKnora 中添加 IM 渠道**
+
+1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
+2. 填写配置：
+   - **平台**：选择「Slack」
+   - **接入模式**：选择「WebSocket」
+   - **输出模式**：选择「流式输出」
+   - **App Token**：填入以 `xapp-` 开头的 Token
+   - **Bot Token**：填入以 `xoxb-` 开头的 Token
+3. 保存
+
+启动后日志出现以下内容表示连接成功：
+
+```
+[IM] Slack WebSocket connecting...
+```
+
+---
+
+#### 方式二：Webhook 模式 (Events API)
+
+> 需要公网可达的回调地址。
+
+**第一步：创建 Slack App 并获取凭证**
+
+1. 登录 [Slack API](https://api.slack.com/apps) 创建应用。
+2. 在 **Basic Information** 页面，滚动到 **App Credentials** 区域，复制 **Signing Secret**。
+3. 在 **OAuth & Permissions** 页面，配置 Bot Token Scopes（同上），安装到 Workspace，复制 **Bot User OAuth Token**（Bot Token）。
+
+**第二步：在 WeKnora 中添加 IM 渠道**
+
+1. 进入 Agent 编辑器 → **IM 集成** → **添加渠道**
+2. 填写配置：
+   - **平台**：选择「Slack」
+   - **接入模式**：选择「Webhook」
+   - **Bot Token**：填入以 `xoxb-` 开头的 Token
+   - **Signing Secret**：填入 Signing Secret
+3. 保存后，复制渠道卡片上显示的**回调地址**。
+
+**第三步：配置 Event Subscriptions**
+
+1. 在 Slack App 设置页左侧导航栏选择 **Event Subscriptions**。
+2. 开启 **Enable Events** 开关。
+3. 在 **Request URL** 中粘贴从 WeKnora 复制的回调地址。Slack 会发送一个 challenge 请求，WeKnora 会自动响应并验证通过。
+4. 展开 **Subscribe to bot events**，添加需要的事件（同上）。
+5. 点击 **Save Changes**。
+
+---
+
 ### 模式选择指南
 
 | | Webhook | WebSocket |
@@ -339,6 +440,8 @@ CREATE TABLE im_channels (
 | 企业微信 | Webhook | `corp_id`, `agent_secret`, `token`, `encoding_aes_key`, `corp_agent_id` |
 | 飞书 | WebSocket | `app_id`, `app_secret` |
 | 飞书 | Webhook | `app_id`, `app_secret`, `verification_token`, `encrypt_key` |
+| Slack | WebSocket | `app_token`, `bot_token` |
+| Slack | Webhook | `bot_token`, `signing_secret` |
 
 ### im_channel_sessions 表
 
@@ -645,6 +748,64 @@ EndStream:
 |------|------|
 | `internal/im/feishu/adapter.go` | 事件解析、CardKit 流式实现、Token 缓存、AES 解密 |
 | `internal/im/feishu/longconn.go` | WebSocket 长连接（封装飞书 SDK） |
+
+---
+
+### Slack
+
+统一适配器同时支持 Webhook 和 WebSocket (Socket Mode) 模式，且原生实现 `StreamSender` 接口。
+
+#### Webhook 模式 (Events API)
+
+```
+Slack 服务器 ──HTTP POST──▶ /api/v1/im/callback/{channel_id}
+                                   │
+                           签名验证 (HMAC-SHA256)
+                           解析 JSON → IncomingMessage
+                                   │
+                           通过 Slack Web API 回复
+```
+
+- **签名验证：** 使用 `signing_secret` 对请求体进行 HMAC-SHA256 签名验证，防止伪造请求。
+- **事件过滤：** 仅处理 `message` 和 `app_mention` 事件，忽略机器人自己发送的消息。
+- **URL 验证：** 自动处理 Slack 的 `url_verification` challenge 请求。
+
+#### WebSocket 模式 (Socket Mode)
+
+通过 `slack-go/slack/socketmode` 建立长连接，事件推送与 Webhook 等价，无需公网域名，内置自动重连。
+
+```
+LongConnClient ══WebSocket══▶ wss://wss-primary.slack.com
+       │
+  1. 使用 App Token 建立连接
+  2. 接收 Events API 消息帧
+  3. 确认消息 (Ack)
+  4. 通过 Slack Web API 回复
+```
+
+#### 流式回复
+
+Slack 的流式输出基于消息更新 (chat.update) 实现：
+
+```
+StartStream:
+  1. POST /chat.postMessage              → 发送初始消息，获取 ts (timestamp)
+
+SendStreamChunk:
+  2. POST /chat.update                   → 根据 ts 更新消息内容 (累积全文)
+
+EndStream:
+  3. 无需特殊操作
+```
+
+每次 `SendStreamChunk` 发送的是**累积全文**而非增量。
+
+#### 源码文件
+
+| 文件 | 职责 |
+|------|------|
+| `internal/im/slack/adapter.go` | 事件解析、签名验证、流式实现、文件下载 |
+| `internal/im/slack/longconn.go` | WebSocket 长连接（封装 slack-go Socket Mode） |
 
 ---
 
