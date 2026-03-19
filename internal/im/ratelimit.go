@@ -1,8 +1,12 @@
 package im
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -13,6 +17,95 @@ const (
 	// rateLimitCleanupInterval is how often stale entries are purged.
 	rateLimitCleanupInterval = 1 * time.Minute
 )
+
+// ──────────────────────────────────────────────────────────────────────────────
+// distributedLimiter: Redis ZSET + local fallback
+// ──────────────────────────────────────────────────────────────────────────────
+
+// rateLimitScript is an atomic Lua script that implements a sliding-window rate
+// limiter on a Redis Sorted Set. It prunes expired entries, checks the count,
+// and conditionally adds a new member — all in a single round-trip.
+//
+// KEYS[1] = the rate-limit key
+// ARGV[1] = now (Unix milliseconds)
+// ARGV[2] = window size (milliseconds)
+// ARGV[3] = max allowed requests
+// ARGV[4] = unique member value (e.g. now_ms as string)
+//
+// Returns 1 if the request is allowed, 0 if rate-limited.
+var rateLimitScript = redis.NewScript(`
+local key     = KEYS[1]
+local now     = tonumber(ARGV[1])
+local window  = tonumber(ARGV[2])
+local maxReq  = tonumber(ARGV[3])
+local member  = ARGV[4]
+
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
+local count = redis.call('ZCARD', key)
+if count < maxReq then
+    redis.call('ZADD', key, now, member)
+    redis.call('PEXPIRE', key, window + 1000)
+    return 1
+end
+return 0
+`)
+
+// distributedLimiter tries Redis first, falls back to a local sliding-window
+// limiter when Redis is unavailable (nil client or transient error).
+type distributedLimiter struct {
+	redisClient *redis.Client
+	local       *slidingWindowLimiter
+	window      time.Duration
+	maxRequests int
+	instanceID  string // used to disambiguate ZSET members across instances
+}
+
+func newDistributedLimiter(redisClient *redis.Client, window time.Duration, maxRequests int, instanceID string) *distributedLimiter {
+	return &distributedLimiter{
+		redisClient: redisClient,
+		local:       newSlidingWindowLimiter(window, maxRequests),
+		window:      window,
+		maxRequests: maxRequests,
+		instanceID:  instanceID,
+	}
+}
+
+// Allow returns true if the request for the given key is within the rate limit.
+func (d *distributedLimiter) Allow(key string) bool {
+	if d.redisClient != nil {
+		allowed, err := d.redisAllow(context.Background(), key)
+		if err == nil {
+			return allowed
+		}
+		// Redis failed — fall through to local limiter.
+	}
+	return d.local.Allow(key)
+}
+
+func (d *distributedLimiter) redisAllow(ctx context.Context, key string) (bool, error) {
+	redisKey := RedisKeyRateLimit + key
+	nowMs := time.Now().UnixMilli()
+	windowMs := d.window.Milliseconds()
+	member := fmt.Sprintf("%s:%d", d.instanceID, nowMs) // instanceID prevents ZSET member collision across instances
+
+	result, err := rateLimitScript.Run(ctx, d.redisClient,
+		[]string{redisKey},
+		nowMs, windowMs, d.maxRequests, member,
+	).Int64()
+	if err != nil {
+		return false, err
+	}
+	return result == 1, nil
+}
+
+// cleanupLoop delegates to the local limiter's cleanup for the fallback path.
+func (d *distributedLimiter) cleanupLoop(stopCh <-chan struct{}) {
+	d.local.cleanupLoop(stopCh)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// slidingWindowLimiter: local in-memory fallback (original implementation)
+// ──────────────────────────────────────────────────────────────────────────────
 
 // rateLimitEntry holds the request timestamps for a single key.
 type rateLimitEntry struct {

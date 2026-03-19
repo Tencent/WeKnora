@@ -27,6 +27,34 @@ type Config struct {
 	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
 	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
+	IM              *IMConfig              `yaml:"im"               json:"im"`
+}
+
+// IMConfig configures the IM integration service.
+// All fields are optional — zero values fall back to built-in defaults so
+// existing deployments need no config changes.
+type IMConfig struct {
+	// Workers is the number of concurrent QA worker goroutines per instance.
+	// Default: 5.
+	Workers int `yaml:"workers" json:"workers"`
+	// GlobalMaxWorkers is the maximum number of QA requests that can execute
+	// concurrently across ALL instances. Enforced via a Redis counter; when the
+	// global limit is reached, local workers wait until a slot opens.
+	// Requires Redis — ignored in single-instance mode.
+	// 0 (default) means no global limit.
+	GlobalMaxWorkers int `yaml:"global_max_workers" json:"global_max_workers"`
+	// MaxQueueSize is the maximum number of pending QA requests per instance.
+	// Default: 50.
+	MaxQueueSize int `yaml:"max_queue_size" json:"max_queue_size"`
+	// MaxPerUser limits how many requests a single user can have queued globally.
+	// Default: 3.
+	MaxPerUser int `yaml:"max_per_user" json:"max_per_user"`
+	// RateLimitWindow is the sliding window duration for per-user rate limiting.
+	// Default: 60s.
+	RateLimitWindow time.Duration `yaml:"rate_limit_window" json:"rate_limit_window"`
+	// RateLimitMax is the maximum number of requests allowed per window per user.
+	// Default: 10.
+	RateLimitMax int `yaml:"rate_limit_max" json:"rate_limit_max"`
 }
 
 // DocReaderConfig configures the document parser client (gRPC or HTTP).
