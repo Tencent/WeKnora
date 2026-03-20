@@ -19,13 +19,12 @@
             </div>
         </div>
         <div class="think-content" v-show="!isFold || deepSession.thinking">
-            <div ref="contentInnerRef" class="content-inner" v-html="safeProcessThinkContent(deepSession.thinkContent)"></div>
+            <div ref="contentInnerRef" class="content-inner">{{ deepSession.thinkContent }}</div>
         </div>
     </div>
 </template>
 <script setup>
 import { watch, ref, defineProps, onMounted, nextTick } from 'vue';
-import { sanitizeHTML } from '@/utils/security';
 import { useI18n } from 'vue-i18n';
 
 const isFold = ref(false)
@@ -79,19 +78,6 @@ const toggleFold = () => {
         isFold.value = !isFold.value;
     }
 }
-
-// 安全地处理思考内容，防止XSS攻击
-const safeProcessThinkContent = (content) => {
-    if (!content || typeof content !== 'string') return '';
-
-    // 先处理换行符
-    const contentWithBreaks = content.replace(/\n/g, '<br/>');
-
-    // 使用DOMPurify进行安全清理，允许基本的文本格式化标签
-    const cleanContent = sanitizeHTML(contentWithBreaks);
-
-    return cleanContent;
-};
 </script>
 <style lang="less" scoped>
 .deep-think {
@@ -204,6 +190,7 @@ const safeProcessThinkContent = (content) => {
             max-height: 200px;
             overflow-y: auto;
             word-break: break-word;
+            white-space: pre-wrap;
 
             &::-webkit-scrollbar {
                 width: 4px;
