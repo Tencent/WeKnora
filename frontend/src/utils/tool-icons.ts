@@ -69,6 +69,14 @@ const toolDisplayNameKeys: Record<string, string> = {
 // Get tool display name (user-friendly, localized)
 export function getToolDisplayName(toolName: string): string {
     const key = toolDisplayNameKeys[toolName];
-    return key ? t(key) : toolName;
+    if (key) return t(key);
+
+    // Format MCP tool names: "mcp_service_tool" → "Service Tool"
+    if (toolName.startsWith('mcp_')) {
+        const parts = toolName.slice(4).split('_');
+        return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    }
+
+    return toolName;
 }
 

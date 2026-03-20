@@ -423,7 +423,37 @@ const TOOL_NAME_KEYS: Record<string, string> = {
 const getLocalizedToolName = (toolName?: string | null): string => {
   if (!toolName) return t('agent.toolFallback');
   const key = TOOL_NAME_KEYS[toolName];
-  return key ? t(key) : toolName;
+  if (key) return t(key);
+
+  // Format MCP tool names: "mcp_my_server_search_docs" → "My Server: search docs"
+  if (toolName.startsWith('mcp_')) {
+    return formatMCPToolName(toolName);
+  }
+
+  return toolName;
+};
+
+/**
+ * Format MCP tool name for friendly display.
+ * Input:  "mcp_{service_name}_{tool_name}" (all lowercase, underscores)
+ * Output: "Service Name: tool name"
+ */
+const formatMCPToolName = (rawName: string): string => {
+  // Strip "mcp_" prefix
+  const rest = rawName.slice(4);
+
+  // Try to find the tool's original name from the event's tool_data or description.
+  // Since we only have the sanitized composite name, split heuristically:
+  // The service name comes first, tool name second, separated by "_".
+  // We look for common MCP tool name patterns at the end.
+  const parts = rest.split('_');
+  if (parts.length <= 1) return rest;
+
+  // Heuristic: tool names from MCP servers are typically 1-3 words like
+  // "search", "get_weather", "list_bugs". We try to find a reasonable split.
+  // For now, treat everything as a readable phrase.
+  const humanized = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+  return humanized;
 };
 
 const TOOL_NAME_DISPLAY: Record<string, string> = {
@@ -455,6 +485,11 @@ const sanitizeForDisplay = (text: string): string => {
   for (const [name, display] of Object.entries(TOOL_NAME_DISPLAY)) {
     result = result.replaceAll(name, display);
   }
+  // Format any remaining mcp_ tool names inline
+  result = result.replace(/\bmcp_([a-z0-9_]+)/g, (_match, rest) => {
+    const parts = rest.split('_');
+    return parts.map((p: string) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+  });
   result = result.replace(ID_LABEL_RE, '');
   result = result.replace(UUID_RE, '');
   result = result.replace(/`\s*`/g, '');
@@ -1566,6 +1601,8 @@ const getToolIcon = (toolName: string): string => {
     return fileAddIcon;
   } else if (toolName === 'image_analysis') {
     return thinkingIcon;
+  } else if (toolName.startsWith('mcp_')) {
+    return documentIcon; // MCP external tool icon
   } else {
     return documentIcon; // default icon
   }
