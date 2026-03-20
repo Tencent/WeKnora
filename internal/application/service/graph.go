@@ -85,6 +85,14 @@ func NewGraphBuilder(config *config.Config, chatModel chat.Chat) types.GraphBuil
 	}
 }
 
+// renderGraphExtractionPrompt applies shared placeholders (e.g. {{language}}, {{lang}}) to graph extraction templates.
+func (b *graphBuilder) renderGraphExtractionPrompt(ctx context.Context, template string) string {
+	lang := types.LanguageNameFromContext(ctx)
+	return types.RenderPromptPlaceholders(template, types.PlaceholderValues{
+		"language": lang,
+	})
+}
+
 // extractEntities extracts entities from text chunks
 // It uses LLM to analyze text content and identify relevant entities
 func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) ([]*types.Entity, error) {
@@ -101,7 +109,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	messages := []chat.Message{
 		{
 			Role:    "system",
-			Content: b.config.Conversation.ExtractEntitiesPrompt,
+			Content: b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt),
 		},
 		{
 			Role:    "user",
@@ -212,7 +220,7 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 	messages := []chat.Message{
 		{
 			Role:    "system",
-			Content: b.config.Conversation.ExtractRelationshipsPrompt,
+			Content: b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractRelationshipsPrompt),
 		},
 		{
 			Role:    "user",

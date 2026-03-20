@@ -1910,11 +1910,13 @@ func (s *knowledgeService) enqueueQuestionGenerationTask(ctx context.Context,
 	kbID, knowledgeID string, questionCount int,
 ) {
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	lang, _ := types.LanguageFromContext(ctx)
 	payload := types.QuestionGenerationPayload{
 		TenantID:        tenantID,
 		KnowledgeBaseID: kbID,
 		KnowledgeID:     knowledgeID,
 		QuestionCount:   questionCount,
+		Language:        lang,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -2160,6 +2162,14 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 
 	// Set tenant context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
+
+	if strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt) == "" {
+		logger.Errorf(ctx, "GenerateQuestionsPrompt is empty: configure conversation.generate_questions_prompt_id")
+		return fmt.Errorf("generate questions prompt not configured")
+	}
 
 	// Get knowledge base
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
@@ -2324,10 +2334,9 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		return nil, nil
 	}
 
-	// Build prompt with context
-	prompt := s.config.Conversation.GenerateQuestionsPrompt
+	prompt := strings.TrimSpace(s.config.Conversation.GenerateQuestionsPrompt)
 	if prompt == "" {
-		prompt = defaultQuestionGenerationPrompt
+		return nil, fmt.Errorf("generate questions prompt not configured")
 	}
 
 	// Build context section
@@ -2343,11 +2352,14 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 		contextSection += "\n"
 	}
 
-	// Replace placeholders
-	prompt = strings.ReplaceAll(prompt, "{{question_count}}", fmt.Sprintf("%d", questionCount))
-	prompt = strings.ReplaceAll(prompt, "{{content}}", content)
-	prompt = strings.ReplaceAll(prompt, "{{context}}", contextSection)
-	prompt = strings.ReplaceAll(prompt, "{{doc_name}}", docName)
+	langName := types.LanguageNameFromContext(ctx)
+	prompt = types.RenderPromptPlaceholders(prompt, types.PlaceholderValues{
+		"question_count": fmt.Sprintf("%d", questionCount),
+		"content":        content,
+		"context":        contextSection,
+		"doc_name":       docName,
+		"language":       langName,
+	})
 
 	thinking := false
 	response, err := chatModel.Chat(ctx, []chat.Message{
@@ -2384,40 +2396,6 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 
 	return questions, nil
 }
-
-// Default prompt for question generation with context support
-const defaultQuestionGenerationPrompt = `You are a professional question generation assistant. Your task is to generate related questions that users might ask based on the given [Main Content].
-
-{{context}}
-## Main Content (generate questions based on this content)
-Document name: {{doc_name}}
-Document content:
-{{content}}
-
-## Core Requirements
-- Generated questions must be directly related to the [Main Content]
-- Questions must NOT use any pronouns or referential words (such as "it", "this", "that document", "this article", "the text", "its", etc.); use specific names instead
-- Questions must be complete and self-contained, understandable without additional context
-- Questions should be natural questions that users would likely ask in real scenarios
-- Questions should be diverse, covering different aspects of the content
-- Each question should be concise and clear, within 30 words
-- Generate {{question_count}} questions
-
-## Suggested Question Types
-- Definition: What is...? What does... mean?
-- Reason: Why...? What is the reason for...?
-- Method: How to...? What is the way to...?
-- Comparison: What is the difference between... and...?
-- Application: What scenarios can... be used for?
-
-## Output Format
-Output the question list directly, one question per line, without numbering or other prefixes.
-
-## CRITICAL: Language Rule
-- Generate questions in the SAME LANGUAGE as the source document
-- If the document is in Korean, generate questions in Korean
-- If the document is in English, generate questions in English
-- If the document is in Chinese, generate questions in Chinese`
 
 // GetKnowledgeFile retrieves the physical file associated with a knowledge entry
 func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
