@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -600,6 +601,66 @@ func (r *chunkRepository) ListAllFAQChunksWithMetadataByKnowledgeBaseID(
 	}
 
 	return allChunks, nil
+}
+
+// FindFAQChunkWithDuplicateQuestion finds a single FAQ chunk whose standard_question or
+// similar_questions overlap with the given question list.
+// Uses dialect-specific JSON queries (MySQL / PostgreSQL / SQLite).
+func (r *chunkRepository) FindFAQChunkWithDuplicateQuestion(
+	ctx context.Context,
+	tenantID uint64,
+	kbID string,
+	excludeChunkID string,
+	questions []string,
+) (*types.Chunk, error) {
+	if len(questions) == 0 {
+		return nil, nil
+	}
+
+	db := r.db.WithContext(ctx).
+		Select("id, metadata").
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ? AND status = ? AND id != ?",
+			tenantID, kbID, types.ChunkTypeFAQ, types.ChunkStatusIndexed, excludeChunkID)
+
+	switch r.db.Name() {
+	case "mysql":
+		// MySQL 5.7+: JSON_EXTRACT for standard_question, JSON_CONTAINS for similar_questions
+		parts := []string{
+			"JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.standard_question')) IN ?",
+		}
+		args := []interface{}{questions}
+		for _, q := range questions {
+			parts = append(parts,
+				"JSON_CONTAINS(metadata, ?, '$.similar_questions')")
+			jsonVal, _ := json.Marshal(q)
+			args = append(args, string(jsonVal))
+		}
+		db = db.Where(strings.Join(parts, " OR "), args...)
+	case "postgres":
+		db = db.Where(
+			"(metadata->>'standard_question' IN ? OR EXISTS ("+
+				"SELECT 1 FROM jsonb_array_elements_text("+
+				"COALESCE(metadata->'similar_questions', '[]'::jsonb)) elem "+
+				"WHERE elem.value IN ?))",
+			questions, questions)
+	default: // sqlite
+		db = db.Where(
+			"(json_extract(metadata, '$.standard_question') IN ? OR EXISTS ("+
+				"SELECT 1 FROM json_each("+
+				"CASE WHEN json_extract(metadata, '$.similar_questions') IS NOT NULL "+
+				"THEN json_extract(metadata, '$.similar_questions') ELSE '[]' END) "+
+				"WHERE value IN ?))",
+			questions, questions)
+	}
+
+	var chunk types.Chunk
+	if err := db.Limit(1).Find(&chunk).Error; err != nil {
+		return nil, err
+	}
+	if chunk.ID == "" {
+		return nil, nil
+	}
+	return &chunk, nil
 }
 
 // ListAllFAQChunksForExport lists all FAQ chunks for export with full metadata, tag_id, is_enabled, and flags.

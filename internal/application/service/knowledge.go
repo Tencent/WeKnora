@@ -6238,54 +6238,48 @@ func (s *knowledgeService) checkFAQQuestionDuplicate(
 		seen[q] = struct{}{}
 	}
 
-	// 查询知识库中已有的所有FAQ chunks的metadata
-	existingChunks, err := s.chunkRepo.ListAllFAQChunksWithMetadataByKnowledgeBaseID(ctx, tenantID, kbID)
+	// 将标准问和所有相似问合并，用一条 DB 查询检查是否与其他条目冲突
+	allQuestions := make([]string, 0, 1+len(meta.SimilarQuestions))
+	allQuestions = append(allQuestions, meta.StandardQuestion)
+	allQuestions = append(allQuestions, meta.SimilarQuestions...)
+
+	dupChunk, err := s.chunkRepo.FindFAQChunkWithDuplicateQuestion(ctx, tenantID, kbID, excludeChunkID, allQuestions)
 	if err != nil {
-		return fmt.Errorf("failed to list existing FAQ chunks: %w", err)
+		return fmt.Errorf("failed to check FAQ question duplicate: %w", err)
+	}
+	if dupChunk == nil {
+		return nil
 	}
 
-	// 构建已存在的标准问和相似问集合
-	for _, chunk := range existingChunks {
-		// 排除当前正在编辑的条目
-		if chunk.ID == excludeChunkID {
-			continue
-		}
+	// 找到冲突条目，解析其 metadata 以生成精确的错误信息
+	existingMeta, err := dupChunk.FAQMetadata()
+	if err != nil || existingMeta == nil {
+		return werrors.NewBadRequestError("标准问或相似问与已有条目重复")
+	}
 
-		existingMeta, err := chunk.FAQMetadata()
-		if err != nil || existingMeta == nil {
-			continue
-		}
+	if existingMeta.StandardQuestion == meta.StandardQuestion {
+		return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」已存在", meta.StandardQuestion))
+	}
 
-		// 检查标准问是否重复
-		if existingMeta.StandardQuestion == meta.StandardQuestion {
-			return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」已存在", meta.StandardQuestion))
-		}
+	existingSimilarSet := make(map[string]struct{}, len(existingMeta.SimilarQuestions))
+	for _, q := range existingMeta.SimilarQuestions {
+		existingSimilarSet[q] = struct{}{}
+	}
 
-		// 检查当前标准问是否与已有相似问重复
-		for _, q := range existingMeta.SimilarQuestions {
-			if q == meta.StandardQuestion {
-				return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」与已有相似问重复", meta.StandardQuestion))
-			}
-		}
+	if _, ok := existingSimilarSet[meta.StandardQuestion]; ok {
+		return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」与已有相似问重复", meta.StandardQuestion))
+	}
 
-		// 检查当前相似问是否与已有标准问重复
-		for _, q := range meta.SimilarQuestions {
-			if q == existingMeta.StandardQuestion {
-				return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」与已有标准问重复", q))
-			}
+	for _, q := range meta.SimilarQuestions {
+		if q == existingMeta.StandardQuestion {
+			return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」与已有标准问重复", q))
 		}
-
-		// 检查当前相似问是否与已有相似问重复
-		for _, q := range meta.SimilarQuestions {
-			for _, existingQ := range existingMeta.SimilarQuestions {
-				if q == existingQ {
-					return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」已存在", q))
-				}
-			}
+		if _, ok := existingSimilarSet[q]; ok {
+			return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」已存在", q))
 		}
 	}
 
-	return nil
+	return werrors.NewBadRequestError("标准问或相似问与已有条目重复")
 }
 
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name
