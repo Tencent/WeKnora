@@ -3,6 +3,7 @@ package docparser
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -78,8 +79,12 @@ func (r *ImageResolver) ResolveAndStore(
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
 	markdown := UnwrapLinkedImages(result.MarkdownContent)
+	md2, imgDataURIs, _ := r.ResolveDataURIImages(ctx, markdown, fileSvc, tenantID)
+	markdown = md2
+	images = append(images, imgDataURIs...)
+
 	if len(result.ImageRefs) == 0 {
-		return markdown, nil, nil
+		return markdown, images, nil
 	}
 
 	// Build a map of original_ref -> image ref for fast lookup
@@ -160,6 +165,8 @@ func extFromMime(mime string) string {
 		return ".webp"
 	case "image/bmp":
 		return ".bmp"
+	case "image/svg+xml":
+		return ".svg"
 	default:
 		return ""
 	}
@@ -209,6 +216,103 @@ func UnwrapLinkedImages(markdown string) string {
 // The URL group supports one level of balanced parentheses so that URLs
 // like https://example.com/item_(abc)/123 are captured in full.
 var imgMarkdownPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
+
+// imgMarkdownDataURI matches markdown images whose URL is a data:image/*;base64,...
+// payload. (?i) applies to the whole parenthesized data URI.
+var imgMarkdownDataURI = regexp.MustCompile(
+	`!\[([^\]]*)\]\((?i:(data:image/[^;]+;base64,\s*[^)]+))\)`,
+)
+
+// parseImageDataURI splits a data URI into image MIME type and base64 payload.
+func parseImageDataURI(dataURI string) (mimeType string, b64Payload string, ok bool) {
+	const sep = ";base64,"
+	idx := strings.Index(strings.ToLower(dataURI), sep)
+	if idx < 0 {
+		return "", "", false
+	}
+	meta := strings.TrimSpace(dataURI[:idx])
+	const prefix = "data:image/"
+	if len(meta) < len(prefix) || !strings.EqualFold(meta[:len(prefix)], prefix) {
+		return "", "", false
+	}
+	sub := strings.TrimSpace(meta[len(prefix):])
+	mimeType = "image/" + strings.ToLower(sub)
+	b64Payload = strings.TrimSpace(dataURI[idx+len(sep):])
+	if b64Payload == "" {
+		return "", "", false
+	}
+	return mimeType, b64Payload, true
+}
+
+// ResolveDataURIImages finds embedded data:image/*;base64 images in markdown,
+// decodes them, stores via fileSvc, and replaces each reference with the returned
+// provider URL (same limits as remote images: count and decoded size).
+func (r *ImageResolver) ResolveDataURIImages(
+	ctx context.Context,
+	markdown string,
+	fileSvc interfaces.FileService,
+	tenantID uint64,
+) (updatedMarkdown string, images []StoredImage, err error) {
+	markdown = UnwrapLinkedImages(markdown)
+	matches := imgMarkdownDataURI.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return markdown, nil, nil
+	}
+
+	processed := 0
+	for i := len(matches) - 1; i >= 0; i-- {
+		if processed >= maxRemoteImages {
+			break
+		}
+		m := matches[i]
+		if len(m) < 6 {
+			continue
+		}
+		dataURI := markdown[m[4]:m[5]]
+		mimeType, payload, ok := parseImageDataURI(dataURI)
+		if !ok {
+			continue
+		}
+		payload = strings.ReplaceAll(payload, "\n", "")
+		payload = strings.ReplaceAll(payload, "\r", "")
+		payload = strings.ReplaceAll(payload, "\t", "")
+		payload = strings.ReplaceAll(payload, " ", "")
+		if payload == "" {
+			continue
+		}
+		data, decErr := base64.StdEncoding.DecodeString(payload)
+		if decErr != nil {
+			log.Printf("WARN: data URI base64 decode failed: %v", decErr)
+			continue
+		}
+		if len(data) > maxRemoteImageSize {
+			log.Printf("WARN: data URI image exceeds size limit (%d bytes)", maxRemoteImageSize)
+			continue
+		}
+		if isIconImage(data) {
+			markdown = markdown[:m[0]] + markdown[m[1]:]
+			continue
+		}
+		ext := extFromMime(mimeType)
+		if ext == "" {
+			ext = ".png"
+		}
+		fileName := uuid.New().String() + ext
+		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+		if saveErr != nil {
+			log.Printf("WARN: failed to save data URI image: %v", saveErr)
+			continue
+		}
+		images = append(images, StoredImage{
+			OriginalRef: dataURI,
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+		})
+		markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
+		processed++
+	}
+	return markdown, images, nil
+}
 
 // ResolveRemoteImages scans a Markdown string for image references whose URL
 // is http:// or https://, downloads each one through an SSRF-safe HTTP client,

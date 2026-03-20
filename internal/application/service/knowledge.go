@@ -6803,11 +6803,17 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		return
 	}
 
-	// Resolve remote images: download http(s) images, upload to storage, replace URLs.
-	// This runs before chunking so that chunks contain stable provider:// URLs.
+	// Resolve embedded data:base64 images and remote http(s) images → storage, replace URLs.
+	// Runs before chunking so chunks contain stable provider:// URLs.
 	var resolvedImages []docparser.StoredImage
 	if s.imageResolver != nil {
 		fileSvc := s.resolveFileService(ctx, kb)
+		afterDataURI, fromDataURI, _ := s.imageResolver.ResolveDataURIImages(ctx, clean, fileSvc, knowledge.TenantID)
+		if len(fromDataURI) > 0 {
+			logger.Infof(ctx, "Resolved %d data-URI images for manual knowledge %s", len(fromDataURI), knowledge.ID)
+			clean = afterDataURI
+			resolvedImages = append(resolvedImages, fromDataURI...)
+		}
 		updatedContent, storedImages, resolveErr := s.imageResolver.ResolveRemoteImages(ctx, clean, fileSvc, knowledge.TenantID)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "Remote image resolution partially failed: %v", resolveErr)
@@ -6815,7 +6821,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		if len(storedImages) > 0 {
 			logger.Infof(ctx, "Resolved %d remote images for manual knowledge %s", len(storedImages), knowledge.ID)
 			clean = updatedContent
-			resolvedImages = storedImages
+			resolvedImages = append(resolvedImages, storedImages...)
 		}
 	}
 
