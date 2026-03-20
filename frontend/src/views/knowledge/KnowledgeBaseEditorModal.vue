@@ -348,7 +348,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       parentChunkSize: 4096,
       childChunkSize: 384
     },
-    storageProvider: 'local' as string,
+    storageProvider: '' as string,
     multimodalConfig: {
       enabled: false,
       vllmModelId: ''
