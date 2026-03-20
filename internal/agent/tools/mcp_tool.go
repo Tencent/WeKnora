@@ -31,23 +31,30 @@ func NewMCPTool(service *types.MCPService, mcpTool *types.MCPTool, mcpManager *m
 }
 
 // Name returns the unique name for this tool.
-// Format: mcp_{service_name}_{tool_name} to prevent tool name collision across MCP services.
-// We use service.Name (human-readable, stable) instead of service.ID (UUID) so that tool
-// names survive MCP server re-registrations that generate a new UUID (see #715).
+// Format: mcp_{service_name}_{tool_name} — uses the human-readable service name so that
+// tool names remain stable across MCP server reconnections (fixes #715).
+//
+// Security: service names must be unique per tenant (enforced by DB unique index on
+// (tenant_id, name)). The ToolRegistry uses first-wins semantics to prevent a later
+// service from overwriting an already-registered tool (GHSA-67q9-58vj-32qx).
+//
 // Note: OpenAI API requires tool names to match ^[a-zA-Z0-9_-]+$ and max 64 chars.
 func (t *MCPTool) Name() string {
-	serviceID := sanitizeName(t.service.Name)
+	serviceName := sanitizeName(t.service.Name)
 	toolName := sanitizeName(t.mcpTool.Name)
-	name := fmt.Sprintf("mcp_%s_%s", serviceID, toolName)
+	name := fmt.Sprintf("mcp_%s_%s", serviceName, toolName)
 
 	if len(name) > maxFunctionNameLength {
-		// UUID service IDs (36 chars) make the prefix too long.
-		// Use first 8 hex chars of the ID — enough entropy to avoid collisions
-		// among a tenant's handful of MCP services.
-		if len(serviceID) > 8 {
-			serviceID = serviceID[:8]
+		// Truncate service name to fit within the limit while keeping tool name intact.
+		// Reserve space for "mcp_" prefix (4) + "_" separator (1) + tool name.
+		maxServiceLen := maxFunctionNameLength - 5 - len(toolName)
+		if maxServiceLen < 4 {
+			maxServiceLen = 4
 		}
-		name = fmt.Sprintf("mcp_%s_%s", serviceID, toolName)
+		if len(serviceName) > maxServiceLen {
+			serviceName = serviceName[:maxServiceLen]
+		}
+		name = fmt.Sprintf("mcp_%s_%s", serviceName, toolName)
 
 		if len(name) > maxFunctionNameLength {
 			name = name[:maxFunctionNameLength]
@@ -270,8 +277,20 @@ func RegisterMCPTools(
 		// Register each tool
 		for _, mcpTool := range tools {
 			tool := NewMCPTool(service, mcpTool, mcpManager)
+			toolName := tool.Name()
+
+			// Check for name collision before registering (first-wins policy).
+			if existing, err := registry.GetTool(toolName); err == nil {
+				if mcpExisting, ok := existing.(*MCPTool); ok && mcpExisting.service.ID != service.ID {
+					logger.GetLogger(ctx).Warnf(
+						"MCP tool name collision: %q from service %q conflicts with service %q — skipped (first-wins)",
+						toolName, service.Name, mcpExisting.service.Name,
+					)
+				}
+			}
+
 			registry.RegisterTool(tool)
-			logger.GetLogger(ctx).Infof("Registered MCP tool: %s from service: %s", tool.Name(), service.Name)
+			logger.GetLogger(ctx).Infof("Registered MCP tool: %s from service: %s", toolName, service.Name)
 		}
 	}
 
