@@ -60,6 +60,8 @@ type QuestionGenerationPayload struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	KnowledgeID     string `json:"knowledge_id"`
 	QuestionCount   int    `json:"question_count"`
+	// Language is the request locale (e.g. zh-CN, en-US) when the task was enqueued, used for {{language}} / {{lang}} in templates.
+	Language string `json:"language,omitempty"`
 }
 
 // SummaryGenerationPayload represents the summary generation task payload
