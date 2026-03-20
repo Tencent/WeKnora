@@ -273,12 +273,11 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
                 item.thinking = false;
             } else if (item.content.includes('<\/think>')) {
                 // 历史消息中包含完整的 <think>...</think> 标签，说明 thinking 已完成
-                const arr = item.content.trim().split('<\/think>');
                 item.showThink = true;
                 item.thinking = false;  // 关键：标记 thinking 已完成，使 deepThink 默认折叠
-                item.thinkContent = arr[0].trim().replace('<think>', '');
-                let index = item.content.trim().lastIndexOf('<\/think>')
-                item.content = item.content.substring(index + 8);
+                const index = item.content.trim().lastIndexOf('<\/think>');
+                item.thinkContent = item.content.trim().substring(0, index).replace('<think>', '').trim();
+                item.content = item.content.trim().substring(index + 8);
             } else if (item.content.includes('<think>')) {
                 // 内容包含 <think> 但没有 </think>，说明 thinking 还在进行中（不太可能出现在历史消息中）
                 item.showThink = true;
@@ -576,7 +575,9 @@ onChunk((data) => {
     } else if (fullContent.value.includes('<think>') && fullContent.value.includes('<\/think>')) {
         obj.thinking = false;
         obj.showThink = true;
-        const index = fullContent.value.indexOf('<\/think>');
+        // Use lastIndexOf to handle edge cases with multiple </think> occurrences,
+        // consistent with history loading logic (line 280)
+        const index = fullContent.value.lastIndexOf('<\/think>');
         obj.thinkContent = fullContent.value.substring(0, index).replace('<think>', '').trim();
         obj.content = fullContent.value.substring(index + 8).trim();
     } else {
