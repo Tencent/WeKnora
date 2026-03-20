@@ -31,12 +31,12 @@ func NewMCPTool(service *types.MCPService, mcpTool *types.MCPTool, mcpManager *m
 }
 
 // Name returns the unique name for this tool.
-// Format: mcp_{service_id}_{tool_name} to prevent tool name collision across MCP services
-// (GHSA-67q9-58vj-32qx: a malicious server could otherwise register a tool that
-// overwrites a legitimate one when using only service name + tool name).
+// Format: mcp_{service_name}_{tool_name} to prevent tool name collision across MCP services.
+// We use service.Name (human-readable, stable) instead of service.ID (UUID) so that tool
+// names survive MCP server re-registrations that generate a new UUID (see #715).
 // Note: OpenAI API requires tool names to match ^[a-zA-Z0-9_-]+$ and max 64 chars.
 func (t *MCPTool) Name() string {
-	serviceID := sanitizeName(t.service.ID)
+	serviceID := sanitizeName(t.service.Name)
 	toolName := sanitizeName(t.mcpTool.Name)
 	name := fmt.Sprintf("mcp_%s_%s", serviceID, toolName)
 
