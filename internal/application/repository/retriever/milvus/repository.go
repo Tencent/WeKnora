@@ -1000,7 +1000,11 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 		return results, scores, nil
 	}
 	set := resultSet[0]
-	resultLen := set.Fields[0].Len()
+	resultLen := set.Len()
+	if resultLen == 0 {
+		return results, scores, nil
+	}
+
 	for _, score := range set.Scores {
 		scores = append(scores, float64(score))
 	}
