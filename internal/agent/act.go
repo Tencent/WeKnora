@@ -107,7 +107,7 @@ func (e *AgentEngine) executeToolCalls(
 
 		toolCallStartTime := time.Now()
 
-		// Emit tool hint for UI progress display (nanobot pattern)
+		// Emit tool hint for UI progress display
 		toolHint := formatToolHint(tc.Function.Name, args)
 		e.eventBus.Emit(ctx, event.Event{
 			ID:        tc.ID + "-tool-hint",
