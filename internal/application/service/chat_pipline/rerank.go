@@ -82,9 +82,9 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		}
 		// 合并Content和ImageInfo的文本内容
 		passage := getEnrichedPassage(ctx, result)
-		// 过滤空内容,避免Rerank API报错
+		// Skip passages that become empty after cleaning
 		if strings.TrimSpace(passage) == "" {
-			pipelineWarn(ctx, "Rerank", "empty_passage_skip", map[string]interface{}{
+			pipelineInfo(ctx, "Rerank", "empty_passage_skip", map[string]interface{}{
 				"chunk_id": result.ID,
 			})
 			continue
@@ -209,6 +209,27 @@ func (p *PluginRerank) rerank(ctx context.Context,
 		"query_variant": query,
 		"passages":      len(passages),
 	})
+
+	// Filter out empty or whitespace-only passages before sending to the API
+	var cleanPassages []string
+	var cleanCandidates []*types.SearchResult
+	for i, p := range passages {
+		if strings.TrimSpace(p) != "" {
+			cleanPassages = append(cleanPassages, p)
+			if i < len(candidates) {
+				cleanCandidates = append(cleanCandidates, candidates[i])
+			}
+		}
+	}
+	if len(cleanPassages) == 0 {
+		pipelineInfo(ctx, "Rerank", "model_call_skip", map[string]interface{}{
+			"reason": "all_passages_empty",
+		})
+		return nil
+	}
+	passages = cleanPassages
+	candidates = cleanCandidates
+
 	rerankResp, err := rerankModel.Rerank(ctx, query, passages)
 	if err != nil {
 		pipelineError(ctx, "Rerank", "model_call", map[string]interface{}{
@@ -428,6 +449,8 @@ var (
 	reLatexBlock = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
 	// reTableSep matches table separator rows like |---|---|.
 	reTableSep = regexp.MustCompile(`(?m)^\s*\|[\s:|-]+\|\s*$`)
+	// reTableRow matches markdown table data rows like | col1 | col2 |.
+	reTableRow = regexp.MustCompile(`(?m)^\s*\|(.+?)\|\s*$`)
 	// reHeadingPrefix matches leading # markers in headings.
 	reHeadingPrefix = regexp.MustCompile(`(?m)^#{1,6}\s+`)
 	// reBlockquote matches leading > markers.
@@ -468,6 +491,22 @@ func cleanPassageForRerank(text string) string {
 	text = reRawURL.ReplaceAllString(text, "")
 	// 7. Remove table separator rows
 	text = reTableSep.ReplaceAllString(text, "")
+	// 7.5. Convert table data rows to plain text (strip | delimiters)
+	text = reTableRow.ReplaceAllStringFunc(text, func(match string) string {
+		inner := reTableRow.FindStringSubmatch(match)
+		if len(inner) < 2 {
+			return match
+		}
+		cells := strings.Split(inner[1], "|")
+		var parts []string
+		for _, cell := range cells {
+			cell = strings.TrimSpace(cell)
+			if cell != "" {
+				parts = append(parts, cell)
+			}
+		}
+		return strings.Join(parts, ", ")
+	})
 	// 8. Strip heading markers but keep heading text
 	text = reHeadingPrefix.ReplaceAllString(text, "")
 	// 9. Strip blockquote markers

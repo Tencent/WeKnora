@@ -41,9 +41,9 @@ func TestCleanPassageForRerank(t *testing.T) {
 			expect: "公式如下  其中E是能量",
 		},
 		{
-			name:   "remove table separator rows",
+			name:   "remove table separator rows and convert data rows",
 			input:  "| 名称 | 值 |\n| --- | --- |\n| A | 1 |",
-			expect: "| 名称 | 值 |\n\n| A | 1 |",
+			expect: "名称, 值\n\nA, 1",
 		},
 		{
 			name:   "strip heading markers",
@@ -90,6 +90,26 @@ func TestCleanPassageForRerank(t *testing.T) {
 
 ` + "```json\n{\"key\": \"value\"}\n```",
 			expect: "产品介绍\n\n这是一个 重要的 产品。详见 产品页面。\n\n用户评价：非常好用\n\n功能一\n功能二",
+		},
+		{
+			name:   "convert table data rows to plain text",
+			input:  "| col1 | col2 | col3 |",
+			expect: "col1, col2, col3",
+		},
+		{
+			name:   "multi-row table fully converted",
+			input:  "| Header1 | Header2 |\n| --- | --- |\n| data1 | data2 |\n| data3 | data4 |",
+			expect: "Header1, Header2\n\ndata1, data2\ndata3, data4",
+		},
+		{
+			name:   "table-only passage becomes empty after separator removal",
+			input:  "| --- | --- |",
+			expect: "",
+		},
+		{
+			name:   "whitespace-only after cleaning",
+			input:  "   \n\n   ",
+			expect: "",
 		},
 	}
 
