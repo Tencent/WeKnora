@@ -257,6 +257,7 @@ start_app() {
     export DOCREADER_TRANSPORT=grpc
     export MINIO_ENDPOINT=localhost:9000
     export REDIS_ADDR=localhost:6379
+    export MILVUS_ADDRESS=localhost:19530
     export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
     export NEO4J_URI=bolt://localhost:7687
     export QDRANT_HOST=localhost
