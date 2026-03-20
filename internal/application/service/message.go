@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +13,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// regThinkIndex matches <think>...</think> blocks for stripping from KB index content.
+var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
 // messageService implements the MessageService interface for managing messaging operations
 // It handles creating, retrieving, updating, and deleting messages within sessions.
@@ -342,7 +346,13 @@ func (s *messageService) getRetrievalConfig(ctx context.Context) *types.Retrieva
 // then links the message to the Knowledge entry via the knowledge_id field.
 // The KB ID is read from the tenant's ChatHistoryConfig — if not configured, indexing is skipped.
 func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string, assistantAnswer string, messageID string, sessionID string) {
-	if strings.TrimSpace(userQuery) == "" && strings.TrimSpace(assistantAnswer) == "" {
+	// Strip thinking content (<think>...</think>) before indexing to avoid
+	// polluting the knowledge base with intermediate reasoning that would
+	// degrade retrieval quality.
+	assistantAnswer = regThinkIndex.ReplaceAllString(assistantAnswer, "")
+	assistantAnswer = strings.TrimSpace(assistantAnswer)
+
+	if strings.TrimSpace(userQuery) == "" && assistantAnswer == "" {
 		return
 	}
 
