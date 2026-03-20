@@ -3010,6 +3010,10 @@ export default {
       fileTypeText: "纯文本",
       fileTypeImage: "图片",
       engines: {
+        builtin: {
+          name: "内置",
+          desc: "DocReader 内置解析引擎（docx/pdf/xlsx 等复杂格式）",
+        },
         simple: {
           name: "Simple",
           desc: "简单格式 & 图片解析（无需外部服务）",

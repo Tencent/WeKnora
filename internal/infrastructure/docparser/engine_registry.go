@@ -25,9 +25,30 @@ func RegisterEngine(e EngineRegistration) {
 }
 
 func init() {
+	RegisterEngine(&builtinEngine{})
 	RegisterEngine(&simpleEngine{})
 	RegisterEngine(&mineruEngine{})
 	RegisterEngine(&mineruCloudEngine{})
+}
+
+// ---------------------------------------------------------------------------
+// builtin — DocReader-backed parser for complex document formats.
+// ---------------------------------------------------------------------------
+
+type builtinEngine struct{}
+
+func (e *builtinEngine) Name() string { return "builtin" }
+func (e *builtinEngine) Description() string {
+	return "DocReader built-in parser engine"
+}
+func (e *builtinEngine) FileTypes(_ bool) []string {
+	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"}
+}
+func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
+	if docreaderConnected {
+		return true, ""
+	}
+	return false, "DocReader service not connected"
 }
 
 // SimpleEngineName is the engine name for Go-native simple format handling.

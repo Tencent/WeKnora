@@ -3069,6 +3069,10 @@ export default {
       fileTypeText: '일반 텍스트',
       fileTypeImage: '이미지',
       engines: {
+        builtin: {
+          name: '내장',
+          desc: 'DocReader 내장 파서 엔진 (docx/pdf/xlsx 등 복잡한 형식)',
+        },
         simple: {
           name: 'Simple',
           desc: '간단한 형식 및 이미지 파싱 (외부 서비스 불필요)',

@@ -3012,6 +3012,10 @@ export default {
       fileTypeText: 'Plain Text',
       fileTypeImage: 'Images',
       engines: {
+        builtin: {
+          name: 'Built-in',
+          desc: 'DocReader built-in parser engine (docx/pdf/xlsx and other complex formats)',
+        },
         simple: {
           name: 'Simple',
           desc: 'Simple format & image parsing (no external service required)',

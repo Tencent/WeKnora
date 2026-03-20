@@ -2679,6 +2679,10 @@ export default {
       fileTypeText: 'Текстовые файлы',
       fileTypeImage: 'Изображения',
       engines: {
+        builtin: {
+          name: 'Встроенный',
+          desc: 'Встроенный парсер DocReader (docx/pdf/xlsx и другие сложные форматы)',
+        },
         simple: {
           name: 'Simple',
           desc: 'Простой формат и анализ изображений (внешний сервис не требуется)',

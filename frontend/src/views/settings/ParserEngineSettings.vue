@@ -26,18 +26,26 @@
       </div>
 
       <template v-else>
-        <!-- DocReader 未连接时显示占位 -->
+        <!-- 当后端未返回 builtin 引擎项时，仍展示 DocReader 状态卡片 -->
         <div v-if="!hasBuiltinEngine" class="engine-item first" data-model-type="builtin">
           <div class="engine-item-header">
             <div class="engine-title-row">
               <h3>builtin</h3>
-              <t-tag theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
+              <t-tag
+                :theme="connected ? 'success' : 'danger'"
+                variant="light"
+                size="small"
+              >{{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}</t-tag>
             </div>
             <p>{{ $t('settings.parser.builtinDesc') }}</p>
           </div>
           <div class="docreader-inline">
             <div class="status-line">
-              <t-tag theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
+              <t-tag
+                :theme="connected ? 'success' : 'danger'"
+                variant="light"
+                size="small"
+              >{{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}</t-tag>
               <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
               <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
             </div>
@@ -55,7 +63,7 @@
         >
           <div class="engine-item-header">
             <div class="engine-title-row">
-              <h3>{{ engine.Name }}</h3>
+              <h3>{{ getEngineDisplayName(engine.Name) }}</h3>
               <t-tag v-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
               <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
                 <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">{{ $t('settings.parser.unavailable') }}</t-tag>
@@ -69,7 +77,7 @@
                 class="engine-doc-link"
               >{{ engineDocLabel(engine.Name) }} ↗</a>
             </div>
-            <p>{{ engine.Description }}</p>
+            <p>{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
           </div>
 
           <!-- builtin: DocReader 连接信息 -->
@@ -266,6 +274,18 @@ function engineDocLink(name: string): string | undefined {
 
 function engineDocLabel(_name: string): string {
   return t('settings.parser.docs')
+}
+
+function getEngineDisplayName(engineName: string): string {
+  const key = `kbSettings.parser.engines.${engineName}.name`
+  const translated = t(key)
+  return translated !== key ? translated : engineName
+}
+
+function getEngineDisplayDesc(engineName: string, fallback: string): string {
+  const key = `kbSettings.parser.engines.${engineName}.desc`
+  const translated = t(key)
+  return translated !== key ? translated : fallback
 }
 
 async function loadEngines() {
