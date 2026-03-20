@@ -188,6 +188,24 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 			}
 		}
 
+		// Compensate for unclosed <think> tag when stream ends unexpectedly
+		// (e.g., context cancelled, upstream error) without an answer arriving.
+		if thinkingStarted && !thinkingEnded {
+			thinkingEnded = true
+			finalContent += "</think>"
+			if err := eventBus.Emit(ctx, types.Event{
+				ID:        answerID,
+				Type:      types.EventType(event.EventAgentFinalAnswer),
+				SessionID: chatManage.SessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: "</think>",
+					Done:    true,
+				},
+			}); err != nil {
+				logger.Errorf(ctx, "Failed to emit think close tag on stream end: %v", err)
+			}
+		}
+
 		pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})

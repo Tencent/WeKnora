@@ -642,6 +642,17 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 			ToolCalls:    state.buildOrderedToolCalls(),
 		}
 	}
+
+	// Ensure thinking done is sent when stream finishes without any answer content
+	// (e.g., model only produced reasoning then hit finish_reason with empty content).
+	if isDone && state.hasThinking {
+		streamChan <- types.StreamResponse{
+			ResponseType: types.ResponseTypeThinking,
+			Content:      "",
+			Done:         true,
+		}
+		state.hasThinking = false
+	}
 }
 
 // processToolCallsDelta 处理 tool calls 的增量更新
