@@ -154,7 +154,6 @@ export interface DatabaseQueryData {
     columns: string[];
     rows: Array<Record<string, any>>;
     row_count: number;
-    query: string;
 }
 
 // Web search result item

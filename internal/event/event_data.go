@@ -161,6 +161,7 @@ type AgentToolCallData struct {
 	ToolName   string         `json:"tool_name"`
 	Arguments  map[string]any `json:"arguments,omitempty"`
 	Iteration  int            `json:"iteration"`
+	Hint       string         `json:"hint,omitempty"` // Human-readable tool hint, e.g. `web_search("query")`
 }
 
 // AgentToolResultData represents agent tool execution result data

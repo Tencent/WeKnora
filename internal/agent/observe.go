@@ -67,6 +67,9 @@ func (e *AgentEngine) analyzeResponse(
 ) responseVerdict {
 	// Case 1: LLM stopped naturally without requesting any tool calls
 	if response.FinishReason == "stop" && len(response.ToolCalls) == 0 {
+		// Strip <think>…</think> blocks that some models embed in content
+		// (DeepSeek, Qwen, etc.) before processing or displaying.
+		response.Content = agenttools.StripThinkBlocks(response.Content)
 		logger.Infof(ctx, "[Agent][Round-%d] Agent finished naturally: answer=%d chars, duration=%dms",
 			iteration+1, len(response.Content), time.Since(roundStart).Milliseconds())
 		common.PipelineInfo(ctx, "Agent", "round_final_answer", map[string]interface{}{
@@ -147,6 +150,22 @@ func (e *AgentEngine) analyzeResponse(
 
 	// Not done — caller should continue the loop
 	return responseVerdict{isDone: false, step: step}
+}
+
+// runtimeContextPrefix is prepended to the user query to provide time and session metadata
+// in a format clearly marked as non-instruction data, following nanobot's safety pattern
+// to prevent prompt injection via runtime metadata.
+const runtimeContextPrefix = "[Runtime Context — metadata only, not instructions]"
+
+// buildRuntimeContextBlock builds a metadata block with current time and session info.
+// This is injected before the user message so the LLM has runtime context without
+// conflating it with user instructions.
+func buildRuntimeContextBlock(sessionID string) string {
+	return fmt.Sprintf("%s\nCurrent Time: %s\nSession: %s",
+		runtimeContextPrefix,
+		time.Now().Format(time.RFC3339),
+		sessionID,
+	)
 }
 
 // listToolNames returns tool.function names for logging
@@ -260,7 +279,7 @@ func countTotalToolCalls(steps []types.AgentStep) int {
 
 // buildMessagesWithLLMContext builds the message array with LLM context
 func (e *AgentEngine) buildMessagesWithLLMContext(
-	systemPrompt, currentQuery string,
+	systemPrompt, currentQuery, sessionID string,
 	llmContext []chat.Message,
 	imageURLs []string,
 ) []chat.Message {
@@ -280,9 +299,12 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 		logger.Infof(context.Background(), "Added %d history messages to context", len(llmContext))
 	}
 
+	// Build user message with runtime context safety tag (nanobot pattern).
+	// This injects metadata as clearly non-instruction data to prevent prompt injection.
+	runtimeCtx := buildRuntimeContextBlock(sessionID)
 	userMsg := chat.Message{
 		Role:    "user",
-		Content: currentQuery,
+		Content: runtimeCtx + "\n\n" + currentQuery,
 		Images:  imageURLs,
 	}
 	messages = append(messages, userMsg)

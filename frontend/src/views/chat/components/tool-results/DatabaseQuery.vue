@@ -1,17 +1,6 @@
 <template>
   <div class="database-query-display">
-    <!-- Query Display -->
-    <div v-if="data.query" class="query-section">
-      <div class="section-header">{{ $t('chat.sqlQueryExecuted') }}</div>
-      <pre class="query-code">{{ data.query }}</pre>
-    </div>
-    
     <!-- Results Summary -->
-    <div class="results-summary">
-      <strong>{{ $t('chat.sqlResultsLabel') }}</strong> {{ data.row_count }} {{ $t('chat.rowsLabel') }}
-      <span v-if="data.columns"> × {{ data.columns.length }} {{ $t('chat.columnsLabel') }}</span>
-    </div>
-    
     <!-- Results Table -->
     <div v-if="data.rows && data.rows.length > 0" class="results-table-container">
       <table class="results-table">
@@ -63,31 +52,6 @@ const formatValue = (value: any): string => {
 .database-query-display {
   font-size: 13px;
   color: var(--td-text-color-primary);
-}
-
-.query-section {
-  margin-bottom: 16px;
-}
-
-.section-header {
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.query-code {
-  background: var(--td-bg-color-container);
-  color: var(--td-text-color-primary);
-  padding: 12px;
-  border-radius: 6px;
-  overflow-x: auto;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .results-summary {

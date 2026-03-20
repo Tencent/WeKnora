@@ -198,7 +198,7 @@ func (e *AgentEngine) Execute(
 	if len(imageURLs) > 0 {
 		imgs = imageURLs[0]
 	}
-	messages := e.buildMessagesWithLLMContext(systemPrompt, query, llmContext, imgs)
+	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
 
 	// Get tool definitions for function calling
 	tools := e.buildToolsForLLM()

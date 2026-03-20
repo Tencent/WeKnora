@@ -236,7 +236,7 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 	// Format output
 	logger.Debugf(ctx, "[Tool][DatabaseQuery] Formatting query results...")
-	output := t.formatQueryResults(columns, results, securedSQL)
+	output := t.formatQueryResults(columns, results)
 
 	logger.Infof(ctx, "[Tool][DatabaseQuery] Execute completed successfully: %d rows returned", len(results))
 	return &types.ToolResult{
@@ -246,8 +246,6 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 			"columns":      columns,
 			"rows":         results,
 			"row_count":    len(results),
-			"query":        securedSQL,
-			"tenant_id":    tenantID,
 			"display_type": "database_query",
 		},
 	}, nil
@@ -255,11 +253,11 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
 func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
-	// Use the new ValidateAndSecureSQL with comprehensive security options
 	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(
 		sqlQuery,
 		utils.WithSecurityDefaults(tenantID),
 		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
+		utils.WithHiddenKBFilter(),
 		utils.WithInjectionRiskCheck(),
 	)
 	if err != nil {
@@ -267,7 +265,6 @@ func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint6
 	}
 
 	if !validationResult.Valid {
-		// Build error message from validation errors
 		var errMsgs []string
 		for _, valErr := range validationResult.Errors {
 			errMsgs = append(errMsgs, fmt.Sprintf("%s: %s", valErr.Type, valErr.Message))
@@ -282,10 +279,8 @@ func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint6
 func (t *DatabaseQueryTool) formatQueryResults(
 	columns []string,
 	results []map[string]interface{},
-	query string,
 ) string {
 	output := "=== Query Results ===\n\n"
-	output += fmt.Sprintf("Executed SQL: %s\n\n", query)
 	output += fmt.Sprintf("Returned %d rows\n\n", len(results))
 
 	if len(results) == 0 {

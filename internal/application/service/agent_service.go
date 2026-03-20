@@ -471,15 +471,20 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to get knowledge base %s: %v", secutils.SanitizeForLog(kbID), err)
-			// Add fallback info
 			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
 				ID:          kbID,
 				Name:        kbID,
-				Type:        "document", // Default type
+				Type:        "document",
 				Description: "",
 				DocCount:    0,
 				RecentDocs:  []agent.RecentDocInfo{},
 			})
+			continue
+		}
+
+		// Skip hidden/system-managed knowledge bases (e.g., __chat_history__)
+		if kb.IsTemporary {
+			logger.Debugf(ctx, "Skipping temporary knowledge base %s (%s) from prompt", kb.ID, kb.Name)
 			continue
 		}
 

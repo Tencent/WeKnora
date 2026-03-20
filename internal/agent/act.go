@@ -13,6 +13,53 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// toolDisplayNames maps internal tool names to user-friendly display labels.
+var toolDisplayNames = map[string]string{
+	agenttools.ToolThinking:            "深度思考",
+	agenttools.ToolTodoWrite:           "制定计划",
+	agenttools.ToolGrepChunks:          "关键词搜索",
+	agenttools.ToolKnowledgeSearch:     "知识搜索",
+	agenttools.ToolListKnowledgeChunks: "查看文档分块",
+	agenttools.ToolQueryKnowledgeGraph: "查询知识图谱",
+	agenttools.ToolGetDocumentInfo:     "获取文档信息",
+	agenttools.ToolDatabaseQuery:       "查询数据",
+	agenttools.ToolDataAnalysis:        "数据分析",
+	agenttools.ToolDataSchema:          "查看数据结构",
+	agenttools.ToolWebSearch:           "搜索网页",
+	agenttools.ToolWebFetch:            "获取网页",
+	agenttools.ToolFinalAnswer:         "最终回答",
+	agenttools.ToolExecuteSkillScript:  "执行技能脚本",
+	agenttools.ToolReadSkill:           "读取技能",
+}
+
+// toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints
+// (e.g., database_query exposes raw SQL which leaks implementation details).
+var toolHintSensitiveArgs = map[string]bool{
+	agenttools.ToolDatabaseQuery: true,
+}
+
+// formatToolHint returns a concise human-readable hint for a tool call, e.g. `搜索网页("query text")`.
+// Uses display names instead of internal tool names, and hides sensitive arguments.
+func formatToolHint(name string, args map[string]any) string {
+	displayName := name
+	if dn, ok := toolDisplayNames[name]; ok {
+		displayName = dn
+	}
+
+	if len(args) == 0 || toolHintSensitiveArgs[name] {
+		return displayName
+	}
+	for _, v := range args {
+		if s, ok := v.(string); ok {
+			if len(s) > 40 {
+				s = s[:40] + "…"
+			}
+			return fmt.Sprintf(`%s("%s")`, displayName, s)
+		}
+	}
+	return displayName
+}
+
 // executeToolCalls runs every tool call in the LLM response, appending results to step.ToolCalls.
 // It also emits tool-call and tool-result events, and optionally runs reflection after each call.
 func (e *AgentEngine) executeToolCalls(
@@ -59,8 +106,11 @@ func (e *AgentEngine) executeToolCalls(
 		logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
 
 		toolCallStartTime := time.Now()
+
+		// Emit tool hint for UI progress display (nanobot pattern)
+		toolHint := formatToolHint(tc.Function.Name, args)
 		e.eventBus.Emit(ctx, event.Event{
-			ID:        tc.ID + "-tool-call",
+			ID:        tc.ID + "-tool-hint",
 			Type:      event.EventAgentToolCall,
 			SessionID: sessionID,
 			Data: event.AgentToolCallData{
@@ -68,6 +118,7 @@ func (e *AgentEngine) executeToolCalls(
 				ToolName:   tc.Function.Name,
 				Arguments:  args,
 				Iteration:  iteration,
+				Hint:       toolHint,
 			},
 		})
 

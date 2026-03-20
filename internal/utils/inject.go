@@ -136,6 +136,9 @@ type sqlValidator struct {
 	// Soft delete filtering
 	enableSoftDeleteInjection bool
 	tablesWithDeletedAt       map[string]bool
+
+	// Hidden knowledge base filtering (is_temporary = false)
+	enableHiddenKBFilter bool
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -598,6 +601,15 @@ func WithSoftDeleteFilter(tables ...string) SQLValidationOption {
 	}
 }
 
+// WithHiddenKBFilter excludes internal/temporary knowledge bases (is_temporary = true)
+// from query results. These are system-managed KBs like __chat_history__ that should
+// not be visible to end users.
+func WithHiddenKBFilter() SQLValidationOption {
+	return func(v *sqlValidator) {
+		v.enableHiddenKBFilter = true
+	}
+}
+
 // WithSecurityDefaults applies a comprehensive set of security validations
 func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -783,7 +795,7 @@ func ValidateSQL(sql string, opts ...SQLValidationOption) (*SQLParseResult, *SQL
 // This is a convenience function that combines validation and SQL rewriting
 func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQLValidationResult, error) {
 	// Parse and validate
-	parseResult, validationResult := ValidateSQL(sql, opts...)
+	_, validationResult := ValidateSQL(sql, opts...)
 
 	// If validation failed, return error
 	if !validationResult.Valid {
@@ -804,7 +816,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	}
 
 	// If no SQL rewriting is enabled, return original SQL
-	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection {
+	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter {
 		return sql, validationResult, nil
 	}
 
@@ -820,18 +832,56 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 		return "", validationResult, fmt.Errorf("failed to normalize SQL: %v", err)
 	}
 
-	// Build table map from parse result
-	tablesInQuery := make(map[string]string)
-	for _, tableName := range parseResult.TableNames {
-		tablesInQuery[strings.ToLower(tableName)] = strings.ToLower(tableName)
-	}
+	// Build table→alias map from parse tree (respects SQL aliases like "kb", "k")
+	tablesInQuery := extractTableAliasMap(result)
 
 	// Inject tenant conditions
 	securedSQL := validator.injectTenantConditions(normalizedSQL, tablesInQuery)
 	// Inject deleted_at IS NULL conditions
 	securedSQL = validator.injectSoftDeleteConditions(securedSQL, tablesInQuery)
+	// Inject hidden KB filter (exclude is_temporary = true knowledge bases)
+	securedSQL = validator.injectHiddenKBFilter(securedSQL, tablesInQuery)
 
 	return securedSQL, validationResult, nil
+}
+
+// extractTableAliasMap walks the parse tree to build a table_name→alias map.
+// When a table has an alias (e.g., "knowledge_bases kb"), the map entry is
+// {"knowledge_bases": "kb"}. Without an alias, both key and value are the table name.
+func extractTableAliasMap(parseResult *pg_query.ParseResult) map[string]string {
+	m := make(map[string]string)
+	if len(parseResult.Stmts) == 0 || parseResult.Stmts[0].Stmt == nil {
+		return m
+	}
+	selectStmt := parseResult.Stmts[0].Stmt.GetSelectStmt()
+	if selectStmt == nil {
+		return m
+	}
+	for _, fromItem := range selectStmt.FromClause {
+		collectTableAliases(fromItem, m)
+	}
+	return m
+}
+
+// collectTableAliases recursively collects table→alias mappings from FROM clause nodes.
+func collectTableAliases(node *pg_query.Node, m map[string]string) {
+	if node == nil {
+		return
+	}
+	if rv := node.GetRangeVar(); rv != nil {
+		tableName := strings.ToLower(rv.Relname)
+		alias := tableName
+		if rv.Alias != nil && rv.Alias.Aliasname != "" {
+			alias = strings.ToLower(rv.Alias.Aliasname)
+		}
+		m[tableName] = alias
+		return
+	}
+	if je := node.GetJoinExpr(); je != nil {
+		collectTableAliases(je.Larg, m)
+		collectTableAliases(je.Rarg, m)
+		return
+	}
 }
 
 // InjectAndConditions injects filter conditions into a SQL statement using AND semantics.
@@ -919,6 +969,19 @@ func (v *sqlValidator) injectSoftDeleteConditions(sql string, tablesInQuery map[
 	}
 
 	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
+}
+
+// injectHiddenKBFilter adds is_temporary = false filtering for the knowledge_bases table,
+// hiding internal/system-managed KBs (e.g., __chat_history__) from query results.
+func (v *sqlValidator) injectHiddenKBFilter(sql string, tablesInQuery map[string]string) string {
+	if !v.enableHiddenKBFilter {
+		return sql
+	}
+	alias, ok := tablesInQuery["knowledge_bases"]
+	if !ok {
+		return sql
+	}
+	return InjectAndConditions(sql, fmt.Sprintf("%s.is_temporary = false", alias))
 }
 
 // checkSQLInjectionRisks checks for common SQL injection patterns in WHERE clause

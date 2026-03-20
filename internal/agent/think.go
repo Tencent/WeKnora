@@ -232,6 +232,9 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d",
 		iteration+1, len(fullContent), len(toolCalls))
 
+	// Strip <think>…</think> blocks that some models (DeepSeek, Qwen, etc.) embed in content.
+	fullContent = agenttools.StripThinkBlocks(fullContent)
+
 	// Build response
 	return &types.ChatResponse{
 		Content:      fullContent,
