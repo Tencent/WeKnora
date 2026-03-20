@@ -193,6 +193,7 @@ var Pipline = map[string][]EventType{
 		CHAT_COMPLETION,
 	},
 	"rag_stream": { // Streaming Retrieval Augmented Generation
+		LOAD_HISTORY,          // Load conversation history independently (works even when rewrite is disabled)
 		REWRITE_QUERY,
 		CHUNK_SEARCH_PARALLEL, // Parallel: CHUNK_SEARCH + ENTITY_SEARCH
 		CHUNK_RERANK,

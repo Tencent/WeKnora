@@ -93,7 +93,19 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 	})
 
 	// --- Load and prepare conversation history ---
-	historyList := p.loadHistory(ctx, chatManage)
+	// If history was already loaded by a prior LOAD_HISTORY step, reuse it
+	// instead of fetching again. This allows rag_stream to work correctly
+	// even when rewrite is disabled.
+	var historyList []*types.History
+	if len(chatManage.History) > 0 {
+		historyList = chatManage.History
+		pipelineInfo(ctx, "Rewrite", "history_reused", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"rounds":     len(historyList),
+		})
+	} else {
+		historyList = p.loadHistory(ctx, chatManage)
+	}
 
 	// Skip if there's nothing to do: no history to rewrite AND no images to analyse
 	if len(historyList) == 0 && !hasImages {
