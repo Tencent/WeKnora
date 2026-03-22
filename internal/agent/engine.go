@@ -36,6 +36,8 @@ type AgentEngine struct {
 	imageDescriber       ImageDescriberFunc        // VLM function for describing images in tool results (optional)
 	tokenEstimator       *agenttoken.Estimator     // Token estimator for context window management
 	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
+	lastUsage            types.TokenUsage          // Token usage from the most recent LLM call
+	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -57,7 +59,10 @@ func NewAgentEngine(
 	if eventBus == nil {
 		eventBus = event.NewEventBus()
 	}
-	tokenEst := agenttoken.NewEstimator(0)
+	tokenEst, err := agenttoken.NewEstimator()
+	if err != nil {
+		return nil
+	}
 	engine := &AgentEngine{
 		config:               config,
 		toolRegistry:         toolRegistry,
@@ -131,6 +136,18 @@ func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
 // GetSkillsManager returns the skills manager
 func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 	return e.skillsManager
+}
+
+// estimateCurrentTokens returns the best estimate of the current context token count.
+// When API-reported usage from a previous round is available, it uses that as a
+// baseline and only BPE-estimates the delta (newly appended messages). Otherwise it
+// falls back to a full BPE estimation of all messages.
+func (e *AgentEngine) estimateCurrentTokens(messages []chat.Message) int {
+	if e.lastUsage.TotalTokens > 0 && e.lastSentMsgCount > 0 && e.lastSentMsgCount < len(messages) {
+		delta := e.tokenEstimator.EstimateMessages(messages[e.lastSentMsgCount:])
+		return e.lastUsage.TotalTokens + delta
+	}
+	return e.tokenEstimator.EstimateMessages(messages)
 }
 
 // Execute executes the agent with conversation history and streaming output
@@ -272,11 +289,14 @@ func (e *AgentEngine) executeLoop(
 
 		roundStart := time.Now()
 
-		// Context window management
-		messages = e.manageContextWindow(ctx, messages, state.CurrentRound+1)
+		// Context window management: estimate current token count using
+		// the API-reported usage from the previous round plus a BPE delta
+		// for newly appended messages (assistant reply + tool results).
+		currentTokens := e.estimateCurrentTokens(messages)
+		messages = e.manageContextWindow(ctx, messages, state.CurrentRound+1, currentTokens)
 
-		logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools",
-			state.CurrentRound+1, e.config.MaxIterations, len(messages), len(tools))
+		logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools, est_tokens=%d",
+			state.CurrentRound+1, e.config.MaxIterations, len(messages), len(tools), currentTokens)
 		common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 			"iteration":      state.CurrentRound,
 			"round":          state.CurrentRound + 1,
@@ -286,13 +306,19 @@ func (e *AgentEngine) executeLoop(
 		})
 
 		// 1. Think: Call LLM with function calling (includes retry + graceful degradation)
+		e.lastSentMsgCount = len(messages)
 		response, err := e.callLLMWithRetry(ctx, messages, tools, state, query, state.CurrentRound, sessionID)
 		if err != nil {
 			return state, err
 		}
 		if response == nil {
-			// Graceful degradation succeeded — state.IsComplete already set
 			break
+		}
+		if response.Usage.TotalTokens > 0 {
+			e.lastUsage = response.Usage
+			logger.Debugf(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d",
+				state.CurrentRound+1, response.Usage.PromptTokens,
+				response.Usage.CompletionTokens, response.Usage.TotalTokens)
 		}
 
 		// Create agent step

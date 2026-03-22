@@ -13,58 +13,59 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// streamLLMResult holds accumulated output from a streaming LLM call.
+type streamLLMResult struct {
+	Content   string
+	ToolCalls []types.LLMToolCall
+	Usage     *types.TokenUsage
+}
+
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
 // emitFunc: callback to emit each chunk event
-// Returns: full accumulated content, tool calls (if any), error
 func (e *AgentEngine) streamLLMToEventBus(
 	ctx context.Context,
 	messages []chat.Message,
 	opts *chat.ChatOptions,
 	emitFunc func(chunk *types.StreamResponse, fullContent string),
-) (string, []types.LLMToolCall, error) {
+) (*streamLLMResult, error) {
 	logger.Debugf(ctx, "[Agent][Stream] Starting LLM stream with %d messages", len(messages))
 
-	// Create a per-call timeout context so that a single LLM call gets a
-	// guaranteed time window even when the parent context's deadline is almost
-	// exhausted after previous iterations. The shorter of the two deadlines wins,
-	// so the parent pipeline timeout is still respected.
 	llmCtx, llmCancel := context.WithTimeout(ctx, e.getLLMCallTimeout())
 	defer llmCancel()
 
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
-		return "", nil, err
+		return nil, err
 	}
 
-	fullContent := ""
-	var toolCalls []types.LLMToolCall
+	result := &streamLLMResult{}
 	chunkCount := 0
 
 	for chunk := range stream {
 		chunkCount++
 
 		if chunk.Content != "" {
-			// Only accumulate LLM's own text output, not content extracted from tool arguments
-			// (e.g. final_answer's answer or thinking tool's thought are streamed separately)
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
 			if !isExtracted {
-				fullContent += chunk.Content
+				result.Content += chunk.Content
 			}
 		}
 
-		// Collect tool calls if present
 		if len(chunk.ToolCalls) > 0 {
-			toolCalls = chunk.ToolCalls
+			result.ToolCalls = chunk.ToolCalls
 		}
 
-		// Emit event through callback
+		if chunk.Usage != nil {
+			result.Usage = chunk.Usage
+		}
+
 		if emitFunc != nil {
-			emitFunc(&chunk, fullContent)
+			emitFunc(&chunk, result.Content)
 		}
 	}
 
-	return fullContent, toolCalls, nil
+	return result, nil
 }
 
 // streamReflectionToEventBus streams reflection process through EventBus
@@ -93,14 +94,14 @@ Think:
 	// Generate a single ID for this entire reflection stream
 	reflectionID := generateEventID("reflection")
 
-	fullReflection, _, err := e.streamLLMToEventBus(
+	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
 		&chat.ChatOptions{Temperature: 0.5},
 		func(chunk *types.StreamResponse, fullContent string) {
 			if chunk.Content != "" {
 				e.eventBus.Emit(ctx, event.Event{
-					ID:        reflectionID, // Same ID for all chunks in this stream
+					ID:        reflectionID,
 					Type:      event.EventAgentReflection,
 					SessionID: sessionID,
 					Data: event.AgentReflectionData{
@@ -118,7 +119,7 @@ Think:
 		return "", err
 	}
 
-	return fullReflection, nil
+	return llmResult.Content, nil
 }
 
 // streamThinkingToEventBus streams the thinking process through EventBus
@@ -145,7 +146,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	thinkingID := generateEventID("thinking")
 	answerID := generateEventID("answer")
 
-	fullContent, toolCalls, err := e.streamLLMToEventBus(
+	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
 		opts,
@@ -230,17 +231,19 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	}
 
 	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d",
-		iteration+1, len(fullContent), len(toolCalls))
+		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls))
 
-	// Strip <think>…</think> blocks that some models (DeepSeek, Qwen, etc.) embed in content.
-	fullContent = agenttools.StripThinkBlocks(fullContent)
+	fullContent := agenttools.StripThinkBlocks(llmResult.Content)
 
-	// Build response
-	return &types.ChatResponse{
+	resp := &types.ChatResponse{
 		Content:      fullContent,
-		ToolCalls:    toolCalls,
+		ToolCalls:    llmResult.ToolCalls,
 		FinishReason: "stop",
-	}, nil
+	}
+	if llmResult.Usage != nil {
+		resp.Usage = *llmResult.Usage
+	}
+	return resp, nil
 }
 
 // callLLMWithRetry logs messages, sanitizes them, calls the LLM with retry on transient errors,

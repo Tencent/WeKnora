@@ -58,14 +58,14 @@ func NewConsolidator(
 	}
 }
 
-// ShouldConsolidate checks if the messages need consolidation based on token count.
-func (c *Consolidator) ShouldConsolidate(messages []chat.Message) bool {
-	if c.maxTokens <= 0 || len(messages) <= 3 {
+// ShouldConsolidate checks if consolidation is needed based on the caller-provided
+// token estimate. The estimate should come from the model API's Usage when available.
+func (c *Consolidator) ShouldConsolidate(currentTokens int) bool {
+	if c.maxTokens <= 0 {
 		return false
 	}
-	tokenCount := c.estimator.EstimateMessages(messages)
 	triggerAt := int(float64(c.maxTokens) * c.threshold)
-	return tokenCount > triggerAt
+	return currentTokens > triggerAt
 }
 
 // Consolidate summarizes older messages and returns a compressed message array.

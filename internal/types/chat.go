@@ -5,6 +5,13 @@ import (
 	"encoding/json"
 )
 
+// TokenUsage holds token consumption statistics returned by the model API.
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // LLMToolCall represents a function/tool call from the LLM
 type LLMToolCall struct {
 	ID       string       `json:"id"`
@@ -20,20 +27,10 @@ type FunctionCall struct {
 
 // ChatResponse chat response
 type ChatResponse struct {
-	Content string `json:"content"`
-	// Tool calls requested by the model
-	ToolCalls []LLMToolCall `json:"tool_calls,omitempty"`
-	// Finish reason
-	FinishReason string `json:"finish_reason,omitempty"` // "stop", "tool_calls", "length", etc.
-	// Usage information
-	Usage struct {
-		// Prompt tokens
-		PromptTokens int `json:"prompt_tokens"`
-		// Completion tokens
-		CompletionTokens int `json:"completion_tokens"`
-		// Total tokens
-		TotalTokens int `json:"total_tokens"`
-	} `json:"usage"`
+	Content      string       `json:"content"`
+	ToolCalls    []LLMToolCall `json:"tool_calls,omitempty"`
+	FinishReason string       `json:"finish_reason,omitempty"`
+	Usage        TokenUsage   `json:"usage"`
 }
 
 // Response type
@@ -64,24 +61,16 @@ const (
 
 // StreamResponse stream response
 type StreamResponse struct {
-	// Unique identifier
-	ID string `json:"id"`
-	// Response type
-	ResponseType ResponseType `json:"response_type"`
-	// Current fragment content
-	Content string `json:"content"`
-	// Whether the response is complete
-	Done bool `json:"done"`
-	// Knowledge references
-	KnowledgeReferences References `json:"knowledge_references,omitempty"`
-	// Session ID (for agent_query event)
-	SessionID string `json:"session_id,omitempty"`
-	// Assistant Message ID (for agent_query event)
-	AssistantMessageID string `json:"assistant_message_id,omitempty"`
-	// Tool calls for streaming (partial)
-	ToolCalls []LLMToolCall `json:"tool_calls,omitempty"`
-	// Additional metadata for enhanced display
-	Data map[string]interface{} `json:"data,omitempty"`
+	ID                  string                 `json:"id"`
+	ResponseType        ResponseType           `json:"response_type"`
+	Content             string                 `json:"content"`
+	Done                bool                   `json:"done"`
+	KnowledgeReferences References             `json:"knowledge_references,omitempty"`
+	SessionID           string                 `json:"session_id,omitempty"`
+	AssistantMessageID  string                 `json:"assistant_message_id,omitempty"`
+	ToolCalls           []LLMToolCall          `json:"tool_calls,omitempty"`
+	Data                map[string]interface{} `json:"data,omitempty"`
+	Usage               *TokenUsage            `json:"usage,omitempty"`
 }
 
 // References references

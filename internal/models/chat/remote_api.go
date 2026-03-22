@@ -152,6 +152,10 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(messages []Message, opts *Cha
 		Stream:   isStream,
 	}
 
+	if isStream {
+		req.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
+	}
+
 	if opts != nil {
 		if opts.Temperature > 0 {
 			req.Temperature = float32(opts.Temperature)
@@ -316,11 +320,7 @@ func (c *RemoteAPIChat) parseCompletionResponse(resp *openai.ChatCompletionRespo
 	response := &types.ChatResponse{
 		Content:      content,
 		FinishReason: string(choice.FinishReason),
-		Usage: struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			TotalTokens      int `json:"total_tokens"`
-		}{
+		Usage: types.TokenUsage{
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
@@ -465,6 +465,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 					Content:      "",
 					Done:         true,
 					ToolCalls:    state.buildOrderedToolCalls(),
+					Usage:        state.usage,
 				}
 			} else {
 				streamChan <- types.StreamResponse{
@@ -474,6 +475,14 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 				}
 			}
 			return
+		}
+
+		if response.Usage != nil {
+			state.usage = &types.TokenUsage{
+				PromptTokens:     response.Usage.PromptTokens,
+				CompletionTokens: response.Usage.CompletionTokens,
+				TotalTokens:      response.Usage.TotalTokens,
+			}
 		}
 
 		if len(response.Choices) > 0 {
@@ -514,6 +523,7 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 				Content:      "",
 				Done:         true,
 				ToolCalls:    state.buildOrderedToolCalls(),
+				Usage:        state.usage,
 			}
 			return
 		}
@@ -538,6 +548,14 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 		if err := json.Unmarshal(event.Data, &streamResp); err != nil {
 			logger.Errorf(ctx, "Failed to parse stream response: %v", err)
 			continue
+		}
+
+		if streamResp.Usage != nil {
+			state.usage = &types.TokenUsage{
+				PromptTokens:     streamResp.Usage.PromptTokens,
+				CompletionTokens: streamResp.Usage.CompletionTokens,
+				TotalTokens:      streamResp.Usage.TotalTokens,
+			}
 		}
 
 		if len(streamResp.Choices) > 0 {
@@ -566,6 +584,7 @@ type streamState struct {
 	nameNotified     map[int]bool
 	hasThinking      bool
 	fieldExtractors  map[int]*jsonFieldExtractor // per tool-call-index extractors for streaming field extraction
+	usage            *types.TokenUsage           // captured from the final stream chunk when include_usage is enabled
 }
 
 func newStreamState() *streamState {

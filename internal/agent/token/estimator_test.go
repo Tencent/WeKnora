@@ -12,34 +12,34 @@ import (
 )
 
 func TestEstimator(t *testing.T) {
-	e := NewEstimator(0) // use default
+	e, err := NewEstimator()
+	if err != nil {
+		t.Fatalf("Failed to create estimator: %v", err)
+	}
 
 	t.Run("empty string", func(t *testing.T) {
 		assert.Equal(t, 0, e.EstimateString(""))
 	})
 
 	t.Run("english text", func(t *testing.T) {
-		// "hello world" = 11 chars ≈ 11/3.5 + 1 ≈ 4 tokens
 		tokens := e.EstimateString("hello world")
-		assert.Greater(t, tokens, 0)
-		assert.Less(t, tokens, 20)
+		assert.Equal(t, 2, tokens)
 	})
 
 	t.Run("chinese text", func(t *testing.T) {
-		// 10 Chinese chars at ~1.5 chars/token ≈ 7 tokens
 		tokens := e.EstimateString("你好世界测试数据中文")
-		assert.Greater(t, tokens, 3)
-		assert.Less(t, tokens, 20)
+		fmt.Println(tokens)
+		assert.Greater(t, tokens, 0)
 	})
 
-	t.Run("CJK is more tokens per char than latin", func(t *testing.T) {
-		// Same number of characters, but CJK should estimate more tokens
+	t.Run("CJK produces more tokens per char than latin", func(t *testing.T) {
 		latin := strings.Repeat("a", 100)
 		cjk := strings.Repeat("中", 100)
 		latinTokens := e.EstimateString(latin)
 		cjkTokens := e.EstimateString(cjk)
+		fmt.Println(latinTokens, cjkTokens)
 		assert.Greater(t, cjkTokens, latinTokens,
-			"CJK text should estimate more tokens per character")
+			"CJK text should produce more tokens per character")
 	})
 
 	t.Run("message estimation includes overhead", func(t *testing.T) {
@@ -49,6 +49,7 @@ func TestEstimator(t *testing.T) {
 		}
 		tokens := e.EstimateMessage(&msg)
 		contentTokens := e.EstimateString("hello")
+		fmt.Println(tokens, contentTokens)
 		assert.Greater(t, tokens, contentTokens,
 			"message tokens should include overhead beyond just content")
 	})
@@ -82,26 +83,28 @@ func TestEstimator(t *testing.T) {
 }
 
 func TestCompressContext(t *testing.T) {
-	e := NewEstimator(0)
+	e, err := NewEstimator()
+	require.NoError(t, err)
 
 	t.Run("no compression needed", func(t *testing.T) {
 		messages := []chat.Message{
 			{Role: "system", Content: "system prompt"},
 			{Role: "user", Content: "hello"},
 		}
-		result := CompressContext(messages, e, 100000)
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 100000, tokens)
 		assert.Equal(t, messages, result)
 	})
 
 	t.Run("preserves system and last message", func(t *testing.T) {
-		// Create messages that exceed the token limit
 		messages := []chat.Message{
 			{Role: "system", Content: "system prompt"},
 			{Role: "user", Content: strings.Repeat("old message ", 1000)},
 			{Role: "assistant", Content: strings.Repeat("old response ", 1000)},
 			{Role: "user", Content: "current query"},
 		}
-		result := CompressContext(messages, e, 100) // very low limit to force compression
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 100, tokens)
 		require.GreaterOrEqual(t, len(result), 2)
 		assert.Equal(t, "system", result[0].Role)
 		assert.Equal(t, "current query", result[len(result)-1].Content)
@@ -110,27 +113,23 @@ func TestCompressContext(t *testing.T) {
 	t.Run("keeps tool_call and tool_result paired", func(t *testing.T) {
 		messages := []chat.Message{
 			{Role: "system", Content: "system prompt"},
-			// Old conversation
 			{Role: "user", Content: strings.Repeat("x", 500)},
 			{Role: "assistant", Content: strings.Repeat("y", 500)},
-			// Tool interaction that should stay together
 			{Role: "assistant", Content: "thinking", ToolCalls: []chat.ToolCall{
 				{ID: "call_1", Function: chat.FunctionCall{Name: "search", Arguments: `{"q":"test"}`}},
 			}},
 			{Role: "tool", Content: strings.Repeat("result ", 100), ToolCallID: "call_1", Name: "search"},
-			// Current query
 			{Role: "user", Content: "what did you find?"},
 		}
 
-		result := CompressContext(messages, e, 200) // force some compression
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 200, tokens)
 
 		b, _ := json.Marshal(result)
 		fmt.Println(string(b))
 
-		// Check that tool_call and tool_result are still paired
 		for i, msg := range result {
 			if msg.Role == "tool" {
-				// The previous message should be an assistant with tool_calls
 				require.Greater(t, i, 0)
 				assert.Equal(t, "assistant", result[i-1].Role)
 				assert.Greater(t, len(result[i-1].ToolCalls), 0)
@@ -143,7 +142,7 @@ func TestCompressContext(t *testing.T) {
 			{Role: "system", Content: "system"},
 			{Role: "user", Content: "hello"},
 		}
-		result := CompressContext(messages, e, 0)
+		result := CompressContext(messages, e, 0, 0)
 		assert.Equal(t, messages, result)
 	})
 
@@ -152,7 +151,7 @@ func TestCompressContext(t *testing.T) {
 			{Role: "system", Content: "system"},
 			{Role: "user", Content: "hello"},
 		}
-		result := CompressContext(messages, e, 1) // even with tiny limit
+		result := CompressContext(messages, e, 1, 999)
 		assert.Equal(t, messages, result)
 	})
 }
@@ -179,8 +178,8 @@ func TestGroupToolMessages(t *testing.T) {
 			{Role: "user", Content: "thanks"},
 		}
 		groups := groupToolMessages(messages)
-		assert.Len(t, groups, 3)    // user, (assistant+2 tools), user
-		assert.Len(t, groups[1], 3) // assistant + 2 tool results
+		assert.Len(t, groups, 3)
+		assert.Len(t, groups[1], 3)
 		b, _ := json.Marshal(groups)
 		fmt.Println(string(b))
 	})

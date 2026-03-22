@@ -16,29 +16,29 @@ import (
 )
 
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
-// It returns the (possibly shortened) message slice.
-func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round int) []chat.Message {
+// currentTokens is the caller's best estimate of the current context size (using
+// API-reported Usage when available, falling back to BPE estimation).
+func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round, currentTokens int) []chat.Message {
 	if e.config.MaxContextTokens <= 0 {
 		return messages
 	}
 
 	beforeLen := len(messages)
 
-	// Try LLM-powered consolidation first (preserves more semantic content)
-	if e.memoryConsolidator != nil && e.memoryConsolidator.ShouldConsolidate(messages) {
-		logger.Infof(ctx, "[Agent][Round-%d] Token threshold exceeded, consolidating memory",
-			round)
+	if e.memoryConsolidator != nil && e.memoryConsolidator.ShouldConsolidate(currentTokens) {
+		logger.Infof(ctx, "[Agent][Round-%d] Token threshold exceeded (est=%d), consolidating memory",
+			round, currentTokens)
 		consolidated, consolidateErr := e.memoryConsolidator.Consolidate(ctx, messages)
 		if consolidateErr != nil {
 			logger.Warnf(ctx, "[Agent][Round-%d] Memory consolidation failed: %v, "+
 				"falling back to simple compression", round, consolidateErr)
 		} else {
 			messages = consolidated
+			currentTokens = e.tokenEstimator.EstimateMessages(messages)
 		}
 	}
 
-	// Fallback: simple context compression if still over the hard limit (80%)
-	messages = agenttoken.CompressContext(messages, e.tokenEstimator, e.config.MaxContextTokens)
+	messages = agenttoken.CompressContext(messages, e.tokenEstimator, e.config.MaxContextTokens, currentTokens)
 
 	if len(messages) < beforeLen {
 		logger.Infof(ctx, "[Agent][Round-%d] Context managed: %d → %d messages (max_tokens=%d)",

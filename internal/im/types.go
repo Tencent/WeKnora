@@ -14,20 +14,20 @@ import (
 // IMChannel represents an IM channel configuration stored in the database.
 // Each channel binds to an agent and contains platform-specific credentials.
 type IMChannel struct {
-	ID          string         `json:"id"          gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
-	TenantID    uint64         `json:"tenant_id"   gorm:"not null;index:idx_im_channels_tenant"`
-	AgentID     string         `json:"agent_id"    gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
-	Platform    string         `json:"platform"    gorm:"type:varchar(20);not null"`
-	Name        string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
-	Enabled     bool           `json:"enabled"     gorm:"not null;default:true"`
-	Mode        string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
+	ID              string         `json:"id"          gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
+	TenantID        uint64         `json:"tenant_id"   gorm:"not null;index:idx_im_channels_tenant"`
+	AgentID         string         `json:"agent_id"    gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
+	Platform        string         `json:"platform"    gorm:"type:varchar(20);not null"`
+	Name            string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
+	Enabled         bool           `json:"enabled"     gorm:"not null;default:true"`
+	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
 	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
 	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `json:"deleted_at"  gorm:"index"`
 }
 
 func (IMChannel) TableName() string {

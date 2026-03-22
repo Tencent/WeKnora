@@ -57,13 +57,13 @@ const (
 // All IM-related Redis keys are defined here for discoverability and to avoid
 // scattered string literals across multiple files.
 const (
-	RedisKeyLeader     = "im:ws:leader:"     // + channelID — WebSocket leader election
-	RedisKeyDedup      = "im:dedup:"         // + messageID — message deduplication
-	RedisKeyStop       = "im:stop:"          // + userKey   — cross-instance /stop marker (pre-execution)
-	RedisKeyInflight   = "im:inflight:"      // + userKey   — maps userKey → sessionID:messageID for cross-instance /stop
-	RedisKeyQueueUser  = "im:queue:user:"    // + userKey   — global per-user queue counter
-	RedisKeyRateLimit  = "im:ratelimit:"     // + key       — sliding-window rate limiting
-	RedisKeyGlobalGate = "im:global:active"  // global concurrent worker counter
+	RedisKeyLeader     = "im:ws:leader:"    // + channelID — WebSocket leader election
+	RedisKeyDedup      = "im:dedup:"        // + messageID — message deduplication
+	RedisKeyStop       = "im:stop:"         // + userKey   — cross-instance /stop marker (pre-execution)
+	RedisKeyInflight   = "im:inflight:"     // + userKey   — maps userKey → sessionID:messageID for cross-instance /stop
+	RedisKeyQueueUser  = "im:queue:user:"   // + userKey   — global per-user queue counter
+	RedisKeyRateLimit  = "im:ratelimit:"    // + key       — sliding-window rate limiting
+	RedisKeyGlobalGate = "im:global:active" // global concurrent worker counter
 )
 
 // channelState holds runtime state for a running IM channel.

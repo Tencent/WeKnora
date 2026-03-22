@@ -87,7 +87,7 @@ Now generate the final answer:`, query)
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 
-	fullAnswer, _, err := e.streamLLMToEventBus(
+	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
 		&chat.ChatOptions{Temperature: e.config.Temperature, Thinking: e.config.Thinking},
@@ -95,7 +95,7 @@ Now generate the final answer:`, query)
 			if chunk.Content != "" {
 				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
 				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID, // Same ID for all chunks in this stream
+					ID:        answerID,
 					Type:      event.EventAgentFinalAnswer,
 					SessionID: sessionID,
 					Data: event.AgentFinalAnswerData{
@@ -115,6 +115,7 @@ Now generate the final answer:`, query)
 		return err
 	}
 
+	fullAnswer := llmResult.Content
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
 	common.PipelineInfo(ctx, "Agent", "final_answer_done", map[string]interface{}{
 		"session_id": sessionID,

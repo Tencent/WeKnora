@@ -9,7 +9,8 @@ import (
 )
 
 func TestConsolidator_ShouldConsolidate(t *testing.T) {
-	est := token.NewEstimator(0)
+	est, err := token.NewEstimator()
+	assert.NoError(t, err)
 
 	t.Run("below threshold returns false", func(t *testing.T) {
 		c := NewConsolidator(nil, est, 100000, 0)
@@ -19,27 +20,18 @@ func TestConsolidator_ShouldConsolidate(t *testing.T) {
 			{Role: "assistant", Content: "hi"},
 			{Role: "user", Content: "current"},
 		}
-		assert.False(t, c.ShouldConsolidate(messages))
+		tokens := est.EstimateMessages(messages)
+		assert.False(t, c.ShouldConsolidate(tokens))
 	})
 
-	t.Run("too few messages returns false", func(t *testing.T) {
-		c := NewConsolidator(nil, est, 10, 0)
-		messages := []chat.Message{
-			{Role: "system", Content: "system"},
-			{Role: "user", Content: "hello"},
-		}
-		assert.False(t, c.ShouldConsolidate(messages))
+	t.Run("over threshold returns true", func(t *testing.T) {
+		c := NewConsolidator(nil, est, 10, 0) // very low threshold
+		assert.True(t, c.ShouldConsolidate(100))
 	})
 
 	t.Run("disabled returns false", func(t *testing.T) {
-		c := NewConsolidator(nil, est, 0, 0) // disabled
-		messages := []chat.Message{
-			{Role: "system", Content: "system"},
-			{Role: "user", Content: "hello"},
-			{Role: "assistant", Content: "hi"},
-			{Role: "user", Content: "current"},
-		}
-		assert.False(t, c.ShouldConsolidate(messages))
+		c := NewConsolidator(nil, est, 0, 0)
+		assert.False(t, c.ShouldConsolidate(99999))
 	})
 }
 
@@ -61,7 +53,8 @@ func TestTruncateForPrompt(t *testing.T) {
 }
 
 func TestRawArchive(t *testing.T) {
-	est := token.NewEstimator(0)
+	est, err := token.NewEstimator()
+	assert.NoError(t, err)
 	c := NewConsolidator(nil, est, 100000, 0)
 
 	messages := []chat.Message{
@@ -83,7 +76,8 @@ func TestRawArchive(t *testing.T) {
 }
 
 func TestBuildConsolidationPrompt(t *testing.T) {
-	est := token.NewEstimator(0)
+	est, err := token.NewEstimator()
+	assert.NoError(t, err)
 	c := NewConsolidator(nil, est, 100000, 0)
 
 	messages := []chat.Message{
