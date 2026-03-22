@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -26,6 +26,9 @@ func (p *PluginFilterTopK) ActivationEvents() []types.EventType {
 func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if !chatManage.NeedsRetrieval() {
+		return next()
+	}
 	pipelineInfo(ctx, "FilterTopK", "input", map[string]interface{}{
 		"session_id": chatManage.SessionID,
 		"top_k":      chatManage.RerankTopK,

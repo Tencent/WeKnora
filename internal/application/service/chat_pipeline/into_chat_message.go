@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -74,7 +74,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	}
 
 	// Intent-based no-search path: bypass "reference materials" template entirely.
-	if chatManage.SkipKBSearch {
+	if !chatManage.NeedsRetrieval() {
 		// Prefer rewritten query in no-search mode; fallback to original query.
 		userContent := safeQuery
 		if rewrite := strings.TrimSpace(chatManage.RewriteQuery); rewrite != "" {
@@ -154,7 +154,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		"session_id":                 chatManage.SessionID,
 		"user_content_len":           len(chatManage.UserContent),
 		"faq_priority":               chatManage.FAQPriorityEnabled,
-		"skip_kb_search":             chatManage.SkipKBSearch,
+		"intent":                     chatManage.Intent,
 		"image_description":          chatManage.ImageDescription,
 		"chat_model_supports_vision": chatManage.ChatModelSupportsVision,
 	})

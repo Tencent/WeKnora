@@ -10,7 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
-	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -155,7 +155,7 @@ func NewChunkExtractService(
 	chunkRepo interfaces.ChunkRepository,
 	graphEngine interfaces.RetrieveGraphRepository,
 ) interfaces.TaskHandler {
-	// generator := chatpipline.NewQAPromptGenerator(chatpipline.NewFormater(), config.ExtractManager.ExtractGraph)
+	// generator := chatpipeline.NewQAPromptGenerator(chatpipeline.NewFormater(), config.ExtractManager.ExtractGraph)
 	// ctx := context.Background()
 	// logger.Debugf(ctx, "chunk extract system prompt: %s", generator.System(ctx))
 	// logger.Debugf(ctx, "chunk extract user prompt: %s", generator.User(ctx, "demo"))
@@ -211,7 +211,7 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 			},
 		},
 	}
-	extractor := chatpipline.NewExtractor(chatModel, template)
+	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
 	if err != nil {
 		return err

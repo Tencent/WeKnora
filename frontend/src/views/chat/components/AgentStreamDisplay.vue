@@ -845,18 +845,36 @@ const buildFullEventList = (stream: any[]) => {
     if (isThinkingLikeEvent(event) && result.length > 0) {
       const prev = result[result.length - 1];
       if (isThinkingLikeEvent(prev)) {
-        // Merge into previous: combine content
         const prevContent = prev._mergedContent || getThinkingContent(prev);
         const curContent = getThinkingContent(event);
+
+        // Deduplicate: when a tool_call thinking event's thought content was
+        // already delivered via streaming thinking events (same text), skip it.
+        if (curContent && prevContent && prevContent.includes(curContent)) {
+          continue;
+        }
+        if (curContent && prevContent && curContent.includes(prevContent)) {
+          // Current fully contains previous — replace instead of appending
+          result[result.length - 1] = {
+            type: 'thinking',
+            event_id: prev.event_id,
+            content: curContent,
+            thinking: prev.thinking || event.thinking,
+            timestamp: prev.timestamp,
+            _mergedContent: curContent,
+          };
+          continue;
+        }
+
+        // Normal merge: combine non-overlapping content
         const merged = [prevContent, curContent].filter(Boolean).join('\n\n');
-        // Replace previous with a merged thinking event
         result[result.length - 1] = {
           type: 'thinking',
           event_id: prev.event_id,
           content: merged,
           thinking: prev.thinking || event.thinking,
           timestamp: prev.timestamp,
-          _mergedContent: merged, // track for further merges
+          _mergedContent: merged,
         };
         continue;
       }

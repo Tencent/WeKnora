@@ -102,6 +102,10 @@ type ConversationConfig struct {
 	ExtractEntitiesPrompt      string `yaml:"-" json:"extract_entities_prompt"`
 	ExtractRelationshipsPrompt string `yaml:"-" json:"extract_relationships_prompt"`
 	GenerateQuestionsPrompt    string `yaml:"-" json:"generate_questions_prompt"`
+
+	// IntentSystemPrompts maps intent values (e.g. "greeting", "chitchat") to
+	// system prompt text. Populated by backfill from IntentPrompts templates.
+	IntentSystemPrompts map[string]string `yaml:"-" json:"-"`
 }
 
 // SummaryConfig 摘要配置
@@ -201,6 +205,8 @@ type PromptTemplatesConfig struct {
 	AgentSystemPrompt    []PromptTemplate `yaml:"agent_system_prompt"    json:"agent_system_prompt,omitempty"`
 	GraphExtraction      []PromptTemplate `yaml:"graph_extraction"       json:"graph_extraction,omitempty"`
 	GenerateQuestions    []PromptTemplate `yaml:"generate_questions"     json:"generate_questions,omitempty"`
+	// IntentPrompts holds per-intent system prompt overrides (template ID = intent value).
+	IntentPrompts []PromptTemplate `yaml:"intent_prompts" json:"intent_prompts,omitempty"`
 }
 
 // DefaultTemplate returns the first template marked as default in the list,
@@ -504,6 +510,17 @@ func backfillConversationDefaults(cfg *Config) {
 			}
 		}
 	}
+
+	// Build intent→system-prompt map from IntentPrompts templates.
+	// Template ID must equal the QueryIntent string value (e.g. "greeting").
+	if len(pt.IntentPrompts) > 0 {
+		conv.IntentSystemPrompts = make(map[string]string, len(pt.IntentPrompts))
+		for _, t := range pt.IntentPrompts {
+			if t.ID != "" && t.Content != "" {
+				conv.IntentSystemPrompts[t.ID] = t.Content
+			}
+		}
+	}
 }
 
 // FindTemplateByID searches across all template lists for a template with the given ID.
@@ -524,6 +541,7 @@ func FindTemplateByID(pt *PromptTemplatesConfig, id string) *PromptTemplate {
 		pt.AgentSystemPrompt,
 		pt.GraphExtraction,
 		pt.GenerateQuestions,
+		pt.IntentPrompts,
 	} {
 		for i := range list {
 			if list[i].ID == id {
@@ -574,6 +592,7 @@ func loadPromptTemplates(configDir string) (*PromptTemplatesConfig, error) {
 		"agent_system_prompt.yaml":    &config.AgentSystemPrompt,
 		"graph_extraction.yaml":       &config.GraphExtraction,
 		"generate_questions.yaml":     &config.GenerateQuestions,
+		"intent_prompts.yaml":        &config.IntentPrompts,
 	}
 
 	// 加载每个模板文件

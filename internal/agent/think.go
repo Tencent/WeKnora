@@ -210,8 +210,6 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			}
 
 			if chunk.Content != "" {
-				// logger.Debugf(ctx, "[Agent][Thinking][Iteration-%d] Emitting thought chunk: %d chars",
-				// 	iteration+1, len(chunk.Content))
 				e.eventBus.Emit(ctx, event.Event{
 					ID:        thinkingID, // Same ID for all chunks in this stream
 					Type:      event.EventAgentThought,

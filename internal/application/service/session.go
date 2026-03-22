@@ -14,7 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 
-	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	llmcontext "github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 )
 
@@ -31,7 +31,7 @@ type sessionService struct {
 	knowledgeBaseService interfaces.KnowledgeBaseService  // Service for knowledge base operations
 	modelService         interfaces.ModelService          // Service for model operations
 	tenantService        interfaces.TenantService         // Service for tenant operations
-	eventManager         *chatpipline.EventManager        // Event manager for chat pipeline
+	eventManager         *chatpipeline.EventManager        // Event manager for chat pipeline
 	agentService         interfaces.AgentService          // Service for agent operations
 	sessionStorage       llmcontext.ContextStorage        // Session storage
 	knowledgeService     interfaces.KnowledgeService      // Service for knowledge operations
@@ -50,7 +50,7 @@ func NewSessionService(cfg *config.Config,
 	chunkService interfaces.ChunkService,
 	modelService interfaces.ModelService,
 	tenantService interfaces.TenantService,
-	eventManager *chatpipline.EventManager,
+	eventManager *chatpipeline.EventManager,
 	agentService interfaces.AgentService,
 	sessionStorage llmcontext.ContextStorage,
 	webSearchStateRepo interfaces.WebSearchStateService,

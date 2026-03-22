@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -43,6 +43,9 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 func (p *PluginMerge) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if !chatManage.NeedsRetrieval() {
+		return next()
+	}
 	pipelineInfo(ctx, "Merge", "input", map[string]interface{}{
 		"session_id":    chatManage.SessionID,
 		"candidate_cnt": len(chatManage.RerankResult),
@@ -154,31 +157,43 @@ func (p *PluginMerge) groupAndMergeOverlapping(ctx context.Context, results []*t
 		"knowledge_cnt": len(knowledgeGroup),
 	})
 
-	var mergedChunks []*types.SearchResult
+	// Flatten into independent (knowledgeID, chunks) work units for parallel merge.
+	type mergeUnit struct {
+		knowledgeID string
+		chunks      []*types.SearchResult
+	}
+	var units []mergeUnit
 	for knowledgeID, chunkGroup := range knowledgeGroup {
 		for _, chunks := range chunkGroup {
-			pipelineInfo(ctx, "Merge", "group_process", map[string]interface{}{
-				"knowledge_id": knowledgeID,
-				"chunk_cnt":    len(chunks),
-			})
-
-			// Sort by start position, then by end position
-			sort.Slice(chunks, func(i, j int) bool {
-				if chunks[i].StartAt == chunks[j].StartAt {
-					return chunks[i].EndAt < chunks[j].EndAt
-				}
-				return chunks[i].StartAt < chunks[j].StartAt
-			})
-
-			grouped := p.mergeOverlappingChunks(ctx, knowledgeID, chunks)
-
-			pipelineInfo(ctx, "Merge", "group_output", map[string]interface{}{
-				"knowledge_id":  knowledgeID,
-				"merged_chunks": len(grouped),
-			})
-
-			mergedChunks = append(mergedChunks, grouped...)
+			units = append(units, mergeUnit{knowledgeID: knowledgeID, chunks: chunks})
 		}
+	}
+
+	groupResults := ParallelMap(units, 0, func(_ int, u mergeUnit) []*types.SearchResult {
+		pipelineInfo(ctx, "Merge", "group_process", map[string]interface{}{
+			"knowledge_id": u.knowledgeID,
+			"chunk_cnt":    len(u.chunks),
+		})
+
+		sort.Slice(u.chunks, func(i, j int) bool {
+			if u.chunks[i].StartAt == u.chunks[j].StartAt {
+				return u.chunks[i].EndAt < u.chunks[j].EndAt
+			}
+			return u.chunks[i].StartAt < u.chunks[j].StartAt
+		})
+
+		grouped := p.mergeOverlappingChunks(ctx, u.knowledgeID, u.chunks)
+
+		pipelineInfo(ctx, "Merge", "group_output", map[string]interface{}{
+			"knowledge_id":  u.knowledgeID,
+			"merged_chunks": len(grouped),
+		})
+		return grouped
+	})
+
+	var mergedChunks []*types.SearchResult
+	for _, g := range groupResults {
+		mergedChunks = append(mergedChunks, g...)
 	}
 
 	pipelineInfo(ctx, "Merge", "output", map[string]interface{}{

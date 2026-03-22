@@ -1,87 +1,140 @@
 package types
 
-// ChatManage represents the configuration and state for a chat session
-// including query processing, search parameters, and model configurations
-type ChatManage struct {
-	SessionID    string     `json:"session_id"`              // Unique identifier for the chat session
-	UserID       string     `json:"user_id"`                 // Unique identifier for the user
-	Query        string     `json:"query,omitempty"`         // Original user query
-	RewriteQuery string     `json:"rewrite_query,omitempty"` // Query after rewriting for better retrieval
-	EnableMemory bool       `json:"enable_memory"`           // Whether memory feature is enabled
-	History      []*History `json:"history,omitempty"`       // Chat history for context
+// PipelineRequest holds immutable configuration set once at the request entry point.
+type PipelineRequest struct {
+	SessionID    string `json:"session_id"`
+	UserID       string `json:"user_id"`
+	Query        string `json:"query,omitempty"`
+	EnableMemory bool   `json:"enable_memory"`
+	MaxRounds    int    `json:"max_rounds"`
 
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`      // IDs of knowledge bases to search (multi-KB support)
-	KnowledgeIDs     []string `json:"knowledge_ids,omitempty"` // IDs of specific files to search (optional)
-	// SearchTargets is the pre-computed unified search targets
-	// Computed once at request entry point, used throughout the pipeline
+	// Knowledge base retrieval parameters
+	KnowledgeBaseIDs []string      `json:"knowledge_base_ids"`
+	KnowledgeIDs     []string      `json:"knowledge_ids,omitempty"`
 	SearchTargets    SearchTargets `json:"-"`
-	VectorThreshold  float64       `json:"vector_threshold"`  // Minimum score threshold for vector search results
-	KeywordThreshold float64       `json:"keyword_threshold"` // Minimum score threshold for keyword search results
-	EmbeddingTopK    int           `json:"embedding_top_k"`   // Number of top results to retrieve from embedding search
-	VectorDatabase   string        `json:"vector_database"`   // Vector database type/name to use
+	VectorThreshold  float64       `json:"vector_threshold"`
+	KeywordThreshold float64       `json:"keyword_threshold"`
+	EmbeddingTopK    int           `json:"embedding_top_k"`
+	VectorDatabase   string        `json:"vector_database"`
 
-	RerankModelID   string  `json:"rerank_model_id"`  // Model ID for reranking search results
-	RerankTopK      int     `json:"rerank_top_k"`     // Number of top results after reranking
-	RerankThreshold float64 `json:"rerank_threshold"` // Minimum score threshold for reranked results
+	// Rerank parameters
+	RerankModelID   string  `json:"rerank_model_id"`
+	RerankTopK      int     `json:"rerank_top_k"`
+	RerankThreshold float64 `json:"rerank_threshold"`
 
-	MaxRounds int `json:"max_rounds"` // Maximum history rounds used for rewrite/context
+	// Chat model parameters
+	ChatModelID      string           `json:"chat_model_id"`
+	SummaryConfig    SummaryConfig    `json:"summary_config"`
+	FallbackStrategy FallbackStrategy `json:"fallback_strategy"`
+	FallbackResponse string           `json:"fallback_response"`
+	FallbackPrompt   string           `json:"fallback_prompt"`
 
-	ChatModelID      string           `json:"chat_model_id"`     // ID of the chat model to use
-	SummaryConfig    SummaryConfig    `json:"summary_config"`    // Configuration for summary generation
-	FallbackStrategy FallbackStrategy `json:"fallback_strategy"` // Strategy when no relevant results are found
-	FallbackResponse string           `json:"fallback_response"` // Default response when fallback occurs
-	FallbackPrompt   string           `json:"fallback_prompt"`   // Prompt for model-based fallback response
+	// Rewrite parameters
+	EnableRewrite        bool   `json:"enable_rewrite"`
+	EnableQueryExpansion bool   `json:"enable_query_expansion"`
+	RewritePromptSystem  string `json:"rewrite_prompt_system"`
+	RewritePromptUser    string `json:"rewrite_prompt_user"`
 
-	EnableRewrite        bool   `json:"enable_rewrite"`         // Whether to enable rewrite
-	EnableQueryExpansion bool   `json:"enable_query_expansion"` // Whether to enable query expansion with LLM
-	RewritePromptSystem  string `json:"rewrite_prompt_system"`  // Custom system prompt for rewrite stage
-	RewritePromptUser    string `json:"rewrite_prompt_user"`    // Custom user prompt for rewrite stage
+	// FAQ strategy
+	FAQPriorityEnabled       bool    `json:"-"`
+	FAQDirectAnswerThreshold float64 `json:"-"`
+	FAQScoreBoost            float64 `json:"-"`
 
-	// Internal fields for pipeline data processing
-	SearchResult    []*SearchResult   `json:"-"` // Results from search phase
-	RerankResult    []*SearchResult   `json:"-"` // Results after reranking
-	MergeResult     []*SearchResult   `json:"-"` // Final merged results after all processing
-	Entity          []string          `json:"-"` // List of identified entities
-	EntityKBIDs     []string          `json:"-"` // Knowledge base IDs with ExtractConfig enabled
-	EntityKnowledge map[string]string `json:"-"` // KnowledgeID -> KnowledgeBaseID mapping for graph-enabled files
-	GraphResult     *GraphData        `json:"-"` // Graph data from search phase
-	UserContent     string            `json:"-"` // Processed user content
-	ChatResponse    *ChatResponse     `json:"-"` // Final response from chat model
+	// Image / multimodal support
+	Images                  []string `json:"-"`
+	VLMModelID              string   `json:"-"`
+	ChatModelSupportsVision bool     `json:"-"`
 
-	// Event system for streaming responses
-	EventBus  EventBusInterface `json:"-"` // EventBus for emitting streaming events
-	MessageID string            `json:"-"` // Assistant message ID for event emission
-
-	// Web search configuration (internal use)
-	TenantID         uint64 `json:"-"` // Tenant ID for retrieving web search config
-	WebSearchEnabled bool   `json:"-"` // Whether web search is enabled for this request
-
-	// FAQ Strategy Settings
-	FAQPriorityEnabled       bool    `json:"-"` // Whether FAQ priority strategy is enabled
-	FAQDirectAnswerThreshold float64 `json:"-"` // Threshold for direct FAQ answer (similarity > this value)
-	FAQScoreBoost            float64 `json:"-"` // Score multiplier for FAQ results
-
-	// Image support for multimodal chat
-	UserMessageID           string   `json:"-"` // User message ID for updating image captions after rewrite
-	Images                  []string `json:"-"` // Image URLs for MultiContent in current user message
-	ImageDescription        string   `json:"-"` // Image description (visual details + OCR text) generated by VLM (used as fallback for non-vision models)
-	VLMModelID              string   `json:"-"` // Agent-configured VLM model ID for image analysis
-	ChatModelSupportsVision bool     `json:"-"` // Whether the chat model accepts multimodal/image input
-	SkipKBSearch            bool     `json:"-"` // Set by rewrite intent classification: true = skip KB retrieval
-	Language                string   `json:"-"` // User language name for prompt placeholder (e.g. "Chinese (Simplified)", "English")
+	// Misc request-scoped config
+	TenantID         uint64 `json:"-"`
+	WebSearchEnabled bool   `json:"-"`
+	Language         string `json:"-"`
 }
 
-// Clone creates a deep copy of the ChatManage object
+// QueryIntent represents the classified intent of a user query.
+type QueryIntent string
+
+const (
+	IntentKBSearch      QueryIntent = "kb_search"
+	IntentWebSearch     QueryIntent = "web_search"
+	IntentGreeting      QueryIntent = "greeting"
+	IntentChitchat      QueryIntent = "chitchat"
+	IntentFollowUp      QueryIntent = "follow_up"
+	IntentImageOnly     QueryIntent = "image_only"
+	IntentSummarize     QueryIntent = "summarize"
+	IntentClarification QueryIntent = "clarification"
+)
+
+// NeedsKBRetrieval returns true when the intent requires knowledge base search.
+// The zero value (empty string) is treated as needing retrieval for safety.
+// Note: IntentWebSearch is NOT included — use ChatManage.NeedsRetrieval()
+// which also considers the WebSearchEnabled flag.
+func (i QueryIntent) NeedsKBRetrieval() bool {
+	switch i {
+	case IntentKBSearch, IntentClarification, "":
+		return true
+	default:
+		return false
+	}
+}
+
+// PipelineState holds mutable intermediate data that plugins read and write
+// as the pipeline progresses.
+type PipelineState struct {
+	RewriteQuery string      `json:"rewrite_query,omitempty"`
+	Intent       QueryIntent `json:"intent,omitempty"`
+	History      []*History  `json:"history,omitempty"`
+
+	SearchResult         []*SearchResult   `json:"-"`
+	RerankResult         []*SearchResult   `json:"-"`
+	MergeResult          []*SearchResult   `json:"-"`
+	Entity               []string          `json:"-"`
+	EntityKBIDs          []string          `json:"-"`
+	EntityKnowledge      map[string]string `json:"-"`
+	GraphResult          *GraphData        `json:"-"`
+	UserContent          string            `json:"-"`
+	ChatResponse         *ChatResponse     `json:"-"`
+	ImageDescription     string            `json:"-"`
+	SystemPromptOverride string            `json:"-"`
+}
+
+// PipelineContext holds runtime context for the current pipeline execution.
+type PipelineContext struct {
+	EventBus      EventBusInterface `json:"-"`
+	MessageID     string            `json:"-"`
+	UserMessageID string            `json:"-"`
+}
+
+// ChatManage represents the full configuration, state and runtime context
+// for a chat pipeline execution. It embeds PipelineRequest (immutable config),
+// PipelineState (mutable intermediate data), and PipelineContext (runtime handles).
+type ChatManage struct {
+	PipelineRequest
+	PipelineState
+	PipelineContext
+}
+
+// NeedsRetrieval returns true when the current pipeline execution should
+// run the retrieval stages (search, rerank, merge, etc.).
+// For IntentWebSearch, retrieval is only needed if web search is enabled;
+// for all other intents it delegates to QueryIntent.NeedsKBRetrieval().
+func (c *ChatManage) NeedsRetrieval() bool {
+	if c.Intent == IntentWebSearch {
+		return c.WebSearchEnabled
+	}
+	return c.Intent.NeedsKBRetrieval()
+}
+
+// Clone creates a deep copy of the ChatManage object.
+// PipelineContext fields (EventBus, MessageID, etc.) are NOT copied because they
+// are per-execution handles that should not be shared across clones.
 func (c *ChatManage) Clone() *ChatManage {
-	// Deep copy knowledge base IDs slice
 	knowledgeBaseIDs := make([]string, len(c.KnowledgeBaseIDs))
 	copy(knowledgeBaseIDs, c.KnowledgeBaseIDs)
 
-	// Deep copy knowledge IDs slice
 	knowledgeIDs := make([]string, len(c.KnowledgeIDs))
 	copy(knowledgeIDs, c.KnowledgeIDs)
 
-	// Deep copy search targets slice
 	searchTargets := make(SearchTargets, len(c.SearchTargets))
 	for i, t := range c.SearchTargets {
 		if t != nil {
@@ -96,55 +149,47 @@ func (c *ChatManage) Clone() *ChatManage {
 	}
 
 	return &ChatManage{
-		Query:            c.Query,
-		RewriteQuery:     c.RewriteQuery,
-		SessionID:        c.SessionID,
-		KnowledgeBaseIDs: knowledgeBaseIDs,
-		KnowledgeIDs:     knowledgeIDs,
-		SearchTargets:    searchTargets,
-		VectorThreshold:  c.VectorThreshold,
-		KeywordThreshold: c.KeywordThreshold,
-		EmbeddingTopK:    c.EmbeddingTopK,
-		MaxRounds:        c.MaxRounds,
-		VectorDatabase:   c.VectorDatabase,
-		RerankModelID:    c.RerankModelID,
-		RerankTopK:       c.RerankTopK,
-		RerankThreshold:  c.RerankThreshold,
-		ChatModelID:      c.ChatModelID,
-		SummaryConfig: SummaryConfig{
-			MaxTokens:           c.SummaryConfig.MaxTokens,
-			RepeatPenalty:       c.SummaryConfig.RepeatPenalty,
-			TopK:                c.SummaryConfig.TopK,
-			TopP:                c.SummaryConfig.TopP,
-			FrequencyPenalty:    c.SummaryConfig.FrequencyPenalty,
-			PresencePenalty:     c.SummaryConfig.PresencePenalty,
-			Prompt:              c.SummaryConfig.Prompt,
-			ContextTemplate:     c.SummaryConfig.ContextTemplate,
-			NoMatchPrefix:       c.SummaryConfig.NoMatchPrefix,
-			Temperature:         c.SummaryConfig.Temperature,
-			Seed:                c.SummaryConfig.Seed,
-			MaxCompletionTokens: c.SummaryConfig.MaxCompletionTokens,
-			Thinking:            c.SummaryConfig.Thinking,
+		PipelineRequest: PipelineRequest{
+			Query:                    c.Query,
+			SessionID:                c.SessionID,
+			UserID:                   c.UserID,
+			EnableMemory:             c.EnableMemory,
+			MaxRounds:                c.MaxRounds,
+			KnowledgeBaseIDs:         knowledgeBaseIDs,
+			KnowledgeIDs:             knowledgeIDs,
+			SearchTargets:            searchTargets,
+			VectorThreshold:          c.VectorThreshold,
+			KeywordThreshold:         c.KeywordThreshold,
+			EmbeddingTopK:            c.EmbeddingTopK,
+			VectorDatabase:           c.VectorDatabase,
+			RerankModelID:            c.RerankModelID,
+			RerankTopK:               c.RerankTopK,
+			RerankThreshold:          c.RerankThreshold,
+			ChatModelID:              c.ChatModelID,
+			SummaryConfig:            c.SummaryConfig,
+			FallbackStrategy:         c.FallbackStrategy,
+			FallbackResponse:         c.FallbackResponse,
+			FallbackPrompt:           c.FallbackPrompt,
+			EnableRewrite:            c.EnableRewrite,
+			EnableQueryExpansion:     c.EnableQueryExpansion,
+			RewritePromptSystem:      c.RewritePromptSystem,
+			RewritePromptUser:        c.RewritePromptUser,
+			FAQPriorityEnabled:       c.FAQPriorityEnabled,
+			FAQDirectAnswerThreshold: c.FAQDirectAnswerThreshold,
+			FAQScoreBoost:            c.FAQScoreBoost,
+			Images:                   append([]string(nil), c.Images...),
+			VLMModelID:               c.VLMModelID,
+			ChatModelSupportsVision:  c.ChatModelSupportsVision,
+			TenantID:                 c.TenantID,
+			WebSearchEnabled:         c.WebSearchEnabled,
+			Language:                 c.Language,
 		},
-		FallbackStrategy:     c.FallbackStrategy,
-		FallbackResponse:     c.FallbackResponse,
-		FallbackPrompt:       c.FallbackPrompt,
-		RewritePromptSystem:  c.RewritePromptSystem,
-		RewritePromptUser:    c.RewritePromptUser,
-		EnableRewrite:        c.EnableRewrite,
-		EnableQueryExpansion: c.EnableQueryExpansion,
-		TenantID:             c.TenantID,
-		// FAQ Strategy Settings
-		FAQPriorityEnabled:       c.FAQPriorityEnabled,
-		FAQDirectAnswerThreshold: c.FAQDirectAnswerThreshold,
-		FAQScoreBoost:            c.FAQScoreBoost,
-		UserMessageID:            c.UserMessageID,
-		Images:                   append([]string(nil), c.Images...),
-		ImageDescription:         c.ImageDescription,
-		VLMModelID:               c.VLMModelID,
-		ChatModelSupportsVision:  c.ChatModelSupportsVision,
-		SkipKBSearch:             c.SkipKBSearch,
-		Language:                 c.Language,
+		PipelineState: PipelineState{
+			RewriteQuery:         c.RewriteQuery,
+			Intent:               c.Intent,
+			ImageDescription:     c.ImageDescription,
+			SystemPromptOverride: c.SystemPromptOverride,
+		},
 	}
 }
 
@@ -152,56 +197,87 @@ func (c *ChatManage) Clone() *ChatManage {
 type EventType string
 
 const (
-	LOAD_HISTORY           EventType = "load_history"           // Load conversation history without rewriting
-	REWRITE_QUERY          EventType = "rewrite_query"          // Query rewriting for better retrieval
-	CHUNK_SEARCH           EventType = "chunk_search"           // Search for relevant chunks
-	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"  // Parallel search: chunks + entities
-	ENTITY_SEARCH          EventType = "entity_search"          // Search for relevant entities
-	CHUNK_RERANK           EventType = "chunk_rerank"           // Rerank search results
-	CHUNK_MERGE            EventType = "chunk_merge"            // Merge similar chunks
-	DATA_ANALYSIS          EventType = "data_analysis"          // Data analysis for CSV/Excel files
-	INTO_CHAT_MESSAGE      EventType = "into_chat_message"      // Convert chunks into chat messages
-	CHAT_COMPLETION        EventType = "chat_completion"        // Generate chat completion
-	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream" // Stream chat completion
-	STREAM_FILTER          EventType = "stream_filter"          // Filter streaming output
-	FILTER_TOP_K           EventType = "filter_top_k"           // Keep only top K results
-	MEMORY_RETRIEVAL       EventType = "memory_retrieval"       // Retrieve memory context
-	MEMORY_STORAGE         EventType = "memory_storage"         // Store conversation to memory
+	LOAD_HISTORY           EventType = "load_history"
+	QUERY_UNDERSTAND       EventType = "query_understand"
+	CHUNK_SEARCH           EventType = "chunk_search"
+	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"
+	ENTITY_SEARCH          EventType = "entity_search"
+	CHUNK_RERANK           EventType = "chunk_rerank"
+	CHUNK_MERGE            EventType = "chunk_merge"
+	DATA_ANALYSIS          EventType = "data_analysis"
+	INTO_CHAT_MESSAGE      EventType = "into_chat_message"
+	CHAT_COMPLETION        EventType = "chat_completion"
+	CHAT_COMPLETION_STREAM EventType = "chat_completion_stream"
+	FILTER_TOP_K           EventType = "filter_top_k"
+	MEMORY_RETRIEVAL       EventType = "memory_retrieval"
+	MEMORY_STORAGE         EventType = "memory_storage"
 )
 
-// Pipline defines the sequence of events for different chat modes
-var Pipline = map[string][]EventType{
-	"chat": { // Simple chat without retrieval
+// PipelineBuilder dynamically assembles a pipeline as an ordered list of EventTypes.
+type PipelineBuilder struct {
+	stages []EventType
+}
+
+// NewPipelineBuilder returns an empty builder.
+func NewPipelineBuilder() *PipelineBuilder {
+	return &PipelineBuilder{}
+}
+
+// Add appends one or more stages unconditionally.
+func (b *PipelineBuilder) Add(stages ...EventType) *PipelineBuilder {
+	b.stages = append(b.stages, stages...)
+	return b
+}
+
+// AddIf appends stages only when the condition is true.
+func (b *PipelineBuilder) AddIf(cond bool, stages ...EventType) *PipelineBuilder {
+	if cond {
+		b.stages = append(b.stages, stages...)
+	}
+	return b
+}
+
+// Build returns the final event list.  The builder must not be reused.
+func (b *PipelineBuilder) Build() []EventType {
+	out := make([]EventType, len(b.stages))
+	copy(out, b.stages)
+	return out
+}
+
+// Pipeline defines the sequence of events for different chat modes.
+// Kept as a convenience lookup for callers that don't need dynamic composition.
+var Pipeline = map[string][]EventType{
+	"chat": {
 		CHAT_COMPLETION,
 	},
-	"chat_stream": { // Streaming chat without retrieval (no history)
+	"chat_stream": {
 		CHAT_COMPLETION_STREAM,
-		STREAM_FILTER,
 	},
-	"chat_history_stream": { // Streaming chat with conversation history
+	"chat_history_stream": {
 		LOAD_HISTORY,
 		MEMORY_RETRIEVAL,
 		CHAT_COMPLETION_STREAM,
-		STREAM_FILTER,
 		MEMORY_STORAGE,
 	},
-	"rag": { // Retrieval Augmented Generation
+	"rag": {
 		CHUNK_SEARCH,
 		CHUNK_RERANK,
 		CHUNK_MERGE,
 		INTO_CHAT_MESSAGE,
 		CHAT_COMPLETION,
 	},
-	"rag_stream": { // Streaming Retrieval Augmented Generation
-		LOAD_HISTORY,          // Load conversation history independently (works even when rewrite is disabled)
-		REWRITE_QUERY,
-		CHUNK_SEARCH_PARALLEL, // Parallel: CHUNK_SEARCH + ENTITY_SEARCH
+	"rag_stream": {
+		LOAD_HISTORY,
+		QUERY_UNDERSTAND,
+		CHUNK_SEARCH_PARALLEL,
 		CHUNK_RERANK,
 		CHUNK_MERGE,
 		FILTER_TOP_K,
 		DATA_ANALYSIS,
 		INTO_CHAT_MESSAGE,
 		CHAT_COMPLETION_STREAM,
-		STREAM_FILTER,
 	},
 }
+
+// Pipline is a deprecated alias for Pipeline (kept for backward compatibility).
+var Pipline = Pipeline

@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -60,7 +59,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		"message_count": len(chatMessages),
 		"system_prompt": chatMessages[0].Content,
 	})
-	logger.Infof(ctx, "user message: %s", chatMessages[len(chatMessages)-1].Content)
+	pipelineInfo(ctx, "Stream", "user_message", map[string]interface{}{
+		"content": chatMessages[len(chatMessages)-1].Content,
+	})
 	// EventBus is required for event-driven streaming
 	if chatManage.EventBus == nil {
 		pipelineError(ctx, "Stream", "eventbus_missing", map[string]interface{}{
@@ -98,117 +99,123 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		"session_id": chatManage.SessionID,
 	})
 
-	// Start goroutine to consume channel and emit events directly
-	// For non-agent mode, thinking content is embedded in answer stream with <think> tags
-	// This ensures consistent display between streaming and history loading
+	// Start goroutine to consume channel and emit events directly.
+	// For non-agent mode, thinking content is embedded in answer stream with <think> tags.
+	// The goroutine monitors ctx.Done() to avoid leaking when the context is cancelled
+	// and the upstream channel is not closed promptly.
 	go func() {
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		var finalContent string
 		var thinkingStarted bool
 		var thinkingEnded bool
 
-		for response := range responseChan {
-			// Handle error responses from the stream
-			if response.ResponseType == types.ResponseTypeError {
-				logger.Errorf(ctx, "Stream error received: %s", response.Content)
-				if err := eventBus.Emit(ctx, types.Event{
-					ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
-					Type:      types.EventType(event.EventError),
-					SessionID: chatManage.SessionID,
-					Data: event.ErrorData{
-						Error:     response.Content,
-						Stage:     "chat_completion_stream",
-						SessionID: chatManage.SessionID,
-					},
-				}); err != nil {
-					logger.Errorf(ctx, "Failed to emit error event: %v", err)
-				}
-				continue
-			}
-
-			// For non-agent mode: embed thinking content with <think> tags in answer stream
-			// This ensures the frontend uses deepThink.vue component consistently
-			if response.ResponseType == types.ResponseTypeThinking {
-				content := response.Content
-				// Add <think> tag at the beginning of thinking content
-				if !thinkingStarted {
-					content = "<think>" + content
-					thinkingStarted = true
-				}
-				// Add </think> tag at the end of thinking content
-				if response.Done && !thinkingEnded {
-					content = content + "</think>"
-					thinkingEnded = true
-				}
-				finalContent += content
-				if err := eventBus.Emit(ctx, types.Event{
-					ID:        answerID,
-					Type:      types.EventType(event.EventAgentFinalAnswer),
-					SessionID: chatManage.SessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: content,
-						Done:    false, // Thinking is not the final answer
-					},
-				}); err != nil {
-					logger.Errorf(ctx, "Failed to emit thinking as answer event: %v", err)
-				}
-				continue
-			}
-
-			// Emit event for each answer chunk
-			if response.ResponseType == types.ResponseTypeAnswer {
-				// If we had thinking but it wasn't explicitly ended, close the think tag
+		for {
+			select {
+			case <-ctx.Done():
 				if thinkingStarted && !thinkingEnded {
-					thinkingEnded = true
-					finalContent += "</think>"
-					if err := eventBus.Emit(ctx, types.Event{
+					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
 						Data: event.AgentFinalAnswerData{
 							Content: "</think>",
+							Done:    true,
+						},
+					})
+				}
+				pipelineInfo(ctx, "Stream", "context_cancelled", map[string]interface{}{
+					"session_id": chatManage.SessionID,
+				})
+				return
+
+			case response, ok := <-responseChan:
+				if !ok {
+					if thinkingStarted && !thinkingEnded {
+						finalContent += "</think>"
+						eventBus.Emit(ctx, types.Event{
+							ID:        answerID,
+							Type:      types.EventType(event.EventAgentFinalAnswer),
+							SessionID: chatManage.SessionID,
+							Data: event.AgentFinalAnswerData{
+								Content: "</think>",
+								Done:    true,
+							},
+						})
+					}
+					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
+						"session_id": chatManage.SessionID,
+					})
+					return
+				}
+
+				if response.ResponseType == types.ResponseTypeError {
+					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
+						"session_id": chatManage.SessionID,
+						"error":      response.Content,
+					})
+					eventBus.Emit(ctx, types.Event{
+						ID:        fmt.Sprintf("%s-error", uuid.New().String()[:8]),
+						Type:      types.EventType(event.EventError),
+						SessionID: chatManage.SessionID,
+						Data: event.ErrorData{
+							Error:     response.Content,
+							Stage:     "chat_completion_stream",
+							SessionID: chatManage.SessionID,
+						},
+					})
+					continue
+				}
+
+				if response.ResponseType == types.ResponseTypeThinking {
+					content := response.Content
+					if !thinkingStarted {
+						content = "<think>" + content
+						thinkingStarted = true
+					}
+					if response.Done && !thinkingEnded {
+						content = content + "</think>"
+						thinkingEnded = true
+					}
+					finalContent += content
+					eventBus.Emit(ctx, types.Event{
+						ID:        answerID,
+						Type:      types.EventType(event.EventAgentFinalAnswer),
+						SessionID: chatManage.SessionID,
+						Data: event.AgentFinalAnswerData{
+							Content: content,
 							Done:    false,
 						},
-					}); err != nil {
-						logger.Errorf(ctx, "Failed to emit think close tag: %v", err)
+					})
+					continue
+				}
+
+				if response.ResponseType == types.ResponseTypeAnswer {
+					if thinkingStarted && !thinkingEnded {
+						thinkingEnded = true
+						finalContent += "</think>"
+						eventBus.Emit(ctx, types.Event{
+							ID:        answerID,
+							Type:      types.EventType(event.EventAgentFinalAnswer),
+							SessionID: chatManage.SessionID,
+							Data: event.AgentFinalAnswerData{
+								Content: "</think>",
+								Done:    false,
+							},
+						})
 					}
-				}
-				finalContent += response.Content
-				if err := eventBus.Emit(ctx, types.Event{
-					ID:        answerID,
-					Type:      types.EventType(event.EventAgentFinalAnswer),
-					SessionID: chatManage.SessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: response.Content,
-						Done:    response.Done,
-					},
-				}); err != nil {
-					logger.Errorf(ctx, "Failed to emit answer event: %v", err)
+					finalContent += response.Content
+					eventBus.Emit(ctx, types.Event{
+						ID:        answerID,
+						Type:      types.EventType(event.EventAgentFinalAnswer),
+						SessionID: chatManage.SessionID,
+						Data: event.AgentFinalAnswerData{
+							Content: response.Content,
+							Done:    response.Done,
+						},
+					})
 				}
 			}
 		}
-
-		// Compensate for unclosed <think> tag when stream ends unexpectedly
-		// (e.g., context cancelled, upstream error) without an answer arriving.
-		if thinkingStarted && !thinkingEnded {
-			thinkingEnded = true
-			finalContent += "</think>"
-			if err := eventBus.Emit(ctx, types.Event{
-				ID:        answerID,
-				Type:      types.EventType(event.EventAgentFinalAnswer),
-				SessionID: chatManage.SessionID,
-				Data: event.AgentFinalAnswerData{
-					Content: "</think>",
-					Done:    true,
-				},
-			}); err != nil {
-				logger.Errorf(ctx, "Failed to emit think close tag on stream end: %v", err)
-			}
-		}
-
-		pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
-			"session_id": chatManage.SessionID,
-		})
 	}()
 
 	return next()

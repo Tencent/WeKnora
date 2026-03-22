@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func (p *MemoryPlugin) handleRetrieval(
 			memoryStr += fmt.Sprintf("- %s (Summary: %s)\n", ep.CreatedAt.Format("2006-01-02"), ep.Summary)
 		}
 		chatManage.UserContent += memoryStr
-		logger.Info(ctx, "Retrieved memory: %s", memoryStr)
+		logger.Infof(ctx, "Retrieved memory: %s", memoryStr)
 	}
 	logger.Info(ctx, "End to retrieve memory")
 

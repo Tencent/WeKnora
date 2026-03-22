@@ -1,8 +1,12 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
+	"regexp"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -10,6 +14,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
@@ -51,11 +57,16 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 	return chatModel, opt, nil
 }
 
-// prepareMessagesWithHistory prepare complete messages including history
+// prepareMessagesWithHistory prepare complete messages including history.
+// When SystemPromptOverride is set (e.g. by intent-specific prompt logic),
+// it takes precedence over the default SummaryConfig.Prompt.
 func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
-	// Replace placeholders in system prompt
-	systemPrompt := renderSystemPromptPlaceholders(chatManage.SummaryConfig.Prompt, chatManage.Language)
-	
+	base := chatManage.SummaryConfig.Prompt
+	if chatManage.SystemPromptOverride != "" {
+		base = chatManage.SystemPromptOverride
+	}
+	systemPrompt := renderSystemPromptPlaceholders(base, chatManage.Language)
+
 	chatMessages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
 	}
@@ -75,6 +86,59 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	chatMessages = append(chatMessages, userMsg)
 
 	return chatMessages
+}
+
+// loadAndProcessHistory fetches recent messages, groups them into Q&A pairs,
+// strips <think> tags from assistant answers, sorts by recency, and limits to maxRounds.
+// fetchCount controls how many raw messages to fetch (typically maxRounds*2+10).
+func loadAndProcessHistory(
+	ctx context.Context,
+	messageService interfaces.MessageService,
+	sessionID string,
+	maxRounds int,
+	fetchCount int,
+) ([]*types.History, error) {
+	history, err := messageService.GetRecentMessagesBySession(ctx, sessionID, fetchCount)
+	if err != nil {
+		return nil, err
+	}
+
+	historyMap := make(map[string]*types.History)
+	for _, message := range history {
+		h, ok := historyMap[message.RequestID]
+		if !ok {
+			h = &types.History{}
+		}
+		if message.Role == "user" {
+			h.Query = message.Content
+			h.CreateAt = message.CreatedAt
+			if desc := extractImageCaptions(message.Images); desc != "" {
+				h.Query += "\n\n[用户上传图片内容]\n" + desc
+			}
+		} else {
+			h.Answer = regThinkTags.ReplaceAllString(message.Content, "")
+			h.KnowledgeReferences = message.KnowledgeReferences
+		}
+		historyMap[message.RequestID] = h
+	}
+
+	historyList := make([]*types.History, 0, len(historyMap))
+	for _, h := range historyMap {
+		if h.Answer != "" && h.Query != "" {
+			historyList = append(historyList, h)
+		}
+	}
+
+	sort.Slice(historyList, func(i, j int) bool {
+		return historyList[i].CreateAt.After(historyList[j].CreateAt)
+	})
+
+	if len(historyList) > maxRounds {
+		historyList = historyList[:maxRounds]
+	}
+
+	slices.Reverse(historyList)
+	return historyList, nil
 }
 
 // extractImageCaptions concatenates non-empty Caption fields from stored
@@ -100,4 +164,65 @@ func renderSystemPromptPlaceholders(prompt string, language ...string) string {
 		vals["language"] = language[0]
 	}
 	return types.RenderPromptPlaceholders(prompt, vals)
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency utilities
+// ---------------------------------------------------------------------------
+
+// ParallelTask represents a named unit of concurrent work.
+type ParallelTask struct {
+	Name string
+	Run  func() *PluginError
+}
+
+// RunParallel executes tasks concurrently.
+// Returns a map of task name → error for tasks that returned non-nil errors.
+func RunParallel(tasks ...ParallelTask) map[string]*PluginError {
+	errs := make(map[string]*PluginError)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	wg.Add(len(tasks))
+	for _, task := range tasks {
+		go func(t ParallelTask) {
+			defer wg.Done()
+			if err := t.Run(); err != nil {
+				mu.Lock()
+				errs[t.Name] = err
+				mu.Unlock()
+			}
+		}(task)
+	}
+	wg.Wait()
+	return errs
+}
+
+// ParallelMap applies fn to each element of items concurrently (up to
+// maxWorkers goroutines) and returns results in the same order as items.
+// If maxWorkers <= 0, concurrency is unbounded (one goroutine per item).
+func ParallelMap[T, R any](items []T, maxWorkers int, fn func(int, T) R) []R {
+	n := len(items)
+	if n == 0 {
+		return nil
+	}
+	results := make([]R, n)
+
+	if maxWorkers <= 0 || maxWorkers > n {
+		maxWorkers = n
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxWorkers)
+
+	for i, item := range items {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, it T) {
+			defer func() { <-sem; wg.Done() }()
+			results[idx] = fn(idx, it)
+		}(i, item)
+	}
+	wg.Wait()
+	return results
 }

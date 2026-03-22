@@ -126,7 +126,6 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 
 	// Check model status
 	if model.Status == types.ModelStatusActive {
-		logger.Info(ctx, "Model is active and ready to use")
 		return model, nil
 	}
 

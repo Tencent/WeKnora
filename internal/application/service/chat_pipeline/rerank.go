@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -37,6 +37,9 @@ func (p *PluginRerank) ActivationEvents() []types.EventType {
 func (p *PluginRerank) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
+	if !chatManage.NeedsRetrieval() {
+		return next()
+	}
 	pipelineInfo(ctx, "Rerank", "input", map[string]interface{}{
 		"session_id":    chatManage.SessionID,
 		"candidate_cnt": len(chatManage.SearchResult),
@@ -114,10 +117,10 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 				degradedThreshold = 0.3
 			}
 			pipelineWarn(ctx, "Rerank", "threshold_degrade", map[string]interface{}{
-				"original":       originalThreshold,
-				"degraded":       degradedThreshold,
-				"candidate_cnt":  len(candidatesToRerank),
-				"reason":         "no results above original threshold, retrying with lower threshold",
+				"original":      originalThreshold,
+				"degraded":      degradedThreshold,
+				"candidate_cnt": len(candidatesToRerank),
+				"reason":        "no results above original threshold, retrying with lower threshold",
 			})
 			chatManage.RerankThreshold = degradedThreshold
 			rerankResp = p.rerank(ctx, chatManage, rerankModel, chatManage.RewriteQuery, passages, candidatesToRerank)
@@ -356,11 +359,10 @@ func applyMMR(
 		"candidates": len(results),
 	})
 
-	// Pre-compute all token sets upfront (optimization)
-	allTokenSets := make([]map[string]struct{}, len(results))
-	for i, r := range results {
-		allTokenSets[i] = searchutil.TokenizeSimple(getEnrichedPassage(ctx, r))
-	}
+	// Pre-compute all token sets concurrently (CPU-bound tokenization)
+	allTokenSets := ParallelMap(results, 0, func(i int, r *types.SearchResult) map[string]struct{} {
+		return searchutil.TokenizeSimple(getEnrichedPassage(ctx, r))
+	})
 
 	selected := make([]*types.SearchResult, 0, k)
 	selectedTokenSets := make([]map[string]struct{}, 0, k)

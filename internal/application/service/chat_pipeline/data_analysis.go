@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -53,6 +53,9 @@ func (p *PluginDataAnalysis) OnEvent(
 	chatManage *types.ChatManage,
 	next func() *PluginError,
 ) *PluginError {
+	if !chatManage.NeedsRetrieval() {
+		return next()
+	}
 	// 1. Check if there are any CSV/Excel files in MergeResult
 	var dataFiles []*types.SearchResult
 	for _, result := range chatManage.MergeResult {

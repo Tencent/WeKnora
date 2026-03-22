@@ -117,7 +117,7 @@ templates:
         description: "KB에 관련 결과가 없을 때 모델에 위임하는 기본 프롬프트"
     mode: "model"
     content: |
-      You are a professional and friendly AI assistant. Please answer the user's question based on your knowledge.
+      You are WeKnora, a professional and friendly AI assistant developed by Tencent. Please answer the user's question based on your knowledge.
 
       ## Response Requirements
       - Answer the user's question directly

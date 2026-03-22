@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
-	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
 )
 
 // KnowledgeQA performs knowledge base question answering with LLM summarization
@@ -91,40 +90,45 @@ func (s *sessionService) KnowledgeQA(
 	userID, _ := types.UserIDFromContext(ctx)
 
 	chatManage := &types.ChatManage{
-		Query:                req.Query,
-		RewriteQuery:         req.Query,
-		SessionID:            req.Session.ID,
-		UserID:               userID,
-		MessageID:            req.AssistantMessageID,
-		KnowledgeBaseIDs:     knowledgeBaseIDs,
-		KnowledgeIDs:         knowledgeIDs,
-		SearchTargets:        searchTargets,
-		VectorThreshold:      s.cfg.Conversation.VectorThreshold,
-		KeywordThreshold:     s.cfg.Conversation.KeywordThreshold,
-		EmbeddingTopK:        s.cfg.Conversation.EmbeddingTopK,
-		RerankTopK:           s.cfg.Conversation.RerankTopK,
-		RerankThreshold:      s.cfg.Conversation.RerankThreshold,
-		MaxRounds:            s.cfg.Conversation.MaxRounds,
-		ChatModelID:          chatModelID,
-		SummaryConfig:        summaryConfig,
-		FallbackStrategy:     fallbackStrategy,
-		FallbackResponse:     s.cfg.Conversation.FallbackResponse,
-		FallbackPrompt:       s.cfg.Conversation.FallbackPrompt,
-		EventBus:             eventBus.AsEventBusInterface(),
-		WebSearchEnabled:     req.WebSearchEnabled,
-		EnableMemory:         req.EnableMemory,
-		TenantID:             retrievalTenantID,
-		RewritePromptSystem:  s.cfg.Conversation.RewritePromptSystem,
-		RewritePromptUser:    s.cfg.Conversation.RewritePromptUser,
-		EnableRewrite:        s.cfg.Conversation.EnableRewrite,
-		EnableQueryExpansion: s.cfg.Conversation.EnableQueryExpansion,
-		// Image support
-		UserMessageID:           req.UserMessageID,
-		Images:                  req.ImageURLs,
-		ImageDescription:        req.ImageDescription,
-		VLMModelID:              vlmModelID,
-		ChatModelSupportsVision: chatModelSupportsVision,
-		Language:                types.LanguageNameFromContext(ctx),
+		PipelineRequest: types.PipelineRequest{
+			Query:                   req.Query,
+			SessionID:               req.Session.ID,
+			UserID:                  userID,
+			EnableMemory:            req.EnableMemory,
+			MaxRounds:               s.cfg.Conversation.MaxRounds,
+			KnowledgeBaseIDs:        knowledgeBaseIDs,
+			KnowledgeIDs:            knowledgeIDs,
+			SearchTargets:           searchTargets,
+			VectorThreshold:         s.cfg.Conversation.VectorThreshold,
+			KeywordThreshold:        s.cfg.Conversation.KeywordThreshold,
+			EmbeddingTopK:           s.cfg.Conversation.EmbeddingTopK,
+			RerankTopK:              s.cfg.Conversation.RerankTopK,
+			RerankThreshold:         s.cfg.Conversation.RerankThreshold,
+			ChatModelID:             chatModelID,
+			SummaryConfig:           summaryConfig,
+			FallbackStrategy:        fallbackStrategy,
+			FallbackResponse:        s.cfg.Conversation.FallbackResponse,
+			FallbackPrompt:          s.cfg.Conversation.FallbackPrompt,
+			EnableRewrite:           s.cfg.Conversation.EnableRewrite,
+			EnableQueryExpansion:    s.cfg.Conversation.EnableQueryExpansion,
+			RewritePromptSystem:     s.cfg.Conversation.RewritePromptSystem,
+			RewritePromptUser:       s.cfg.Conversation.RewritePromptUser,
+			WebSearchEnabled:        req.WebSearchEnabled,
+			TenantID:                retrievalTenantID,
+			Images:                  req.ImageURLs,
+			VLMModelID:              vlmModelID,
+			ChatModelSupportsVision: chatModelSupportsVision,
+			Language:                types.LanguageNameFromContext(ctx),
+		},
+		PipelineState: types.PipelineState{
+			RewriteQuery:     req.Query,
+			ImageDescription: req.ImageDescription,
+		},
+		PipelineContext: types.PipelineContext{
+			EventBus:      eventBus.AsEventBusInterface(),
+			MessageID:     req.AssistantMessageID,
+			UserMessageID: req.UserMessageID,
+		},
 	}
 
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
@@ -132,35 +136,42 @@ func (s *sessionService) KnowledgeQA(
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
 
 	// Determine pipeline based on knowledge bases availability and web search setting
-	// If no knowledge bases are selected AND web search is disabled, use pure chat pipeline
-	// Otherwise use rag_stream pipeline (which handles both KB search and web search)
+	hasKB := len(knowledgeBaseIDs) > 0 || len(knowledgeIDs) > 0
+	needsRAG := hasKB || req.WebSearchEnabled
+	hasHistory := chatManage.MaxRounds > 0
+
 	var pipeline []types.EventType
-	if len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 && !req.WebSearchEnabled {
-		logger.Info(ctx, "No knowledge bases selected and web search disabled, using chat pipeline")
-		// For pure chat, UserContent is the Query (since INTO_CHAT_MESSAGE is skipped)
-		// Only append image text description for non-vision models; vision models see images directly
+	if !needsRAG {
+		// Pure chat — no retrieval needed.
 		userContent := req.Query
 		if req.ImageDescription != "" && !chatModelSupportsVision {
 			userContent += "\n\n[用户上传图片内容]\n" + req.ImageDescription
 		}
 		chatManage.UserContent = userContent
 
-		// Use chat_history_stream if multi-turn is enabled, otherwise use chat_stream
-		if chatManage.MaxRounds > 0 {
-			logger.Infof(ctx, "Multi-turn enabled with maxRounds=%d, using chat_history_stream pipeline", chatManage.MaxRounds)
-			pipeline = types.Pipline["chat_history_stream"]
-		} else {
-			logger.Info(ctx, "Multi-turn disabled, using chat_stream pipeline")
-			pipeline = types.Pipline["chat_stream"]
-		}
+		pipeline = types.NewPipelineBuilder().
+			AddIf(hasHistory, types.LOAD_HISTORY).
+			AddIf(chatManage.EnableMemory, types.MEMORY_RETRIEVAL).
+			Add(types.CHAT_COMPLETION_STREAM).
+			AddIf(chatManage.EnableMemory, types.MEMORY_STORAGE).
+			Build()
 	} else {
-		if req.WebSearchEnabled && len(knowledgeBaseIDs) == 0 && len(knowledgeIDs) == 0 {
-			logger.Info(ctx, "Web search enabled without knowledge bases, using rag_stream pipeline for web search only")
-		} else {
-			logger.Info(ctx, "Knowledge bases selected, using rag_stream pipeline")
-		}
-		pipeline = types.Pipline["rag_stream"]
+		// RAG — dynamically assemble based on feature flags.
+		pipeline = types.NewPipelineBuilder().
+			Add(types.LOAD_HISTORY).
+			Add(types.QUERY_UNDERSTAND).
+			Add(types.CHUNK_SEARCH_PARALLEL).
+			Add(types.CHUNK_RERANK).
+			Add(types.CHUNK_MERGE).
+			Add(types.FILTER_TOP_K).
+			Add(types.DATA_ANALYSIS).
+			Add(types.INTO_CHAT_MESSAGE).
+			Add(types.CHAT_COMPLETION_STREAM).
+			Build()
 	}
+
+	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, webSearch=%v, history=%v",
+		len(pipeline), hasKB, req.WebSearchEnabled, hasHistory)
 
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
@@ -465,57 +476,54 @@ func (s *sessionService) buildSearchTargets(
 func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 	chatManage *types.ChatManage, eventList []types.EventType,
 ) error {
-	ctx, span := tracing.ContextWithSpan(ctx, "SessionService.KnowledgeQAByEvent")
-	defer span.End()
-
 	logger.Info(ctx, "Start processing knowledge base question answering through events")
-	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s,  query: %s",
+	logger.Infof(ctx, "Knowledge base question answering parameters, session ID: %s, query: %s",
 		chatManage.SessionID, chatManage.Query)
 
-	// Prepare method list for logging and tracing
-	methods := []string{}
-	for _, event := range eventList {
-		methods = append(methods, string(event))
+	methods := make([]string, len(eventList))
+	for i, event := range eventList {
+		methods[i] = string(event)
 	}
-
-	// Set up tracing attributes
 	logger.Infof(ctx, "Trigger event list: %v", methods)
-	span.SetAttributes(
-		attribute.String("request_id", func() string { id, _ := types.RequestIDFromContext(ctx); return id }()),
-		attribute.String("query", chatManage.Query),
-		attribute.String("method", strings.Join(methods, ",")),
-	)
 
-	// Process each event in sequence
+	pipelineStart := time.Now()
 	for _, eventType := range eventList {
-		logger.Infof(ctx, "Starting to trigger event: %v", eventType)
+		stageStart := time.Now()
 		err := s.eventManager.Trigger(ctx, eventType, chatManage)
+		stageDuration := time.Since(stageStart)
 
-		// Handle case where search returns no results
-		if err == chatpipline.ErrSearchNothing {
-			logger.Warnf(
-				ctx,
-				"Event %v triggered, search result is empty, using fallback response, strategy: %v",
-				eventType,
-				chatManage.FallbackStrategy,
-			)
+		if err == chatpipeline.ErrSearchNothing {
+			common.PipelineWarn(ctx, "Pipeline", "stage_fallback", map[string]interface{}{
+				"event":       string(eventType),
+				"duration_ms": stageDuration.Milliseconds(),
+				"reason":      "search_nothing",
+				"strategy":    string(chatManage.FallbackStrategy),
+			})
 			s.handleFallbackResponse(ctx, chatManage)
 			return nil
 		}
 
-		// Handle other errors
 		if err != nil {
-			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
-				eventType, err.ErrorType, err.Description, err.Err)
-			span.RecordError(err.Err)
-			span.SetStatus(codes.Error, err.Description)
-			span.SetAttributes(attribute.String("error_type", err.ErrorType))
+			common.PipelineError(ctx, "Pipeline", "stage_failed", map[string]interface{}{
+				"event":       string(eventType),
+				"duration_ms": stageDuration.Milliseconds(),
+				"error_type":  err.ErrorType,
+				"description": err.Description,
+			})
 			return err.Err
 		}
-		logger.Infof(ctx, "Event %v triggered successfully", eventType)
+
+		common.PipelineInfo(ctx, "Pipeline", "stage_complete", map[string]interface{}{
+			"event":       string(eventType),
+			"duration_ms": stageDuration.Milliseconds(),
+		})
 	}
 
-	logger.Info(ctx, "All events triggered successfully")
+	common.PipelineInfo(ctx, "Pipeline", "all_stages_complete", map[string]interface{}{
+		"session_id":        chatManage.SessionID,
+		"total_stages":      len(eventList),
+		"total_duration_ms": time.Since(pipelineStart).Milliseconds(),
+	})
 	return nil
 }
 
@@ -557,18 +565,22 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	chatManage := &types.ChatManage{
-		Query:            query,
-		RewriteQuery:     query,
-		UserID:           userID,
-		KnowledgeBaseIDs: knowledgeBaseIDs,
-		KnowledgeIDs:     knowledgeIDs,
-		SearchTargets:    searchTargets,
-		MaxRounds:        s.cfg.Conversation.MaxRounds,
-		EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
-		VectorThreshold:  rc.GetEffectiveVectorThreshold(),
-		KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
-		RerankTopK:       rc.GetEffectiveRerankTopK(),
-		RerankThreshold:  rc.GetEffectiveRerankThreshold(),
+		PipelineRequest: types.PipelineRequest{
+			Query:            query,
+			UserID:           userID,
+			KnowledgeBaseIDs: knowledgeBaseIDs,
+			KnowledgeIDs:     knowledgeIDs,
+			SearchTargets:    searchTargets,
+			MaxRounds:        s.cfg.Conversation.MaxRounds,
+			EmbeddingTopK:    rc.GetEffectiveEmbeddingTopK(),
+			VectorThreshold:  rc.GetEffectiveVectorThreshold(),
+			KeywordThreshold: rc.GetEffectiveKeywordThreshold(),
+			RerankTopK:       rc.GetEffectiveRerankTopK(),
+			RerankThreshold:  rc.GetEffectiveRerankThreshold(),
+		},
+		PipelineState: types.PipelineState{
+			RewriteQuery: query,
+		},
 	}
 
 	// Get default models
@@ -601,42 +613,20 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 		types.FILTER_TOP_K, // Filter top K results
 	}
 
-	ctx, span := tracing.ContextWithSpan(ctx, "SessionService.SearchKnowledge")
-	defer span.End()
+	logger.Infof(ctx, "Trigger search event list: %v", searchEvents)
 
-	// Prepare method list for logging and tracing
-	methods := []string{}
-	for _, event := range searchEvents {
-		methods = append(methods, string(event))
-	}
-
-	// Set up tracing attributes
-	logger.Infof(ctx, "Trigger search event list: %v", methods)
-	span.SetAttributes(
-		attribute.String("query", query),
-		attribute.StringSlice("knowledge_base_ids", knowledgeBaseIDs),
-		attribute.StringSlice("knowledge_ids", knowledgeIDs),
-		attribute.String("method", strings.Join(methods, ",")),
-	)
-
-	// Process each search event in sequence
 	for _, event := range searchEvents {
 		logger.Infof(ctx, "Starting to trigger search event: %v", event)
 		err := s.eventManager.Trigger(ctx, event, chatManage)
 
-		// Handle case where search returns no results
-		if err == chatpipline.ErrSearchNothing {
+		if err == chatpipeline.ErrSearchNothing {
 			logger.Warnf(ctx, "Event %v triggered, search result is empty", event)
 			return []*types.SearchResult{}, nil
 		}
 
-		// Handle other errors
 		if err != nil {
 			logger.Errorf(ctx, "Event triggering failed, event: %v, error type: %s, description: %s, error: %v",
 				event, err.ErrorType, err.Description, err.Err)
-			span.RecordError(err.Err)
-			span.SetStatus(codes.Error, err.Description)
-			span.SetAttributes(attribute.String("error_type", err.ErrorType))
 			return nil, err.Err
 		}
 		logger.Infof(ctx, "Event %v triggered successfully", event)

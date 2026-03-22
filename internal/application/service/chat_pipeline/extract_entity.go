@@ -1,4 +1,4 @@
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
@@ -47,14 +47,13 @@ func NewPluginExtractEntity(
 	return res
 }
 
-// ActivationEvents returns the list of event types this plugin responds to
-// This plugin only responds to REWRITE_QUERY events
+// ActivationEvents returns the list of event types this plugin responds to.
 func (p *PluginExtractEntity) ActivationEvents() []types.EventType {
-	return []types.EventType{types.REWRITE_QUERY}
+	return []types.EventType{types.QUERY_UNDERSTAND}
 }
 
 // OnEvent processes triggered events
-// When receiving a REWRITE_QUERY event, it rewrites the user query using conversation history and the language model
+// When receiving a QUERY_UNDERSTAND event, it extracts entities from the query
 func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {

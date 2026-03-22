@@ -42,7 +42,7 @@ import (
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
-	chatpipline "github.com/Tencent/WeKnora/internal/application/service/chat_pipline"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
@@ -203,23 +203,21 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
-	must(container.Provide(chatpipline.NewEventManager))
-	must(container.Invoke(chatpipline.NewPluginTracing))
-	must(container.Invoke(chatpipline.NewPluginSearch))
-	must(container.Invoke(chatpipline.NewPluginRerank))
-	must(container.Invoke(chatpipline.NewPluginMerge))
-	must(container.Invoke(chatpipline.NewPluginDataAnalysis))
-	must(container.Invoke(chatpipline.NewPluginIntoChatMessage))
-	must(container.Invoke(chatpipline.NewPluginChatCompletion))
-	must(container.Invoke(chatpipline.NewPluginChatCompletionStream))
-	must(container.Invoke(chatpipline.NewPluginStreamFilter))
-	must(container.Invoke(chatpipline.NewPluginFilterTopK))
-	must(container.Invoke(chatpipline.NewPluginRewrite))
-	must(container.Invoke(chatpipline.NewPluginLoadHistory))
-	must(container.Invoke(chatpipline.NewPluginExtractEntity))
-	must(container.Invoke(chatpipline.NewPluginSearchEntity))
-	must(container.Invoke(chatpipline.NewPluginSearchParallel))
-	must(container.Invoke(chatpipline.NewMemoryPlugin))
+	must(container.Provide(chatpipeline.NewEventManager))
+	must(container.Invoke(chatpipeline.NewPluginSearch))
+	must(container.Invoke(chatpipeline.NewPluginRerank))
+	must(container.Invoke(chatpipeline.NewPluginMerge))
+	must(container.Invoke(chatpipeline.NewPluginDataAnalysis))
+	must(container.Invoke(chatpipeline.NewPluginIntoChatMessage))
+	must(container.Invoke(chatpipeline.NewPluginChatCompletion))
+	must(container.Invoke(chatpipeline.NewPluginChatCompletionStream))
+	must(container.Invoke(chatpipeline.NewPluginFilterTopK))
+	must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))
+	must(container.Invoke(chatpipeline.NewPluginLoadHistory))
+	must(container.Invoke(chatpipeline.NewPluginExtractEntity))
+	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
+	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
+	must(container.Invoke(chatpipeline.NewMemoryPlugin))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// HTTP handlers layer

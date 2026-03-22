@@ -317,7 +317,7 @@ onBeforeUnmount(() => {
 .content-wrapper {
     background: var(--td-bg-color-container);
     border-radius: 6px;
-    padding: 8px 12px;
+    padding: 8px 0px;
     transition: all 0.2s ease;
 }
 

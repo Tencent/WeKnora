@@ -1,13 +1,9 @@
-// Package chatpipline provides chat pipeline processing capabilities
-// Including query rewriting, history processing, model invocation and other features
-package chatpipline
+package chatpipeline
 
 import (
 	"context"
 	"encoding/json"
 	"regexp"
-	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -19,35 +15,30 @@ import (
 	"github.com/google/uuid"
 )
 
-// PluginRewrite is a plugin for rewriting user queries
-// It uses historical dialog context and large language models to optimize the user's original query
-type PluginRewrite struct {
-	modelService   interfaces.ModelService   // Model service for calling large language models
-	messageService interfaces.MessageService // Message service for retrieving historical messages
-	config         *config.Config            // System configuration
+// PluginQueryUnderstand performs query rewriting and intent classification.
+// It uses conversation history and an LLM to optimise the user's original query
+// and determine the downstream pipeline behaviour.
+type PluginQueryUnderstand struct {
+	modelService   interfaces.ModelService
+	messageService interfaces.MessageService
+	config         *config.Config
 }
 
-// reg is a regular expression used to match and remove content between <think></think> tags
-var reg = regexp.MustCompile(`(?s)<think>.*?</think>`)
 var rewriteImageSepPattern = regexp.MustCompile(`(?s)^(.*?)\s*\n?---\n(.*)$`)
 
-const (
-	noSearchPrefix = "[NO_SEARCH]"
-)
-
-type rewriteOutput struct {
-	RewriteQuery     string
-	SkipKBSearch     bool
-	ImageDescription string
+type queryUnderstandOutput struct {
+	RewriteQuery     string            `json:"rewrite_query"`
+	Intent           types.QueryIntent `json:"intent"`
+	ImageDescription string            `json:"image_description"`
 }
 
-// NewPluginRewrite creates a new query rewriting plugin instance
-// Also registers the plugin with the event manager
-func NewPluginRewrite(eventManager *EventManager,
+// NewPluginQueryUnderstand creates a new query-understanding plugin instance
+// and registers it with the event manager.
+func NewPluginQueryUnderstand(eventManager *EventManager,
 	modelService interfaces.ModelService, messageService interfaces.MessageService,
 	config *config.Config,
-) *PluginRewrite {
-	res := &PluginRewrite{
+) *PluginQueryUnderstand {
+	res := &PluginQueryUnderstand{
 		modelService:   modelService,
 		messageService: messageService,
 		config:         config,
@@ -56,10 +47,9 @@ func NewPluginRewrite(eventManager *EventManager,
 	return res
 }
 
-// ActivationEvents returns the list of event types this plugin responds to
-// This plugin only responds to REWRITE_QUERY events
-func (p *PluginRewrite) ActivationEvents() []types.EventType {
-	return []types.EventType{types.REWRITE_QUERY}
+// ActivationEvents returns the list of event types this plugin responds to.
+func (p *PluginQueryUnderstand) ActivationEvents() []types.EventType {
+	return []types.EventType{types.QUERY_UNDERSTAND}
 }
 
 // OnEvent processes triggered events.
@@ -67,24 +57,22 @@ func (p *PluginRewrite) ActivationEvents() []types.EventType {
 //   - Text only: standard rewrite + intent classification (uses chat model)
 //   - Text + images: multimodal rewrite + intent + image description (uses VLM/vision model)
 //   - Images only: multimodal analysis + intent + image description (uses VLM/vision model)
-func (p *PluginRewrite) OnEvent(ctx context.Context,
+func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
 	chatManage.RewriteQuery = chatManage.Query
 
 	hasImages := len(chatManage.Images) > 0
 	needRewrite := chatManage.EnableRewrite
-	// When images are present we always run the step for image analysis + intent,
-	// even without history or rewrite enabled.
 	if !needRewrite && !hasImages {
-		pipelineInfo(ctx, "Rewrite", "skip", map[string]interface{}{
+		pipelineInfo(ctx, "QueryUnderstand", "skip", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"reason":     "rewrite_disabled_no_images",
 		})
 		return next()
 	}
 
-	pipelineInfo(ctx, "Rewrite", "input", map[string]interface{}{
+	pipelineInfo(ctx, "QueryUnderstand", "input", map[string]interface{}{
 		"session_id":     chatManage.SessionID,
 		"tenant_id":      chatManage.TenantID,
 		"user_query":     chatManage.Query,
@@ -93,13 +81,10 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 	})
 
 	// --- Load and prepare conversation history ---
-	// If history was already loaded by a prior LOAD_HISTORY step, reuse it
-	// instead of fetching again. This allows rag_stream to work correctly
-	// even when rewrite is disabled.
 	var historyList []*types.History
 	if len(chatManage.History) > 0 {
 		historyList = chatManage.History
-		pipelineInfo(ctx, "Rewrite", "history_reused", map[string]interface{}{
+		pipelineInfo(ctx, "QueryUnderstand", "history_reused", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"rounds":     len(historyList),
 		})
@@ -107,19 +92,10 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 		historyList = p.loadHistory(ctx, chatManage)
 	}
 
-	// Skip if there's nothing to do: no history to rewrite AND no images to analyse
-	if len(historyList) == 0 && !hasImages {
-		pipelineInfo(ctx, "Rewrite", "skip", map[string]interface{}{
-			"session_id": chatManage.SessionID,
-			"reason":     "empty_history_no_images",
-		})
-		return next()
-	}
-
 	// --- Select the appropriate model ---
 	rewriteModel, useImages := p.selectModel(ctx, chatManage, hasImages)
 	if rewriteModel == nil {
-		pipelineError(ctx, "Rewrite", "get_model", map[string]interface{}{
+		pipelineError(ctx, "QueryUnderstand", "get_model", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
 		return next()
@@ -128,7 +104,6 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 	// --- Build prompts ---
 	systemContent, userContent := p.buildPrompts(chatManage, historyList)
 
-	// Build user message (with images when using a vision-capable model)
 	userMsg := chat.Message{Role: "user", Content: userContent}
 	if useImages {
 		userMsg.Images = chatManage.Images
@@ -178,7 +153,7 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 				},
 			})
 		}
-		pipelineError(ctx, "Rewrite", "model_call", map[string]interface{}{
+		pipelineError(ctx, "QueryUnderstand", "model_call", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 			"error":      err.Error(),
 		})
@@ -201,30 +176,42 @@ func (p *PluginRewrite) OnEvent(ctx context.Context,
 	}
 
 	// --- Parse structured output ---
-	p.parseRewriteOutput(chatManage, response.Content)
+	p.parseOutput(chatManage, response.Content)
 
-	// Persist image description back to the user message so that future turns
-	// can see it when loading conversation history.
+	// Persist image description asynchronously — this DB write does not affect
+	// the current pipeline result, so it can run in the background.
 	if chatManage.ImageDescription != "" && chatManage.UserMessageID != "" {
-		p.updateUserMessageImageCaption(ctx, chatManage)
+		go p.updateUserMessageImageCaption(context.WithoutCancel(ctx), chatManage)
 	}
 
-	pipelineInfo(ctx, "Rewrite", "output", map[string]interface{}{
-		"session_id":      chatManage.SessionID,
-		"rewrite_query":   chatManage.RewriteQuery,
-		"skip_kb_search":  chatManage.SkipKBSearch,
-		"has_image_desc":  chatManage.ImageDescription != "",
-		"original_output": response.Content,
+	// --- Apply intent-specific system prompt override ---
+	if !chatManage.NeedsRetrieval() {
+		if prompt, ok := p.config.Conversation.IntentSystemPrompts[string(chatManage.Intent)]; ok {
+			chatManage.SystemPromptOverride = prompt
+			pipelineInfo(ctx, "QueryUnderstand", "prompt_override", map[string]interface{}{
+				"session_id": chatManage.SessionID,
+				"intent":     chatManage.Intent,
+			})
+		}
+	}
+
+	pipelineInfo(ctx, "QueryUnderstand", "output", map[string]interface{}{
+		"session_id":          chatManage.SessionID,
+		"rewrite_query":       chatManage.RewriteQuery,
+		"intent":              chatManage.Intent,
+		"has_image_desc":      chatManage.ImageDescription != "",
+		"has_prompt_override": chatManage.SystemPromptOverride != "",
+		"original_output":     response.Content,
 	})
 	return next()
 }
 
 // updateUserMessageImageCaption writes the generated ImageDescription back to
-// the stored user message's Images so that subsequent turns can see it in history.
-func (p *PluginRewrite) updateUserMessageImageCaption(ctx context.Context, chatManage *types.ChatManage) {
+// the stored user message so that subsequent turns can see it in history.
+func (p *PluginQueryUnderstand) updateUserMessageImageCaption(ctx context.Context, chatManage *types.ChatManage) {
 	msg, err := p.messageService.GetMessage(ctx, chatManage.SessionID, chatManage.UserMessageID)
 	if err != nil {
-		pipelineWarn(ctx, "Rewrite", "get_user_message", map[string]interface{}{
+		pipelineWarn(ctx, "QueryUnderstand", "get_user_message", map[string]interface{}{
 			"session_id":      chatManage.SessionID,
 			"user_message_id": chatManage.UserMessageID,
 			"error":           err.Error(),
@@ -238,10 +225,8 @@ func (p *PluginRewrite) updateUserMessageImageCaption(ctx context.Context, chatM
 
 	msg.Images[0].Caption = chatManage.ImageDescription
 
-	// Use the targeted UpdateMessageImages to reliably persist the JSONB column.
-	// GORM's struct-based Updates may silently skip custom Valuer types.
 	if err := p.messageService.UpdateMessageImages(ctx, chatManage.SessionID, chatManage.UserMessageID, msg.Images); err != nil {
-		pipelineWarn(ctx, "Rewrite", "update_image_caption", map[string]interface{}{
+		pipelineWarn(ctx, "QueryUnderstand", "update_image_caption", map[string]interface{}{
 			"session_id":      chatManage.SessionID,
 			"user_message_id": chatManage.UserMessageID,
 			"error":           err.Error(),
@@ -250,58 +235,25 @@ func (p *PluginRewrite) updateUserMessageImageCaption(ctx context.Context, chatM
 }
 
 // loadHistory fetches and processes conversation history for rewrite context.
-func (p *PluginRewrite) loadHistory(ctx context.Context, chatManage *types.ChatManage) []*types.History {
-	history, err := p.messageService.GetRecentMessagesBySession(ctx, chatManage.SessionID, 20)
-	if err != nil {
-		pipelineWarn(ctx, "Rewrite", "history_fetch", map[string]interface{}{
-			"session_id": chatManage.SessionID,
-			"error":      err.Error(),
-		})
-	}
-
-	historyMap := make(map[string]*types.History)
-	for _, message := range history {
-		h, ok := historyMap[message.RequestID]
-		if !ok {
-			h = &types.History{}
-		}
-		if message.Role == "user" {
-			h.Query = message.Content
-			h.CreateAt = message.CreatedAt
-			if desc := extractImageCaptions(message.Images); desc != "" {
-				h.Query += "\n\n[用户上传图片内容]\n" + desc
-			}
-		} else {
-			h.Answer = reg.ReplaceAllString(message.Content, "")
-			h.KnowledgeReferences = message.KnowledgeReferences
-		}
-		historyMap[message.RequestID] = h
-	}
-
-	historyList := make([]*types.History, 0)
-	for _, h := range historyMap {
-		if h.Answer != "" && h.Query != "" {
-			historyList = append(historyList, h)
-		}
-	}
-
-	sort.Slice(historyList, func(i, j int) bool {
-		return historyList[i].CreateAt.After(historyList[j].CreateAt)
-	})
-
+func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *types.ChatManage) []*types.History {
 	maxRounds := p.config.Conversation.MaxRounds
 	if chatManage.MaxRounds > 0 {
 		maxRounds = chatManage.MaxRounds
 	}
-	if len(historyList) > maxRounds {
-		historyList = historyList[:maxRounds]
+
+	historyList, err := loadAndProcessHistory(ctx, p.messageService, chatManage.SessionID, maxRounds, 20)
+	if err != nil {
+		pipelineWarn(ctx, "QueryUnderstand", "history_fetch", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"error":      err.Error(),
+		})
+		return nil
 	}
 
-	slices.Reverse(historyList)
 	chatManage.History = historyList
 
 	if len(historyList) > 0 {
-		pipelineInfo(ctx, "Rewrite", "history_ready", map[string]interface{}{
+		pipelineInfo(ctx, "QueryUnderstand", "history_ready", map[string]interface{}{
 			"session_id":     chatManage.SessionID,
 			"history_rounds": len(historyList),
 		})
@@ -310,17 +262,16 @@ func (p *PluginRewrite) loadHistory(ctx context.Context, chatManage *types.ChatM
 	return historyList
 }
 
-// selectModel picks the model for rewrite. When images are present it prefers
-// a vision-capable model (either the chat model itself, or the agent's VLM).
-// Returns (model, useImages).
-func (p *PluginRewrite) selectModel(ctx context.Context, chatManage *types.ChatManage, hasImages bool) (chat.Chat, bool) {
+// selectModel picks the model for query understanding. When images are present
+// it prefers a vision-capable model. Returns (model, useImages).
+func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *types.ChatManage, hasImages bool) (chat.Chat, bool) {
 	if hasImages {
 		if chatManage.ChatModelSupportsVision {
 			m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 			if err == nil {
 				return m, true
 			}
-			pipelineWarn(ctx, "Rewrite", "vision_model_fallback", map[string]interface{}{
+			pipelineWarn(ctx, "QueryUnderstand", "vision_model_fallback", map[string]interface{}{
 				"session_id": chatManage.SessionID,
 				"error":      err.Error(),
 			})
@@ -330,21 +281,20 @@ func (p *PluginRewrite) selectModel(ctx context.Context, chatManage *types.ChatM
 			if err == nil {
 				return m, true
 			}
-			pipelineWarn(ctx, "Rewrite", "vlm_model_fallback", map[string]interface{}{
+			pipelineWarn(ctx, "QueryUnderstand", "vlm_model_fallback", map[string]interface{}{
 				"session_id":   chatManage.SessionID,
 				"vlm_model_id": chatManage.VLMModelID,
 				"error":        err.Error(),
 			})
 		}
-		pipelineWarn(ctx, "Rewrite", "no_vision_model", map[string]interface{}{
+		pipelineWarn(ctx, "QueryUnderstand", "no_vision_model", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
 	}
 
-	// Fallback: text-only rewrite with chat model
 	m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
 	if err != nil {
-		pipelineError(ctx, "Rewrite", "get_model", map[string]interface{}{
+		pipelineError(ctx, "QueryUnderstand", "get_model", map[string]interface{}{
 			"session_id":    chatManage.SessionID,
 			"chat_model_id": chatManage.ChatModelID,
 			"error":         err.Error(),
@@ -355,7 +305,7 @@ func (p *PluginRewrite) selectModel(ctx context.Context, chatManage *types.ChatM
 }
 
 // buildPrompts constructs system and user prompts with placeholder replacement.
-func (p *PluginRewrite) buildPrompts(chatManage *types.ChatManage, historyList []*types.History) (string, string) {
+func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, historyList []*types.History) (string, string) {
 	userPrompt := p.config.Conversation.RewritePromptUser
 	if chatManage.RewritePromptUser != "" {
 		userPrompt = chatManage.RewritePromptUser
@@ -377,54 +327,39 @@ func (p *PluginRewrite) buildPrompts(chatManage *types.ChatManage, historyList [
 		types.RenderPromptPlaceholders(userPrompt, vals)
 }
 
-// parseRewriteOutput extracts intent classification, rewritten query, and
-// optional image description from the model's structured output.
+// parseOutput extracts the rewritten query, intent classification, and optional
+// image description from the model's structured JSON output.
 //
-// Expected formats:
-//
-//	Preferred: {"rewrite_query":"...","skip_kb_search":false,"image_description":"..."}
-//	Legacy fallback:
-//	  - Text only:  "[NO_SEARCH] rewritten question"  or  "rewritten question"
-//	  - With images: "[NO_SEARCH]\nrewritten question\n---\nimage description"
-func (p *PluginRewrite) parseRewriteOutput(chatManage *types.ChatManage, raw string) {
+// Expected format: {"rewrite_query":"...","intent":"kb_search","image_description":"..."}
+func (p *PluginQueryUnderstand) parseOutput(chatManage *types.ChatManage, raw string) {
 	content := strings.TrimSpace(raw)
 	if content == "" {
 		return
 	}
 
-	if output, ok := parseStructuredRewriteOutput(content); ok {
+	if output, ok := parseStructuredQueryOutput(content); ok {
 		if rewrite := strings.TrimSpace(output.RewriteQuery); rewrite != "" {
 			chatManage.RewriteQuery = rewrite
 		}
-		chatManage.SkipKBSearch = output.SkipKBSearch
+		chatManage.Intent = output.Intent
 		chatManage.ImageDescription = strings.TrimSpace(output.ImageDescription)
 		return
 	}
 
-	// Legacy fallback parsing for older prompts/models.
-	if strings.HasPrefix(content, noSearchPrefix) {
-		chatManage.SkipKBSearch = true
-		content = strings.TrimSpace(strings.TrimPrefix(content, noSearchPrefix))
-	}
-
-	if m := rewriteImageSepPattern.FindStringSubmatch(content); len(m) == 3 {
-		chatManage.RewriteQuery = strings.TrimSpace(m[1])
-		chatManage.ImageDescription = strings.TrimSpace(m[2])
-		return
-	}
+	// If JSON parsing failed entirely, treat the raw text as the rewritten query
+	// and default to IntentKBSearch for safety.
 	if content != "" {
 		chatManage.RewriteQuery = content
 	}
 }
 
-func parseStructuredRewriteOutput(raw string) (rewriteOutput, bool) {
+func parseStructuredQueryOutput(raw string) (queryUnderstandOutput, bool) {
 	content := strings.TrimSpace(raw)
 	if content == "" {
-		return rewriteOutput{}, false
+		return queryUnderstandOutput{}, false
 	}
 
-	var out rewriteOutput
-	if parsed, ok := parseStructuredRewriteOutputJSON(content); ok {
+	if parsed, ok := parseStructuredQueryOutputJSON(content); ok {
 		return parsed, true
 	}
 
@@ -432,31 +367,29 @@ func parseStructuredRewriteOutput(raw string) (rewriteOutput, bool) {
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
 	if start < 0 || end <= start {
-		return rewriteOutput{}, false
+		return queryUnderstandOutput{}, false
 	}
 	candidate := content[start : end+1]
-	if parsed, ok := parseStructuredRewriteOutputJSON(candidate); ok {
+	if parsed, ok := parseStructuredQueryOutputJSON(candidate); ok {
 		return parsed, true
 	}
-	return out, false
+	return queryUnderstandOutput{}, false
 }
 
-func parseStructuredRewriteOutputJSON(content string) (rewriteOutput, bool) {
+func parseStructuredQueryOutputJSON(content string) (queryUnderstandOutput, bool) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(content), &obj); err != nil {
-		return rewriteOutput{}, false
+		return queryUnderstandOutput{}, false
 	}
 
-	out := rewriteOutput{
+	out := queryUnderstandOutput{
 		RewriteQuery: strings.TrimSpace(firstStringField(obj,
 			"rewrite_query", "rewritten_query", "query", "question")),
 	}
 
-	// Support common variants and semantic inversion for need_search.
-	if v, ok := firstBoolField(obj, "skip_kb_search", "skip_search", "no_search"); ok {
-		out.SkipKBSearch = v
-	} else if v, ok := firstBoolField(obj, "need_search", "requires_search"); ok {
-		out.SkipKBSearch = !v
+	intentStr := strings.TrimSpace(firstStringField(obj, "intent"))
+	if intentStr != "" {
+		out.Intent = types.QueryIntent(intentStr)
 	}
 
 	desc := strings.TrimSpace(firstStringField(obj,
@@ -486,43 +419,6 @@ func firstStringField(obj map[string]json.RawMessage, keys ...string) string {
 	return ""
 }
 
-func firstBoolField(obj map[string]json.RawMessage, keys ...string) (bool, bool) {
-	for _, key := range keys {
-		raw, ok := obj[key]
-		if !ok || len(raw) == 0 {
-			continue
-		}
-		if v, ok := parseBoolJSON(raw); ok {
-			return v, true
-		}
-	}
-	return false, false
-}
-
-func parseBoolJSON(raw json.RawMessage) (bool, bool) {
-	var b bool
-	if err := json.Unmarshal(raw, &b); err == nil {
-		return b, true
-	}
-
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		switch strings.ToLower(strings.TrimSpace(s)) {
-		case "true", "1", "yes", "y":
-			return true, true
-		case "false", "0", "no", "n":
-			return false, true
-		}
-	}
-
-	var n float64
-	if err := json.Unmarshal(raw, &n); err == nil {
-		return n != 0, true
-	}
-
-	return false, false
-}
-
 func mergeImageDescAndOCR(desc, ocr string) (string, bool) {
 	if desc == "" && ocr == "" {
 		return "", false
@@ -539,7 +435,7 @@ func mergeImageDescAndOCR(desc, ocr string) (string, bool) {
 	return desc + "\n\n[OCR]\n" + ocr, true
 }
 
-// formatConversationHistory formats conversation history for prompt template
+// formatConversationHistory formats conversation history for prompt template.
 func formatConversationHistory(historyList []*types.History) string {
 	if len(historyList) == 0 {
 		return ""

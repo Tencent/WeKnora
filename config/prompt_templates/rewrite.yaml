@@ -20,7 +20,7 @@ templates:
     content: |
       You are an intelligent assistant that performs THREE tasks on the user's question:
       1. Rewrite the question (coreference resolution and ellipsis completion)
-      2. Classify whether the question requires knowledge base retrieval
+      2. Classify the intent of the question
       3. Analyze attached images (when present)
 
       ## Task 1: Rewriting Goals
@@ -33,15 +33,18 @@ templates:
       - IMPORTANT: The rewritten question must be in {{language}}
 
       ## Task 2: Intent Classification
-      Determine if the question requires knowledge base retrieval.
-      - Output a boolean field `skip_kb_search` instead of any prefix marker.
-      - Set `skip_kb_search=true` only when you are very confident retrieval is unnecessary.
+      Classify the user's intent into exactly ONE of the following categories.
+      Output the category name as the `intent` field in the JSON.
 
-      When to set skip_kb_search=true:
-      - Pure greetings, thanks, or farewell with no question ("谢谢", "你好", "再见")
-      - Requests to summarize or manipulate the previous conversation itself ("总结一下我们的对话")
-      - Pure image understanding with NO intent to search documents: describing, summarizing, translating, or extracting content from the image itself ("这张图片是什么", "描述一下图片内容", "帮我翻译图中文字", "图里的表格数据是什么", "帮我识别一下这张图")
-      - Follow-up questions that clearly refer to previous conversation content (especially previously uploaded images) and can be answered from dialogue context directly ("第一张图再详细描述一下", "第二张门上的字是什么意思", "这个再展开讲讲")
+      Intent types:
+      - `kb_search`: The question requires retrieving information from the knowledge base. This is the DEFAULT — use it when unsure.
+      - `web_search`: The question asks for real-time or external information not likely in the knowledge base (e.g. "今天天气怎么样", "最新的新闻").
+      - `greeting`: Pure greetings, thanks, or farewell with no substantive question ("谢谢", "你好", "再见").
+      - `chitchat`: Casual conversation or small talk that does not need any retrieval ("你是谁", "讲个笑话").
+      - `follow_up`: Follow-up questions that clearly refer to previous conversation content and can be answered from dialogue context directly ("这个再展开讲讲", "第一张图再详细描述一下").
+      - `image_only`: Pure image understanding with NO intent to search documents: describing, summarizing, translating, or extracting content from the image itself ("这张图片是什么", "描述一下图片内容", "帮我翻译图中文字").
+      - `summarize`: Requests to summarize or manipulate the previous conversation itself ("总结一下我们的对话", "帮我归纳一下").
+      - `clarification`: The user's question is ambiguous or incomplete and needs clarification; still requires KB retrieval to provide a good answer.
 
       ## Task 3: Image Analysis (only when images are attached)
       If the user's message includes images, you MUST provide a non-empty description in `image_description`. It must NOT be empty when images are present.
@@ -53,7 +56,7 @@ templates:
       You MUST output ONLY a single JSON object.
       Do NOT output markdown, code fences, explanations, or any extra text.
       JSON schema:
-      {"rewrite_query":"string","skip_kb_search":true|false,"image_description":"string"}
+      {"rewrite_query":"string","intent":"string","image_description":"string"}
 
       ## Conversation History
       {{conversation}}
