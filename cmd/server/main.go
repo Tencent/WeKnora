@@ -25,6 +25,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -61,7 +62,6 @@ func main() {
 	) error {
 		// Create HTTP server
 		server := &http.Server{
-			Addr:    fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 			Handler: router,
 		}
 
@@ -94,10 +94,15 @@ func main() {
 			done()
 		}()
 
-		// Start server
-		logger.Infof(context.Background(), "Server is running at %s:%d", cfg.Server.Host, cfg.Server.Port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		// Start server with retry to handle port not yet released during hot-reload
+		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+		listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
+		if err != nil {
 			return fmt.Errorf("failed to start server: %v", err)
+		}
+		logger.Infof(context.Background(), "Server is running at %s", addr)
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("server error: %v", err)
 		}
 
 		// Wait for shutdown signal
@@ -107,4 +112,26 @@ func main() {
 	if err != nil {
 		logger.Fatalf(context.Background(), "Failed to run application: %v", err)
 	}
+}
+
+// listenWithRetry retries net.Listen with exponential backoff,
+// useful during hot-reload when the previous process may not have released the port yet.
+func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.Listener, error) {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			return listener, nil
+		}
+		lastErr = err
+		if i < maxRetries-1 {
+			delay := baseDelay * time.Duration(1<<uint(i))
+			if delay > 3*time.Second {
+				delay = 3 * time.Second
+			}
+			logger.Warnf(context.Background(), "Port %s in use, retrying in %v... (%d/%d)", addr, delay, i+1, maxRetries)
+			time.Sleep(delay)
+		}
+	}
+	return nil, lastErr
 }
