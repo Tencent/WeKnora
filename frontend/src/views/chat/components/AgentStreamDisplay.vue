@@ -1361,8 +1361,20 @@ const getTokens = (content: any) => {
     return `\x00TAG${idx}\x00`;
   });
 
-  let sanitized = sanitizeForDisplay(preserved);
+  // CRITICAL FIX: Also protect image URLs from sanitizeForDisplay
+  // Extract image markdown ![alt](url) before sanitization
+  const imagePlaceholders: string[] = [];
+  const preservedWithImages = preserved.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match) => {
+    const idx = imagePlaceholders.length;
+    imagePlaceholders.push(match);
+    return `\x00IMG${idx}\x00`;
+  });
 
+  let sanitized = sanitizeForDisplay(preservedWithImages);
+
+  // Restore preserved images
+  sanitized = sanitized.replace(/\x00IMG(\d+)\x00/g, (_, idx) => imagePlaceholders[Number(idx)]);
+  
   // Restore preserved tags
   sanitized = sanitized.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tagPlaceholders[Number(idx)]);
 
