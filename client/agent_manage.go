@@ -26,7 +26,7 @@ type Agent struct {
 
 // AgentConfig represents the configuration for an agent
 type AgentConfig struct {
-	AgentMode                string   `json:"agent_mode"`                           // "quick-answer" or "smart-reasoning"
+	AgentMode                string   `json:"agent_mode"` // "quick-answer" or "smart-reasoning"
 	SystemPrompt             string   `json:"system_prompt,omitempty"`
 	ContextTemplate          string   `json:"context_template,omitempty"`
 	ModelID                  string   `json:"model_id,omitempty"`
@@ -35,10 +35,9 @@ type AgentConfig struct {
 	MaxCompletionTokens      int      `json:"max_completion_tokens,omitempty"`
 	MaxIterations            int      `json:"max_iterations,omitempty"`
 	AllowedTools             []string `json:"allowed_tools,omitempty"`
-	ReflectionEnabled        bool     `json:"reflection_enabled,omitempty"`
-	MCPSelectionMode         string   `json:"mcp_selection_mode,omitempty"`         // "all", "selected", "none"
+	MCPSelectionMode         string   `json:"mcp_selection_mode,omitempty"` // "all", "selected", "none"
 	MCPServices              []string `json:"mcp_services,omitempty"`
-	KBSelectionMode          string   `json:"kb_selection_mode,omitempty"`          // "all", "selected", "none"
+	KBSelectionMode          string   `json:"kb_selection_mode,omitempty"` // "all", "selected", "none"
 	KnowledgeBases           []string `json:"knowledge_bases,omitempty"`
 	SupportedFileTypes       []string `json:"supported_file_types,omitempty"`
 	FAQPriorityEnabled       bool     `json:"faq_priority_enabled,omitempty"`
@@ -57,7 +56,7 @@ type AgentConfig struct {
 	EnableRewrite            bool     `json:"enable_rewrite,omitempty"`
 	RewritePromptSystem      string   `json:"rewrite_prompt_system,omitempty"`
 	RewritePromptUser        string   `json:"rewrite_prompt_user,omitempty"`
-	FallbackStrategy         string   `json:"fallback_strategy,omitempty"`          // "fixed" or "model"
+	FallbackStrategy         string   `json:"fallback_strategy,omitempty"` // "fixed" or "model"
 	FallbackResponse         string   `json:"fallback_response,omitempty"`
 	FallbackPrompt           string   `json:"fallback_prompt,omitempty"`
 }

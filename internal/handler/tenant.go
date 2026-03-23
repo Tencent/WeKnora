@@ -448,11 +448,10 @@ func (h *TenantHandler) SearchTenants(c *gin.Context) {
 
 // AgentConfigRequest represents the request body for updating agent configuration
 type AgentConfigRequest struct {
-	MaxIterations     int      `json:"max_iterations"`
-	ReflectionEnabled bool     `json:"reflection_enabled"`
-	AllowedTools      []string `json:"allowed_tools"`
-	Temperature       float64  `json:"temperature"`
-	SystemPrompt      string   `json:"system_prompt,omitempty"` // Unified system prompt (uses {{web_search_status}} placeholder)
+	MaxIterations int      `json:"max_iterations"`
+	AllowedTools  []string `json:"allowed_tools"`
+	Temperature   float64  `json:"temperature"`
+	SystemPrompt  string   `json:"system_prompt,omitempty"` // Unified system prompt (uses {{web_search_status}} placeholder)
 }
 
 // GetTenantAgentConfig godoc
@@ -501,7 +500,6 @@ func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 			"success": true,
 			"data": gin.H{
 				"max_iterations":           agent.DefaultAgentMaxIterations,
-				"reflection_enabled":       agent.DefaultAgentReflectionEnabled,
 				"allowed_tools":            agenttools.DefaultAllowedTools(),
 				"temperature":              agent.DefaultAgentTemperature,
 				"system_prompt":            agent.GetProgressiveRAGSystemPrompt(h.config),
@@ -524,7 +522,6 @@ func (h *TenantHandler) GetTenantAgentConfig(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"max_iterations":           tenant.AgentConfig.MaxIterations,
-			"reflection_enabled":       tenant.AgentConfig.ReflectionEnabled,
 			"allowed_tools":            agenttools.DefaultAllowedTools(),
 			"temperature":              tenant.AgentConfig.Temperature,
 			"system_prompt":            systemPrompt,
@@ -572,7 +569,6 @@ func (h *TenantHandler) updateTenantAgentConfigInternal(c *gin.Context) {
 
 	agentConfig := &types.AgentConfig{
 		MaxIterations:         req.MaxIterations,
-		ReflectionEnabled:     req.ReflectionEnabled,
 		AllowedTools:          agenttools.DefaultAllowedTools(),
 		Temperature:           req.Temperature,
 		SystemPrompt:          systemPrompt,

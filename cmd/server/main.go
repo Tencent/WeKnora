@@ -40,6 +40,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+
+	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -65,14 +67,24 @@ func main() {
 			Handler: router,
 		}
 
+		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+		listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
+		if err != nil {
+			return fmt.Errorf("failed to start server: %v", err)
+		}
+
 		ctx, done := context.WithCancel(context.Background())
+
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 		go func() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
 
-			// Create a context with timeout for server shutdown
+			// Close listener first to release port immediately,
+			// so the next process can bind during our graceful drain.
+			listener.Close()
+
 			shutdownTimeout := cfg.Server.ShutdownTimeout
 			if shutdownTimeout == 0 {
 				shutdownTimeout = 30 * time.Second
@@ -80,11 +92,18 @@ func main() {
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 			defer shutdownCancel()
 
+			// Second signal → force close all connections immediately
+			go func() {
+				sig := <-signals
+				logger.Warnf(context.Background(), "Received second signal: %v, forcing shutdown...", sig)
+				server.Close()
+			}()
+
 			if err := server.Shutdown(shutdownCtx); err != nil {
-				logger.Fatalf(context.Background(), "Server forced to shutdown: %v", err)
+				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
+				server.Close()
 			}
 
-			// Clean up all registered resources
 			logger.Info(context.Background(), "Cleaning up resources...")
 			errs := resourceCleaner.Cleanup(shutdownCtx)
 			if len(errs) > 0 {
@@ -94,18 +113,11 @@ func main() {
 			done()
 		}()
 
-		// Start server with retry to handle port not yet released during hot-reload
-		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-		listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
-		if err != nil {
-			return fmt.Errorf("failed to start server: %v", err)
-		}
 		logger.Infof(context.Background(), "Server is running at %s", addr)
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			return fmt.Errorf("server error: %v", err)
 		}
 
-		// Wait for shutdown signal
 		<-ctx.Done()
 		return nil
 	})
@@ -114,12 +126,20 @@ func main() {
 	}
 }
 
-// listenWithRetry retries net.Listen with exponential backoff,
+// listenWithRetry retries listening with exponential backoff and SO_REUSEPORT,
 // useful during hot-reload when the previous process may not have released the port yet.
 func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.Listener, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			return c.Control(func(fd uintptr) {
+				_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
+			})
+		},
+	}
+
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
-		listener, err := net.Listen("tcp", addr)
+		listener, err := lc.Listen(context.Background(), "tcp", addr)
 		if err == nil {
 			return listener, nil
 		}

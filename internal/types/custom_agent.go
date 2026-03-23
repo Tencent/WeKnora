@@ -93,8 +93,6 @@ type CustomAgentConfig struct {
 	MaxIterations int `yaml:"max_iterations" json:"max_iterations"`
 	// Allowed tools (only for agent type)
 	AllowedTools []string `yaml:"allowed_tools" json:"allowed_tools"`
-	// Whether reflection is enabled (only for agent type)
-	ReflectionEnabled bool `yaml:"reflection_enabled" json:"reflection_enabled"`
 	// MCP service selection mode: "all" = all enabled MCP services, "selected" = specific services, "none" = no MCP
 	MCPSelectionMode string `yaml:"mcp_selection_mode" json:"mcp_selection_mode"`
 	// Selected MCP service IDs (only used when MCPSelectionMode is "selected")

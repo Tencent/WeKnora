@@ -231,22 +231,5 @@ func (e *AgentEngine) executeToolCalls(
 			},
 		})
 
-		// Optional: Reflection after each tool call (streaming)
-		if e.config.ReflectionEnabled && result != nil {
-			reflection, err := e.streamReflectionToEventBus(
-				ctx, tc.ID, tc.Function.Name, result.Output,
-				iteration, sessionID,
-			)
-			if err != nil {
-				logger.Warnf(ctx, "Reflection failed: %v", err)
-			} else if reflection != "" {
-				// Store reflection in the corresponding tool call
-				// Find the tool call we just added and update it
-				if len(step.ToolCalls) > 0 {
-					lastIdx := len(step.ToolCalls) - 1
-					step.ToolCalls[lastIdx].Reflection = reflection
-				}
-			}
-		}
 	}
 }

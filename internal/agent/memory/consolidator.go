@@ -12,7 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/token"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -317,7 +316,3 @@ const consolidationSystemPrompt = "" +
 	"- Be structured with clear sections if the conversation covered multiple topics\n" +
 	"- Be concise — aim for 30% or less of the original length\n\n" +
 	"Output only the summary, no preamble or explanation."
-
-// ChatResponse is used to extract content from LLM response.
-// This avoids a direct dependency on the types package for the response format.
-var _ = (*types.ChatResponse)(nil) // compile-time check that types.ChatResponse exists

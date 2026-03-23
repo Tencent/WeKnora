@@ -68,60 +68,6 @@ func (e *AgentEngine) streamLLMToEventBus(
 	return result, nil
 }
 
-// streamReflectionToEventBus streams reflection process through EventBus
-// Note: Reflection is now handled through the think tool in main loop
-func (e *AgentEngine) streamReflectionToEventBus(
-	ctx context.Context,
-	toolCallID string,
-	toolName string,
-	result string,
-	iteration int,
-	sessionID string,
-) (string, error) {
-	// Simplified reflection without BuildReflectionPrompt
-	reflectionPrompt := fmt.Sprintf(`Evaluate the result of calling tool %s and decide the next action.
-
-Tool returned: %s
-
-Think:
-1. Does the result satisfy the requirement?
-2. What should be done next?`, toolName, result)
-
-	messages := []chat.Message{
-		{Role: "user", Content: reflectionPrompt},
-	}
-
-	// Generate a single ID for this entire reflection stream
-	reflectionID := generateEventID("reflection")
-
-	llmResult, err := e.streamLLMToEventBus(
-		ctx,
-		messages,
-		&chat.ChatOptions{Temperature: 0.5},
-		func(chunk *types.StreamResponse, fullContent string) {
-			if chunk.Content != "" {
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        reflectionID,
-					Type:      event.EventAgentReflection,
-					SessionID: sessionID,
-					Data: event.AgentReflectionData{
-						ToolCallID: toolCallID,
-						Content:    chunk.Content,
-						Iteration:  iteration,
-						Done:       chunk.Done,
-					},
-				})
-			}
-		},
-	)
-	if err != nil {
-		logger.Warnf(ctx, "Reflection failed: %v", err)
-		return "", err
-	}
-
-	return llmResult.Content, nil
-}
-
 // streamThinkingToEventBus streams the thinking process through EventBus
 func (e *AgentEngine) streamThinkingToEventBus(
 	ctx context.Context,
