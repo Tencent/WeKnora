@@ -5901,17 +5901,22 @@ func (s *knowledgeService) ExportFAQEntries(ctx context.Context, kbID string) ([
 
 // buildTagMap builds a map from tag_id to tag_name for the given knowledge base.
 func (s *knowledgeService) buildTagMap(ctx context.Context, tenantID uint64, kbID string) (map[string]string, error) {
-	// Get all tags for this knowledge base (no pagination limit)
-	page := &types.Pagination{Page: 1, PageSize: 10000}
-	tags, _, err := s.tagRepo.ListByKB(ctx, tenantID, kbID, page, "")
-	if err != nil {
-		return nil, err
-	}
+	const pageSize = 100
+	tagMap := make(map[string]string)
 
-	tagMap := make(map[string]string, len(tags))
-	for _, tag := range tags {
-		if tag != nil {
-			tagMap[tag.ID] = tag.Name
+	for pageNum := 1; ; pageNum++ {
+		page := &types.Pagination{Page: pageNum, PageSize: pageSize}
+		tags, _, err := s.tagRepo.ListByKB(ctx, tenantID, kbID, page, "")
+		if err != nil {
+			return nil, err
+		}
+		for _, tag := range tags {
+			if tag != nil {
+				tagMap[tag.ID] = tag.Name
+			}
+		}
+		if len(tags) < pageSize {
+			break
 		}
 	}
 	return tagMap, nil
