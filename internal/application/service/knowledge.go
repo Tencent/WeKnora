@@ -1344,7 +1344,15 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		start = end
 	}
 	// Process and store chunks
-	s.processChunks(ctx, kb, knowledge, chunks)
+	var opts ProcessChunksOptions
+	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+		opts.EnableQuestionGeneration = true
+		opts.QuestionCount = kb.QuestionGenerationConfig.QuestionCount
+		if opts.QuestionCount <= 0 {
+			opts.QuestionCount = 3
+		}
+	}
+	s.processChunks(ctx, kb, knowledge, chunks, opts)
 }
 
 // ProcessChunksOptions contains options for processing chunks
@@ -6848,6 +6856,13 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		EnableMultimodel: kb.IsMultimodalEnabled() && len(resolvedImages) > 0,
 		StoredImages:     resolvedImages,
 	}
+	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
+		opts.EnableQuestionGeneration = true
+		opts.QuestionCount = kb.QuestionGenerationConfig.QuestionCount
+		if opts.QuestionCount <= 0 {
+			opts.QuestionCount = 3
+		}
+	}
 
 	if kb.ChunkingConfig.EnableParentChild {
 		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
@@ -7473,7 +7488,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			})
 			start = end
 		}
-		s.processChunks(ctx, kb, knowledge, passageChunks)
+		passageOpts := ProcessChunksOptions{
+			EnableQuestionGeneration: payload.EnableQuestionGeneration,
+			QuestionCount:            payload.QuestionCount,
+		}
+		s.processChunks(ctx, kb, knowledge, passageChunks, passageOpts)
 		return nil
 	} else {
 		// File import

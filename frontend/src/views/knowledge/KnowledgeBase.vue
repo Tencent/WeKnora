@@ -167,6 +167,8 @@ const onVisibleChange = (visible: boolean) => {
 let isCardDetails = ref(false);
 let timeout: ReturnType<typeof setInterval> | null = null;
 let delDialog = ref(false)
+let rebuildDialog = ref(false)
+let rebuildKnowledgeItem = ref<KnowledgeCard>({ id: '', parse_status: '' })
 let knowledge = ref<KnowledgeCard>({ id: '', parse_status: '' })
 let knowledgeIndex = ref(-1)
 let knowledgeScroll = ref()
@@ -1299,7 +1301,7 @@ const handleManualEdit = (index: number, item: KnowledgeCard) => {
   });
 };
 
-const handleKnowledgeReparse = async (index: number, item: KnowledgeCard) => {
+const handleKnowledgeReparse = (index: number, item: KnowledgeCard) => {
   if (isFAQ.value) return;
   if (!canEdit.value) return;
   if (!item?.id) {
@@ -1313,10 +1315,14 @@ const handleKnowledgeReparse = async (index: number, item: KnowledgeCard) => {
   if (cardList.value[index]) {
     cardList.value[index].isMore = false;
   }
-  const confirm = window.confirm(
-    t('knowledgeBase.rebuildConfirm', { fileName: item.file_name || item.title || '' }) as string,
-  );
-  if (!confirm) return;
+  rebuildKnowledgeItem.value = item;
+  rebuildDialog.value = true;
+};
+
+const rebuildConfirm = async () => {
+  rebuildDialog.value = false;
+  const item = rebuildKnowledgeItem.value;
+  if (!item?.id) return;
   try {
     await reparseKnowledge(item.id);
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
@@ -1736,7 +1742,7 @@ async function createNewSession(value: string): Promise<void> {
                             @click.stop="openMore(index)"
                             :class="[moreIndex == index ? 'active-more' : '']"
                           >
-                            <img class="more" src="@/assets/img/more.png" alt="" />
+                            <img class="more-icon" src="@/assets/img/more.png" alt="" />
                           </div>
                           <template #content>
                             <!-- Normal menu -->
@@ -1951,6 +1957,31 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="circle-btn-txt" @click="delDialog = false">{{ t('common.cancel') }}</span>
                 <span class="circle-btn-txt confirm" @click="delCardConfirm">
                   {{ t('knowledgeBase.confirmDelete') }}
+                </span>
+              </div>
+            </div>
+          </t-dialog>
+
+          <!-- 重建知识确认弹窗 -->
+          <t-dialog
+            v-model:visible="rebuildDialog"
+            dialogClassName="del-knowledge"
+            :closeBtn="false"
+            :cancelBtn="null"
+            :confirmBtn="null"
+          >
+            <div class="circle-wrap">
+              <div class="header">
+                <img class="circle-img" src="@/assets/img/circle.png" alt="" />
+                <span class="circle-title">{{ t('knowledgeBase.rebuildDocument') }}</span>
+              </div>
+              <span class="del-circle-txt">
+                {{ t('knowledgeBase.rebuildConfirm', { fileName: rebuildKnowledgeItem.file_name || rebuildKnowledgeItem.title || '' }) }}
+              </span>
+              <div class="circle-btn">
+                <span class="circle-btn-txt" @click="rebuildDialog = false">{{ t('common.cancel') }}</span>
+                <span class="circle-btn-txt confirm" @click="rebuildConfirm">
+                  {{ t('common.confirm') }}
                 </span>
               </div>
             </div>
@@ -3187,7 +3218,7 @@ async function createNewSession(value: string): Promise<void> {
     background: var(--td-component-stroke);
   }
 
-  .more {
+  .more-icon {
     width: 14px;
     height: 14px;
   }
