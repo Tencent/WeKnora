@@ -101,6 +101,55 @@ func Jaccard(a, b map[string]struct{}) float64 {
 	return float64(inter) / float64(union)
 }
 
+// NormalizeContent returns a lowercased, whitespace-collapsed version of s
+// suitable for containment and overlap checks.
+func NormalizeContent(s string) string {
+	c := strings.ToLower(strings.TrimSpace(s))
+	if c == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(c), " ")
+}
+
+// IsContentContained reports whether the normalized form of short is a
+// substring of the normalized form of long. Both inputs must already be
+// normalized via NormalizeContent.
+func IsContentContained(normalizedShort, normalizedLong string) bool {
+	if normalizedShort == "" || normalizedLong == "" {
+		return false
+	}
+	if len(normalizedShort) > len(normalizedLong) {
+		return false
+	}
+	return strings.Contains(normalizedLong, normalizedShort)
+}
+
+// ContentOverlapRatio estimates how much of a's content overlaps with b by
+// comparing their token sets (Jaccard-like but using overlap coefficient:
+// |intersection| / |smaller set|). Both inputs should be raw content strings.
+// Returns a value in [0, 1] where 1 means the smaller set is fully contained
+// in the larger set.
+func ContentOverlapRatio(a, b string) float64 {
+	tokA := TokenizeSimple(a)
+	tokB := TokenizeSimple(b)
+	if len(tokA) == 0 || len(tokB) == 0 {
+		return 0
+	}
+
+	small, large := tokA, tokB
+	if len(tokA) > len(tokB) {
+		small, large = tokB, tokA
+	}
+
+	inter := 0
+	for k := range small {
+		if _, ok := large[k]; ok {
+			inter++
+		}
+	}
+	return float64(inter) / float64(len(small))
+}
+
 // ClampFloat clamps a float value to the specified range [minV, maxV].
 func ClampFloat(v, minV, maxV float64) float64 {
 	if v < minV {
