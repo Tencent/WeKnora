@@ -78,5 +78,6 @@ func (c *GenericChat) customizeRequest(req *openai.ChatCompletionRequest, opts *
 	req.ChatTemplateKwargs = map[string]interface{}{
 		"enable_thinking": thinking,
 	}
-	return nil, false // 使用标准请求（已修改）
+
+	return req, true
 }

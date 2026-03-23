@@ -477,7 +477,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 		}
 
 		if len(response.Choices) > 0 {
-			c.processStreamDelta(ctx, &response.Choices[0], state, streamChan)
+			c.processStreamDelta(ctx, &response.Choices[0], state, streamChan, response.Choices[0].Delta.ReasoningContent)
 		}
 	}
 }
@@ -522,14 +522,39 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 			continue
 		}
 
-		var streamResp openai.ChatCompletionStreamResponse
+		// 使用局部结构体进行一次性解析，同时捕捉标准字段和 vLLM 的 reasoning 字段，避免性能损失
+		var streamResp struct {
+			openai.ChatCompletionStreamResponse
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					openai.ChatCompletionStreamChoiceDelta
+					Reasoning string `json:"reasoning,omitempty"`
+				} `json:"delta"`
+				FinishReason openai.FinishReason `json:"finish_reason"`
+			} `json:"choices"`
+		}
+
 		if err := json.Unmarshal(event.Data, &streamResp); err != nil {
 			logger.Errorf(ctx, "Failed to parse stream response: %v", err)
 			continue
 		}
 
 		if len(streamResp.Choices) > 0 {
-			c.processStreamDelta(ctx, &streamResp.Choices[0], state, streamChan)
+			choice := streamResp.Choices[0]
+			// 统一获取逻辑（支持标准和 vLLM 两种路径）
+			reasoning := choice.Delta.Reasoning
+			if reasoning == "" {
+				reasoning = choice.Delta.ReasoningContent
+			}
+
+			// 构造一个标准 SDK 兼容的 choice 对象传给下游，保证现有逻辑完全不动
+			sdkChoice := openai.ChatCompletionStreamChoice{
+				Index:        choice.Index,
+				Delta:        choice.Delta.ChatCompletionStreamChoiceDelta,
+				FinishReason: choice.FinishReason,
+			}
+			c.processStreamDelta(ctx, &sdkChoice, state, streamChan, reasoning)
 		}
 	}
 }
@@ -570,7 +595,7 @@ func (s *streamState) buildOrderedToolCalls() []types.LLMToolCall {
 }
 
 // processStreamDelta 处理流式响应的单个 delta
-func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.ChatCompletionStreamChoice, state *streamState, streamChan chan types.StreamResponse) {
+func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.ChatCompletionStreamChoice, state *streamState, streamChan chan types.StreamResponse, reasoningContent string) {
 	delta := choice.Delta
 	isDone := string(choice.FinishReason) != ""
 
@@ -580,11 +605,11 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 	}
 
 	// 发送思考内容（ReasoningContent，支持 DeepSeek 等模型）
-	if delta.ReasoningContent != "" {
+	if reasoningContent != "" {
 		state.hasThinking = true
 		streamChan <- types.StreamResponse{
 			ResponseType: types.ResponseTypeThinking,
-			Content:      delta.ReasoningContent,
+			Content:      reasoningContent,
 			Done:         false,
 		}
 	}
