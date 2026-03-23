@@ -87,125 +87,37 @@ func (s *agentService) CreateAgentEngine(
 ) (interfaces.AgentEngine, error) {
 	logger.Infof(ctx, "Creating agent engine with custom EventBus")
 
-	// Validate config
+	// 1. Validate config
 	if err := s.ValidateConfig(config); err != nil {
 		return nil, fmt.Errorf("invalid agent config: %w", err)
 	}
-
 	if chatModel == nil {
 		return nil, fmt.Errorf("chat model is nil after initialization")
 	}
 
-	// Note: rerankModel can be nil when no knowledge bases are configured
-	// The registerTools function will filter out knowledge-related tools in this case
-
-	// Create tool registry
+	// 2. Build tool registry
 	toolRegistry := tools.NewToolRegistry()
-
-	// Apply configurable tool output size limit
 	if config.MaxToolOutputChars > 0 {
 		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
 	}
-
-	// Register tools
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
+	s.registerMCPTools(ctx, toolRegistry, config)
 
-	// Register MCP tools from enabled services for this tenant
-	tenantID := uint64(0)
-	if tid, ok := types.TenantIDFromContext(ctx); ok {
-		tenantID = tid
-	}
-	if tenantID > 0 && s.mcpServiceService != nil && s.mcpManager != nil {
-		// Check MCP selection mode from agent config
-		mcpMode := config.MCPSelectionMode
-		if mcpMode == "" {
-			mcpMode = "all" // Default to all enabled MCP services
-		}
+	// 3. Resolve knowledge base and selected document metadata
+	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
 
-		// Skip MCP registration if mode is "none"
-		if mcpMode == "none" {
-			logger.Infof(ctx, "MCP services disabled by agent config (mode: none)")
-		} else {
-			var mcpServices []*types.MCPService
-			var err error
-
-			if mcpMode == "selected" && len(config.MCPServices) > 0 {
-				// Get only selected MCP services
-				mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
-				if err != nil {
-					logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
-				} else {
-					logger.Infof(ctx, "Using %d selected MCP services from agent config", len(mcpServices))
-				}
-			} else {
-				// Get all MCP services for this tenant
-				mcpServices, err = s.mcpServiceService.ListMCPServices(ctx, tenantID)
-				if err != nil {
-					logger.Warnf(ctx, "Failed to list MCP services: %v", err)
-				}
-			}
-
-			if err == nil && len(mcpServices) > 0 {
-				// Filter enabled services
-				enabledServices := make([]*types.MCPService, 0)
-				for _, svc := range mcpServices {
-					if svc != nil && svc.Enabled {
-						enabledServices = append(enabledServices, svc)
-					}
-				}
-
-				// Register MCP tools
-				if len(enabledServices) > 0 {
-					if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager); err != nil {
-						logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
-					} else {
-						logger.Infof(ctx, "Registered MCP tools from %d enabled services", len(enabledServices))
-					}
-				}
-			}
-		}
-	}
-
-	// Get knowledge base detailed information for prompt
-	kbInfos, err := s.getKnowledgeBaseInfos(ctx, config.KnowledgeBases)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
-		// Create fallback info with IDs only
-		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(config.KnowledgeBases))
-		for _, kbID := range config.KnowledgeBases {
-			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
-				ID:          kbID,
-				Name:        kbID, // Use ID as name when details unavailable
-				Description: "",
-				DocCount:    0,
-			})
-		}
-	}
-
-	// Get selected documents information (user @ mentioned documents)
-	selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to get selected document details: %v", err)
-		selectedDocs = []*agent.SelectedDocumentInfo{}
-	}
-
+	// 4. Resolve system prompt template
 	systemPromptTemplate := ""
 	if config.UseCustomSystemPrompt {
 		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
 	}
 
-	// Create engine with provided EventBus and contextManager
+	// 5. Create engine
 	engine := agent.NewAgentEngine(
-		config,
-		chatModel,
-		toolRegistry,
-		eventBus,
-		kbInfos,
-		selectedDocs,
-		contextManager,
-		sessionID,
+		config, chatModel, toolRegistry, eventBus,
+		kbInfos, selectedDocs, contextManager, sessionID,
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
@@ -230,11 +142,96 @@ func (s *agentService) CreateAgentEngine(
 			logger.Warnf(ctx, "Failed to initialize skills manager: %v", err)
 		} else if skillsManager != nil {
 			engine.SetSkillsManager(skillsManager)
-			logger.Infof(ctx, "Skills manager initialized with %d skills", len(skillsManager.GetAllMetadata()))
+			logger.Infof(ctx, "Skills manager initialized with %d skills",
+				len(skillsManager.GetAllMetadata()))
 		}
 	}
 
 	return engine, nil
+}
+
+// registerMCPTools registers MCP tools from enabled services for this tenant.
+func (s *agentService) registerMCPTools(
+	ctx context.Context,
+	toolRegistry *tools.ToolRegistry,
+	config *types.AgentConfig,
+) {
+	tenantID := uint64(0)
+	if tid, ok := types.TenantIDFromContext(ctx); ok {
+		tenantID = tid
+	}
+	if tenantID == 0 || s.mcpServiceService == nil || s.mcpManager == nil {
+		return
+	}
+
+	mcpMode := config.MCPSelectionMode
+	if mcpMode == "" {
+		mcpMode = "all"
+	}
+	if mcpMode == "none" {
+		logger.Infof(ctx, "MCP services disabled by agent config (mode: none)")
+		return
+	}
+
+	var mcpServices []*types.MCPService
+	var err error
+
+	if mcpMode == "selected" && len(config.MCPServices) > 0 {
+		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
+			return
+		}
+		logger.Infof(ctx, "Using %d selected MCP services from agent config", len(mcpServices))
+	} else {
+		mcpServices, err = s.mcpServiceService.ListMCPServices(ctx, tenantID)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to list MCP services: %v", err)
+			return
+		}
+	}
+
+	enabledServices := make([]*types.MCPService, 0)
+	for _, svc := range mcpServices {
+		if svc != nil && svc.Enabled {
+			enabledServices = append(enabledServices, svc)
+		}
+	}
+	if len(enabledServices) > 0 {
+		if err := tools.RegisterMCPTools(ctx, toolRegistry, enabledServices, s.mcpManager); err != nil {
+			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
+		} else {
+			logger.Infof(ctx, "Registered MCP tools from %d enabled services", len(enabledServices))
+		}
+	}
+}
+
+// resolveKBAndDocInfos loads knowledge base metadata and selected document info for prompt.
+func (s *agentService) resolveKBAndDocInfos(
+	ctx context.Context,
+	config *types.AgentConfig,
+) ([]*agent.KnowledgeBaseInfo, []*agent.SelectedDocumentInfo) {
+	kbInfos, err := s.getKnowledgeBaseInfos(ctx, config.KnowledgeBases)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
+		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(config.KnowledgeBases))
+		for _, kbID := range config.KnowledgeBases {
+			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
+				ID:          kbID,
+				Name:        kbID,
+				Description: "",
+				DocCount:    0,
+			})
+		}
+	}
+
+	selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to get selected document details: %v", err)
+		selectedDocs = []*agent.SelectedDocumentInfo{}
+	}
+
+	return kbInfos, selectedDocs
 }
 
 // initializeSkillsManager creates and initializes the skills manager
