@@ -423,12 +423,14 @@ func (s *Service) StartChannel(channel *IMChannel) error {
 	}
 	s.mu.Unlock()
 
-	// For WebSocket channels, try leader election to avoid duplicate connections.
-	if channel.Mode == "websocket" && s.redis != nil {
+	// For WebSocket / long-poll channels, try leader election to avoid
+	// duplicate connections. Only one instance should actively poll or
+	// maintain a persistent connection for each channel.
+	if (channel.Mode == "websocket" || channel.Mode == "longpoll") && s.redis != nil {
 		acquired := s.tryAcquireWSLeader(channel.ID)
 		if !acquired {
 			logger.Infof(context.Background(),
-				"[IM] Channel %s WebSocket owned by another instance, will retry", channel.ID)
+				"[IM] Channel %s %s owned by another instance, will retry", channel.ID, channel.Mode)
 			go s.wsLeaderRetryLoop(channel)
 			return nil
 		}
@@ -451,9 +453,9 @@ func (s *Service) startChannelInternal(channel *IMChannel, factory AdapterFactor
 		return fmt.Errorf("create adapter: %w", err)
 	}
 
-	// Start leader renewal goroutine for WebSocket channels.
+	// Start leader renewal goroutine for WebSocket / long-poll channels.
 	var leaderCancel context.CancelFunc
-	if channel.Mode == "websocket" && s.redis != nil {
+	if (channel.Mode == "websocket" || channel.Mode == "longpoll") && s.redis != nil {
 		leaderCtx, lCancel := context.WithCancel(context.Background())
 		leaderCancel = lCancel
 		go s.wsLeaderRenewLoop(leaderCtx, channel.ID)
@@ -490,8 +492,18 @@ func (s *Service) stopChannelLocked(channelID string, cs *channelState) {
 		cs.Cancel()
 	}
 	delete(s.channels, channelID)
-	s.releaseWSLeader(channelID)
-	logger.Infof(context.Background(), "[IM] Stopped channel: id=%s", channelID)
+	// For long-poll channels, do NOT release the leader lock immediately.
+	// Let it expire naturally via TTL so the old poll goroutine has time to
+	// fully drain before another instance takes over. This prevents a brief
+	// dual-writer window where both old and new instances process messages.
+	// For websocket channels, the connection closes synchronously, so
+	// immediate release is safe.
+	if cs.Channel != nil && cs.Channel.Mode == "longpoll" {
+		logger.Infof(context.Background(), "[IM] Stopped longpoll channel: id=%s (leader lock will expire via TTL)", channelID)
+	} else {
+		s.releaseWSLeader(channelID)
+		logger.Infof(context.Background(), "[IM] Stopped channel: id=%s", channelID)
+	}
 }
 
 // ── WebSocket leader election ───────────────────────────────────────────────
@@ -2022,18 +2034,6 @@ func (s *Service) handleFileMessage(ctx context.Context, msg *IncomingMessage, a
 			fmt.Sprintf("❌ 不支持的文件类型「%s」。\n\n支持的类型：PDF、Word、TXT、Markdown、Excel、CSV、PPT、图片。", ext))
 	}
 
-	displayName := msg.FileName
-	if ext == "" {
-		displayName = "文件"
-	}
-
-	// Send "processing started" notification (streaming)
-	if err := s.sendSmartReply(ctx, adapter, msg, channel,
-		fmt.Sprintf("用户发送了一个文件「%s」，系统正在处理并保存到知识库中，需要告知用户请稍候。", displayName),
-		fmt.Sprintf("📥 已收到%s，正在处理并保存到知识库，请稍候...", displayName)); err != nil {
-		logger.Warnf(ctx, "[IM] Failed to send file processing start notification: %v", err)
-	}
-
 	// Process asynchronously to avoid blocking the message handler
 	go s.processFileToKnowledgeBase(context.WithoutCancel(ctx), msg, downloader, adapter, channel)
 
@@ -2116,18 +2116,20 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 // It uses sendSmartReply to generate a friendly, streaming reply via the channel's LLM.
 // Falls back to a static template if the LLM is unavailable.
 func (s *Service) sendFileResult(ctx context.Context, adapter Adapter, msg *IncomingMessage, fileName string, success bool, errDetail string, channel *IMChannel) {
+	typeName := fileTypeName(fileName)
+
 	var fallback string
 	if success {
-		fallback = fmt.Sprintf("✅ 文件「%s」已保存到知识库，正在解析中，完成后会通知你～", fileName)
+		fallback = fmt.Sprintf("✅ %s已保存到知识库，正在解析中，完成后会通知你～", typeName)
 	} else {
-		fallback = fmt.Sprintf("❌ 文件「%s」处理失败：%s", fileName, errDetail)
+		fallback = fmt.Sprintf("❌ %s处理失败：%s", typeName, errDetail)
 	}
 
 	var situation string
 	if success {
-		situation = fmt.Sprintf("用户上传的文件「%s」已成功保存到知识库，但还需要后台解析文档内容（这需要一些时间）。请告知用户文件已收到，正在解析处理中，解析完成后会自动推送结果。", fileName)
+		situation = fmt.Sprintf("用户上传的%s已成功保存到知识库，但还需要后台解析文档内容（这需要一些时间）。请告知用户文件已收到，正在解析处理中，解析完成后会自动推送结果。", typeName)
 	} else {
-		situation = fmt.Sprintf("用户上传的文件「%s」处理失败，原因：%s。", fileName, errDetail)
+		situation = fmt.Sprintf("用户上传的%s处理失败，原因：%s。", typeName, errDetail)
 	}
 
 	if err := s.sendSmartReply(ctx, adapter, msg, channel, situation, fallback); err != nil {
@@ -2346,6 +2348,8 @@ func (s *Service) watchAndSendSummary(
 				return
 			}
 
+			typeName := fileTypeName(fileName)
+
 			switch knowledge.ParseStatus {
 			case types.ParseStatusFailed:
 				// Parsing failed — notify user and stop watching
@@ -2354,8 +2358,8 @@ func (s *Service) watchAndSendSummary(
 					errMsg = "文档解析失败"
 				}
 				_ = s.sendSmartReply(ctx, adapter, msg, channel,
-					fmt.Sprintf("用户之前上传的文件「%s」解析失败了，错误原因：%s。请安慰用户并建议重试。", fileName, errMsg),
-					fmt.Sprintf("⚠️ 文件「%s」解析失败：%s", fileName, errMsg))
+					fmt.Sprintf("用户之前上传的%s解析失败了，错误原因：%s。请安慰用户并建议重试。", typeName, errMsg),
+					fmt.Sprintf("⚠️ %s解析失败：%s", typeName, errMsg))
 				return
 
 			case types.ParseStatusCompleted:
@@ -2367,12 +2371,12 @@ func (s *Service) watchAndSendSummary(
 					// still show it if present.
 					if knowledge.Description != "" && knowledge.Description != fileName {
 						_ = s.sendSmartReply(ctx, adapter, msg, channel,
-							fmt.Sprintf("用户之前上传的文件「%s」已解析完成。以下是文件的完整摘要内容：\n%s\n\n请生成一条通知消息，包含：1) 告知文件已解析完成；2) 用 Markdown 格式（标题、列表、加粗等）结构化展示上述摘要内容，不要删减或概括；3) 提示用户可以针对该文件提问。", fileName, knowledge.Description),
-							fmt.Sprintf("📄 文件「%s」已解析完成。\n\n**摘要：**\n\n%s\n\n---\n可以针对该文件进行提问。", fileName, knowledge.Description))
+							fmt.Sprintf("用户之前上传的%s已解析完成。以下是文件的完整摘要内容：\n%s\n\n请生成一条通知消息，包含：1) 告知文件已解析完成；2) 用 Markdown 格式（标题、列表、加粗等）结构化展示上述摘要内容，不要删减或概括；3) 提示用户可以针对该文件提问。", typeName, knowledge.Description),
+							fmt.Sprintf("📄 %s已解析完成。\n\n**摘要：**\n\n%s\n\n---\n可以针对该文件进行提问。", typeName, knowledge.Description))
 					} else {
 						_ = s.sendSmartReply(ctx, adapter, msg, channel,
-							fmt.Sprintf("用户之前上传的文件「%s」已解析完成，现在可以开始针对该文件进行提问了。", fileName),
-							fmt.Sprintf("📄 文件「%s」已解析完成，可以开始提问了！", fileName))
+							fmt.Sprintf("用户之前上传的%s已解析完成，现在可以开始针对该文件进行提问了。", typeName),
+							fmt.Sprintf("📄 %s已解析完成，可以开始提问了！", typeName))
 					}
 					return
 
@@ -2383,8 +2387,8 @@ func (s *Service) watchAndSendSummary(
 
 				case types.SummaryStatusFailed:
 					_ = s.sendSmartReply(ctx, adapter, msg, channel,
-						fmt.Sprintf("用户之前上传的文件「%s」已解析完成，但摘要生成失败了。不过文件已可用于提问。", fileName),
-						fmt.Sprintf("📄 文件「%s」已解析完成，可以开始提问了！（摘要生成失败）", fileName))
+						fmt.Sprintf("用户之前上传的%s已解析完成，但摘要生成失败了。不过文件已可用于提问。", typeName),
+						fmt.Sprintf("📄 %s已解析完成，可以开始提问了！（摘要生成失败）", typeName))
 					return
 
 				default:
@@ -2416,13 +2420,14 @@ func (s *Service) sendSummaryNotification(
 		summary = knowledge.Title
 	}
 
+	typeName := fileTypeName(fileName)
 	var situation, fallback string
 	if summary != "" && summary != fileName {
-		situation = fmt.Sprintf("用户之前上传的文件「%s」已解析完成。以下是文件的完整摘要内容：\n%s\n\n请生成一条通知消息，包含：1) 告知文件已解析完成；2) 用 Markdown 格式（标题、列表、加粗等）结构化展示上述摘要内容，不要删减或概括；3) 提示用户可以针对该文件提问。", fileName, summary)
-		fallback = fmt.Sprintf("📄 文件「%s」已解析完成。\n\n**摘要：**\n\n%s\n\n---\n可以针对该文件进行提问。", fileName, summary)
+		situation = fmt.Sprintf("用户之前上传的%s已解析完成。以下是文件的完整摘要内容：\n%s\n\n请生成一条通知消息，包含：1) 告知文件已解析完成；2) 用 Markdown 格式（标题、列表、加粗等）结构化展示上述摘要内容，不要删减或概括；3) 提示用户可以针对该文件提问。", typeName, summary)
+		fallback = fmt.Sprintf("📄 %s已解析完成。\n\n**摘要：**\n\n%s\n\n---\n可以针对该文件进行提问。", typeName, summary)
 	} else {
-		situation = fmt.Sprintf("用户之前上传的文件「%s」已解析完成，现在可以开始针对该文件进行提问了。", fileName)
-		fallback = fmt.Sprintf("📄 文件「%s」已解析完成，可以开始提问了！", fileName)
+		situation = fmt.Sprintf("用户之前上传的%s已解析完成，现在可以开始针对该文件进行提问了。", typeName)
+		fallback = fmt.Sprintf("📄 %s已解析完成，可以开始提问了！", typeName)
 	}
 
 	if err := s.sendSmartReply(ctx, adapter, msg, channel, situation, fallback); err != nil {
@@ -2454,6 +2459,30 @@ func imPlatformToChannel(platform string) string {
 		return types.ChannelSlack
 	default:
 		return types.ChannelIM
+	}
+}
+
+// fileTypeName returns a human-readable file type name based on the file extension.
+func fileTypeName(filename string) string {
+	switch fileExtension(filename) {
+	case "pdf":
+		return "PDF 文档"
+	case "doc", "docx":
+		return "Word 文档"
+	case "txt":
+		return "文本文件"
+	case "md", "markdown":
+		return "Markdown 文档"
+	case "png", "jpg", "jpeg", "gif":
+		return "图片"
+	case "csv":
+		return "CSV 表格"
+	case "xls", "xlsx":
+		return "Excel 表格"
+	case "ppt", "pptx":
+		return "PPT 演示文稿"
+	default:
+		return "文件"
 	}
 }
 

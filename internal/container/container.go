@@ -61,6 +61,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/mattermost"
 	"github.com/Tencent/WeKnora/internal/im/slack"
 	"github.com/Tencent/WeKnora/internal/im/telegram"
+	"github.com/Tencent/WeKnora/internal/im/wechat"
 	"github.com/Tencent/WeKnora/internal/im/wecom"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
@@ -1276,6 +1277,32 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 		postReplyToMain := credentialBool(creds, "post_to_main")
 		adapter := mattermost.NewAdapter(client, outgoingToken, botUserID, postReplyToMain)
 		return adapter, func() {}, nil
+	})
+	// Register WeChat adapter factory
+	imService.RegisterAdapterFactory("wechat", func(factoryCtx context.Context, channel *imPkg.IMChannel, msgHandler func(context.Context, *imPkg.IncomingMessage) error) (imPkg.Adapter, context.CancelFunc, error) {
+		creds, err := parseCredentials(channel.Credentials)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse wechat credentials: %w", err)
+		}
+
+		botToken := getString(creds, "bot_token")
+		ilinkBotID := getString(creds, "ilink_bot_id")
+
+		if botToken == "" || ilinkBotID == "" {
+			return nil, nil, fmt.Errorf("wechat credentials require bot_token and ilink_bot_id")
+		}
+
+		adapter := wechat.NewAdapter(botToken, ilinkBotID)
+		client := wechat.NewLongPollClient(botToken, ilinkBotID, msgHandler)
+
+		pollCtx, pollCancel := context.WithCancel(context.Background())
+		go func() {
+			if err := client.Start(pollCtx); err != nil && pollCtx.Err() == nil {
+				logger.Errorf(context.Background(), "[IM] WeChat long-poll stopped for channel %s: %v", channel.ID, err)
+			}
+		}()
+
+		return adapter, pollCancel, nil
 	})
 
 	// Load and start all enabled channels from database

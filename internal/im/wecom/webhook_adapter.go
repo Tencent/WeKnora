@@ -595,6 +595,8 @@ var allowedIMAPIHosts = []string{
 	"qyapi.weixin.qq.com",
 	"api.weixin.qq.com",
 	"open.work.weixin.qq.com",
+	"novac2c.cdn.weixin.qq.com",
+	"ilinkai.weixin.qq.com",
 }
 
 // isAllowedIMAPIHost returns true if rawURL points to a known IM platform API host.

@@ -136,6 +136,10 @@ func (ch *IMChannel) computeBotIdentity() string {
 		if tok := str("outgoing_token"); tok != "" {
 			return "mattermost:wh:" + tok
 		}
+	case "wechat":
+		if botID := str("ilink_bot_id"); botID != "" {
+			return "wechat:" + botID
+		}
 	}
 	return ""
 }

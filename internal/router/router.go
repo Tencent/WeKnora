@@ -641,6 +641,13 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler) {
 		channels.DELETE("/:id", imHandler.DeleteIMChannel)
 		channels.POST("/:id/toggle", imHandler.ToggleIMChannel)
 	}
+
+	// WeChat QR code login (requires authentication)
+	wechatGroup := r.Group("/wechat")
+	{
+		wechatGroup.POST("/qrcode", imHandler.WeChatGetQRCode)
+		wechatGroup.POST("/qrcode/status", imHandler.WeChatPollQRCodeStatus)
+	}
 }
 
 // serveFrontendStatic registers a middleware that serves the frontend SPA
