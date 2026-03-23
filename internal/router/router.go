@@ -676,6 +676,10 @@ func serveFiles(r *gin.Engine) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "missing required parameter: file_path"})
 			return
 		}
+		if strings.Contains(filePath, "..") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+			return
+		}
 
 		provider := types.ParseProviderScheme(filePath)
 
