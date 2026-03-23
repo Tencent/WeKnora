@@ -249,37 +249,29 @@ const loading = ref(true)
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
 
-// 根据类型过滤并去重模型
+// 根据类型过滤模型
 const chatModels = computed(() => 
-  deduplicateModels(
-    allModels.value
-      .filter(m => m.type === 'KnowledgeQA')
-      .map(convertToLegacyFormat)
-  )
+  allModels.value
+    .filter(m => m.type === 'KnowledgeQA')
+    .map(convertToLegacyFormat)
 )
 
 const embeddingModels = computed(() => 
-  deduplicateModels(
-    allModels.value
-      .filter(m => m.type === 'Embedding')
-      .map(convertToLegacyFormat)
-  )
+  allModels.value
+    .filter(m => m.type === 'Embedding')
+    .map(convertToLegacyFormat)
 )
 
 const rerankModels = computed(() => 
-  deduplicateModels(
-    allModels.value
-      .filter(m => m.type === 'Rerank')
-      .map(convertToLegacyFormat)
-  )
+  allModels.value
+    .filter(m => m.type === 'Rerank')
+    .map(convertToLegacyFormat)
 )
 
 const vllmModels = computed(() => 
-  deduplicateModels(
-    allModels.value
-      .filter(m => m.type === 'VLLM')
-      .map(convertToLegacyFormat)
-  )
+  allModels.value
+    .filter(m => m.type === 'VLLM')
+    .map(convertToLegacyFormat)
 )
 
 // 将后端模型格式转换为旧的前端格式
@@ -296,30 +288,6 @@ function convertToLegacyFormat(model: ModelConfig) {
     isBuiltin: model.is_builtin || false,
     supportsVision: model.parameters.supports_vision || false
   }
-}
-
-// 去重函数：比较除id外的所有字段，相同的只保留第一个
-function deduplicateModels(models: any[]) {
-  const seen = new Map<string, any>()
-  
-  return models.filter(model => {
-    // 创建一个不包含id的签名用于比较
-    const signature = JSON.stringify({
-      name: model.name,
-      source: model.source,
-      modelName: model.modelName,
-      baseUrl: model.baseUrl,
-      apiKey: model.apiKey,
-      dimension: model.dimension
-    })
-    
-    if (seen.has(signature)) {
-      return false
-    }
-    
-    seen.set(signature, model)
-    return true
-  })
 }
 
 // 加载模型列表
@@ -410,7 +378,9 @@ const handleModelSave = async (modelData: any) => {
             truncate_prompt_tokens: 0
           }
         } : {}),
-        ...((currentModelType.value === 'chat' || currentModelType.value === 'vllm') ? {
+        ...(currentModelType.value === 'vllm' ? {
+          supports_vision: true
+        } : currentModelType.value === 'chat' ? {
           supports_vision: modelData.supportsVision ?? false
         } : {})
       }

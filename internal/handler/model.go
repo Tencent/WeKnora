@@ -301,18 +301,22 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		model.Name = req.Name
 	}
 	model.Description = req.Description
-	// Check if any Parameters field is set (can't use struct comparison due to map field)
-	if req.Parameters.BaseURL != "" || req.Parameters.APIKey != "" || req.Parameters.Provider != "" {
-		// SSRF validation for updated model BaseURL
-		if req.Parameters.BaseURL != "" {
-			if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
-				logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
-				c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
-				return
-			}
+
+	// SSRF validation for updated model BaseURL
+	if req.Parameters.BaseURL != "" {
+		if err := secutils.ValidateURLForSSRF(req.Parameters.BaseURL); err != nil {
+			logger.Warnf(ctx, "SSRF validation failed for model BaseURL: %v", err)
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+			return
 		}
-		model.Parameters = req.Parameters
 	}
+	// Preserve backend-managed fields not sent by frontend
+	req.Parameters.ParameterSize = model.Parameters.ParameterSize
+	if req.Parameters.ExtraConfig == nil {
+		req.Parameters.ExtraConfig = model.Parameters.ExtraConfig
+	}
+	model.Parameters = req.Parameters
+
 	model.Source = req.Source
 	model.Type = req.Type
 

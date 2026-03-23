@@ -230,8 +230,8 @@
           </p>
         </div>
 
-        <!-- Chat/VLLM: supports vision toggle -->
-        <div v-if="modelType === 'chat' || modelType === 'vllm'" class="form-item">
+        <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
+        <div v-if="modelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
           <div style="display: flex; align-items: center; gap: 8px;">
             <t-switch v-model="formData.supportsVision" />
