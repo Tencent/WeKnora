@@ -5901,7 +5901,7 @@ func (s *knowledgeService) ExportFAQEntries(ctx context.Context, kbID string) ([
 
 // buildTagMap builds a map from tag_id to tag_name for the given knowledge base.
 func (s *knowledgeService) buildTagMap(ctx context.Context, tenantID uint64, kbID string) (map[string]string, error) {
-	const pageSize = 100
+	const pageSize = 1000
 	tagMap := make(map[string]string)
 
 	for pageNum := 1; ; pageNum++ {

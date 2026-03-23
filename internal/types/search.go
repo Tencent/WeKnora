@@ -175,7 +175,7 @@ type Pagination struct {
 	// Page
 	Page int `form:"page"      json:"page"      binding:"omitempty,min=1"`
 	// Page size
-	PageSize int `form:"page_size" json:"page_size" binding:"omitempty,min=1,max=100"`
+	PageSize int `form:"page_size" json:"page_size" binding:"omitempty,min=1,max=1000"`
 }
 
 // GetPage gets the page number, default is 1
@@ -191,8 +191,8 @@ func (p *Pagination) GetPageSize() int {
 	if p.PageSize < 1 {
 		return 20
 	}
-	if p.PageSize > 100 {
-		return 100
+	if p.PageSize > 1000 {
+		return 1000
 	}
 	return p.PageSize
 }
