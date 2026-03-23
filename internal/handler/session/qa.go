@@ -82,6 +82,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		return nil, nil, errors.NewBadRequestError("Query content cannot be empty")
 	}
 
+	// SSRF protection: strip client-supplied URL/Caption fields from image attachments.
+	// The URL field must only be populated server-side by saveImageAttachments; an
+	// attacker could inject internal network URLs to trigger SSRF via the LLM provider.
+	for i := range request.Images {
+		request.Images[i].URL = ""
+		request.Images[i].Caption = ""
+	}
+
 	// Log request details
 	if requestJSON, err := json.Marshal(request); err == nil {
 		logger.Infof(ctx, "[%s] Request: session_id=%s, request=%s",

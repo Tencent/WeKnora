@@ -33,6 +33,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -500,6 +501,13 @@ func (a *WebhookAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessa
 //  2. Content-Type → extension mapping (fallback for platforms like WeCom that
 //     don't provide the original filename in the callback JSON)
 func downloadFromURL(ctx context.Context, rawURL, fileName string) (io.ReadCloser, string, error) {
+	// SSRF protection: reject internal/private URLs unless on the WeCom API allowlist.
+	if !isAllowedIMAPIHost(rawURL) {
+		if safe, reason := secutils.IsSSRFSafeURL(rawURL); !safe {
+			return nil, "", fmt.Errorf("URL rejected for security reasons: %s", reason)
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
@@ -571,6 +579,30 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string) (io.ReadClose
 	}
 
 	return resp.Body, fileName, nil
+}
+
+// allowedIMAPIHosts lists IM platform API hosts that are trusted for file downloads.
+// URLs pointing to these hosts bypass IsSSRFSafeURL checks because the WeCom API
+// itself returns these URLs in callback payloads (e.g. temporary media links).
+var allowedIMAPIHosts = []string{
+	"qyapi.weixin.qq.com",
+	"api.weixin.qq.com",
+	"open.work.weixin.qq.com",
+}
+
+// isAllowedIMAPIHost returns true if rawURL points to a known IM platform API host.
+func isAllowedIMAPIHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	hostname := strings.ToLower(u.Hostname())
+	for _, allowed := range allowedIMAPIHosts {
+		if hostname == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 // contentTypeToExt maps common Content-Type values to file extensions.

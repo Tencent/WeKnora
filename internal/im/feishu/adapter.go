@@ -476,11 +476,28 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 // File download support via Feishu GetMessageResource API
 // ──────────────────────────────────────────────────────────────────────
 
+// feishuSafePathParam checks that a Feishu API path parameter contains only
+// safe characters (alphanumeric, hyphen, underscore). This prevents path
+// traversal attacks via crafted callback payloads.
+func feishuSafePathParam(s string) bool {
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // DownloadFile downloads a file or image attachment from a Feishu message.
 // Uses the GetMessageResource API: GET /open-apis/im/v1/messages/:message_id/resources/:file_key?type={file|image}
 func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io.ReadCloser, string, error) {
 	if msg.FileKey == "" || msg.MessageID == "" {
 		return nil, "", fmt.Errorf("file_key and message_id are required")
+	}
+
+	// SSRF/path-traversal protection: validate path parameters contain only safe characters
+	if !feishuSafePathParam(msg.MessageID) || !feishuSafePathParam(msg.FileKey) {
+		return nil, "", fmt.Errorf("invalid message_id or file_key format")
 	}
 
 	accessToken, err := a.getTenantAccessToken(ctx)
