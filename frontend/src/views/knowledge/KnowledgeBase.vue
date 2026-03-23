@@ -496,6 +496,7 @@ const confirmDeleteTag = (tag: any) => {
       loadTags(kbId.value);
       // 由于后端是异步删除文档，延迟刷新以确保看到最新数据
       setTimeout(() => {
+        page = 1; // Reset page counter when reloading files after tag deletion
         loadKnowledgeFiles(kbId.value);
       }, 500);
     })
@@ -510,6 +511,7 @@ const handleKnowledgeTagChange = async (knowledgeId: string, tagValue: string) =
     const tagIdToUpdate = tagValue || null;
     await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIdToUpdate } });
     MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
+    page = 1; // Reset page counter to 1 when reloading files after tag change
     loadKnowledgeFiles(kbId.value);
     loadTags(kbId.value);
   } catch (error: any) {
@@ -632,6 +634,7 @@ const handleFileUploaded = (event: CustomEvent) => {
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
     console.log('匹配当前知识库，开始刷新文件列表');
     // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
+    page = 1; // Reset page counter when reloading files after upload
     loadKnowledgeFiles(uploadedKbId);
     loadTags(uploadedKbId);
   }
@@ -857,6 +860,7 @@ const handleMoveConfirm = async () => {
       startMovePoll(taskId);
     } else {
       moveSubmitting.value = false;
+      page = 1; // Reset page counter when reloading files after move
       loadKnowledgeFiles(kbId.value);
     }
   } catch (e: any) {
@@ -881,6 +885,7 @@ const startMovePoll = (taskId: string) => {
         } else {
           MessagePlugin.success(t('knowledgeBase.moveCompleted'));
         }
+        page = 1; // Reset page counter when reloading files after move completion
         loadKnowledgeFiles(kbId.value);
       } else if (data.status === 'failed') {
         stopMovePoll();
@@ -902,6 +907,7 @@ const stopMovePoll = () => {
 
 const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => {
   if (savedKbId === kbId.value && !isFAQ.value) {
+    page = 1; // Reset page counter when reloading files after manual edit
     loadKnowledgeFiles(savedKbId);
   }
 };
@@ -1314,6 +1320,7 @@ const handleKnowledgeReparse = async (index: number, item: KnowledgeCard) => {
   try {
     await reparseKnowledge(item.id);
     MessagePlugin.success(t('knowledgeBase.rebuildSubmitted'));
+    page = 1; // Reset page counter when reloading files after reparse
     loadKnowledgeFiles(kbId.value);
   } catch (error: any) {
     MessagePlugin.error(error?.message || t('knowledgeBase.rebuildFailed'));
@@ -1342,6 +1349,7 @@ const delCardConfirm = () => {
   delDialog.value = false;
   delKnowledge(knowledgeIndex.value, knowledge.value, () => {
     // 删除成功后刷新文档列表和分类数量
+    page = 1; // Reset page counter when reloading files after deletion
     loadKnowledgeFiles(kbId.value);
     loadTags(kbId.value);
   });
