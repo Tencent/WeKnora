@@ -452,9 +452,11 @@ var (
 	// reLatexBlock matches block-level LaTeX ($$...$$).
 	reLatexBlock = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
 	// reTableSep matches table separator rows like |---|---|.
-	reTableSep = regexp.MustCompile(`(?m)^\s*\|[\s:|-]+\|\s*$`)
+	// Uses [ \t] instead of \s to avoid consuming newlines across rows.
+	reTableSep = regexp.MustCompile(`(?m)^[ \t]*\|[ \t:|-]+\|[ \t]*$`)
 	// reTableRow matches markdown table data rows like | col1 | col2 |.
-	reTableRow = regexp.MustCompile(`(?m)^\s*\|(.+?)\|\s*$`)
+	// Uses [ \t] instead of \s to avoid consuming newlines across rows.
+	reTableRow = regexp.MustCompile(`(?m)^[ \t]*\|(.+?)\|[ \t]*$`)
 	// reHeadingPrefix matches leading # markers in headings.
 	reHeadingPrefix = regexp.MustCompile(`(?m)^#{1,6}\s+`)
 	// reBlockquote matches leading > markers.
