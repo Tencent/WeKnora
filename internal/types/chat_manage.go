@@ -71,7 +71,7 @@ const (
 // which also considers the WebSearchEnabled flag.
 func (i QueryIntent) NeedsKBRetrieval() bool {
 	switch i {
-	case IntentKBSearch, IntentClarification, "":
+	case IntentKBSearch, IntentClarification, IntentSummarize, "":
 		return true
 	default:
 		return false

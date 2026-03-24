@@ -1,0 +1,362 @@
+[
+    {
+        "send_time": 1700000000,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"大家好，今天我们来讨论一下新项目的技术方案。\"}}"
+    },
+    {
+        "send_time": 1700000060,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好的，我先介绍一下背景。我们需要构建一个知识库管理系统，支持多种文档格式的导入，包括PDF、Word、Markdown等。系统需要具备全文检索和语义搜索能力，同时要支持多租户隔离。\"}}"
+    },
+    {
+        "send_time": 1700000120,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"技术栈方面有什么建议吗？\"}}"
+    },
+    {
+        "send_time": 1700000180,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"我建议后端用Go语言，数据库用PostgreSQL，向量检索用Milvus或者Qdrant。前端可以用React + TypeScript。\"}}"
+    },
+    {
+        "send_time": 1700000240,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"同意。关于文档解析这块，我做了一些调研：\\n\\n1. PDF解析可以用unstructured库，支持表格和图片提取\\n2. Word文档用docx库解析\\n3. Markdown直接用标准解析器\\n4. 对于扫描件类型的PDF，需要接入OCR服务\\n\\n另外，文档分割策略也很关键，我们需要支持按段落、按Token数、按语义边界等多种分割方式。\"}}"
+    },
+    {
+        "send_time": 1700000300,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"我来补充一下向量检索的部分。目前主流的Embedding模型有OpenAI的text-embedding-ada-002、BGE系列、以及M3E等。我们可以做一个抽象层，支持切换不同的Embedding模型。\"}}"
+    },
+    {
+        "send_time": 1700000360,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好的，那权限管理怎么设计？\"}}"
+    },
+    {
+        "send_time": 1700000420,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"权限管理我们采用RBAC模型，分为以下几个层级：\\n\\n- 超级管理员：全局管理权限\\n- 空间管理员：管理特定知识空间\\n- 编辑者：可以上传和编辑文档\\n- 查看者：只能查看和搜索\\n\\n每个知识空间相互隔离，数据不互通。\"}}"
+    },
+    {
+        "send_time": 1700000480,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"@王五 你那边API网关的方案定了吗？\"}}"
+    },
+    {
+        "send_time": 1700000540,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"定了，我们用Kong作为API网关，主要看中它的插件生态和性能。认证方面用JWT + OAuth2.0双重机制。\"}}"
+    },
+    {
+        "send_time": 1700000600,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"我整理了一下完整的技术架构方案：\\n\\n【前端层】\\n- React 18 + TypeScript\\n- Ant Design Pro 组件库\\n- TanStack Query 数据请求\\n\\n【网关层】\\n- Kong API Gateway\\n- JWT认证 + Rate Limiting\\n\\n【服务层】\\n- Go 1.21 + Gin框架\\n- 微服务架构，拆分为：用户服务、文档服务、检索服务、知识库服务\\n\\n【存储层】\\n- PostgreSQL：业务数据\\n- Redis：缓存和会话\\n- MinIO：文件存储\\n- Milvus：向量存储\\n- Elasticsearch：全文检索\\n\\n【基础设施】\\n- Kubernetes部署\\n- Prometheus + Grafana 监控\\n- ELK 日志系统\\n\\n大家看看有没有补充的？\"}}"
+    },
+    {
+        "send_time": 1700000660,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"非常完整！我再补充几点：\\n1. CI/CD用GitHub Actions\\n2. 容器镜像仓库用Harbor\\n3. 配置中心用Nacos\"}}"
+    },
+    {
+        "send_time": 1700000720,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"对了，还有一个重要的问题——文档分割的粒度。根据我的经验，chunk size设为512到1024个token比较合适，overlap设为10%-20%。不同类型的文档可能需要不同的分割策略。\"}}"
+    },
+    {
+        "send_time": 1700000780,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"同意李四的建议。另外我建议加一个分割预览功能，让用户上传文档后可以预览分割效果，手动调整不合理的地方。\"}}"
+    },
+    {
+        "send_time": 1700000840,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好主意！这样用户体验会好很多。\"}}"
+    },
+    {
+        "send_time": 1700001000,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"那我们来分工吧：\\n- 张三（我）：负责整体架构和用户服务\\n- 李四：负责文档解析和分割模块\\n- 王五：负责API网关和认证\\n- 赵六：负责向量检索和语义搜索\"}}"
+    },
+    {
+        "send_time": 1700001060,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"没问题，预计两周出第一版原型。\"}}"
+    },
+    {
+        "send_time": 1700001120,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"OK，我这边网关部分一周内可以搞定。\"}}"
+    },
+    {
+        "send_time": 1700001180,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"收到，我先把Milvus的集群搭起来，然后写检索服务。\"}}"
+    },
+    {
+        "send_time": 1700086400,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"@所有人 更新一下进展：文档解析模块已经完成了PDF和Word的基础解析，正在做表格识别的优化。遇到一个问题——部分PDF文件的文本提取效果不佳，可能需要结合OCR来处理。\"}}"
+    },
+    {
+        "send_time": 1700086460,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"OCR服务可以用PaddleOCR，开源免费，效果也不错。\"}}"
+    },
+    {
+        "send_time": 1700086520,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好的，我试试。另外分割策略我实现了三种：\\n1. 固定长度分割（按token数）\\n2. 递归字符分割（按段落→句子→字符逐级分割）\\n3. 语义分割（基于embedding相似度判断分割点）\\n\\n其中语义分割效果最好但速度最慢，建议作为高级选项提供。\"}}"
+    },
+    {
+        "send_time": 1700086580,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"语义分割我可以帮忙优化，用批量Embedding调用可以提速不少。\"}}"
+    },
+    {
+        "send_time": 1700086640,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"API网关已经部署好了，JWT认证也接通了。现在支持以下接口：\\n- POST /api/v1/auth/login\\n- POST /api/v1/auth/register\\n- GET /api/v1/user/profile\\n- POST /api/v1/documents/upload\\n- GET /api/v1/documents/list\\n- POST /api/v1/search\\n\\nSwagger文档我也生成好了，大家可以看看。\"}}"
+    },
+    {
+        "send_time": 1700086700,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"进展不错！我这边用户服务也基本完成了，包括注册、登录、角色管理、空间管理等功能。明天开始和王五联调。\"}}"
+    },
+    {
+        "send_time": 1700172800,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"向量检索服务已经可以用了！我做了个简单的benchmark：\\n\\n- 数据量：100万条向量（768维）\\n- 索引类型：IVF_FLAT\\n- 查询延迟：P99 < 50ms\\n- 召回率：top10 > 95%\\n\\n对于我们的场景完全够用了。\"}}"
+    },
+    {
+        "send_time": 1700172860,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"太好了！性能指标很不错。我们还需要考虑混合检索的方案，把向量检索和关键词检索结合起来，这样可以提高搜索的准确性和覆盖面。\"}}"
+    },
+    {
+        "send_time": 1700172920,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"已经在做了。我用了RRF（Reciprocal Rank Fusion）算法来融合两路检索的结果，初步测试效果比单路检索好20%左右。\"}}"
+    },
+    {
+        "send_time": 1700172980,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"我这边文档处理pipeline也跑通了，完整流程是：\\n上传文档 → 格式识别 → 文本提取 → 清洗去噪 → 分割成chunks → Embedding → 入库\\n\\n平均处理速度：一篇10页的PDF大约需要15秒。\"}}"
+    },
+    {
+        "send_time": 1700173040,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"联调基本顺利，发现了几个小问题已经修复了。现在所有接口都通了，可以开始集成测试了。\"}}"
+    },
+    {
+        "send_time": 1700259200,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"集成测试发现了一个问题：当并发上传超过50个文档时，文档处理队列会出现积压。@李四 你看看是不是要加个消息队列来缓冲？\"}}"
+    },
+    {
+        "send_time": 1700259260,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"确实需要。我加一个RabbitMQ作为任务队列，文档处理改成异步模式：\\n1. 上传接口立即返回task_id\\n2. 后台worker从队列中取任务处理\\n3. 处理完成后通过WebSocket通知前端\\n\\n这样就不会阻塞上传接口了。\"}}"
+    },
+    {
+        "send_time": 1700259320,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"同时建议加一个处理进度的API，前端可以轮询或者用SSE来展示处理进度。\"}}"
+    },
+    {
+        "send_time": 1700259380,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"WebSocket的网关配置我已经加好了，支持长连接和心跳检测。\"}}"
+    },
+    {
+        "send_time": 1700259440,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好的，那就这么定了。下周一我们做一次全面的Code Review，然后准备部署到测试环境。\"}}"
+    },
+    {
+        "send_time": 1700259500,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"收到！\"}}"
+    },
+    {
+        "send_time": 1700259560,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"OK\"}}"
+    },
+    {
+        "send_time": 1700259620,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"没问题，我周末把检索服务的单元测试补全。\"}}"
+    },
+    {
+        "send_time": 1700345600,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"@所有人 提醒一下，明天下午2点Code Review会议，请大家提前把代码提交到feature分支。\\n\\nReview重点：\\n1. 代码规范和命名\\n2. 错误处理是否完善\\n3. 并发安全\\n4. 性能瓶颈\\n5. 安全漏洞\"}}"
+    },
+    {
+        "send_time": 1700345660,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"已提交，PR链接：https://github.com/example/knowledgebase/pull/42\"}}"
+    },
+    {
+        "send_time": 1700345720,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"我的也提交了：https://github.com/example/knowledgebase/pull/43\"}}"
+    },
+    {
+        "send_time": 1700345780,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"提交了：https://github.com/example/knowledgebase/pull/44\\n单元测试覆盖率达到了85%。\"}}"
+    },
+    {
+        "send_time": 1700432000,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"Code Review总结：\\n\\n整体代码质量不错，发现以下几个需要改进的地方：\\n\\n【李四-文档服务】\\n- 文件上传缺少类型校验，需要加白名单\\n- 大文件处理需要加内存限制\\n- 建议增加文档去重逻辑\\n\\n【王五-网关服务】\\n- Rate Limiting的配置需要更细粒度\\n- 日志中不应该打印敏感信息\\n- 建议增加请求ID追踪\\n\\n【赵六-检索服务】\\n- 向量维度需要做配置化\\n- 搜索结果的缓存策略可以优化\\n- 建议支持过滤条件（按时间、标签等）\\n\\n请大家在周三前完成修改。\"}}"
+    },
+    {
+        "send_time": 1700432060,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"收到，文件类型校验和内存限制我今天就能改好。文档去重的话，我打算用SimHash算法做近似去重，可以接受吗？\"}}"
+    },
+    {
+        "send_time": 1700432120,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"可以，SimHash对于文本去重效果不错。你可以先用MD5做精确去重，再用SimHash做近似去重，两层过滤。\"}}"
+    },
+    {
+        "send_time": 1700432180,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"Rate Limiting我改成按用户+接口维度限流。请求ID追踪我用X-Request-ID header来实现，贯穿整个调用链。\"}}"
+    },
+    {
+        "send_time": 1700432240,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"向量维度已经配置化了。搜索缓存我用了LRU策略，过期时间设为5分钟。过滤条件的话，我支持了以下维度：\\n- 时间范围\\n- 文档标签\\n- 知识空间\\n- 文档类型\\n- 自定义metadata字段\"}}"
+    },
+    {
+        "send_time": 1700518400,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"所有修改都合并了，准备部署到测试环境。@王五 帮忙确认一下K8s集群的资源配置。\"}}"
+    },
+    {
+        "send_time": 1700518460,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"测试环境的资源配置如下：\\n\\n- 用户服务：2核4G × 2副本\\n- 文档服务：4核8G × 3副本（需要较多内存处理大文件）\\n- 检索服务：4核8G × 2副本\\n- 网关服务：2核4G × 2副本\\n- PostgreSQL：8核16G\\n- Redis：4核8G\\n- Milvus：8核32G\\n- MinIO：4核8G\\n\\n总计约需要60核128G的资源。\"}}"
+    },
+    {
+        "send_time": 1700518520,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"资源够用。开始部署吧，部署完成后大家各自验证自己负责的模块。\"}}"
+    },
+    {
+        "send_time": 1700518580,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"Milvus集群我提前部署好了，数据已经做了持久化配置。\"}}"
+    },
+    {
+        "send_time": 1700518640,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"文档处理的Worker数量需要可配置吗？我现在默认设了3个并发Worker。\"}}"
+    },
+    {
+        "send_time": 1700518700,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"要的，通过环境变量配置就行。测试环境3个够了，生产环境可能需要更多。\"}}"
+    },
+    {
+        "send_time": 1700604800,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"测试环境部署完成！所有服务状态正常，Health Check全部通过。\\n\\n访问地址：https://test-kb.example.com\\n\\nSwagger文档：https://test-kb.example.com/swagger/index.html\"}}"
+    },
+    {
+        "send_time": 1700604860,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"文档上传和处理流程验证通过。测试了以下格式：\\n✅ PDF（普通文本）\\n✅ PDF（含表格）\\n✅ PDF（扫描件+OCR）\\n✅ Word (.docx)\\n✅ Markdown\\n✅ TXT\\n❌ Excel（暂不支持，计划下个版本加上）\"}}"
+    },
+    {
+        "send_time": 1700604920,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"检索功能验证通过。测试了100篇文档的导入和搜索，搜索结果的相关性还不错。但发现一个问题：当搜索query很短（比如只有两三个字）时，向量检索的效果会下降，建议对短query做特殊处理，比如优先走关键词检索。\"}}"
+    },
+    {
+        "send_time": 1700604980,
+        "msgtype": "text",
+        "sender_name": "张三",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"好建议，这个加到优化列表里。第一版就先这样，下周开始邀请内部用户试用，收集反馈。\\n\\n辛苦大家了，项目进展很顺利！\"}}"
+    },
+    {
+        "send_time": 1700605040,
+        "msgtype": "text",
+        "sender_name": "李四",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"加油！💪\"}}"
+    },
+    {
+        "send_time": 1700605100,
+        "msgtype": "text",
+        "sender_name": "王五",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"一起加油！\"}}"
+    },
+    {
+        "send_time": 1700605160,
+        "msgtype": "text",
+        "sender_name": "赵六",
+        "msg_content": "{\"msgtype\":\"text\",\"text\":{\"content\":\"期待用户反馈！\"}}"
+    }
+]
