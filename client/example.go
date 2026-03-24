@@ -64,7 +64,7 @@ func ExampleUsage() {
 			"source": "local",
 			"type":   "document",
 		}
-		knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), createdKB.ID, filePath, metadata, nil, "")
+		knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), createdKB.ID, filePath, metadata, nil, "", "")
 		if err != nil {
 			fmt.Printf("Failed to upload knowledge file: %v\n", err)
 		} else {
