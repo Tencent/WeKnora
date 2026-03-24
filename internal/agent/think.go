@@ -226,10 +226,18 @@ func (e *AgentEngine) callLLMWithRetry(
 ) (*types.ChatResponse, error) {
 	round := iteration + 1
 
-	// Log message summary at Debug level (per-message detail is noisy at Info)
+	// Log message summary; only detail the tail messages to avoid repeating what prior rounds already logged
+	const maxDetailMsgs = 4
 	logger.Infof(ctx, "[Agent][Round-%d] Calling LLM: %d messages, %d tools",
 		round, len(messages), len(tools))
-	for i, msg := range messages {
+	startIdx := 0
+	if len(messages) > maxDetailMsgs {
+		startIdx = len(messages) - maxDetailMsgs
+		logger.Debugf(ctx, "[Agent][Round-%d] (skipping msg[0..%d], already logged in prior rounds)",
+			round, startIdx-1)
+	}
+	for i := startIdx; i < len(messages); i++ {
+		msg := messages[i]
 		if msg.Role == "tool" {
 			logger.Debugf(ctx, "[Agent][Round-%d] msg[%d]: role=tool, name=%s, len=%d",
 				round, i, msg.Name, len(msg.Content))
