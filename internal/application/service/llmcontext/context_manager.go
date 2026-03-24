@@ -3,205 +3,215 @@ package llmcontext
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// contextManager implements the ContextManager interface
-// It handles business logic (compression, token management) and delegates storage to ContextStorage
+// dbFallbackFetchCount is the number of raw DB messages to fetch when
+// rebuilding context from persistent storage.  This should be generous
+// because user+assistant messages are paired by RequestID and some
+// incomplete pairs are discarded.
+const dbFallbackFetchCount = 200
+
+var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// contextManager implements the ContextManager interface.
+// It is a cache-backed storage layer: messages are persisted per session in
+// a fast store (Redis / memory).  When the cache is empty (e.g. TTL expired),
+// it falls back to the persistent messages table via MessageService to
+// rebuild context.
+//
+// All LLM-aware compression (summarisation, tool-boundary-aware truncation)
+// is handled by the Agent Engine's Consolidator before messages are sent to
+// the model.
 type contextManager struct {
-	storage             ContextStorage                 // Storage backend (Redis, Memory, etc.)
-	compressionStrategy interfaces.CompressionStrategy // Compression strategy
-	maxTokens           int                            // Maximum tokens allowed in context
+	storage     ContextStorage
+	messageRepo interfaces.MessageRepository // optional; enables DB fallback
 }
 
-// NewContextManager creates a new context manager with the specified storage and compression strategy
-func NewContextManager(
-	storage ContextStorage,
-	compressionStrategy interfaces.CompressionStrategy,
-	maxTokens int,
-) interfaces.ContextManager {
+// NewContextManager creates a context manager.
+// messageRepo is optional — when provided, GetContext will reconstruct
+// history from the DB if the cache is empty.
+func NewContextManager(storage ContextStorage, messageRepo interfaces.MessageRepository) interfaces.ContextManager {
 	return &contextManager{
-		storage:             storage,
-		compressionStrategy: compressionStrategy,
-		maxTokens:           maxTokens,
+		storage:     storage,
+		messageRepo: messageRepo,
 	}
 }
 
-// NewContextManagerWithMemory creates a context manager with in-memory storage (for backward compatibility)
-func NewContextManagerWithMemory(
-	compressionStrategy interfaces.CompressionStrategy,
-	maxTokens int,
-) interfaces.ContextManager {
-	return &contextManager{
-		storage:             NewMemoryStorage(),
-		compressionStrategy: compressionStrategy,
-		maxTokens:           maxTokens,
-	}
-}
-
-// AddMessage adds a message to the session context
-// This method handles the business logic: loading, appending, compression, and saving
+// AddMessage appends a message to the session context and persists it.
 func (cm *contextManager) AddMessage(ctx context.Context, sessionID string, message chat.Message) error {
-	logger.Infof(ctx, "[ContextManager][Session-%s] Adding message: role=%s, content_length=%d",
-		sessionID, message.Role, len(message.Content))
-
-	// Log message content preview
-	contentPreview := message.Content
-	if len(contentPreview) > 200 {
-		contentPreview = contentPreview[:200] + "..."
-	}
-	logger.Debugf(ctx, "[ContextManager][Session-%s] Message content preview: %s", sessionID, contentPreview)
-
-	// Load existing messages from storage
 	messages, err := cm.storage.Load(ctx, sessionID)
 	if err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to load context: %v", sessionID, err)
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// Add new message
-	beforeCount := len(messages)
 	messages = append(messages, message)
-	logger.Debugf(ctx, "[ContextManager][Session-%s] Messages count: %d -> %d", sessionID, beforeCount, len(messages))
 
-	// Check if compression is needed
-	tokenCount := cm.compressionStrategy.EstimateTokens(messages)
-	logger.Debugf(ctx, "[ContextManager][Session-%s] Current token count: %d (max: %d)",
-		sessionID, tokenCount, cm.maxTokens)
-
-	if tokenCount > cm.maxTokens {
-		logger.Infof(ctx, "[ContextManager][Session-%s] Context exceeds max tokens (%d > %d), applying compression",
-			sessionID, tokenCount, cm.maxTokens)
-		beforeCompressionCount := len(messages)
-		compressed, err := cm.compressionStrategy.Compress(ctx, messages, cm.maxTokens)
-		if err != nil {
-			logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to compress context: %v", sessionID, err)
-			return fmt.Errorf("failed to compress context: %w", err)
-		}
-		messages = compressed
-		afterTokenCount := cm.compressionStrategy.EstimateTokens(messages)
-		logger.Infof(ctx, "[ContextManager][Session-%s] Context compressed: %d -> %d messages, %d -> %d tokens",
-			sessionID, beforeCompressionCount, len(compressed), tokenCount, afterTokenCount)
-	}
-
-	// Save updated messages to storage
 	if err := cm.storage.Save(ctx, sessionID, messages); err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to save context: %v", sessionID, err)
 		return fmt.Errorf("failed to save context: %w", err)
 	}
 
-	logger.Infof(
-		ctx,
-		"[ContextManager][Session-%s] Successfully added message (total: %d messages)",
-		sessionID,
-		len(messages),
-	)
+	logger.Debugf(ctx, "[ContextManager][Session-%s] Message saved (total: %d)", sessionID, len(messages))
 	return nil
 }
 
-// GetContext retrieves the current context for a session from storage
+// GetContext retrieves the stored context for a session.
+// If the cache is empty and a MessageService is available, it rebuilds
+// the context from the persistent messages table and warms the cache.
 func (cm *contextManager) GetContext(ctx context.Context, sessionID string) ([]chat.Message, error) {
-	logger.Infof(ctx, "[ContextManager][Session-%s] Getting context", sessionID)
-
-	// Load messages from storage
 	messages, err := cm.storage.Load(ctx, sessionID)
 	if err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to load context: %v", sessionID, err)
 		return nil, fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// Calculate token estimate
-	tokenCount := cm.compressionStrategy.EstimateTokens(messages)
-
-	logger.Infof(ctx, "[ContextManager][Session-%s] Retrieved %d messages (~%d tokens)",
-		sessionID, len(messages), tokenCount)
-
-	// Log message role distribution
-	roleCount := make(map[string]int)
-	for _, msg := range messages {
-		roleCount[msg.Role]++
+	if len(messages) > 0 {
+		logger.Debugf(ctx, "[ContextManager][Session-%s] Cache hit: %d messages", sessionID, len(messages))
+		return messages, nil
 	}
-	logger.Debugf(ctx, "[ContextManager][Session-%s] Message distribution: %v", sessionID, roleCount)
 
-	return messages, nil
+	if cm.messageRepo == nil {
+		return messages, nil
+	}
+
+	// Cache miss — rebuild from DB
+	rebuilt, err := cm.rebuildFromDB(ctx, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "[ContextManager][Session-%s] Failed to rebuild context from DB: %v", sessionID, err)
+		return []chat.Message{}, nil
+	}
+
+	if len(rebuilt) > 0 {
+		if saveErr := cm.storage.Save(ctx, sessionID, rebuilt); saveErr != nil {
+			logger.Warnf(ctx, "[ContextManager][Session-%s] Failed to warm cache: %v", sessionID, saveErr)
+		}
+		logger.Infof(ctx, "[ContextManager][Session-%s] Rebuilt %d messages from DB", sessionID, len(rebuilt))
+	}
+
+	return rebuilt, nil
 }
 
-// ClearContext clears all context for a session from storage
-func (cm *contextManager) ClearContext(ctx context.Context, sessionID string) error {
-	logger.Infof(ctx, "[ContextManager][Session-%s] Clearing context", sessionID)
+// rebuildFromDB loads recent messages from the persistent messages table
+// and converts them into chat.Message pairs (user + assistant).
+func (cm *contextManager) rebuildFromDB(ctx context.Context, sessionID string) ([]chat.Message, error) {
+	dbMessages, err := cm.messageRepo.GetRecentMessagesBySession(ctx, sessionID, dbFallbackFetchCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load messages from DB: %w", err)
+	}
+	if len(dbMessages) == 0 {
+		return nil, nil
+	}
 
-	// Delete from storage
+	// Group by RequestID into Q&A pairs, same logic as chat_pipeline/common.go
+	type pair struct {
+		query     string
+		answer    string
+		createdAt time.Time
+	}
+	pairMap := make(map[string]*pair)
+	for _, msg := range dbMessages {
+		p, ok := pairMap[msg.RequestID]
+		if !ok {
+			p = &pair{}
+			pairMap[msg.RequestID] = p
+		}
+		switch msg.Role {
+		case "user":
+			p.query = msg.Content
+			p.createdAt = msg.CreatedAt
+			if desc := extractImageCaptions(msg.Images); desc != "" {
+				p.query += "\n\n[用户上传图片内容]\n" + desc
+			}
+		case "assistant":
+			p.answer = regThinkTags.ReplaceAllString(msg.Content, "")
+		}
+	}
+
+	pairs := make([]*pair, 0, len(pairMap))
+	for _, p := range pairMap {
+		if p.query != "" && p.answer != "" {
+			pairs = append(pairs, p)
+		}
+	}
+
+	sort.Slice(pairs, func(i, j int) bool {
+		return pairs[i].createdAt.Before(pairs[j].createdAt)
+	})
+
+	result := make([]chat.Message, 0, len(pairs)*2)
+	for _, p := range pairs {
+		result = append(result,
+			chat.Message{Role: "user", Content: p.query},
+			chat.Message{Role: "assistant", Content: p.answer},
+		)
+	}
+
+	return result, nil
+}
+
+// extractImageCaptions concatenates non-empty Caption fields from message
+// images so that previous turns' image descriptions are included in context.
+func extractImageCaptions(images types.MessageImages) string {
+	var parts []string
+	for _, img := range images {
+		if img.Caption != "" {
+			parts = append(parts, img.Caption)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// ClearContext removes all context for a session.
+func (cm *contextManager) ClearContext(ctx context.Context, sessionID string) error {
 	if err := cm.storage.Delete(ctx, sessionID); err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to clear context: %v", sessionID, err)
 		return fmt.Errorf("failed to clear context: %w", err)
 	}
-
-	logger.Infof(ctx, "[ContextManager][Session-%s] Context cleared successfully", sessionID)
+	logger.Infof(ctx, "[ContextManager][Session-%s] Context cleared", sessionID)
 	return nil
 }
 
-// GetContextStats returns statistics about the context
+// GetContextStats returns statistics about the stored context.
 func (cm *contextManager) GetContextStats(ctx context.Context, sessionID string) (*interfaces.ContextStats, error) {
-	// Load messages from storage
 	messages, err := cm.storage.Load(ctx, sessionID)
 	if err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to load context for stats: %v", sessionID, err)
 		return nil, fmt.Errorf("failed to load context: %w", err)
 	}
 
-	tokenCount := cm.compressionStrategy.EstimateTokens(messages)
-
-	stats := &interfaces.ContextStats{
+	return &interfaces.ContextStats{
 		MessageCount:         len(messages),
-		TokenCount:           tokenCount,
-		IsCompressed:         false, // We'd need to track this explicitly for accurate reporting
 		OriginalMessageCount: len(messages),
-	}
-
-	logger.Debugf(ctx, "[ContextManager][Session-%s] Context stats: %d messages, ~%d tokens",
-		sessionID, stats.MessageCount, stats.TokenCount)
-
-	return stats, nil
+	}, nil
 }
 
-// SetSystemPrompt sets or updates the system prompt for a session
-// If a system message exists, it will be replaced; otherwise, a new one will be added at the beginning
+// SetSystemPrompt sets or updates the system prompt for a session.
 func (cm *contextManager) SetSystemPrompt(ctx context.Context, sessionID string, systemPrompt string) error {
-	logger.Infof(ctx, "[ContextManager][Session-%s] Setting system prompt, length=%d", sessionID, len(systemPrompt))
-
-	// Load existing messages from storage
 	messages, err := cm.storage.Load(ctx, sessionID)
 	if err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to load context: %v", sessionID, err)
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// Create new system message
 	systemMessage := chat.Message{
 		Role:    "system",
 		Content: systemPrompt,
 	}
 
-	// Check if first message is a system message
 	if len(messages) > 0 && messages[0].Role == "system" {
-		// Replace existing system message
-		logger.Debugf(ctx, "[ContextManager][Session-%s] Replacing existing system prompt", sessionID)
 		messages[0] = systemMessage
 	} else {
-		// Insert system message at the beginning
-		logger.Debugf(ctx, "[ContextManager][Session-%s] Inserting new system prompt at beginning", sessionID)
 		messages = append([]chat.Message{systemMessage}, messages...)
 	}
 
-	// Save updated messages to storage
 	if err := cm.storage.Save(ctx, sessionID, messages); err != nil {
-		logger.Errorf(ctx, "[ContextManager][Session-%s] Failed to save context: %v", sessionID, err)
 		return fmt.Errorf("failed to save context: %w", err)
 	}
 
-	logger.Infof(ctx, "[ContextManager][Session-%s] System prompt set successfully", sessionID)
+	logger.Debugf(ctx, "[ContextManager][Session-%s] System prompt set (length=%d)", sessionID, len(systemPrompt))
 	return nil
 }

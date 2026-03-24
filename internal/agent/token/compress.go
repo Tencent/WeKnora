@@ -8,15 +8,14 @@ import (
 // When message tokens exceed MaxContextTokens * threshold, old messages are trimmed.
 const DefaultContextThresholdRatio = 0.8
 
-// CompressContext trims older messages to bring total token count below the threshold.
-// currentTokens is the caller's best estimate of the current context size (from API
-// Usage when available, falling back to BPE estimation). The estimator is still used
-// internally for per-message-group cost calculation during trimming.
-//
-// It preserves:
-//   - The first message (system prompt)
-//   - The last message (current user query)
+// CompressContext trims older history messages to bring total token count below
+// the threshold.  It preserves:
+//   - The system prompt (first message)
+//   - The current turn: user query (last user message) and all subsequent
+//     assistant/tool messages
 //   - tool_call / tool_result message pairs (never splits them)
+//
+// currentTokens is the caller's best estimate of the current context size.
 func CompressContext(
 	messages []chat.Message,
 	estimator *Estimator,
@@ -33,10 +32,24 @@ func CompressContext(
 	}
 
 	systemMsg := messages[0]
-	lastMsg := messages[len(messages)-1]
-	middle := messages[1 : len(messages)-1]
 
-	groups := groupToolMessages(middle)
+	// Find the current user query — the last message with role "user".
+	lastUserIdx := len(messages) - 1
+	for i := len(messages) - 1; i >= 1; i-- {
+		if messages[i].Role == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+
+	history := messages[1:lastUserIdx]
+	tail := messages[lastUserIdx:]
+
+	if len(history) == 0 {
+		return messages
+	}
+
+	groups := groupToolMessages(history)
 
 	tokensToFree := currentTokens - threshold
 	freed := 0
@@ -59,7 +72,7 @@ func CompressContext(
 	for i := removeUpTo; i < len(groups); i++ {
 		remaining = append(remaining, groups[i]...)
 	}
-	remaining = append(remaining, lastMsg)
+	remaining = append(remaining, tail...)
 
 	return remaining
 }

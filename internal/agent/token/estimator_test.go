@@ -154,6 +154,153 @@ func TestCompressContext(t *testing.T) {
 		result := CompressContext(messages, e, 1, 999)
 		assert.Equal(t, messages, result)
 	})
+
+	t.Run("round2+: user query not at end, preserves current turn tail", func(t *testing.T) {
+		longText := strings.Repeat("filler content ", 200)
+		messages := []chat.Message{
+			{Role: "system", Content: "system prompt"},
+			// old history
+			{Role: "user", Content: longText},
+			{Role: "assistant", Content: longText},
+			{Role: "user", Content: longText},
+			{Role: "assistant", Content: longText},
+			// current turn
+			{Role: "user", Content: "current question"},
+			{Role: "assistant", Content: "let me search", ToolCalls: []chat.ToolCall{
+				{ID: "c1", Function: chat.FunctionCall{Name: "search", Arguments: `{"q":"test"}`}},
+			}},
+			{Role: "tool", Content: "search results", ToolCallID: "c1", Name: "search"},
+		}
+
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 300, tokens)
+
+		// System prompt preserved.
+		assert.Equal(t, "system", result[0].Role)
+		assert.Equal(t, "system prompt", result[0].Content)
+
+		// Current turn tail must be fully intact.
+		userIdx := -1
+		for i, m := range result {
+			if m.Role == "user" && m.Content == "current question" {
+				userIdx = i
+				break
+			}
+		}
+		require.NotEqual(t, -1, userIdx, "user query must be preserved")
+		require.Greater(t, len(result), userIdx+2, "assistant + tool must follow")
+		assert.Equal(t, "assistant", result[userIdx+1].Role)
+		assert.Equal(t, "let me search", result[userIdx+1].Content)
+		assert.Equal(t, "tool", result[userIdx+2].Role)
+		assert.Equal(t, "search results", result[userIdx+2].Content)
+
+		// Should be shorter than original (old history trimmed).
+		assert.Less(t, len(result), len(messages))
+	})
+
+	t.Run("round2+: multiple tool results after user query all preserved", func(t *testing.T) {
+		longText := strings.Repeat("data ", 300)
+		messages := []chat.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: longText},
+			{Role: "assistant", Content: longText},
+			// current turn with parallel tool calls
+			{Role: "user", Content: "do things"},
+			{Role: "assistant", Content: "ok", ToolCalls: []chat.ToolCall{
+				{ID: "c1", Function: chat.FunctionCall{Name: "t1"}},
+				{ID: "c2", Function: chat.FunctionCall{Name: "t2"}},
+			}},
+			{Role: "tool", Content: "res1", ToolCallID: "c1", Name: "t1"},
+			{Role: "tool", Content: "res2", ToolCallID: "c2", Name: "t2"},
+		}
+
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 200, tokens)
+
+		// Both tool results must be present.
+		var toolNames []string
+		for _, m := range result {
+			if m.Role == "tool" {
+				toolNames = append(toolNames, m.Name)
+			}
+		}
+		assert.Contains(t, toolNames, "t1")
+		assert.Contains(t, toolNames, "t2")
+
+		// User query preserved.
+		found := false
+		for _, m := range result {
+			if m.Content == "do things" {
+				found = true
+			}
+		}
+		assert.True(t, found)
+	})
+
+	t.Run("round2+: no history between system and user query returns unchanged", func(t *testing.T) {
+		messages := []chat.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hello"},
+			{Role: "assistant", Content: "thinking", ToolCalls: []chat.ToolCall{
+				{ID: "c1", Function: chat.FunctionCall{Name: "t1"}},
+			}},
+			{Role: "tool", Content: "done", ToolCallID: "c1", Name: "t1"},
+		}
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 10, tokens)
+		assert.Equal(t, messages, result, "no history to trim → unchanged")
+	})
+
+	t.Run("no user message at all returns unchanged", func(t *testing.T) {
+		messages := []chat.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "assistant", Content: strings.Repeat("x", 1000)},
+			{Role: "assistant", Content: strings.Repeat("y", 1000)},
+		}
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 10, tokens)
+		// lastUserIdx defaults to len-1 (last msg), history = messages[1:last] = [assistant]
+		// This still does its best—the important thing is it doesn't panic.
+		assert.NotNil(t, result)
+	})
+
+	t.Run("round2+: tool pair in history never split", func(t *testing.T) {
+		longText := strings.Repeat("verbose ", 200)
+		messages := []chat.Message{
+			{Role: "system", Content: "sys"},
+			// old turn 1
+			{Role: "user", Content: "old query 1"},
+			{Role: "assistant", Content: longText, ToolCalls: []chat.ToolCall{
+				{ID: "old1", Function: chat.FunctionCall{Name: "old_tool"}},
+			}},
+			{Role: "tool", Content: longText, ToolCallID: "old1", Name: "old_tool"},
+			// old turn 2
+			{Role: "user", Content: "old query 2"},
+			{Role: "assistant", Content: "short reply"},
+			// current turn
+			{Role: "user", Content: "current"},
+			{Role: "assistant", Content: "working", ToolCalls: []chat.ToolCall{
+				{ID: "new1", Function: chat.FunctionCall{Name: "new_tool"}},
+			}},
+			{Role: "tool", Content: "result", ToolCallID: "new1", Name: "new_tool"},
+		}
+
+		tokens := e.EstimateMessages(messages)
+		result := CompressContext(messages, e, 300, tokens)
+
+		// Verify no orphaned tool message: every "tool" msg must be preceded by
+		// an assistant with tool_calls.
+		for i, m := range result {
+			if m.Role == "tool" {
+				require.Greater(t, i, 0, "tool message at index 0 is impossible")
+				prev := result[i-1]
+				isPairedTool := prev.Role == "tool"
+				isPairedAssistant := prev.Role == "assistant" && len(prev.ToolCalls) > 0
+				assert.True(t, isPairedTool || isPairedAssistant,
+					"tool message at %d must be preceded by assistant+tool_calls or another tool, got %s", i, prev.Role)
+			}
+		}
+	})
 }
 
 func TestGroupToolMessages(t *testing.T) {

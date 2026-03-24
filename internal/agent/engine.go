@@ -293,7 +293,11 @@ func (e *AgentEngine) executeLoop(
 		// the API-reported usage from the previous round plus a BPE delta
 		// for newly appended messages (assistant reply + tool results).
 		currentTokens := e.estimateCurrentTokens(messages)
+		beforeLen := len(messages)
 		messages = e.manageContextWindow(ctx, messages, state.CurrentRound+1, currentTokens)
+		if len(messages) < beforeLen {
+			currentTokens = e.tokenEstimator.EstimateMessages(messages)
+		}
 
 		logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools, est_tokens=%d",
 			state.CurrentRound+1, e.config.MaxIterations, len(messages), len(tools), currentTokens)

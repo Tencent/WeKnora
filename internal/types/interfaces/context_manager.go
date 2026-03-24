@@ -42,12 +42,3 @@ type ContextStats struct {
 	OriginalMessageCount int `json:"original_message_count"`
 }
 
-// CompressionStrategy defines how context should be compressed
-type CompressionStrategy interface {
-	// Compress compresses messages when context exceeds limits
-	// Returns compressed messages that fit within the limit
-	Compress(ctx context.Context, messages []chat.Message, maxTokens int) ([]chat.Message, error)
-
-	// EstimateTokens estimates token count for messages
-	EstimateTokens(messages []chat.Message) int
-}

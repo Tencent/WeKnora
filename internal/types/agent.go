@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// DefaultMaxContextTokens is the default context window budget for agent conversations (200k).
+const DefaultMaxContextTokens = 200000
+
 // AgentConfig represents the full agent configuration (used at tenant level and runtime)
 // This includes all configuration parameters for agent execution
 type AgentConfig struct {
@@ -47,8 +50,8 @@ type AgentConfig struct {
 	// Outputs exceeding this limit are truncated with head + tail preservation.
 	MaxToolOutputChars int `json:"max_tool_output_chars,omitempty"`
 
-	// Maximum context window tokens for the agent (default: 0 = disabled).
-	// When set, the agent compresses older messages to stay within this limit,
+	// Maximum context window tokens for the agent (default: 200000).
+	// The agent compresses older messages to stay within this limit,
 	// preserving tool_call/tool_result pairs.
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
 }

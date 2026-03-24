@@ -70,10 +70,11 @@ func (c *Consolidator) ShouldConsolidate(currentTokens int) bool {
 // Consolidate summarizes older messages and returns a compressed message array.
 // It preserves:
 //   - The system prompt (first message)
-//   - The current user query (last message)
-//   - Recent messages that fit within the token budget
+//   - The current turn: user query (last user message) and all subsequent
+//     assistant/tool messages belonging to the same turn
+//   - Recent history messages that fit within the token budget
 //
-// Older messages are replaced with a summary system message.
+// Older history messages are replaced with a summary system message.
 // On LLM failure after maxConsolidationAttempts, falls back to raw text archiving.
 func (c *Consolidator) Consolidate(
 	ctx context.Context,
@@ -84,32 +85,51 @@ func (c *Consolidator) Consolidate(
 	}
 
 	systemMsg := messages[0]
-	lastMsg := messages[len(messages)-1]
-	middle := messages[1 : len(messages)-1]
 
-	// Determine how many messages to keep vs. consolidate.
-	// We want to consolidate enough to bring tokens below the threshold.
-	targetTokens := int(float64(c.maxTokens) * c.threshold * 0.6) // aim for 60% of threshold
-	keepFromEnd := c.findKeepBoundary(middle, targetTokens, &systemMsg, &lastMsg)
-
-	if keepFromEnd >= len(middle) {
-		// Nothing to consolidate
+	// Find the current user query — the last message with role "user".
+	// Everything from this point onward (user query + assistant tool_calls +
+	// tool results) is the active turn and must be preserved intact.
+	lastUserIdx := 0
+	for i := len(messages) - 1; i >= 1; i-- {
+		if messages[i].Role == "user" {
+			lastUserIdx = i
+			break
+		}
+	}
+	if lastUserIdx <= 1 {
 		return messages, nil
 	}
 
-	toConsolidate := middle[:len(middle)-keepFromEnd]
-	toKeep := middle[len(middle)-keepFromEnd:]
+	history := messages[1:lastUserIdx]
+	tail := messages[lastUserIdx:]
 
-	// Try LLM-powered summarization
+	if len(history) < 2 {
+		return messages, nil
+	}
+
+	targetTokens := int(float64(c.maxTokens) * c.threshold * 0.6) // aim for 60% of threshold
+
+	tailTokens := 0
+	for i := range tail {
+		tailTokens += c.estimator.EstimateMessage(&tail[i])
+	}
+
+	keepFromEnd := c.findKeepBoundary(history, targetTokens, &systemMsg, tailTokens)
+
+	if keepFromEnd >= len(history) {
+		return messages, nil
+	}
+
+	toConsolidate := history[:len(history)-keepFromEnd]
+	toKeep := history[len(history)-keepFromEnd:]
+
 	summary, err := c.summarizeWithRetry(ctx, toConsolidate)
 	if err != nil {
-		// Fall back to raw archiving
 		logger.Warnf(ctx, "[MemoryConsolidator] LLM summarization failed after retries, "+
 			"falling back to raw archive: %v", err)
 		summary = c.rawArchive(toConsolidate)
 	}
 
-	// Build consolidated messages
 	summaryMsg := chat.Message{
 		Role: "system",
 		Content: fmt.Sprintf(
@@ -118,59 +138,56 @@ func (c *Consolidator) Consolidate(
 		),
 	}
 
-	result := make([]chat.Message, 0, 3+len(toKeep))
+	result := make([]chat.Message, 0, 2+len(toKeep)+len(tail))
 	result = append(result, systemMsg)
 	result = append(result, summaryMsg)
 	result = append(result, toKeep...)
-	result = append(result, lastMsg)
+	result = append(result, tail...)
 
 	logger.Infof(ctx, "[MemoryConsolidator] Consolidated %d messages → summary (%d chars), "+
-		"keeping %d recent messages",
-		len(toConsolidate), len(summary), len(toKeep))
+		"keeping %d history + %d current-turn messages",
+		len(toConsolidate), len(summary), len(toKeep), len(tail))
 
 	return result, nil
 }
 
-// findKeepBoundary determines how many messages from the end of middle to keep.
+// findKeepBoundary determines how many messages from the end of history to keep.
 // Returns the count of messages to keep (from the end), respecting tool_call/tool_result boundaries.
+// tailTokens is the token cost of the current-turn tail that is always preserved.
 func (c *Consolidator) findKeepBoundary(
-	middle []chat.Message,
+	history []chat.Message,
 	targetTokens int,
-	systemMsg, lastMsg *chat.Message,
+	systemMsg *chat.Message,
+	tailTokens int,
 ) int {
-	// Budget for kept messages = target - system - last
 	budget := targetTokens -
 		c.estimator.EstimateMessage(systemMsg) -
-		c.estimator.EstimateMessage(lastMsg) -
+		tailTokens -
 		500 // reserve for summary message
 
 	if budget <= 0 {
 		return 0
 	}
 
-	// Walk from the end, accumulating tokens, respecting tool boundaries
 	tokens := 0
 	keepCount := 0
-	i := len(middle) - 1
+	i := len(history) - 1
 
 	for i >= 0 {
-		msg := middle[i]
+		msg := history[i]
 		msgTokens := c.estimator.EstimateMessage(&msg)
 
-		// If this is a tool result, we must also keep its assistant message
 		if msg.Role == "tool" {
-			// Walk back to find the assistant message with tool_calls
 			groupTokens := msgTokens
 			groupSize := 1
 			j := i - 1
-			for j >= 0 && middle[j].Role == "tool" {
-				groupTokens += c.estimator.EstimateMessage(&middle[j])
+			for j >= 0 && history[j].Role == "tool" {
+				groupTokens += c.estimator.EstimateMessage(&history[j])
 				groupSize++
 				j--
 			}
-			// Include the assistant message
-			if j >= 0 && middle[j].Role == "assistant" {
-				groupTokens += c.estimator.EstimateMessage(&middle[j])
+			if j >= 0 && history[j].Role == "assistant" {
+				groupTokens += c.estimator.EstimateMessage(&history[j])
 				groupSize++
 			}
 
