@@ -89,7 +89,7 @@ func (s *WebSearchService) CompressWithRAG(
 		if body != "" {
 			contentLines = append(contentLines, body)
 		}
-		knowledge, err := knowSvc.CreateKnowledgeFromPassageSync(ctx, createdKB.ID, contentLines)
+		knowledge, err := knowSvc.CreateKnowledgeFromPassageSync(ctx, createdKB.ID, contentLines, "")
 		if err != nil {
 			logger.Warnf(ctx, "failed to ingest passage into temp KB: %v", err)
 			continue

@@ -1919,7 +1919,7 @@ func (s *Service) processFileToKnowledgeBase(ctx context.Context, msg *IncomingM
 	fh := newInMemoryFileHeader(fileName, content)
 
 	// Create knowledge entry via the knowledge service
-	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", "")
+	knowledge, err := s.knowledgeService.CreateKnowledgeFromFile(kbCtx, kbID, fh, nil, nil, "", "", imPlatformToChannel(channel.Platform))
 	if err != nil {
 		errMsg := err.Error()
 		// Check for duplicate file
@@ -2267,6 +2267,24 @@ func fileExtension(filename string) string {
 		return ""
 	}
 	return strings.ToLower(parts[len(parts)-1])
+}
+
+// imPlatformToChannel maps an IM platform identifier to a Knowledge.Channel constant.
+func imPlatformToChannel(platform string) string {
+	switch strings.ToLower(platform) {
+	case "wechat":
+		return types.ChannelWechat
+	case "wecom", "wxwork":
+		return types.ChannelWecom
+	case "feishu", "lark":
+		return types.ChannelFeishu
+	case "dingtalk":
+		return types.ChannelDingtalk
+	case "slack":
+		return types.ChannelSlack
+	default:
+		return types.ChannelIM
+	}
 }
 
 // newInMemoryFileHeader wraps in-memory file content as a *multipart.FileHeader

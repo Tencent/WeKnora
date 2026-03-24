@@ -601,6 +601,7 @@ func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint6
 			res.KnowledgeTitle = k.Title
 			res.KnowledgeFilename = k.FileName
 			res.KnowledgeSource = k.Source
+			res.KnowledgeChannel = k.Channel
 			res.Metadata = k.GetMetadata()
 		}
 

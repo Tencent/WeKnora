@@ -28,6 +28,7 @@ export default function (knowledgeBaseId?: string) {
     total: 0,
     type: "",
     source: "",
+    channel: "",
     file_type: "",
     chunkLoading: false,
     chunkLoadError: "",
@@ -151,6 +152,7 @@ export default function (knowledgeBaseId?: string) {
       id: "",
       type: "",
       source: "",
+      channel: "",
       file_type: "",
       chunkLoadError: "",
     });
@@ -164,6 +166,7 @@ export default function (knowledgeBaseId?: string) {
             id: data.id,
             type: data.type || 'file',
             source: data.source || '',
+            channel: data.channel || '',
             file_type: data.file_type || ''
           });
         }

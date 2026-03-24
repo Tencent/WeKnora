@@ -32,6 +32,10 @@
               <span class="field-label">{{ $t('chat.documentSourceLabel') }}</span>
               <span class="field-value">{{ formatSource(doc) }}</span>
             </div>
+            <div class="info-field" v-if="doc.channel && doc.channel !== 'web'">
+              <span class="field-label">{{ $t('knowledgeBase.channelLabel') }}</span>
+              <span class="field-value">{{ getChannelLabel(doc.channel) }}</span>
+            </div>
             <div class="info-field" v-if="doc.file_name || doc.file_type || doc.file_size">
               <span class="field-label">{{ $t('chat.documentFileLabel') }}</span>
               <span class="field-value">
@@ -83,6 +87,23 @@ const errors = computed(() => props.data?.errors?.filter(Boolean) ?? []);
 const totalChunkCount = computed(() =>
   documents.value.reduce((sum, doc) => sum + (doc.chunk_count || 0), 0),
 );
+
+const channelLabelMap: Record<string, string> = {
+  web: 'knowledgeBase.channelWeb',
+  api: 'knowledgeBase.channelApi',
+  browser_extension: 'knowledgeBase.channelBrowserExtension',
+  wechat: 'knowledgeBase.channelWechat',
+  wecom: 'knowledgeBase.channelWecom',
+  feishu: 'knowledgeBase.channelFeishu',
+  dingtalk: 'knowledgeBase.channelDingtalk',
+  slack: 'knowledgeBase.channelSlack',
+  im: 'knowledgeBase.channelIm',
+};
+
+const getChannelLabel = (channel: string) => {
+  const key = channelLabelMap[channel];
+  return key ? t(key) : t('knowledgeBase.channelUnknown');
+};
 
 const formatSource = (doc: DocumentInfoDocument) => {
   if (doc.type && doc.source) {

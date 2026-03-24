@@ -153,7 +153,8 @@ type SearchResult struct {
 	ImageInfo         string            `json:"image_info"`
 	Metadata          map[string]string `json:"metadata"`
 	KnowledgeFilename string            `json:"knowledge_filename"`
-	KnowledgeSource   string            `json:"knowledge_source"`
+	KnowledgeSource  string            `json:"knowledge_source"`
+	KnowledgeChannel string            `json:"knowledge_channel"`
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`

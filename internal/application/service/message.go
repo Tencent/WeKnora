@@ -369,7 +369,7 @@ func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string,
 	passages = append(passages, passage)
 
 	// Use async (non-sync) passage creation so it doesn't block the response
-	knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, cfg.KnowledgeBaseID, passages)
+	knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, cfg.KnowledgeBaseID, passages, "")
 	if err != nil {
 		logger.Warnf(ctx, "Failed to index message to chat history KB: %v", err)
 		return

@@ -178,9 +178,16 @@ func checkStorageEngineConfigured(ctx context.Context, kb *types.KnowledgeBase) 
 	return nil
 }
 
+func defaultChannel(ch string) string {
+	if ch == "" {
+		return types.ChannelWeb
+	}
+	return ch
+}
+
 // CreateKnowledgeFromFile creates a knowledge entry from an uploaded file
 func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
-	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string,
+	kbID string, file *multipart.FileHeader, metadata map[string]string, enableMultimodel *bool, customFileName string, tagID string, channel string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file")
 
@@ -322,6 +329,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		KnowledgeBaseID:  kbID,
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
 		Type:             "file",
+		Channel:          defaultChannel(channel),
 		Title:            safeFilename,
 		FileName:         safeFilename,
 		FileType:         getFileType(safeFilename),
@@ -434,14 +442,14 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 }
 
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string, channel string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
 	// Route to file_url logic when the URL points to a downloadable file
 	if isFileURL(rawURL, fileName, fileType) {
-		return s.createKnowledgeFromFileURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID)
+		return s.createKnowledgeFromFileURL(ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagID, channel)
 	}
 
 	url := rawURL
@@ -510,6 +518,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		Type:             "url",
+		Channel:          defaultChannel(channel),
 		Title:            title,
 		Source:           url,
 		FileHash:         fileHash,
@@ -628,6 +637,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 	enableMultimodel *bool,
 	title string,
 	tagID string,
+	channel string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from file URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, file URL: %s", kbID, fileURL)
@@ -720,6 +730,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		Type:             "file_url",
+		Channel:          defaultChannel(channel),
 		Title:            title,
 		FileName:         displayName,
 		FileType:         fileType,
@@ -790,21 +801,21 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 
 // CreateKnowledgeFromPassage creates a knowledge entry from text passages
 func (s *knowledgeService) CreateKnowledgeFromPassage(ctx context.Context,
-	kbID string, passage []string,
+	kbID string, passage []string, channel string,
 ) (*types.Knowledge, error) {
-	return s.createKnowledgeFromPassageInternal(ctx, kbID, passage, false)
+	return s.createKnowledgeFromPassageInternal(ctx, kbID, passage, false, channel)
 }
 
 // CreateKnowledgeFromPassageSync creates a knowledge entry from text passages and waits for indexing to complete.
 func (s *knowledgeService) CreateKnowledgeFromPassageSync(ctx context.Context,
-	kbID string, passage []string,
+	kbID string, passage []string, channel string,
 ) (*types.Knowledge, error) {
-	return s.createKnowledgeFromPassageInternal(ctx, kbID, passage, true)
+	return s.createKnowledgeFromPassageInternal(ctx, kbID, passage, true, channel)
 }
 
 // CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
 func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
-	kbID string, payload *types.ManualKnowledgePayload,
+	kbID string, payload *types.ManualKnowledgePayload, channel string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating manual knowledge entry")
 
@@ -857,6 +868,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kbID,
 		Type:             types.KnowledgeTypeManual,
+		Channel:          defaultChannel(channel),
 		Title:            title,
 		Description:      "",
 		Source:           types.KnowledgeTypeManual,
@@ -901,7 +913,7 @@ func (s *knowledgeService) CreateKnowledgeFromManual(ctx context.Context,
 // createKnowledgeFromPassageInternal consolidates the common logic for creating knowledge from passages.
 // When syncMode is true, chunk processing is performed synchronously; otherwise, it's processed asynchronously.
 func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Context,
-	kbID string, passage []string, syncMode bool,
+	kbID string, passage []string, syncMode bool, channel string,
 ) (*types.Knowledge, error) {
 	if syncMode {
 		logger.Info(ctx, "Start creating knowledge from passage (sync)")
@@ -940,6 +952,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 		TenantID:         ctx.Value(types.TenantIDContextKey).(uint64),
 		KnowledgeBaseID:  kbID,
 		Type:             "passage",
+		Channel:          defaultChannel(channel),
 		ParseStatus:      "pending",
 		EnableStatus:     "disabled",
 		CreatedAt:        time.Now(),
@@ -1271,6 +1284,7 @@ func (s *knowledgeService) cloneKnowledge(
 		TenantID:         targetKB.TenantID,
 		KnowledgeBaseID:  targetKB.ID,
 		Type:             src.Type,
+		Channel:          src.Channel,
 		Title:            src.Title,
 		Description:      src.Description,
 		Source:           src.Source,
@@ -6038,6 +6052,7 @@ func (s *knowledgeService) ensureFAQKnowledge(
 		TenantID:         tenantID,
 		KnowledgeBaseID:  kb.ID,
 		Type:             types.KnowledgeTypeFAQ,
+		Channel:          types.ChannelWeb,
 		Title:            fmt.Sprintf("%s - FAQ", kb.Name),
 		Description:      "FAQ 条目容器",
 		Source:           types.KnowledgeTypeFAQ,
@@ -8610,6 +8625,7 @@ func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *type
 		TenantID:         kb.TenantID,
 		KnowledgeBaseID:  kb.ID,
 		Type:             types.KnowledgeTypeFAQ,
+		Channel:          types.ChannelWeb,
 		Title:            "FAQ",
 		ParseStatus:      "completed",
 		EnableStatus:     "enabled",
@@ -8621,6 +8637,7 @@ func (s *knowledgeService) getOrCreateFAQKnowledge(ctx context.Context, kb *type
 		knowledge.Title = srcKnowledge.Title
 		knowledge.Description = srcKnowledge.Description
 		knowledge.Source = srcKnowledge.Source
+		knowledge.Channel = srcKnowledge.Channel
 		knowledge.Metadata = srcKnowledge.Metadata
 	}
 

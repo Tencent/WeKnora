@@ -280,6 +280,23 @@ const formatFileSize = (bytes?: number | string) => {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+const channelLabelMap: Record<string, string> = {
+  web: 'knowledgeBase.channelWeb',
+  api: 'knowledgeBase.channelApi',
+  browser_extension: 'knowledgeBase.channelBrowserExtension',
+  wechat: 'knowledgeBase.channelWechat',
+  wecom: 'knowledgeBase.channelWecom',
+  feishu: 'knowledgeBase.channelFeishu',
+  dingtalk: 'knowledgeBase.channelDingtalk',
+  slack: 'knowledgeBase.channelSlack',
+  im: 'knowledgeBase.channelIm',
+};
+
+const getChannelLabel = (channel: string) => {
+  const key = channelLabelMap[channel];
+  return key ? t(key) : t('knowledgeBase.channelUnknown');
+};
+
 // 获取知识条目的显示类型
 const getKnowledgeType = (item: any) => {
   if (item.type === 'url') {
@@ -1923,6 +1940,7 @@ async function createNewSession(value: string): Promise<void> {
                       </template>
                       <div class="card-popover-meta">
                         <span class="card-popover-time">{{ t('knowledgeBase.updatedAt') }}：{{ formatDocTime(hoveredCardItem.updated_at) }}</span>
+                        <span v-if="(hoveredCardItem as any).channel && (hoveredCardItem as any).channel !== 'web'" class="card-popover-channel">{{ getChannelLabel((hoveredCardItem as any).channel) }}</span>
                         <span v-if="getTagName(hoveredCardItem.tag_id)" class="card-popover-tag">{{ getTagName(hoveredCardItem.tag_id) }}</span>
                         <span class="card-popover-type">{{ getKnowledgeType(hoveredCardItem) }}</span>
                       </div>
@@ -3381,6 +3399,13 @@ async function createNewSession(value: string): Promise<void> {
     gap: 8px;
     font-size: 11px;
     color: var(--td-text-color-secondary);
+  }
+
+  .card-popover-channel {
+    padding: 1px 6px;
+    background: var(--td-warning-color-light);
+    color: var(--td-warning-color);
+    border-radius: 4px;
   }
 
   .card-popover-tag {

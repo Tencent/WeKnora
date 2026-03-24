@@ -29,6 +29,7 @@ type Knowledge struct {
 	Title            string          `json:"title"`
 	Description      string          `json:"description"`
 	Source           string          `json:"source"`
+	Channel          string          `json:"channel"`
 	ParseStatus      string          `json:"parse_status"`
 	SummaryStatus    string          `json:"summary_status"`
 	EnableStatus     string          `json:"enable_status"`
@@ -204,6 +205,8 @@ type CreateKnowledgeFromURLRequest struct {
 	Title string `json:"title,omitempty"`
 	// TagID is the optional tag ID to associate with the knowledge entry
 	TagID string `json:"tag_id,omitempty"`
+	// Channel identifies the ingestion channel (e.g. "web", "browser_extension", "api")
+	Channel string `json:"channel,omitempty"`
 }
 
 // CreateKnowledgeFromURL creates a knowledge entry from a URL.
@@ -435,9 +438,10 @@ func (c *Client) UpdateImageInfo(ctx context.Context,
 
 // CreateManualKnowledgeRequest contains the parameters for creating a manual Markdown knowledge entry.
 type CreateManualKnowledgeRequest struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	Title      string `json:"title"`
+	Content    string `json:"content"`
 	TagID   string `json:"tag_id,omitempty"`
+	Channel string `json:"channel,omitempty"`
 }
 
 // UpdateManualKnowledgeRequest contains the parameters for updating a manual Markdown knowledge entry.

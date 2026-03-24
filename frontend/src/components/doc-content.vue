@@ -400,6 +400,23 @@ const getDisplayTitle = () => {
   return props.details.title;
 };
 
+const channelLabelMap: Record<string, string> = {
+  web: 'knowledgeBase.channelWeb',
+  api: 'knowledgeBase.channelApi',
+  browser_extension: 'knowledgeBase.channelBrowserExtension',
+  wechat: 'knowledgeBase.channelWechat',
+  wecom: 'knowledgeBase.channelWecom',
+  feishu: 'knowledgeBase.channelFeishu',
+  dingtalk: 'knowledgeBase.channelDingtalk',
+  slack: 'knowledgeBase.channelSlack',
+  im: 'knowledgeBase.channelIm',
+};
+
+const getChannelLabel = (channel: string) => {
+  const key = channelLabelMap[channel];
+  return key ? t(key) : t('knowledgeBase.channelUnknown');
+};
+
 // 获取类型标签
 const getTypeLabel = () => {
   switch (props.details.type) {
@@ -714,6 +731,9 @@ const handleDetailsScroll = () => {
           </div>
           <div class="meta-row">
             <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
+            <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning" class="channel-tag">
+              {{ getChannelLabel(details.channel) }}
+            </t-tag>
             <div class="view-mode-buttons">
               <t-button 
                 v-if="canPreview()"
@@ -1055,6 +1075,10 @@ const handleDetailsScroll = () => {
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+  }
+
+  .channel-tag {
+    flex-shrink: 0;
   }
 
   .chunk-count {

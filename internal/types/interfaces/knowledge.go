@@ -12,7 +12,7 @@ import (
 // KnowledgeService defines the interface for knowledge services.
 type KnowledgeService interface {
 	// CreateKnowledgeFromFile creates knowledge from a file.
-	// tagID is optional - when provided, the file will be assigned to the specified tag/category.
+	// channel identifies the ingestion channel (e.g. "web", "api", "wechat"); empty defaults to "web".
 	CreateKnowledgeFromFile(
 		ctx context.Context,
 		kbID string,
@@ -21,11 +21,12 @@ type KnowledgeService interface {
 		enableMultimodel *bool,
 		customFileName string,
 		tagID string,
+		channel string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.
-	// tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
+	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromURL(
 		ctx context.Context,
 		kbID string,
@@ -35,16 +36,20 @@ type KnowledgeService interface {
 		enableMultimodel *bool,
 		title string,
 		tagID string,
+		channel string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
-	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string) (*types.Knowledge, error)
+	// channel identifies the ingestion channel; empty defaults to "web".
+	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassageSync creates knowledge from text passages and waits until chunks are indexed.
-	CreateKnowledgeFromPassageSync(ctx context.Context, kbID string, passage []string) (*types.Knowledge, error)
+	CreateKnowledgeFromPassageSync(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)
 	// CreateKnowledgeFromManual creates or saves manual Markdown knowledge content.
+	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromManual(
 		ctx context.Context,
 		kbID string,
 		payload *types.ManualKnowledgePayload,
+		channel string,
 	) (*types.Knowledge, error)
 	// GetKnowledgeByID retrieves knowledge by ID (uses tenant from context).
 	GetKnowledgeByID(ctx context.Context, id string) (*types.Knowledge, error)

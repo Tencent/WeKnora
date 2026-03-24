@@ -16,6 +16,20 @@ const (
 	KnowledgeTypeFAQ = "faq"
 )
 
+// Channel constants identify through which channel a knowledge entry was ingested.
+// Aligned with Message.Channel values ("web", "api", "im") but allows finer granularity.
+const (
+	ChannelWeb              = "web"               // Web UI (default)
+	ChannelAPI              = "api"               // External API call
+	ChannelBrowserExtension = "browser_extension" // Browser extension / plugin
+	ChannelWechat           = "wechat"            // WeChat
+	ChannelWecom            = "wecom"             // WeCom (企业微信)
+	ChannelFeishu           = "feishu"            // Feishu / Lark
+	ChannelDingtalk         = "dingtalk"          // DingTalk
+	ChannelSlack            = "slack"             // Slack
+	ChannelIM               = "im"                // Generic IM channel
+)
+
 // Knowledge parse status constants
 const (
 	// ParseStatusPending indicates the knowledge is waiting to be processed
@@ -69,8 +83,10 @@ type Knowledge struct {
 	Title string `json:"title"`
 	// Description of the knowledge
 	Description string `json:"description"`
-	// Source of the knowledge
+	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
 	Source string `json:"source"`
+	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
+	Channel string `json:"channel"            gorm:"type:varchar(50);default:'web'"`
 	// Parse status of the knowledge
 	ParseStatus string `json:"parse_status"`
 	// Summary status for async summary generation
@@ -148,6 +164,7 @@ type ManualKnowledgePayload struct {
 	Content string `json:"content"`
 	Status  string `json:"status"`
 	TagID   string `json:"tag_id"`
+	Channel string `json:"channel"`
 }
 
 // KnowledgeSearchScope defines a (tenant_id, knowledge_base_id) scope for knowledge search (e.g. own KBs + shared KBs).
@@ -270,6 +287,9 @@ func (k *Knowledge) EnsureManualDefaults() {
 	}
 	if k.Source == "" {
 		k.Source = KnowledgeTypeManual
+	}
+	if k.Channel == "" {
+		k.Channel = ChannelWeb
 	}
 }
 
