@@ -288,19 +288,19 @@ func (e *elasticsearchRepository) countBulkErrors(ctx context.Context,
 
 // DeleteByChunkIDList Delete indices by chunk ID list
 func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, dimension int, knowledgeType string) error {
-	return e.deleteByFieldList(ctx, "chunk_id.keyword", chunkIDList)
+	return e.deleteByFieldList(ctx, "chunk_id", chunkIDList)
 }
 
 // DeleteBySourceIDList Delete indices by source ID list
 func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, dimension int, knowledgeType string) error {
-	return e.deleteByFieldList(ctx, "source_id.keyword", sourceIDList)
+	return e.deleteByFieldList(ctx, "source_id", sourceIDList)
 }
 
 // DeleteByKnowledgeIDList Delete indices by knowledge ID list
 func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	knowledgeIDList []string, dimension int, knowledgeType string,
 ) error {
-	return e.deleteByFieldList(ctx, "knowledge_id.keyword", knowledgeIDList)
+	return e.deleteByFieldList(ctx, "knowledge_id", knowledgeIDList)
 }
 
 // deleteByFieldList Delete documents by field value list
@@ -368,14 +368,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		must = append(must, map[string]interface{}{
 			"terms": map[string]interface{}{
-				"knowledge_base_id.keyword": params.KnowledgeBaseIDs,
+				"knowledge_base_id": params.KnowledgeBaseIDs,
 			},
 		})
 	}
 	if len(params.KnowledgeIDs) > 0 {
 		must = append(must, map[string]interface{}{
 			"terms": map[string]interface{}{
-				"knowledge_id.keyword": params.KnowledgeIDs,
+				"knowledge_id": params.KnowledgeIDs,
 			},
 		})
 	}
@@ -383,7 +383,7 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	if len(params.TagIDs) > 0 {
 		must = append(must, map[string]interface{}{
 			"terms": map[string]interface{}{
-				"tag_id.keyword": params.TagIDs,
+				"tag_id": params.TagIDs,
 			},
 		})
 	}
@@ -400,14 +400,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		mustNot = append(mustNot, map[string]interface{}{
 			"terms": map[string]interface{}{
-				"knowledge_id.keyword": params.ExcludeKnowledgeIDs,
+				"knowledge_id": params.ExcludeKnowledgeIDs,
 			},
 		})
 	}
 	if len(params.ExcludeChunkIDs) > 0 {
 		mustNot = append(mustNot, map[string]interface{}{
 			"terms": map[string]interface{}{
-				"chunk_id.keyword": params.ExcludeChunkIDs,
+				"chunk_id": params.ExcludeChunkIDs,
 			},
 		})
 	}
@@ -1185,7 +1185,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 		query := map[string]interface{}{
 			"query": map[string]interface{}{
 				"terms": map[string]interface{}{
-					"chunk_id.keyword": enabledChunkIDs,
+					"chunk_id": enabledChunkIDs,
 				},
 			},
 			"script": map[string]interface{}{
@@ -1220,7 +1220,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 		query := map[string]interface{}{
 			"query": map[string]interface{}{
 				"terms": map[string]interface{}{
-					"chunk_id.keyword": disabledChunkIDs,
+					"chunk_id": disabledChunkIDs,
 				},
 			},
 			"script": map[string]interface{}{
@@ -1278,7 +1278,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkTagID(
 		query := map[string]interface{}{
 			"query": map[string]interface{}{
 				"terms": map[string]interface{}{
-					"chunk_id.keyword": chunkIDs,
+					"chunk_id": chunkIDs,
 				},
 			},
 			"script": map[string]interface{}{

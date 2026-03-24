@@ -175,7 +175,7 @@ func (e *elasticsearchRepository) DeleteByChunkIDList(ctx context.Context, chunk
 	log.Infof("[Elasticsearch] Deleting indices by chunk IDs, count: %d", len(chunkIDList))
 	// Use DeleteByQuery to delete all documents matching the chunk IDs
 	_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
-		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{"chunk_id.keyword": chunkIDList}},
+		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{"chunk_id": chunkIDList}},
 	}).Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to delete by chunk IDs: %v", err)
@@ -198,7 +198,7 @@ func (e *elasticsearchRepository) DeleteBySourceIDList(ctx context.Context, sour
 	log.Infof("[Elasticsearch] Deleting indices by source IDs, count: %d", len(sourceIDList))
 	// Use DeleteByQuery to delete all documents matching the source IDs
 	_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
-		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{"source_id.keyword": sourceIDList}},
+		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{"source_id": sourceIDList}},
 	}).Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to delete by source IDs: %v", err)
@@ -223,7 +223,7 @@ func (e *elasticsearchRepository) DeleteByKnowledgeIDList(ctx context.Context,
 	log.Infof("[Elasticsearch] Deleting indices by knowledge IDs, count: %d", len(knowledgeIDList))
 	// Use DeleteByQuery to delete all documents matching the knowledge IDs
 	_, err := e.client.DeleteByQuery(e.index).Query(&types.Query{
-		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{"knowledge_id.keyword": knowledgeIDList}},
+		Terms: &types.TermsQuery{TermsQuery: map[string]types.TermsQueryField{"knowledge_id": knowledgeIDList}},
 	}).Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to delete by knowledge IDs: %v", err)
@@ -247,14 +247,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	if len(params.KnowledgeBaseIDs) > 0 {
 		must = append(must, types.Query{Terms: &types.TermsQuery{
 			TermsQuery: map[string]types.TermsQueryField{
-				"knowledge_base_id.keyword": params.KnowledgeBaseIDs,
+				"knowledge_base_id": params.KnowledgeBaseIDs,
 			},
 		}})
 	}
 	if len(params.KnowledgeIDs) > 0 {
 		must = append(must, types.Query{Terms: &types.TermsQuery{
 			TermsQuery: map[string]types.TermsQueryField{
-				"knowledge_id.keyword": params.KnowledgeIDs,
+				"knowledge_id": params.KnowledgeIDs,
 			},
 		}})
 	}
@@ -262,7 +262,7 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	if len(params.TagIDs) > 0 {
 		must = append(must, types.Query{Terms: &types.TermsQuery{
 			TermsQuery: map[string]types.TermsQueryField{
-				"tag_id.keyword": params.TagIDs,
+				"tag_id": params.TagIDs,
 			},
 		}})
 	}
@@ -275,12 +275,12 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 	}})
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		mustNot = append(mustNot, types.Query{Terms: &types.TermsQuery{
-			TermsQuery: map[string]types.TermsQueryField{"knowledge_id.keyword": params.ExcludeKnowledgeIDs},
+			TermsQuery: map[string]types.TermsQueryField{"knowledge_id": params.ExcludeKnowledgeIDs},
 		}})
 	}
 	if len(params.ExcludeChunkIDs) > 0 {
 		mustNot = append(mustNot, types.Query{Terms: &types.TermsQuery{
-			TermsQuery: map[string]types.TermsQueryField{"chunk_id.keyword": params.ExcludeChunkIDs},
+			TermsQuery: map[string]types.TermsQueryField{"chunk_id": params.ExcludeChunkIDs},
 		}})
 	}
 	return []types.Query{{Bool: &types.BoolQuery{Must: must, MustNot: mustNot}}}
@@ -642,7 +642,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 			Must: []types.Query{
 				{Terms: &types.TermsQuery{
 					TermsQuery: map[string]types.TermsQueryField{
-						"chunk_id.keyword": enabledChunkIDs,
+						"chunk_id": enabledChunkIDs,
 					},
 				}},
 			},
@@ -668,7 +668,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkEnabledStatus(
 			Must: []types.Query{
 				{Terms: &types.TermsQuery{
 					TermsQuery: map[string]types.TermsQueryField{
-						"chunk_id.keyword": disabledChunkIDs,
+						"chunk_id": disabledChunkIDs,
 					},
 				}},
 			},
@@ -717,7 +717,7 @@ func (e *elasticsearchRepository) BatchUpdateChunkTagID(
 			Must: []types.Query{
 				{Terms: &types.TermsQuery{
 					TermsQuery: map[string]types.TermsQueryField{
-						"chunk_id.keyword": chunkIDs,
+						"chunk_id": chunkIDs,
 					},
 				}},
 			},
