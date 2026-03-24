@@ -6228,6 +6228,7 @@ func buildFAQChunkContent(meta *types.FAQChunkMetadata, mode types.FAQIndexMode)
 
 // checkFAQQuestionDuplicate 检查标准问和相似问是否与知识库中其他条目重复
 // excludeChunkID 用于排除当前正在编辑的条目（更新时使用）
+// 按照批量导入时的检查方式：先构建已存在问题集合，再统一检查
 func (s *knowledgeService) checkFAQQuestionDuplicate(
 	ctx context.Context,
 	tenantID uint64,
@@ -6235,14 +6236,14 @@ func (s *knowledgeService) checkFAQQuestionDuplicate(
 	excludeChunkID string,
 	meta *types.FAQChunkMetadata,
 ) error {
-	// 首先检查当前条目自身的相似问是否与标准问重复
+	// 1. 首先检查当前条目自身的相似问是否与标准问重复
 	for _, q := range meta.SimilarQuestions {
 		if q == meta.StandardQuestion {
 			return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」不能与标准问相同", q))
 		}
 	}
 
-	// 检查当前条目自身的相似问之间是否有重复
+	// 2. 检查当前条目自身的相似问之间是否有重复
 	seen := make(map[string]struct{})
 	for _, q := range meta.SimilarQuestions {
 		if _, exists := seen[q]; exists {
@@ -6251,7 +6252,33 @@ func (s *knowledgeService) checkFAQQuestionDuplicate(
 		seen[q] = struct{}{}
 	}
 
-	// 将标准问和所有相似问合并，用一条 DB 查询检查是否与其他条目冲突
+	// 3. 检查反例问题是否与标准问或相似问重复（反例不能和正例相同）
+	positiveQuestions := make(map[string]struct{})
+	positiveQuestions[meta.StandardQuestion] = struct{}{}
+	for _, q := range meta.SimilarQuestions {
+		positiveQuestions[q] = struct{}{}
+	}
+	negativeQuestionsSeen := make(map[string]struct{})
+	for _, q := range meta.NegativeQuestions {
+		if q == "" {
+			continue
+		}
+		// 检查反例是否与标准问重复
+		if q == meta.StandardQuestion {
+			return werrors.NewBadRequestError(fmt.Sprintf("反例问题「%s」不能与标准问相同", q))
+		}
+		// 检查反例是否与相似问重复
+		if _, exists := positiveQuestions[q]; exists {
+			return werrors.NewBadRequestError(fmt.Sprintf("反例问题「%s」不能与相似问相同", q))
+		}
+		// 检查反例之间是否重复
+		if _, exists := negativeQuestionsSeen[q]; exists {
+			return werrors.NewBadRequestError(fmt.Sprintf("反例问题「%s」重复", q))
+		}
+		negativeQuestionsSeen[q] = struct{}{}
+	}
+
+	// 4. 将标准问和所有相似问合并，用一条 DB 查询检查是否与其他条目冲突（替代全量扫描）
 	allQuestions := make([]string, 0, 1+len(meta.SimilarQuestions))
 	allQuestions = append(allQuestions, meta.StandardQuestion)
 	allQuestions = append(allQuestions, meta.SimilarQuestions...)
@@ -6264,28 +6291,34 @@ func (s *knowledgeService) checkFAQQuestionDuplicate(
 		return nil
 	}
 
-	// 找到冲突条目，解析其 metadata 以生成精确的错误信息
 	existingMeta, err := dupChunk.FAQMetadata()
 	if err != nil || existingMeta == nil {
 		return werrors.NewBadRequestError("标准问或相似问与已有条目重复")
 	}
 
-	if existingMeta.StandardQuestion == meta.StandardQuestion {
-		return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」已存在", meta.StandardQuestion))
-	}
-
+	// 5–7. 与原先全量扫描一致的报错语义：先检查标准问，再逐条检查相似问
 	existingSimilarSet := make(map[string]struct{}, len(existingMeta.SimilarQuestions))
 	for _, q := range existingMeta.SimilarQuestions {
-		existingSimilarSet[q] = struct{}{}
+		if q != "" {
+			existingSimilarSet[q] = struct{}{}
+		}
 	}
 
-	if _, ok := existingSimilarSet[meta.StandardQuestion]; ok {
-		return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」与已有相似问重复", meta.StandardQuestion))
+	if meta.StandardQuestion != "" {
+		if meta.StandardQuestion == existingMeta.StandardQuestion {
+			return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」已存在", meta.StandardQuestion))
+		}
+		if _, ok := existingSimilarSet[meta.StandardQuestion]; ok {
+			return werrors.NewBadRequestError(fmt.Sprintf("标准问「%s」已存在", meta.StandardQuestion))
+		}
 	}
 
 	for _, q := range meta.SimilarQuestions {
+		if q == "" {
+			continue
+		}
 		if q == existingMeta.StandardQuestion {
-			return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」与已有标准问重复", q))
+			return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」已存在", q))
 		}
 		if _, ok := existingSimilarSet[q]; ok {
 			return werrors.NewBadRequestError(fmt.Sprintf("相似问「%s」已存在", q))

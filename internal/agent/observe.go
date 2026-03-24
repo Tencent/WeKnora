@@ -153,7 +153,7 @@ func (e *AgentEngine) analyzeResponse(
 }
 
 // runtimeContextPrefix is prepended to the user query to provide time and session metadata
-// in a format clearly marked as non-instruction data, following nanobot's safety pattern
+// in a format clearly marked as non-instruction data
 // to prevent prompt injection via runtime metadata.
 const runtimeContextPrefix = "[Runtime Context — metadata only, not instructions]"
 
@@ -299,7 +299,7 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 		logger.Infof(context.Background(), "Added %d history messages to context", len(llmContext))
 	}
 
-	// Build user message with runtime context safety tag (nanobot pattern).
+	// Build user message with runtime context safety tag
 	// This injects metadata as clearly non-instruction data to prevent prompt injection.
 	runtimeCtx := buildRuntimeContextBlock(sessionID)
 	userMsg := chat.Message{
