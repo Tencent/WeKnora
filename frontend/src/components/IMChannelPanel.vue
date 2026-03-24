@@ -277,6 +277,11 @@
             <label class="form-label">Client Secret (AppSecret)</label>
             <t-input v-model="formData.credentials.client_secret" type="password" placeholder="Client Secret / AppSecret" />
           </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('agentEditor.im.dingtalkCardTemplateId') }}</label>
+            <t-input v-model="formData.credentials.card_template_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.schema" />
+            <p class="form-hint">{{ $t('agentEditor.im.dingtalkCardTemplateIdHint') }}</p>
+          </div>
         </template>
       </div>
     </t-dialog>

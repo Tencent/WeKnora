@@ -1143,6 +1143,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 
 		clientID := getString(creds, "client_id")
 		clientSecret := getString(creds, "client_secret")
+		cardTemplateID := getString(creds, "card_template_id")
 
 		mode := channel.Mode
 		if mode == "" {
@@ -1151,7 +1152,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 
 		switch mode {
 		case "webhook":
-			adapter := dingtalk.NewWebhookAdapter(clientID, clientSecret)
+			adapter := dingtalk.NewWebhookAdapter(clientID, clientSecret, cardTemplateID)
 			return adapter, nil, nil
 
 		case "websocket":
@@ -1164,7 +1165,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 				}
 			}()
 
-			adapter := dingtalk.NewAdapter(client, clientID, clientSecret)
+			adapter := dingtalk.NewAdapter(client, clientID, clientSecret, cardTemplateID)
 			return adapter, wsCancel, nil
 
 		default:

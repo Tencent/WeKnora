@@ -3233,6 +3233,8 @@ export default {
       slackConsole: "Slack API 콘솔",
       telegramConsole: "Telegram BotFather",
       dingtalkConsole: "DingTalk 개발 플랫폼",
+      dingtalkCardTemplateId: "카드 템플릿 ID (선택 사항)",
+      dingtalkCardTemplateIdHint: "open-dev.dingtalk.com/fe/card에서 AI 카드 템플릿을 만들면 타자기 효과 스트리밍 출력이 활성화됩니다",
       modeHint: "WebSocket 방식이 설정이 더 간편하여 권장됩니다",
       consoleTip: "자격 증명 정보를 가져오세요",
       fileKnowledgeBase: "파일 저장 지식 베이스",

@@ -63,7 +63,7 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 func (c *LongConnClient) onChatBotMessage(ctx context.Context, data *chatbot.BotCallbackDataModel) ([]byte, error) {
 	chatType := im.ChatTypeDirect
 	chatID := ""
-	if data.ConversationType == "2" {
+	if data.ConversationType == dingtalkConvTypeGroup {
 		chatType = im.ChatTypeGroup
 		chatID = data.ConversationId
 	}

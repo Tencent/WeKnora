@@ -34,6 +34,7 @@ type Adapter struct {
 
 // NewWebhookAdapter creates a Telegram adapter for webhook mode.
 func NewWebhookAdapter(botToken, secretToken string) *Adapter {
+	startStreamReaper()
 	return &Adapter{
 		botToken:    botToken,
 		secretToken: secretToken,
@@ -42,6 +43,7 @@ func NewWebhookAdapter(botToken, secretToken string) *Adapter {
 
 // NewAdapter creates a Telegram adapter backed by a long-polling client.
 func NewAdapter(client *LongConnClient, botToken string) *Adapter {
+	startStreamReaper()
 	return &Adapter{
 		botToken: botToken,
 		client:   client,
@@ -204,7 +206,7 @@ func resolveChatID(incoming *im.IncomingMessage) string {
 // ── Send reply ──
 
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	return a.sendMessage(ctx, resolveChatID(incoming), reply.Content, "")
+	return a.sendMessage(ctx, resolveChatID(incoming), transformThinkBlocks(reply.Content), "")
 }
 
 func (a *Adapter) sendMessage(ctx context.Context, chatID, text, replyToMessageID string) error {
@@ -220,12 +222,14 @@ func (a *Adapter) sendMessage(ctx context.Context, chatID, text, replyToMessageI
 	return a.callAPI(ctx, "sendMessage", body)
 }
 
-func (a *Adapter) editMessage(ctx context.Context, chatID, messageID, text string) error {
+func (a *Adapter) editMessage(ctx context.Context, chatID, messageID, text, parseMode string) error {
 	body := map[string]interface{}{
 		"chat_id":    chatID,
 		"message_id": json.Number(messageID),
 		"text":       text,
-		"parse_mode": "Markdown",
+	}
+	if parseMode != "" {
+		body["parse_mode"] = parseMode
 	}
 	return a.callAPI(ctx, "editMessageText", body)
 }
@@ -279,17 +283,57 @@ func (a *Adapter) callAPIWithResult(ctx context.Context, method string, body int
 
 // ── StreamSender implementation (edit message in-place) ──
 
+// minEditInterval is the minimum time between consecutive editMessageText calls
+// to avoid hitting Telegram's rate limit (~30 msg/sec global, ~20 edit/min per chat).
+const minEditInterval = 500 * time.Millisecond
+
 type streamState struct {
-	mu      sync.Mutex
-	content strings.Builder
-	msgID   string // Telegram message ID of the "thinking" message
-	chatID  string
+	mu        sync.Mutex
+	content   strings.Builder
+	msgID     string    // Telegram message ID of the "thinking" message
+	chatID    string
+	lastEdit  time.Time // last successful editMessageText timestamp
+	createdAt time.Time // for orphan stream detection
 }
 
-var (
-	streamsMu sync.Mutex
-	streams   = map[string]*streamState{}
+const (
+	streamOrphanTTL      = 5 * time.Minute
+	streamReaperInterval = 1 * time.Minute
 )
+
+var (
+	streamsMu       sync.Mutex
+	streams         = map[string]*streamState{}
+	startReaperOnce sync.Once
+	reaperStopCh    = make(chan struct{})
+)
+
+// startStreamReaper starts a background goroutine (once) that periodically
+// removes orphaned stream entries. This prevents memory leaks when EndStream
+// is never called due to panics or pipeline errors.
+func startStreamReaper() {
+	startReaperOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(streamReaperInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cutoff := time.Now().Add(-streamOrphanTTL)
+					streamsMu.Lock()
+					for id, state := range streams {
+						if state.createdAt.Before(cutoff) {
+							delete(streams, id)
+						}
+					}
+					streamsMu.Unlock()
+				case <-reaperStopCh:
+					return
+				}
+			}
+		}()
+	})
+}
 
 func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
 	chatID := resolveChatID(incoming)
@@ -311,8 +355,9 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 
 	streamsMu.Lock()
 	streams[streamID] = &streamState{
-		msgID:  msgID,
-		chatID: chatID,
+		msgID:     msgID,
+		chatID:    chatID,
+		createdAt: time.Now(),
 	}
 	streamsMu.Unlock()
 
@@ -334,11 +379,18 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 
 	state.mu.Lock()
 	state.content.WriteString(content)
-	fullContent := state.content.String()
+
+	// Throttle: skip edit if last edit was too recent
+	if time.Since(state.lastEdit) < minEditInterval {
+		state.mu.Unlock()
+		return nil
+	}
+
+	fullContent := transformThinkBlocks(state.content.String())
+	state.lastEdit = time.Now()
 	state.mu.Unlock()
 
-	if err := a.editMessage(ctx, state.chatID, state.msgID, fullContent); err != nil {
-		// Telegram has rate limits, just log
+	if err := a.editMessage(ctx, state.chatID, state.msgID, fullContent, ""); err != nil {
 		logger.Warnf(ctx, "[Telegram] Failed to update stream chunk: %v", err)
 	}
 
@@ -356,15 +408,19 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	}
 
 	state.mu.Lock()
-	fullContent := state.content.String()
+	fullContent := transformThinkBlocks(state.content.String())
 	state.mu.Unlock()
 
-	if err := a.editMessage(ctx, state.chatID, state.msgID, fullContent); err != nil {
+	if err := a.editMessage(ctx, state.chatID, state.msgID, fullContent, "Markdown"); err != nil {
 		logger.Warnf(ctx, "[Telegram] Failed to end stream: %v", err)
 	}
 
 	logger.Infof(ctx, "[Telegram] Streaming ended: stream_id=%s", streamID)
 	return nil
+}
+
+func transformThinkBlocks(content string) string {
+	return im.TransformThinkBlocks(content, im.TelegramThinkStyle)
 }
 
 // ── FileDownloader implementation ──

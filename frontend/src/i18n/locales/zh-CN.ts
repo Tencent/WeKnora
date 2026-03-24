@@ -3178,6 +3178,8 @@ export default {
       slackConsole: "Slack API 控制台",
       telegramConsole: "Telegram BotFather",
       dingtalkConsole: "钉钉开放平台",
+      dingtalkCardTemplateId: "卡片模板 ID（可选）",
+      dingtalkCardTemplateIdHint: "在 open-dev.dingtalk.com/fe/card 创建 AI 卡片模板，启用后支持打字机效果的流式输出",
       modeHint: "推荐使用 WebSocket 方式接入，配置更简单",
       consoleTip: "前往获取凭证信息",
       fileKnowledgeBase: "文件保存知识库",

@@ -3203,6 +3203,8 @@ export default {
       slackConsole: 'Slack API Console',
       telegramConsole: 'Telegram BotFather',
       dingtalkConsole: 'DingTalk Open Platform',
+      dingtalkCardTemplateId: 'Card Template ID (optional)',
+      dingtalkCardTemplateIdHint: 'Create an AI Card template at open-dev.dingtalk.com/fe/card to enable streaming output with typewriter effect',
       modeHint: 'WebSocket is recommended for easier setup',
       consoleTip: 'to get credentials',
       fileKnowledgeBase: 'File Storage Knowledge Base',

@@ -2866,6 +2866,8 @@ export default {
       slackConsole: 'Консоль Slack API',
       telegramConsole: 'Telegram BotFather',
       dingtalkConsole: 'Платформа DingTalk',
+      dingtalkCardTemplateId: 'ID шаблона карточки (необязательно)',
+      dingtalkCardTemplateIdHint: 'Создайте шаблон AI-карточки на open-dev.dingtalk.com/fe/card для потоковой передачи с эффектом печатной машинки',
       modeHint: 'Рекомендуется WebSocket — проще настроить',
       consoleTip: 'для получения учётных данных',
       fileKnowledgeBase: 'База знаний для файлов',

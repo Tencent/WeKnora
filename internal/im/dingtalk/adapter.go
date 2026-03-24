@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -23,6 +24,12 @@ import (
 
 // httpClient is a shared HTTP client with a reasonable timeout for DingTalk API calls.
 var httpClient = &http.Client{Timeout: 15 * time.Second}
+
+// minCardUpdateInterval is the minimum time between consecutive card streaming updates.
+const minCardUpdateInterval = 500 * time.Millisecond
+
+// dingtalkConvTypeGroup is the DingTalk conversation type value for group chats.
+const dingtalkConvTypeGroup = "2"
 
 // Compile-time checks.
 var (
@@ -32,9 +39,10 @@ var (
 
 // Adapter implements im.Adapter for DingTalk.
 type Adapter struct {
-	clientID     string
-	clientSecret string
-	client       *LongConnClient // nil for webhook mode
+	clientID       string
+	clientSecret   string
+	cardTemplateID string          // optional: enables AI card streaming when set
+	client         *LongConnClient // nil for webhook mode
 
 	// accessToken cache
 	tokenMu    sync.RWMutex
@@ -43,19 +51,23 @@ type Adapter struct {
 }
 
 // NewWebhookAdapter creates a DingTalk adapter for HTTP callback mode.
-func NewWebhookAdapter(clientID, clientSecret string) *Adapter {
+func NewWebhookAdapter(clientID, clientSecret, cardTemplateID string) *Adapter {
+	startStreamReaper()
 	return &Adapter{
-		clientID:     clientID,
-		clientSecret: clientSecret,
+		clientID:       clientID,
+		clientSecret:   clientSecret,
+		cardTemplateID: cardTemplateID,
 	}
 }
 
 // NewAdapter creates a DingTalk adapter backed by a stream client.
-func NewAdapter(client *LongConnClient, clientID, clientSecret string) *Adapter {
+func NewAdapter(client *LongConnClient, clientID, clientSecret, cardTemplateID string) *Adapter {
+	startStreamReaper()
 	return &Adapter{
-		clientID:     clientID,
-		clientSecret: clientSecret,
-		client:       client,
+		clientID:       clientID,
+		clientSecret:   clientSecret,
+		cardTemplateID: cardTemplateID,
+		client:         client,
 	}
 }
 
@@ -64,7 +76,7 @@ func (a *Adapter) Platform() im.Platform {
 }
 
 func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
-	return false // DingTalk does not use URL verification challenges.
+	return false
 }
 
 // VerifyCallback verifies the DingTalk webhook signature (HmacSHA256).
@@ -79,7 +91,6 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 		return fmt.Errorf("missing timestamp or sign header")
 	}
 
-	// Check timestamp is within 1 hour
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid timestamp: %w", err)
@@ -89,7 +100,6 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 		return fmt.Errorf("timestamp expired")
 	}
 
-	// Verify HMAC-SHA256 signature
 	stringToSign := timestamp + "\n" + a.clientSecret
 	h := hmac.New(sha256.New, []byte(a.clientSecret))
 	h.Write([]byte(stringToSign))
@@ -104,19 +114,19 @@ func (a *Adapter) VerifyCallback(c *gin.Context) error {
 
 // DingTalk callback message structure.
 type callbackMessage struct {
-	ConversationID   string           `json:"conversationId"`
-	ConversationType string           `json:"conversationType"` // "1" = single, "2" = group
-	MsgID            string           `json:"msgId"`
-	Msgtype          string           `json:"msgtype"` // "text", "picture", "richText", "file"
-	Text             *textContent     `json:"text"`
-	SenderNick       string           `json:"senderNick"`
-	SenderStaffId    string           `json:"senderStaffId"`
-	SenderID         string           `json:"senderId"`
-	SessionWebhook   string           `json:"sessionWebhook"`
-	RobotCode        string           `json:"robotCode"`
-	AtUsers          []atUser         `json:"atUsers"`
-	IsInAtList       bool             `json:"isInAtList"`
-	ChatbotCorpId    string           `json:"chatbotCorpId"`
+	ConversationID   string       `json:"conversationId"`
+	ConversationType string       `json:"conversationType"`
+	MsgID            string       `json:"msgId"`
+	Msgtype          string       `json:"msgtype"`
+	Text             *textContent `json:"text"`
+	SenderNick       string       `json:"senderNick"`
+	SenderStaffId    string       `json:"senderStaffId"`
+	SenderID         string       `json:"senderId"`
+	SessionWebhook   string       `json:"sessionWebhook"`
+	RobotCode        string       `json:"robotCode"`
+	AtUsers          []atUser     `json:"atUsers"`
+	IsInAtList       bool         `json:"isInAtList"`
+	ChatbotCorpId    string       `json:"chatbotCorpId"`
 }
 
 type textContent struct {
@@ -146,7 +156,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 	chatType := im.ChatTypeDirect
 	chatID := ""
-	if msg.ConversationType == "2" {
+	if msg.ConversationType == dingtalkConvTypeGroup {
 		chatType = im.ChatTypeGroup
 		chatID = msg.ConversationID
 	}
@@ -161,7 +171,7 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 		content = strings.TrimSpace(msg.Text.Content)
 	}
 
-	incoming := &im.IncomingMessage{
+	return &im.IncomingMessage{
 		Platform:    im.PlatformDingtalk,
 		UserID:      userID,
 		UserName:    msg.SenderNick,
@@ -174,25 +184,22 @@ func parseCallbackMessage(msg *callbackMessage) *im.IncomingMessage {
 			"session_webhook": msg.SessionWebhook,
 		},
 	}
-
-	return incoming
 }
 
 // ── Send reply ──
 
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	// Prefer sessionWebhook for simplicity
+	content := transformThinkBlocks(reply.Content)
+
 	sessionWebhook := ""
 	if incoming.Extra != nil {
 		sessionWebhook = incoming.Extra["session_webhook"]
 	}
 
 	if sessionWebhook != "" {
-		return a.replyViaSessionWebhook(ctx, sessionWebhook, reply.Content)
+		return a.replyViaSessionWebhook(ctx, sessionWebhook, content)
 	}
-
-	// Fallback to OpenAPI
-	return a.replyViaOpenAPI(ctx, incoming, reply.Content)
+	return a.replyViaOpenAPI(ctx, incoming, content)
 }
 
 func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, content string) error {
@@ -292,7 +299,6 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 	a.tokenMu.Lock()
 	defer a.tokenMu.Unlock()
 
-	// Double check after acquiring write lock
 	if a.token != "" && time.Now().Before(a.tokenExpAt) {
 		return a.token, nil
 	}
@@ -334,26 +340,154 @@ func (a *Adapter) getAccessToken(ctx context.Context) (string, error) {
 	}
 
 	a.token = result.AccessToken
-	// Refresh 5 minutes before expiry
 	a.tokenExpAt = time.Now().Add(time.Duration(result.ExpireIn)*time.Second - 5*time.Minute)
 
 	return a.token, nil
 }
 
+// ── DingTalk OpenAPI helpers for AI Card ──
+
+func (a *Adapter) dingtalkAPI(ctx context.Context, method, path string, body interface{}) (json.RawMessage, error) {
+	token, err := a.getAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get access token: %w", err)
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal body: %w", err)
+	}
+
+	url := "https://api.dingtalk.com" + path
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-acs-dingtalk-access-token", token)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("dingtalk API %s returned %d: %s", path, resp.StatusCode, string(respBody))
+	}
+	return respBody, nil
+}
+
+// createAndDeliverCard creates an AI card and delivers it to the conversation.
+func (a *Adapter) createAndDeliverCard(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
+	outTrackID := uuid.New().String()
+
+	body := map[string]interface{}{
+		"cardTemplateId": a.cardTemplateID,
+		"outTrackId":     outTrackID,
+		"callbackType":   "STREAM",
+		"cardData": map[string]interface{}{
+			"cardParamMap": map[string]string{
+				"content": "",
+			},
+		},
+		"userIdType": 1,
+	}
+
+	if incoming.ChatType == im.ChatTypeGroup {
+		// Group chat
+		convID := incoming.ChatID
+		body["openSpaceId"] = "dtv1.card//IM_GROUP." + convID
+		body["imGroupOpenSpaceModel"] = map[string]interface{}{"supportForward": true}
+		body["imGroupOpenDeliverModel"] = map[string]interface{}{
+			"robotCode": a.clientID,
+			"extension": map[string]string{},
+		}
+	} else {
+		// Single chat (1:1 DM)
+		body["openSpaceId"] = "dtv1.card//IM_ROBOT." + incoming.UserID
+		body["imRobotOpenSpaceModel"] = map[string]interface{}{"supportForward": true}
+		body["imRobotOpenDeliverModel"] = map[string]interface{}{
+			"robotCode": a.clientID,
+			"spaceType": "IM_ROBOT",
+			"extension": map[string]string{},
+		}
+	}
+
+	_, err := a.dingtalkAPI(ctx, http.MethodPost, "/v1.0/card/instances/createAndDeliver", body)
+	if err != nil {
+		return "", fmt.Errorf("create card: %w", err)
+	}
+
+	return outTrackID, nil
+}
+
+// streamingUpdateCard pushes content to an existing AI card.
+func (a *Adapter) streamingUpdateCard(ctx context.Context, outTrackID, content string, isFinalize bool) error {
+	body := map[string]interface{}{
+		"outTrackId": outTrackID,
+		"guid":       uuid.New().String(),
+		"key":        "content",
+		"content":    content,
+		"isFull":     true,
+		"isFinalize": isFinalize,
+		"isError":    false,
+	}
+
+	_, err := a.dingtalkAPI(ctx, http.MethodPut, "/v1.0/card/streaming", body)
+	return err
+}
+
 // ── StreamSender implementation ──
-// DingTalk does not support editing messages in place. We accumulate content
-// and send the full reply at EndStream via sessionWebhook.
 
 type streamState struct {
 	mu             sync.Mutex
 	content        strings.Builder
 	sessionWebhook string
+	outTrackID     string    // non-empty when using AI card streaming
+	lastUpdate     time.Time // for card update throttling
+	createdAt      time.Time // for orphan stream detection
 }
 
-var (
-	streamsMu sync.Mutex
-	dStreams   = map[string]*streamState{}
+const (
+	streamOrphanTTL      = 5 * time.Minute
+	streamReaperInterval = 1 * time.Minute
 )
+
+var (
+	streamsMu       sync.Mutex
+	dStreams         = map[string]*streamState{}
+	startReaperOnce sync.Once
+	reaperStopCh    = make(chan struct{})
+)
+
+// startStreamReaper starts a background goroutine (once) that periodically
+// removes orphaned stream entries. This prevents memory leaks when EndStream
+// is never called due to panics or pipeline errors.
+func startStreamReaper() {
+	startReaperOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(streamReaperInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cutoff := time.Now().Add(-streamOrphanTTL)
+					streamsMu.Lock()
+					for id, state := range dStreams {
+						if state.createdAt.Before(cutoff) {
+							delete(dStreams, id)
+						}
+					}
+					streamsMu.Unlock()
+				case <-reaperStopCh:
+					return
+				}
+			}
+		}()
+	})
+}
 
 func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage) (string, error) {
 	sessionWebhook := ""
@@ -363,13 +497,26 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 
 	streamID := fmt.Sprintf("dt:%s:%s", incoming.UserID, incoming.MessageID)
 
-	streamsMu.Lock()
-	dStreams[streamID] = &streamState{
+	state := &streamState{
 		sessionWebhook: sessionWebhook,
+		createdAt:      time.Now(),
 	}
+
+	// If card template is configured, create an AI card for streaming
+	if a.cardTemplateID != "" {
+		outTrackID, err := a.createAndDeliverCard(ctx, incoming)
+		if err != nil {
+			logger.Warnf(ctx, "[DingTalk] Failed to create AI card, falling back to sessionWebhook: %v", err)
+		} else {
+			state.outTrackID = outTrackID
+		}
+	}
+
+	streamsMu.Lock()
+	dStreams[streamID] = state
 	streamsMu.Unlock()
 
-	logger.Infof(ctx, "[DingTalk] Streaming started: stream_id=%s", streamID)
+	logger.Infof(ctx, "[DingTalk] Streaming started: stream_id=%s, card=%v", streamID, state.outTrackID != "")
 	return streamID, nil
 }
 
@@ -387,7 +534,27 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 
 	state.mu.Lock()
 	state.content.WriteString(content)
+
+	// No card template → just accumulate, send at EndStream
+	if state.outTrackID == "" {
+		state.mu.Unlock()
+		return nil
+	}
+
+	// Throttle card updates
+	if time.Since(state.lastUpdate) < minCardUpdateInterval {
+		state.mu.Unlock()
+		return nil
+	}
+
+	fullContent := transformThinkBlocks(state.content.String())
+	state.lastUpdate = time.Now()
+	outTrackID := state.outTrackID
 	state.mu.Unlock()
+
+	if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, false); err != nil {
+		logger.Warnf(ctx, "[DingTalk] Failed to update card stream: %v", err)
+	}
 
 	return nil
 }
@@ -403,15 +570,20 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 	}
 
 	state.mu.Lock()
-	fullContent := state.content.String()
+	fullContent := transformThinkBlocks(state.content.String())
+	outTrackID := state.outTrackID
 	state.mu.Unlock()
 
-	if state.sessionWebhook != "" {
+	if outTrackID != "" {
+		// Finalize AI card
+		if err := a.streamingUpdateCard(ctx, outTrackID, fullContent, true); err != nil {
+			logger.Warnf(ctx, "[DingTalk] Failed to finalize card stream: %v", err)
+		}
+	} else if state.sessionWebhook != "" {
 		if err := a.replyViaSessionWebhook(ctx, state.sessionWebhook, fullContent); err != nil {
 			logger.Warnf(ctx, "[DingTalk] Failed to end stream: %v", err)
 		}
 	} else {
-		// Fallback to OpenAPI
 		if err := a.replyViaOpenAPI(ctx, incoming, fullContent); err != nil {
 			logger.Warnf(ctx, "[DingTalk] Failed to end stream via OpenAPI: %v", err)
 		}
@@ -419,4 +591,8 @@ func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, s
 
 	logger.Infof(ctx, "[DingTalk] Streaming ended: stream_id=%s", streamID)
 	return nil
+}
+
+func transformThinkBlocks(content string) string {
+	return im.TransformThinkBlocks(content, im.MarkdownThinkStyle)
 }
