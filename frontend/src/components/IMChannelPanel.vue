@@ -90,6 +90,7 @@
             <t-radio-button value="feishu">{{ $t('agentEditor.im.feishu') }}</t-radio-button>
             <t-radio-button value="slack">{{ $t('agentEditor.im.slack') }}</t-radio-button>
             <t-radio-button value="telegram">{{ $t('agentEditor.im.telegram') }}</t-radio-button>
+            <t-radio-button value="dingtalk">{{ $t('agentEditor.im.dingtalk') }}</t-radio-button>
           </t-radio-group>
         </div>
 
@@ -259,6 +260,24 @@
           </template>
         </template>
 
+        <!-- DingTalk credentials -->
+        <template v-if="formData.platform === 'dingtalk'">
+          <div class="platform-link-hint">
+            <t-icon name="jump" class="hint-link-icon" />
+            <a href="https://open.dingtalk.com/" target="_blank" rel="noopener noreferrer" class="hint-link">
+              {{ $t('agentEditor.im.dingtalkConsole') }}
+            </a>
+            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+          </div>
+          <div class="form-item">
+            <label class="form-label">Client ID (AppKey)</label>
+            <t-input v-model="formData.credentials.client_id" placeholder="Client ID / AppKey" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">Client Secret (AppSecret)</label>
+            <t-input v-model="formData.credentials.client_secret" type="password" placeholder="Client Secret / AppSecret" />
+          </div>
+        </template>
       </div>
     </t-dialog>
   </div>
@@ -289,7 +308,7 @@ const knowledgeBases = ref<{ id: string; name: string }[]>([]);
 const defaultCredentials = (): Record<string, any> => ({});
 
 const formData = ref({
-  platform: 'wecom' as 'wecom' | 'feishu' | 'slack' | 'telegram',
+  platform: 'wecom' as 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk',
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket',
   output_mode: 'stream' as 'stream' | 'full',
@@ -544,6 +563,10 @@ onMounted(() => {
     color: #26a6db;
   }
 
+  &.dingtalk {
+    background: rgba(23, 126, 251, 0.08);
+    color: #177efb;
+  }
 }
 
 .channel-name {

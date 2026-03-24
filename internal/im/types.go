@@ -100,6 +100,10 @@ func (ch *IMChannel) computeBotIdentity() string {
 			}
 			return "telegram:" + botToken
 		}
+	case "dingtalk":
+		if clientID := str("client_id"); clientID != "" {
+			return "dingtalk:" + clientID
+		}
 	}
 	return ""
 }

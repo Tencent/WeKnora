@@ -12,7 +12,7 @@ import (
 )
 
 // validIMPlatforms is the set of supported IM platforms.
-var validIMPlatforms = map[string]bool{"wecom": true, "feishu": true, "slack": true, "telegram": true}
+var validIMPlatforms = map[string]bool{"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true}
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
@@ -57,7 +57,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if !validIMPlatforms[req.Platform] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack' or 'telegram'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram' or 'dingtalk'"})
 		return
 	}
 

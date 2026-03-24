@@ -31,6 +31,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.91
 	github.com/neo4j/neo4j-go-driver/v6 v6.0.0-alpha.1
 	github.com/ollama/ollama v0.11.4
+	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/parquet-go/parquet-go v0.25.0
 	github.com/pganalyze/pg_query_go/v6 v6.1.0
