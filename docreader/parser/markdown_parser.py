@@ -177,13 +177,15 @@ class MarkdownImageUtil:
     def __init__(self):
         # Pattern to match base64 embedded images
         # Captures: (1) alt text, (2) image format, (3) base64 data
+        # Alt text uses .*? (non-greedy) to allow literal ] (e.g. Windows paths).
+        # MIME subtype uses [^;]+ to handle types with hyphens like x-emf.
         self.b64_pattern = re.compile(
-            r"!\[([^\]]*)\]\(data:image/(\w+)\+?\w*;base64,([^\)]+)\)"
+            r"!\[(.*?)\]\(data:image/([^;]+);base64,([^\)]+)\)"
         )
-        # Pattern to match regular image syntax
-        self.image_pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+        # Pattern to match regular image syntax (alt text allows ])
+        self.image_pattern = re.compile(r"!\[(.*?)\]\(([^)]+)\)")
         # Pattern for replacing image paths
-        self.replace_pattern = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+        self.replace_pattern = re.compile(r"!\[(.*?)\]\(([^)]+)\)")
 
     def extract_image(
         self,

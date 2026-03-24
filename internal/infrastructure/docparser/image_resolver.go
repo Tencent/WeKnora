@@ -83,6 +83,14 @@ func (r *ImageResolver) ResolveAndStore(
 	markdown = md2
 	images = append(images, imgDataURIs...)
 
+	md3, imgHTML, _ := r.ResolveHTMLDataURIImages(ctx, markdown, fileSvc, tenantID)
+	markdown = md3
+	images = append(images, imgHTML...)
+
+	md4, imgBare, _ := r.ResolveBareBase64Content(ctx, markdown, fileSvc, tenantID)
+	markdown = md4
+	images = append(images, imgBare...)
+
 	if len(result.ImageRefs) == 0 {
 		return markdown, images, nil
 	}
@@ -96,7 +104,7 @@ func (r *ImageResolver) ResolveAndStore(
 	// Process each image reference found in the markdown.
 	// The URL group supports one level of balanced parentheses so that URLs
 	// like https://example.com/item_(abc)/123 are captured in full.
-	imgPattern := regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
+	imgPattern := regexp.MustCompile(`!\[(.*?)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
 	matches := imgPattern.FindAllStringSubmatchIndex(markdown, -1)
 
 	// Process in reverse order to preserve positions when replacing
@@ -174,12 +182,307 @@ func extFromMime(mime string) string {
 
 // isProviderScheme checks if the path uses a provider:// scheme (local://, minio://, cos://, tos://).
 func isProviderScheme(p string) bool {
-	for _, prefix := range []string{"local://", "minio://", "cos://", "tos://"} {
+	for _, prefix := range []string{"local://", "minio://", "cos://", "tos://", "s3://"} {
 		if strings.HasPrefix(p, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions for base64 image handling
+// ---------------------------------------------------------------------------
+
+// cleanBase64Payload removes whitespace characters from a base64 payload string.
+func cleanBase64Payload(payload string) string {
+	payload = strings.ReplaceAll(payload, "\n", "")
+	payload = strings.ReplaceAll(payload, "\r", "")
+	payload = strings.ReplaceAll(payload, "\t", "")
+	payload = strings.ReplaceAll(payload, " ", "")
+	return payload
+}
+
+// decodeBase64Flexible tries standard, raw, URL-safe, and raw-URL-safe base64 decodings.
+func decodeBase64Flexible(payload string) ([]byte, error) {
+	if data, err := base64.StdEncoding.DecodeString(payload); err == nil {
+		return data, nil
+	}
+	if data, err := base64.RawStdEncoding.DecodeString(payload); err == nil {
+		return data, nil
+	}
+	if data, err := base64.URLEncoding.DecodeString(payload); err == nil {
+		return data, nil
+	}
+	return base64.RawURLEncoding.DecodeString(payload)
+}
+
+// sniffImageMime detects the MIME type by examining the magic bytes of image data.
+func sniffImageMime(data []byte) string {
+	if len(data) < 4 {
+		return ""
+	}
+	if data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' {
+		return "image/png"
+	}
+	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return "image/jpeg"
+	}
+	if data[0] == 'G' && data[1] == 'I' && data[2] == 'F' {
+		return "image/gif"
+	}
+	if len(data) >= 12 &&
+		data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+		data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
+		return "image/webp"
+	}
+	if data[0] == 'B' && data[1] == 'M' {
+		return "image/bmp"
+	}
+	return ""
+}
+
+// ---------------------------------------------------------------------------
+// HTML <img> tag data URI resolution
+// ---------------------------------------------------------------------------
+
+// imgHTMLDataURI matches HTML <img> tags with inline data:image/*;base64,... in the src attribute.
+var imgHTMLDataURI = regexp.MustCompile(
+	`(?i)<img\s[^>]*?src\s*=\s*["'](data:image/[^;]+;base64,[^"']+)["'][^>]*?/?\s*>`,
+)
+
+// ResolveHTMLDataURIImages finds <img src="data:image/*;base64,..."> tags in markdown,
+// decodes the images, stores them via fileSvc, and replaces each tag with a markdown
+// image reference using the storage URL.
+func (r *ImageResolver) ResolveHTMLDataURIImages(
+	ctx context.Context,
+	markdown string,
+	fileSvc interfaces.FileService,
+	tenantID uint64,
+) (updatedMarkdown string, images []StoredImage, err error) {
+	matches := imgHTMLDataURI.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return markdown, nil, nil
+	}
+
+	processed := 0
+	for i := len(matches) - 1; i >= 0; i-- {
+		if processed >= maxRemoteImages {
+			break
+		}
+		m := matches[i]
+		dataURI := markdown[m[2]:m[3]]
+		mimeType, payload, ok := parseImageDataURI(dataURI)
+		if !ok {
+			continue
+		}
+		payload = cleanBase64Payload(payload)
+		if payload == "" {
+			continue
+		}
+		data, decErr := decodeBase64Flexible(payload)
+		if decErr != nil {
+			log.Printf("WARN: HTML img data URI base64 decode failed: %v", decErr)
+			continue
+		}
+		if len(data) > maxRemoteImageSize {
+			continue
+		}
+		if isIconImage(data) {
+			markdown = markdown[:m[0]] + markdown[m[1]:]
+			continue
+		}
+		ext := extFromMime(mimeType)
+		if ext == "" {
+			ext = ".png"
+		}
+		fileName := uuid.New().String() + ext
+		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+		if saveErr != nil {
+			log.Printf("WARN: failed to save HTML img data URI image: %v", saveErr)
+			continue
+		}
+		images = append(images, StoredImage{
+			OriginalRef: "html-img-data-uri",
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+		})
+		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
+		processed++
+	}
+	return markdown, images, nil
+}
+
+// ---------------------------------------------------------------------------
+// Bare base64/data URI resolution (catch-all)
+// ---------------------------------------------------------------------------
+
+// bareDataURIPattern matches standalone data:image/*;base64,... strings.
+var bareDataURIPattern = regexp.MustCompile(
+	`(?i)data:image/([^;\s]+);base64,([A-Za-z0-9+/=]{100,})`,
+)
+
+// bareBase64CommaPrefixed matches base64,DATA patterns (partial data URIs missing the mime prefix).
+var bareBase64CommaPrefixed = regexp.MustCompile(
+	`base64,([A-Za-z0-9+/=]{200,})`,
+)
+
+// ResolveBareBase64Content finds remaining bare data URIs and base64 image content
+// in the markdown text, decodes and stores them, and replaces with image references.
+// This acts as a catch-all after the standard markdown and HTML resolvers.
+func (r *ImageResolver) ResolveBareBase64Content(
+	ctx context.Context,
+	markdown string,
+	fileSvc interfaces.FileService,
+	tenantID uint64,
+) (updatedMarkdown string, images []StoredImage, err error) {
+	md, imgs1 := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID)
+	markdown = md
+	images = append(images, imgs1...)
+
+	md2, imgs2 := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID)
+	markdown = md2
+	images = append(images, imgs2...)
+
+	return markdown, images, nil
+}
+
+func (r *ImageResolver) resolveBareDataURIs(
+	ctx context.Context,
+	markdown string,
+	fileSvc interfaces.FileService,
+	tenantID uint64,
+) (string, []StoredImage) {
+	matches := bareDataURIPattern.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return markdown, nil
+	}
+
+	var images []StoredImage
+	processed := 0
+	for i := len(matches) - 1; i >= 0; i-- {
+		if processed >= maxRemoteImages {
+			break
+		}
+		m := matches[i]
+		// Check context: skip HTML src attributes, but handle broken markdown refs
+		insideWrapper := false
+		if m[0] > 0 {
+			prev := markdown[m[0]-1]
+			if prev == '"' || prev == '\'' {
+				continue // inside HTML attribute — already handled by ResolveHTMLDataURIImages
+			}
+			if prev == '(' {
+				insideWrapper = true // likely inside a broken ![...](...) ref
+			}
+		}
+		mimeSubtype := strings.ToLower(markdown[m[2]:m[3]])
+		payload := markdown[m[4]:m[5]]
+		mimeType := "image/" + mimeSubtype
+
+		payload = cleanBase64Payload(payload)
+		if payload == "" {
+			continue
+		}
+		data, decErr := decodeBase64Flexible(payload)
+		if decErr != nil {
+			log.Printf("WARN: bare data URI base64 decode failed: %v", decErr)
+			continue
+		}
+		if len(data) > maxRemoteImageSize {
+			continue
+		}
+		if isIconImage(data) {
+			markdown = markdown[:m[0]] + markdown[m[1]:]
+			continue
+		}
+		ext := extFromMime(mimeType)
+		if ext == "" {
+			ext = ".png"
+		}
+		fileName := uuid.New().String() + ext
+		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+		if saveErr != nil {
+			log.Printf("WARN: failed to save bare data URI image: %v", saveErr)
+			continue
+		}
+		images = append(images, StoredImage{
+			OriginalRef: "bare-data-uri",
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+		})
+		if insideWrapper {
+			// Inside a broken markdown ref like ![weird]alt](data:...) — replace data URI only
+			markdown = markdown[:m[0]] + servingURL + markdown[m[1]:]
+		} else {
+			markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
+		}
+		processed++
+	}
+	return markdown, images
+}
+
+func (r *ImageResolver) resolveBareBase64Prefix(
+	ctx context.Context,
+	markdown string,
+	fileSvc interfaces.FileService,
+	tenantID uint64,
+) (string, []StoredImage) {
+	matches := bareBase64CommaPrefixed.FindAllStringSubmatchIndex(markdown, -1)
+	if len(matches) == 0 {
+		return markdown, nil
+	}
+
+	var images []StoredImage
+	processed := 0
+	for i := len(matches) - 1; i >= 0; i-- {
+		if processed >= maxRemoteImages {
+			break
+		}
+		m := matches[i]
+		// Skip if preceded by ';' — this is part of a data URI handled above
+		if m[0] > 0 && markdown[m[0]-1] == ';' {
+			continue
+		}
+		payload := markdown[m[2]:m[3]]
+		payload = cleanBase64Payload(payload)
+		if payload == "" {
+			continue
+		}
+		data, decErr := decodeBase64Flexible(payload)
+		if decErr != nil {
+			continue
+		}
+		if len(data) > maxRemoteImageSize {
+			continue
+		}
+		mimeType := sniffImageMime(data)
+		if mimeType == "" {
+			continue
+		}
+		if isIconImage(data) {
+			markdown = markdown[:m[0]] + markdown[m[1]:]
+			continue
+		}
+		ext := extFromMime(mimeType)
+		if ext == "" {
+			ext = ".png"
+		}
+		fileName := uuid.New().String() + ext
+		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
+		if saveErr != nil {
+			log.Printf("WARN: failed to save bare base64 image: %v", saveErr)
+			continue
+		}
+		images = append(images, StoredImage{
+			OriginalRef: "bare-base64",
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+		})
+		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
+		processed++
+	}
+	return markdown, images
 }
 
 // ---------------------------------------------------------------------------
@@ -213,14 +516,17 @@ func UnwrapLinkedImages(markdown string) string {
 }
 
 // imgMarkdownPattern matches Markdown image syntax: ![alt](url).
+// The alt-text group uses .*? (non-greedy) to allow literal ] in alt text.
 // The URL group supports one level of balanced parentheses so that URLs
 // like https://example.com/item_(abc)/123 are captured in full.
-var imgMarkdownPattern = regexp.MustCompile(`!\[([^\]]*)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
+var imgMarkdownPattern = regexp.MustCompile(`!\[(.*?)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
 
 // imgMarkdownDataURI matches markdown images whose URL is a data:image/*;base64,...
 // payload. (?i) applies to the whole parenthesized data URI.
+// The alt-text group uses .*? (non-greedy) to allow literal ] inside alt text
+// (e.g. file paths like ![C:\img]name.png](data:...)).
 var imgMarkdownDataURI = regexp.MustCompile(
-	`!\[([^\]]*)\]\((?i:(data:image/[^;]+;base64,\s*[^)]+))\)`,
+	`!\[(.*?)\]\((?i:(data:image/[^;]+;base64,\s*[^)]+))\)`,
 )
 
 // parseImageDataURI splits a data URI into image MIME type and base64 payload.
@@ -273,14 +579,11 @@ func (r *ImageResolver) ResolveDataURIImages(
 		if !ok {
 			continue
 		}
-		payload = strings.ReplaceAll(payload, "\n", "")
-		payload = strings.ReplaceAll(payload, "\r", "")
-		payload = strings.ReplaceAll(payload, "\t", "")
-		payload = strings.ReplaceAll(payload, " ", "")
+		payload = cleanBase64Payload(payload)
 		if payload == "" {
 			continue
 		}
-		data, decErr := base64.StdEncoding.DecodeString(payload)
+		data, decErr := decodeBase64Flexible(payload)
 		if decErr != nil {
 			log.Printf("WARN: data URI base64 decode failed: %v", decErr)
 			continue

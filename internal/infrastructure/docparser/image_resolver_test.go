@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -138,5 +139,134 @@ func TestResolveDataURIImages_CaseInsensitive(t *testing.T) {
 	}
 	if len(imgs) != 1 || !strings.Contains(out, "local://test/") {
 		t.Fatalf("imgs=%d out=%q", len(imgs), out)
+	}
+}
+
+func TestResolveDataURIImages_AltTextWithBracket(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	md := `pre ![C:\Users\Frank\RichOle\YAJ]7D)SW_W6.png](data:image/png;base64,` + b64 + `) post`
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveDataURIImages(context.Background(), md, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image but got %d; alt text with ] was not handled", len(imgs))
+	}
+	if strings.Contains(out, "base64") {
+		t.Fatalf("base64 content still present in output: %s", out[:min(200, len(out))])
+	}
+}
+
+func TestResolveDataURIImages_XEmfMimeType(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	md := `![](data:image/x-emf;base64,` + b64 + `)`
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveDataURIImages(context.Background(), md, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image for x-emf mime type but got %d", len(imgs))
+	}
+	if strings.Contains(out, "data:image") {
+		t.Fatalf("data URI still present for x-emf: %s", out[:min(200, len(out))])
+	}
+}
+
+func TestResolveHTMLDataURIImages(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	md := `text <img src="data:image/png;base64,` + b64 + `" alt="test"> more`
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveHTMLDataURIImages(context.Background(), md, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image from HTML img tag but got %d", len(imgs))
+	}
+	if strings.Contains(out, "<img") || strings.Contains(out, "base64") {
+		t.Fatalf("HTML img tag or base64 still present: %s", out[:min(200, len(out))])
+	}
+	if !strings.Contains(out, "![image](local://test/") {
+		t.Fatalf("expected markdown image replacement, got: %s", out[:min(200, len(out))])
+	}
+}
+
+func TestResolveBareBase64Content_BareDataURI(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	md := `some text data:image/png;base64,` + b64 + ` more text`
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveBareBase64Content(context.Background(), md, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image from bare data URI but got %d", len(imgs))
+	}
+	if strings.Contains(out, "base64") {
+		t.Fatalf("base64 content still present: %s", out[:min(200, len(out))])
+	}
+}
+
+func TestResolveBareBase64Content_InsideBrokenMarkdownRef(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	// Simulate a broken markdown ref that the primary regex already handled
+	// If primary regex handles it, this won't reach the bare handler
+	// But test the bare handler's behavior when prev char is '('
+	md := `text (data:image/png;base64,` + b64 + `) more`
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveBareBase64Content(context.Background(), md, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 image but got %d", len(imgs))
+	}
+	if strings.Contains(out, "base64") {
+		t.Fatalf("base64 still present: %s", out[:min(200, len(out))])
+	}
+	// When preceded by '(', should replace with just URL (not wrapped in ![image]())
+	if strings.Contains(out, "![image]") {
+		t.Fatalf("should not wrap in ![image]() when inside parentheses: %s", out[:min(200, len(out))])
+	}
+}
+
+func TestResolveAndStore_MultipleFormats(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	// Markdown with: standard data URI, alt text with ], x-emf mime type
+	md := strings.Join([]string{
+		`# Document`,
+		`![](data:image/png;base64,` + b64 + `)`,
+		`![C:\path\file]name.png](data:image/png;base64,` + b64 + `)`,
+		`![](data:image/x-emf;base64,` + b64 + `)`,
+	}, "\n\n")
+
+	result := &types.ReadResult{MarkdownContent: md}
+	svc := &captureSaveBytes{}
+	r := NewImageResolver()
+	out, imgs, err := r.ResolveAndStore(context.Background(), result, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 3 {
+		t.Fatalf("expected 3 images but got %d", len(imgs))
+	}
+	if strings.Contains(out, "base64") {
+		t.Fatalf("base64 content still in output after ResolveAndStore")
+	}
+	if strings.Contains(out, "data:image") {
+		t.Fatalf("data URI still in output after ResolveAndStore")
 	}
 }
