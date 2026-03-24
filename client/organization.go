@@ -126,19 +126,6 @@ type JoinRequestResponse struct {
 	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
 }
 
-// UserInfo represents user information for API responses
-type UserInfo struct {
-	ID                  string    `json:"id"`
-	Username            string    `json:"username"`
-	Email               string    `json:"email"`
-	Avatar              string    `json:"avatar"`
-	TenantID            uint64    `json:"tenant_id"`
-	IsActive            bool      `json:"is_active"`
-	CanAccessAllTenants bool      `json:"can_access_all_tenants"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
-}
-
 // SharedKnowledgeBaseInfo represents a shared knowledge base
 type SharedKnowledgeBaseInfo struct {
 	ShareID        string    `json:"share_id"`
