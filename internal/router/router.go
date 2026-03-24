@@ -178,6 +178,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		kb.POST("/manual", handler.CreateManualKnowledge)
 		// 获取知识库下的知识列表
 		kb.GET("", handler.ListKnowledge)
+		// 清空知识库下的所有知识
+		kb.DELETE("", handler.ClearKnowledgeBaseContents)
 	}
 
 	// 知识路由组

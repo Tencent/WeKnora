@@ -282,6 +282,33 @@ func (c *Client) DeleteKnowledgeBase(ctx context.Context, knowledgeBaseID string
 	return parseResponse(resp, &response)
 }
 
+// ClearKnowledgeBaseContentsResponse represents the response from clear knowledge base contents API
+type ClearKnowledgeBaseContentsResponse struct {
+	DeletedCount int `json:"deleted_count"`
+}
+
+// ClearKnowledgeBaseContents deletes all knowledge entries in a knowledge base (async).
+// The knowledge base itself is preserved; only its contents are removed.
+func (c *Client) ClearKnowledgeBaseContents(ctx context.Context, knowledgeBaseID string) (*ClearKnowledgeBaseContentsResponse, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge", knowledgeBaseID)
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Success bool                                `json:"success"`
+		Message string                              `json:"message"`
+		Data    ClearKnowledgeBaseContentsResponse   `json:"data"`
+	}
+
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return &response.Data, nil
+}
+
 // SearchParams represents the search parameters for hybrid search
 type SearchParams struct {
 	QueryText            string  `json:"query_text"`
