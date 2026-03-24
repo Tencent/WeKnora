@@ -37,6 +37,9 @@
 import { defineProps, computed, ref, watch, onMounted, nextTick } from "vue";
 import { hydrateProtectedFileImages } from '@/utils/security';
 import picturePreview from '@/components/picture-preview.vue';
+import { useI18n } from 'vue-i18n';
+
+const { t } = useI18n();
 
 const props = defineProps({
     content: {
@@ -52,8 +55,27 @@ const props = defineProps({
         type: Array,
         required: false,
         default: () => []
+    },
+    channel: {
+        type: String,
+        required: false,
+        default: ''
     }
 });
+
+const channelLabelMap = {
+    web: () => t('chat.channelWeb'),
+    api: () => t('chat.channelApi'),
+    im: () => t('chat.channelIm'),
+};
+
+const channelLabel = computed(() => {
+    if (!props.channel) return '';
+    const label = channelLabelMap[props.channel];
+    return typeof label === 'function' ? label() : (label || props.channel);
+});
+
+const channelClass = computed(() => props.channel ? `channel-${props.channel}` : '');
 
 const containerRef = ref(null);
 const hasImages = computed(() => props.images && props.images.length > 0);
@@ -187,6 +209,37 @@ const closePreImg = () => {
 
     &:hover {
         opacity: 0.85;
+    }
+}
+
+.channel_tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 18px;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-placeholder);
+    border: 1px solid var(--td-border-level-2-color, #e7e7e7);
+
+    &.channel-web {
+        color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+        border-color: var(--td-brand-color-2, rgba(0, 82, 217, 0.1));
+    }
+
+    &.channel-api {
+        color: var(--td-success-color);
+        background: var(--td-success-color-1, rgba(0, 168, 112, 0.06));
+        border-color: var(--td-success-color-2, rgba(0, 168, 112, 0.15));
+    }
+
+    &.channel-im {
+        color: var(--td-warning-color);
+        background: var(--td-warning-color-1, rgba(237, 123, 0, 0.06));
+        border-color: var(--td-warning-color-2, rgba(237, 123, 0, 0.15));
     }
 }
 

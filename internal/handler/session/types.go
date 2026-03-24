@@ -49,6 +49,7 @@ type CreateKnowledgeQARequest struct {
 	DisableTitle     bool                   `json:"disable_title"`                         // Whether to disable auto title generation
 	EnableMemory     bool                   `json:"enable_memory"`                         // Whether memory feature is enabled for this request
 	Images           []ImageAttachment      `json:"images"`                                // Attached images for multimodal chat
+	Channel          string                 `json:"channel"`                               // Source channel: "web", "api", "im", etc.
 }
 
 // SearchKnowledgeRequest defines the request structure for searching knowledge without LLM summarization

@@ -33,6 +33,7 @@ type AgentQARequest struct {
 	DisableTitle     bool              `json:"disable_title,omitempty"`      // Whether to disable auto title generation
 	MCPServiceIDs    []string          `json:"mcp_service_ids,omitempty"`    // Optional MCP service allow list (deprecated)
 	Images           []ImageAttachment `json:"images,omitempty"`             // Attached images for multimodal chat
+	Channel          string            `json:"channel,omitempty"`            // Source channel: "web", "api", "im", etc.
 }
 
 // AgentResponseType defines the type of agent response

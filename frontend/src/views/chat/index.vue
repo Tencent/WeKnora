@@ -355,7 +355,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     }
 
     // 将@提及的知识库和文件信息存入用户消息
-    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages });
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, channel: 'web' });
     scrollToBottom();
     
     // Get agent mode status from settings store

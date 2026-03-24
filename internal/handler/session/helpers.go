@@ -165,7 +165,7 @@ func createAgentQueryEvent(sessionID, assistantMessageID string) interfaces.Stre
 }
 
 // createUserMessage creates a user message and returns the created message.
-func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages) (*types.Message, error) {
+func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, requestID string, mentionedItems types.MentionedItems, images types.MessageImages, channel string) (*types.Message, error) {
 	return h.messageService.CreateMessage(ctx, &types.Message{
 		SessionID:      sessionID,
 		Role:           "user",
@@ -175,6 +175,7 @@ func (h *Handler) createUserMessage(ctx context.Context, sessionID, query, reque
 		IsCompleted:    true,
 		MentionedItems: mentionedItems,
 		Images:         images,
+		Channel:        channel,
 	})
 }
 

@@ -15,7 +15,7 @@ export async function generateSessionsTitle(session_id: string, data: any) {
 }
 
 export async function knowledgeChat(data: { session_id: string; query: string; }) {
-  return postChat(`/api/v1/knowledge-chat/${data.session_id}`, { query: data.query });
+  return postChat(`/api/v1/knowledge-chat/${data.session_id}`, { query: data.query, channel: "web" });
 }
 
 // Agent chat with streaming support
@@ -28,7 +28,8 @@ export async function agentChat(data: {
   return postChat(`/api/v1/agent-chat/${data.session_id}`, { 
     query: data.query,
     knowledge_base_ids: data.knowledge_base_ids,
-    agent_enabled: data.agent_enabled
+    agent_enabled: data.agent_enabled,
+    channel: "web"
   });
 }
 

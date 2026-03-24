@@ -218,6 +218,7 @@ type KnowledgeQARequest struct {
 	SummaryModelID   string            `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
 	DisableTitle     bool              `json:"disable_title"`      // Whether to disable auto title generation
 	Images           []ImageAttachment `json:"images,omitempty"`   // Attached images for multimodal chat
+	Channel          string            `json:"channel,omitempty"`  // Source channel: "web", "api", "im", etc.
 }
 
 // LLMToolCall represents a function/tool call from the LLM

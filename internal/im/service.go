@@ -1424,6 +1424,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	userMsg, err := s.messageService.CreateMessage(qaCtx, &types.Message{
 		SessionID: session.ID, Role: "user", Content: msg.Content,
 		RequestID: requestID, CreatedAt: time.Now(), IsCompleted: true,
+		Channel: "im",
 	})
 	if err != nil {
 		return fmt.Errorf("create user message: %w", err)
@@ -1433,6 +1434,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	assistantMsg, err := s.messageService.CreateMessage(qaCtx, &types.Message{
 		SessionID: session.ID, Role: "assistant",
 		RequestID: requestID, CreatedAt: time.Now(), IsCompleted: false,
+		Channel: "im",
 	})
 	if err != nil {
 		return fmt.Errorf("create assistant message: %w", err)
@@ -1611,6 +1613,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		RequestID:   requestID,
 		CreatedAt:   time.Now(),
 		IsCompleted: true,
+		Channel:     "im",
 	})
 	if err != nil {
 		return "", fmt.Errorf("create user message: %w", err)
@@ -1623,6 +1626,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		RequestID:   requestID,
 		CreatedAt:   time.Now(),
 		IsCompleted: false,
+		Channel:     "im",
 	})
 	if err != nil {
 		return "", fmt.Errorf("create assistant message: %w", err)

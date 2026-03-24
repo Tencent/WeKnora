@@ -118,6 +118,7 @@ export function useStream() {
       if (params.images !== undefined && params.images.length > 0) {
         postBody.images = params.images;
       }
+      postBody.channel = "web";
       
       await fetchEventSource(url, {
         method: params.method,
