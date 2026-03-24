@@ -95,10 +95,12 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d: temp=%.2f, tools=%d, thinking=%v",
 		iteration+1, e.config.Temperature, len(tools), e.config.Thinking)
 
+	parallelToolCalls := true
 	opts := &chat.ChatOptions{
-		Temperature: e.config.Temperature,
-		Tools:       tools,
-		Thinking:    e.config.Thinking,
+		Temperature:       e.config.Temperature,
+		Tools:             tools,
+		Thinking:          e.config.Thinking,
+		ParallelToolCalls: &parallelToolCalls,
 	}
 
 	pendingToolCalls := make(map[string]bool)

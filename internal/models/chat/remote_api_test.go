@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,121 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func newTestRemoteChat() *RemoteAPIChat {
+	chat, _ := NewRemoteAPIChat(&ChatConfig{
+		Source:    types.ModelSourceRemote,
+		BaseURL:   "https://api.example.com/v1",
+		ModelName: "test-model",
+		APIKey:    "test-key",
+		ModelID:   "test-model",
+	})
+	return chat
+}
+
+func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
+	chat := newTestRemoteChat()
+	messages := []Message{{Role: "user", Content: "hello"}}
+
+	t.Run("nil ParallelToolCalls leaves default", func(t *testing.T) {
+		opts := &ChatOptions{Temperature: 0.7}
+		req := chat.BuildChatCompletionRequest(messages, opts, false)
+		assert.Nil(t, req.ParallelToolCalls, "should be nil when not set")
+	})
+
+	t.Run("ParallelToolCalls true is propagated", func(t *testing.T) {
+		ptc := true
+		opts := &ChatOptions{
+			Temperature:       0.7,
+			ParallelToolCalls: &ptc,
+			Tools: []Tool{{
+				Type: "function",
+				Function: FunctionDef{
+					Name:        "mcp_weather_getforecast",
+					Description: "Get weather",
+					Parameters:  json.RawMessage(`{"type":"object"}`),
+				},
+			}},
+		}
+		req := chat.BuildChatCompletionRequest(messages, opts, true)
+		assert.Equal(t, true, req.ParallelToolCalls)
+		assert.Len(t, req.Tools, 1)
+		assert.Equal(t, "mcp_weather_getforecast", req.Tools[0].Function.Name)
+	})
+
+	t.Run("ParallelToolCalls false is propagated", func(t *testing.T) {
+		ptc := false
+		opts := &ChatOptions{
+			Temperature:       0.7,
+			ParallelToolCalls: &ptc,
+		}
+		req := chat.BuildChatCompletionRequest(messages, opts, false)
+		assert.Equal(t, false, req.ParallelToolCalls)
+	})
+}
+
+func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
+	chat := newTestRemoteChat()
+	messages := []Message{{Role: "user", Content: "查询乙醇的理化性质"}}
+
+	mcpTools := []Tool{
+		{
+			Type: "function",
+			Function: FunctionDef{
+				Name:        "mcp_hazardous_chemicals_gethazardouschemicals",
+				Description: "[MCP Service: hazardous_chemicals (external)] Get hazardous chemicals list",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{}}`),
+			},
+		},
+		{
+			Type: "function",
+			Function: FunctionDef{
+				Name:        "mcp_hazardous_chemicals_gethazardouschemicalbybizid",
+				Description: "[MCP Service: hazardous_chemicals (external)] Get hazardous chemical by biz ID",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"bizId":{"type":"string"}},"required":["bizId"]}`),
+			},
+		},
+	}
+
+	ptc := true
+	opts := &ChatOptions{
+		Temperature:       0.7,
+		Tools:             mcpTools,
+		ParallelToolCalls: &ptc,
+	}
+
+	req := chat.BuildChatCompletionRequest(messages, opts, true)
+
+	assert.Len(t, req.Tools, 2)
+	assert.Equal(t, "mcp_hazardous_chemicals_gethazardouschemicals", req.Tools[0].Function.Name)
+	assert.Equal(t, "mcp_hazardous_chemicals_gethazardouschemicalbybizid", req.Tools[1].Function.Name)
+	assert.Equal(t, true, req.ParallelToolCalls)
+	assert.True(t, req.Stream)
+
+	for _, tool := range req.Tools {
+		name := tool.Function.Name
+		assert.NotContains(t, name, "ed606721", "tool name must use service name, not UUID")
+		assert.Regexp(t, `^[a-zA-Z0-9_-]+$`, name, "tool name must match OpenAI pattern")
+		assert.LessOrEqual(t, len(name), 64, "tool name must be <= 64 chars")
+	}
+}
+
+func TestBuildChatCompletionRequest_ToolChoice(t *testing.T) {
+	chat := newTestRemoteChat()
+	messages := []Message{{Role: "user", Content: "test"}}
+
+	t.Run("auto tool choice", func(t *testing.T) {
+		opts := &ChatOptions{ToolChoice: "auto"}
+		req := chat.BuildChatCompletionRequest(messages, opts, false)
+		assert.Equal(t, "auto", req.ToolChoice)
+	})
+
+	t.Run("specific tool choice", func(t *testing.T) {
+		opts := &ChatOptions{ToolChoice: "mcp_svc_tool"}
+		req := chat.BuildChatCompletionRequest(messages, opts, false)
+		assert.NotNil(t, req.ToolChoice)
+	})
+}
 
 // TestRemoteAPIChat 综合测试 Remote API Chat 的所有功能
 func TestRemoteAPIChat(t *testing.T) {
