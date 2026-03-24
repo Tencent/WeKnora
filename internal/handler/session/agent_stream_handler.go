@@ -450,7 +450,11 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	// This guards against edge cases where the LLM stops without calling final_answer.
 	if h.finalAnswer == "" && data.FinalAnswer != "" {
 		logger.GetLogger(h.ctx).Warnf(
-			"No answer events were streamed, emitting fallback answer (len=%d)", len(data.FinalAnswer),
+			"No answer events were streamed, emitting fallback answer (len=%d). "+
+				"This typically happens when: (1) model stopped naturally and content was sent as thought events, "+
+				"or (2) Ollama model returned tool calls non-incrementally. "+
+				"total_steps=%d, total_duration_ms=%d",
+			len(data.FinalAnswer), data.TotalSteps, data.TotalDurationMs,
 		)
 		fallbackID := fmt.Sprintf("answer-fallback-%d", time.Now().UnixMilli())
 		if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{

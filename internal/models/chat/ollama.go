@@ -227,7 +227,17 @@ func (c *OllamaChat) ChatStream(
 					Done:         false,
 				}
 
-				// Extract and stream content from special tools (complete, not incremental)
+				// Ollama returns tool calls as complete objects (not incremental deltas).
+				// Log this so we can trace non-streaming answer delivery.
+				for _, tc := range resp.Message.ToolCalls {
+					if tc.Function.Name == "final_answer" || tc.Function.Name == "thinking" {
+						argsBytes, _ := json.Marshal(tc.Function.Arguments)
+						logger.Warnf(ctx, "[Ollama Stream] Tool %q arrived non-incrementally (%d bytes args), "+
+							"answer will not be token-streamed to frontend",
+							tc.Function.Name, len(argsBytes))
+					}
+				}
+
 				for _, tc := range resp.Message.ToolCalls {
 					switch tc.Function.Name {
 					case "final_answer":

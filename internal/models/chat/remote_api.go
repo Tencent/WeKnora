@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -15,6 +17,17 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/sashabaranov/go-openai"
 )
+
+// rawHTTPClient is a shared HTTP client for raw HTTP LLM calls with connection-level timeouts.
+// No overall Timeout is set so streaming calls are controlled by context cancellation only.
+var rawHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:         (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+		IdleConnTimeout:     90 * time.Second,
+		MaxIdleConnsPerHost: 5,
+	},
+}
 
 // RemoteAPIChat 实现了基于 OpenAI 兼容 API 的聊天
 // 这是一个通用实现，不包含任何 provider 特定的逻辑
@@ -285,8 +298,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(httpReq)
+	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
@@ -430,8 +442,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	client := &http.Client{}
-	resp, err := client.Do(httpReq)
+	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
@@ -620,7 +631,7 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 
 	// 处理 tool calls
 	if len(delta.ToolCalls) > 0 {
-		c.processToolCallsDelta(delta.ToolCalls, state, streamChan)
+		c.processToolCallsDelta(ctx, delta.ToolCalls, state, streamChan)
 	}
 
 	// 发送思考内容（ReasoningContent，支持 DeepSeek 等模型）
@@ -675,7 +686,7 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 }
 
 // processToolCallsDelta 处理 tool calls 的增量更新
-func (c *RemoteAPIChat) processToolCallsDelta(toolCalls []openai.ToolCall, state *streamState, streamChan chan types.StreamResponse) {
+func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []openai.ToolCall, state *streamState, streamChan chan types.StreamResponse) {
 	for _, tc := range toolCalls {
 		var toolCallIndex int
 		if tc.Index != nil {
@@ -735,6 +746,12 @@ func (c *RemoteAPIChat) processToolCallsDelta(toolCalls []openai.ToolCall, state
 			if !exists {
 				extractor = newJSONFieldExtractor("answer")
 				state.fieldExtractors[toolCallIndex] = extractor
+				// Detect non-incremental arrival: if the first args chunk is large,
+				// the model likely returned all arguments at once (non-streaming tool call)
+				if len(tc.Function.Arguments) > 200 {
+					logger.Warnf(ctx, "[LLM Stream] final_answer args arrived in large chunk (%d bytes), "+
+						"model may not support incremental tool call streaming", len(tc.Function.Arguments))
+				}
 			}
 			answerChunk := extractor.Feed(tc.Function.Arguments)
 			if answerChunk != "" {

@@ -41,9 +41,15 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 	result := &streamLLMResult{}
 	chunkCount := 0
+	responseTypeCounts := make(map[string]int)
+	firstChunkTime := time.Time{}
 
 	for chunk := range stream {
 		chunkCount++
+		if chunkCount == 1 {
+			firstChunkTime = time.Now()
+		}
+		responseTypeCounts[string(chunk.ResponseType)]++
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -64,6 +70,16 @@ func (e *AgentEngine) streamLLMToEventBus(
 			emitFunc(&chunk, result.Content)
 		}
 	}
+
+	// Stream diagnostic summary: helps identify non-streaming patterns
+	streamDuration := time.Duration(0)
+	if !firstChunkTime.IsZero() {
+		streamDuration = time.Since(firstChunkTime)
+	}
+	logger.Infof(ctx, "[Agent][Stream] Completed: chunks=%d, content_len=%d, tool_calls=%d, "+
+		"stream_duration=%dms, type_distribution=%v",
+		chunkCount, len(result.Content), len(result.ToolCalls),
+		streamDuration.Milliseconds(), responseTypeCounts)
 
 	return result, nil
 }
@@ -88,6 +104,9 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	pendingToolCalls := make(map[string]bool)
 	thinkingToolIDs := make(map[string]string) // tool_call_id -> event ID for thinking tool streams
 
+	// Track which event types we emitted for diagnostics
+	emittedEventTypes := make(map[string]int)
+
 	// Generate IDs for this stream
 	thinkingID := generateEventID("thinking")
 	answerID := generateEventID("answer")
@@ -103,6 +122,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 
 				if toolCallID != "" && toolName != "" && !pendingToolCalls[toolCallID] {
 					pendingToolCalls[toolCallID] = true
+					emittedEventTypes["tool_call_pending"]++
 					e.eventBus.Emit(ctx, event.Event{
 						ID:        fmt.Sprintf("%s-tool-call-pending", toolCallID),
 						Type:      event.EventAgentToolCall,
@@ -119,6 +139,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			// Handle final_answer tool's streaming answer content
 			if chunk.ResponseType == types.ResponseTypeAnswer {
 				if source, _ := chunk.Data["source"].(string); source == "final_answer_tool" {
+					emittedEventTypes["final_answer_chunk"]++
 					e.eventBus.Emit(ctx, event.Event{
 						ID:        answerID,
 						Type:      event.EventAgentFinalAnswer,
@@ -141,6 +162,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 						eventID = generateEventID("thinking-tool")
 						thinkingToolIDs[toolCallID] = eventID
 					}
+					emittedEventTypes["thinking_tool_chunk"]++
 					e.eventBus.Emit(ctx, event.Event{
 						ID:        eventID,
 						Type:      event.EventAgentThought,
@@ -156,6 +178,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 			}
 
 			if chunk.Content != "" {
+				emittedEventTypes["thought_chunk"]++
 				e.eventBus.Emit(ctx, event.Event{
 					ID:        thinkingID, // Same ID for all chunks in this stream
 					Type:      event.EventAgentThought,
@@ -174,8 +197,9 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		return nil, err
 	}
 
-	logger.Debugf(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d",
-		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls))
+	// Emit diagnostics: helps identify when answer content went to "thought" vs "final_answer" events
+	logger.Infof(ctx, "[Agent][Thinking] Iteration-%d completed: content=%d chars, tool_calls=%d, emitted_events=%v",
+		iteration+1, len(llmResult.Content), len(llmResult.ToolCalls), emittedEventTypes)
 
 	fullContent := agenttools.StripThinkBlocks(llmResult.Content)
 

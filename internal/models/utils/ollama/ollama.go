@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,8 +41,18 @@ func GetOllamaService() (*OllamaService, error) {
 		return nil, fmt.Errorf("invalid Ollama service URL: %w", err)
 	}
 
-	// Create official client
-	client := api.NewClient(parsedURL, http.DefaultClient)
+	// Dedicated HTTP client for Ollama instead of http.DefaultClient.
+	// - Dial timeout prevents hanging when Ollama process is down or port unreachable
+	// - No overall Timeout so long-running streaming calls are controlled by context cancellation
+	ollamaHTTPClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext:         (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+			TLSHandshakeTimeout: 10 * time.Second,
+			IdleConnTimeout:     90 * time.Second,
+			MaxIdleConns:        10,
+		},
+	}
+	client := api.NewClient(parsedURL, ollamaHTTPClient)
 
 	// Check if Ollama is set as optional
 	isOptional := false
