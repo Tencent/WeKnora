@@ -288,8 +288,7 @@ func (t *GrepChunksTool) searchChunks(
 	query := t.db.Debug().WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
 			"chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, "+
-			"knowledges.title as knowledge_title, "+
-			"COUNT(*) OVER (PARTITION BY chunks.knowledge_id) AS total_chunk_count").
+			"knowledges.title as knowledge_title").
 		Joins("JOIN knowledges ON chunks.knowledge_id = knowledges.id").
 		Where("chunks.is_enabled = ?", true).
 		Where("chunks.deleted_at IS NULL").
@@ -334,6 +333,42 @@ func (t *GrepChunksTool) searchChunks(
 	if err := query.Order("chunks.created_at DESC").Limit(maxFetchLimit).Find(&results).Error; err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to fetch results: %v", err)
 		return nil, 0, err
+	}
+
+	if len(results) > 0 {
+		knowledgeIDSet := make(map[string]struct{})
+		for _, r := range results {
+			if r.KnowledgeID != "" {
+				knowledgeIDSet[r.KnowledgeID] = struct{}{}
+			}
+		}
+		uniqueKnowledgeIDs := make([]string, 0, len(knowledgeIDSet))
+		for kid := range knowledgeIDSet {
+			uniqueKnowledgeIDs = append(uniqueKnowledgeIDs, kid)
+		}
+
+		type countRow struct {
+			KnowledgeID string `gorm:"column:knowledge_id"`
+			Count       int    `gorm:"column:cnt"`
+		}
+		var counts []countRow
+		if err := t.db.WithContext(ctx).Table("chunks").
+			Select("knowledge_id, COUNT(*) AS cnt").
+			Where("knowledge_id IN ?", uniqueKnowledgeIDs).
+			Where("is_enabled = ?", true).
+			Where("deleted_at IS NULL").
+			Group("knowledge_id").
+			Find(&counts).Error; err != nil {
+			logger.Warnf(ctx, "[Tool][GrepChunks] Failed to fetch chunk counts, skipping: %v", err)
+		} else {
+			countMap := make(map[string]int, len(counts))
+			for _, c := range counts {
+				countMap[c.KnowledgeID] = c.Count
+			}
+			for i := range results {
+				results[i].TotalChunkCount = countMap[results[i].KnowledgeID]
+			}
+		}
 	}
 
 	return results, int64(len(results)), nil
