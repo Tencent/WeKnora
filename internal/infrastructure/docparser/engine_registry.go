@@ -67,7 +67,7 @@ func (e *simpleEngine) Description() string {
 	return "Simple format & image parsing (no external service required)"
 }
 func (e *simpleEngine) FileTypes(_ bool) []string {
-	return []string{"md", "markdown", "txt", "csv", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"}
+	return []string{"md", "markdown", "txt", "csv", "json", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"}
 }
 func (e *simpleEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string) {
 	return true, ""

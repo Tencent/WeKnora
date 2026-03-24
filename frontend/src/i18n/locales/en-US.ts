@@ -3016,6 +3016,7 @@ export default {
       fileTypeExcel: 'Excel Spreadsheets',
       fileTypeCsv: 'CSV Files',
       fileTypeText: 'Plain Text',
+      fileTypeJson: 'JSON Files',
       fileTypeImage: 'Images',
       engines: {
         builtin: {

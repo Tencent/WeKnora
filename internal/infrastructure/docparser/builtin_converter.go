@@ -15,7 +15,8 @@ import (
 var simpleFormats = map[string]bool{
 	"md": true, "markdown": true,
 	"txt": true, "text": true,
-	"csv": true,
+	"csv":  true,
+	"json": true,
 }
 
 var imageFormats = map[string]bool{
@@ -54,6 +55,12 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
 		md, err := csvToMarkdown(req.FileContent)
 		if err != nil {
 			return nil, fmt.Errorf("csv conversion failed: %w", err)
+		}
+		return &types.ReadResult{MarkdownContent: md}, nil
+	case ft == "json":
+		md, err := jsonToMarkdown(req.FileContent)
+		if err != nil {
+			return nil, fmt.Errorf("json conversion failed: %w", err)
 		}
 		return &types.ReadResult{MarkdownContent: md}, nil
 	case imageFormats[ft]:

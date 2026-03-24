@@ -3014,6 +3014,7 @@ export default {
       fileTypeExcel: "Excel 表格",
       fileTypeCsv: "CSV 文件",
       fileTypeText: "纯文本",
+      fileTypeJson: "JSON 文件",
       fileTypeImage: "图片",
       engines: {
         builtin: {

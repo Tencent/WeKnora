@@ -3079,6 +3079,7 @@ export default {
       fileTypeExcel: 'Excel 스프레드시트',
       fileTypeCsv: 'CSV 파일',
       fileTypeText: '일반 텍스트',
+      fileTypeJson: 'JSON 파일',
       fileTypeImage: '이미지',
       engines: {
         builtin: {

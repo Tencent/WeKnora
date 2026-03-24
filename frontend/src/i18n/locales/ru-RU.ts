@@ -2689,6 +2689,7 @@ export default {
       fileTypeExcel: 'Таблицы Excel',
       fileTypeCsv: 'Файлы CSV',
       fileTypeText: 'Текстовые файлы',
+      fileTypeJson: 'Файлы JSON',
       fileTypeImage: 'Изображения',
       engines: {
         builtin: {
