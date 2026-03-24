@@ -11,6 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// validIMPlatforms is the set of supported IM platforms.
+var validIMPlatforms = map[string]bool{"wecom": true, "feishu": true, "slack": true, "telegram": true}
+
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
 	imService *im.Service
@@ -53,8 +56,8 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		return
 	}
 
-	if req.Platform != "wecom" && req.Platform != "feishu" && req.Platform != "slack" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu' or 'slack'"})
+	if !validIMPlatforms[req.Platform] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack' or 'telegram'"})
 		return
 	}
 

@@ -23,7 +23,7 @@
             <div class="channel-info-top">
               <div class="channel-main">
                 <span class="platform-badge" :class="channel.platform">
-                  {{ channel.platform === 'wecom' ? $t('agentEditor.im.wecom') : channel.platform === 'feishu' ? $t('agentEditor.im.feishu') : $t('agentEditor.im.slack') }}
+                  {{ platformLabel(channel.platform) }}
                 </span>
                 <span class="channel-name">{{ channel.name || $t('agentEditor.im.unnamed') }}</span>
               </div>
@@ -89,6 +89,7 @@
             <t-radio-button value="wecom">{{ $t('agentEditor.im.wecom') }}</t-radio-button>
             <t-radio-button value="feishu">{{ $t('agentEditor.im.feishu') }}</t-radio-button>
             <t-radio-button value="slack">{{ $t('agentEditor.im.slack') }}</t-radio-button>
+            <t-radio-button value="telegram">{{ $t('agentEditor.im.telegram') }}</t-radio-button>
           </t-radio-group>
         </div>
 
@@ -236,6 +237,28 @@
             </div>
           </template>
         </template>
+
+        <!-- Telegram credentials -->
+        <template v-if="formData.platform === 'telegram'">
+          <div class="platform-link-hint">
+            <t-icon name="jump" class="hint-link-icon" />
+            <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="hint-link">
+              {{ $t('agentEditor.im.telegramConsole') }}
+            </a>
+            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+          </div>
+          <div class="form-item">
+            <label class="form-label">Bot Token</label>
+            <t-input v-model="formData.credentials.bot_token" type="password" placeholder="123456789:AABBccdd..." />
+          </div>
+          <template v-if="formData.mode === 'webhook'">
+            <div class="form-item">
+              <label class="form-label">Secret Token</label>
+              <t-input v-model="formData.credentials.secret_token" type="password" placeholder="Secret Token (optional)" />
+            </div>
+          </template>
+        </template>
+
       </div>
     </t-dialog>
   </div>
@@ -266,13 +289,18 @@ const knowledgeBases = ref<{ id: string; name: string }[]>([]);
 const defaultCredentials = (): Record<string, any> => ({});
 
 const formData = ref({
-  platform: 'wecom' as 'wecom' | 'feishu' | 'slack',
+  platform: 'wecom' as 'wecom' | 'feishu' | 'slack' | 'telegram',
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket',
   output_mode: 'stream' as 'stream' | 'full',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
 });
+
+function platformLabel(platform: string): string {
+  const key = `agentEditor.im.${platform}`;
+  return t(key);
+}
 
 async function loadChannels() {
   loading.value = true;
@@ -510,6 +538,12 @@ onMounted(() => {
     background: rgba(224, 30, 90, 0.08);
     color: #e01e5a;
   }
+
+  &.telegram {
+    background: rgba(38, 166, 219, 0.08);
+    color: #26a6db;
+  }
+
 }
 
 .channel-name {

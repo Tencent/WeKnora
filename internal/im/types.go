@@ -3,6 +3,7 @@ package im
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -90,6 +91,14 @@ func (ch *IMChannel) computeBotIdentity() string {
 	case "feishu":
 		if appID := str("app_id"); appID != "" {
 			return "feishu:" + appID
+		}
+	case "telegram":
+		if botToken := str("bot_token"); botToken != "" {
+			// Use the bot ID part (before the colon) as identity.
+			if idx := strings.Index(botToken, ":"); idx > 0 {
+				return "telegram:" + botToken[:idx]
+			}
+			return "telegram:" + botToken
 		}
 	}
 	return ""
