@@ -377,10 +377,7 @@ const toggleEditorView = () => {
   activeTab.value = isPreviewMode.value ? 'edit' : 'preview'
 }
 
-marked.use({
-  mangle: false,
-  headerIds: false,
-})
+marked.use({})
 
 const previewHTML = computed(() => {
   if (!form.content) {

@@ -1,4 +1,6 @@
 import mermaid from 'mermaid';
+import 'marked';
+import type {Tokens} from "marked";
 
 let mermaidInitialized = false;
 
@@ -36,18 +38,18 @@ export const ensureMermaidInitialized = () => {
   mermaidInitialized = true;
 };
 
+
 export const createMermaidCodeRenderer = (idPrefix: string) => {
   let mermaidCount = 0;
 
-  return (code: string, infostring?: string) => {
-    const lang = (infostring || '').trim();
+  return ({lang, text}: Tokens.Code) => {
     if (lang === 'mermaid') {
       const id = `${idPrefix}-${++mermaidCount}`;
-      return `<div class="mermaid" id="${id}">${code}</div>`;
+      return `<div class="mermaid" id="${id}">${text}</div>`;
     }
 
     const displayLang = lang || 'Code';
-    const escapedCode = code
+    const escapedCode = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');

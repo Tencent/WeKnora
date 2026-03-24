@@ -20,7 +20,7 @@
     "docx-preview": "^0.3.7",
     "dompurify": "^3.2.6",
     "highlight.js": "^11.11.1",
-    "marked": "^5.1.2",
+    "marked": "^17.0.5",
     "mermaid": "^11.4.1",
     "pagefind": "^1.1.1",
     "papaparse": "^5.5.3",
@@ -37,7 +37,6 @@
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.1",
-    "@types/marked": "^5.0.2",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-vue": "6.0.0",
     "@vitejs/plugin-vue-jsx": "5.0.1",

@@ -6,6 +6,7 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import { useI18n } from 'vue-i18n';
+import type {Tokens} from 'marked';
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
 
@@ -196,14 +197,13 @@ async function renderMarkdown(blob: Blob) {
     gfm: true,
   });
   const renderer = new marked.Renderer();
-  renderer.code = function (code, infostring) {
-    const lang = (infostring || '').trim();
+  renderer.code = function ({lang, text}: Tokens.Code) {
     let highlighted = '';
     if (lang && hljs.getLanguage(lang)) {
-      try { highlighted = hljs.highlight(code, { language: lang }).value; }
-      catch { highlighted = hljs.highlightAuto(code).value; }
+      try { highlighted = hljs.highlight(text, { language: lang }).value; }
+      catch { highlighted = hljs.highlightAuto(text).value; }
     } else {
-      highlighted = hljs.highlightAuto(code).value;
+      highlighted = hljs.highlightAuto(text).value;
     }
     return `<pre><code class="hljs">${highlighted}</code></pre>`;
   };

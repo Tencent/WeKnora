@@ -1,6 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { marked } from "marked";
+import type { Tokens } from 'marked';
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
@@ -49,8 +50,6 @@ const props = defineProps(["visible", "details", "knowledgeType", "sourceInfo"])
 const emit = defineEmits(["closeDoc", "getDoc", "questionDeleted"]);
 
 marked.use({
-  mangle: false,
-  headerIds: false,
   breaks: true,      // 启用单行换行转 <br>
   gfm: true,         // 启用 GitHub Flavored Markdown
 });
@@ -173,7 +172,7 @@ const checkImage = (url) => {
     img.src = url;
   });
 };
-renderer.image = function (href, title, text) {
+renderer.image = function ({href, title, text}: Tokens.Image) {
   // 安全地处理图片链接
   if (!isValidImageURL(href)) {
     return `<p>${t('error.invalidImageLink')}</p>`;
@@ -188,28 +187,26 @@ renderer.image = function (href, title, text) {
 };
 
 // 自定义代码块渲染器，只显示语言标签
-renderer.code = function (code, infostring) {
-  const lang = (infostring || '').trim();
-
+renderer.code = function ({text, lang}: Tokens.Code) {
   // Mermaid 图表处理
   if (lang === 'mermaid') {
     // 生成唯一ID
     const id = `mermaid-${++mermaidRenderCount}`;
     // 返回带有 mermaid 类的 div，后续由 mermaid.run() 处理
-    return `<div class="mermaid" id="${id}">${code}</div>`;
+    return `<div class="mermaid" id="${id}">${text}</div>`;
   }
 
   let detectedLang = lang;
   let highlighted = '';
   if (lang && hljs.getLanguage(lang)) {
     try {
-      highlighted = hljs.highlight(code, { language: lang }).value;
+      highlighted = hljs.highlight(text, { language: lang }).value;
     } catch (e) {
-      highlighted = hljs.highlightAuto(code).value;
-      detectedLang = hljs.highlightAuto(code).language || lang;
+      highlighted = hljs.highlightAuto(text).value;
+      detectedLang = hljs.highlightAuto(text).language || lang;
     }
   } else {
-    const auto = hljs.highlightAuto(code);
+    const auto = hljs.highlightAuto(text);
     highlighted = auto.value;
     detectedLang = auto.language || lang;
   }
