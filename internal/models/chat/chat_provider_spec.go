@@ -46,6 +46,11 @@ var chatProviderSpecs = []ProviderSpec{
 		Provider:          provider.ProviderGeneric,
 		RequestCustomizer: genericRequestCustomizer,
 	},
+	// Volcengine (火山引擎 Ark)
+	{
+		Provider:          provider.ProviderVolcengine,
+		RequestCustomizer: volcengineRequestCustomizer,
+	},
 	// NVIDIA
 	{
 		Provider:           provider.ProviderNvidia,
@@ -76,15 +81,16 @@ type QwenChatCompletionRequest struct {
 	EnableThinking *bool `json:"enable_thinking,omitempty"`
 }
 
-// LKEAPThinkingConfig 思维链配置（LKEAP 特有格式）
-type LKEAPThinkingConfig struct {
+// ThinkingConfig 思维链配置（LKEAP / Volcengine 等通用格式）
+type ThinkingConfig struct {
 	Type string `json:"type"` // "enabled" 或 "disabled"
 }
 
-// LKEAPChatCompletionRequest LKEAP 自定义请求结构体
-type LKEAPChatCompletionRequest struct {
+// ThinkingChatCompletionRequest 带 thinking 字段的自定义请求结构体
+// 适用于 LKEAP、Volcengine 等使用 { "thinking": { "type": "enabled" } } 格式的 provider
+type ThinkingChatCompletionRequest struct {
 	openai.ChatCompletionRequest
-	Thinking *LKEAPThinkingConfig `json:"thinking,omitempty"` // 思维链开关（仅 V3.x 系列）
+	Thinking *ThinkingConfig `json:"thinking,omitempty"`
 }
 
 // --- Customizer functions ---
@@ -116,7 +122,7 @@ func lkeapRequestCustomizer(
 		return nil, false
 	}
 
-	lkeapReq := LKEAPChatCompletionRequest{
+	lkeapReq := ThinkingChatCompletionRequest{
 		ChatCompletionRequest: *req,
 	}
 
@@ -124,7 +130,7 @@ func lkeapRequestCustomizer(
 	if *opts.Thinking {
 		thinkingType = "enabled"
 	}
-	lkeapReq.Thinking = &LKEAPThinkingConfig{Type: thinkingType}
+	lkeapReq.Thinking = &ThinkingConfig{Type: thinkingType}
 
 	return lkeapReq, true
 }
@@ -153,7 +159,29 @@ func genericRequestCustomizer(
 	req.ChatTemplateKwargs = map[string]interface{}{
 		"enable_thinking": thinking,
 	}
-	return nil, false
+	return req, true
+}
+
+// volcengineRequestCustomizer 自定义火山引擎请求
+// 火山引擎使用 thinking 参数控制深度思考，格式同 LKEAP: { "type": "enabled"/"disabled" }
+func volcengineRequestCustomizer(
+	req *openai.ChatCompletionRequest, opts *ChatOptions, _ bool,
+) (any, bool) {
+	if opts == nil || opts.Thinking == nil {
+		return nil, false
+	}
+
+	vcReq := ThinkingChatCompletionRequest{
+		ChatCompletionRequest: *req,
+	}
+
+	thinkingType := "disabled"
+	if *opts.Thinking {
+		thinkingType = "enabled"
+	}
+	vcReq.Thinking = &ThinkingConfig{Type: thinkingType}
+
+	return vcReq, true
 }
 
 // nvidiaEndpointCustomizer 自定义 NVIDIA 请求地址
