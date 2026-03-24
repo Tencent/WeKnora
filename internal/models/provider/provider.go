@@ -55,6 +55,8 @@ const (
 	ProviderLKEAP ProviderName = "lkeap"
 	// NVIDIA
 	ProviderNvidia ProviderName = "nvidia"
+	// Novita AI
+	ProviderNovita ProviderName = "novita"
 )
 
 // AllProviders 返回所有注册的提供者名称
@@ -81,6 +83,7 @@ func AllProviders() []ProviderName {
 		ProviderLKEAP,
 		ProviderGPUStack,
 		ProviderNvidia,
+		ProviderNovita,
 	}
 }
 
@@ -248,6 +251,8 @@ func DetectProvider(baseURL string) ProviderName {
 		return ProviderLKEAP
 	case containsAny(baseURL, "nvidia.com"):
 		return ProviderNvidia
+	case containsAny(baseURL, "api.novita.ai", "novita.ai"):
+		return ProviderNovita
 	default:
 		return ProviderGeneric
 	}

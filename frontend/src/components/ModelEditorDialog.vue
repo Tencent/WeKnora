@@ -381,6 +381,17 @@ const fallbackProviderOptions = computed(() => [
     description: t('model.editor.providers.nvidia.description'),
     modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
   },
+  {
+    value: 'novita',
+    label: t('model.editor.providers.novita.label'),
+    defaultUrls: {
+      chat: 'https://api.novita.ai/openai/v1',
+      embedding: 'https://api.novita.ai/openai/v1',
+      vllm: 'https://api.novita.ai/openai/v1',
+    },
+    description: t('model.editor.providers.novita.description'),
+    modelTypes: ['chat', 'embedding', 'vllm']
+  },
   { 
     value: 'generic', 
     label: t('model.editor.providers.generic.label'), 

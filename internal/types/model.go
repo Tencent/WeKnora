@@ -47,6 +47,7 @@ const (
 	ModelSourceSiliconFlow ModelSource = "siliconflow" // SiliconFlow model
 	ModelSourceJina        ModelSource = "jina"        // Jina AI model
 	ModelSourceOpenRouter  ModelSource = "openrouter"  // OpenRouter model
+	ModelSourceNovita     ModelSource = "novita"     // Novita AI model
 )
 
 // EmbeddingParameters represents the embedding parameters for a model

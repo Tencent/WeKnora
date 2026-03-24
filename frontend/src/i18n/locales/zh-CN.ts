@@ -1605,6 +1605,10 @@ export default {
             label: "NVIDIA",
             description: "deepseek-ai-deepseek-v3_1, nv-embed-v1, rerank-qa-mistral-4b, etc.",
         },
+        novita: {
+            label: "Novita AI",
+            description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.5, qwen/qwen3-embedding-0.6b 等",
+        },
       },
     },
     builtinTag: "内置",
