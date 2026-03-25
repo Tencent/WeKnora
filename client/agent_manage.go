@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -202,4 +205,60 @@ func (c *Client) GetAgentPlaceholders(ctx context.Context) (map[string]json.RawM
 	}
 
 	return response.Data, nil
+}
+
+// SuggestedQuestion represents a suggested question for an agent
+type SuggestedQuestion struct {
+	Question        string `json:"question"`                    // Question text
+	Source          string `json:"source"`                      // Source: "faq", "document", or "agent_config"
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"` // Source knowledge base ID
+}
+
+// SuggestedQuestionsRequest represents the options for getting suggested questions
+type SuggestedQuestionsRequest struct {
+	KnowledgeBaseIDs []string // Optional: override agent's KB scope
+	KnowledgeIDs     []string // Optional: limit to specific knowledge items
+	Limit            int      // Optional: max questions to return (default 6)
+}
+
+// SuggestedQuestionsResponse represents the API response for suggested questions
+type SuggestedQuestionsResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Questions []SuggestedQuestion `json:"questions"`
+	} `json:"data"`
+}
+
+// GetSuggestedQuestions retrieves suggested questions for the given agent,
+// based on its associated knowledge bases. The returned questions can be
+// displayed as quick-start prompts in the chat UI.
+//
+// When request is nil, uses the agent's default knowledge base configuration.
+func (c *Client) GetSuggestedQuestions(ctx context.Context, agentID string, request *SuggestedQuestionsRequest) ([]SuggestedQuestion, error) {
+	path := fmt.Sprintf("/api/v1/agents/%s/suggested-questions", agentID)
+
+	query := url.Values{}
+	if request != nil {
+		if len(request.KnowledgeBaseIDs) > 0 {
+			query.Set("knowledge_base_ids", strings.Join(request.KnowledgeBaseIDs, ","))
+		}
+		if len(request.KnowledgeIDs) > 0 {
+			query.Set("knowledge_ids", strings.Join(request.KnowledgeIDs, ","))
+		}
+		if request.Limit > 0 {
+			query.Set("limit", strconv.Itoa(request.Limit))
+		}
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, query)
+	if err != nil {
+		return nil, err
+	}
+
+	var response SuggestedQuestionsResponse
+	if err := parseResponse(resp, &response); err != nil {
+		return nil, err
+	}
+
+	return response.Data.Questions, nil
 }
