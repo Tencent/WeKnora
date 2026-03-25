@@ -491,6 +491,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		// Copy agent
 		agents.POST("/:id/copy", agentHandler.CopyAgent)
 	}
+	// Registered outside the group to avoid Gin route conflict with /agents/:id/shares in organization routes
+	r.GET("/agents/:id/suggested-questions", agentHandler.GetSuggestedQuestions)
 }
 
 // RegisterSkillRoutes registers skill routes

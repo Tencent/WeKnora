@@ -64,6 +64,20 @@ type CustomAgentService interface {
 	//   - The newly created agent copy
 	//   - Possible errors such as not existing, insufficient permissions, etc.
 	CopyAgent(ctx context.Context, id string) (*types.CustomAgent, error)
+
+	// GetSuggestedQuestions returns suggested questions for the agent based on its
+	// associated knowledge bases. When kbIDs or knowledgeIDs are provided, they override
+	// the agent's default knowledge base selection.
+	// Parameters:
+	//   - ctx: Context information
+	//   - agentID: Agent ID
+	//   - kbIDs: Optional knowledge base IDs to override agent config
+	//   - knowledgeIDs: Optional knowledge item IDs to further filter
+	//   - limit: Maximum number of questions to return
+	// Returns:
+	//   - List of suggested questions
+	//   - Possible errors
+	GetSuggestedQuestions(ctx context.Context, agentID string, kbIDs []string, knowledgeIDs []string, limit int) ([]types.SuggestedQuestion, error)
 }
 
 // CustomAgentRepository defines the custom agent repository interface

@@ -289,6 +289,8 @@ export default {
   chat: {
     title: "대화",
     newChat: "새 대화",
+    suggestedQuestions: "이렇게 물어보세요",
+    suggestedQuestionsLoading: "추천 질문 로딩 중...",
     inputPlaceholder: "메시지를 입력하세요...",
     send: "전송",
     thinking: "생각 중...",

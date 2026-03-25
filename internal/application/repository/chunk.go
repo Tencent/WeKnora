@@ -910,3 +910,99 @@ func (r *chunkRepository) FAQChunkDiff(
 
 	return chunksToAdd, chunksToDelete, nil
 }
+
+// ListRecommendedFAQChunks lists FAQ chunks with the recommended flag set.
+// Filter by kbIDs and/or knowledgeIDs (OR relationship). At least one must be non-empty.
+// Returns up to `limit` chunks sorted by updated_at descending.
+func (r *chunkRepository) ListRecommendedFAQChunks(
+	ctx context.Context,
+	tenantID uint64,
+	kbIDs []string,
+	knowledgeIDs []string,
+	limit int,
+) ([]*types.Chunk, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	query := r.db.WithContext(ctx).
+		Select("id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
+		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ? AND flags & ? != 0",
+			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true, int(types.ChunkFlagRecommended))
+	if len(knowledgeIDs) > 0 {
+		// 指定了具体知识文档，直接按 knowledge_id 过滤（忽略 kbIDs）
+		query = query.Where("knowledge_id IN ?", knowledgeIDs)
+	} else {
+		query = query.Where("knowledge_base_id IN ?", kbIDs)
+	}
+	if err := query.
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListRecentDocumentChunksWithQuestions lists recent document chunks that have generated questions.
+// Filter by kbIDs and/or knowledgeIDs (OR relationship). At least one must be non-empty.
+// Returns up to `limit` chunks sorted by updated_at descending.
+func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
+	ctx context.Context,
+	tenantID uint64,
+	kbIDs []string,
+	knowledgeIDs []string,
+	limit int,
+) ([]*types.Chunk, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+
+	baseQuery := r.db.WithContext(ctx).
+		Select("id, knowledge_base_id, chunk_type, metadata, updated_at").
+		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ?",
+			tenantID, types.ChunkTypeText, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true)
+	if len(knowledgeIDs) > 0 {
+		// 指定了具体知识文档，直接按 knowledge_id 过滤（忽略 kbIDs）
+		baseQuery = baseQuery.Where("knowledge_id IN ?", knowledgeIDs)
+	} else {
+		baseQuery = baseQuery.Where("knowledge_base_id IN ?", kbIDs)
+	}
+
+	// Query chunks that have non-empty generated_questions in metadata
+	switch r.db.Name() {
+	case "postgres":
+		if err := baseQuery.
+			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
+			Order("updated_at DESC").
+			Limit(limit).
+			Find(&chunks).Error; err != nil {
+			return nil, err
+		}
+	case "mysql":
+		if err := baseQuery.
+			Where("metadata IS NOT NULL AND JSON_LENGTH(JSON_EXTRACT(metadata, '$.generated_questions')) > 0").
+			Order("updated_at DESC").
+			Limit(limit).
+			Find(&chunks).Error; err != nil {
+			return nil, err
+		}
+	default: // sqlite
+		if err := baseQuery.
+			Where("metadata IS NOT NULL AND json_array_length(json_extract(metadata, '$.generated_questions')) > 0").
+			Order("updated_at DESC").
+			Limit(limit).
+			Find(&chunks).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	return chunks, nil
+}

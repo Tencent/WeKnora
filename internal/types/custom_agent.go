@@ -175,6 +175,10 @@ type CustomAgentConfig struct {
 	FallbackResponse string `yaml:"fallback_response" json:"fallback_response"`
 	// Fallback prompt (when FallbackStrategy is "model")
 	FallbackPrompt string `yaml:"fallback_prompt" json:"fallback_prompt"`
+
+	// ===== Suggested Prompts =====
+	// 推荐问题列表，用于在前端对话面板展示快捷提问
+	SuggestedPrompts []string `yaml:"suggested_prompts" json:"suggested_prompts,omitempty"`
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig
@@ -253,6 +257,16 @@ func (a *CustomAgent) EnsureDefaults() {
 // IsAgentMode returns true if this agent uses ReAct agent mode
 func (a *CustomAgent) IsAgentMode() bool {
 	return a.Config.AgentMode == AgentModeSmartReasoning
+}
+
+// SuggestedQuestion 推荐问题
+type SuggestedQuestion struct {
+	// 问题文本
+	Question string `json:"question"`
+	// 来源类型: "faq", "document", "agent_config"
+	Source string `json:"source"`
+	// 来源知识库ID（仅 faq/document 来源时有值）
+	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }
 
 // BuiltinAgentRegistry provides a registry of all built-in agents.

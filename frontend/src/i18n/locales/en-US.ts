@@ -1696,6 +1696,8 @@ export default {
   chat: {
     title: 'Chat',
     newChat: 'New Chat',
+    suggestedQuestions: 'You can ask me',
+    suggestedQuestionsLoading: 'Loading suggestions...',
     inputPlaceholder: 'Enter your message...',
     send: 'Send',
     thinking: 'Thinking...',

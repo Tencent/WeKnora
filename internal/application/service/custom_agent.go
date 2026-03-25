@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,13 +24,21 @@ var (
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	repo interfaces.CustomAgentRepository
+	repo      interfaces.CustomAgentRepository
+	chunkRepo interfaces.ChunkRepository
+	kbService interfaces.KnowledgeBaseService
 }
 
 // NewCustomAgentService creates a new custom agent service
-func NewCustomAgentService(repo interfaces.CustomAgentRepository) interfaces.CustomAgentService {
+func NewCustomAgentService(
+	repo interfaces.CustomAgentRepository,
+	chunkRepo interfaces.ChunkRepository,
+	kbService interfaces.KnowledgeBaseService,
+) interfaces.CustomAgentService {
 	return &customAgentService{
-		repo: repo,
+		repo:      repo,
+		chunkRepo: chunkRepo,
+		kbService: kbService,
 	}
 }
 
@@ -409,4 +418,184 @@ func (s *customAgentService) CopyAgent(ctx context.Context, id string) (*types.C
 
 	logger.Infof(ctx, "Agent copied successfully, source ID: %s, new ID: %s", id, newAgent.ID)
 	return newAgent, nil
+}
+
+// GetSuggestedQuestions returns suggested questions for the agent based on its
+// associated knowledge bases.
+func (s *customAgentService) GetSuggestedQuestions(
+	ctx context.Context,
+	agentID string,
+	kbIDs []string,
+	knowledgeIDs []string,
+	limit int,
+) ([]types.SuggestedQuestion, error) {
+	if limit <= 0 {
+		limit = 6
+	}
+
+	// Get tenant ID from context
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return nil, ErrInvalidTenantID
+	}
+
+	// Get agent configuration
+	agent, err := s.GetAgentByID(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []types.SuggestedQuestion
+
+	// 1. Add agent config suggested_prompts first (highest priority)
+	if len(agent.Config.SuggestedPrompts) > 0 {
+		for _, prompt := range agent.Config.SuggestedPrompts {
+			if strings.TrimSpace(prompt) == "" {
+				continue
+			}
+			result = append(result, types.SuggestedQuestion{
+				Question: prompt,
+				Source:   "agent_config",
+			})
+		}
+	}
+
+	// 2. Determine knowledge base scope
+	effectiveKBIDs := kbIDs
+	if len(effectiveKBIDs) == 0 {
+		// Use agent's KB configuration
+		switch agent.Config.KBSelectionMode {
+		case "all":
+			kbs, err := s.kbService.ListKnowledgeBases(ctx)
+			if err != nil {
+				logger.ErrorWithFields(ctx, err, map[string]interface{}{
+					"agent_id": agentID,
+				})
+				// Return what we have so far (agent_config suggestions)
+				return s.truncateQuestions(result, limit), nil
+			}
+			for _, kb := range kbs {
+				effectiveKBIDs = append(effectiveKBIDs, kb.ID)
+			}
+		case "selected":
+			effectiveKBIDs = agent.Config.KnowledgeBases
+		case "none":
+			// No KB access, return agent_config suggestions only
+			return s.truncateQuestions(result, limit), nil
+		default:
+			// Default to agent's configured KBs
+			effectiveKBIDs = agent.Config.KnowledgeBases
+		}
+	}
+
+	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 {
+		return s.truncateQuestions(result, limit), nil
+	}
+
+	// Deduplicate questions we've already collected
+	seen := make(map[string]bool)
+	for _, q := range result {
+		seen[q.Question] = true
+	}
+
+	remaining := limit - len(result)
+	if remaining <= 0 {
+		return s.truncateQuestions(result, limit), nil
+	}
+
+	// 3. Collect all candidate chunks from both FAQ and Document KBs,
+	//    then sort by updated_at uniformly (not FAQ-first).
+	type candidate struct {
+		question types.SuggestedQuestion
+		updatedAt time.Time
+	}
+	var candidates []candidate
+
+	// Determine query scope
+	queryKBIDs := effectiveKBIDs
+	queryKnowledgeIDs := knowledgeIDs
+
+	// Fetch more than needed from each source, we'll merge-sort and truncate
+	fetchLimit := remaining * 2
+	if fetchLimit < 10 {
+		fetchLimit = 10
+	}
+
+	// Collect FAQ recommended chunks
+	faqChunks, err := s.chunkRepo.ListRecommendedFAQChunks(ctx, tenantID, queryKBIDs, queryKnowledgeIDs, fetchLimit)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"agent_id": agentID,
+		})
+	} else {
+		for _, chunk := range faqChunks {
+			meta, err := chunk.FAQMetadata()
+			if err != nil || meta == nil || meta.StandardQuestion == "" {
+				continue
+			}
+			if seen[meta.StandardQuestion] {
+				continue
+			}
+			seen[meta.StandardQuestion] = true
+			candidates = append(candidates, candidate{
+				question: types.SuggestedQuestion{
+					Question:        meta.StandardQuestion,
+					Source:          "faq",
+					KnowledgeBaseID: chunk.KnowledgeBaseID,
+				},
+				updatedAt: chunk.UpdatedAt,
+			})
+		}
+	}
+
+	// Collect Document chunks with generated questions
+	docChunks, err := s.chunkRepo.ListRecentDocumentChunksWithQuestions(ctx, tenantID, queryKBIDs, queryKnowledgeIDs, fetchLimit)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"agent_id": agentID,
+		})
+	} else {
+		for _, chunk := range docChunks {
+			meta, err := chunk.DocumentMetadata()
+			if err != nil || meta == nil || len(meta.GeneratedQuestions) == 0 {
+				continue
+			}
+			q := meta.GeneratedQuestions[0].Question
+			if q == "" || seen[q] {
+				continue
+			}
+			seen[q] = true
+			candidates = append(candidates, candidate{
+				question: types.SuggestedQuestion{
+					Question:        q,
+					Source:          "document",
+					KnowledgeBaseID: chunk.KnowledgeBaseID,
+				},
+				updatedAt: chunk.UpdatedAt,
+			})
+		}
+	}
+
+	// 4. Sort all candidates by updated_at descending (newest first)
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].updatedAt.After(candidates[j].updatedAt)
+	})
+
+	// 5. Pick top N
+	for _, c := range candidates {
+		if len(result) >= limit {
+			break
+		}
+		result = append(result, c.question)
+	}
+
+	return s.truncateQuestions(result, limit), nil
+}
+
+// truncateQuestions truncates the question list to the specified limit
+func (s *customAgentService) truncateQuestions(questions []types.SuggestedQuestion, limit int) []types.SuggestedQuestion {
+	if len(questions) > limit {
+		return questions[:limit]
+	}
+	return questions
 }

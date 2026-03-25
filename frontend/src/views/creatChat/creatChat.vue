@@ -4,6 +4,25 @@
             <div class="dialogue-title">
                 <span>{{ $t('createChat.title') }}</span>
             </div>
+            <!-- 推荐问题 -->
+            <div class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 }">
+                <transition name="fade">
+                    <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
+                        <div class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</div>
+                        <div class="suggested-questions-grid">
+                            <div
+                                v-for="(item, index) in suggestedQuestions"
+                                :key="item.question"
+                                class="suggested-question-card"
+                                @click="sendMsg(item.question, '', [], [])"
+                            >
+                                <span class="suggested-question-text">{{ item.question }}</span>
+                                <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
+                            </div>
+                        </div>
+                    </div>
+                </transition>
+            </div>
             <InputField @send-msg="sendMsg"></InputField>
         </div>
     </div>
@@ -19,9 +38,11 @@
     />
 </template>
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
+import { getSuggestedQuestions } from "@/api/agent/index";
+import type { SuggestedQuestion } from "@/api/agent/index";
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
@@ -38,6 +59,48 @@ const settingsStore = useSettingsStore();
 const uiStore = useUIStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
+
+// ===== 推荐问题 =====
+const suggestedQuestions = ref<SuggestedQuestion[]>([]);
+let suggestedQuestionsFetchId = 0;
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+const fetchSuggestedQuestions = async () => {
+    const fetchId = ++suggestedQuestionsFetchId;
+    // 加载期间保留旧数据，不清空，避免布局抖动
+    try {
+        const agentId = settingsStore.selectedAgentId;
+        if (!agentId) return;
+        const selectedKBs = settingsStore.getSelectedKnowledgeBases();
+        const selectedFiles = settingsStore.getSelectedFiles();
+        const res = await getSuggestedQuestions(agentId, {
+            knowledge_base_ids: selectedKBs.length > 0 ? selectedKBs : undefined,
+            knowledge_ids: selectedFiles.length > 0 ? selectedFiles : undefined,
+            limit: 6,
+        });
+        if (fetchId === suggestedQuestionsFetchId) {
+            suggestedQuestions.value = res?.data?.questions || [];
+        }
+    } catch (err) {
+        console.warn('[SuggestedQuestions] Failed to fetch:', err);
+        if (fetchId === suggestedQuestionsFetchId) {
+            suggestedQuestions.value = [];
+        }
+    }
+};
+
+// 防抖包装，切换知识库/文件时300ms内不重复请求
+const debouncedFetch = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => { fetchSuggestedQuestions(); }, 300);
+};
+
+// 监听 Agent / 知识库 / 文件切换
+watch(() => settingsStore.selectedAgentId, debouncedFetch);
+watch(() => settingsStore.settings.selectedKnowledgeBases, debouncedFetch, { deep: true });
+watch(() => settingsStore.settings.selectedFiles, debouncedFetch, { deep: true });
+
+onMounted(() => { fetchSuggestedQuestions(); });
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = []) => {
     createNewSession(value, modelId, mentionedItems, imageFiles);
@@ -141,6 +204,94 @@ const handleKBEditorSuccess = (kbId: string) => {
             height: 24px;
             width: 24px;
         }
+    }
+}
+
+.suggested-questions-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 24px;
+    width: 100%;
+    max-width: 800px;
+    min-height: 0;
+    transition: min-height 0.3s ease;
+
+    &.has-questions {
+        min-height: 80px; // 有内容时保持最小高度，避免加载新数据时塌缩
+    }
+}
+
+.suggested-questions-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+
+// 淡入淡出过渡
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+
+.suggested-questions-title {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+.suggested-questions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    width: 100%;
+}
+
+.suggested-question-card {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--td-component-stroke);
+    background: var(--td-bg-color-container);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    max-width: 100%;
+
+    &:hover {
+        border-color: var(--td-brand-color);
+        background: var(--td-brand-color-light);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+}
+
+.suggested-question-text {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.suggested-question-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    font-weight: 500;
+
+    &.faq {
+        background: var(--td-success-color-1);
+        color: var(--td-success-color);
     }
 }
 

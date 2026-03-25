@@ -297,6 +297,8 @@ export default {
   chat: {
     title: "对话",
     newChat: "新对话",
+    suggestedQuestions: "你可以这样问我",
+    suggestedQuestionsLoading: "正在加载推荐问题...",
     inputPlaceholder: "请输入您的消息...",
     send: "发送",
     thinking: "思考中...",

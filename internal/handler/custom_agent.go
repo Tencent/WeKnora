@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -373,6 +375,83 @@ func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
 			"rewrite_system_prompt": types.PlaceholdersByField(types.PromptFieldRewriteSystemPrompt),
 			"rewrite_prompt":        types.PlaceholdersByField(types.PromptFieldRewritePrompt),
 			"fallback_prompt":       types.PlaceholdersByField(types.PromptFieldFallbackPrompt),
+		},
+	})
+}
+
+// GetSuggestedQuestions godoc
+// @Summary      获取推荐问题
+// @Description  基于智能体关联的知识库，返回推荐问题供用户快捷提问
+// @Tags         智能体
+// @Accept       json
+// @Produce      json
+// @Param        id                  path      string  true   "智能体ID"
+// @Param        knowledge_base_ids  query     string  false  "知识库ID列表（逗号分隔），覆盖智能体默认配置"
+// @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
+// @Param        limit               query     int     false  "返回数量上限（默认6）"
+// @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
+// @Failure      400                 {object}  errors.AppError         "请求参数错误"
+// @Failure      404                 {object}  errors.AppError         "智能体不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/{id}/suggested-questions [get]
+func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Get agent ID from URL parameter
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Agent ID is empty")
+		c.Error(errors.NewBadRequestError("Agent ID cannot be empty"))
+		return
+	}
+
+	// Parse optional query parameters
+	var kbIDs []string
+	if kbIDsStr := strings.TrimSpace(c.Query("knowledge_base_ids")); kbIDsStr != "" {
+		for _, id := range strings.Split(kbIDsStr, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				kbIDs = append(kbIDs, trimmed)
+			}
+		}
+	}
+
+	var knowledgeIDs []string
+	if kIDsStr := strings.TrimSpace(c.Query("knowledge_ids")); kIDsStr != "" {
+		for _, id := range strings.Split(kIDsStr, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				knowledgeIDs = append(knowledgeIDs, trimmed)
+			}
+		}
+	}
+
+	limit := 6
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	logger.Infof(ctx, "Getting suggested questions for agent %s, kbIDs: %v, limit: %d",
+		secutils.SanitizeForLog(id), kbIDs, limit)
+
+	questions, err := h.service.GetSuggestedQuestions(ctx, id, kbIDs, knowledgeIDs, limit)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"agent_id": id,
+		})
+		if err == service.ErrAgentNotFound {
+			c.Error(errors.NewNotFoundError("Agent not found"))
+			return
+		}
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"questions": questions,
 		},
 	})
 }
