@@ -99,7 +99,7 @@ Each thought can build on, question, or revise previous insights as understandin
     "total_thoughts": {
       "type": "integer",
       "description": "Estimated total thoughts needed (numeric value, e.g., 5, 10)",
-      "minimum": 5
+      "minimum": 1
     },
     "is_revision": {
       "type": "boolean",

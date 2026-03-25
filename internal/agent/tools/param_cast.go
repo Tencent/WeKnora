@@ -68,6 +68,12 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 // Returns (newValue, true) if a conversion was made, (val, false) otherwise.
 func castValue(val interface{}, targetType string) (interface{}, bool) {
 	switch targetType {
+	case "array":
+		// Allow a single string to satisfy string-array parameters used by tools.
+		if s, ok := val.(string); ok {
+			return []string{s}, true
+		}
+
 	case "boolean":
 		if s, ok := val.(string); ok {
 			lower := strings.ToLower(s)

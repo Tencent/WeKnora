@@ -16,15 +16,7 @@ templates:
     default: true
     has_knowledge_base: true
     content: |
-      The following is retrieved information that may or may not be relevant:
-      {{contexts}}
-
       User question: {{query}}
-
-      Instructions:
-      - If the retrieved information is relevant to the user's question, use it to provide an accurate answer.
-      - If the retrieved information is NOT relevant (e.g., the user is greeting, chatting, or asking something unrelated), ignore it and respond naturally as a helpful assistant.
-      - Do not mention "retrieved information" or "reference materials" in your response unless the user explicitly asks about sources.
 
   - id: "detailed_context"
     name: "Detailed Template"

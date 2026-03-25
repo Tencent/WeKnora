@@ -79,3 +79,22 @@ func TestCastParams_BoolFalseString(t *testing.T) {
 		t.Errorf("expected false, got %v (%T)", parsed["flag"], parsed["flag"])
 	}
 }
+
+func TestCastParams_StringToStringArray(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{"patterns":{"type":"array","items":{"type":"string"}}}}`)
+	args := json.RawMessage(`{"patterns":"OpenClaw"}`)
+	result := CastParams(args, schema)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	patterns, ok := parsed["patterns"].([]interface{})
+	if !ok {
+		t.Fatalf("expected patterns to be array, got %T", parsed["patterns"])
+	}
+	if len(patterns) != 1 || patterns[0] != "OpenClaw" {
+		t.Fatalf("expected [OpenClaw], got %v", patterns)
+	}
+}
