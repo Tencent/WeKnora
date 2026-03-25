@@ -90,7 +90,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 		query = query.Where("tag_id = ?", tagID)
 	}
 	if keyword != "" {
-		query = query.Where("file_name LIKE ?", "%"+keyword+"%")
+		query = query.Where("(file_name LIKE ? OR title LIKE ?)", "%"+keyword+"%", "%"+keyword+"%")
 	}
 	if fileType != "" {
 		if fileType == "manual" {
@@ -114,7 +114,7 @@ func (r *knowledgeRepository) ListPagedKnowledgeByKnowledgeBaseID(
 		dataQuery = dataQuery.Where("tag_id = ?", tagID)
 	}
 	if keyword != "" {
-		dataQuery = dataQuery.Where("file_name LIKE ?", "%"+keyword+"%")
+		dataQuery = dataQuery.Where("(file_name LIKE ? OR title LIKE ?)", "%"+keyword+"%", "%"+keyword+"%")
 	}
 	if fileType != "" {
 		if fileType == "manual" {
@@ -337,16 +337,20 @@ func (r *knowledgeRepository) SearchKnowledge(
 
 	// If keyword is provided, filter by file_name or title
 	if keyword != "" {
-		query = query.Where("knowledges.file_name LIKE ? ", "%"+keyword+"%")
+		query = query.Where("(knowledges.file_name LIKE ? OR knowledges.title LIKE ?)", "%"+keyword+"%", "%"+keyword+"%")
 	}
 
-	// If fileTypes is provided, filter by file extension
+	// If fileTypes is provided, filter by file extension or type
 	if len(fileTypes) > 0 {
-		// Build file extension patterns (e.g., "%.csv", "%.xlsx")
 		seen := make(map[string]bool)
 		var uniquePatterns []string
+		includeURL := false
 		for _, ft := range fileTypes {
 			ft = strings.ToLower(strings.TrimPrefix(ft, "."))
+			if ft == "url" || ft == "html" {
+				includeURL = true
+				continue
+			}
 			pattern := "%." + ft
 			if !seen[pattern] {
 				seen[pattern] = true
@@ -377,14 +381,17 @@ func (r *knowledgeRepository) SearchKnowledge(
 				}
 			}
 		}
-		// Build OR conditions for file extensions
-		if len(uniquePatterns) > 0 {
-			orConditions := make([]string, len(uniquePatterns))
-			args := make([]interface{}, len(uniquePatterns))
-			for i, p := range uniquePatterns {
-				orConditions[i] = "LOWER(knowledges.file_name) LIKE ?"
-				args[i] = p
-			}
+		var orConditions []string
+		var args []interface{}
+		for _, p := range uniquePatterns {
+			orConditions = append(orConditions, "LOWER(knowledges.file_name) LIKE ?")
+			args = append(args, p)
+		}
+		if includeURL {
+			orConditions = append(orConditions, "knowledges.type = ?")
+			args = append(args, "url")
+		}
+		if len(orConditions) > 0 {
 			query = query.Where("("+strings.Join(orConditions, " OR ")+")", args...)
 		}
 	}
@@ -448,14 +455,19 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 		Where("knowledges.deleted_at IS NULL")
 
 	if keyword != "" {
-		query = query.Where("knowledges.file_name LIKE ?", "%"+keyword+"%")
+		query = query.Where("(knowledges.file_name LIKE ? OR knowledges.title LIKE ?)", "%"+keyword+"%", "%"+keyword+"%")
 	}
 
 	if len(fileTypes) > 0 {
 		seen := make(map[string]bool)
 		var uniquePatterns []string
+		includeURL := false
 		for _, ft := range fileTypes {
 			ft = strings.ToLower(strings.TrimPrefix(ft, "."))
+			if ft == "url" || ft == "html" {
+				includeURL = true
+				continue
+			}
 			pattern := "%." + ft
 			if !seen[pattern] {
 				seen[pattern] = true
@@ -485,13 +497,17 @@ func (r *knowledgeRepository) SearchKnowledgeInScopes(
 				}
 			}
 		}
-		if len(uniquePatterns) > 0 {
-			orConditions := make([]string, len(uniquePatterns))
-			ftArgs := make([]interface{}, len(uniquePatterns))
-			for i, p := range uniquePatterns {
-				orConditions[i] = "LOWER(knowledges.file_name) LIKE ?"
-				ftArgs[i] = p
-			}
+		var orConditions []string
+		var ftArgs []interface{}
+		for _, p := range uniquePatterns {
+			orConditions = append(orConditions, "LOWER(knowledges.file_name) LIKE ?")
+			ftArgs = append(ftArgs, p)
+		}
+		if includeURL {
+			orConditions = append(orConditions, "knowledges.type = ?")
+			ftArgs = append(ftArgs, "url")
+		}
+		if len(orConditions) > 0 {
 			query = query.Where("("+strings.Join(orConditions, " OR ")+")", ftArgs...)
 		}
 	}
