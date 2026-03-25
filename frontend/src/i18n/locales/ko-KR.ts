@@ -961,6 +961,8 @@ export default {
     confirmDelete: "삭제 확인",
     deleteSuccess: "삭제 성공",
     deleteFailed: "삭제 실패",
+    saveSuccess: "저장 성공",
+    saveFailed: "저장 실패",
     file: "파일",
     knowledgeBase: "지식베이스",
     noResult: "결과 없음",

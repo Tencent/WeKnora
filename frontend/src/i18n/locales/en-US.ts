@@ -1111,6 +1111,8 @@ export default {
     confirmDelete: 'Confirm Delete',
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Delete failed',
+    saveSuccess: 'Saved successfully',
+    saveFailed: 'Save failed',
     file: 'File',
     knowledgeBase: 'Knowledge Base',
     noResult: 'No results',

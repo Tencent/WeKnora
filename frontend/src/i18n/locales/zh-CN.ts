@@ -957,6 +957,8 @@ export default {
     confirmDelete: "确认删除",
     deleteSuccess: "删除成功",
     deleteFailed: "删除失败",
+    saveSuccess: "保存成功",
+    saveFailed: "保存失败",
     file: "文件",
     knowledgeBase: "知识库",
     noResult: "无结果",

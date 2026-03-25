@@ -1081,6 +1081,8 @@ export default {
     confirmDelete: 'Подтвердить удаление',
     deleteSuccess: 'Успешно удалено',
     deleteFailed: 'Ошибка удаления',
+    saveSuccess: 'Успешно сохранено',
+    saveFailed: 'Ошибка сохранения',
     file: 'Файл',
     knowledgeBase: 'База знаний',
     noResult: 'Нет результатов',
