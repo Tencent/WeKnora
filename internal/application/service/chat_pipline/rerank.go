@@ -82,6 +82,13 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		}
 		// 合并Content和ImageInfo的文本内容
 		passage := getEnrichedPassage(ctx, result)
+		// 过滤空内容,避免Rerank API报错
+		if strings.TrimSpace(passage) == "" {
+			pipelineWarn(ctx, "Rerank", "empty_passage_skip", map[string]interface{}{
+				"chunk_id": result.ID,
+			})
+			continue
+		}
 		passages = append(passages, passage)
 		candidatesToRerank = append(candidatesToRerank, result)
 	}
