@@ -21,6 +21,7 @@ import (
 
 const (
 	envMilvusCollection   = "MILVUS_COLLECTION"
+	envMilvusMetricType   = "MILVUS_METRIC_TYPE"
 	defaultCollectionName = "weknora_embeddings"
 	fieldContent          = "content"
 	fieldSourceID         = "source_id"
@@ -51,10 +52,26 @@ func NewMilvusRetrieveEngineRepository(client *client.Client) interfaces.Retriev
 		collectionBaseName = defaultCollectionName
 	}
 
+	metricType := entity.IP
+	if mt := os.Getenv(envMilvusMetricType); mt != "" {
+		switch strings.ToUpper(mt) {
+		case "COSINE":
+			metricType = entity.COSINE
+		case "L2":
+			metricType = entity.L2
+		case "IP":
+			metricType = entity.IP
+		default:
+			log.Warnf("[Milvus] Unknown MILVUS_METRIC_TYPE '%s', using default IP", mt)
+		}
+	}
+	log.Infof("[Milvus] Using metric type: %s", metricType)
+
 	res := &milvusRepository{
 		filter:             filter{},
 		client:             client,
 		collectionBaseName: collectionBaseName,
+		metricType:         metricType,
 	}
 
 	log.Info("[Milvus] Successfully initialized repository")
@@ -150,7 +167,7 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 
 		indexOpts := make([]client.CreateIndexOption, 0)
 		// hnsw index for embedding field
-		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldEmbedding, index.NewHNSWIndex(entity.IP, 16, 128)))
+		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldEmbedding, index.NewHNSWIndex(m.metricType, 16, 128)))
 		indexOpts = append(indexOpts, client.NewCreateIndexOption(collectionName, fieldContentSparse, index.NewAutoIndex(entity.BM25)))
 		// Create payload indexes for filtering
 		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID, fieldIsEnabled}

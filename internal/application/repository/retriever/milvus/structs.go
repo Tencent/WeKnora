@@ -3,6 +3,7 @@ package milvus
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -10,6 +11,7 @@ type milvusRepository struct {
 	filter
 	client             *client.Client
 	collectionBaseName string
+	metricType         entity.MetricType
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
 }
