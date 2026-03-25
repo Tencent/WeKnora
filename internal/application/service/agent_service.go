@@ -205,6 +205,19 @@ func (s *agentService) CreateAgentEngine(
 	)
 	engine.SetAppConfig(s.cfg)
 
+	// Set VLM image describer for MCP tool result image analysis.
+	// When an MCP tool returns images, the engine uses VLM to generate text descriptions
+	// and appends them to the tool result content (since Chat Completions API does not
+	// reliably support images in tool role messages across providers).
+	if config.VLMModelID != "" {
+		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
+			engine.SetImageDescriber(vlmModel.Predict)
+			logger.Infof(ctx, "VLM image describer set for MCP tool result analysis (model: %s)", config.VLMModelID)
+		} else {
+			logger.Warnf(ctx, "Failed to load VLM model %s for MCP image fallback: %v", config.VLMModelID, err)
+		}
+	}
+
 	// Initialize skills manager if skills are enabled
 	if config.SkillsEnabled && len(config.SkillDirs) > 0 {
 		skillsManager, err := s.initializeSkillsManager(ctx, config, toolRegistry)

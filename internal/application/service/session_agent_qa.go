@@ -70,6 +70,11 @@ func (s *sessionService) AgentQA(
 		return err
 	}
 
+	// Set VLM model ID for tool result image analysis (runtime-only field)
+	if req.CustomAgent != nil && req.CustomAgent.Config.VLMModelID != "" {
+		agentConfig.VLMModelID = req.CustomAgent.Config.VLMModelID
+	}
+
 	// Resolve model ID using shared helper (AgentQA requires a model, so error if not found)
 	effectiveModelID, err := s.resolveChatModelID(ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
 	if err != nil {

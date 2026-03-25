@@ -38,6 +38,9 @@ type AgentConfig struct {
 	SkillsEnabled bool     `json:"skills_enabled"` // Whether skills are enabled (default: false)
 	SkillDirs     []string `json:"skill_dirs"`     // Directories to search for skills
 	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
+
+	// Runtime-only fields (not persisted)
+	VLMModelID string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
 }
 
 // SessionAgentConfig represents session-level agent configuration
@@ -140,6 +143,7 @@ type ToolResult struct {
 	Output  string                 `json:"output"`          // Human-readable output
 	Data    map[string]interface{} `json:"data,omitempty"`  // Structured data for programmatic use
 	Error   string                 `json:"error,omitempty"` // Error message if execution failed
+	Images  []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
 }
 
 // ToolCall represents a single tool invocation within an agent step
