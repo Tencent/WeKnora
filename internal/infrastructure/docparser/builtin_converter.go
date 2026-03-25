@@ -77,14 +77,16 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 		fileName = "image.png"
 	}
 	refPath := "images/" + fileName
+	// Encode spaces so the markdown URL is valid and matches the regex in ResolveAndStore.
+	safeRef := strings.ReplaceAll(refPath, " ", "%20")
 	mime := http.DetectContentType(data)
 
 	return &types.ReadResult{
-		MarkdownContent: fmt.Sprintf("![%s](%s)", fileName, refPath),
+		MarkdownContent: fmt.Sprintf("![%s](%s)", fileName, safeRef),
 		ImageRefs: []types.ImageRef{
 			{
 				Filename:    fileName,
-				OriginalRef: refPath,
+				OriginalRef: safeRef,
 				MimeType:    mime,
 				ImageData:   data,
 			},

@@ -104,7 +104,9 @@ func (r *ImageResolver) ResolveAndStore(
 	// Process each image reference found in the markdown.
 	// The URL group supports one level of balanced parentheses so that URLs
 	// like https://example.com/item_(abc)/123 are captured in full.
-	imgPattern := regexp.MustCompile(`!\[(.*?)\]\(([^()\s]*(?:\([^)]*\)[^()\s]*)*)\)`)
+	// Allow spaces in URLs (exclude only parens and newlines) to handle
+	// filenames with spaces, e.g. "images/第 1 页.jpg".
+	imgPattern := regexp.MustCompile(`!\[(.*?)\]\(([^()\n]*(?:\([^)]*\)[^()\n]*)*)\)`)
 	matches := imgPattern.FindAllStringSubmatchIndex(markdown, -1)
 
 	// Process in reverse order to preserve positions when replacing

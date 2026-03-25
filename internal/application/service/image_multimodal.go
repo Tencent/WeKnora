@@ -43,6 +43,7 @@ type ImageMultimodalService struct {
 	tenantRepo     interfaces.TenantRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ollamaService  *ollama.OllamaService
+	taskEnqueuer   interfaces.TaskEnqueuer
 }
 
 func NewImageMultimodalService(
@@ -53,6 +54,7 @@ func NewImageMultimodalService(
 	tenantRepo interfaces.TenantRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ollamaService *ollama.OllamaService,
+	taskEnqueuer interfaces.TaskEnqueuer,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:   chunkService,
@@ -62,6 +64,7 @@ func NewImageMultimodalService(
 		tenantRepo:     tenantRepo,
 		retrieveEngine: retrieveEngine,
 		ollamaService:  ollamaService,
+		taskEnqueuer:   taskEnqueuer,
 	}
 }
 
@@ -211,6 +214,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// For standalone image files, use caption as the knowledge description
 	// and mark the knowledge as completed (it was kept in "processing" until now).
 	s.finalizeImageKnowledge(ctx, payload, imageInfo.Caption)
+
+	// Enqueue question generation for the caption/OCR content if KB has it enabled.
+	// During initial processChunks, question generation is skipped for image-type
+	// knowledge because the text chunk is just a markdown reference. Now that we
+	// have real textual content (caption/OCR), we can generate questions.
+	s.enqueueQuestionGenerationIfEnabled(ctx, payload)
 
 	return nil
 }
@@ -398,6 +407,50 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 		return nil
 	}
 	return fileSvc
+}
+
+// enqueueQuestionGenerationIfEnabled checks if the knowledge base has question
+// generation enabled and, if so, enqueues a task for the image knowledge.
+func (s *ImageMultimodalService) enqueueQuestionGenerationIfEnabled(ctx context.Context, payload types.ImageMultimodalPayload) {
+	if s.taskEnqueuer == nil {
+		return
+	}
+
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if err != nil || kb == nil {
+		return
+	}
+	if kb.QuestionGenerationConfig == nil || !kb.QuestionGenerationConfig.Enabled {
+		return
+	}
+
+	questionCount := kb.QuestionGenerationConfig.QuestionCount
+	if questionCount <= 0 {
+		questionCount = 3
+	}
+	if questionCount > 10 {
+		questionCount = 10
+	}
+
+	taskPayload := types.QuestionGenerationPayload{
+		TenantID:        payload.TenantID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		KnowledgeID:     payload.KnowledgeID,
+		QuestionCount:   questionCount,
+	}
+	payloadBytes, err := json.Marshal(taskPayload)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to marshal question generation payload: %v", err)
+		return
+	}
+
+	task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
+	if _, err := s.taskEnqueuer.Enqueue(task); err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to enqueue question generation for %s: %v", payload.KnowledgeID, err)
+	} else {
+		logger.Infof(ctx, "[ImageMultimodal] Enqueued question generation task for image knowledge %s (count=%d)",
+			payload.KnowledgeID, questionCount)
+	}
 }
 
 // downloadImageFromURL downloads image bytes from an HTTP(S) URL.
