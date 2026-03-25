@@ -1357,6 +1357,8 @@ export default {
       dimensionDetected: 'Определение выполнено, размерность: {value}',
       dimensionFailed: 'Не удалось определить, введите размерность вручную',
       remoteDimensionDetected: 'Обнаружена размерность: {value}',
+      supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
+      supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',
@@ -1954,6 +1956,9 @@ export default {
     noAnswerContent: '(Нет содержимого ответа)',
     noMatchFound: 'Совпадений не найдено',
     deleteSessionFailed: 'Ошибка удаления, попробуйте позже!',
+    imageTooMany: 'Максимум 5 изображений',
+    imageTypeSizeError: 'Поддерживаются только JPG/PNG/GIF/WEBP до 10 МБ',
+    imageUploadTooltip: 'Загрузить изображение (вставка/перетаскивание)',
     thinkingAlt: 'Обдумывание...',
     deepThoughtCompleted: 'Глубокий анализ завершён',
     deepThoughtAlt: 'Глубокий анализ'
@@ -2587,6 +2592,7 @@ export default {
     cannotRemoveAgentKb: 'Cannot remove knowledge base configured by agent',
     agentConfiguredKb: 'Configured by agent, cannot be removed',
     modelLockedByAgent: 'Model selection is locked by the current agent',
+    imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings'
   },
   preview: {
@@ -2715,7 +2721,15 @@ export default {
       getDocumentContent: 'Получение содержимого документа',
       todoWrite: 'Управление планами',
       knowledgeGraphExtract: 'Извлечение графа знаний',
-      thinking: 'Размышление'
+      thinking: 'Размышление',
+      imageAnalysis: 'Анализ изображения',
+      queryKnowledgeGraph: 'Запрос графа знаний',
+      finalAnswer: 'Генерация ответа',
+      readSkill: 'Чтение навыка',
+      executeSkillScript: 'Выполнение скрипта навыка',
+      dataAnalysis: 'Анализ данных',
+      dataSchema: 'Структура данных',
+      databaseQuery: 'Запрос к базе данных'
     },
     summary: {
       searchKb: 'Поиск по базе знаний <strong>{count}</strong> раз(а)',
@@ -2763,6 +2777,9 @@ export default {
       thinkingFailed: 'Ошибка размышления',
       updateTodos: 'Обновление списка задач',
       updateTodosFailed: 'Ошибка обновления списка задач',
+      imageAnalyzing: 'Анализ изображения...',
+      imageAnalysisDone: 'Анализ изображения завершён',
+      imageAnalysisFailed: 'Ошибка анализа изображения',
       called: 'Вызван {name}',
       calledFailed: 'Ошибка вызова {name}'
     },
@@ -2884,6 +2901,23 @@ export default {
       selectLabel: 'Выбор MCP-сервисов',
       selectDesc: 'Выберите MCP-сервисы для включения',
       selectPlaceholder: 'Выберите MCP-сервисы'
+    },
+    imageUpload: {
+      navLabel: 'Мультимодальность',
+      sectionTitle: 'Настройка мультимодальности',
+      sectionDesc: 'Настройте загрузку изображений и визуально-языковую модель для мультимодальных диалогов',
+      label: 'Загрузка изображений',
+      desc: 'Разрешить пользователям загружать изображения для мультимодальных вопросов и ответов',
+      vlmModel: 'Модель VLM',
+      vlmModelDesc: 'Визуально-языковая модель для анализа изображений',
+      vlmModelPlaceholder: 'Выберите модель VLM',
+      vlmModelRequired: 'Модель VLM обязательна при включённой загрузке изображений',
+      storageProvider: 'Хранилище изображений',
+      storageProviderDesc: 'Хранилище для загруженных изображений. Оставьте пустым для системного значения по умолчанию',
+      storageProviderPlaceholder: 'Выберите хранилище',
+      storageDefault: 'Системное значение',
+      notConfigured: 'Не настроено',
+      goStorageSettings: 'Перейти к настройкам хранилища'
     },
     faq: {
       title: 'Стратегия приоритета FAQ',

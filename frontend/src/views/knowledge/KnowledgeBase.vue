@@ -1048,7 +1048,7 @@ const handleDocumentUpload = async (event: Event) => {
       failCount++;
       let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
       if (error?.code === 'duplicate_file') {
-        errorMessage = "文件已存在";
+        errorMessage = t('knowledgeBase.fileExists');
       }
       if (totalCount === 1) {
         MessagePlugin.error(errorMessage);

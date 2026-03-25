@@ -3048,6 +3048,13 @@ export default {
       knowledgeGraphExtract: "知识图谱抽取",
       thinking: "思考",
       imageAnalysis: "查看图片内容",
+      queryKnowledgeGraph: "知识图谱查询",
+      finalAnswer: "生成回答",
+      readSkill: "读取技能",
+      executeSkillScript: "执行技能脚本",
+      dataAnalysis: "数据分析",
+      dataSchema: "数据结构",
+      databaseQuery: "数据库查询",
     },
     summary: {
       searchKb: "检索知识库 <strong>{count}</strong> 次",

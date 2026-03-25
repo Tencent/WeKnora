@@ -348,6 +348,7 @@ import { getChunkByIdOnly } from '@/api/knowledge-base';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
 import { useI18n } from 'vue-i18n';
+import i18n from '@/i18n';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { hydrateProtectedFileImages } from '@/utils/security';
 import {
@@ -418,6 +419,13 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
   image_analysis: 'agentStream.tools.imageAnalysis',
+  query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
+  final_answer: 'agentStream.tools.finalAnswer',
+  read_skill: 'agentStream.tools.readSkill',
+  execute_skill_script: 'agentStream.tools.executeSkillScript',
+  data_analysis: 'agentStream.tools.dataAnalysis',
+  data_schema: 'agentStream.tools.dataSchema',
+  database_query: 'agentStream.tools.databaseQuery',
 };
 
 const getLocalizedToolName = (toolName?: string | null): string => {
@@ -456,34 +464,14 @@ const formatMCPToolName = (rawName: string): string => {
   return humanized;
 };
 
-const TOOL_NAME_DISPLAY: Record<string, string> = {
-  knowledge_search: '语义搜索',
-  search_knowledge: '语义搜索',
-  grep_chunks: '文本搜索',
-  list_knowledge_chunks: '阅读文档内容',
-  get_document_info: '获取文档信息',
-  query_knowledge_graph: '知识图谱查询',
-  web_search: '网络搜索',
-  web_fetch: '网页抓取',
-  todo_write: '制定计划',
-  final_answer: '生成回答',
-  thinking: '思考',
-  read_skill: '读取技能',
-  execute_skill_script: '执行技能脚本',
-  data_analysis: '数据分析',
-  data_schema: '数据结构',
-  database_query: '数据库查询',
-  image_analysis: '查看图片内容',
-};
-
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const ID_LABEL_RE = /\b(knowledge_base_id|knowledge_id|chunk_id|knowledge_base_ids)\s*[:=]\s*/gi;
 
 const sanitizeForDisplay = (text: string): string => {
   if (!text) return text;
   let result = text;
-  for (const [name, display] of Object.entries(TOOL_NAME_DISPLAY)) {
-    result = result.replaceAll(name, display);
+  for (const [name, i18nKey] of Object.entries(TOOL_NAME_KEYS)) {
+    result = result.replaceAll(name, i18n.global.t(i18nKey));
   }
   // Format any remaining mcp_ tool names inline
   result = result.replace(/\bmcp_([a-z0-9_]+)/g, (_match, rest) => {

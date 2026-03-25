@@ -3050,6 +3050,13 @@ export default {
       knowledgeGraphExtract: 'Knowledge Graph Extraction',
       thinking: 'Thinking',
       imageAnalysis: 'Image Analysis',
+      queryKnowledgeGraph: 'Knowledge Graph Query',
+      finalAnswer: 'Generate Answer',
+      readSkill: 'Read Skill',
+      executeSkillScript: 'Execute Skill Script',
+      dataAnalysis: 'Data Analysis',
+      dataSchema: 'Data Schema',
+      databaseQuery: 'Database Query',
     },
     summary: {
       searchKb: 'Searched knowledge base <strong>{count}</strong> time(s)',
