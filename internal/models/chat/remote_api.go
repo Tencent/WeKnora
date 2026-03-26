@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -20,9 +19,10 @@ import (
 
 // rawHTTPClient is a shared HTTP client for raw HTTP LLM calls with connection-level timeouts.
 // No overall Timeout is set so streaming calls are controlled by context cancellation only.
+// Uses SSRFSafeDialContext to prevent DNS rebinding attacks at the connection layer.
 var rawHTTPClient = &http.Client{
 	Transport: &http.Transport{
-		DialContext:         (&net.Dialer{Timeout: 15 * time.Second}).DialContext,
+		DialContext:         secutils.SSRFSafeDialContext,
 		TLSHandshakeTimeout: 10 * time.Second,
 		IdleConnTimeout:     90 * time.Second,
 		MaxIdleConnsPerHost: 5,
@@ -50,6 +50,12 @@ type RemoteAPIChat struct {
 
 // NewRemoteAPIChat 创建远程 API 聊天实例
 func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
+	if chatConfig.BaseURL != "" {
+		if err := secutils.ValidateURLForSSRF(chatConfig.BaseURL); err != nil {
+			return nil, fmt.Errorf("baseURL SSRF check failed: %w", err)
+		}
+	}
+
 	apiKey := chatConfig.APIKey
 	config := openai.DefaultConfig(apiKey)
 	if baseURL := chatConfig.BaseURL; baseURL != "" {
@@ -295,6 +301,9 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
 	}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -437,6 +446,9 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
+	}
+	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
+		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {

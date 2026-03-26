@@ -746,7 +746,7 @@ func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
 		DisableKeepAlives:  config.DisableKeepAlives,
 		DisableCompression: config.DisableCompression,
 		// Dial with SSRF protection - validates resolved IPs before connecting
-		DialContext: ssrfSafeDialContext,
+		DialContext: SSRFSafeDialContext,
 	}
 
 	return &http.Client{
@@ -769,14 +769,24 @@ func NewSSRFSafeHTTPClient(config SSRFSafeHTTPClientConfig) *http.Client {
 	}
 }
 
-// ssrfSafeDialContext is a custom dial function that validates the resolved IP addresses
+// SSRFSafeDialContext is a custom dial function that validates the resolved IP addresses
 // before establishing a connection. This provides an additional layer of SSRF protection
 // against DNS rebinding attacks during the connection phase.
-func ssrfSafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	// Parse host and port
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid address %s: %w", addr, err)
+	}
+
+	// Whitelisted hosts bypass all dial-time SSRF checks, consistent with
+	// ValidateURLForSSRF which skips IsSSRFSafeURL for whitelisted hosts.
+	if IsSSRFWhitelisted(host) {
+		dialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+		return dialer.DialContext(ctx, network, addr)
 	}
 
 	// Check if the host is a restricted hostname
