@@ -25,7 +25,7 @@ func (p *MiniMaxProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderMiniMax,
 		DisplayName: "MiniMax",
-		Description: "MiniMax-M2.1, MiniMax-M2.1-lightning, etc.",
+		Description: "MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: MiniMaxCNBaseURL,
 		},

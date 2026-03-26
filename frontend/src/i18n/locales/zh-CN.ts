@@ -1581,7 +1581,7 @@ export default {
         },
         minimax: {
           label: "MiniMax",
-          description: "MiniMax-M2.1, MiniMax-M2.1-lightning 等",
+          description: "MiniMax-M2.7, MiniMax-M2.7-highspeed, MiniMax-M2.5 等",
         },
         mimo: {
           label: "小米 MiMo",
@@ -1625,7 +1625,7 @@ export default {
         },
         novita: {
             label: "Novita AI",
-            description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.5, qwen/qwen3-embedding-0.6b 等",
+            description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b 等",
         },
       },
     },

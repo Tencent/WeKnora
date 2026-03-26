@@ -23,7 +23,7 @@ func (p *NovitaProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderNovita,
 		DisplayName: "Novita AI",
-		Description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.5, qwen/qwen3-embedding-0.6b, etc.",
+		Description: "moonshotai/kimi-k2.5, zai-org/glm-5, minimax/minimax-m2.7, qwen/qwen3-embedding-0.6b, etc.",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: NovitaOpenAIBaseURL,
 			types.ModelTypeEmbedding:   NovitaOpenAIBaseURL,
