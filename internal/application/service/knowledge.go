@@ -2082,7 +2082,11 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		if len(textChunks) > 0 {
 			summary = textChunks[0].Content
 			if len(summary) > 500 {
-				summary = summary[:500]
+				// Use rune-based truncation to avoid cutting UTF-8 multi-byte characters
+				runes := []rune(summary)
+				if len(runes) > 500 {
+					summary = string(runes[:500])
+				}
 			}
 		}
 	}
