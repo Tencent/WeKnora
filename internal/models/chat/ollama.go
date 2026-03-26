@@ -156,14 +156,17 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		return nil, fmt.Errorf("聊天请求失败: %w", err)
 	}
 
-	// 构建响应
+	totalTokens := promptTokens + completionTokens
+	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+		c.modelName, promptTokens, completionTokens, totalTokens)
+
 	return &types.ChatResponse{
 		Content:   responseContent,
 		ToolCalls: toolCalls,
 		Usage: types.TokenUsage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
+			TotalTokens:      totalTokens,
 		},
 	}, nil
 }
@@ -275,6 +278,8 @@ func (c *OllamaChat) ChatStream(
 						CompletionTokens: resp.EvalCount,
 						TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
 					}
+					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+						c.modelName, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
 				}
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,

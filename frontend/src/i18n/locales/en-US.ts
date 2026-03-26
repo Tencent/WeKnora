@@ -755,7 +755,7 @@ export default {
     rerankTopKLabel: 'Rerank Top K',
     rerankTopKDescription: 'Maximum number of results kept after reranking',
     rerankThresholdLabel: 'Rerank Threshold',
-    rerankThresholdDescription: 'Minimum score threshold for reranking (0-1)',
+    rerankThresholdDescription: 'Minimum score threshold for reranking (-10 to 10)',
     rerankModelLabel: 'Rerank Model',
     rerankModelDescription: 'Select the model for reranking search results',
     rerankModelRequired: 'Please select a Rerank model. Search requires this model to rerank results.',

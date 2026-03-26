@@ -124,9 +124,13 @@ func (cm *contextManager) rebuildFromDB(ctx context.Context, sessionID string) (
 		}
 		switch msg.Role {
 		case "user":
-			p.query = msg.Content
+			if msg.RenderedContent != "" {
+				p.query = msg.RenderedContent
+			} else {
+				p.query = msg.Content
+			}
 			p.createdAt = msg.CreatedAt
-			if desc := extractImageCaptions(msg.Images); desc != "" {
+			if desc := extractImageCaptions(msg.Images); desc != "" && msg.RenderedContent == "" {
 				p.query += "\n\n[用户上传图片内容]\n" + desc
 			}
 		case "assistant":

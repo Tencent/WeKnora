@@ -93,6 +93,7 @@ type PipelineState struct {
 	EntityKnowledge      map[string]string `json:"-"`
 	GraphResult          *GraphData        `json:"-"`
 	UserContent          string            `json:"-"`
+	RenderedContexts     string            `json:"-"`
 	ChatResponse         *ChatResponse     `json:"-"`
 	ImageDescription     string            `json:"-"`
 	SystemPromptOverride string            `json:"-"`
@@ -189,6 +190,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			Intent:               c.Intent,
 			ImageDescription:     c.ImageDescription,
 			SystemPromptOverride: c.SystemPromptOverride,
+			RenderedContexts:     c.RenderedContexts,
 		},
 	}
 }

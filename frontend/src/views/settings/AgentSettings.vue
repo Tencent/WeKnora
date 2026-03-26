@@ -433,13 +433,13 @@
           <div class="setting-control slider-with-value">
             <t-slider
               v-model="localRerankThreshold"
-              :min="0"
-              :max="1"
-              :step="0.05"
+              :min="-10"
+              :max="10"
+              :step="0.01"
               style="width: 240px;"
               @change="handleRerankThresholdChange"
             />
-            <span class="value-display">{{ localRerankThreshold.toFixed(2) }}</span>
+            <span class="value-display">{{ localRerankThreshold.toFixed(1) }}</span>
           </div>
         </div>
 

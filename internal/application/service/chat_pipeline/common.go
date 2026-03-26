@@ -65,7 +65,11 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	if chatManage.SystemPromptOverride != "" {
 		base = chatManage.SystemPromptOverride
 	}
-	systemPrompt := renderSystemPromptPlaceholders(base, chatManage.Language)
+	systemPrompt := types.RenderPromptPlaceholders(base, types.PlaceholderValues{
+		"query":    chatManage.Query,
+		"language": chatManage.Language,
+		"contexts": chatManage.RenderedContexts,
+	})
 
 	chatMessages := []chat.Message{
 		{Role: "system", Content: systemPrompt},
@@ -110,9 +114,13 @@ func loadAndProcessHistory(
 			h = &types.History{}
 		}
 		if message.Role == "user" {
-			h.Query = message.Content
+			if message.RenderedContent != "" {
+				h.Query = message.RenderedContent
+			} else {
+				h.Query = message.Content
+			}
 			h.CreateAt = message.CreatedAt
-			if desc := extractImageCaptions(message.Images); desc != "" {
+			if desc := extractImageCaptions(message.Images); desc != "" && message.RenderedContent == "" {
 				h.Query += "\n\n[用户上传图片内容]\n" + desc
 			}
 		} else {
@@ -152,18 +160,6 @@ func extractImageCaptions(images types.MessageImages) string {
 		}
 	}
 	return strings.Join(parts, "\n")
-}
-
-// renderSystemPromptPlaceholders replaces placeholders in system prompt
-// Supported placeholders:
-//   - {{current_time}} -> current time in RFC3339 format
-//   - {{language}} -> user language name (replaced if present; empty string if not set in ChatManage)
-func renderSystemPromptPlaceholders(prompt string, language ...string) string {
-	vals := types.PlaceholderValues{}
-	if len(language) > 0 {
-		vals["language"] = language[0]
-	}
-	return types.RenderPromptPlaceholders(prompt, vals)
 }
 
 // ---------------------------------------------------------------------------

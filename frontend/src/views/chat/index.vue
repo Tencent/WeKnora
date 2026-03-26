@@ -41,10 +41,11 @@
             </div>
         </div>
         <div style="min-height: 115px; margin: 16px auto 4px;width: 100%;max-width: 800px;">
-            <InputField 
-                @send-msg="(query, modelId, mentionedItems, imageFiles) => sendMsg(query, modelId, mentionedItems, imageFiles)" 
+            <InputField
+                ref="inputFieldRef"
+                @send-msg="(query, modelId, mentionedItems, imageFiles) => sendMsg(query, modelId, mentionedItems, imageFiles)"
                 @stop-generation="handleStopGeneration"
-                :isReplying="isReplying" 
+                :isReplying="isReplying"
                 :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId"
             ></InputField>
@@ -87,6 +88,7 @@ const route = useRoute();
 const router = useRouter();
 const session_id = ref(route.params.chatid);
 const sessionData = ref(null);
+const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
@@ -139,8 +141,11 @@ const fetchSuggestedQuestions = async () => {
 };
 
 const handleSuggestedQuestionClick = (question) => {
-    // 触发发送消息
-    sendMsg(question);
+    if (inputFieldRef.value?.triggerSend) {
+        inputFieldRef.value.triggerSend(question);
+    } else {
+        sendMsg(question);
+    }
 };
 
 // 防抖包装，切换知识库/文件时300ms内不重复请求

@@ -20,7 +20,7 @@ type RetrievalConfig struct {
 	KeywordThreshold float64 `json:"keyword_threshold"`
 	// RerankTopK is the maximum number of results after reranking (default: 10)
 	RerankTopK int `json:"rerank_top_k"`
-	// RerankThreshold is the minimum rerank score (0-1, default: 0.2)
+	// RerankThreshold is the minimum rerank score (-10 to 10, default: 0.2)
 	RerankThreshold float64 `json:"rerank_threshold"`
 	// RerankModelID is the ID of the rerank model to use (required for search)
 	RerankModelID string `json:"rerank_model_id"`
@@ -60,7 +60,7 @@ func (c *RetrievalConfig) GetEffectiveRerankTopK() int {
 
 // GetEffectiveRerankThreshold returns RerankThreshold with a fallback default.
 func (c *RetrievalConfig) GetEffectiveRerankThreshold() float64 {
-	if c == nil || c.RerankThreshold <= 0 {
+	if c == nil {
 		return 0.2
 	}
 	return c.RerankThreshold

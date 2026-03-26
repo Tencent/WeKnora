@@ -969,10 +969,13 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 		Select("id, knowledge_base_id, chunk_type, metadata, updated_at").
 		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ?",
 			tenantID, types.ChunkTypeText, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true)
-	if len(knowledgeIDs) > 0 {
+
+	if len(kbIDs) > 0 && len(knowledgeIDs) > 0 {
+		baseQuery = baseQuery.Where("knowledge_base_id IN ? OR knowledge_id IN ?", kbIDs, knowledgeIDs)
+	} else if len(knowledgeIDs) > 0 {
 		// 指定了具体知识文档，直接按 knowledge_id 过滤（忽略 kbIDs）
 		baseQuery = baseQuery.Where("knowledge_id IN ?", knowledgeIDs)
-	} else {
+	} else if len(kbIDs) > 0 {
 		baseQuery = baseQuery.Where("knowledge_base_id IN ?", kbIDs)
 	}
 

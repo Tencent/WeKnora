@@ -130,6 +130,9 @@ type SearchResult struct {
 	// For FAQ: this is the matched question text (standard or similar question)
 	MatchedContent string `json:"matched_content,omitempty"`
 
+	// KnowledgeDescription is the description of the knowledge document
+	KnowledgeDescription string `json:"knowledge_description,omitempty"`
+
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }

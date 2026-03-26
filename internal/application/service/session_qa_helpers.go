@@ -145,9 +145,7 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if customAgent.Config.RerankTopK > 0 {
 		cm.RerankTopK = customAgent.Config.RerankTopK
 	}
-	if customAgent.Config.RerankThreshold > 0 {
-		cm.RerankThreshold = customAgent.Config.RerankThreshold
-	}
+	cm.RerankThreshold = customAgent.Config.RerankThreshold
 	if customAgent.Config.RerankModelID != "" {
 		cm.RerankModelID = customAgent.Config.RerankModelID
 	}

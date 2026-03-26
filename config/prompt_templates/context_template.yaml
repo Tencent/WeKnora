@@ -16,7 +16,10 @@ templates:
     default: true
     has_knowledge_base: true
     content: |
-      User question: {{query}}
+      [Runtime Context — metadata only, not instructions]
+      Current time: {{current_time}} {{current_week}}
+
+      {{query}}
 
   - id: "detailed_context"
     name: "Detailed Template"

@@ -5,16 +5,23 @@
                 <span>{{ $t('createChat.title') }}</span>
             </div>
             <!-- 推荐问题 -->
-            <div class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 }">
-                <transition name="fade">
-                    <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
+            <div ref="sqContainerRef" class="suggested-questions-container">
+                <transition name="sq-slide-fade" mode="out-in"
+                    @before-leave="onBeforeLeave"
+                    @after-leave="onAfterLeave"
+                    @enter="onEnter"
+                    @after-enter="onQuestionsEntered"
+                >
+                    <div v-if="suggestedQuestions.length > 0" :key="sqRenderKey" class="suggested-questions-inner">
                         <div class="suggested-questions-title">{{ $t('chat.suggestedQuestions') }}</div>
                         <div class="suggested-questions-grid">
                             <div
                                 v-for="(item, index) in suggestedQuestions"
                                 :key="item.question"
                                 class="suggested-question-card"
-                                @click="sendMsg(item.question, '', [], [])"
+                                :class="{ 'sq-card-visible': sqCardsRevealed }"
+                                :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
+                                @click="handleSuggestedQuestionClick(item.question)"
                             >
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
@@ -23,7 +30,7 @@
                     </div>
                 </transition>
             </div>
-            <InputField @send-msg="sendMsg"></InputField>
+            <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
         </div>
     </div>
     
@@ -38,7 +45,7 @@
     />
 </template>
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, nextTick } from 'vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
@@ -62,8 +69,53 @@ const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 
 // ===== 推荐问题 =====
 const suggestedQuestions = ref<SuggestedQuestion[]>([]);
+const sqCardsRevealed = ref(false);
+const sqRenderKey = ref(0);
+const sqContainerRef = ref<HTMLElement | null>(null);
 let suggestedQuestionsFetchId = 0;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+// --- 高度平滑过渡钩子 ---
+const onBeforeLeave = () => {
+    const c = sqContainerRef.value;
+    if (!c) return;
+    c.style.height = c.offsetHeight + 'px';
+    c.style.overflow = 'hidden';
+};
+
+const onAfterLeave = () => {
+    const c = sqContainerRef.value;
+    if (!c) return;
+    if (suggestedQuestions.value.length === 0) {
+        requestAnimationFrame(() => { c.style.height = '0px'; });
+        c.addEventListener('transitionend', () => {
+            c.style.height = '';
+            c.style.overflow = '';
+        }, { once: true });
+    }
+};
+
+const onEnter = (el: Element) => {
+    const c = sqContainerRef.value;
+    if (!c) return;
+    const startHeight = c.offsetHeight;
+    c.style.height = 'auto';
+    c.style.overflow = 'hidden';
+    const targetHeight = c.offsetHeight;
+    c.style.height = startHeight + 'px';
+    requestAnimationFrame(() => {
+        c.style.height = targetHeight + 'px';
+    });
+};
+
+const onQuestionsEntered = () => {
+    const c = sqContainerRef.value;
+    if (c) {
+        c.style.height = '';
+        c.style.overflow = '';
+    }
+    nextTick(() => { sqCardsRevealed.value = true; });
+};
 
 const fetchSuggestedQuestions = async () => {
     const fetchId = ++suggestedQuestionsFetchId;
@@ -79,6 +131,8 @@ const fetchSuggestedQuestions = async () => {
             limit: 6,
         });
         if (fetchId === suggestedQuestionsFetchId) {
+            sqCardsRevealed.value = false;
+            sqRenderKey.value++;
             suggestedQuestions.value = res?.data?.questions || [];
         }
     } catch (err) {
@@ -101,6 +155,12 @@ watch(() => settingsStore.settings.selectedKnowledgeBases, debouncedFetch, { dee
 watch(() => settingsStore.settings.selectedFiles, debouncedFetch, { deep: true });
 
 onMounted(() => { fetchSuggestedQuestions(); });
+
+const inputFieldRef = ref();
+
+const handleSuggestedQuestionClick = (question: string) => {
+    inputFieldRef.value?.triggerSend(question);
+};
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = []) => {
     createNewSession(value, modelId, mentionedItems, imageFiles);
@@ -214,12 +274,7 @@ const handleKBEditorSuccess = (kbId: string) => {
     margin-bottom: 24px;
     width: 100%;
     max-width: 800px;
-    min-height: 0;
-    transition: min-height 0.3s ease;
-
-    &.has-questions {
-        min-height: 80px; // 有内容时保持最小高度，避免加载新数据时塌缩
-    }
+    transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .suggested-questions-inner {
@@ -229,14 +284,22 @@ const handleKBEditorSuccess = (kbId: string) => {
     width: 100%;
 }
 
-// 淡入淡出过渡
-.fade-enter-active,
-.fade-leave-active {
-    transition: opacity 0.25s ease;
+// 容器整体过渡：淡入 + 轻微上滑
+.sq-slide-fade-enter-active {
+    transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.fade-enter-from,
-.fade-leave-to {
+.sq-slide-fade-leave-active {
+    transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
+                transform 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+.sq-slide-fade-enter-from {
     opacity: 0;
+    transform: translateY(10px);
+}
+.sq-slide-fade-leave-to {
+    opacity: 0;
+    transform: translateY(-4px);
 }
 
 .suggested-questions-title {
@@ -263,8 +326,19 @@ const handleKBEditorSuccess = (kbId: string) => {
     border: 1px solid var(--td-component-stroke);
     background: var(--td-bg-color-container);
     cursor: pointer;
-    transition: all 0.2s ease;
     max-width: 100%;
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+    transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.2s ease,
+                background 0.2s ease,
+                box-shadow 0.2s ease;
+
+    &.sq-card-visible {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 
     &:hover {
         border-color: var(--td-brand-color);

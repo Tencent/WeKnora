@@ -141,8 +141,9 @@ Return your response in the specified JSON format.`, chatManage.Query, knowledge
 		Score:             1.0,
 		MatchType:         types.MatchTypeDataAnalysis,
 		KnowledgeID:       knowledge.ID,
-		KnowledgeTitle:    knowledge.Title,
-		KnowledgeFilename: knowledge.FileName,
+		KnowledgeTitle:       knowledge.Title,
+		KnowledgeFilename:    knowledge.FileName,
+		KnowledgeDescription: knowledge.Description,
 	}
 
 	chatManage.MergeResult = append(chatManage.MergeResult, analysisResult)

@@ -462,7 +462,7 @@ func (s *customAgentService) GetSuggestedQuestions(
 
 	// 2. Determine knowledge base scope
 	effectiveKBIDs := kbIDs
-	if len(effectiveKBIDs) == 0 {
+	if len(effectiveKBIDs) == 0 && len(knowledgeIDs) == 0 {
 		// Use agent's KB configuration
 		switch agent.Config.KBSelectionMode {
 		case "all":
@@ -506,7 +506,7 @@ func (s *customAgentService) GetSuggestedQuestions(
 	// 3. Collect all candidate chunks from both FAQ and Document KBs,
 	//    then sort by updated_at uniformly (not FAQ-first).
 	type candidate struct {
-		question types.SuggestedQuestion
+		question  types.SuggestedQuestion
 		updatedAt time.Time
 	}
 	var candidates []candidate

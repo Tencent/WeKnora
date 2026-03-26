@@ -238,9 +238,6 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.RerankTopK == 0 {
 		a.Config.RerankTopK = 5
 	}
-	if a.Config.RerankThreshold == 0 {
-		a.Config.RerankThreshold = 0.5
-	}
 	// Advanced settings defaults
 	if a.Config.FallbackStrategy == "" {
 		a.Config.FallbackStrategy = "model"

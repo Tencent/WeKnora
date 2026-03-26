@@ -124,9 +124,10 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 						ChunkType:         getString(refMap, "chunk_type"),
 						ParentChunkID:     getString(refMap, "parent_chunk_id"),
 						ImageInfo:         getString(refMap, "image_info"),
-						KnowledgeFilename: getString(refMap, "knowledge_filename"),
-						KnowledgeSource:   getString(refMap, "knowledge_source"),
-						KnowledgeBaseID:   getString(refMap, "knowledge_base_id"),
+						KnowledgeFilename:    getString(refMap, "knowledge_filename"),
+						KnowledgeSource:      getString(refMap, "knowledge_source"),
+						KnowledgeDescription: getString(refMap, "knowledge_description"),
+						KnowledgeBaseID:      getString(refMap, "knowledge_base_id"),
 					}
 					searchResults = append(searchResults, sr)
 				}

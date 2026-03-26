@@ -607,7 +607,7 @@ export default {
     rerankTopKLabel: "Rerank Top K",
     rerankTopKDescription: "재정렬 후 유지되는 최대 결과 수",
     rerankThresholdLabel: "Rerank 임계값",
-    rerankThresholdDescription: "재정렬의 최소 점수 임계값 (0-1)",
+    rerankThresholdDescription: "재정렬의 최소 점수 임계값 (-10 ~ 10)",
     rerankModelLabel: "Rerank 모델",
     rerankModelDescription: "검색 결과 재정렬에 사용할 모델을 선택하세요",
     rerankModelRequired: "Rerank 모델을 선택하세요. 검색 기능에 이 모델이 필요합니다.",

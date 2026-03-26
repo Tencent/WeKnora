@@ -904,8 +904,8 @@ func validateConversationConfig(req *types.ConversationConfig) error {
 	if req.RerankTopK <= 0 {
 		return errors.NewBadRequestError("rerank_top_k must be greater than 0")
 	}
-	if req.RerankThreshold < 0 || req.RerankThreshold > 1 {
-		return errors.NewBadRequestError("rerank_threshold must be between 0 and 1")
+	if req.RerankThreshold < -10 || req.RerankThreshold > 10 {
+		return errors.NewBadRequestError("rerank_threshold must be between -10 and 10")
 	}
 	if req.Temperature < 0 || req.Temperature > 2 {
 		return errors.NewBadRequestError("temperature must be between 0 and 2")
@@ -1176,8 +1176,8 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("keyword_threshold must be between 0 and 1"))
 		return
 	}
-	if cfg.RerankThreshold < 0 || cfg.RerankThreshold > 1 {
-		c.Error(errors.NewBadRequestError("rerank_threshold must be between 0 and 1"))
+	if cfg.RerankThreshold < -10 || cfg.RerankThreshold > 10 {
+		c.Error(errors.NewBadRequestError("rerank_threshold must be between -10 and 10"))
 		return
 	}
 	if cfg.EmbeddingTopK < 0 || cfg.EmbeddingTopK > 200 {

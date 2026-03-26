@@ -246,6 +246,11 @@ func (s *messageService) UpdateMessageImages(ctx context.Context, sessionID, mes
 	return s.messageRepo.UpdateMessageImages(ctx, sessionID, messageID, images)
 }
 
+// UpdateMessageRenderedContent updates the rendered_content column for a user message.
+func (s *messageService) UpdateMessageRenderedContent(ctx context.Context, sessionID, messageID string, renderedContent string) error {
+	return s.messageRepo.UpdateMessageRenderedContent(ctx, sessionID, messageID, renderedContent)
+}
+
 // DeleteMessage removes a message from a session, also cleaning up its Knowledge entry in the chat history KB.
 func (s *messageService) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
 	logger.Info(ctx, "Start deleting message")

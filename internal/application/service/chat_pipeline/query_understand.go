@@ -109,7 +109,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		userMsg.Images = chatManage.Images
 	}
 
-	maxTokens := 60
+	maxTokens := 150
 	if useImages {
 		maxTokens = 500
 	}

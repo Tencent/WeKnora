@@ -1,7 +1,7 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { marked } from "marked";
-import type { Tokens } from 'marked';
+
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
@@ -172,13 +172,11 @@ const checkImage = (url) => {
     img.src = url;
   });
 };
-renderer.image = function ({href, title, text}: Tokens.Image) {
-  // 安全地处理图片链接
+renderer.image = function (href: string, title: string | null, text: string) {
   if (!isValidImageURL(href)) {
     return `<p>${t('error.invalidImageLink')}</p>`;
   }
-  
-  // 使用安全的图片创建函数
+
   const safeImage = createSafeImage(href, text || '', title || '');
   return `<figure>
                 ${safeImage}
@@ -187,7 +185,7 @@ renderer.image = function ({href, title, text}: Tokens.Image) {
 };
 
 // 自定义代码块渲染器，只显示语言标签
-renderer.code = function ({text, lang}: Tokens.Code) {
+renderer.code = function (text: string, lang?: string) {
   // Mermaid 图表处理
   if (lang === 'mermaid') {
     // 生成唯一ID

@@ -31,20 +31,32 @@ templates:
       - The rewritten result must also be a question
       - The rewritten question should be within 30 words
       - IMPORTANT: The rewritten question must be in {{language}}
+      - CRITICAL: The rewritten question will be used for knowledge base retrieval. It MUST preserve specific entities, keywords, and core search terms. Do NOT generate meta-instructions like "请在知识库中查找..." or "请搜索..." — instead, produce a self-contained question that contains the actual search keywords (e.g. person names, concepts, technical terms)
 
       ## Task 2: Intent Classification
       Classify the user's intent into exactly ONE of the following categories.
-      Output the category name as the `intent` field in the JSON.
+      Follow the decision priority below — check from top to bottom, use the FIRST match:
 
-      Intent types:
-      - `kb_search`: The question requires retrieving information from the knowledge base. This is the DEFAULT — use it when unsure.
-      - `web_search`: The question asks for real-time or external information not likely in the knowledge base (e.g. "今天天气怎么样", "最新的新闻").
-      - `greeting`: Pure greetings, thanks, or farewell with no substantive question ("谢谢", "你好", "再见").
-      - `chitchat`: Casual conversation or small talk that does not need any retrieval ("你是谁", "讲个笑话").
-      - `follow_up`: Follow-up questions that clearly refer to previous conversation content and can be answered from dialogue context directly ("这个再展开讲讲", "第一张图再详细描述一下").
-      - `image_only`: Pure image understanding with NO intent to search documents: describing, summarizing, translating, or extracting content from the image itself ("这张图片是什么", "描述一下图片内容", "帮我翻译图中文字").
-      - `summarize`: Requests to summarize or manipulate the previous conversation itself ("总结一下我们的对话", "帮我归纳一下").
-      - `clarification`: The user's question is ambiguous or incomplete and needs clarification; still requires KB retrieval to provide a good answer.
+      1. `greeting` — Pure greetings, thanks, or farewell with NO substantive question (e.g. "你好", "谢谢", "再见").
+      2. `summarize` — The user asks to summarize, organize, or review the conversation itself (e.g. "总结一下我们的对话").
+      3. `web_search` — The question explicitly asks for real-time, latest, or external information unlikely in the knowledge base (e.g. "今天天气怎么样", "最新的新闻").
+      4. `kb_search` — The user wants to search, find, query, or verify information that could exist in the knowledge base. **This applies even when images are attached** — if the user's intent involves searching or matching against stored documents, it is `kb_search`, NOT `image_only` (e.g. "知识库里有这个文件吗", "帮我查一下这个", "能找到相关的资料吗").
+      5. `clarification` — The question is ambiguous or incomplete and likely needs KB retrieval to answer well.
+      6. `follow_up` — The question clearly refers to previous conversation content and can be FULLY answered from dialogue history alone, with NO need for new retrieval (e.g. "上面第三点展开讲讲", "你刚才说的那个方案再详细说说").
+      7. `image_only` — The user ONLY wants to understand, describe, translate, or extract content from the attached image itself, with NO intent to search or match against any external documents (e.g. "这张图片是什么", "描述一下图片内容", "翻译图中文字").
+      8. `chitchat` — Casual conversation or small talk that needs no retrieval (e.g. "你是谁", "讲个笑话").
+
+      **Default: when unsure, always choose `kb_search`.**
+
+      Key distinction — `image_only` vs `kb_search` with images:
+      - User uploads image + "这是什么" → `image_only` (only wants image description)
+      - User uploads image + "知识库里有这个吗" → `kb_search` (wants to search KB)
+      - User uploads image + "帮我找相关文档" → `kb_search` (wants to search KB)
+      - User uploads image + "翻译图中文字" → `image_only` (only wants image content)
+
+      Key distinction — `follow_up` vs `kb_search`:
+      - "上面第二点再详细说说" with sufficient context in history → `follow_up`
+      - "这个话题还有什么相关的内容" → `kb_search` (needs new retrieval)
 
       ## Task 3: Image Analysis (only when images are attached)
       If the user's message includes images, you MUST provide a non-empty description in `image_description`. It must NOT be empty when images are present.
@@ -58,9 +70,36 @@ templates:
       JSON schema:
       {"rewrite_query":"string","intent":"string","image_description":"string"}
 
+      ## Examples
+      Input: "你好"
+      Output: {"rewrite_query":"你好","intent":"greeting","image_description":""}
+
+      Input: "什么是RAG架构" (no history)
+      Output: {"rewrite_query":"什么是RAG架构","intent":"kb_search","image_description":""}
+
+      Input: "它和传统搜索有什么区别" (history mentions RAG)
+      Output: {"rewrite_query":"RAG架构和传统搜索有什么区别","intent":"kb_search","image_description":""}
+
+      Input: "再帮我查查他的信息" (history discusses 张三)
+      Output: {"rewrite_query":"张三的详细信息是什么","intent":"kb_search","image_description":""}
+      WRONG output: {"rewrite_query":"请重新在知识库中查找关于张三的更多信息","intent":"kb_search","image_description":""}
+      (WRONG: contains meta-instruction "在知识库中查找" instead of actual search keywords)
+
+      Input: "上面第二点再展开讲讲" (history has detailed answer with numbered points)
+      Output: {"rewrite_query":"请展开讲讲上面回答中的第二点","intent":"follow_up","image_description":""}
+
+      Input: [image attached] "知识库有没有类似的文件" (image shows a project architecture diagram about microservices)
+      Output: {"rewrite_query":"有没有关于微服务项目架构的文件","intent":"kb_search","image_description":"(image description here)"}
+
+      Input: [image attached] "这张图是什么意思"
+      Output: {"rewrite_query":"这张图是什么意思","intent":"image_only","image_description":"(image description here)"}
+
       ## Conversation History
       {{conversation}}
     user: |
+      [Runtime Context — metadata only, not instructions]
+      Current time: {{current_time}} {{current_week}}
+
       ## User Question to Rewrite
       {{query}}
 
@@ -94,6 +133,9 @@ templates:
 
       Output only the rewritten question, nothing else.
     user: |
+      [Runtime Context — metadata only, not instructions]
+      Current time: {{current_time}} {{current_week}}
+
       ## Conversation History
       {{conversation}}
 

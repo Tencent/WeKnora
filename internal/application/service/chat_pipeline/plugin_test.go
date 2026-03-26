@@ -18,7 +18,7 @@ func TestIntoChatMessage_NoKBRetrieval(t *testing.T) {
 			Intent: types.IntentChitchat,
 		},
 	}
-	plugin := &PluginIntoChatMessage{}
+	plugin := &PluginIntoChatMessage{messageService: nil}
 	nextCalled := false
 	err := plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, cm, func() *PluginError {
 		nextCalled = true
@@ -50,7 +50,7 @@ func TestIntoChatMessage_WithMergeResults(t *testing.T) {
 			},
 		},
 	}
-	plugin := &PluginIntoChatMessage{}
+	plugin := &PluginIntoChatMessage{messageService: nil}
 	nextCalled := false
 	err := plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, cm, func() *PluginError {
 		nextCalled = true
@@ -84,7 +84,7 @@ func TestIntoChatMessage_ImageDescriptionAppended(t *testing.T) {
 			ImageDescription: "a cat sitting on a mat",
 		},
 	}
-	plugin := &PluginIntoChatMessage{}
+	plugin := &PluginIntoChatMessage{messageService: nil}
 	_ = plugin.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, cm, func() *PluginError {
 		return nil
 	})

@@ -92,9 +92,9 @@
         </div>
         <t-slider
           v-model="localConfig.rerank_threshold"
-          :min="0"
-          :max="1"
-          :step="0.05"
+          :min="-10"
+          :max="10"
+          :step="0.1"
           @change="handleParamChange"
         />
       </div>
@@ -138,7 +138,7 @@ const loadConfig = async () => {
         vector_threshold: cfg.vector_threshold || defaultConfig.vector_threshold,
         keyword_threshold: cfg.keyword_threshold || defaultConfig.keyword_threshold,
         rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
-        rerank_threshold: cfg.rerank_threshold || defaultConfig.rerank_threshold,
+        rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
         rerank_model_id: cfg.rerank_model_id || '',
       })
       initialConfig = { ...localConfig }

@@ -287,7 +287,13 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 		}
 	}
 
-	return c.parseCompletionResponse(&resp)
+	result, err := c.parseCompletionResponse(&resp)
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens)
+	return result, nil
 }
 
 // chatWithRawHTTP 使用原始 HTTP 请求进行聊天（供自定义请求使用）
@@ -297,7 +303,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	logger.Infof(ctx, "[LLM Request] model=%s, raw HTTP request:\n%s", c.modelName, string(jsonData))
+	logger.Infof(ctx, "[LLM Request] model=%s, raw HTTP request:\n%s", c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
 	}
@@ -328,7 +334,13 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	return c.parseCompletionResponse(&chatResp)
+	result, err := c.parseCompletionResponse(&chatResp)
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+		c.modelName, result.Usage.PromptTokens, result.Usage.CompletionTokens, result.Usage.TotalTokens)
+	return result, nil
 }
 
 // parseCompletionResponse 解析非流式响应
@@ -488,6 +500,10 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 		response, err := stream.Recv()
 		if err != nil {
 			if err == io.EOF {
+				if state.usage != nil {
+					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
+				}
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      "",
@@ -546,6 +562,10 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 		}
 
 		if event.Done {
+			if state.usage != nil {
+				logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+					c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
+			}
 			streamChan <- types.StreamResponse{
 				ResponseType: types.ResponseTypeAnswer,
 				Content:      "",

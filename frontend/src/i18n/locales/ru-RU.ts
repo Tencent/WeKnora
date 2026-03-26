@@ -730,7 +730,7 @@ export default {
     rerankTopKLabel: 'Rerank Top K',
     rerankTopKDescription: 'Максимальное количество результатов после повторного ранжирования',
     rerankThresholdLabel: 'Порог Rerank',
-    rerankThresholdDescription: 'Минимальный порог оценки для повторного ранжирования (0-1)',
+    rerankThresholdDescription: 'Минимальный порог оценки для повторного ранжирования (от -10 до 10)',
     rerankModelLabel: 'Модель Rerank',
     rerankModelDescription: 'Выберите модель для повторного ранжирования результатов поиска',
     rerankModelRequired: 'Пожалуйста, выберите модель Rerank. Функция поиска требует эту модель для ранжирования результатов.',

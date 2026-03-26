@@ -8,15 +8,18 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // PluginIntoChatMessage handles the transformation of search results into chat messages
-type PluginIntoChatMessage struct{}
+type PluginIntoChatMessage struct {
+	messageService interfaces.MessageService
+}
 
 // NewPluginIntoChatMessage creates and registers a new PluginIntoChatMessage instance
-func NewPluginIntoChatMessage(eventManager *EventManager) *PluginIntoChatMessage {
-	res := &PluginIntoChatMessage{}
+func NewPluginIntoChatMessage(eventManager *EventManager, messageService interfaces.MessageService) *PluginIntoChatMessage {
+	res := &PluginIntoChatMessage{messageService: messageService}
 	eventManager.Register(res)
 	return res
 }
@@ -73,9 +76,9 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		return ErrTemplateExecute.WithError(fmt.Errorf("user query contains invalid content"))
 	}
 
-	// Intent-based no-search path: bypass "reference materials" template entirely.
+	// Intent-based no-search path: no retrieval results, but still render
+	// through the context template so runtime metadata (current_time, etc.) is injected.
 	if !chatManage.NeedsRetrieval() {
-		// Prefer rewritten query in no-search mode; fallback to original query.
 		userContent := safeQuery
 		if rewrite := strings.TrimSpace(chatManage.RewriteQuery); rewrite != "" {
 			if safeRewrite, ok := utils.ValidateInput(rewrite); ok {
@@ -89,15 +92,37 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
 			userContent += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription
 		}
-		chatManage.UserContent = userContent
-		pipelineInfo(ctx, "IntoChatMessage", "skip_template_no_search", map[string]interface{}{
+
+		if tpl := chatManage.SummaryConfig.ContextTemplate; tpl != "" {
+			chatManage.UserContent = types.RenderPromptPlaceholders(tpl, types.PlaceholderValues{
+				"query":    userContent,
+				"contexts": "",
+				"language": chatManage.Language,
+			})
+		} else {
+			chatManage.UserContent = userContent
+		}
+
+		pipelineInfo(ctx, "IntoChatMessage", "no_search_with_template", map[string]interface{}{
 			"session_id":       chatManage.SessionID,
 			"user_content_len": len(chatManage.UserContent),
+			"has_template":     chatManage.SummaryConfig.ContextTemplate != "",
 		})
 		return next()
 	}
 
 	var contextsBuilder strings.Builder
+
+	// Collect unique document metadata (title + description), once per knowledge
+	allResults := chatManage.MergeResult
+	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
+		allResults = append(faqResults, docResults...)
+	}
+	docHeader := buildDocumentHeader(allResults)
+	if docHeader != "" {
+		contextsBuilder.WriteString(docHeader)
+		contextsBuilder.WriteString("\n")
+	}
 
 	// Build contexts string based on FAQ priority strategy
 	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
@@ -135,10 +160,12 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		}
 	}
 
+	chatManage.RenderedContexts = contextsBuilder.String()
+
 	// Replace placeholders in context template
 	userContent := types.RenderPromptPlaceholders(chatManage.SummaryConfig.ContextTemplate, types.PlaceholderValues{
 		"query":    safeQuery,
-		"contexts": contextsBuilder.String(),
+		"contexts": chatManage.RenderedContexts,
 		"language": chatManage.Language,
 	})
 
@@ -158,7 +185,96 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		"image_description":          chatManage.ImageDescription,
 		"chat_model_supports_vision": chatManage.ChatModelSupportsVision,
 	})
+
+	p.persistRenderedContent(ctx, chatManage)
 	return next()
+}
+
+// persistRenderedContent asynchronously writes the RAG-augmented UserContent back
+// to the user message so that subsequent conversation turns can see the full
+// retrieval context in history.
+func (p *PluginIntoChatMessage) persistRenderedContent(ctx context.Context, chatManage *types.ChatManage) {
+	if chatManage.UserMessageID == "" || chatManage.UserContent == "" {
+		pipelineInfo(ctx, "IntoChatMessage", "persist_rendered_content_skip", map[string]interface{}{
+			"session_id":       chatManage.SessionID,
+			"user_message_id":  chatManage.UserMessageID,
+			"has_user_content": chatManage.UserContent != "",
+			"reason":           "empty_id_or_content",
+		})
+		return
+	}
+	if chatManage.UserContent == chatManage.Query {
+		return
+	}
+	pipelineInfo(ctx, "IntoChatMessage", "persist_rendered_content", map[string]interface{}{
+		"session_id":           chatManage.SessionID,
+		"user_message_id":      chatManage.UserMessageID,
+		"rendered_content_len": len(chatManage.UserContent),
+	})
+	bgCtx := context.WithoutCancel(ctx)
+	go func() {
+		if err := p.messageService.UpdateMessageRenderedContent(
+			bgCtx, chatManage.SessionID, chatManage.UserMessageID, chatManage.UserContent,
+		); err != nil {
+			pipelineWarn(bgCtx, "IntoChatMessage", "persist_rendered_content_error", map[string]interface{}{
+				"session_id":      chatManage.SessionID,
+				"user_message_id": chatManage.UserMessageID,
+				"error":           err.Error(),
+			})
+		}
+	}()
+}
+
+// buildDocumentHeader generates a document metadata section listing each unique
+// knowledge document (by KnowledgeID) with its title and description.
+// Returns an empty string when no meaningful metadata is available.
+func buildDocumentHeader(results []*types.SearchResult) string {
+	type docMeta struct {
+		title       string
+		description string
+	}
+
+	seen := make(map[string]struct{})
+	var docs []docMeta
+
+	for _, r := range results {
+		if r.KnowledgeID == "" {
+			continue
+		}
+		if _, ok := seen[r.KnowledgeID]; ok {
+			continue
+		}
+		seen[r.KnowledgeID] = struct{}{}
+
+		title := r.KnowledgeTitle
+		if title == "" {
+			title = r.KnowledgeFilename
+		}
+		if title == "" {
+			continue
+		}
+
+		docs = append(docs, docMeta{
+			title:       title,
+			description: r.KnowledgeDescription,
+		})
+	}
+
+	if len(docs) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("### Referenced Documents\n")
+	for i, d := range docs {
+		// if d.description != "" {
+		// 	b.WriteString(fmt.Sprintf("%d. %s — %s\n", i+1, d.title, d.description))
+		// } else {
+		// 	b.WriteString(fmt.Sprintf("%d. %s\n", i+1, d.title))
+		// }
+		b.WriteString(fmt.Sprintf("%d. %s\n", i+1, d.title))
+	}
+	return b.String()
 }
 
 // getEnrichedPassageForChat 合并Content和ImageInfo的文本内容，为聊天消息准备

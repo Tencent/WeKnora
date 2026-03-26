@@ -1825,6 +1825,14 @@ onBeforeRouteUpdate((to, from, next) => {
   next()
 })
 
+defineExpose({
+  triggerSend(text: string) {
+    if (!text.trim()) return;
+    query.value = text;
+    nextTick(() => createSession(text));
+  }
+});
+
 </script>
 <template>
   <div class="answers-input" @drop="onDrop" @dragover="onDragOver">

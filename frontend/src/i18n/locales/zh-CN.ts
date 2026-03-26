@@ -615,7 +615,7 @@ export default {
     rerankTopKLabel: "Rerank 数量 (Top K)",
     rerankTopKDescription: "重排序后保留的最大结果数量",
     rerankThresholdLabel: "Rerank 阈值",
-    rerankThresholdDescription: "重排序的最低分数阈值（0-1）",
+    rerankThresholdDescription: "重排序的最低分数阈值（-10 到 10）",
     rerankModelLabel: "Rerank 模型",
     rerankModelDescription: "选择用于搜索结果重排序的模型",
     rerankModelRequired: "请选择 Rerank 模型，搜索功能需要此模型对结果进行重排序",

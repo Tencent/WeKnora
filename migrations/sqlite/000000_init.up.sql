@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS messages (
     session_id VARCHAR(36) NOT NULL,
     role VARCHAR(50) NOT NULL,
     content TEXT NOT NULL,
+    rendered_content TEXT NOT NULL DEFAULT '',
     knowledge_references TEXT NOT NULL DEFAULT '[]',
     agent_steps TEXT DEFAULT NULL,
     mentioned_items TEXT DEFAULT '[]',
