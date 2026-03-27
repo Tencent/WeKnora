@@ -510,6 +510,7 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 					Done:         true,
 					ToolCalls:    state.buildOrderedToolCalls(),
 					Usage:        state.usage,
+					FinishReason: state.lastFinishReason,
 				}
 			} else {
 				streamChan <- types.StreamResponse{
@@ -633,6 +634,7 @@ type streamState struct {
 	hasThinking      bool
 	fieldExtractors  map[int]*jsonFieldExtractor // per tool-call-index extractors for streaming field extraction
 	usage            *types.TokenUsage           // captured from the final stream chunk when include_usage is enabled
+	lastFinishReason string                      // last observed finish_reason for EOF handler fallback
 }
 
 func newStreamState() *streamState {
@@ -666,6 +668,11 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 	delta := choice.Delta
 	isDone := string(choice.FinishReason) != ""
 
+	// Track finish_reason for EOF handler fallback
+	if isDone {
+		state.lastFinishReason = string(choice.FinishReason)
+	}
+
 	// 处理 tool calls
 	if len(delta.ToolCalls) > 0 {
 		c.processToolCallsDelta(ctx, delta.ToolCalls, state, streamChan)
@@ -698,6 +705,7 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 			Content:      delta.Content,
 			Done:         isDone,
 			ToolCalls:    state.buildOrderedToolCalls(),
+			FinishReason: string(choice.FinishReason),
 		}
 	}
 
@@ -707,6 +715,7 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 			Content:      "",
 			Done:         true,
 			ToolCalls:    state.buildOrderedToolCalls(),
+			FinishReason: string(choice.FinishReason),
 		}
 	}
 
@@ -719,6 +728,17 @@ func (c *RemoteAPIChat) processStreamDelta(ctx context.Context, choice *openai.C
 			Done:         true,
 		}
 		state.hasThinking = false
+	}
+
+	// Catch-all: isDone but none of the above branches sent a response with
+	// FinishReason (empty content, no tool calls, no thinking). This prevents
+	// the finish_reason from being lost in the streaming pipeline.
+	if isDone && delta.Content == "" && len(state.toolCallMap) == 0 && !state.hasThinking {
+		streamChan <- types.StreamResponse{
+			ResponseType: types.ResponseTypeAnswer,
+			Done:         true,
+			FinishReason: string(choice.FinishReason),
+		}
 	}
 }
 

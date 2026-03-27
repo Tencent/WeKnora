@@ -27,6 +27,13 @@ const (
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
+
+	// maxEmptyResponseRetries is the maximum number of retries when the LLM
+	// returns an empty content with a natural stop (no tool calls). This guards
+	// against the agent completing with an empty answer when the LLM fails to
+	// produce content (e.g., thinking-only loops without KB).
+	// Trade-off: each retry costs ~2s of LLM latency; 2 retries = max 4s extra.
+	maxEmptyResponseRetries = 2
 )
 
 // transientErrorMarkers are substrings that indicate a transient (retryable) error.
