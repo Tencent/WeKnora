@@ -42,7 +42,6 @@ export interface LoginResponse {
 export interface OIDCAuthURLResponse {
   success: boolean
   authorization_url?: string
-  auth_url?: string
   state?: string
   message?: string
 }
@@ -52,15 +51,6 @@ export interface OIDCConfigResponse {
   enabled: boolean
   provider_display_name?: string
   message?: string
-}
-
-export interface OIDCCallbackResponse extends LoginResponse {
-  is_new_user?: boolean
-}
-
-export interface OIDCCallbackRequest {
-  code: string
-  redirect_uri: string
 }
 
 // 用户注册接口
@@ -180,21 +170,6 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
     return {
       success: false,
       enabled: false,
-      message: error.message || t('error.auth.loginFailed')
-    }
-  }
-}
-
-/**
- * 处理 OIDC 回调并完成登录
- */
-export async function loginWithOIDC(data: OIDCCallbackRequest): Promise<LoginResponse> {
-  try {
-    const response = await post('/api/v1/auth/oidc/callback', data)
-    return response as unknown as LoginResponse
-  } catch (error: any) {
-    return {
-      success: false,
       message: error.message || t('error.auth.loginFailed')
     }
   }

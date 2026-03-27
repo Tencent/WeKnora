@@ -678,15 +678,11 @@ const handleOIDCLogin = async () => {
   try {
     oidcLoading.value = true
     const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI(), getFrontendOIDCRedirectURI())
-    const authorizationURL = response.authorization_url || response.auth_url
+    const authorizationURL = response.authorization_url
 
     if (!response.success || !authorizationURL) {
       MessagePlugin.error(response.message || t('auth.oidcLoginFailed'))
       return
-    }
-
-    if (response.state) {
-      sessionStorage.setItem('weknora_oidc_state', response.state)
     }
 
     window.location.href = authorizationURL

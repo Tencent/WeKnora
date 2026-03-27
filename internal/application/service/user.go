@@ -797,22 +797,6 @@ func encodeOIDCAuthorizationState(state *oidcAuthorizationState) (string, error)
 	return base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
-func decodeOIDCAuthorizationState(raw string) (*oidcAuthorizationState, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, errors.New("state is required")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, err
-	}
-	var state oidcAuthorizationState
-	if err := json.Unmarshal(payload, &state); err != nil {
-		return nil, err
-	}
-	return &state, nil
-}
-
 func decodeJWTClaims(token string) (map[string]interface{}, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) < 2 {

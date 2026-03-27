@@ -79,7 +79,6 @@ const handleGlobalOIDCCallback = async () => {
   if (!oidcError && !oidcResult) return
 
   if (oidcError) {
-    sessionStorage.removeItem('weknora_oidc_state')
     clearOIDCCallbackState('/login')
     await router.replace('/login')
     MessagePlugin.error(oidcErrorDescription || 'OIDC login failed')
@@ -96,7 +95,6 @@ const handleGlobalOIDCCallback = async () => {
 
     const response = decodeOIDCResult(oidcResult)
     if (response.success) {
-      sessionStorage.removeItem('weknora_oidc_state')
       clearOIDCCallbackState('/')
       MessagePlugin.success('Login successful')
       await persistOIDCLoginResponse(response)
