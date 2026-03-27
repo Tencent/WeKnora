@@ -1,54 +1,41 @@
-<p align="center">
-  <picture>
-    <img src="./docs/images/logo.png" alt="WeKnora Logo" height="120"/>
-  </picture>
-</p>
-<p align="center">
-  <picture>
-    <a href="https://trendshift.io/repositories/15289" target="_blank">
-      <img src="https://trendshift.io/api/badge/repositories/15289" alt="Tencent%2FWeKnora | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/>
-    </a>
-  </picture>
-</p>
 
-<p align="center">
-    <a href="https://weknora.weixin.qq.com" target="_blank">
-        <img alt="官方网站" src="https://img.shields.io/badge/官方网站-WeKnora-4e6b99">
-    </a>
-    <a href="https://chatbot.weixin.qq.com" target="_blank">
-        <img alt="微信对话开放平台" src="https://img.shields.io/badge/微信对话开放平台-5ac725">
-    </a>
-    <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
-        <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
-    </a>
-    <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.3.4-2e6cc4?labelColor=d4eaf7">
-    </a>
-</p>
 
-<p align="center">
-| <a href="./README.md"><b>English</b></a> | <b>简体中文</b> | <a href="./README_JA.md"><b>日本語</b></a> |
-</p>
 
-<p align="center">
-  <h4 align="center">
+
+
+
+| **[English](./README.md)** | **简体中文** | **[日本語](./README_JA.md)** |
+
+
+
+
 
   [项目介绍](#-项目介绍) • [架构设计](#-架构设计) • [核心特性](#-核心特性) • [快速开始](#-快速开始) • [文档](#-文档) • [开发指南](#-开发指南)
 
-  </h4>
-</p>
+
 
 # 💡 WeKnora - 基于大模型的文档理解检索框架
 
 ## 📌 项目介绍
 
-[**WeKnora（维娜拉）**](https://weknora.weixin.qq.com) 是一款基于大语言模型（LLM）的文档理解与语义检索框架，专为结构复杂、内容异构的文档场景而打造。
+**[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款基于大语言模型（LLM）的文档理解与语义检索框架，专为结构复杂、内容异构的文档场景而打造。
 
 框架采用模块化架构，融合多模态预处理、语义向量索引、智能召回与大模型生成推理，构建起高效、可控的文档问答流程。核心检索流程基于 **RAG（Retrieval-Augmented Generation）** 机制，将上下文相关片段与语言模型结合，实现更高质量的语义回答。
 
-**官网：** https://weknora.weixin.qq.com
+**官网：** [https://weknora.weixin.qq.com](https://weknora.weixin.qq.com)
 
 ## ✨ 最新更新
+
+**v0.3.5 版本亮点：**
+
+- **Telegram、ding'ding & Mattermost IM集成**：新增Telegram机器人（webhook/长轮询，流式editMessageText回复）、钉钉机器人（webhook/Stream模式，AI卡片流式输出）和Mattermost适配器；IM频道现已覆盖企业微信、飞书、Slack、Telegram、钉钉、Mattermost共6个平台
+- **IM斜杠命令与QA队列**：可插拔斜杠命令框架（/help、/info、/search、/stop、/clear），配合有界QA工作池、用户级限流和基于Redis的多实例分布式协调
+- **推荐问题**：Agent基于关联知识库自动生成上下文相关的推荐问题，在对话界面开场前展示；图片知识自动触发问题生成任务
+- **VLM自动描述MCP工具返回图片**：当MCP工具返回图片时，Agent通过配置的VLM模型自动生成文字描述，使不支持图片输入的LLM也能理解图片内容
+- **Novita AI提供商**：新增Novita AI，通过OpenAI兼容接口支持Chat、Embedding和VLLM模型类型
+- **MCP工具名称稳定性**：工具名称改为基于service.Name（跨重连保持稳定），新增唯一名称约束和碰撞防护；前端将snake_case工具名格式化为可读形式
+- **来源频道标记**：知识条目和消息新增channel字段，记录来源（web/api/im/browser_extension），便于追溯
+- **重要修复**：修复无知识库时Agent空响应、中文/emoji文档摘要UTF-8截断、租户设置更新时API密钥加密丢失、vLLM流式推理内容缺失、Rerank空段落过滤等问题
 
 **v0.3.4 版本亮点：**
 
@@ -60,24 +47,19 @@
 - **AWS S3存储**：集成AWS S3存储适配器，配置界面及数据库迁移
 - **AES-256-GCM加密**：API密钥静态加密，采用AES-256-GCM增强安全性
 - **内置MCP服务**：支持内置MCP服务，扩展Agent能力
-- **Agent流式交互面板**：优化AgentStreamDisplay组件，自动滚动、样式增强与加载指示器
 - **混合检索优化**：按目标分组并复用查询向量，提升检索性能
 - **Final Answer工具**：新增final_answer工具及Agent耗时跟踪，优化Agent工作流
 
+**更早版本**
+
 **v0.3.3 版本亮点：**
 
-- 🧩 **父子分块策略**：层级化的父子分块策略，增强上下文管理和检索精度
-- 📌 **知识库置顶**：支持置顶常用知识库，快速访问
-- 🔄 **兜底回复**：无相关结果时的兜底回复处理及UI指示
-- 🖼️ **图片图标检测**：文档处理中的图片图标自动检测与过滤
-- 🧹 **Rerank段落清洗**：Rerank模型段落清洗功能，提升相关性评分准确度
-- 🐳 **Docker与技能管理**：增强Docker设置，新增入口脚本和技能管理
-- 🗄️ **存储桶自动创建**：存储引擎连通性检查增强，支持自动创建存储桶
-- 🎨 **UI一致性优化**：统一边框样式、更新主题和组件样式，全面提升视觉一致性
-- ⚡ **分块尺寸调优**：更新知识库处理中的分块大小配置
-
-<details>
-<summary><b>更早版本</b></summary>
+- **父子分块策略**：层级化的父子分块策略，增强上下文管理和检索精度
+- **知识库置顶**：支持置顶常用知识库，快速访问
+- **兜底回复**：无相关结果时的兜底回复处理及UI指示
+- **Rerank段落清洗**：Rerank模型段落清洗功能，提升相关性评分准确度
+- **存储桶自动创建**：存储引擎连通性检查增强，支持自动创建存储桶
+- **Milvus向量数据库**：新增Milvus向量数据库后端，用于知识检索
 
 **v0.3.2 版本亮点：**
 
@@ -120,7 +102,7 @@
 - 🎨 **全新UI**：优化对话界面，支持Agent模式/普通模式切换，展示工具调用过程，知识库管理界面全面升级
 - ⚡ **底层升级**：引入MQ异步任务管理，支持数据库自动迁移，提供快速开发模式
 
-</details>
+
 
 ## 🔒 安全声明
 
@@ -133,7 +115,7 @@
 
 ## 🏗️ 架构设计
 
-![weknora-pipelone.png](./docs/images/architecture.png)
+weknora-pipelone.png
 
 WeKnora 采用现代化模块化设计，构建了一条完整的文档理解与检索流水线。系统主要包括文档解析、向量化处理、检索引擎和大模型推理等核心模块，每个组件均可灵活配置与扩展。
 
@@ -153,34 +135,42 @@ WeKnora 采用现代化模块化设计，构建了一条完整的文档理解与
 
 ## 📊 适用场景
 
-| 应用场景 | 具体应用 | 核心价值 |
-|---------|----------|----------|
-| **企业知识管理** | 内部文档检索、规章制度问答、操作手册查询 | 提升知识查找效率，降低培训成本 |
-| **科研文献分析** | 论文检索、研究报告分析、学术资料整理 | 加速文献调研，辅助研究决策 |
-| **产品技术支持** | 产品手册问答、技术文档检索、故障排查 | 提升客户服务质量，减少技术支持负担 |
-| **法律合规审查** | 合同条款检索、法规政策查询、案例分析 | 提高合规效率，降低法律风险 |
-| **医疗知识辅助** | 医学文献检索、诊疗指南查询、病例分析 | 辅助临床决策，提升诊疗质量 |
+
+| 应用场景       | 具体应用                 | 核心价值              |
+| ---------- | -------------------- | ----------------- |
+| **企业知识管理** | 内部文档检索、规章制度问答、操作手册查询 | 提升知识查找效率，降低培训成本   |
+| **科研文献分析** | 论文检索、研究报告分析、学术资料整理   | 加速文献调研，辅助研究决策     |
+| **产品技术支持** | 产品手册问答、技术文档检索、故障排查   | 提升客户服务质量，减少技术支持负担 |
+| **法律合规审查** | 合同条款检索、法规政策查询、案例分析   | 提高合规效率，降低法律风险     |
+| **医疗知识辅助** | 医学文献检索、诊疗指南查询、病例分析   | 辅助临床决策，提升诊疗质量     |
+
 
 ## 🧩 功能模块能力
 
-| 功能模块 | 支持情况                                                | 说明 |
-|---------|-----------------------------------------------------|------|
-| Agent模式 | ✅ ReACT Agent模式                                     | 支持使用内置工具检索知识库、MCP工具和网络搜索，跨知识库检索，多次迭代和反思 |
-| 知识库类型 | ✅ FAQ / 文档                                          | 支持创建FAQ和文档两种类型知识库，支持文件夹导入、URL导入、标签管理和在线录入 |
-| 文档格式支持 | ✅ PDF / Word / Txt / Markdown / 图片（含 OCR / Caption） | 支持多种结构化与非结构化文档内容解析，支持图文混排与图像文字提取 |
-| 模型管理 | ✅ 集中配置、内置模型共享                                       | 模型集中配置，知识库设置页增加模型选择，支持多租户共享内置模型 |
-| 嵌入模型支持 | ✅ 本地模型、BGE / GTE API 等                              | 支持自定义 embedding 模型，兼容本地部署与云端向量生成接口 |
-| 向量数据库接入 | ✅ PostgreSQL（pgvector）、Elasticsearch                | 支持主流向量索引后端，可灵活切换与扩展，适配不同检索场景 |
-| 检索机制 | ✅ BM25 / Dense Retrieve / GraphRAG                  | 支持稠密/稀疏召回、知识图谱增强检索等多种策略，可自由组合召回-重排-生成流程 |
-| 大模型集成 | ✅ 支持 Qwen、DeepSeek 等，思考/非思考模式切换                     | 可接入本地大模型（如 Ollama 启动）或调用外部 API 服务，支持推理模式灵活配置 |
-| 对话策略 | ✅ Agent模型、普通模式模型、检索阈值、Prompt配置                      | 支持配置Agent模型、普通模式所需的模型、检索阈值，在线配置Prompt，精确控制多轮对话行为 |
-| 网络搜索 | ✅ 可扩展搜索引擎、DuckDuckGo / Google                       | 支持可扩展的网络搜索引擎，内置DuckDuckGo搜索引擎 |
-| MCP工具 | ✅ uvx、npx启动工具，Stdio/HTTP Streamable/SSE             | 支持通过MCP扩展Agent能力，内置uvx、npx两种MCP启动工具，支持三种传输方式 |
-| 问答能力 | ✅ 上下文感知、多轮对话、提示词模板                                  | 支持复杂语义建模、指令控制与链式问答，可配置提示词与上下文窗口 |
-| 端到端测试支持 | ✅ 检索+生成过程可视化与指标评估                                   | 提供一体化链路测试工具，支持评估召回命中率、回答覆盖度、BLEU / ROUGE 等主流指标 |
-| 部署模式 | ✅ 支持本地部署 / Docker 镜像                                | 满足私有化、离线部署与灵活运维的需求，支持快速开发模式 |
-| 用户界面 | ✅ Web UI + RESTful API                              | 提供交互式界面与标准 API 接口，支持Agent模式/普通模式切换，展示工具调用过程 |
-| 任务管理 | ✅ MQ异步任务、数据库自动迁移                                    | 引入MQ对异步任务进行状态维护，支持版本升级时的数据库表结构和数据自动迁移 |
+
+| 功能模块    | 支持情况                                                               | 说明                                                                                      |
+| ------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| Agent模式 | ✅ ReACT Agent模式                                                    | 内置工具检索知识库、调用MCP工具和网络搜索；支持跨知识库检索与多轮迭代推理                                                  |
+| 知识库类型   | ✅ FAQ / 文档                                                         | FAQ和文档两种类型，支持文件夹导入、URL导入、标签管理、在线录入和知识迁移                                                 |
+| 文档格式支持  | ✅ PDF / Word / Txt / Markdown / HTML / 图片（OCR + Caption）           | 结构化与非结构化文档解析；图片OCR文字提取；VLM图片描述生成                                                        |
+| IM频道集成  | ✅ 企业微信 / 飞书 / Slack / Telegram / 钉钉 / Mattermost                   | WebSocket和Webhook双模式；流式回复；斜杠命令（/help、/info、/search、/stop、/clear）；用户级限流；基于Redis的多实例分布式协调 |
+| 模型管理    | ✅ 集中配置、内置模型共享                                                      | 模型集中配置，知识库级别模型选择，支持多租户共享内置模型                                                            |
+| 嵌入模型支持  | ✅ 本地模型（Ollama）、BGE / GTE / OpenAI兼容接口                              | 支持自定义embedding模型，兼容本地部署与云端向量生成接口                                                        |
+| 向量数据库接入 | ✅ PostgreSQL（pgvector）/ Elasticsearch / Milvus / Weaviate / Qdrant | 五种向量索引后端，可灵活切换，适配不同检索场景                                                                 |
+| 对象存储    | ✅ 本地 / MinIO / AWS S3 / 火山引擎TOS                                    | 可插拔存储适配器；启动时自动创建存储桶                                                                     |
+| 检索机制    | ✅ BM25 / Dense Retrieve / GraphRAG                                 | 稠密/稀疏召回、知识图谱增强检索；可自由组合召回-重排-生成流程                                                        |
+| 大模型集成   | ✅ Qwen / DeepSeek / MiniMax / NVIDIA / Novita AI / OpenAI兼容        | 接入本地大模型（Ollama）或外部API服务；思考/非思考模式切换；vLLM流式推理内容支持                                         |
+| 对话策略    | ✅ Agent模型、普通模式模型、检索阈值、Prompt配置                                     | 在线Prompt编辑；检索阈值调节；精确控制多轮对话行为                                                            |
+| 网络搜索    | ✅ DuckDuckGo / Bing / Google（可扩展）                                  | 可插拔搜索引擎；按对话开关网络搜索                                                                       |
+| MCP工具   | ✅ uvx / npx启动工具，Stdio / HTTP Streamable / SSE                      | 通过MCP扩展Agent能力；工具名称稳定（跨重连保持一致）；VLM自动描述工具返回图片                                            |
+| 推荐问题    | ✅ 基于知识库的问题推荐                                                       | Agent在对话前展示推荐问题；图片知识自动触发问题生成                                                            |
+| 问答能力    | ✅ 上下文感知、多轮对话、提示词模板                                                 | 复杂语义建模、指令控制与链式问答，可配置提示词与上下文窗口                                                           |
+| 安全机制    | ✅ AES-256-GCM静态加密、SSRF防护                                           | API密钥静态加密；远程API调用的SSRF安全校验；Agent技能沙盒执行                                                  |
+| 端到端测试支持 | ✅ 检索+生成过程可视化与指标评估                                                  | 一体化链路测试，支持评估召回命中率、回答覆盖度、BLEU/ROUGE等指标                                                   |
+| 部署模式    | ✅ 本地 / Docker / Kubernetes（Helm）                                   | 私有化和离线部署；热重载快速开发模式；Helm Chart支持Kubernetes部署                                             |
+| 用户界面    | ✅ Web UI + RESTful API                                             | 交互式界面与标准API；Agent/普通模式切换；工具调用过程可视化                                                      |
+| 任务管理    | ✅ MQ异步任务、数据库自动迁移                                                   | MQ异步任务状态维护；版本升级时自动执行数据库表结构和数据迁移                                                         |
+
 
 ## 🚀 快速开始
 
@@ -188,9 +178,9 @@ WeKnora 采用现代化模块化设计，构建了一条完整的文档理解与
 
 确保本地已安装以下工具：
 
-* [Docker](https://www.docker.com/)
-* [Docker Compose](https://docs.docker.com/compose/)
-* [Git](https://git-scm.com/)
+- [Docker](https://www.docker.com/)
+- [Docker Compose](https://docs.docker.com/compose/)
+- [Git](https://git-scm.com/)
 
 ### 📦 安装步骤
 
@@ -235,31 +225,37 @@ ollama serve > /dev/null 2>&1 &
 #### ③.1 激活不同组合的功能
 
 - 启动最小功能
+
 ```bash
 docker compose up -d
 ```
 
 - 启动全部功能
+
 ```bash
 docker-compose --profile full up -d
 ```
 
 - 需要 tracing 日志
+
 ```bash
 docker-compose --profile jaeger up -d
 ```
 
 - 需要 neo4j 知识图谱
+
 ```bash
 docker-compose --profile neo4j up -d
 ```
 
 - 需要 minio 文件存储服务
+
 ```bash
 docker-compose --profile minio up -d
 ```
 
 - 多选项组合
+
 ```bash
 docker-compose --profile neo4j --profile minio up -d
 ```
@@ -276,9 +272,9 @@ make stop-all
 
 启动成功后，可访问以下地址：
 
-* Web UI：`http://localhost`
-* 后端 API：`http://localhost:8080`
-* 链路追踪（Jaeger）：`http://localhost:16686`
+- Web UI：`http://localhost`
+- 后端 API：`http://localhost:8080`
+- 链路追踪（Jaeger）：`http://localhost:16686`
 
 ### 🔌 使用微信对话开放平台
 
@@ -301,6 +297,7 @@ git clone https://github.com/Tencent/WeKnora
 > 推荐直接参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行配置。
 
 mcp客户端配置服务器
+
 ```json
 {
   "mcpServers": {
@@ -319,6 +316,7 @@ mcp客户端配置服务器
 ```
 
 使用stdio命令直接运行
+
 ```
 pip install weknora-mcp-server
 python -m weknora-mcp-server
@@ -349,7 +347,7 @@ make clean-db
 
 ### ④ 访问Web UI
 
-http://localhost
+[http://localhost](http://localhost)
 
 首次访问会自动跳转到注册登录页面，完成注册后，请创建一个新的知识库，并在该知识库的设置页面完成相关设置。
 
@@ -357,15 +355,12 @@ http://localhost
 
 ### Web UI 界面
 
-<table>
-  <tr>
-    <td><b>知识库管理</b><br/><img src="./docs/images/knowledgebases.png" alt="知识库管理"></td>
-    <td><b>对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置"></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>Agent模式工具调用过程</b><br/><img src="./docs/images/agent-qa.png" alt="Agent模式工具调用过程"></td>
-  </tr>
-</table>
+
+|                   |          |
+| ----------------- | -------- |
+| **知识库管理**         | **对话设置** |
+| **Agent模式工具调用过程** |          |
+
 
 **知识库管理：** 支持创建FAQ和文档两种类型知识库，支持拖拽上传、文件夹导入、URL导入等多种方式，自动识别文档结构并提取核心知识，建立索引。支持标签管理和在线录入，系统清晰展示处理进度和文档状态，实现高效的知识库管理。
 
@@ -413,6 +408,7 @@ make dev-frontend   # 启动前端（新终端）
 ```
 
 **开发优势：**
+
 - ✅ 前端修改自动热重载（无需重启）
 - ✅ 后端修改快速重启（5-10秒，支持 Air 热重载）
 - ✅ 无需重新构建 Docker 镜像
@@ -480,7 +476,7 @@ refactor: 重构文档解析模块
 
 感谢以下优秀的贡献者们：
 
-[![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora)](https://github.com/Tencent/WeKnora/graphs/contributors)
+[Contributors](https://github.com/Tencent/WeKnora/graphs/contributors)
 
 ## 📄 许可证
 
@@ -489,10 +485,3 @@ refactor: 重构文档解析模块
 
 ## 📈 项目统计
 
-<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
- </picture>
-</a>
