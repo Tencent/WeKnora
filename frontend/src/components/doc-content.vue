@@ -172,7 +172,7 @@ const checkImage = (url) => {
     img.src = url;
   });
 };
-renderer.image = function (href: string, title: string | null, text: string) {
+renderer.image = function ({href, title, text}) {
   if (!isValidImageURL(href)) {
     return `<p>${t('error.invalidImageLink')}</p>`;
   }
@@ -185,7 +185,7 @@ renderer.image = function (href: string, title: string | null, text: string) {
 };
 
 // 自定义代码块渲染器，只显示语言标签
-renderer.code = function (text: string, lang?: string) {
+renderer.code = function ({text, lang}) {
   // Mermaid 图表处理
   if (lang === 'mermaid') {
     // 生成唯一ID
