@@ -37,6 +37,10 @@
                 <t-icon name="play-circle" class="meta-icon" />
                 {{ channel.output_mode === 'stream' ? $t('agentEditor.im.outputStream') : $t('agentEditor.im.outputFull') }}
               </span>
+              <span v-if="channel.session_mode === 'thread'" class="meta-tag">
+                <t-icon name="chat" class="meta-icon" />
+                {{ $t('agentEditor.im.sessionModeThread') }}
+              </span>
             </div>
             <div v-if="channel.mode === 'webhook'" class="callback-url-row">
               <span class="url-label">{{ $t('agentEditor.im.callbackUrl') }}:</span>
@@ -119,6 +123,19 @@
             <t-radio-button value="stream">{{ $t('agentEditor.im.outputStream') }}</t-radio-button>
             <t-radio-button value="full">{{ $t('agentEditor.im.outputFull') }}</t-radio-button>
           </t-radio-group>
+        </div>
+
+        <!-- Session Mode -->
+        <div class="form-item">
+          <label class="form-label">{{ $t('agentEditor.im.sessionMode') }}</label>
+          <t-radio-group v-model="formData.session_mode">
+            <t-radio-button value="user">{{ $t('agentEditor.im.sessionModeUser') }}</t-radio-button>
+            <t-radio-button value="thread"
+              :disabled="!platformSupportsThread(formData.platform)">
+              {{ $t('agentEditor.im.sessionModeThread') }}
+            </t-radio-button>
+          </t-radio-group>
+          <p class="form-hint">{{ $t('agentEditor.im.sessionModeHint') }}</p>
         </div>
 
         <!-- Knowledge base for file messages -->
@@ -356,6 +373,7 @@ const formData = ref({
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket',
   output_mode: 'stream' as 'stream' | 'full',
+  session_mode: 'user' as 'user' | 'thread',
   knowledge_base_id: '',
   credentials: defaultCredentials(),
 });
@@ -363,6 +381,10 @@ const formData = ref({
 function platformLabel(platform: string): string {
   const key = `agentEditor.im.${platform}`;
   return t(key);
+}
+
+function platformSupportsThread(platform: string): boolean {
+  return ['slack', 'mattermost', 'feishu', 'telegram'].includes(platform);
 }
 
 watch(
@@ -373,6 +395,9 @@ watch(
       if (typeof formData.value.credentials.post_to_main !== 'boolean') {
         formData.value.credentials.post_to_main = false;
       }
+    }
+    if (!platformSupportsThread(p)) {
+      formData.value.session_mode = 'user';
     }
   },
 );
@@ -427,6 +452,7 @@ function editChannel(channel: IMChannel) {
     name: channel.name,
     mode: channel.mode,
     output_mode: channel.output_mode,
+    session_mode: channel.session_mode || 'user',
     knowledge_base_id: channel.knowledge_base_id || '',
     credentials: { ...channel.credentials },
   };
@@ -440,6 +466,7 @@ function resetForm() {
     name: '',
     mode: 'websocket',
     output_mode: 'stream',
+    session_mode: 'user',
     knowledge_base_id: '',
     credentials: defaultCredentials(),
   };
@@ -452,6 +479,7 @@ async function handleSave() {
         name: formData.value.name,
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        session_mode: formData.value.session_mode,
         knowledge_base_id: formData.value.knowledge_base_id,
         credentials: formData.value.credentials,
       });
@@ -462,6 +490,7 @@ async function handleSave() {
         name: formData.value.name,
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
+        session_mode: formData.value.session_mode,
         knowledge_base_id: formData.value.knowledge_base_id,
         credentials: formData.value.credentials,
       });

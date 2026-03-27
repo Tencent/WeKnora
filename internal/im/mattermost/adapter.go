@@ -114,7 +114,14 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	} else {
 		threadRoot = payload.RootID
 		if threadRoot == "" {
-			threadRoot = payload.PostID
+			// Outgoing webhooks may omit root_id for thread replies.
+			// Fetch the post to resolve the actual thread root.
+			if actualRootID, err := a.client.GetPost(c.Request.Context(), payload.PostID); err == nil && actualRootID != "" {
+				threadRoot = actualRootID
+			} else {
+				// Top-level message: use its own PostID as thread root.
+				threadRoot = payload.PostID
+			}
 		}
 	}
 
@@ -126,6 +133,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		ChatType:  im.ChatTypeGroup,
 		Content:   strings.TrimSpace(payload.Text),
 		MessageID: payload.PostID,
+		ThreadID:  threadRoot,
 		Extra: map[string]string{
 			extraKeyThreadRoot: threadRoot,
 			extraKeyChannelID:  payload.ChannelID,

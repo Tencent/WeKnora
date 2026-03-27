@@ -205,6 +205,8 @@ type feishuEvent struct {
 
 type feishuMessage struct {
 	MessageID   string `json:"message_id"`
+	RootID      string `json:"root_id"`
+	ParentID    string `json:"parent_id"`
 	MessageType string `json:"message_type"`
 	ChatType    string `json:"chat_type"`
 	ChatID      string `json:"chat_id"`
@@ -263,6 +265,12 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	}
 	msg := eventBody.Event.Message
 
+	// Compute thread ID: use root_id for threaded replies, or message_id for top-level messages.
+	threadID := msg.RootID
+	if threadID == "" {
+		threadID = msg.MessageID
+	}
+
 	// Determine chat type
 	chatType := im.ChatTypeDirect
 	chatID := ""
@@ -308,6 +316,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			ChatType:    chatType,
 			Content:     strings.TrimSpace(content),
 			MessageID:   msg.MessageID,
+			ThreadID:    threadID,
 		}, nil
 
 	case "file":
@@ -328,6 +337,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			ChatID:      chatID,
 			ChatType:    chatType,
 			MessageID:   msg.MessageID,
+			ThreadID:    threadID,
 			FileKey:     fileContent.FileKey,
 			FileName:    fileContent.FileName,
 		}, nil
@@ -349,6 +359,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			ChatID:      chatID,
 			ChatType:    chatType,
 			MessageID:   msg.MessageID,
+			ThreadID:    threadID,
 			FileKey:     imageContent.ImageKey,
 			FileName:    imageContent.ImageKey + ".png",
 		}, nil
@@ -411,6 +422,7 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 			ChatType:    chatType,
 			Content:     content,
 			MessageID:   msg.MessageID,
+			ThreadID:    threadID,
 		}, nil
 
 	default:

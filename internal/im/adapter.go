@@ -19,6 +19,16 @@ const (
 	PlatformMattermost Platform = "mattermost"
 )
 
+// SessionMode determines how IM sessions are resolved.
+type SessionMode string
+
+const (
+	// SessionModeUser resolves sessions by (platform, user_id, chat_id, tenant_id).
+	SessionModeUser SessionMode = "user"
+	// SessionModeThread resolves sessions by (platform, thread_id, chat_id, tenant_id).
+	SessionModeThread SessionMode = "thread"
+)
+
 // MessageType identifies the kind of IM message.
 type MessageType string
 
@@ -52,6 +62,15 @@ type IncomingMessage struct {
 	FileName string
 	// FileSize is the file size in bytes (for file messages, optional).
 	FileSize int64
+	// ThreadID is the platform-specific thread identifier.
+	// - Slack: thread_ts (top-level message uses its own timestamp)
+	// - Mattermost: root_id, or post_id if top-level
+	// - Feishu: root_id, or message_id if top-level
+	// - Telegram: message_thread_id (Forum Topics only)
+	// Empty for platforms without thread support (WeCom, DingTalk).
+	// In thread mode, top-level messages use their own ID as ThreadID,
+	// effectively creating a new session per top-level message.
+	ThreadID string
 	// Extra holds platform-specific fields (e.g., WeCom stream ID).
 	Extra map[string]string
 }

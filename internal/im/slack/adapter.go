@@ -70,6 +70,7 @@ func parseIncomingMessage(user, channel, text, ts string, chatType im.ChatType, 
 		ChatType:  chatType,
 		Content:   strings.TrimSpace(content),
 		MessageID: ts,
+		ThreadID:  ts,
 	}
 
 	if len(files) > 0 {

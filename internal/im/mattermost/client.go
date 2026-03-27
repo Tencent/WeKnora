@@ -88,6 +88,37 @@ func (c *Client) CreatePost(ctx context.Context, channelID, rootID, message stri
 	return created.ID, nil
 }
 
+// GetPost fetches a post by ID, returning its root_id (empty if top-level).
+func (c *Client) GetPost(ctx context.Context, postID string) (rootID string, err error) {
+	url := fmt.Sprintf("%s/posts/%s", c.baseURL, postID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	c.authHeader(req)
+	req.Header.Del("Content-Type")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("mattermost get post: status=%d body=%s", resp.StatusCode, truncateForErr(respBody))
+	}
+
+	var post struct {
+		ID     string `json:"id"`
+		RootID string `json:"root_id"`
+	}
+	if err := json.Unmarshal(respBody, &post); err != nil {
+		return "", fmt.Errorf("decode get post: %w", err)
+	}
+	return post.RootID, nil
+}
+
 // PatchPostMessage updates a post's message field.
 func (c *Client) PatchPostMessage(ctx context.Context, postID, message string) error {
 	payload, err := json.Marshal(map[string]string{"message": message})
