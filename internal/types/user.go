@@ -64,6 +64,36 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
+type OIDCAuthURLResponse struct {
+	Success             bool   `json:"success"`
+	ProviderDisplayName string `json:"provider_display_name,omitempty"`
+	AuthorizationURL    string `json:"authorization_url,omitempty"`
+	State               string `json:"state,omitempty"`
+}
+
+type OIDCConfigResponse struct {
+	Success             bool   `json:"success"`
+	Enabled             bool   `json:"enabled"`
+	ProviderDisplayName string `json:"provider_display_name,omitempty"`
+}
+
+type OIDCCallbackResponse struct {
+	Success      bool    `json:"success"`
+	Message      string  `json:"message,omitempty"`
+	User         *User   `json:"user,omitempty"`
+	Tenant       *Tenant `json:"tenant,omitempty"`
+	Token        string  `json:"token,omitempty"`
+	RefreshToken string  `json:"refresh_token,omitempty"`
+	IsNewUser    bool    `json:"is_new_user,omitempty"`
+}
+
+type OIDCUserInfo struct {
+	Subject  string                 `json:"subject,omitempty"`
+	Username string                 `json:"username,omitempty"`
+	Email    string                 `json:"email,omitempty"`
+	Claims   map[string]interface{} `json:"claims,omitempty"`
+}
+
 // RegisterRequest represents a registration request
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=50"`

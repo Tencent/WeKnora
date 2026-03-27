@@ -1027,6 +1027,12 @@ export default {
   auth: {
     login: 'Login',
     logout: 'Logout',
+    oidcLogin: 'Sign in with OIDC',
+    oidcLoginWithProvider: 'Sign in with {provider}',
+    redirectingToOIDC: 'Redirecting to identity provider...',
+    orContinueWith: 'Or continue with',
+    oidcLoginFailed: 'OIDC login failed',
+    oidcStateMismatch: 'OIDC state verification failed, please try again',
     username: 'Username',
     email: 'Email',
     password: 'Password',

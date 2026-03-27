@@ -1,0 +1,25 @@
+# config.yaml
+issuer: http://127.0.0.1:5556/dex
+storage:
+  type: memory
+web:
+  http: 0.0.0.0:5556
+staticClients:
+  - id: weknora
+    redirectURIs:
+      - 'http://127.0.0.1:5173/api/v1/auth/oidc/callback'
+      - 'http://127.0.0.1/api/v1/auth/oidc/callback'
+    name: 'WeKnora'
+    secret: KvwhFZQa57ijWkiCuva0
+enablePasswordDB: true
+staticPasswords:
+  - email: "admin@example.com"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: "admin"
+    userID: "1234"
+oauth2:
+  responseTypes: 
+    - code
+    - id_token
+    - token
+  skipApprovalScreen: true
