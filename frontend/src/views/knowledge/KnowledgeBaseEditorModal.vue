@@ -212,6 +212,11 @@
                   />
                 </div>
 
+                <!-- 数据源管理（仅编辑模式） -->
+                <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'datasource'" class="section">
+                  <DataSourceSettings :kb-id="kbId" />
+                </div>
+
                 <!-- 共享设置（仅编辑模式） -->
                 <div v-if="mode === 'edit' && kbId" v-show="currentSection === 'share'" class="section">
                   <KBShareSettings :kb-id="kbId" />
@@ -250,6 +255,7 @@ import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
+import DataSourceSettings from './settings/DataSourceSettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -292,8 +298,12 @@ const navItems = computed(() => {
       { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
+    // 数据源管理：仅文档类型知识库 + 编辑模式
+    if (props.mode === 'edit' && props.kbId) {
+      items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource') })
+    }
   }
-  // 只在编辑模式下显示共享标签页
+  // 共享设置：编辑模式下所有类型都可用
   if (props.mode === 'edit' && props.kbId) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
   }
@@ -810,7 +820,7 @@ watch(
 .settings-modal {
   position: relative;
   width: 90vw;
-  max-width: 1100px;
+  max-width: 1000px;
   height: 85vh;
   max-height: 750px;
   background: var(--td-bg-color-container);
@@ -944,7 +954,7 @@ watch(
   .section-title {
     margin: 0 0 8px 0;
     font-family: "PingFang SC";
-    font-size: 16px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -974,7 +984,7 @@ watch(
   display: block;
   margin-bottom: 8px;
   font-family: "PingFang SC";
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--td-text-color-primary);
 

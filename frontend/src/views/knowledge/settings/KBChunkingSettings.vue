@@ -250,8 +250,8 @@ const emitUpdate = () => {
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
+  flex: 0 0 40%;
+  max-width: 40%;
   padding-right: 24px;
 
   label {
@@ -271,8 +271,8 @@ const emitUpdate = () => {
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
+  flex: 0 0 55%;
+  max-width: 55%;
   display: flex;
   justify-content: flex-end;
   align-items: center;

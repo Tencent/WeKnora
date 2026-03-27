@@ -14,6 +14,7 @@ const (
 	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
 	TypeImageMultimodal     = "image:multimodal"      // 图片多模态处理任务（OCR + VLM Caption）
 	TypeManualProcess       = "manual:process"        // 手工知识更新任务（cleanup + 重新索引）
+	TypeDataSourceSync      = "datasource:sync"       // 数据源同步任务
 )
 
 // ExtractChunkPayload represents the extract chunk task payload

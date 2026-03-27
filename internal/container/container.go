@@ -50,6 +50,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/web_search"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
+	"github.com/Tencent/WeKnora/internal/datasource"
+	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -143,6 +145,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewAgentShareRepository))
 	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
 	must(container.Provide(service.NewWebSearchStateService))
+	must(container.Provide(repository.NewDataSourceRepository))
+	must(container.Provide(repository.NewSyncLogRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -204,6 +208,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
+
+	// Data source sync framework
+	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
+	must(container.Provide(initConnectorRegistry))
+	must(container.Provide(datasource.NewScheduler))
+	must(container.Provide(service.NewDataSourceService))
+	must(container.Invoke(startDataSourceScheduler))
+	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
@@ -242,6 +254,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
+
+	// Data source handler
+	must(container.Provide(handler.NewDataSourceHandler))
 
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
@@ -397,7 +412,11 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", os.Getenv("DB_DRIVER"))
 	}
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	db, err := gorm.Open(dialector, &gorm.Config{
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1253,4 +1272,32 @@ func credentialBool(creds map[string]interface{}, key string) bool {
 	default:
 		return false
 	}
+}
+
+// initConnectorRegistry creates and populates the connector registry with all available connectors.
+func initConnectorRegistry() *datasource.ConnectorRegistry {
+	registry := datasource.NewConnectorRegistry()
+
+	// Register Feishu connector
+	_ = registry.Register(feishuConnector.NewConnector())
+
+	// Future connectors will be registered here:
+	// _ = registry.Register(notionConnector.NewConnector())
+	// _ = registry.Register(confluenceConnector.NewConnector())
+	// _ = registry.Register(yuqueConnector.NewConnector())
+	// _ = registry.Register(githubConnector.NewConnector())
+
+	return registry
+}
+
+// startDataSourceScheduler starts the data source cron scheduler and registers cleanup.
+func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interfaces.ResourceCleaner) {
+	if err := scheduler.Start(context.Background()); err != nil {
+		logger.Warnf(context.Background(), "[Container] data source scheduler start failed: %v", err)
+	}
+
+	cleaner.RegisterWithName("DataSourceScheduler", func() error {
+		scheduler.Stop()
+		return nil
+	})
 }

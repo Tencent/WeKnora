@@ -107,7 +107,8 @@ func (r *knowledgeTagRepository) ListByKB(
 	baseQuery := r.db.WithContext(ctx).Model(&types.KnowledgeTag{}).
 		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
 	if keyword != "" {
-		baseQuery = baseQuery.Where("name LIKE ?", "%"+keyword+"%")
+		escaped := escapeLikeKeyword(keyword)
+		baseQuery = baseQuery.Where("name LIKE ?", "%"+escaped+"%")
 	}
 
 	if err := baseQuery.Count(&total).Error; err != nil {
@@ -117,7 +118,8 @@ func (r *knowledgeTagRepository) ListByKB(
 	dataQuery := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID)
 	if keyword != "" {
-		dataQuery = dataQuery.Where("name LIKE ?", "%"+keyword+"%")
+		escaped := escapeLikeKeyword(keyword)
+		dataQuery = dataQuery.Where("name LIKE ?", "%"+escaped+"%")
 	}
 
 	var tags []*types.KnowledgeTag

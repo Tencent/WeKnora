@@ -272,7 +272,7 @@ defineExpose({ loadShares })
   margin-bottom: 16px;
   .shares-title {
     font-family: "PingFang SC";
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     color: var(--td-text-color-primary);
   }

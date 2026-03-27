@@ -315,7 +315,7 @@ onMounted(async () => {
   .section-title {
     margin: 0 0 8px 0;
     font-family: "PingFang SC";
-    font-size: 16px;
+    font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -340,7 +340,7 @@ onMounted(async () => {
     display: block;
     margin-bottom: 8px;
     font-family: "PingFang SC";
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
@@ -382,7 +382,7 @@ onMounted(async () => {
 
   .shares-title {
     font-family: "PingFang SC";
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
     color: var(--td-text-color-primary);
   }

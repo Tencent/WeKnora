@@ -60,6 +60,7 @@ type RouterParams struct {
 	SkillHandler          *handler.SkillHandler
 	OrganizationHandler   *handler.OrganizationHandler
 	IMHandler             *handler.IMHandler
+	DataSourceHandler     *handler.DataSourceHandler
 }
 
 // NewRouter 创建新的路由
@@ -140,6 +141,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSkillRoutes(v1, params.SkillHandler)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
 		RegisterIMChannelRoutes(v1, params.IMHandler)
+		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
 	}
 
 	return r
@@ -736,4 +738,37 @@ func serveFiles(r *gin.Engine) {
 			logger.Warnf(context.Background(), "[Router] /files write response failed: %v", err)
 		}
 	})
+}
+
+// RegisterDataSourceRoutes 注册数据源相关的路由
+func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHandler) {
+	// Data source routes
+	ds := r.Group("/datasource")
+	{
+		// Get available connector types
+		ds.GET("/types", handler.GetAvailableConnectors)
+
+		// Validate credentials without persistence (for "Test Connection" button)
+		ds.POST("/validate-credentials", handler.ValidateCredentials)
+
+		// CRUD operations
+		ds.POST("", handler.CreateDataSource)
+		ds.GET("", handler.ListDataSources)
+		ds.GET("/:id", handler.GetDataSource)
+		ds.PUT("/:id", handler.UpdateDataSource)
+		ds.DELETE("/:id", handler.DeleteDataSource)
+
+		// Connection and resource management
+		ds.POST("/:id/validate", handler.ValidateConnection)
+		ds.GET("/:id/resources", handler.ListAvailableResources)
+
+		// Sync management
+		ds.POST("/:id/sync", handler.ManualSync)
+		ds.POST("/:id/pause", handler.PauseDataSource)
+		ds.POST("/:id/resume", handler.ResumeDataSource)
+
+		// Sync logs
+		ds.GET("/:id/logs", handler.GetSyncLogs)
+		ds.GET("/logs/:log_id", handler.GetSyncLog)
+	}
 }

@@ -208,8 +208,8 @@ onMounted(load)
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
+  flex: 0 0 40%;
+  max-width: 40%;
   padding-right: 24px;
 
   label {
@@ -229,8 +229,8 @@ onMounted(load)
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
+  flex: 0 0 55%;
+  max-width: 55%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

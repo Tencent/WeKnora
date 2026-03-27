@@ -19,6 +19,7 @@ type AsynqTaskParams struct {
 	KnowledgeService     interfaces.KnowledgeService
 	KnowledgeBaseService interfaces.KnowledgeBaseService
 	TagService           interfaces.KnowledgeTagService
+	DataSourceService    interfaces.DataSourceService
 	ChunkExtractor       interfaces.TaskHandler `name:"chunkExtractor"`
 	DataTableSummary     interfaces.TaskHandler `name:"dataTableSummary"`
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
@@ -107,6 +108,9 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register image multimodal handler
 	mux.HandleFunc(types.TypeImageMultimodal, params.ImageMultimodal.Handle)
+
+	// Register data source sync handler
+	mux.HandleFunc(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
 
 	go func() {
 		// Start the server
