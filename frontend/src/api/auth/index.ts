@@ -147,9 +147,9 @@ export async function login(data: LoginRequest): Promise<LoginResponse> {
 /**
  * 获取 OIDC 登录跳转地址
  */
-export async function getOIDCAuthorizationURL(redirectURI: string, frontendRedirectURI: string): Promise<OIDCAuthURLResponse> {
+export async function getOIDCAuthorizationURL(redirectURI: string): Promise<OIDCAuthURLResponse> {
   try {
-    const response = await get(`/api/v1/auth/oidc/url?redirect_uri=${encodeURIComponent(redirectURI)}&frontend_redirect_uri=${encodeURIComponent(frontendRedirectURI)}`)
+    const response = await get(`/api/v1/auth/oidc/url?redirect_uri=${encodeURIComponent(redirectURI)}`)
     return response as unknown as OIDCAuthURLResponse
   } catch (error: any) {
     return {

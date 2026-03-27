@@ -28,9 +28,8 @@ import (
 )
 
 type oidcAuthorizationState struct {
-	Nonce               string `json:"nonce"`
-	RedirectURI         string `json:"redirect_uri,omitempty"`
-	FrontendRedirectURI string `json:"frontend_redirect_uri,omitempty"`
+	Nonce       string `json:"nonce"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 var (
@@ -214,16 +213,13 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 }
 
 // GetOIDCAuthorizationURL builds the OIDC authorization URL.
-func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI, frontendRedirectURI string) (*types.OIDCAuthURLResponse, error) {
+func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI string) (*types.OIDCAuthURLResponse, error) {
 	cfg, err := s.getOIDCConfig(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(redirectURI) == "" {
 		return nil, errors.New("redirect_uri is required")
-	}
-	if strings.TrimSpace(frontendRedirectURI) == "" {
-		return nil, errors.New("frontend_redirect_uri is required")
 	}
 
 	nonce, err := generateRandomString(24)
@@ -232,9 +228,8 @@ func (s *userService) GetOIDCAuthorizationURL(ctx context.Context, redirectURI, 
 	}
 
 	state, err := encodeOIDCAuthorizationState(&oidcAuthorizationState{
-		Nonce:               nonce,
-		RedirectURI:         strings.TrimSpace(redirectURI),
-		FrontendRedirectURI: strings.TrimSpace(frontendRedirectURI),
+		Nonce:       nonce,
+		RedirectURI: strings.TrimSpace(redirectURI),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode OIDC state: %w", err)

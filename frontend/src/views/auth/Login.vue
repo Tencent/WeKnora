@@ -660,7 +660,6 @@ const persistLoginResponse = async (response: any) => {
   router.replace('/platform/knowledge-bases')
 }
 
-const getFrontendOIDCRedirectURI = () => `${window.location.origin}/`
 const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
 
 const loadOIDCConfig = async () => {
@@ -677,7 +676,7 @@ const loadOIDCConfig = async () => {
 const handleOIDCLogin = async () => {
   try {
     oidcLoading.value = true
-    const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI(), getFrontendOIDCRedirectURI())
+		const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI())
     const authorizationURL = response.authorization_url
 
     if (!response.success || !authorizationURL) {

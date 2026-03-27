@@ -173,19 +173,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
 	ctx := c.Request.Context()
 	redirectURI := strings.TrimSpace(c.Query("redirect_uri"))
-	frontendRedirectURI := strings.TrimSpace(c.Query("frontend_redirect_uri"))
 	if redirectURI == "" {
 		appErr := errors.NewValidationError("redirect_uri is required")
 		c.Error(appErr)
 		return
 	}
-	if frontendRedirectURI == "" {
-		appErr := errors.NewValidationError("frontend_redirect_uri is required")
-		c.Error(appErr)
-		return
-	}
 
-	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, redirectURI, frontendRedirectURI)
+	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, redirectURI)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
 		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
@@ -233,10 +227,7 @@ func (h *AuthHandler) GetOIDCConfig(c *gin.Context) {
 // @Router       /auth/oidc/callback [get]
 func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	ctx := c.Request.Context()
-	frontendRedirectURI := strings.TrimSpace(c.Query("frontend_redirect_uri"))
-	if frontendRedirectURI == "" {
-		frontendRedirectURI = "/login"
-	}
+	frontendRedirectURI := "/"
 
 	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
 		redirectURL := frontendRedirectURI + "#oidc_error=" + urlQueryEscape(providerError)
@@ -253,9 +244,6 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 		logger.Errorf(ctx, "Failed to decode OIDC state: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("invalid_state"))
 		return
-	}
-	if strings.TrimSpace(decodedState.FrontendRedirectURI) != "" {
-		frontendRedirectURI = strings.TrimSpace(decodedState.FrontendRedirectURI)
 	}
 
 	code := strings.TrimSpace(c.Query("code"))
@@ -294,9 +282,8 @@ func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error)
 }
 
 type oidcStatePayload struct {
-	Nonce               string `json:"nonce"`
-	RedirectURI         string `json:"redirect_uri,omitempty"`
-	FrontendRedirectURI string `json:"frontend_redirect_uri,omitempty"`
+	Nonce       string `json:"nonce"`
+	RedirectURI string `json:"redirect_uri,omitempty"`
 }
 
 func decodeOIDCState(raw string) (*oidcStatePayload, error) {
