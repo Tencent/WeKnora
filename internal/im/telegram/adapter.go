@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,12 +77,13 @@ type telegramUpdate struct {
 }
 
 type telegramMsg struct {
-	MessageID int            `json:"message_id"`
-	From      *telegramUser  `json:"from"`
-	Chat      telegramChat   `json:"chat"`
-	Text      string         `json:"text"`
-	Document  *telegramDoc   `json:"document"`
-	Photo     []telegramPhoto `json:"photo"`
+	MessageID       int             `json:"message_id"`
+	MessageThreadID int             `json:"message_thread_id"`
+	From            *telegramUser   `json:"from"`
+	Chat            telegramChat    `json:"chat"`
+	Text            string          `json:"text"`
+	Document        *telegramDoc    `json:"document"`
+	Photo           []telegramPhoto `json:"photo"`
 }
 
 type telegramUser struct {
@@ -154,6 +156,11 @@ func parseTelegramMessage(msg *telegramMsg) *im.IncomingMessage {
 		}
 	}
 
+	threadID := ""
+	if msg.MessageThreadID != 0 {
+		threadID = fmt.Sprintf("%d", msg.MessageThreadID)
+	}
+
 	incoming := &im.IncomingMessage{
 		Platform:    im.PlatformTelegram,
 		UserID:      userID,
@@ -161,6 +168,7 @@ func parseTelegramMessage(msg *telegramMsg) *im.IncomingMessage {
 		ChatID:      chatID,
 		ChatType:    chatType,
 		MessageID:   fmt.Sprintf("%d", msg.MessageID),
+		ThreadID:    threadID,
 		MessageType: im.MessageTypeText,
 		Content:     msg.Text,
 	}
@@ -206,7 +214,20 @@ func resolveChatID(incoming *im.IncomingMessage) string {
 // ── Send reply ──
 
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
-	return a.sendMessage(ctx, resolveChatID(incoming), transformThinkBlocks(reply.Content), "")
+	chatID := resolveChatID(incoming)
+	text := transformThinkBlocks(reply.Content)
+
+	body := map[string]interface{}{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "Markdown",
+	}
+	if incoming.ThreadID != "" {
+		if tid, err := strconv.Atoi(incoming.ThreadID); err == nil {
+			body["message_thread_id"] = tid
+		}
+	}
+	return a.callAPI(ctx, "sendMessage", body)
 }
 
 func (a *Adapter) sendMessage(ctx context.Context, chatID, text, replyToMessageID string) error {
@@ -342,6 +363,11 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 	body := map[string]interface{}{
 		"chat_id": chatID,
 		"text":    "正在思考...",
+	}
+	if incoming.ThreadID != "" {
+		if tid, err := strconv.Atoi(incoming.ThreadID); err == nil {
+			body["message_thread_id"] = tid
+		}
 	}
 	var sentMsg struct {
 		MessageID int `json:"message_id"`

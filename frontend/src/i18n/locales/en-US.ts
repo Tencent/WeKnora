@@ -3246,6 +3246,10 @@ export default {
       fileKnowledgeBase: 'File Storage Knowledge Base',
       fileKnowledgeBasePlaceholder: 'Select a knowledge base (optional)',
       fileKnowledgeBaseHint: 'When configured, files sent by users will be automatically saved to this knowledge base',
+      sessionMode: 'Session Mode',
+      sessionModeUser: 'Per User (default)',
+      sessionModeThread: 'Per Thread',
+      sessionModeHint: 'User mode: each person has their own conversation. Use /clear to start fresh. Thread mode: each message thread is a separate conversation. Multiple people can collaborate in the same thread.',
     },
     mcp: {
       label: 'MCP Services',

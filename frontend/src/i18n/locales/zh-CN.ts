@@ -3221,6 +3221,10 @@ export default {
       fileKnowledgeBase: "文件保存知识库",
       fileKnowledgeBasePlaceholder: "选择知识库（可选）",
       fileKnowledgeBaseHint: "配置后，用户发送的文件将自动保存到该知识库中",
+      sessionMode: "会话模式",
+      sessionModeUser: "按用户（默认）",
+      sessionModeThread: "按话题",
+      sessionModeHint: "用户模式：每个用户独立对话，使用 /clear 开始新对话。话题模式：每个消息话题独立对话，同一话题中多人可协作。",
     },
     tools: {
       thinking: "思考",

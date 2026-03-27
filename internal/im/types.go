@@ -24,6 +24,7 @@ type IMChannel struct {
 	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
+	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
 	Credentials     types.JSON     `json:"credentials"       gorm:"type:jsonb;not null;default:'{}'"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
@@ -48,14 +49,37 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 	if ch.OutputMode == "" {
 		ch.OutputMode = "stream"
 	}
+	if ch.SessionMode == "" {
+		ch.SessionMode = string(SessionModeUser)
+	}
+	if err := ch.validateSessionMode(); err != nil {
+		return err
+	}
 	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
 }
 
-// BeforeSave ensures bot_identity is recomputed on every save (create + update).
+// BeforeSave ensures bot_identity is recomputed and session_mode is validated
+// on every save (create + update).
 func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
+	if ch.SessionMode == "" {
+		ch.SessionMode = string(SessionModeUser)
+	}
+	if err := ch.validateSessionMode(); err != nil {
+		return err
+	}
 	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
+}
+
+// validateSessionMode checks that SessionMode holds a supported value.
+func (ch *IMChannel) validateSessionMode() error {
+	switch SessionMode(ch.SessionMode) {
+	case SessionModeUser, SessionModeThread:
+		return nil
+	default:
+		return fmt.Errorf("invalid session_mode: %s", ch.SessionMode)
+	}
 }
 
 // computeBotIdentity derives a unique bot identity string from the channel's
@@ -123,6 +147,7 @@ type ChannelSession struct {
 	Platform    string         `json:"platform"      gorm:"type:varchar(20);not null"`
 	UserID      string         `json:"user_id"       gorm:"type:varchar(128);not null"`
 	ChatID      string         `json:"chat_id"       gorm:"type:varchar(128);not null;default:''"`
+	ThreadID    string         `json:"thread_id"     gorm:"type:varchar(128);not null;default:''"`
 	SessionID   string         `json:"session_id"    gorm:"type:varchar(36);not null;index"`
 	TenantID    uint64         `json:"tenant_id"     gorm:"not null;index"`
 	AgentID     string         `json:"agent_id"      gorm:"type:varchar(36);default:''"`

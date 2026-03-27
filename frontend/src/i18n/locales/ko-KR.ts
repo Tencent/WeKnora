@@ -3275,6 +3275,10 @@ export default {
       fileKnowledgeBase: "파일 저장 지식 베이스",
       fileKnowledgeBasePlaceholder: "지식 베이스 선택 (선택 사항)",
       fileKnowledgeBaseHint: "설정 시 사용자가 보낸 파일이 자동으로 해당 지식 베이스에 저장됩니다",
+      sessionMode: "세션 모드",
+      sessionModeUser: "사용자별 (기본)",
+      sessionModeThread: "스레드별",
+      sessionModeHint: "사용자 모드: 각 사용자별 독립 대화. /clear로 새 대화 시작. 스레드 모드: 메시지 스레드별 독립 대화. 같은 스레드에서 여러 명이 함께 대화 가능.",
     },
     tools: {
       thinking: '사고',
