@@ -112,7 +112,7 @@ flowchart TD
     F -- 是 --> H{是否有 code}
     H -- 否 --> I[302 到前端并带 #oidc_error=missing_code]
 
-    H -- 是 --> J[调用 LoginWithOIDC(code, redirect_uri)]
+    H -- 是 --> J[调用 LoginWithOIDC，传入 code 和 redirect_uri]
     J --> K[向 OIDC token endpoint 换 token]
     K --> L[解析 id_token / 调用 userinfo]
     L --> M{本地用户是否存在}
