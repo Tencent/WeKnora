@@ -91,6 +91,7 @@
             <t-radio-button value="slack">{{ $t('agentEditor.im.slack') }}</t-radio-button>
             <t-radio-button value="telegram">{{ $t('agentEditor.im.telegram') }}</t-radio-button>
             <t-radio-button value="dingtalk">{{ $t('agentEditor.im.dingtalk') }}</t-radio-button>
+            <t-radio-button value="mattermost">{{ $t('agentEditor.im.mattermost') }}</t-radio-button>
           </t-radio-group>
         </div>
 
@@ -104,10 +105,11 @@
         <div class="form-item">
           <label class="form-label">{{ $t('agentEditor.im.mode') }}</label>
           <t-radio-group v-model="formData.mode">
-            <t-radio-button value="websocket">WebSocket</t-radio-button>
+            <t-radio-button value="websocket" :disabled="formData.platform === 'mattermost'">WebSocket</t-radio-button>
             <t-radio-button value="webhook">Webhook</t-radio-button>
           </t-radio-group>
-          <p class="form-hint">{{ $t('agentEditor.im.modeHint') }}</p>
+          <p v-if="formData.platform === 'mattermost'" class="form-hint">{{ $t('agentEditor.im.mattermostModeHint') }}</p>
+          <p v-else class="form-hint">{{ $t('agentEditor.im.modeHint') }}</p>
         </div>
 
         <!-- Output mode -->
@@ -283,13 +285,50 @@
             <p class="form-hint">{{ $t('agentEditor.im.dingtalkCardTemplateIdHint') }}</p>
           </div>
         </template>
+
+        <!-- Mattermost credentials -->
+        <template v-if="formData.platform === 'mattermost'">
+          <div class="platform-link-hint">
+            <t-icon name="jump" class="hint-link-icon" />
+            <a href="https://developers.mattermost.com/integrate/webhooks/outgoing/" target="_blank" rel="noopener noreferrer" class="hint-link">
+              {{ $t('agentEditor.im.mattermostConsole') }}
+            </a>
+            <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+          </div>
+          <div class="form-item">
+            <label class="form-label">Site URL</label>
+            <t-input v-model="formData.credentials.site_url" placeholder="https://mattermost.example.com" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">Bot Token</label>
+            <t-input v-model="formData.credentials.bot_token" type="password" placeholder="Bot Token" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">Outgoing Webhook Token</label>
+            <t-input v-model="formData.credentials.outgoing_token" type="password" placeholder="Token from Outgoing Webhook" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">Bot User ID</label>
+            <t-input v-model="formData.credentials.bot_user_id" placeholder="Optional — filter bot self-messages" />
+          </div>
+          <div class="form-item mattermost-post-main-row">
+            <div class="mattermost-post-main-label">
+              <label class="form-label">{{ $t('agentEditor.im.mattermostPostToMain') }}</label>
+              <t-switch
+                :value="!!formData.credentials.post_to_main"
+                @change="(v: boolean) => { formData.credentials.post_to_main = v }"
+              />
+            </div>
+            <p class="form-hint">{{ $t('agentEditor.im.mattermostPostToMainHint') }}</p>
+          </div>
+        </template>
       </div>
     </t-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel } from '@/api/agent';
@@ -313,7 +352,7 @@ const knowledgeBases = ref<{ id: string; name: string }[]>([]);
 const defaultCredentials = (): Record<string, any> => ({});
 
 const formData = ref({
-  platform: 'wecom' as 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk',
+  platform: 'wecom' as 'wecom' | 'feishu' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost',
   name: '',
   mode: 'websocket' as 'webhook' | 'websocket',
   output_mode: 'stream' as 'stream' | 'full',
@@ -325,6 +364,18 @@ function platformLabel(platform: string): string {
   const key = `agentEditor.im.${platform}`;
   return t(key);
 }
+
+watch(
+  () => formData.value.platform,
+  (p) => {
+    if (p === 'mattermost') {
+      formData.value.mode = 'webhook';
+      if (typeof formData.value.credentials.post_to_main !== 'boolean') {
+        formData.value.credentials.post_to_main = false;
+      }
+    }
+  },
+);
 
 async function loadChannels() {
   loading.value = true;
@@ -343,16 +394,29 @@ async function loadChannels() {
 }
 
 function getCallbackUrl(channel: IMChannel): string {
-  const base = window.location.origin;
+  const base = import.meta.env.VITE_IS_DOCKER ? window.location.origin : 'http://127.0.0.1:8080';
   return `${base}/api/v1/im/callback/${channel.id}`;
 }
 
 async function copyUrl(channel: IMChannel) {
+  const text = getCallbackUrl(channel);
   try {
-    await navigator.clipboard.writeText(getCallbackUrl(channel));
+    await navigator.clipboard.writeText(text);
     MessagePlugin.success(t('common.copySuccess'));
   } catch {
-    MessagePlugin.error(t('common.copyFailed'));
+    const el = document.createElement('textarea');
+    el.value = text;
+    el.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(el);
+    if (ok) {
+      MessagePlugin.success(t('common.copySuccess'));
+    } else {
+      MessagePlugin.error(t('common.copyFailed'));
+    }
   }
 }
 
@@ -572,6 +636,11 @@ onMounted(() => {
     background: rgba(23, 126, 251, 0.08);
     color: #177efb;
   }
+
+  &.mattermost {
+    background: rgba(25, 42, 77, 0.08);
+    color: #192a4d;
+  }
 }
 
 .channel-name {
@@ -658,6 +727,20 @@ onMounted(() => {
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
+  }
+}
+
+.mattermost-post-main-row {
+  .mattermost-post-main-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    .form-label {
+      margin-bottom: 0;
+      flex: 1;
+    }
   }
 }
 
