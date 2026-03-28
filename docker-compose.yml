@@ -349,7 +349,7 @@ services:
       - ./misc/dex-config.yaml:/etc/dex/config.yaml
     command: ["dex", "serve", "/etc/dex/config.yaml"]
     profiles:
-      - oidc
+      - dex
       - full
 
 networks:

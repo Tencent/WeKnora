@@ -550,6 +550,7 @@ OIDC 配置定义位于 `internal/config/config.go`，环境变量示例见 `.en
 ---
 
 ## 13. 本地联调示例（Dex）
+[Dex](https://dexidp.io/) 是一个简单易用的OIDC Provider，您可以通过它对接多种第三方认证系统（如OAuth2.0，Google，GitHub，LDAP等）。除了Dex之外，您也可以选择[KeyCloak](https://www.keycloak.org/)等其他符合OpenID Connect协议的Provider进行接入。
 
 项目中已提供 Dex 示例配置：`misc/dex-config.yaml`。
 

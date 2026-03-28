@@ -143,7 +143,7 @@ start_services() {
                 ENABLED_SERVICES="$ENABLED_SERVICES jaeger"
                 ;;
             --dex)
-                PROFILES="$PROFILES --profile oidc"
+                PROFILES="$PROFILES --profile dex"
                 ENABLED_SERVICES="$ENABLED_SERVICES dex"
                 ;;
             --full)
