@@ -54,10 +54,14 @@ func (p *AliyunProvider) ValidateConfig(config *Config) error {
 	return nil
 }
 
-// IsQwen3Model 检查模型名是否为 Qwen3 模型
-// Qwen3 模型需要特殊处理 enable_thinking 参数
-func IsQwen3Model(modelName string) bool {
-	return strings.HasPrefix(modelName, "qwen3-")
+// IsQwenThinkingModel 检查模型名是否为支持思维链的 Qwen 模型
+// 支持思维链的模型需要特殊处理 enable_thinking 参数
+func IsQwenThinkingModel(modelName string) bool {
+	lowerName := strings.ToLower(modelName)
+	return strings.HasPrefix(lowerName, "qwen3") ||
+		strings.HasPrefix(lowerName, "qwen-plus") ||
+		strings.HasPrefix(lowerName, "qwen-max") ||
+		strings.HasPrefix(lowerName, "qwen-turbo")
 }
 
 // IsDeepSeekModel 检查模型名是否为 DeepSeek 模型

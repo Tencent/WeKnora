@@ -25,11 +25,11 @@ type ProviderSpec struct {
 // chatProviderSpecs is the ordered list of provider specs.
 // Order matters: more specific specs (with ModelMatcher) should come before generic ones.
 var chatProviderSpecs = []ProviderSpec{
-	// Qwen3 (must be before generic Aliyun — only matches Qwen3 models)
+	// Aliyun Qwen Thinking Models (must be before generic Aliyun)
 	{
 		Provider:          provider.ProviderAliyun,
-		ModelMatcher:      func(name string) bool { return provider.IsQwen3Model(name) },
-		RequestCustomizer: qwen3RequestCustomizer,
+		ModelMatcher:      func(name string) bool { return provider.IsQwenThinkingModel(name) },
+		RequestCustomizer: qwenThinkingRequestCustomizer,
 	},
 	// LKEAP
 	{
@@ -95,12 +95,12 @@ type ThinkingChatCompletionRequest struct {
 
 // --- Customizer functions ---
 
-// qwen3RequestCustomizer 自定义 Qwen3 请求
-// Qwen3 模型在非流式请求时需要显式禁用 thinking
-func qwen3RequestCustomizer(
-	req *openai.ChatCompletionRequest, _ *ChatOptions, isStream bool,
+// qwenThinkingRequestCustomizer 自定义 Qwen 系列（阿里云）模型的思考请求
+func qwenThinkingRequestCustomizer(
+	req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool,
 ) (any, bool) {
 	if !isStream {
+		// Qwen3 模型在非流式请求时需要显式禁用 thinking
 		qwenReq := QwenChatCompletionRequest{
 			ChatCompletionRequest: *req,
 		}
@@ -108,7 +108,19 @@ func qwen3RequestCustomizer(
 		qwenReq.EnableThinking = &enableThinking
 		return qwenReq, true
 	}
-	return nil, false
+
+	// 流式请求：根据 opts.Thinking 启用思考
+	qwenReq := QwenChatCompletionRequest{
+		ChatCompletionRequest: *req,
+	}
+	thinking := false
+	if opts != nil && opts.Thinking != nil {
+		thinking = *opts.Thinking
+	}
+	qwenReq.EnableThinking = &thinking
+
+	// 必须返回 true 以使用 raw HTTP，否则 SDK 会过滤掉 enable_thinking 字段
+	return qwenReq, true
 }
 
 // lkeapRequestCustomizer 自定义 LKEAP 请求
