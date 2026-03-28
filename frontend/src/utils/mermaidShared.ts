@@ -83,10 +83,10 @@ export const renderMermaidInContainer = async (
         let {svg} = await mermaid.render(`${el.id}-svg`, code);
         el.classList.add('mermaid')
         el.innerHTML = svg;
-        el.addEventListener('click', (event) => {
+        el.onclick = (event) => {
             event.stopPropagation();
             openMermaidFullscreen(svg);
-        })
+        };
     } catch(e){
         console.error("Mermaid rendering error:", e);
     }
