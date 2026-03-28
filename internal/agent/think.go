@@ -15,9 +15,10 @@ import (
 
 // streamLLMResult holds accumulated output from a streaming LLM call.
 type streamLLMResult struct {
-	Content   string
-	ToolCalls []types.LLMToolCall
-	Usage     *types.TokenUsage
+	Content      string
+	ToolCalls    []types.LLMToolCall
+	Usage        *types.TokenUsage
+	FinishReason string // actual finish_reason from LLM (captured from last stream chunk)
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -64,6 +65,10 @@ func (e *AgentEngine) streamLLMToEventBus(
 
 		if chunk.Usage != nil {
 			result.Usage = chunk.Usage
+		}
+
+		if chunk.FinishReason != "" {
+			result.FinishReason = chunk.FinishReason
 		}
 
 		if emitFunc != nil {
@@ -205,10 +210,18 @@ func (e *AgentEngine) streamThinkingToEventBus(
 
 	fullContent := agenttools.StripThinkBlocks(llmResult.Content)
 
+	// Use actual finish_reason from LLM stream instead of hardcoding "stop".
+	// Fallback to "stop" when the stream did not report a finish_reason
+	// (e.g., certain Ollama models or providers that omit the field).
+	finishReason := llmResult.FinishReason
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
 	resp := &types.ChatResponse{
 		Content:      fullContent,
 		ToolCalls:    llmResult.ToolCalls,
-		FinishReason: "stop",
+		FinishReason: finishReason,
 	}
 	if llmResult.Usage != nil {
 		resp.Usage = *llmResult.Usage

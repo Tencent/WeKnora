@@ -71,6 +71,7 @@ type StreamResponse struct {
 	ToolCalls           []LLMToolCall          `json:"tool_calls,omitempty"`
 	Data                map[string]interface{} `json:"data,omitempty"`
 	Usage               *TokenUsage            `json:"usage,omitempty"`
+	FinishReason        string                 `json:"finish_reason,omitempty"`
 }
 
 // References references

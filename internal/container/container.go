@@ -56,6 +56,7 @@ import (
 	imPkg "github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/im/dingtalk"
 	"github.com/Tencent/WeKnora/internal/im/feishu"
+	"github.com/Tencent/WeKnora/internal/im/mattermost"
 	"github.com/Tencent/WeKnora/internal/im/slack"
 	"github.com/Tencent/WeKnora/internal/im/telegram"
 	"github.com/Tencent/WeKnora/internal/im/wecom"
@@ -1171,6 +1172,40 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 		}
 	})
 
+	// Register Mattermost adapter factory (outgoing webhook + REST API).
+	imService.RegisterAdapterFactory("mattermost", func(factoryCtx context.Context, channel *imPkg.IMChannel, msgHandler func(context.Context, *imPkg.IncomingMessage) error) (imPkg.Adapter, context.CancelFunc, error) {
+		creds, err := parseCredentials(channel.Credentials)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parse mattermost credentials: %w", err)
+		}
+
+		mode := channel.Mode
+		if mode == "" {
+			mode = "webhook"
+		}
+		if mode != "webhook" {
+			return nil, nil, fmt.Errorf("unsupported mattermost mode: %s (only webhook is supported)", mode)
+		}
+
+		siteURL := getString(creds, "site_url")
+		botToken := getString(creds, "bot_token")
+		outgoingToken := getString(creds, "outgoing_token")
+		botUserID := getString(creds, "bot_user_id")
+
+		if outgoingToken == "" {
+			return nil, nil, fmt.Errorf("mattermost outgoing_token is required")
+		}
+
+		client, err := mattermost.NewClient(siteURL, botToken)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		postReplyToMain := credentialBool(creds, "post_to_main")
+		adapter := mattermost.NewAdapter(client, outgoingToken, botUserID, postReplyToMain)
+		return adapter, func() {}, nil
+	})
+
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to load channels from database: %v", err)
@@ -1197,4 +1232,25 @@ func getString(creds map[string]interface{}, key string) string {
 		}
 	}
 	return ""
+}
+
+// credentialBool reads a boolean from JSON credentials (bool, string "true"/"1", or non-zero number).
+func credentialBool(creds map[string]interface{}, key string) bool {
+	v, ok := creds[key]
+	if !ok {
+		return false
+	}
+	switch x := v.(type) {
+	case bool:
+		return x
+	case string:
+		s := strings.TrimSpace(strings.ToLower(x))
+		return s == "true" || s == "1" || s == "yes"
+	case float64:
+		return x != 0
+	case int:
+		return x != 0
+	default:
+		return false
+	}
 }

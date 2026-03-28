@@ -12,7 +12,9 @@ import (
 )
 
 // validIMPlatforms is the set of supported IM platforms.
-var validIMPlatforms = map[string]bool{"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true}
+var validIMPlatforms = map[string]bool{
+	"wecom": true, "feishu": true, "slack": true, "telegram": true, "dingtalk": true, "mattermost": true,
+}
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
@@ -57,7 +59,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	}
 
 	if !validIMPlatforms[req.Platform] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram' or 'dingtalk'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform must be 'wecom', 'feishu', 'slack', 'telegram', 'dingtalk' or 'mattermost'"})
 		return
 	}
 
@@ -76,7 +78,11 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		channel.Enabled = *req.Enabled
 	}
 	if channel.Mode == "" {
-		channel.Mode = "websocket"
+		if channel.Platform == "mattermost" {
+			channel.Mode = "webhook"
+		} else {
+			channel.Mode = "websocket"
+		}
 	}
 	if channel.OutputMode == "" {
 		channel.OutputMode = "stream"
@@ -265,6 +271,8 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		return
 	}
 
+	logger.Infof(ctx, "[IM] Callback received platform=%s path_channel_id=%s", channel.Platform, channelID)
+
 	// Handle URL verification
 	if adapter.HandleURLVerification(c) {
 		return
@@ -287,6 +295,11 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 
 	// If nil, it's a non-message event - just acknowledge
 	if msg == nil {
+		if channel.Platform == "mattermost" {
+			logger.Infof(ctx, "[IM] Mattermost callback ignored (no message): path_channel_id=%s — check: (1) trigger word must be the *first word* of the post; (2) if channel+trigger are both set, post must be in that channel; (3) bot_user_id must not match the sender", channelID)
+		} else {
+			logger.Infof(ctx, "[IM] Callback parsed no message to process platform=%s path_channel_id=%s", channel.Platform, channelID)
+		}
 		c.JSON(http.StatusOK, gin.H{"success": true})
 		return
 	}

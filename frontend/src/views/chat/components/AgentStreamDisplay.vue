@@ -587,10 +587,7 @@ const props = defineProps<{
 }>();
 
 // Configure marked for security
-marked.use({
-  mangle: false,
-  headerIds: false
-});
+marked.use({});
 
 // Event stream
 const eventStream = computed(() => props.session?.agentEventStream || []);

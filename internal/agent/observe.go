@@ -51,9 +51,10 @@ func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.M
 // responseVerdict captures the result of analyzing an LLM response to determine
 // whether the agent loop should stop and what the final answer is (if any).
 type responseVerdict struct {
-	isDone      bool
-	finalAnswer string
-	step        types.AgentStep
+	isDone       bool
+	finalAnswer  string
+	emptyContent bool // LLM returned stop with no tool calls and empty content
+	step         types.AgentStep
 }
 
 // analyzeResponse inspects the LLM response for stop conditions:
@@ -102,9 +103,10 @@ func (e *AgentEngine) analyzeResponse(
 		})
 
 		return responseVerdict{
-			isDone:      true,
-			finalAnswer: response.Content,
-			step:        step,
+			isDone:       true,
+			finalAnswer:  response.Content,
+			emptyContent: response.Content == "",
+			step:         step,
 		}
 	}
 

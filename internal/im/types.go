@@ -39,7 +39,11 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 		ch.ID = uuid.New().String()
 	}
 	if ch.Mode == "" {
-		ch.Mode = "websocket"
+		if ch.Platform == "mattermost" {
+			ch.Mode = "webhook"
+		} else {
+			ch.Mode = "websocket"
+		}
 	}
 	if ch.OutputMode == "" {
 		ch.OutputMode = "stream"
@@ -103,6 +107,10 @@ func (ch *IMChannel) computeBotIdentity() string {
 	case "dingtalk":
 		if clientID := str("client_id"); clientID != "" {
 			return "dingtalk:" + clientID
+		}
+	case "mattermost":
+		if tok := str("outgoing_token"); tok != "" {
+			return "mattermost:wh:" + tok
 		}
 	}
 	return ""

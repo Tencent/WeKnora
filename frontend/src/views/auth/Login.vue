@@ -1,132 +1,51 @@
 <template>
   <div class="login-layout">
-    <!-- Global Animated Background - Knowledge Graph -->
     <div class="animated-bg">
-      <!-- Knowledge Nodes with Icons -->
       <div class="knowledge-node node-1">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
         </svg>
-        </div>
+      </div>
       <div class="knowledge-node node-2">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
       </div>
       <div class="knowledge-node node-3">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <!-- Vector embedding points -->
-          <circle cx="6" cy="6" r="1.5" fill="currentColor"/>
-          <circle cx="12" cy="5" r="1.5" fill="currentColor"/>
-          <circle cx="18" cy="7" r="1.5" fill="currentColor"/>
-          <circle cx="5" cy="12" r="1.5" fill="currentColor"/>
-          <circle cx="12" cy="12" r="2" fill="currentColor"/>
-          <circle cx="19" cy="13" r="1.5" fill="currentColor"/>
-          <circle cx="7" cy="18" r="1.5" fill="currentColor"/>
-          <circle cx="13" cy="19" r="1.5" fill="currentColor"/>
-          <circle cx="18" cy="18" r="1.5" fill="currentColor"/>
-          <!-- Connection lines -->
-          <line x1="6" y1="6" x2="12" y2="5" stroke-width="1"/>
-          <line x1="12" y1="5" x2="18" y2="7" stroke-width="1"/>
-          <line x1="6" y1="6" x2="5" y2="12" stroke-width="1"/>
-          <line x1="12" y1="5" x2="12" y2="12" stroke-width="1"/>
-          <line x1="18" y1="7" x2="19" y2="13" stroke-width="1"/>
-          <line x1="5" y1="12" x2="12" y2="12" stroke-width="1"/>
-          <line x1="12" y1="12" x2="19" y2="13" stroke-width="1"/>
-          <line x1="5" y1="12" x2="7" y2="18" stroke-width="1"/>
-          <line x1="12" y1="12" x2="13" y2="19" stroke-width="1"/>
-          <line x1="19" y1="13" x2="18" y2="18" stroke-width="1"/>
-          <line x1="7" y1="18" x2="13" y2="19" stroke-width="1"/>
-          <line x1="13" y1="19" x2="18" y2="18" stroke-width="1"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-4">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 2L2 7l10 5 10-5-10-5z"/>
           <path d="M2 17l10 5 10-5"/>
           <path d="M2 12l10 5 10-5"/>
         </svg>
       </div>
-      <div class="knowledge-node node-5">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-6">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-7">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 11l3 3L22 4"/>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-8">
+      <div class="knowledge-node node-4">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <ellipse cx="12" cy="5" rx="9" ry="3"/>
           <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
           <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
         </svg>
       </div>
-      <div class="knowledge-node node-9">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-          <path d="M2 17l10 5 10-5"/>
-          <path d="M2 12l10 5 10-5"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-10">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-11">
+      <div class="knowledge-node node-5">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/>
           <path d="m21 21-4.35-4.35"/>
         </svg>
       </div>
-      <div class="knowledge-node node-12">
+      <div class="knowledge-node node-6">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
           <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
           <line x1="12" y1="22.08" x2="12" y2="12"/>
         </svg>
       </div>
-      <div class="knowledge-node node-13">
+      <div class="knowledge-node node-7">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 20h9"/>
-          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
         </svg>
       </div>
-      <div class="knowledge-node node-14">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-          <line x1="3" y1="9" x2="21" y2="9"/>
-          <line x1="9" y1="21" x2="9" y2="9"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-15">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-16">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-17">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-        </svg>
-      </div>
-      <div class="knowledge-node node-18">
+      <div class="knowledge-node node-8">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
           <circle cx="9" cy="7" r="4"/>
@@ -134,47 +53,42 @@
           <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
         </svg>
       </div>
-      <div class="knowledge-node node-19">
+      <div class="knowledge-node node-9">
+        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      </div>
+      <div class="knowledge-node node-10">
+        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+        </svg>
+      </div>
+      <div class="knowledge-node node-11">
+        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+      </div>
+      <div class="knowledge-node node-12">
         <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
         </svg>
       </div>
-      <div class="knowledge-node node-20">
-        <svg class="node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-          <circle cx="12" cy="7" r="4"/>
-        </svg>
-      </div>
 
-      <!-- Connection Lines -->
       <svg class="knowledge-lines" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <!-- Horizontal connections -->
         <line class="connection-line line-1" x1="20" y1="15" x2="35" y2="25" />
         <line class="connection-line line-2" x1="35" y1="25" x2="55" y2="20" />
-        <line class="connection-line line-3" x1="55" y1="20" x2="65" y2="15" />
-        <line class="connection-line line-4" x1="65" y1="15" x2="85" y2="12" />
-        
-        <!-- Middle layer connections -->
-        <line class="connection-line line-5" x1="8" y1="35" x2="25" y2="45" />
-        <line class="connection-line line-6" x1="25" y1="45" x2="45" y2="50" />
-        <line class="connection-line line-7" x1="45" y1="50" x2="65" y2="48" />
-        <line class="connection-line line-8" x1="65" y1="48" x2="72" y2="42" />
-        <line class="connection-line line-9" x1="72" y1="42" x2="90" y2="38" />
-        
-        <!-- Lower connections -->
-        <line class="connection-line line-10" x1="10" y1="55" x2="20" y2="60" />
-        <line class="connection-line line-11" x1="20" y1="60" x2="40" y2="70" />
-        <line class="connection-line line-12" x1="40" y1="70" x2="60" y2="75" />
-        <line class="connection-line line-13" x1="60" y1="75" x2="75" y2="80" />
-        
-        <!-- Vertical connections -->
-        <line class="connection-line line-14" x1="20" y1="15" x2="20" y2="60" />
-        <line class="connection-line line-15" x1="35" y1="25" x2="25" y2="45" />
-        <line class="connection-line line-16" x1="55" y1="20" x2="45" y2="50" />
-        <line class="connection-line line-17" x1="75" y1="30" x2="65" y2="48" />
-        <line class="connection-line line-18" x1="40" y1="70" x2="12" y2="68" />
-        <line class="connection-line line-19" x1="60" y1="75" x2="80" y2="65" />
-        <line class="connection-line line-20" x1="82" y1="52" x2="90" y2="38" />
+        <line class="connection-line line-3" x1="55" y1="20" x2="85" y2="12" />
+        <line class="connection-line line-4" x1="8" y1="35" x2="25" y2="45" />
+        <line class="connection-line line-5" x1="25" y1="45" x2="65" y2="48" />
+        <line class="connection-line line-6" x1="20" y1="60" x2="60" y2="75" />
+        <line class="connection-line line-7" x1="20" y1="15" x2="20" y2="60" />
+        <line class="connection-line line-8" x1="55" y1="20" x2="45" y2="50" />
+        <line class="connection-line line-9" x1="65" y1="48" x2="90" y2="38" />
+        <line class="connection-line line-10" x1="40" y1="70" x2="75" y2="80" />
+        <line class="connection-line line-11" x1="35" y1="25" x2="25" y2="45" />
+        <line class="connection-line line-12" x1="75" y1="30" x2="65" y2="48" />
       </svg>
     </div>
 
@@ -202,9 +116,9 @@
       </a>
       
       <div class="language-switch">
-        <button @click="toggleLanguageMenu" class="header-link" :title="languageOptions.find(l => l.value === currentLanguage)?.label">
-          <span class="lang-flag-icon">{{ languageOptions.find(l => l.value === currentLanguage)?.flag }}</span>
-          <span class="link-text">{{ languageOptions.find(l => l.value === currentLanguage)?.shortLabel }}</span>
+        <button @click="toggleLanguageMenu" class="header-link" :title="currentLangOption?.label">
+          <span class="lang-flag-icon">{{ currentLangOption?.flag }}</span>
+          <span class="link-text">{{ currentLangOption?.shortLabel }}</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
@@ -455,7 +369,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted, computed } from 'vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { Swiper, SwiperSlide } from 'swiper/vue'
@@ -518,7 +432,6 @@ const languageOptions = [
   { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
 ]
 
-// Current language computed from i18n
 const currentLanguage = computed(() => locale.value)
 const oidcLoginText = computed(() => {
   if (oidcProviderName.value) {
@@ -526,6 +439,7 @@ const oidcLoginText = computed(() => {
   }
   return t('auth.oidcLogin')
 })
+const currentLangOption = computed(() => languageOptions.find(l => l.value === currentLanguage.value))
 
 // Login form data
 const formData = reactive<{[key: string]: any}>({
@@ -624,8 +538,6 @@ onMounted(() => {
   document.addEventListener('click', handleClickOutside)
 })
 
-// Clean up listener
-import { onBeforeUnmount } from 'vue'
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
 })
@@ -789,187 +701,60 @@ onMounted(() => {
   }
 }
 
-/* Global Animated Background - Knowledge Graph */
 .animated-bg {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  width: 100%;
-  height: 100%;
   pointer-events: none;
   z-index: 1;
   overflow: hidden;
+  contain: strict;
 }
 
-/* Knowledge Nodes */
 .knowledge-node {
   position: absolute;
   width: 40px;
   height: 40px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(4px);
   border: 2px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 
-    0 0 15px rgba(255, 255, 255, 0.4),
-    0 0 30px rgba(16, 185, 129, 0.3),
-    inset 0 0 15px rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 0 15px rgba(255, 255, 255, 0.35),
+    0 0 30px rgba(16, 185, 129, 0.2),
+    inset 0 0 8px rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: nodePulse 4s infinite ease-in-out;
-  transition: all 0.3s ease;
-}
-
-.knowledge-node:hover {
-  transform: scale(1.2);
-  box-shadow: 
-    0 0 20px rgba(255, 255, 255, 0.6),
-    0 0 40px rgba(16, 185, 129, 0.5),
-    inset 0 0 20px rgba(255, 255, 255, 0.2);
+  animation: nodePulse 5s infinite ease-in-out;
+  will-change: transform, opacity;
 }
 
 .node-icon {
   width: 20px;
   height: 20px;
   color: rgba(255, 255, 255, 0.9);
-  filter: drop-shadow(0 0 3px rgba(16, 185, 129, 0.5));
 }
 
-.node-1 {
-  top: 15%;
-  left: 20%;
-  animation-delay: 0s;
-}
-
-.node-2 {
-  top: 25%;
-  left: 35%;
-  animation-delay: 0.5s;
-}
-
-.node-3 {
-  top: 20%;
-  left: 55%;
-  animation-delay: 1s;
-}
-
-.node-4 {
-  top: 30%;
-  left: 75%;
-  animation-delay: 1.5s;
-}
-
-.node-5 {
-  top: 45%;
-  left: 25%;
-  animation-delay: 2s;
-}
-
-.node-6 {
-  top: 50%;
-  left: 45%;
-  animation-delay: 2.5s;
-}
-
-.node-7 {
-  top: 48%;
-  left: 65%;
-  animation-delay: 3s;
-}
-
-.node-8 {
-  top: 60%;
-  left: 20%;
-  animation-delay: 0.3s;
-}
-
-.node-9 {
-  top: 70%;
-  left: 40%;
-  animation-delay: 0.8s;
-}
-
-.node-10 {
-  top: 65%;
-  left: 80%;
-  animation-delay: 1.3s;
-}
-
-.node-11 {
-  top: 12%;
-  right: 15%;
-  animation-delay: 1.8s;
-}
-
-.node-12 {
-  top: 38%;
-  right: 10%;
-  animation-delay: 2.3s;
-}
-
-.node-13 {
-  top: 55%;
-  left: 10%;
-  animation-delay: 1.1s;
-}
-
-.node-14 {
-  top: 35%;
-  left: 8%;
-  animation-delay: 2.8s;
-}
-
-.node-15 {
-  top: 75%;
-  left: 60%;
-  animation-delay: 1.6s;
-}
-
-.node-16 {
-  top: 80%;
-  right: 25%;
-  animation-delay: 3.2s;
-}
-
-.node-17 {
-  top: 15%;
-  right: 35%;
-  animation-delay: 2.1s;
-}
-
-.node-18 {
-  top: 42%;
-  right: 28%;
-  animation-delay: 0.6s;
-}
-
-.node-19 {
-  top: 68%;
-  left: 12%;
-  animation-delay: 1.9s;
-}
-
-.node-20 {
-  top: 52%;
-  right: 18%;
-  animation-delay: 2.6s;
-}
+.node-1  { top: 15%; left: 20%;  animation-delay: 0s; }
+.node-2  { top: 25%; left: 35%;  animation-delay: 0.5s; }
+.node-3  { top: 20%; left: 55%;  animation-delay: 1s; }
+.node-4  { top: 30%; left: 75%;  animation-delay: 1.5s; }
+.node-5  { top: 45%; left: 25%;  animation-delay: 2s; }
+.node-6  { top: 50%; left: 45%;  animation-delay: 2.5s; }
+.node-7  { top: 48%; left: 65%;  animation-delay: 3s; }
+.node-8  { top: 60%; left: 20%;  animation-delay: 0.3s; }
+.node-9  { top: 12%; right: 15%; animation-delay: 1.8s; }
+.node-10 { top: 38%; right: 10%; animation-delay: 2.3s; }
+.node-11 { top: 70%; left: 40%;  animation-delay: 0.8s; }
+.node-12 { top: 65%; left: 80%;  animation-delay: 1.3s; }
 
 @keyframes nodePulse {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 0.7;
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 0.9;
-  }
+  0%, 100% { transform: scale(1); opacity: 0.65; }
+  50% { transform: scale(1.08); opacity: 0.9; }
 }
 
-/* Connection Lines */
 .knowledge-lines {
   position: absolute;
   top: 0;
@@ -985,37 +770,30 @@ onMounted(() => {
   stroke-dasharray: 6, 3;
   stroke-linecap: round;
   animation: lineFlow 10s infinite linear;
-  filter: drop-shadow(0 0 3px rgba(16, 185, 129, 0.4));
+  will-change: stroke-dashoffset;
 }
 
-.line-1 { animation-delay: 0s; }
-.line-2 { animation-delay: 0.5s; }
-.line-3 { animation-delay: 1s; }
-.line-4 { animation-delay: 0.3s; }
-.line-5 { animation-delay: 0.8s; }
-.line-6 { animation-delay: 1.3s; }
-.line-7 { animation-delay: 1.8s; }
-.line-8 { animation-delay: 2.3s; }
-.line-9 { animation-delay: 0.2s; }
+.line-1  { animation-delay: 0s; }
+.line-2  { animation-delay: 0.5s; }
+.line-3  { animation-delay: 1s; }
+.line-4  { animation-delay: 0.3s; }
+.line-5  { animation-delay: 0.8s; }
+.line-6  { animation-delay: 1.3s; }
+.line-7  { animation-delay: 1.8s; }
+.line-8  { animation-delay: 2.3s; }
+.line-9  { animation-delay: 0.2s; }
 .line-10 { animation-delay: 0.7s; }
-.line-11 { animation-delay: 1.2s; }
-.line-12 { animation-delay: 0.6s; }
-.line-13 { animation-delay: 0.4s; }
-.line-14 { animation-delay: 1.1s; }
-.line-15 { animation-delay: 0.9s; }
-.line-16 { animation-delay: 1.5s; }
-.line-17 { animation-delay: 2.1s; }
-.line-18 { animation-delay: 1.7s; }
-.line-19 { animation-delay: 0.35s; }
-.line-20 { animation-delay: 1.4s; }
+.line-11 { animation-delay: 0.9s; }
+.line-12 { animation-delay: 1.5s; }
 
 @keyframes lineFlow {
-  0% {
-    stroke-dashoffset: 0;
-  }
-  100% {
-    stroke-dashoffset: 18;
-  }
+  0% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 18; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-node { animation: none; opacity: 0.65; }
+  .connection-line { animation: none; }
 }
 
 /* Left Showcase Section */
@@ -1067,7 +845,6 @@ onMounted(() => {
   display: inline-block;
   padding: 8px 20px;
   background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
   border-radius: 20px;
   color: var(--td-text-color-anti);
   font-size: 14px;
@@ -1155,22 +932,11 @@ onMounted(() => {
   top: 32px;
   left: 50px;
   z-index: 100;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
-
-  &:hover {
-    transform: translateY(-2px);
-  }
 
   .logo-image {
     width: 120px;
-      height: auto;
-    filter: brightness(1.1) contrast(1.05) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.25));
-    transition: all 0.3s ease;
-  }
-
-  &:hover .logo-image {
-    filter: brightness(1.15) contrast(1.08) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.3));
+    height: auto;
   }
 }
 
@@ -1191,45 +957,23 @@ onMounted(() => {
   padding: 9px 15px;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.25);
   color: var(--td-text-color-anti);
   text-decoration: none;
   font-size: 13px;
-    font-weight: 600;
+  font-weight: 600;
   font-family: "PingFang SC", sans-serif;
   letter-spacing: 0.2px;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   cursor: pointer;
   position: relative;
-  box-shadow: var(--td-shadow-2);
 
-  svg {
-    flex-shrink: 0;
-    transition: transform 0.25s ease;
-  }
-
-  .link-text {
-    line-height: 1;
-  }
+  svg { flex-shrink: 0; }
+  .link-text { line-height: 1; }
 
   &:hover {
     background: rgba(255, 255, 255, 0.3);
     border-color: rgba(255, 255, 255, 0.4);
     color: var(--td-text-color-anti);
-    transform: translateY(-2px);
-    box-shadow: 
-      0 4px 16px rgba(0, 0, 0, 0.15),
-      0 0 0 1px rgba(255, 255, 255, 0.2);
-
-    svg {
-      transform: scale(1.08);
-    }
-  }
-
-  &:active {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   }
 }
 
@@ -1239,11 +983,10 @@ onMounted(() => {
   button {
     background: rgba(255, 255, 255, 0.2);
     border: 1px solid rgba(255, 255, 255, 0.25);
-    backdrop-filter: blur(8px);
     color: var(--td-text-color-anti);
 
     .lang-flag-icon {
-    font-size: 16px;
+      font-size: 16px;
       line-height: 1;
       flex-shrink: 0;
     }
@@ -1251,20 +994,11 @@ onMounted(() => {
     &:hover {
       background: rgba(255, 255, 255, 0.3);
       border-color: rgba(255, 255, 255, 0.4);
-      color: var(--td-text-color-anti);
-      box-shadow: 
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 0 0 1px rgba(255, 255, 255, 0.2);
     }
 
     svg:last-child {
       margin-left: 2px;
       flex-shrink: 0;
-      transition: transform 0.25s ease;
-    }
-
-    &:hover svg:last-child {
-      transform: translateY(2px);
     }
   }
 }
@@ -1274,14 +1008,12 @@ onMounted(() => {
   top: calc(100% + 8px);
   right: 0;
   min-width: 160px;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.97);
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   overflow: hidden;
   z-index: 1000;
-  animation: dropdownFadeIn 0.2s ease-out;
 }
 
 .language-option {
@@ -1290,19 +1022,12 @@ onMounted(() => {
   gap: 10px;
   padding: 10px 14px;
   cursor: pointer;
-  transition: all 0.2s;
   font-size: 13px;
   font-family: "PingFang SC", sans-serif;
   color: var(--td-text-color-primary);
 
-  .lang-flag {
-    font-size: 16px;
-    flex-shrink: 0;
-  }
-
-  .lang-label {
-    flex: 1;
-  }
+  .lang-flag { font-size: 16px; flex-shrink: 0; }
+  .lang-label { flex: 1; }
 
   .check-icon {
     color: var(--td-success-color);
@@ -1311,35 +1036,16 @@ onMounted(() => {
     flex-shrink: 0;
   }
 
-  &:hover {
-    background: var(--td-bg-color-secondarycontainer);
-  }
-
-  &.active {
-    background: var(--td-success-color-light);
-    color: var(--td-brand-color-active);
-  }
-}
-
-@keyframes dropdownFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  &:hover { background: var(--td-bg-color-secondarycontainer); }
+  &.active { background: var(--td-success-color-light); color: var(--td-brand-color-active); }
 }
 
 .form-card {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(20px);
+  background: rgba(255, 255, 255, 0.97);
   border-radius: 16px;
   padding: 40px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
-  animation: slideInRight 0.4s ease-out;
   border: none;
   width: 100%;
 }
@@ -1438,23 +1144,6 @@ onMounted(() => {
   font-weight: 500;
   font-family: "PingFang SC", sans-serif;
   margin: 20px 0 16px 0;
-  transition: all 0.3s;
-
-  :deep(.t-button) {
-    background-color: var(--td-brand-color);
-    border-color: var(--td-brand-color);
-
-    &:hover {
-      background-color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(7, 192, 95, 0.3);
-    }
-
-    &:active {
-      transform: translateY(0);
-    }
-  }
 }
 
 .oidc-divider {
@@ -1551,18 +1240,6 @@ onMounted(() => {
     .feature-text {
       line-height: 1.4;
     }
-  }
-}
-
-/* Animations */
-@keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 
@@ -1746,105 +1423,60 @@ onMounted(() => {
 
 <style lang="less">
 html[theme-mode="dark"] {
-  // 整体背景：更深的绿色渐变
   .login-layout {
     background: linear-gradient(225deg, #011a14 0%, #032e22 15%, #043a2c 25%, #05503d 38%, #046647 50%, #038a56 65%, #049b60 78%, #06a06a 90%, #07b074 100%);
-
-    &::before {
-      background: radial-gradient(circle at 20% 50%, rgba(255, 255, 255, 0.03) 0%, transparent 50%),
-                  radial-gradient(circle at 80% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 50%);
-    }
   }
 
-  // 知识图谱节点：降低发光强度
   .knowledge-node {
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.2);
-    box-shadow:
-      0 0 10px rgba(255, 255, 255, 0.2),
-      0 0 20px rgba(16, 185, 129, 0.2),
-      inset 0 0 10px rgba(255, 255, 255, 0.05);
-  }
-
-  .knowledge-node:hover {
-    box-shadow:
-      0 0 15px rgba(255, 255, 255, 0.3),
-      0 0 30px rgba(16, 185, 129, 0.3),
-      inset 0 0 15px rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.15);
   }
 
   .connection-line {
-    stroke: rgba(255, 255, 255, 0.3);
+    stroke: rgba(255, 255, 255, 0.25);
   }
 
-  // Logo 反色
   .header-logo .logo-image {
-    filter: invert(1) hue-rotate(180deg) brightness(1.1) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+    filter: invert(1) hue-rotate(180deg) brightness(1.1);
   }
 
-  .header-logo:hover .logo-image {
-    filter: invert(1) hue-rotate(180deg) brightness(1.2) drop-shadow(0 6px 16px rgba(0, 0, 0, 0.6));
-  }
-
-  // 顶部链接按钮：降低玻璃效果亮度
   .header-link {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.15);
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.2);
-      border-color: rgba(255, 255, 255, 0.25);
-    }
+    &:hover { background: rgba(255, 255, 255, 0.2); }
   }
 
   .language-switch button {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.15);
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.2);
-      border-color: rgba(255, 255, 255, 0.25);
-    }
+    &:hover { background: rgba(255, 255, 255, 0.2); }
   }
 
-  // 语言下拉菜单
   .language-dropdown {
-    background: rgba(36, 36, 36, 0.95) !important;
+    background: rgba(36, 36, 36, 0.97) !important;
     border-color: var(--td-component-stroke) !important;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4) !important;
   }
 
-  // 特性标签：降低白色亮度
-  .tag {
-    background: rgba(255, 255, 255, 0.12);
-  }
+  .tag { background: rgba(255, 255, 255, 0.12); }
 
-  // 表单卡片
   .form-card {
-    background: rgba(36, 36, 36, 0.92) !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
+    background: rgba(36, 36, 36, 0.97) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4) !important;
   }
 
-  // 表单输入框：确保深色背景下有边框对比
   .form-content .t-input {
     background: var(--td-bg-color-page) !important;
     border-color: rgba(255, 255, 255, 0.1) !important;
-
-    &:hover {
-      border-color: var(--td-brand-color) !important;
-    }
-
-    &:focus-within {
-      border-color: var(--td-brand-color) !important;
-    }
+    &:hover { border-color: var(--td-brand-color) !important; }
+    &:focus-within { border-color: var(--td-brand-color) !important; }
   }
 
-  // 轮播分页：深色模式下用白色圆点确保可见
   .screenshot-swiper .swiper-pagination-bullet-active {
     background: rgba(255, 255, 255, 0.9) !important;
   }
 
-  // 特性列表图标背景
   .login-features .feature-icon {
     background: rgba(6, 176, 77, 0.15);
   }

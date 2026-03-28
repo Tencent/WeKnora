@@ -270,6 +270,7 @@ func (e *AgentEngine) executeLoop(
 	common.PipelineInfo(ctx, "Agent", "loop_start", map[string]interface{}{
 		"max_iterations": e.config.MaxIterations,
 	})
+	emptyRetries := 0
 	for state.CurrentRound < e.config.MaxIterations {
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
@@ -336,6 +337,28 @@ func (e *AgentEngine) executeLoop(
 		// 2. Analyze: Check for stop conditions (natural stop or final_answer tool)
 		verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
 		if verdict.isDone {
+			// Guard against empty content: when the LLM stops naturally with no
+			// content and no tool calls (e.g., thinking-only loop without KB),
+			// retry with a nudge message instead of accepting an empty answer.
+			if verdict.emptyContent {
+				emptyRetries++
+				if emptyRetries <= maxEmptyResponseRetries {
+					logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
+						state.CurrentRound+1, emptyRetries, maxEmptyResponseRetries)
+					messages = append(messages, chat.Message{
+						Role:    "user",
+						Content: "Please provide your answer by calling the final_answer tool.",
+					})
+					continue
+				}
+				// Retries exhausted — use fallback message rather than empty answer
+				logger.Warnf(ctx, "[Agent][Round-%d] Empty content after %d retries - using fallback",
+					state.CurrentRound+1, maxEmptyResponseRetries)
+				state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
+				state.IsComplete = true
+				state.RoundSteps = append(state.RoundSteps, verdict.step)
+				break
+			}
 			state.FinalAnswer = verdict.finalAnswer
 			state.IsComplete = true
 			state.RoundSteps = append(state.RoundSteps, verdict.step)

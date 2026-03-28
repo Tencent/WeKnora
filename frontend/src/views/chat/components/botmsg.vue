@@ -85,8 +85,6 @@ import {
 } from '@/utils/mermaidShared';
 
 marked.use({
-    mangle: false,
-    headerIds: false,
     breaks: true,  // 全局启用单个换行支持
 });
 
@@ -136,7 +134,7 @@ const closePreImg = () => {
 // 创建自定义渲染器实例
 const customRenderer = new marked.Renderer();
 // 覆盖图片渲染方法
-customRenderer.image = function(href, title, text) {
+customRenderer.image = function({href, title, text}){
     if (!isValidImageURL(href)) {
         return `<p>${t('error.invalidImageLink')}</p>`;
     }

@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.3.4-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.3.5-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -50,6 +50,17 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 
 ## ✨ Latest Updates
 
+**v0.3.5 Highlights:**
+
+- **Telegram, DingTalk & Mattermost IM Integration**: Added Telegram bot (webhook/long-polling, streaming via editMessageText), DingTalk bot (webhook/Stream mode, AI Card streaming), and Mattermost adapter; IM channel coverage now includes WeCom, Feishu, Slack, Telegram, DingTalk, and Mattermost
+- **IM Slash Commands & QA Queue**: Pluggable slash-command system (/help, /info, /search, /stop, /clear) with a bounded QA worker pool, per-user rate limiting, and Redis-based multi-instance coordination
+- **Suggested Questions**: Agents surface context-aware suggested questions based on configured knowledge bases; image knowledge automatically enqueues question generation
+- **VLM Auto-Describe MCP Tool Images**: When MCP tools return images, the agent generates text descriptions via the configured VLM model, enabling image content to be used by text-only LLMs
+- **Novita AI Provider**: New LLM provider with OpenAI-compatible API supporting chat, embedding, and VLLM model types
+- **MCP Tool Name Stability**: Tool names now based on service name (stable across reconnections) instead of UUID; unique name constraint added; frontend formats names into human-readable form
+- **Channel Tracking**: Knowledge entries and messages record source channel (web/api/im/browser_extension) for traceability
+- **Bug Fixes**: Fixed agent empty response when no knowledge base is configured, UTF-8 truncation in summaries for Chinese/emoji documents, API key encryption loss on tenant settings update, vLLM streaming reasoning content propagation, and rerank empty passage errors
+
 **v0.3.4 Highlights:**
 
 - **IM Bot Integration**: WeCom, Feishu, and Slack IM channel support with WebSocket/Webhook modes, streaming, and knowledge base integration
@@ -60,24 +71,20 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 - **AWS S3 Storage**: Integrated AWS S3 storage adapter with configuration UI and database migrations
 - **AES-256-GCM Encryption**: API keys encrypted at rest with AES-256-GCM for enhanced security
 - **Built-in MCP Service**: Built-in MCP service support for extending agent capabilities
-- **Agent Streaming Panel**: Optimized AgentStreamDisplay with auto-scrolling, improved styling, and loading indicators
 - **Hybrid Search Optimization**: Grouped targets and reused query embeddings for better retrieval performance
 - **Final Answer Tool**: New final_answer tool with agent duration tracking for improved agent workflows
 
-**v0.3.3 Highlights:**
-
-- 🧩 **Parent-Child Chunking**: Hierarchical parent-child chunking strategy for enhanced context management and more accurate retrieval
-- 📌 **Knowledge Base Pinning**: Pin frequently-used knowledge bases for quick access
-- 🔄 **Fallback Response**: Fallback response handling with UI indicators when no relevant results are found
-- 🖼️ **Image Icon Detection**: Automatic image icon detection and filtering in document processing
-- 🧹 **Passage Cleaning for Rerank**: Passage cleaning for rerank model to improve relevance scoring accuracy
-- 🐳 **Docker & Skill Management**: Enhanced Docker setup with entrypoint script and skill management
-- 🗄️ **Storage Auto-Creation**: Storage engine connectivity check with auto-creation of buckets
-- 🎨 **UI Consistency**: Standardized border styles, updated theme and component styles across the application
-- ⚡ **Chunk Size Tuning**: Updated chunk size configurations for knowledge base processing
-
 <details>
 <summary><b>Earlier Releases</b></summary>
+
+**v0.3.3 Highlights:**
+
+- **Parent-Child Chunking**: Hierarchical parent-child chunking strategy for enhanced context management and more accurate retrieval
+- **Knowledge Base Pinning**: Pin frequently-used knowledge bases for quick access
+- **Fallback Response**: Fallback response handling with UI indicators when no relevant results are found
+- **Passage Cleaning for Rerank**: Passage cleaning for rerank model to improve relevance scoring accuracy
+- **Storage Auto-Creation**: Storage engine connectivity check with auto-creation of buckets
+- **Milvus Vector DB**: Added Milvus as a new vector database backend for knowledge retrieval
 
 **v0.3.2 Highlights:**
 
@@ -163,24 +170,28 @@ WeKnora employs a modern modular design to build a complete document understandi
 
 ## 🧩 Feature Matrix
 
-| Module | Support                                                                        | Description                                                                                                                                                        |
-|---------|--------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Agent Mode | ✅ ReACT Agent Mode                                                             | Support for using built-in tools to retrieve knowledge bases, MCP tools, and web search, with cross-knowledge base retrieval and multiple iterations               |
-| Knowledge Base Types | ✅ FAQ / Document                                                               | Support for creating FAQ and document knowledge base types, with folder import, URL import, tag management, and online entry                                       |
-| Document Formats | ✅ PDF / Word / Txt / Markdown / Images (with OCR / Caption)                    | Support for structured and unstructured documents with text extraction from images                                                                                 |
-| Model Management | ✅ Centralized configuration, built-in model sharing                            | Centralized model configuration with model selection in knowledge base settings, support for multi-tenant shared built-in models                                   |
-| Embedding Models | ✅ Local models, BGE / GTE APIs, etc.                                           | Customizable embedding models, compatible with local deployment and cloud vector generation APIs                                                                   |
-| Vector DB Integration | ✅ PostgreSQL (pgvector), Elasticsearch                                         | Support for mainstream vector index backends, flexible switching for different retrieval scenarios                                                                 |
-| Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG                                            | Support for sparse/dense recall and knowledge graph-enhanced retrieval with customizable retrieve-rerank-generate pipelines                                        |
-| LLM Integration | ✅ Support for Qwen, DeepSeek, etc., with thinking/non-thinking mode switching  | Compatible with local models (e.g., via Ollama) or external API services with flexible inference configuration                                                     |
-| Conversation Strategy | ✅ Agent models, normal mode models, retrieval thresholds, Prompt configuration | Support for configuring Agent models, normal mode models, retrieval thresholds, online Prompt configuration, precise control over multi-turn conversation behavior |
-| Web Search | ✅ Extensible search engines, DuckDuckGo / Google                               | Support for extensible web search engines with built-in DuckDuckGo search engine                                                                                   |
-| MCP Tools | ✅ uvx, npx launchers, Stdio/HTTP Streamable/SSE                                | Support for extending Agent capabilities through MCP, with built-in uvx and npx launchers, supporting three transport methods                                      |
-| QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates                         | Support for complex semantic modeling, instruction control and chain-of-thought Q&A with configurable prompts and context windows                                  |
-| E2E Testing | ✅ Retrieval+generation process visualization and metric evaluation             | End-to-end testing tools for evaluating recall hit rates, answer coverage, BLEU/ROUGE and other metrics                                                            |
-| Deployment Modes | ✅ Support for local deployment / Docker images                                 | Meets private, offline deployment and flexible operation requirements, with fast development mode support                                                          |
-| User Interfaces | ✅ Web UI + RESTful API                                                         | Interactive interface and standard API endpoints, with Agent mode/normal mode switching and tool call process display                                              |
-| Task Management | ✅ MQ async tasks, automatic database migration                                 | MQ-based async task state maintenance, support for automatic database schema and data migration during version upgrades                                            |
+| Module | Support | Description |
+|---------|---------|-------------|
+| Agent Mode | ✅ ReACT Agent Mode | Built-in tools for knowledge base retrieval, MCP tool calls, and web search; cross-knowledge base retrieval with multi-step iteration |
+| Knowledge Base Types | ✅ FAQ / Document | FAQ and document knowledge bases with folder import, URL import, tag management, online entry, and knowledge move |
+| Document Formats | ✅ PDF / Word / Txt / Markdown / HTML / Images (OCR + Caption) | Structured and unstructured document parsing; image text extraction via OCR; image caption generation via VLM |
+| IM Channel Integration | ✅ WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost | WebSocket and Webhook modes; streaming replies; slash commands (/help, /info, /search, /stop, /clear); per-user rate limiting; Redis-based multi-instance coordination |
+| Model Management | ✅ Centralized configuration, built-in model sharing | Centralized model config with per-knowledge-base model selection; multi-tenant shared built-in model support |
+| Embedding Models | ✅ Local models (Ollama), BGE / GTE / OpenAI-compatible APIs | Customizable embedding models compatible with local deployment and cloud vector generation APIs |
+| Vector DB Integration | ✅ PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant | Five vector index backends with flexible switching to match retrieval scenario requirements |
+| Object Storage | ✅ Local / MinIO / AWS S3 / Volcengine TOS | Pluggable storage adapters for file and image assets; bucket auto-creation on startup |
+| Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG | Sparse/dense recall and knowledge graph-enhanced retrieval; customizable retrieve-rerank-generate pipeline |
+| LLM Integration | ✅ Qwen / DeepSeek / MiniMax / NVIDIA / Novita AI / OpenAI-compatible | Local models via Ollama or external API services; thinking/non-thinking mode switching; vLLM streaming reasoning content support |
+| Conversation Strategy | ✅ Agent model, normal model, retrieval threshold, Prompt configuration | Online Prompt editing; retrieval threshold tuning; precise multi-turn conversation behavior control |
+| Web Search | ✅ DuckDuckGo / Bing / Google (extensible) | Pluggable search engine providers; web search toggle per conversation |
+| MCP Tools | ✅ uvx / npx launchers, Stdio / HTTP Streamable / SSE | Extend agent capabilities via MCP; stable tool naming with collision protection; VLM auto-description for tool-returned images |
+| Suggested Questions | ✅ Knowledge-base-driven question suggestions | Agent surfaces context-aware suggested questions in chat interface; image knowledge auto-generates questions |
+| QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates | Complex semantic modeling, instruction control, chain-of-thought Q&A with configurable prompts and context windows |
+| Security | ✅ AES-256-GCM at-rest encryption, SSRF protection | API keys encrypted at rest; SSRF-safe HTTP client for remote API calls; sandbox execution for agent skills |
+| E2E Testing | ✅ Retrieval + generation visualization and metric evaluation | End-to-end test tools for evaluating recall hit rates, answer coverage, BLEU/ROUGE metrics |
+| Deployment Modes | ✅ Local / Docker / Kubernetes (Helm) | Private and offline deployment; fast development mode with hot-reload; Helm chart for Kubernetes |
+| User Interfaces | ✅ Web UI + RESTful API | Interactive web interface and standard API; Agent/normal mode switching; tool call process display |
+| Task Management | ✅ MQ async tasks, automatic database migration | MQ-based async task state; automatic schema and data migration on version upgrade |
 
 ## 🚀 Getting Started
 

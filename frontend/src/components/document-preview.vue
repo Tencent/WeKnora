@@ -197,7 +197,7 @@ async function renderMarkdown(blob: Blob) {
     gfm: true,
   });
   const renderer = new marked.Renderer();
-  renderer.code = function (text: string, lang?: string) {
+  renderer.code = function ({text, lang}) {
     let highlighted = '';
     if (lang && hljs.getLanguage(lang)) {
       try { highlighted = hljs.highlight(text, { language: lang }).value; }

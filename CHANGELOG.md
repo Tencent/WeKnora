@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.5] - 2026-03-27
+
+### 🚀 New Features
+- **NEW**: Telegram IM Integration — Telegram bot adapter with webhook and long-polling modes, streaming replies via editMessageText, file download via getFile API, and timing-safe secret token verification
+- **NEW**: DingTalk IM Integration — DingTalk bot supporting webhook (HmacSHA256 signature verification) and Stream mode (via dingtalk-stream-sdk-go), with AI Card streaming via OpenAPI and AccessToken caching
+- **NEW**: Mattermost IM Channel — Mattermost IM channel adapter support
+- **NEW**: IM Slash Command System — pluggable command framework with five built-in commands: /help, /info, /search, /stop, /clear; wired into all IM channel message dispatch
+- **NEW**: IM Distributed Coordination — Redis-based multi-instance coordination: per-user queue limits, global concurrency gate, message dedup, WebSocket leader election, /stop cancellation for queued and in-flight requests
+- **NEW**: Suggested Questions — agent-specific suggested questions API based on knowledge bases, with frontend display in chat and create-chat views; image knowledge auto-enqueues question generation tasks
+- **NEW**: VLM Auto-Describe MCP Tool Images — when MCP tools return image content, the agent automatically generates text descriptions via the configured VLM model, making image data accessible to text-only LLMs
+- **NEW**: Novita AI Provider — new LLM provider with OpenAI-compatible API supporting chat, embedding, and VLLM model types
+- **NEW**: Channel Tracking — channel field added to knowledge entries and messages to track source (web/api/im/browser_extension) with frontend labels and DB migrations
+- **NEW**: Expose Built-in Parser Engine in Settings — built-in parser engine now visible and selectable in the settings UI
+
+### ⚡ Improvements
+- MCP tool names now derived from service.Name (stable across server reconnections) instead of UUID; added collision detection and unique (tenant_id, name) DB index
+- Frontend formats MCP tool names from snake_case (e.g. mcp_my_server_search_docs) to human-readable form (My Server Search Docs)
+- Enhanced intent classification and context templates: runtime metadata (current time, weekday) injected into context, critical instructions added to rewrite template for entity/keyword preservation
+- Knowledge search: added SQL LIKE wildcard escaping, title-based filtering, URL and HTML file type support; FindByMetadataKey method added
+- Chunk search returns total chunk counts per knowledge ID for improved agent context awareness
+- MiniMax models upgraded from M2.1/M2.1-lightning to M2.7/M2.7-highspeed; Novita AI MiniMax reference updated to M2.7
+- DingTalk AI Card streaming: create/deliver/update via OpenAPI; shared think-block rendering via im.TransformThinkBlocks applied to all IM reply paths (DingTalk, Telegram, Feishu)
+- IM stream orphan reaper and edit throttling added for DingTalk and Telegram; Feishu stream reaper fixes memory leak
+- WeCom group chat replies fixed via appchat API with user fallback; empty-stream fallback when no visible content is produced
+- Improved LLM call log summarization: limits output to last few messages to reduce verbosity
+- ParallelToolCalls option added to ChatOptions
+
+### 🐛 Bug Fixes
+- Fixed agent producing empty response when no knowledge base is configured: retry (max 2), nudge message, and fallback response added
+- Fixed UTF-8 byte-based truncation in summary fallback causing PostgreSQL invalid byte sequence errors for Chinese/emoji content; changed to rune-based truncation
+- Fixed marked.js usage errors; upgraded marked dependency to v17.0.5 for correct code block rendering
+- Fixed vLLM streaming: reasoning content now parsed and propagated through streaming pipeline alongside standard response
+- Fixed frontend page counter not resetting to 1 after knowledge file operations (tag, upload, move, edit, delete), causing pagination skips
+- Fixed image markdown being stripped during message sanitization
+- Fixed MCP tool naming to use service.Name instead of UUID, preventing tool call failures after server reconnection
+- Fixed global default storage engine not respected when creating a new knowledge base (was hardcoded to "local")
+- Fixed API key encryption loss when updating tenant settings via PUT /tenants/kv/{key}: AfterFind-decrypted plaintext no longer written back to DB
+- Fixed empty passage filtering in rerank to prevent Aliyun and Baidu Qianfan 400 errors
+- Fixed markdown table rows being passed raw to rerank; now converted to plain text (col1, col2) before reranking
+- Fixed OpenRouter embedding provider missing support
+- Fixed Milvus vector metric type now configurable via MILVUS_METRIC_TYPE environment variable
+- Fixed temperature validation to accept zero as a valid value (was previously defaulting)
+- Fixed pg_search update guarded with skip_embedding to prevent unnecessary re-embedding
+- Fixed thinking block content being indexed into chat history knowledge base, degrading RAG retrieval quality
+
+### 📚 Documentation
+- Added Telegram and DingTalk IM platform setup guides (WebSocket/Webhook modes, streaming, architecture diagrams)
+- Updated IM integration docs with Slack, slash commands, QA queue, rate limiting, and streaming output sections
+
+### 🔒 Security Enhancements
+- Enhanced SSRF protection in RemoteAPIChat: replaced default DialContext with SSRFSafeDialContext; added SSRF URL validation for BaseURL and endpoint in NewRemoteAPIChat and chat methods
+
 ## [0.3.4] - 2026-03-19
 
 ### 🚀 New Features
@@ -740,6 +792,7 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.3.5]: https://github.com/Tencent/WeKnora/tree/v0.3.5
 [0.3.4]: https://github.com/Tencent/WeKnora/tree/v0.3.4
 [0.3.3]: https://github.com/Tencent/WeKnora/tree/v0.3.3
 [0.3.2]: https://github.com/Tencent/WeKnora/tree/v0.3.2
