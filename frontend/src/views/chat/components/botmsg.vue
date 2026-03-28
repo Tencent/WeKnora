@@ -60,14 +60,13 @@
     </div>
 </template>
 <script setup>
-import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick } from 'vue';
+import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
 import { marked } from 'marked';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
-import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -78,7 +77,6 @@ import {
     replaceIncompleteImageWithPlaceholder
 } from '@/utils/chatMessageShared';
 import {
-    bindMermaidFullscreenEvents,
     createMermaidCodeRenderer,
     ensureMermaidInitialized,
     renderMermaidInContainer
@@ -228,7 +226,7 @@ const handleAddToKnowledge = () => {
     const question = (props.userQuery || '').trim();
     const manualContent = buildManualMarkdown(question, content);
     const manualTitle = formatManualTitle(question);
-
+``
     uiStore.openManualEditor({
         mode: 'create',
         title: manualTitle,
@@ -254,30 +252,11 @@ const handleMarkdownImageClick = (e) => {
 
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
-    try {
-        const renderedCount = await renderMermaidInContainer(parentMd.value, renderedMermaidIds);
-        if (renderedCount > 0) {
-            nextTick(() => {
-                bindMermaidClickEvents();
-            });
-        }
-    } catch (error) {
-        console.error('Mermaid rendering error:', error);
-    }
-};
-
-// 已渲染的 mermaid 元素 ID 集合
-const renderedMermaidIds = new Set();
-
-// 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
-const bindMermaidClickEvents = () => {
-    bindMermaidFullscreenEvents(parentMd.value, (svgOuterHTML) => {
-        openMermaidFullscreen(svgOuterHTML);
-    });
+  await renderMermaidInContainer(parentMd.value);
 };
 
 // 监听内容变化并渲染 Mermaid - 只在会话完成后渲染
-watch(() => [props.content, props.session?.content, props.session?.is_completed], () => {
+onUpdated(() => {
     nextTick(async () => {
         await hydrateProtectedFileImages(parentMd.value);
         // 只在会话完成后渲染 mermaid
@@ -285,7 +264,7 @@ watch(() => [props.content, props.session?.content, props.session?.is_completed]
             renderMermaidDiagrams();
         }
     });
-}, { immediate: true });
+});
 
 onMounted(async () => {
     // 为 markdown-content 中的图片添加点击事件
