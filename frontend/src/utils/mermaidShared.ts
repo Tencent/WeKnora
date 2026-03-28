@@ -1,5 +1,10 @@
 import mermaid from 'mermaid';
 import type {Tokens} from 'marked';
+import {openMermaidFullscreen} from "@/utils/mermaidViewer.ts";
+import hljs from "highlight.js";
+import "highlight.js/styles/github.css";
+
+hljs.registerAliases("mermaid", { languageName: "plaintext" });
 
 let mermaidInitialized = false;
 
@@ -37,73 +42,55 @@ export const ensureMermaidInitialized = () => {
   mermaidInitialized = true;
 };
 
+let mermaidCount = 0;
 
 export const createMermaidCodeRenderer = (idPrefix: string) => {
-  let mermaidCount = 0;
-
   return ({text, lang}: Tokens.Code) => {
+    let highlighted = '';
+    let highlightLang: string = lang || 'Code';
+    if (highlightLang && hljs.getLanguage(highlightLang)) {
+        try {
+            highlighted = hljs.highlight(text, { language: lang }).value;
+        } catch {
+            let ret = hljs.highlightAuto(text);
+            highlighted = ret.value;
+            highlightLang = ret.language || "Code";
+        }
+    } else {
+        let ret = hljs.highlightAuto(text);
+        highlighted = ret.value;
+        highlightLang = ret.language || "Code";
+    }
     if (lang === 'mermaid') {
       const id = `${idPrefix}-${++mermaidCount}`;
-      return `<div class="mermaid" id="${id}">${text}</div>`;
+      return `<pre id="${id}" data-mermaid="false"><code class="hljs language-${highlightLang}">${highlighted}</code></pre>`;
     }
-
-    const displayLang = lang || 'Code';
-    const escapedCode = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-    return `<pre><code class="language-${displayLang}">${escapedCode}</code></pre>`;
+    return `<pre><code class="hljs language-${highlightLang}">${highlighted}</code></pre>`;
   };
 };
 
 export const renderMermaidInContainer = async (
   rootElement: HTMLElement | null | undefined,
-  renderedMermaidIds: Set<string>,
 ) => {
   if (!rootElement) return 0;
-
-  const mermaidElements = rootElement.querySelectorAll<HTMLElement>('.mermaid');
-  const unrenderedElements: HTMLElement[] = [];
-
-  mermaidElements.forEach((el) => {
-    const id = el.id || `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    if (!el.id) {
-      el.id = id;
+  const mermaidElements = rootElement.querySelectorAll<HTMLElement>('pre[data-mermaid="false"]');
+  for (const el of mermaidElements) {
+    try{
+        const code = el.innerText;
+        // 验证
+        await mermaid.parse(code);
+        // 渲染
+        let {svg} = await mermaid.render(`${el.id}-svg`, code);
+        el.classList.add('mermaid')
+        el.innerHTML = svg;
+        el.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openMermaidFullscreen(svg);
+        })
+    } catch(e){
+        console.error("Mermaid rendering error:", e);
     }
-    if (!renderedMermaidIds.has(el.id) && !el.querySelector('svg')) {
-      renderedMermaidIds.add(el.id);
-      unrenderedElements.push(el);
-    }
-  });
-
-  if (unrenderedElements.length === 0) return 0;
-
-  await mermaid.run({ nodes: unrenderedElements });
-  return unrenderedElements.length;
-};
-
-export const bindMermaidFullscreenEvents = (
-  rootElement: HTMLElement | null | undefined,
-  onOpenFullscreen: (svgOuterHTML: string) => void,
-) => {
-  if (!rootElement) return;
-
-  const mermaidDivs = rootElement.querySelectorAll<HTMLElement>('.mermaid');
-  mermaidDivs.forEach((div) => {
-    div.style.cursor = 'pointer';
-    const oldHandler = (div as any).__mermaidClickHandler as EventListener | undefined;
-    if (oldHandler) {
-      div.removeEventListener('click', oldHandler);
-    }
-    const handler: EventListener = (e: Event) => {
-      e.stopPropagation();
-      const target = e.currentTarget as HTMLElement;
-      const svg = target.querySelector('svg');
-      if (svg) {
-        onOpenFullscreen(svg.outerHTML);
-      }
-    };
-    (div as any).__mermaidClickHandler = handler;
-    div.addEventListener('click', handler);
-  });
+    // 标记为已渲染
+    el.setAttribute('data-mermaid', 'true');
+  }
 };

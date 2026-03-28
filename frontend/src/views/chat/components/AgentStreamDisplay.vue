@@ -349,7 +349,6 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
-import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { hydrateProtectedFileImages } from '@/utils/security';
 import {
   buildManualMarkdown,
@@ -358,7 +357,6 @@ import {
   replaceIncompleteImageWithPlaceholder,
 } from '@/utils/chatMessageShared';
 import {
-  bindMermaidFullscreenEvents,
   createMermaidCodeRenderer,
   ensureMermaidInitialized,
   renderMermaidInContainer,
@@ -1466,28 +1464,9 @@ const protectProviderImageSrcInHTML = (html: string): string => {
   );
 };
 
-// 已渲染的 mermaid 元素 ID 集合
-const renderedMermaidIds = new Set<string>();
-
 // 渲染 Mermaid 图表的函数
 const renderMermaidDiagrams = async () => {
-  try {
-    const renderedCount = await renderMermaidInContainer(rootElement.value, renderedMermaidIds);
-    if (renderedCount > 0) {
-      nextTick(() => {
-        bindMermaidClickEvents();
-      });
-    }
-  } catch (error) {
-    console.error('Mermaid rendering error:', error);
-  }
-};
-
-// 为 Mermaid 容器绑定点击全屏事件（绑定在 div 上，不是 SVG 上）
-const bindMermaidClickEvents = () => {
-  bindMermaidFullscreenEvents(rootElement.value, (svgOuterHTML: string) => {
-    openMermaidFullscreen(svgOuterHTML);
-  });
+  await renderMermaidInContainer(rootElement.value);
 };
 
 // Tool summary - extract key info to display externally
