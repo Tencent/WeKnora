@@ -53,6 +53,7 @@ const (
 	EventAgentReflection  EventType = "reflection"   // Agent 反思
 	EventAgentReferences  EventType = "references"   // 知识引用
 	EventAgentFinalAnswer EventType = "final_answer" // 最终答案
+	EventAgentAskUser     EventType = "ask_user"     // Agent 向用户提问
 
 	// Error events
 	EventError EventType = "error" // 错误事件

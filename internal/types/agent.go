@@ -201,11 +201,13 @@ func (s *AgentStep) GetObservations() []string {
 
 // AgentState tracks the execution state of an agent across iterations
 type AgentState struct {
-	CurrentRound  int             `json:"current_round"`  // Current round number
-	RoundSteps    []AgentStep     `json:"round_steps"`    // All steps taken so far in the current round
-	IsComplete    bool            `json:"is_complete"`    // Whether agent has finished
-	FinalAnswer   string          `json:"final_answer"`   // The final answer to the query
-	KnowledgeRefs []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
+	CurrentRound        int             `json:"current_round"`                    // Current round number
+	RoundSteps          []AgentStep     `json:"round_steps"`                     // All steps taken so far in the current round
+	IsComplete          bool            `json:"is_complete"`                     // Whether agent has finished
+	FinalAnswer         string          `json:"final_answer"`                    // The final answer to the query
+	KnowledgeRefs       []*SearchResult `json:"knowledge_refs"`                  // Collected knowledge references
+	WaitingForUserInput bool            `json:"waiting_for_user_input,omitempty"` // Whether the agent is paused waiting for user input
+	PendingQuestion     string          `json:"pending_question,omitempty"`       // The question posed to the user when waiting for input
 }
 
 // FunctionDefinition represents a function definition for LLM function calling
