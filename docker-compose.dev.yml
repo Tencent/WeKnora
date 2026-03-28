@@ -186,6 +186,19 @@ services:
       - jaeger
       - full
 
+  dex:
+    image: dexidp/dex:latest
+    container_name: WeKnora-dex-dev
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./misc/dex-config.yaml:/etc/dex/config.yaml
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    profiles:
+      - dex
+      - full
+
+
 networks:
   WeKnora-network-dev:
     driver: bridge

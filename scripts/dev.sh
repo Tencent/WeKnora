@@ -69,12 +69,14 @@ show_help() {
     echo "  --qdrant   启动 Qdrant 向量数据库"
     echo "  --neo4j    启动 Neo4j 图数据库"
     echo "  --jaeger   启动 Jaeger 链路追踪"
+    echo "  --dex      启动 Dex（OIDC 身份认证）"
     echo "  --full     启动所有可选服务"
     echo ""
     echo "示例："
     echo "  $0 start                    # 启动基础服务"
     echo "  $0 start --qdrant           # 启动基础服务 + Qdrant"
     echo "  $0 start --qdrant --jaeger  # 启动基础服务 + Qdrant + Jaeger"
+    echo "  $0 start --dex             # 启动基础服务 + Dex"
     echo "  $0 start --full             # 启动所有服务"
     echo "  $0 app                      # 在另一个终端启动后端"
     echo "  $0 frontend                 # 在另一个终端启动前端"
@@ -140,9 +142,13 @@ start_services() {
                 PROFILES="$PROFILES --profile jaeger"
                 ENABLED_SERVICES="$ENABLED_SERVICES jaeger"
                 ;;
+            --dex)
+                PROFILES="$PROFILES --profile dex"
+                ENABLED_SERVICES="$ENABLED_SERVICES dex"
+                ;;
             --full)
                 PROFILES="--profile full"
-                ENABLED_SERVICES="minio qdrant neo4j jaeger"
+                ENABLED_SERVICES="minio qdrant neo4j jaeger dex"
                 break
                 ;;
             *)
@@ -175,6 +181,9 @@ start_services() {
         fi
         if [[ "$ENABLED_SERVICES" == *"jaeger"* ]]; then
             echo "  - Jaeger:        localhost:16686"
+        fi
+        if [[ "$ENABLED_SERVICES" == *"dex"* ]]; then
+            echo "  - Dex:           localhost:5556"
         fi
         
         echo ""
@@ -350,4 +359,3 @@ case "$CMD" in
 esac
 
 exit 0
-

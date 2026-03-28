@@ -989,6 +989,12 @@ export default {
   auth: {
     login: 'Вход',
     logout: 'Выход',
+    oidcLogin: 'Войти через OIDC',
+    oidcLoginWithProvider: 'Войти через {provider}',
+    redirectingToOIDC: 'Перенаправление к поставщику удостоверений...',
+    orContinueWith: 'Или продолжить с помощью',
+    oidcLoginFailed: 'Ошибка входа через OIDC',
+    oidcStateMismatch: 'Не удалось проверить состояние OIDC, попробуйте снова',
     username: 'Имя пользователя',
     email: 'Почта Email',
     password: 'Пароль',

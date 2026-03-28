@@ -228,14 +228,31 @@
           >
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
           </t-button>
-        </t-form>
 
-            <div class="form-footer">
-          <span>{{ $t('auth.noAccount') }}</span>
-              <a href="#" @click.prevent="toggleMode" class="link-button">
-            {{ $t('auth.registerNow') }}
-          </a>
-        </div>
+          <div class="form-footer login-form-footer">
+            <span>{{ $t('auth.noAccount') }}</span>
+            <a href="#" @click.prevent="toggleMode" class="link-button">
+              {{ $t('auth.registerNow') }}
+            </a>
+          </div>
+
+          <div v-if="oidcEnabled" class="oidc-divider">
+            <span>{{ $t('auth.orContinueWith') }}</span>
+          </div>
+
+          <t-button
+            v-if="oidcEnabled"
+            theme="default"
+            size="large"
+            block
+            :loading="oidcLoading"
+            :disabled="loading"
+            class="oidc-button"
+            @click="handleOIDCLogin"
+          >
+            {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+          </t-button>
+        </t-form>
 
             <!-- Features list -->
             <div class="login-features">
@@ -360,7 +377,7 @@ import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/effect-fade'
 import 'swiper/css/pagination'
-import { login, register } from '@/api/auth'
+import { login, register, getOIDCAuthorizationURL, getOIDCConfig } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -401,8 +418,11 @@ const registerFormRef = ref()
 
 // State management
 const loading = ref(false)
+const oidcLoading = ref(false)
 const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
+const oidcEnabled = ref(false)
+const oidcProviderName = ref('')
 
 // Language options
 const languageOptions = [
@@ -413,6 +433,12 @@ const languageOptions = [
 ]
 
 const currentLanguage = computed(() => locale.value)
+const oidcLoginText = computed(() => {
+  if (oidcProviderName.value) {
+    return t('auth.oidcLoginWithProvider', { provider: oidcProviderName.value })
+  }
+  return t('auth.oidcLogin')
+})
 const currentLangOption = computed(() => languageOptions.find(l => l.value === currentLanguage.value))
 
 // Login form data
@@ -516,6 +542,69 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside)
 })
 
+const persistLoginResponse = async (response: any) => {
+  if (response.user && response.tenant && response.token) {
+    authStore.setUser({
+      id: response.user.id || '',
+      username: response.user.username || '',
+      email: response.user.email || '',
+      avatar: response.user.avatar,
+      tenant_id: String(response.tenant.id) || '',
+      can_access_all_tenants: response.user.can_access_all_tenants || false,
+      created_at: response.user.created_at || new Date().toISOString(),
+      updated_at: response.user.updated_at || new Date().toISOString()
+    })
+    authStore.setToken(response.token)
+    if (response.refresh_token) {
+      authStore.setRefreshToken(response.refresh_token)
+    }
+    authStore.setTenant({
+      id: String(response.tenant.id) || '',
+      name: response.tenant.name || '',
+      api_key: response.tenant.api_key || '',
+      owner_id: response.user.id || '',
+      created_at: response.tenant.created_at || new Date().toISOString(),
+      updated_at: response.tenant.updated_at || new Date().toISOString()
+    })
+  }
+
+  await nextTick()
+  router.replace('/platform/knowledge-bases')
+}
+
+const getBackendOIDCRedirectURI = () => `${window.location.origin}/api/v1/auth/oidc/callback`
+
+const loadOIDCConfig = async () => {
+  try {
+    const response = await getOIDCConfig()
+    oidcEnabled.value = !!response.success && !!response.enabled
+    oidcProviderName.value = response.provider_display_name || ''
+  } catch {
+    oidcEnabled.value = false
+    oidcProviderName.value = ''
+  }
+}
+
+const handleOIDCLogin = async () => {
+  try {
+    oidcLoading.value = true
+		const response = await getOIDCAuthorizationURL(getBackendOIDCRedirectURI())
+    const authorizationURL = response.authorization_url
+
+    if (!response.success || !authorizationURL) {
+      MessagePlugin.error(response.message || t('auth.oidcLoginFailed'))
+      return
+    }
+
+    window.location.href = authorizationURL
+  } catch (error: any) {
+    console.error('OIDC 登录跳转失败:', error)
+    MessagePlugin.error(error.message || t('auth.oidcLoginFailed'))
+  } finally {
+    oidcLoading.value = false
+  }
+}
+
 // Handle login
 const handleLogin = async () => {
   try {
@@ -530,37 +619,8 @@ const handleLogin = async () => {
     })
 
     if (response.success) {
-      // Save user info and token
-      if (response.user && response.tenant && response.token) {
-          authStore.setUser({
-            id: response.user.id || '',
-            username: response.user.username || '',
-            email: response.user.email || '',
-            avatar: response.user.avatar,
-            tenant_id: String(response.tenant.id) || '',
-            can_access_all_tenants: response.user.can_access_all_tenants || false,
-            created_at: response.user.created_at || new Date().toISOString(),
-            updated_at: response.user.updated_at || new Date().toISOString()
-          })
-          authStore.setToken(response.token)
-          if (response.refresh_token) {
-            authStore.setRefreshToken(response.refresh_token)
-          }
-          authStore.setTenant({
-            id: String(response.tenant.id) || '',
-            name: response.tenant.name || '',
-            api_key: response.tenant.api_key || '',
-            owner_id: response.user.id || '',
-            created_at: response.tenant.created_at || new Date().toISOString(),
-            updated_at: response.tenant.updated_at || new Date().toISOString()
-          })
-        }
-      
       MessagePlugin.success(t('auth.loginSuccess'))
-
-      // Wait for state update before redirect
-      await nextTick()
-      router.replace('/platform/knowledge-bases')
+      await persistLoginResponse(response)
     } else {
       MessagePlugin.error(response.message || t('auth.loginError'))
     }
@@ -611,8 +671,11 @@ const handleRegister = async () => {
 // Check if already logged in
 onMounted(() => {
   if (authStore.isLoggedIn) {
-    router.replace('/platform/tenant/knowledge-bases')
+    router.replace('/platform/knowledge-bases')
+    return
   }
+
+  loadOIDCConfig()
 })
 </script>
 
@@ -1083,6 +1146,37 @@ onMounted(() => {
   margin: 20px 0 16px 0;
 }
 
+.oidc-divider {
+  position: relative;
+  margin: 4px 0 6px;
+  text-align: center;
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+
+  span {
+    position: relative;
+    z-index: 1;
+    padding: 0 12px;
+    background: rgba(255, 255, 255, 0.95);
+  }
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+}
+
+.oidc-button {
+  height: 46px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
 .form-footer {
   text-align: center;
   font-size: 14px;
@@ -1104,6 +1198,12 @@ onMounted(() => {
       text-decoration: underline;
     }
   }
+}
+
+.login-form-footer {
+  border-bottom: none;
+  padding-bottom: 8px;
+  margin-top: 12px;
 }
 
 .login-features {
@@ -1145,6 +1245,14 @@ onMounted(() => {
 
 /* Responsive Design */
 @media (max-width: 1024px) {
+  .knowledge-node:nth-of-type(n + 13) {
+    display: none;
+  }
+
+  .connection-line:nth-of-type(n + 13) {
+    display: none;
+  }
+
   .showcase-subtitle {
     font-size: 18px;
   }
@@ -1177,6 +1285,14 @@ onMounted(() => {
 @media (max-width: 768px) {
   .login-layout {
     flex-direction: column;
+  }
+
+  .knowledge-node:nth-of-type(n + 9) {
+    display: none;
+  }
+
+  .connection-line:nth-of-type(n + 9) {
+    display: none;
   }
 
   .showcase-section {
@@ -1241,6 +1357,10 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
+  .animated-bg {
+    display: none;
+  }
+
   .showcase-section {
     padding: 32px 20px;
   }
@@ -1285,6 +1405,18 @@ onMounted(() => {
 
   .form-header {
     margin-bottom: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-node,
+  .connection-line {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .animated-bg {
+    display: none;
   }
 }
 </style>

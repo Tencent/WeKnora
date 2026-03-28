@@ -393,6 +393,9 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.POST("/auth/register", handler.Register)
 	r.POST("/auth/login", handler.Login)
+	r.GET("/auth/oidc/config", handler.GetOIDCConfig)
+	r.GET("/auth/oidc/url", handler.GetOIDCAuthorizationURL)
+	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
 	r.POST("/auth/refresh", handler.RefreshToken)
 	r.GET("/auth/validate", handler.ValidateToken)
 	r.POST("/auth/logout", handler.Logout)
