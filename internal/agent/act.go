@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -11,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"golang.org/x/sync/errgroup"
 )
 
 // toolDisplayNames maps internal tool names to user-friendly display labels.
@@ -62,6 +64,7 @@ func formatToolHint(name string, args map[string]any) string {
 
 // executeToolCalls runs every tool call in the LLM response, appending results to step.ToolCalls.
 // It also emits tool-call and tool-result events, and optionally runs reflection after each call.
+// When ParallelToolCalls is enabled and there are 2+ tool calls, they execute concurrently.
 func (e *AgentEngine) executeToolCalls(
 	ctx context.Context, response *types.ChatResponse,
 	step *types.AgentStep, iteration int, sessionID string,
@@ -71,165 +74,257 @@ func (e *AgentEngine) executeToolCalls(
 	}
 
 	round := iteration + 1
-	logger.Infof(ctx, "[Agent][Round-%d] Executing %d tool call(s)", round, len(response.ToolCalls))
+	n := len(response.ToolCalls)
+	logger.Infof(ctx, "[Agent][Round-%d] Executing %d tool call(s)", round, n)
+
+	// Use parallel execution when enabled and there are multiple tool calls
+	if e.config.ParallelToolCalls && n >= 2 {
+		e.executeToolCallsParallel(ctx, response, step, iteration, sessionID)
+		return
+	}
 
 	for i, tc := range response.ToolCalls {
-		// Normalize tool call ID for cross-provider compatibility
-		tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
-		toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%d)]",
-			round, tc.Function.Name, i+1, len(response.ToolCalls))
+		e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID)
+	}
+}
 
-		var args map[string]any
-		argsStr := tc.Function.Arguments
-		if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-			// Attempt JSON repair before giving up
-			repaired := agenttools.RepairJSON(argsStr)
-			if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
-				logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
-				step.ToolCalls = append(step.ToolCalls, types.ToolCall{
-					ID:   tc.ID,
-					Name: tc.Function.Name,
-					Args: map[string]any{"_raw": argsStr},
-					Result: &types.ToolResult{
-						Success: false,
-						Error: fmt.Sprintf(
-							"Failed to parse tool arguments: %v", err,
-						) + "\n\n[Analyze the error above and try a different approach.]",
-					},
-				})
-				continue
-			}
-			logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
-			tc.Function.Arguments = repaired
-		}
+// executeToolCallsParallel runs all tool calls concurrently using errgroup,
+// collecting results in original order.
+func (e *AgentEngine) executeToolCallsParallel(
+	ctx context.Context, response *types.ChatResponse,
+	step *types.AgentStep, iteration int, sessionID string,
+) {
+	round := iteration + 1
+	n := len(response.ToolCalls)
+	logger.Infof(ctx, "[Agent][Round-%d] Parallel execution of %d tool calls", round, n)
 
-		logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+	results := make([]types.ToolCall, n)
+	var mu sync.Mutex
+	g, gCtx := errgroup.WithContext(ctx)
 
-		toolCallStartTime := time.Now()
-
-		// Emit tool hint for UI progress display
-		toolHint := formatToolHint(tc.Function.Name, args)
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        tc.ID + "-tool-hint",
-			Type:      event.EventAgentToolCall,
-			SessionID: sessionID,
-			Data: event.AgentToolCallData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
-				Arguments:  args,
-				Iteration:  iteration,
-				Hint:       toolHint,
-			},
+	for i, tc := range response.ToolCalls {
+		i, tc := i, tc // capture loop vars
+		g.Go(func() error {
+			toolCall := e.runToolCall(gCtx, tc, i, iteration, round, sessionID)
+			mu.Lock()
+			results[i] = toolCall
+			mu.Unlock()
+			return nil // best-effort: don't cancel siblings on failure
 		})
+	}
 
-		// Execute tool with timeout to prevent indefinite hangs
-		common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
-			"iteration":    iteration,
-			"round":        round,
-			"tool":         tc.Function.Name,
-			"tool_call_id": tc.ID,
-			"tool_index":   fmt.Sprintf("%d/%d", i+1, len(response.ToolCalls)),
-		})
-		toolCtx, toolCancel := context.WithTimeout(ctx, defaultToolExecTimeout)
-		result, err := e.toolRegistry.ExecuteTool(
-			toolCtx, tc.Function.Name,
-			json.RawMessage(tc.Function.Arguments),
-		)
-		toolCancel()
-		duration := time.Since(toolCallStartTime).Milliseconds()
+	_ = g.Wait()
 
-		toolCall := types.ToolCall{
-			ID:       tc.ID,
-			Name:     tc.Function.Name,
-			Args:     args,
-			Result:   result,
-			Duration: duration,
-		}
-
-		if err != nil {
-			logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
-			toolCall.Result = &types.ToolResult{
-				Success: false,
-				Error:   err.Error(),
-			}
-		} else {
-			success := result != nil && result.Success
-			outputLen := 0
-			if result != nil {
-				outputLen = len(result.Output)
-			}
-			logger.Infof(ctx, "%s Completed in %dms: success=%v, output=%d chars",
-				toolTag, duration, success, outputLen)
-		}
-
-		// Pipeline event for monitoring
-		toolSuccess := toolCall.Result != nil && toolCall.Result.Success
-		pipelineFields := map[string]interface{}{
-			"iteration":    iteration,
-			"round":        round,
-			"tool":         tc.Function.Name,
-			"tool_call_id": tc.ID,
-			"duration_ms":  duration,
-			"success":      toolSuccess,
-		}
-		if toolCall.Result != nil && toolCall.Result.Error != "" {
-			pipelineFields["error"] = toolCall.Result.Error
-		}
-		if err != nil {
-			common.PipelineError(ctx, "Agent", "tool_call_result", pipelineFields)
-		} else if toolSuccess {
-			common.PipelineInfo(ctx, "Agent", "tool_call_result", pipelineFields)
-		} else {
-			common.PipelineWarn(ctx, "Agent", "tool_call_result", pipelineFields)
-		}
-
-		// Debug-level output preview
-		if toolCall.Result != nil && toolCall.Result.Output != "" {
-			preview := toolCall.Result.Output
-			if len(preview) > 500 {
-				preview = preview[:500] + "... (truncated)"
-			}
-			logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
-		}
-		if toolCall.Result != nil && toolCall.Result.Error != "" {
-			logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
-		}
-
-		// Store tool call
+	// Append results and emit events in original order
+	for _, toolCall := range results {
 		step.ToolCalls = append(step.ToolCalls, toolCall)
 
-		// Emit tool result event (include structured data from tool result)
+		result := toolCall.Result
+		if result == nil {
+			result = &types.ToolResult{Success: false, Error: "no result"}
+		}
+
 		e.eventBus.Emit(ctx, event.Event{
-			ID:        tc.ID + "-tool-result",
+			ID:        toolCall.ID + "-tool-result",
 			Type:      event.EventAgentToolResult,
 			SessionID: sessionID,
 			Data: event.AgentToolResultData{
-				ToolCallID: tc.ID,
-				ToolName:   tc.Function.Name,
+				ToolCallID: toolCall.ID,
+				ToolName:   toolCall.Name,
 				Output:     result.Output,
 				Error:      result.Error,
 				Success:    result.Success,
-				Duration:   duration,
+				Duration:   toolCall.Duration,
 				Iteration:  iteration,
-				Data:       result.Data, // Pass structured data for frontend rendering
+				Data:       result.Data,
 			},
 		})
 
-		// Emit tool execution event (for internal monitoring)
 		e.eventBus.Emit(ctx, event.Event{
-			ID:        tc.ID + "-tool-exec",
+			ID:        toolCall.ID + "-tool-exec",
 			Type:      event.EventAgentTool,
 			SessionID: sessionID,
 			Data: event.AgentActionData{
 				Iteration:  iteration,
-				ToolName:   tc.Function.Name,
-				ToolInput:  args,
+				ToolName:   toolCall.Name,
+				ToolInput:  toolCall.Args,
 				ToolOutput: result.Output,
 				Success:    result.Success,
 				Error:      result.Error,
-				Duration:   duration,
+				Duration:   toolCall.Duration,
 			},
 		})
-
 	}
+}
+
+// executeSingleToolCall runs one tool call sequentially (original behavior).
+func (e *AgentEngine) executeSingleToolCall(
+	ctx context.Context, tc types.LLMToolCall, i int,
+	step *types.AgentStep, iteration, round int, sessionID string,
+) {
+	toolCall := e.runToolCall(ctx, tc, i, iteration, round, sessionID)
+	step.ToolCalls = append(step.ToolCalls, toolCall)
+
+	result := toolCall.Result
+	if result == nil {
+		result = &types.ToolResult{Success: false, Error: "no result"}
+	}
+
+	e.eventBus.Emit(ctx, event.Event{
+		ID:        toolCall.ID + "-tool-result",
+		Type:      event.EventAgentToolResult,
+		SessionID: sessionID,
+		Data: event.AgentToolResultData{
+			ToolCallID: toolCall.ID,
+			ToolName:   toolCall.Name,
+			Output:     result.Output,
+			Error:      result.Error,
+			Success:    result.Success,
+			Duration:   toolCall.Duration,
+			Iteration:  iteration,
+			Data:       result.Data,
+		},
+	})
+
+	e.eventBus.Emit(ctx, event.Event{
+		ID:        toolCall.ID + "-tool-exec",
+		Type:      event.EventAgentTool,
+		SessionID: sessionID,
+		Data: event.AgentActionData{
+			Iteration:  iteration,
+			ToolName:   toolCall.Name,
+			ToolInput:  toolCall.Args,
+			ToolOutput: result.Output,
+			Success:    result.Success,
+			Error:      result.Error,
+			Duration:   toolCall.Duration,
+		},
+	})
+}
+
+// runToolCall handles argument parsing, execution, logging, and pipeline events for a single tool call.
+// It returns the completed ToolCall struct. Safe to call from multiple goroutines.
+func (e *AgentEngine) runToolCall(
+	ctx context.Context, tc types.LLMToolCall, i int,
+	iteration, round int, sessionID string,
+) types.ToolCall {
+	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
+	total := "?" // unknown in isolation; callers log the batch size
+	toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%s)]",
+		round, tc.Function.Name, i+1, total)
+
+	var args map[string]any
+	argsStr := tc.Function.Arguments
+	if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
+		repaired := agenttools.RepairJSON(argsStr)
+		if repairErr := json.Unmarshal([]byte(repaired), &args); repairErr != nil {
+			logger.Errorf(ctx, "%s Failed to parse arguments (repair failed): %v", toolTag, err)
+			return types.ToolCall{
+				ID:   tc.ID,
+				Name: tc.Function.Name,
+				Args: map[string]any{"_raw": argsStr},
+				Result: &types.ToolResult{
+					Success: false,
+					Error: fmt.Sprintf(
+						"Failed to parse tool arguments: %v", err,
+					) + "\n\n[Analyze the error above and try a different approach.]",
+				},
+			}
+		}
+		logger.Warnf(ctx, "%s Repaired malformed JSON arguments", toolTag)
+		tc.Function.Arguments = repaired
+	}
+
+	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
+
+	toolCallStartTime := time.Now()
+
+	// Emit tool hint for UI progress display
+	toolHint := formatToolHint(tc.Function.Name, args)
+	e.eventBus.Emit(ctx, event.Event{
+		ID:        tc.ID + "-tool-hint",
+		Type:      event.EventAgentToolCall,
+		SessionID: sessionID,
+		Data: event.AgentToolCallData{
+			ToolCallID: tc.ID,
+			ToolName:   tc.Function.Name,
+			Arguments:  args,
+			Iteration:  iteration,
+			Hint:       toolHint,
+		},
+	})
+
+	common.PipelineInfo(ctx, "Agent", "tool_call_start", map[string]interface{}{
+		"iteration":    iteration,
+		"round":        round,
+		"tool":         tc.Function.Name,
+		"tool_call_id": tc.ID,
+		"tool_index":   fmt.Sprintf("%d/%s", i+1, total),
+	})
+
+	toolCtx, toolCancel := context.WithTimeout(ctx, defaultToolExecTimeout)
+	result, err := e.toolRegistry.ExecuteTool(
+		toolCtx, tc.Function.Name,
+		json.RawMessage(tc.Function.Arguments),
+	)
+	toolCancel()
+	duration := time.Since(toolCallStartTime).Milliseconds()
+
+	toolCall := types.ToolCall{
+		ID:       tc.ID,
+		Name:     tc.Function.Name,
+		Args:     args,
+		Result:   result,
+		Duration: duration,
+	}
+
+	if err != nil {
+		logger.Errorf(ctx, "%s Failed in %dms: %v", toolTag, duration, err)
+		toolCall.Result = &types.ToolResult{
+			Success: false,
+			Error:   err.Error(),
+		}
+	} else {
+		success := result != nil && result.Success
+		outputLen := 0
+		if result != nil {
+			outputLen = len(result.Output)
+		}
+		logger.Infof(ctx, "%s Completed in %dms: success=%v, output=%d chars",
+			toolTag, duration, success, outputLen)
+	}
+
+	// Pipeline event for monitoring
+	toolSuccess := toolCall.Result != nil && toolCall.Result.Success
+	pipelineFields := map[string]interface{}{
+		"iteration":    iteration,
+		"round":        round,
+		"tool":         tc.Function.Name,
+		"tool_call_id": tc.ID,
+		"duration_ms":  duration,
+		"success":      toolSuccess,
+	}
+	if toolCall.Result != nil && toolCall.Result.Error != "" {
+		pipelineFields["error"] = toolCall.Result.Error
+	}
+	if err != nil {
+		common.PipelineError(ctx, "Agent", "tool_call_result", pipelineFields)
+	} else if toolSuccess {
+		common.PipelineInfo(ctx, "Agent", "tool_call_result", pipelineFields)
+	} else {
+		common.PipelineWarn(ctx, "Agent", "tool_call_result", pipelineFields)
+	}
+
+	if toolCall.Result != nil && toolCall.Result.Output != "" {
+		preview := toolCall.Result.Output
+		if len(preview) > 500 {
+			preview = preview[:500] + "... (truncated)"
+		}
+		logger.Debugf(ctx, "%s Output preview:\n%s", toolTag, preview)
+	}
+	if toolCall.Result != nil && toolCall.Result.Error != "" {
+		logger.Debugf(ctx, "%s Tool error: %s", toolTag, toolCall.Result.Error)
+	}
+
+	return toolCall
 }
