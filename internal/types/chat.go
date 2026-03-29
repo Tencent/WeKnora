@@ -57,6 +57,8 @@ const (
 	ResponseTypeAgentQuery ResponseType = "agent_query"
 	// Complete response type (agent complete)
 	ResponseTypeComplete ResponseType = "complete"
+	// Ask user response type (agent requests user input)
+	ResponseTypeAskUser ResponseType = "ask_user"
 )
 
 // StreamResponse stream response

@@ -38,6 +38,7 @@ type AgentEngine struct {
 	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
 	lastUsage            types.TokenUsage          // Token usage from the most recent LLM call
 	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
+	userInputCh          chan string                // Channel for receiving user input when agent asks a question
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -74,6 +75,7 @@ func NewAgentEngine(
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
+		userInputCh:          make(chan string, 1),
 	}
 
 	// Initialize memory consolidator if context window management is configured
@@ -136,6 +138,20 @@ func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
 // GetSkillsManager returns the skills manager
 func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 	return e.skillsManager
+}
+
+// ResumeWithUserInput sends the user's answer to the blocked engine goroutine,
+// allowing the ReAct loop to continue with the answer appended as a user message.
+func (e *AgentEngine) ResumeWithUserInput(answer string) {
+	select {
+	case e.userInputCh <- answer:
+	default:
+	}
+}
+
+// UserInputChannel returns a send-only channel for providing user input.
+func (e *AgentEngine) UserInputChannel() chan<- string {
+	return e.userInputCh
 }
 
 // estimateCurrentTokens returns the best estimate of the current context token count.
@@ -369,8 +385,8 @@ func (e *AgentEngine) executeLoop(
 		e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
 
 		// 3.5. Check if any tool result signals that user input is required
-		if question, ok := checkRequiresUserInput(step.ToolCalls); ok {
-			logger.Infof(ctx, "[Agent][Round-%d] Tool requested user input, pausing execution: %s",
+		if question, options, reason, needInput := checkRequiresUserInput(step.ToolCalls); needInput {
+			logger.Infof(ctx, "[Agent][Round-%d] Tool requested user input, blocking for answer: %s",
 				state.CurrentRound+1, question)
 			state.RoundSteps = append(state.RoundSteps, step)
 			state.WaitingForUserInput = true
@@ -379,12 +395,28 @@ func (e *AgentEngine) executeLoop(
 				ID:        generateEventID("ask-user"),
 				Type:      event.EventAgentAskUser,
 				SessionID: sessionID,
-				Data: map[string]interface{}{
-					"question":  question,
-					"iteration": state.CurrentRound,
+				Data: event.AgentAskUserData{
+					Question: question,
+					Options:  options,
+					Reason:   reason,
 				},
 			})
-			break
+
+			// Block until user responds or context is cancelled
+			select {
+			case answer := <-e.userInputCh:
+				state.WaitingForUserInput = false
+				state.PendingQuestion = ""
+				messages = e.appendToolResults(ctx, messages, step)
+				messages = append(messages, chat.Message{
+					Role:    "user",
+					Content: answer,
+				})
+				state.CurrentRound++
+				continue // continue the ReAct loop
+			case <-ctx.Done():
+				return state, ctx.Err()
+			}
 		}
 
 		// 4. Observe: Add tool results to messages and write to context
@@ -471,9 +503,9 @@ func decodeDataURIBytes(dataURI string) ([]byte, error) {
 }
 
 // checkRequiresUserInput inspects the tool calls from a step and returns the
-// question string if any tool result signals that user input is required
-// (i.e., the ask_user tool was invoked successfully).
-func checkRequiresUserInput(toolCalls []types.ToolCall) (string, bool) {
+// question, options, reason, and a boolean flag if any tool result signals that
+// user input is required (i.e., the ask_user tool was invoked successfully).
+func checkRequiresUserInput(toolCalls []types.ToolCall) (question string, options []string, reason string, needInput bool) {
 	for _, tc := range toolCalls {
 		if tc.Result == nil || tc.Result.Data == nil {
 			continue
@@ -483,9 +515,21 @@ func checkRequiresUserInput(toolCalls []types.ToolCall) (string, bool) {
 			continue
 		}
 		if flag, isBool := requiresInput.(bool); isBool && flag {
-			question, _ := tc.Result.Data["question"].(string)
-			return question, true
+			question, _ = tc.Result.Data["question"].(string)
+			reason, _ = tc.Result.Data["reason"].(string)
+			if rawOpts, ok := tc.Result.Data["options"]; ok {
+				if optSlice, ok := rawOpts.([]string); ok {
+					options = optSlice
+				} else if optIface, ok := rawOpts.([]interface{}); ok {
+					for _, o := range optIface {
+						if s, ok := o.(string); ok {
+							options = append(options, s)
+						}
+					}
+				}
+			}
+			return question, options, reason, true
 		}
 	}
-	return "", false
+	return "", nil, "", false
 }

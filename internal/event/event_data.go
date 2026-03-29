@@ -203,6 +203,13 @@ type SessionTitleData struct {
 	Title     string `json:"title"`
 }
 
+// AgentAskUserData represents agent ask-user event data
+type AgentAskUserData struct {
+	Question string   `json:"question"`
+	Options  []string `json:"options,omitempty"`
+	Reason   string   `json:"reason"`
+}
+
 // StopData represents stop generation request data
 type StopData struct {
 	SessionID string `json:"session_id"`
