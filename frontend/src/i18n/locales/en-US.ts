@@ -3076,6 +3076,7 @@ export default {
       dataAnalysis: 'Data Analysis',
       dataSchema: 'Data Schema',
       databaseQuery: 'Database Query',
+      askUser: 'Ask User',
     },
     summary: {
       searchKb: 'Searched knowledge base <strong>{count}</strong> time(s)',
@@ -3137,6 +3138,15 @@ export default {
     saveToKb: {
       emptyContent: 'Current response is empty, cannot save to knowledge base',
       editorOpened: 'Editor opened, please select a knowledge base and save',
+    },
+    askUser: {
+      title: 'Agent needs your input',
+      reason: 'Reason',
+      placeholder: 'Type your answer...',
+      send: 'Send',
+      hint: 'Select an option or type a custom answer',
+      hintNoOptions: 'Please type your answer below',
+      replied: 'Replied',
     },
   },
   agentEditor: {

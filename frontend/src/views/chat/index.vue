@@ -27,6 +27,7 @@
                     </div>
                     <div v-if="session.role == 'assistant'">
                         <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
+                            @reply-to-ask="handleReplyToAsk"
                             :isFirstEnter="isFirstEnter"></botmsg>
                     </div>
                 </div>
@@ -498,6 +499,11 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     });
 }
 
+const handleReplyToAsk = (answerText) => {
+    console.log('[Ask User Reply]', answerText);
+    sendMsg(answerText);
+};
+
 // Watch for stream errors and show message
 watch(error, (newError) => {
     if (newError) {
@@ -571,7 +577,8 @@ onChunk((data) => {
     const isAgentOnlyResponse = data.response_type === 'thinking' || 
                                data.response_type === 'tool_call' || 
                                data.response_type === 'tool_result' ||
-                               data.response_type === 'reflection';
+                               data.response_type === 'reflection' ||
+                               data.response_type === 'ask_user';
     
     // 检查当前消息是否已经是 Agent 模式
     const lastMessage = messagesList[messagesList.length - 1];
@@ -981,11 +988,38 @@ const handleAgentChunk = (data) => {
             }
             break;
             
+        case 'ask_user':
+            {
+                console.log('[Agent] Ask user event received:', data.data);
+                if (!message.agentEventStream) message.agentEventStream = [];
+                
+                message.agentEventStream.push({
+                    type: 'ask_user',
+                    question: data.data?.question || data.content || '',
+                    options: data.data?.options || [],
+                    reason: data.data?.reason || '',
+                    event_id: `ask-user-${Date.now()}`,
+                    timestamp: Date.now(),
+                    done: true,
+                });
+                
+                message.waitingForUserInput = true;
+                loading.value = false;
+                isReplying.value = false;
+            }
+            break;
+
         case 'complete':
             // 整个流式响应完成事件 - 确保状态正确关闭
             console.log('[Agent] Complete event received');
             loading.value = false;
             isReplying.value = false;
+            
+            if (data.data?.waiting_for_user_input) {
+                message.waitingForUserInput = true;
+                console.log('[Agent] Complete with waiting_for_user_input=true');
+            }
+            
             // 将 total_duration_ms 存入事件流供 AgentStreamDisplay 使用
             if (data.data?.total_duration_ms && message.agentEventStream) {
                 message.agentEventStream.push({

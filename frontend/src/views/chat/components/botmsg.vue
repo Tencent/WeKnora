@@ -19,7 +19,7 @@
                 </span>
             </div>
             <docInfo :session="session"></docInfo>
-            <AgentStreamDisplay :session="session" :user-query="userQuery" v-if="session.isAgentMode"></AgentStreamDisplay>
+            <AgentStreamDisplay :session="session" :user-query="userQuery" v-if="session.isAgentMode" @reply-to-ask="(text) => emit('reply-to-ask', text)"></AgentStreamDisplay>
             <deepThink :deepSession="session" v-if="session.showThink && !session.isAgentMode"></deepThink>
         </div>
         <!-- 非 Agent 模式下才显示传统的 markdown 渲染 -->
@@ -90,7 +90,7 @@ marked.use({
 
 ensureMermaidInitialized();
 
-const emit = defineEmits(['scroll-bottom'])
+const emit = defineEmits(['scroll-bottom', 'reply-to-ask'])
 const { t } = useI18n()
 const uiStore = useUIStore();
 const renderer = new marked.Renderer();

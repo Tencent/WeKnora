@@ -3074,6 +3074,7 @@ export default {
       dataAnalysis: "数据分析",
       dataSchema: "数据结构",
       databaseQuery: "数据库查询",
+      askUser: "询问用户",
     },
     summary: {
       searchKb: "检索知识库 <strong>{count}</strong> 次",
@@ -3135,6 +3136,15 @@ export default {
     saveToKb: {
       emptyContent: "当前回答为空，无法保存到知识库",
       editorOpened: "已打开编辑器，请选择知识库后保存",
+    },
+    askUser: {
+      title: "智能体需要你的输入",
+      reason: "原因",
+      placeholder: "输入你的回答...",
+      send: "发送",
+      hint: "选择一个选项，或输入自定义回答",
+      hintNoOptions: "请在下方输入你的回答",
+      replied: "已回答",
     },
   },
   agentEditor: {

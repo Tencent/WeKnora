@@ -3128,6 +3128,7 @@ export default {
       dataAnalysis: '데이터 분석',
       dataSchema: '데이터 구조',
       databaseQuery: '데이터베이스 조회',
+      askUser: '사용자에게 질문',
     },
     summary: {
       searchKb: '지식베이스 <strong>{count}</strong>회 검색',
@@ -3189,6 +3190,15 @@ export default {
     saveToKb: {
       emptyContent: '현재 응답이 비어 있어 지식베이스에 저장할 수 없습니다',
       editorOpened: '편집기가 열렸습니다. 지식베이스를 선택한 후 저장하세요',
+    },
+    askUser: {
+      title: '에이전트가 입력을 기다리고 있습니다',
+      reason: '이유',
+      placeholder: '답변을 입력하세요...',
+      send: '보내기',
+      hint: '옵션을 선택하거나 직접 답변을 입력하세요',
+      hintNoOptions: '아래에 답변을 입력해주세요',
+      replied: '답변 완료',
     },
   },
   agentEditor: {

@@ -70,6 +70,17 @@
                 </div>
               </div>
 
+              <!-- Ask User Event (read-only in tree view) -->
+              <div v-else-if="event.type === 'ask_user'" class="ask-user-event ask-user-event--tree">
+                <div class="ask-user-card ask-user-card--compact">
+                  <div class="ask-user-header">
+                    <t-icon name="help-circle" class="ask-user-icon" />
+                    <span class="ask-user-title">{{ $t('agentStream.askUser.title') }}</span>
+                  </div>
+                  <div class="ask-user-question">{{ event.question }}</div>
+                </div>
+              </div>
+
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div
@@ -145,7 +156,7 @@
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div ref="streamingStepsContainer" class="streaming-steps-container" :class="{ 'streaming-steps-constrained': !hasAnswerStarted && !isConversationDone }">
+    <div ref="streamingStepsContainer" class="streaming-steps-container" :class="{ 'streaming-steps-constrained': !hasAnswerStarted && !isConversationDone && !isWaitingForUserInput }">
     <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
       <div v-if="event && event.type" class="event-item" :class="{ 'event-answer': event.type === 'answer' }">
 
@@ -224,6 +235,44 @@
           </div>
         </div>
 
+        <!-- Ask User Event -->
+        <div v-else-if="event.type === 'ask_user'" class="ask-user-event">
+          <div class="ask-user-card">
+            <div class="ask-user-header">
+              <t-icon name="help-circle" class="ask-user-icon" />
+              <span class="ask-user-title">{{ $t('agentStream.askUser.title') }}</span>
+            </div>
+            <div class="ask-user-question">{{ event.question }}</div>
+            <div v-if="event.reason" class="ask-user-reason">
+              <span class="ask-user-reason-label">{{ $t('agentStream.askUser.reason') }}:</span>
+              {{ event.reason }}
+            </div>
+            <div v-if="event.options && event.options.length > 0" class="ask-user-options">
+              <button
+                v-for="(option, optIdx) in event.options"
+                :key="optIdx"
+                class="ask-user-option-btn"
+                @click="handleAskUserReply(option)"
+              >{{ option }}</button>
+            </div>
+            <div class="ask-user-hint">
+              {{ event.options && event.options.length > 0 ? $t('agentStream.askUser.hint') : $t('agentStream.askUser.hintNoOptions') }}
+            </div>
+            <div class="ask-user-input-row">
+              <input
+                type="text"
+                class="ask-user-input"
+                :placeholder="$t('agentStream.askUser.placeholder')"
+                v-model="askUserInputText"
+                @keydown.enter="handleAskUserInputSubmit"
+              />
+              <button class="ask-user-send-btn" @click="handleAskUserInputSubmit" :disabled="!askUserInputText.trim()">
+                <t-icon name="send" />
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Tool Call Event (non-thinking) -->
         <div v-else-if="event.type === 'tool_call'" class="tool-event">
         <div
@@ -299,7 +348,7 @@
       </div>
     </template>
     <!-- Loading Indicator (inside container so it scrolls into view) -->
-    <div v-if="!isConversationDone && eventStream.length > 0" class="loading-indicator">
+    <div v-if="!isConversationDone && !isWaitingForUserInput && eventStream.length > 0" class="loading-indicator">
       <div class="loading-typing">
         <span></span>
         <span></span>
@@ -421,6 +470,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   image_analysis: 'agentStream.tools.imageAnalysis',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
   final_answer: 'agentStream.tools.finalAnswer',
+  ask_user: 'agentStream.tools.askUser',
   read_skill: 'agentStream.tools.readSkill',
   execute_skill_script: 'agentStream.tools.executeSkillScript',
   data_analysis: 'agentStream.tools.dataAnalysis',
@@ -586,6 +636,24 @@ const props = defineProps<{
   userQuery?: string;
 }>();
 
+const emit = defineEmits<{
+  (e: 'reply-to-ask', text: string): void;
+}>();
+
+const askUserInputText = ref('');
+
+const handleAskUserReply = (text: string) => {
+  emit('reply-to-ask', text);
+};
+
+const handleAskUserInputSubmit = () => {
+  const text = askUserInputText.value.trim();
+  if (text) {
+    emit('reply-to-ask', text);
+    askUserInputText.value = '';
+  }
+};
+
 // Configure marked for security
 marked.use({});
 
@@ -692,6 +760,13 @@ watch(eventStream, (stream) => {
   }
 }, { deep: true, immediate: true });
 
+
+// Check if the agent is paused waiting for user input
+const isWaitingForUserInput = computed(() => {
+  const stream = eventStream.value;
+  if (!stream || stream.length === 0) return false;
+  return stream.some((e: any) => e.type === 'ask_user');
+});
 
 // Check if conversation is done (based on answer event with done=true or stop event)
 const isConversationDone = computed(() => {
@@ -2240,6 +2315,155 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .answer-toolbar {
     margin-top: 10px;
+  }
+}
+
+// Ask User Event
+.ask-user-event {
+  animation: fadeInUp 0.3s ease-out;
+  margin-top: 8px;
+
+  .ask-user-card {
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-warning-color-focus);
+    border-radius: 8px;
+    padding: 14px 16px;
+    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.08);
+
+    &--compact {
+      padding: 8px 12px;
+    }
+  }
+
+  .ask-user-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+
+    .ask-user-icon {
+      font-size: 18px;
+      color: var(--td-warning-color);
+    }
+
+    .ask-user-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+    }
+  }
+
+  .ask-user-question {
+    font-size: 14px;
+    color: var(--td-text-color-primary);
+    line-height: 1.6;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+  }
+
+  .ask-user-reason {
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+    line-height: 1.5;
+    margin-bottom: 10px;
+    padding: 6px 10px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: 4px;
+
+    .ask-user-reason-label {
+      font-weight: 600;
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  .ask-user-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .ask-user-option-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 16px;
+    border-radius: 16px;
+    border: 1px solid var(--td-brand-color);
+    background: rgba(7, 192, 95, 0.06);
+    color: var(--td-brand-color);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+
+    &:hover {
+      background: var(--td-brand-color);
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(7, 192, 95, 0.2);
+    }
+
+    &:active {
+      transform: scale(0.97);
+    }
+  }
+
+  .ask-user-hint {
+    font-size: 11px;
+    color: var(--td-text-color-placeholder);
+    margin-bottom: 8px;
+  }
+
+  .ask-user-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ask-user-input {
+    flex: 1;
+    padding: 7px 12px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container);
+    outline: none;
+    transition: border-color 0.2s ease;
+
+    &::placeholder {
+      color: var(--td-text-color-placeholder);
+    }
+
+    &:focus {
+      border-color: var(--td-brand-color);
+      box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    }
+  }
+
+  .ask-user-send-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    border: none;
+    background: var(--td-brand-color);
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+
+    &:hover:not(:disabled) {
+      background: var(--td-brand-color-hover);
+      box-shadow: 0 2px 6px rgba(7, 192, 95, 0.25);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
   }
 }
 
