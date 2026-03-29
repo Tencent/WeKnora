@@ -423,7 +423,14 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	// Update assistant message with final data
 	if data.MessageID == h.assistantMessageID {
 		// h.assistantMessage.Content = data.FinalAnswer
-		h.assistantMessage.IsCompleted = true
+		if data.WaitingForUserInput {
+			// Agent is paused waiting for user input — do NOT mark as completed.
+			// The message will be saved with IsCompleted=false so that when the user
+			// responds via the normal chat endpoint, the agent can resume from history.
+			h.assistantMessage.IsCompleted = false
+		} else {
+			h.assistantMessage.IsCompleted = true
+		}
 		h.assistantMessage.AgentDurationMs = data.TotalDurationMs
 
 		// Update knowledge references if provided

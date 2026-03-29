@@ -13,7 +13,7 @@ import (
 
 var askUserTool = BaseTool{
 	name: ToolNameAskUser,
-	description: `Pause execution and ask the user a clarifying question. Use when the query is ambiguous, information is insufficient, or confirmation is needed before a high-risk operation.
+	description: `Pause the current execution and ask the user a clarifying question. The user's response will be provided in the next message when execution resumes. Use when information is ambiguous or confirmation is needed before proceeding.
 
 ## When to Use This Tool
 
@@ -85,7 +85,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args json.RawMessage) (*types
 
 	// Format the output
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("## Clarification Needed\n\n"))
+	builder.WriteString("## Clarification Needed\n\n")
 	builder.WriteString(fmt.Sprintf("**Question**: %s\n\n", input.Question))
 	builder.WriteString(fmt.Sprintf("**Reason**: %s\n\n", input.Reason))
 	if len(input.Options) > 0 {
@@ -93,7 +93,9 @@ func (t *AskUserTool) Execute(ctx context.Context, args json.RawMessage) (*types
 		for i, option := range input.Options {
 			builder.WriteString(fmt.Sprintf("%d. %s\n", i+1, option))
 		}
+		builder.WriteString("\n")
 	}
+	builder.WriteString("Execution paused. Waiting for user response. The user's answer will appear as the next user message.")
 
 	// Build structured data signaling that user input is needed
 	resultData := map[string]interface{}{

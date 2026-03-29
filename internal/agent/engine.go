@@ -38,7 +38,6 @@ type AgentEngine struct {
 	memoryConsolidator   *agentmemory.Consolidator // Memory consolidator for LLM-powered summarization (optional)
 	lastUsage            types.TokenUsage          // Token usage from the most recent LLM call
 	lastSentMsgCount     int                       // Number of messages sent in the most recent LLM call
-	userInputCh          chan string                // Channel for receiving user input when agent asks a question
 }
 
 // ImageDescriberFunc generates a text description of an image.
@@ -75,7 +74,6 @@ func NewAgentEngine(
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
-		userInputCh:          make(chan string, 1),
 	}
 
 	// Initialize memory consolidator if context window management is configured
@@ -138,20 +136,6 @@ func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
 // GetSkillsManager returns the skills manager
 func (e *AgentEngine) GetSkillsManager() *skills.Manager {
 	return e.skillsManager
-}
-
-// ResumeWithUserInput sends the user's answer to the blocked engine goroutine,
-// allowing the ReAct loop to continue with the answer appended as a user message.
-func (e *AgentEngine) ResumeWithUserInput(answer string) {
-	select {
-	case e.userInputCh <- answer:
-	default:
-	}
-}
-
-// UserInputChannel returns a send-only channel for providing user input.
-func (e *AgentEngine) UserInputChannel() chan<- string {
-	return e.userInputCh
 }
 
 // estimateCurrentTokens returns the best estimate of the current context token count.
@@ -386,11 +370,16 @@ func (e *AgentEngine) executeLoop(
 
 		// 3.5. Check if any tool result signals that user input is required
 		if question, options, reason, needInput := checkRequiresUserInput(step.ToolCalls); needInput {
-			logger.Infof(ctx, "[Agent][Round-%d] Tool requested user input, blocking for answer: %s",
+			logger.Infof(ctx, "[Agent][Round-%d] Tool requested user input, pausing execution: %s",
 				state.CurrentRound+1, question)
 			state.RoundSteps = append(state.RoundSteps, step)
 			state.WaitingForUserInput = true
 			state.PendingQuestion = question
+
+			// Append tool results to context so they are persisted in conversation history
+			messages = e.appendToolResults(ctx, messages, step)
+
+			// Emit ask_user event so frontend receives the question via SSE
 			e.eventBus.Emit(ctx, event.Event{
 				ID:        generateEventID("ask-user"),
 				Type:      event.EventAgentAskUser,
@@ -402,21 +391,10 @@ func (e *AgentEngine) executeLoop(
 				},
 			})
 
-			// Block until user responds or context is cancelled
-			select {
-			case answer := <-e.userInputCh:
-				state.WaitingForUserInput = false
-				state.PendingQuestion = ""
-				messages = e.appendToolResults(ctx, messages, step)
-				messages = append(messages, chat.Message{
-					Role:    "user",
-					Content: answer,
-				})
-				state.CurrentRound++
-				continue // continue the ReAct loop
-			case <-ctx.Done():
-				return state, ctx.Err()
-			}
+			// Break the loop — Execute() returns, goroutine ends cleanly.
+			// The user's answer will arrive as a new message in the normal chat endpoint,
+			// starting a fresh agent execution with the full conversation history from DB.
+			break
 		}
 
 		// 4. Observe: Add tool results to messages and write to context

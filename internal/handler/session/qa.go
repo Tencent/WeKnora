@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -450,31 +449,6 @@ func (h *Handler) AgentQA(c *gin.Context) {
 // qaMode determines which QA execution path to use.
 type qaMode int
 
-// ResumeAgentChat resumes an agent that is blocked waiting for user input.
-// The agent engine blocks on a channel when the ask_user tool is invoked;
-// this endpoint sends the user's answer to that channel so the ReAct loop continues.
-func (h *Handler) ResumeAgentChat(c *gin.Context) {
-	sessionID := c.Param("session_id")
-	messageID := c.Param("message_id")
-
-	var req struct {
-		Answer string `json:"answer" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "answer is required"})
-		return
-	}
-
-	engine, ok := agent.GetEngine(sessionID, messageID)
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no active agent waiting for input"})
-		return
-	}
-
-	engine.ResumeWithUserInput(req.Answer)
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "agent resumed"})
-}
-
 const (
 	qaModeNormal qaMode = iota // KnowledgeQA pipeline (RAG / pure chat)
 	qaModeAgent                // Agent engine with tool calling
@@ -577,8 +551,18 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
-				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
+				if streamCtx.assistantMessage.IsCompleted {
+					// Normal completion — mark as completed and index for search
+					h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
+				} else {
+					// Agent is paused waiting for user input — save message as NOT completed.
+					// The message sits in DB with IsCompleted=false. When the user sends their
+					// answer via the normal chat endpoint, a new agent execution will load the
+					// full conversation history (including the ask_user exchange) and continue.
+					streamCtx.assistantMessage.UpdatedAt = time.Now()
+					_ = h.messageService.UpdateMessage(updateCtx, streamCtx.assistantMessage)
+				}
+				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s (is_completed=%v)", sessionID, streamCtx.assistantMessage.IsCompleted)
 			}
 		}()
 

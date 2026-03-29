@@ -330,7 +330,6 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler) {
 	agentChat := r.Group("/agent-chat")
 	{
 		agentChat.POST("/:session_id", handler.AgentQA)
-		agentChat.POST("/:session_id/messages/:message_id/resume", handler.ResumeAgentChat)
 	}
 
 	// 新增知识检索接口，不需要session_id
