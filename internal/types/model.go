@@ -47,7 +47,8 @@ const (
 	ModelSourceSiliconFlow ModelSource = "siliconflow" // SiliconFlow model
 	ModelSourceJina        ModelSource = "jina"        // Jina AI model
 	ModelSourceOpenRouter  ModelSource = "openrouter"  // OpenRouter model
-	ModelSourceNovita     ModelSource = "novita"     // Novita AI model
+	ModelSourceNvidia      ModelSource = "nvidia"      // NVIDIA model
+	ModelSourceNovita      ModelSource = "novita"      // Novita AI model
 )
 
 // EmbeddingParameters represents the embedding parameters for a model
@@ -61,9 +62,9 @@ type ModelParameters struct {
 	APIKey              string              `yaml:"api_key"              json:"api_key"`
 	InterfaceType       string              `yaml:"interface_type"       json:"interface_type"`
 	EmbeddingParameters EmbeddingParameters `yaml:"embedding_parameters" json:"embedding_parameters"`
-	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"` // Ollama model parameter size (e.g., "7B", "13B", "70B")
-	Provider            string              `yaml:"provider"             json:"provider"`       // Provider identifier: openai, aliyun, zhipu, generic
-	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`   // Provider-specific configuration
+	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"`  // Ollama model parameter size (e.g., "7B", "13B", "70B")
+	Provider            string              `yaml:"provider"             json:"provider"`        // Provider identifier: openai, aliyun, zhipu, generic
+	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`    // Provider-specific configuration
 	SupportsVision      bool                `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
 }
 
