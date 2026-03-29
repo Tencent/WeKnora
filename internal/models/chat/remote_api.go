@@ -22,6 +22,7 @@ import (
 // Uses SSRFSafeDialContext to prevent DNS rebinding attacks at the connection layer.
 var rawHTTPClient = &http.Client{
 	Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
 		DialContext:         secutils.SSRFSafeDialContext,
 		TLSHandshakeTimeout: 10 * time.Second,
 		IdleConnTimeout:     90 * time.Second,

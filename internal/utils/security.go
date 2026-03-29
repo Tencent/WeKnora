@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 // XSS 防护相关正则表达式
@@ -781,7 +783,7 @@ func SSRFSafeDialContext(ctx context.Context, network, addr string) (net.Conn, e
 
 	// Whitelisted hosts bypass all dial-time SSRF checks, consistent with
 	// ValidateURLForSSRF which skips IsSSRFSafeURL for whitelisted hosts.
-	if IsSSRFWhitelisted(host) {
+	if IsSystemProxy(addr) || IsSSRFWhitelisted(host) {
 		dialer := &net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -977,4 +979,23 @@ func ValidateURLForSSRF(rawURL string) error {
 		return fmt.Errorf("SSRF validation failed: %s", reason)
 	}
 	return nil
+}
+
+// IsSystemProxy 判断是否为系统代理
+func IsSystemProxy(host string) bool {
+	proxyCfg := httpproxy.FromEnvironment()
+	for _, proxyUrl := range []string{
+		proxyCfg.HTTPProxy,
+		proxyCfg.HTTPSProxy,
+	} {
+		if proxyUrl == "" {
+			continue
+		}
+		if parse, err := url.Parse(proxyUrl); err == nil {
+			if parse.Host == host {
+				return true
+			}
+		}
+	}
+	return false
 }
