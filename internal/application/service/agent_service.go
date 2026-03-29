@@ -422,6 +422,10 @@ func (s *agentService) registerTools(
 		case tools.ToolFinalAnswer:
 			toolToRegister = tools.NewFinalAnswerTool()
 			logger.Infof(ctx, "Registered final_answer tool")
+
+		case tools.ToolNameAskUser:
+			toolToRegister = tools.NewAskUserTool()
+			logger.Infof(ctx, "Registered ask_user tool")
 		default:
 			logger.Warnf(ctx, "Unknown tool: %s", toolName)
 		}

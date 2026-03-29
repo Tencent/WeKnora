@@ -495,16 +495,21 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	}
 
 	// Send completion event to stream manager so SSE can detect completion
+	completeData := map[string]interface{}{
+		"total_steps":            data.TotalSteps,
+		"total_duration_ms":      data.TotalDurationMs,
+		"waiting_for_user_input": data.WaitingForUserInput,
+	}
+	if data.WaitingForUserInput && data.PendingQuestion != "" {
+		completeData["pending_question"] = data.PendingQuestion
+	}
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
 		Content:   "",
 		Done:      true,
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"total_steps":       data.TotalSteps,
-			"total_duration_ms": data.TotalDurationMs,
-		},
+		Data:      completeData,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Errorf("Append complete event to stream failed: %v", err)
 	}
@@ -519,6 +524,13 @@ func (h *AgentStreamHandler) handleAskUser(ctx context.Context, evt event.Event)
 		return nil
 	}
 
+	h.mu.Lock()
+	// Persist the question in assistant message Content so:
+	// 1. Chat history displays the question the agent asked
+	// 2. DB-based context rebuild (cache miss) can reconstruct the exchange
+	h.assistantMessage.Content += data.Question
+	h.mu.Unlock()
+
 	metadata := map[string]interface{}{
 		"options": data.Options,
 		"reason":  data.Reason,
@@ -528,7 +540,7 @@ func (h *AgentStreamHandler) handleAskUser(ctx context.Context, evt event.Event)
 		ID:        evt.ID,
 		Type:      types.ResponseTypeAskUser,
 		Content:   data.Question,
-		Done:      false,
+		Done:      true, // one-shot event, not streaming
 		Timestamp: time.Now(),
 		Data:      metadata,
 	}); err != nil {
