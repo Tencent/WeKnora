@@ -53,8 +53,8 @@ var chatProviderSpecs = []ProviderSpec{
 	},
 	// NVIDIA
 	{
-		Provider:           provider.ProviderNvidia,
-		EndpointCustomizer: nvidiaEndpointCustomizer,
+		Provider:          provider.ProviderNvidia,
+		RequestCustomizer: genericRequestCustomizer,
 	},
 }
 
@@ -182,10 +182,4 @@ func volcengineRequestCustomizer(
 	vcReq.Thinking = &ThinkingConfig{Type: thinkingType}
 
 	return vcReq, true
-}
-
-// nvidiaEndpointCustomizer 自定义 NVIDIA 请求地址
-// NVIDIA 模型使用 BaseURL 作为完整请求地址
-func nvidiaEndpointCustomizer(baseURL string, _ string, _ bool) string {
-	return baseURL
 }
