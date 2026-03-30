@@ -3411,6 +3411,7 @@ export default {
       strategy: "同步策略",
     },
     syncHistory: "同步历史",
+    refreshLogs: "刷新日志",
     noLogs: "暂无同步记录",
     logStatus: {
       running: "同步中",

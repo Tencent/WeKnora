@@ -3312,6 +3312,7 @@ export default {
     resumed: 'Возобновлено',
     pauseFailed: 'Не удалось приостановить',
     logs: 'Журнал',
+    moreActions: 'Дополнительные действия',
     lastSync: 'Последняя синхронизация',
     lastStatus: 'Результат',
     schedule: 'Расписание',
@@ -3362,6 +3363,7 @@ export default {
       strategy: 'Стратегия',
     },
     syncHistory: 'История синхронизации',
+    refreshLogs: 'Обновить журнал',
     noLogs: 'Нет записей синхронизации',
     logStatus: {
       running: 'Синхронизация',

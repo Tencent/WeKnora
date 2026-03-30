@@ -446,7 +446,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	// Auto-tag: find or create a tag for this data source so synced items are easily identifiable
 	autoTagID := ""
-	autoTagName := connectorDisplayLabel(ds.Type) + "·" + ds.Name
+	autoTagName := ds.Name
 	if autoTag, tagErr := s.tagService.FindOrCreateTagByName(ctx, ds.KnowledgeBaseID, autoTagName); tagErr != nil {
 		logger.Warnf(ctx, "failed to find/create auto-tag %q: %v (proceeding without tag)", autoTagName, tagErr)
 	} else if autoTag != nil {
@@ -686,28 +686,4 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 func timePtr(t time.Time) *time.Time {
 	utc := t.UTC()
 	return &utc
-}
-
-// connectorDisplayLabel returns a human-readable label for a connector type.
-// Used to generate auto-tag names like "飞书·我的知识库".
-func connectorDisplayLabel(connectorType string) string {
-	labels := map[string]string{
-		"feishu":      "飞书",
-		"notion":      "Notion",
-		"confluence":  "Confluence",
-		"yuque":       "语雀",
-		"github":      "GitHub",
-		"google_drive": "Google Drive",
-		"onedrive":    "OneDrive",
-		"dingtalk":    "钉钉",
-		"wecom_doc":   "企微文档",
-		"web_crawler": "网页爬虫",
-		"slack":       "Slack",
-		"imap":        "邮件",
-		"rss":         "RSS",
-	}
-	if l, ok := labels[connectorType]; ok {
-		return l
-	}
-	return connectorType
 }

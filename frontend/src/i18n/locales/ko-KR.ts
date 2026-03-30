@@ -3411,6 +3411,7 @@ export default {
     resumed: "재개됨",
     pauseFailed: "일시정지 실패",
     logs: "로그",
+    moreActions: "추가 작업",
     lastSync: "마지막 동기화",
     lastStatus: "결과",
     schedule: "동기화 주기",
@@ -3461,6 +3462,7 @@ export default {
       strategy: "동기화 전략",
     },
     syncHistory: "동기화 이력",
+    refreshLogs: "로그 새로고침",
     noLogs: "동기화 기록이 없습니다",
     logStatus: {
       running: "동기화 중",

@@ -14,15 +14,20 @@ const logs = ref<SyncLog[]>([])
 const loading = ref(false)
 const expandedId = ref('')
 
-watch(visible, async (v) => {
-  if (!v || !props.dataSourceId) return
-  expandedId.value = ''
+async function fetchLogs() {
+  if (!props.dataSourceId) return
   loading.value = true
   try {
     const res = await getSyncLogs(props.dataSourceId, 50, 0)
     logs.value = res?.data || res || []
   } catch { /* ignore */ }
   loading.value = false
+}
+
+watch(visible, (v) => {
+  if (!v) return
+  expandedId.value = ''
+  fetchLogs()
 })
 
 function toggleExpand(id: string) {
@@ -122,11 +127,29 @@ const groupedLogs = computed(() => {
 <template>
   <t-drawer
     v-model:visible="visible"
-    :header="props.dataSourceName ? `${t('datasource.syncHistory')} · ${props.dataSourceName}` : t('datasource.syncHistory')"
     size="480px"
     destroy-on-close
     class="ds-logs-drawer"
   >
+    <template #header>
+      <div class="logs-drawer-header">
+        <span class="logs-drawer-title">
+          {{ props.dataSourceName ? `${t('datasource.syncHistory')} · ${props.dataSourceName}` : t('datasource.syncHistory') }}
+        </span>
+        <t-tooltip :content="t('datasource.refreshLogs')">
+          <t-button
+            size="small"
+            variant="text"
+            shape="square"
+            :loading="loading"
+            @click="fetchLogs"
+          >
+            <template #icon><t-icon name="refresh" /></template>
+          </t-button>
+        </t-tooltip>
+      </div>
+    </template>
+
     <div v-if="loading" style="text-align:center;padding:60px"><t-loading /></div>
 
     <div v-else-if="logs.length === 0" class="logs-empty">
@@ -432,10 +455,25 @@ const groupedLogs = computed(() => {
   word-break: break-word;
 }
 
-/* --- Drawer overrides --- */
-.ds-logs-drawer :deep(.t-drawer__header) {
+/* --- Drawer header --- */
+.logs-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.logs-drawer-title {
   font-size: 15px;
   font-weight: 600;
+  color: var(--td-text-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Drawer overrides --- */
+.ds-logs-drawer :deep(.t-drawer__header) {
   padding: 16px 24px;
   border-bottom: 1px solid var(--td-border-level-2-color);
 }

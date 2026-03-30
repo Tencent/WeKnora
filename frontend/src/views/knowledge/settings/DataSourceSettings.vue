@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   listDataSources,
@@ -15,6 +15,7 @@ import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 
 const props = defineProps<{ kbId: string }>()
+const emit = defineEmits<{ (e: 'count', value: number): void }>()
 const { t } = useI18n()
 
 const dataSources = ref<DataSource[]>([])
@@ -25,11 +26,13 @@ const logsVisible = ref(false)
 const logsDsId = ref('')
 const logsDsName = ref('')
 
+
 async function loadList() {
   loading.value = true
   try {
     const res = await listDataSources(props.kbId)
     dataSources.value = res?.data || res || []
+    emit('count', dataSources.value.length)
   } catch (e: any) {
     console.error(e)
   } finally {
@@ -53,14 +56,23 @@ function openLogs(ds: DataSource) {
   logsVisible.value = true
 }
 
-async function handleDelete(ds: DataSource) {
-  try {
-    await deleteDataSource(ds.id)
-    MessagePlugin.success(t('datasource.deleteSuccess'))
-    loadList()
-  } catch {
-    MessagePlugin.error(t('datasource.deleteFailed'))
-  }
+function handleDelete(ds: DataSource) {
+  const confirmDialog = DialogPlugin.confirm({
+    header: t('datasource.delete'),
+    body: t('datasource.deleteConfirm'),
+    confirmBtn: { content: t('datasource.delete'), theme: 'danger' },
+    cancelBtn: t('common.cancel'),
+    onConfirm: async () => {
+      try {
+        await deleteDataSource(ds.id)
+        MessagePlugin.success(t('datasource.deleteSuccess'))
+        loadList()
+      } catch {
+        MessagePlugin.error(t('datasource.deleteFailed'))
+      }
+      confirmDialog.destroy()
+    },
+  })
 }
 
 async function handleSync(ds: DataSource) {
@@ -93,10 +105,11 @@ async function handleResume(ds: DataSource) {
   }
 }
 
-function statusColor(status: string) {
-  if (status === 'active') return 'var(--td-success-color)'
-  if (status === 'error') return 'var(--td-error-color)'
-  return 'var(--td-text-color-placeholder)'
+function statusTheme(status: string): 'success' | 'danger' | 'default' | 'warning' {
+  if (status === 'active') return 'success'
+  if (status === 'error') return 'danger'
+  if (status === 'paused') return 'warning'
+  return 'default'
 }
 
 function statusLabel(status: string) {
@@ -124,7 +137,6 @@ function lastSyncFullTime(ds: DataSource) {
   return new Date(ds.last_sync_at).toLocaleString()
 }
 
-// Build sync result pills from latest_sync_log
 function syncResultPills(ds: DataSource) {
   const log = ds.latest_sync_log
   if (!log) return []
@@ -165,46 +177,61 @@ onMounted(loadList)
 
 <template>
   <div class="ds-settings">
-    <!-- Section header: title only, no button here -->
     <div class="section-header">
       <h2 class="section-title">{{ t('datasource.title') }}</h2>
       <p class="section-desc">{{ t('datasource.description') }}</p>
     </div>
 
     <div v-if="loading" class="ds-loading">
-      <t-loading />
+      <t-loading size="small" />
     </div>
 
     <div v-else-if="dataSources.length === 0" class="ds-empty">
-      <t-icon name="cloud-download" size="48px" style="color: var(--td-text-color-placeholder)" />
-      <p>{{ t('datasource.empty') }}</p>
-      <t-button variant="outline" @click="openCreate">{{ t('datasource.addFirst') }}</t-button>
+      <div class="ds-empty-icon">
+        <t-icon name="cloud-download" size="32px" />
+      </div>
+      <div class="ds-empty-text">
+        <p class="ds-empty-title">{{ t('datasource.empty') }}</p>
+      </div>
+      <t-button theme="primary" @click="openCreate">
+        <template #icon><t-icon name="add" /></template>
+        {{ t('datasource.addFirst') }}
+      </t-button>
     </div>
 
     <div v-else class="ds-list">
-      <!-- Data source cards -->
       <div v-for="ds in dataSources" :key="ds.id" class="ds-card">
         <div class="ds-card-header">
-          <div class="ds-card-title">
-            <span class="ds-type-badge">{{ connectorLabel(ds.type) }}</span>
-            <span class="ds-name">{{ ds.name }}</span>
-          </div>
-          <div class="ds-card-header-right">
-            <div class="ds-status">
-              <span class="ds-status-dot" :style="{ background: statusColor(ds.status) }"></span>
-              {{ statusLabel(ds.status) }}
+          <div class="ds-card-identity">
+            <div class="ds-name-row">
+              <span class="ds-name">{{ ds.name }}</span>
+              <t-tag size="small" :theme="statusTheme(ds.status)" variant="light-outline">
+                {{ statusLabel(ds.status) }}
+              </t-tag>
             </div>
-            <t-dropdown trigger="click" :min-column-width="100">
-              <t-button size="small" variant="text" shape="square">
-                <template #icon><t-icon name="more" /></template>
+            <span class="ds-type-label">{{ connectorLabel(ds.type) }}</span>
+          </div>
+          <div class="ds-card-actions">
+            <t-tooltip :content="t('datasource.syncNow')">
+              <t-button size="small" variant="text" theme="primary" @click="handleSync(ds)">
+                <template #icon><t-icon name="refresh" /></template>
               </t-button>
+            </t-tooltip>
+            <t-tooltip :content="t('datasource.logs')">
+              <t-button size="small" variant="text" @click="openLogs(ds)">
+                <template #icon><t-icon name="history" /></template>
+              </t-button>
+            </t-tooltip>
+            <t-dropdown trigger="click" :min-column-width="120">
+              <t-tooltip :content="t('datasource.moreActions')">
+                <t-button size="small" variant="text" shape="square">
+                  <template #icon><t-icon name="ellipsis" /></template>
+                </t-button>
+              </t-tooltip>
               <template #dropdown>
                 <t-dropdown-menu>
                   <t-dropdown-item @click="openEdit(ds)">
                     <t-icon name="edit" /> {{ t('datasource.edit') }}
-                  </t-dropdown-item>
-                  <t-dropdown-item @click="openLogs(ds)">
-                    <t-icon name="history" /> {{ t('datasource.logs') }}
                   </t-dropdown-item>
                   <t-dropdown-item
                     v-if="ds.status === 'active'"
@@ -227,7 +254,6 @@ onMounted(loadList)
           </div>
         </div>
 
-        <!-- Info grid -->
         <div class="ds-card-body">
           <div class="ds-info-cell">
             <span class="ds-info-label">{{ t('datasource.syncModeLabel') }}</span>
@@ -239,43 +265,34 @@ onMounted(loadList)
           </div>
           <div class="ds-info-cell">
             <span class="ds-info-label">{{ t('datasource.lastSync') }}</span>
-            <span class="ds-info-value" :title="lastSyncFullTime(ds)">{{ lastSyncTime(ds) }}</span>
+            <t-tooltip :content="lastSyncFullTime(ds)" :disabled="!lastSyncFullTime(ds)">
+              <span class="ds-info-value">{{ lastSyncTime(ds) }}</span>
+            </t-tooltip>
           </div>
           <div class="ds-info-cell">
             <span class="ds-info-label">{{ t('datasource.lastStatus') }}</span>
             <span class="ds-info-value">
-              <span v-if="ds.latest_sync_log" :style="{ color: lastSyncStatusColor(ds) }">{{ lastSyncStatusLabel(ds) }}</span>
-              <span v-else>--</span>
-              <span v-for="pill in syncResultPills(ds)" :key="pill.cls" :class="['ds-pill', pill.cls]">{{ pill.text }}</span>
+              <template v-if="ds.latest_sync_log">
+                <span :style="{ color: lastSyncStatusColor(ds), fontWeight: 500 }">{{ lastSyncStatusLabel(ds) }}</span>
+                <span v-for="pill in syncResultPills(ds)" :key="pill.cls" :class="['ds-pill', pill.cls]">{{ pill.text }}</span>
+              </template>
+              <span v-else class="ds-info-placeholder">--</span>
             </span>
           </div>
         </div>
 
         <div v-if="ds.error_message" class="ds-error">
-          <t-icon name="error-circle" size="14px" />
-          {{ ds.error_message }}
-        </div>
-
-        <!-- Quick action -->
-        <div class="ds-card-footer">
-          <t-button size="small" variant="outline" theme="primary" @click="handleSync(ds)">
-            <template #icon><t-icon name="refresh" /></template>
-            {{ t('datasource.syncNow') }}
-          </t-button>
-          <t-button size="small" variant="text" @click="openLogs(ds)">
-            {{ t('datasource.logs') }}
-          </t-button>
+          <t-icon name="error-circle-filled" size="14px" />
+          <span>{{ ds.error_message }}</span>
         </div>
       </div>
 
-      <!-- Add card at the end -->
       <div class="ds-card-add" @click="openCreate">
-        <t-icon name="add" size="20px" />
+        <t-icon name="add" size="18px" />
         <span>{{ t('datasource.addCard') }}</span>
       </div>
     </div>
 
-    <!-- Editor dialog -->
     <DataSourceEditorDialog
       v-model:visible="editorVisible"
       :kb-id="kbId"
@@ -283,7 +300,6 @@ onMounted(loadList)
       @saved="onEditorSaved"
     />
 
-    <!-- Sync logs drawer -->
     <DataSourceSyncLogs
       v-model:visible="logsVisible"
       :data-source-id="logsDsId"
@@ -297,77 +313,112 @@ onMounted(loadList)
   padding: 0;
 }
 
-/* --- Section header: matches KBModelConfig / KBStorageSettings pattern --- */
+/* --- Section header --- */
 .section-header {
   margin-bottom: 20px;
 }
 
 .section-title {
-  margin: 0 0 8px 0;
-  font-size: 20px;
+  margin: 0 0 6px 0;
+  font-size: 18px;
   font-weight: 600;
   color: var(--td-text-color-primary);
+  letter-spacing: -0.01em;
 }
 
 .section-desc {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--td-text-color-placeholder);
-  line-height: 22px;
+  line-height: 20px;
 }
 
-/* --- Loading / Empty --- */
-.ds-loading, .ds-empty {
+/* --- Loading --- */
+.ds-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 0;
+}
+
+/* --- Empty state --- */
+.ds-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 0;
-  gap: 12px;
-  color: var(--td-text-color-placeholder);
+  padding: 56px 24px;
+  gap: 16px;
+  border: 1px dashed var(--td-border-level-2-color);
+  border-radius: 12px;
+  background: var(--td-bg-color-container);
+}
+
+.ds-empty-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+}
+
+.ds-empty-text {
+  text-align: center;
+}
+
+.ds-empty-title {
+  margin: 0;
+  font-size: 14px;
+  color: var(--td-text-color-secondary);
+  line-height: 22px;
 }
 
 /* --- List --- */
 .ds-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 /* --- Card --- */
 .ds-card {
+  position: relative;
   border: 1px solid var(--td-border-level-2-color);
-  border-radius: 8px;
-  padding: 16px;
-  transition: border-color 0.2s;
+  border-radius: 10px;
+  padding: 16px 18px;
+  background: var(--td-bg-color-container);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .ds-card:hover {
   border-color: var(--td-brand-color-hover);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
 }
 
+/* --- Card header --- */
 .ds-card-header {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+  gap: 12px;
 }
 
-.ds-card-title {
+.ds-card-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ds-name-row {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
-}
-
-.ds-type-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--td-brand-color-light);
-  color: var(--td-brand-color);
-  font-weight: 500;
-  flex-shrink: 0;
 }
 
 .ds-name {
@@ -377,35 +428,32 @@ onMounted(loadList)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 22px;
 }
 
-.ds-card-header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.ds-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.ds-type-label {
   font-size: 12px;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-placeholder);
+  line-height: 18px;
 }
 
-.ds-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.ds-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 /* --- Info grid --- */
 .ds-card-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px 24px;
-  margin-bottom: 12px;
+  gap: 10px 24px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: var(--td-bg-color-secondarycontainer);
+  border-radius: 8px;
 }
 
 .ds-info-cell {
@@ -415,8 +463,9 @@ onMounted(loadList)
 }
 
 .ds-info-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--td-text-color-placeholder);
+  line-height: 18px;
 }
 
 .ds-info-value {
@@ -426,13 +475,18 @@ onMounted(loadList)
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+  line-height: 20px;
+}
+
+.ds-info-placeholder {
+  color: var(--td-text-color-placeholder);
 }
 
 /* --- Sync result pills --- */
 .ds-pill {
   font-size: 11px;
-  padding: 0 5px;
-  border-radius: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   line-height: 18px;
@@ -442,9 +496,9 @@ onMounted(loadList)
 .ds-pill.updated { background: var(--td-brand-color-light); color: var(--td-brand-color); }
 .ds-pill.deleted { background: var(--td-warning-color-1); color: var(--td-warning-color); }
 .ds-pill.skipped { background: var(--td-bg-color-component); color: var(--td-text-color-placeholder); }
-.ds-pill.failed { background: var(--td-error-color-1); color: var(--td-error-color); }
+.ds-pill.failed  { background: var(--td-error-color-1); color: var(--td-error-color); }
 
-/* --- Error --- */
+/* --- Error alert --- */
 .ds-error {
   display: flex;
   align-items: flex-start;
@@ -452,18 +506,10 @@ onMounted(loadList)
   color: var(--td-error-color);
   font-size: 12px;
   background: var(--td-error-color-1);
-  padding: 6px 10px;
-  border-radius: 4px;
-  margin-bottom: 12px;
-}
-
-/* --- Footer actions --- */
-.ds-card-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-top: 1px solid var(--td-border-level-2-color);
-  padding-top: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-top: 10px;
+  line-height: 20px;
 }
 
 /* --- Add card --- */
@@ -472,11 +518,11 @@ onMounted(loadList)
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 12px;
+  padding: 14px;
   border: 1px dashed var(--td-border-level-2-color);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -484,6 +530,6 @@ onMounted(loadList)
 .ds-card-add:hover {
   border-color: var(--td-brand-color);
   color: var(--td-brand-color);
-  background: var(--td-brand-color-light);
+  background: rgba(0, 82, 217, 0.04);
 }
 </style>
