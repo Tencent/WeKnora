@@ -117,6 +117,10 @@ func (r *fakeSyncLogRepo) Update(_ context.Context, log *types.SyncLog) error {
 	return nil
 }
 
+func (r *fakeSyncLogRepo) CancelPendingByDataSource(_ context.Context, dsID string) error {
+	return nil
+}
+
 func (r *fakeSyncLogRepo) CleanupOldLogs(_ context.Context, retentionDays int) error {
 	return nil
 }

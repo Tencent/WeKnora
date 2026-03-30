@@ -64,6 +64,11 @@ func IsQwenThinkingModel(modelName string) bool {
 		strings.HasPrefix(lowerName, "qwen-turbo")
 }
 
+// IsQwen3Model checks whether the model belongs to the Qwen3 family only.
+func IsQwen3Model(modelName string) bool {
+	return strings.HasPrefix(strings.ToLower(modelName), "qwen3")
+}
+
 // IsDeepSeekModel 检查模型名是否为 DeepSeek 模型
 // DeepSeek 模型不支持 tool_choice 参数
 func IsDeepSeekModel(modelName string) bool {
