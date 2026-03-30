@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
@@ -26,17 +26,39 @@ const editingDs = ref<DataSource | null>(null)
 const logsVisible = ref(false)
 const logsDsId = ref('')
 const logsDsName = ref('')
+const pollTimer = ref<number | null>(null)
 
-async function loadList() {
-  loading.value = true
+function stopPolling() {
+  if (pollTimer.value !== null) {
+    window.clearTimeout(pollTimer.value)
+    pollTimer.value = null
+  }
+}
+
+function schedulePolling() {
+  stopPolling()
+  pollTimer.value = window.setTimeout(() => {
+    loadList(true)
+  }, 3000)
+}
+
+async function loadList(silent = false) {
+  if (!silent) loading.value = true
   try {
     const res = await listDataSources(props.kbId)
     dataSources.value = res?.data || res || []
     emit('count', dataSources.value.length)
+
+    const hasRunningSync = dataSources.value.some(ds => ds.latest_sync_log?.status === 'running')
+    if (hasRunningSync) {
+      schedulePolling()
+    } else {
+      stopPolling()
+    }
   } catch (e: any) {
     console.error(e)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -79,7 +101,7 @@ async function handleSync(ds: DataSource) {
   try {
     await triggerSync(ds.id)
     MessagePlugin.success(t('datasource.syncTriggered'))
-    loadList()
+    await loadList(true)
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.syncFailed'))
   }
@@ -167,12 +189,17 @@ function lastSyncStatusColor(ds: DataSource) {
   }
 }
 
+function isSyncRunning(ds: DataSource) {
+  return ds.latest_sync_log?.status === 'running'
+}
+
 function onEditorSaved() {
   editorVisible.value = false
   loadList()
 }
 
 onMounted(loadList)
+onBeforeUnmount(stopPolling)
 </script>
 
 <template>
@@ -203,7 +230,7 @@ onMounted(loadList)
       <div v-for="ds in dataSources" :key="ds.id" class="ds-card">
         <div class="ds-card-header">
           <div class="ds-card-title-wrap">
-            <DataSourceTypeIcon :type="ds.type" :size="24" />
+            <DataSourceTypeIcon :type="ds.type" :size="32" />
             <div class="ds-title-text">
               <div class="ds-name-row">
                 <span class="ds-name" :title="ds.name">{{ ds.name }}</span>
@@ -216,14 +243,22 @@ onMounted(loadList)
           </div>
           
           <div class="ds-card-actions">
-            <t-tooltip :content="t('datasource.syncNow')">
-              <t-button size="small" variant="text" theme="primary" @click="handleSync(ds)">
-                <template #icon><t-icon name="refresh" /></template>
+            <t-tooltip :content="isSyncRunning(ds) ? t('datasource.logStatus.running') : t('datasource.syncNow')">
+              <t-button
+                size="small"
+                variant="text"
+                theme="primary"
+                :disabled="isSyncRunning(ds)"
+                @click="handleSync(ds)"
+              >
+                <template #icon>
+                  <t-icon name="refresh" :class="{ 'ds-icon-spin': isSyncRunning(ds) }" />
+                </template>
               </t-button>
             </t-tooltip>
             <t-tooltip :content="t('datasource.logs')">
               <t-button size="small" variant="text" @click="openLogs(ds)">
-                <template #icon><t-icon name="history" /></template>
+                <template #icon><t-icon name="root-list" /></template>
               </t-button>
             </t-tooltip>
             <t-dropdown trigger="click" :min-column-width="120">
@@ -394,8 +429,8 @@ onMounted(loadList)
   position: relative;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-border-level-2-color);
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: 8px;
+  padding: 15px 20px;
   transition: all 0.2s ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
@@ -527,6 +562,15 @@ onMounted(loadList)
 .ds-pill.skipped { background: var(--td-bg-color-component); color: var(--td-text-color-placeholder); }
 .ds-pill.failed  { background: var(--td-error-color-1); color: var(--td-error-color); }
 
+.ds-icon-spin {
+  animation: ds-spin 1s linear infinite;
+}
+
+@keyframes ds-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* --- Error alert --- */
 .ds-card-error {
   margin-top: 16px;
@@ -547,10 +591,10 @@ onMounted(loadList)
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 15px;
+  padding: 6px 15px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--td-text-color-secondary);
   font-size: 14px;
   font-weight: 500;

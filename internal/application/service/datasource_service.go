@@ -272,7 +272,9 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		return nil, err
 	}
 
-	if ds.Status != types.DataSourceStatusActive && ds.Status != types.DataSourceStatusError {
+	if ds.Status != types.DataSourceStatusActive &&
+		ds.Status != types.DataSourceStatusError &&
+		ds.Status != types.DataSourceStatusPaused {
 		return nil, datasource.ErrDataSourceNotActive
 	}
 
@@ -307,7 +309,9 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = err.Error()
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		ds.Status = types.DataSourceStatusError
+		if ds.Status != types.DataSourceStatusPaused {
+			ds.Status = types.DataSourceStatusError
+		}
 		ds.ErrorMessage = fmt.Sprintf("Failed to enqueue sync: %v", err)
 		_ = s.dsRepo.Update(ctx, ds)
 		return nil, err
@@ -408,6 +412,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
+	wasPaused := ds.Status == types.DataSourceStatusPaused
+
 	// Get connector
 	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
@@ -416,7 +422,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		ds.Status = types.DataSourceStatusError
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
 		ds.ErrorMessage = syncLog.ErrorMessage
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
@@ -430,7 +438,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		ds.Status = types.DataSourceStatusError
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
 		ds.ErrorMessage = syncLog.ErrorMessage
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
@@ -458,7 +468,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		ds.Status = types.DataSourceStatusError
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
 		ds.ErrorMessage = syncLog.ErrorMessage
 		_ = s.dsRepo.Update(ctx, ds)
 		return fetchErr
@@ -479,7 +491,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
-		ds.Status = types.DataSourceStatusError
+		if !wasPaused {
+			ds.Status = types.DataSourceStatusError
+		}
 		ds.ErrorMessage = syncLog.ErrorMessage
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
@@ -553,7 +567,11 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	ds.LastSyncAt = timePtr(time.Now().UTC())
-	ds.Status = types.DataSourceStatusActive
+	if wasPaused {
+		ds.Status = types.DataSourceStatusPaused
+	} else {
+		ds.Status = types.DataSourceStatusActive
+	}
 	ds.ErrorMessage = ""
 
 	// Store result

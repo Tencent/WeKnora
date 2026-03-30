@@ -12,26 +12,48 @@ const { t } = useI18n()
 
 const logs = ref<SyncLog[]>([])
 const loading = ref(false)
+const loadingMore = ref(false)
+const hasMore = ref(false)
 const expandedId = ref('')
+const pageSize = 50
 
-async function fetchLogs() {
+async function fetchLogs(reset = true) {
   if (!props.dataSourceId) return
-  loading.value = true
+
+  if (reset) {
+    loading.value = true
+  } else {
+    loadingMore.value = true
+  }
+
   try {
-    const res = await getSyncLogs(props.dataSourceId, 50, 0)
-    logs.value = res?.data || res || []
+    const offset = reset ? 0 : logs.value.length
+    const res = await getSyncLogs(props.dataSourceId, pageSize, offset)
+    const items = res?.data || res || []
+    logs.value = reset ? items : [...logs.value, ...items]
+    hasMore.value = items.length === pageSize
   } catch { /* ignore */ }
-  loading.value = false
+
+  if (reset) {
+    loading.value = false
+  } else {
+    loadingMore.value = false
+  }
 }
 
 watch(visible, (v) => {
   if (!v) return
   expandedId.value = ''
-  fetchLogs()
+  fetchLogs(true)
 })
 
 function toggleExpand(id: string) {
   expandedId.value = expandedId.value === id ? '' : id
+}
+
+function loadMore() {
+  if (loading.value || loadingMore.value || !hasMore.value) return
+  fetchLogs(false)
 }
 
 // --- Stats ---
@@ -154,7 +176,7 @@ const groupedLogs = computed(() => {
     <div v-if="loading" style="text-align:center;padding:60px"><t-loading /></div>
 
     <div v-else-if="logs.length === 0" class="logs-empty">
-      <t-icon name="history" size="40px" />
+      <t-icon name="root-list" size="40px" />
       <p>{{ t('datasource.noLogs') }}</p>
     </div>
 
@@ -237,6 +259,19 @@ const groupedLogs = computed(() => {
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="logs-load-more">
+          <t-button
+            v-if="hasMore"
+            variant="outline"
+            block
+            :loading="loadingMore"
+            @click="loadMore"
+          >
+            {{ t('common.loadMore') }}
+          </t-button>
+          <span v-else class="logs-load-more-text">{{ t('common.noMoreData') }}</span>
         </div>
       </div>
     </template>
@@ -324,6 +359,16 @@ const groupedLogs = computed(() => {
   cursor: pointer;
   position: relative;
   margin-bottom: 4px;
+}
+
+.logs-load-more {
+  padding: 16px 0 8px;
+  text-align: center;
+}
+
+.logs-load-more-text {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 /* --- Dot column: continuous line --- */
