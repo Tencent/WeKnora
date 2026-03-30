@@ -967,6 +967,11 @@ func registerWebSearchProviders(registry *web_search.Registry) {
 	registry.Register(web_search.BingProviderInfo(), func() (interfaces.WebSearchProvider, error) {
 		return web_search.NewBingProvider()
 	})
+
+	// Register Tavily provider
+	registry.Register(web_search.TavilyProviderInfo(), func() (interfaces.WebSearchProvider, error) {
+		return web_search.NewTavilyProvider()
+	})
 }
 
 // registerIMAdapterFactories registers adapter factories for each IM platform
