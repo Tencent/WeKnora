@@ -52,6 +52,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
+	wecomConnector "github.com/Tencent/WeKnora/internal/datasource/connector/wecom"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -257,6 +258,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))
+	must(container.Provide(handler.NewWecomCallbackHandler))
 
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
@@ -1280,6 +1282,9 @@ func initConnectorRegistry() *datasource.ConnectorRegistry {
 
 	// Register Feishu connector
 	_ = registry.Register(feishuConnector.NewConnector())
+
+	// Register WeCom document connector
+	_ = registry.Register(wecomConnector.NewConnector())
 
 	// Future connectors will be registered here:
 	// _ = registry.Register(notionConnector.NewConnector())

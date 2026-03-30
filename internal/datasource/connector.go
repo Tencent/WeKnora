@@ -153,10 +153,10 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	types.ConnectorTypeWecomDoc: {
 		Type:         types.ConnectorTypeWecomDoc,
 		Name:         "WeCom Docs (企微文档)",
-		Description:  "Sync documents and content from WeCom",
+		Description:  "Sync smart documents and WeDrive files from WeCom",
 		Priority:     8,
-		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		AuthType:     "corp_secret",
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,

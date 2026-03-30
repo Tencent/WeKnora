@@ -53,6 +53,8 @@ const testErrorMsg = ref('')
 
 // Collapsible prereq in Step 1
 const prereqExpanded = ref(false)
+// WeCom callback section
+const callbackExpanded = ref(false)
 
 // Temp data source for resource listing
 const tempDsId = ref('')
@@ -119,13 +121,13 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
   },
   {
     type: 'wecom_doc',
-    available: false,
-    docUrl: 'https://developer.work.weixin.qq.com/',
+    available: true,
+    docUrl: 'https://work.weixin.qq.com/wework_admin/frame#apps',
     permissionDocUrl: '',
-    permissionPageUrl: '',
-    requiredPermissions: [],
+    permissionPageUrl: 'https://work.weixin.qq.com/wework_admin/frame#apps',
+    requiredPermissions: ['wedoc:callable_app'],
     fields: [
-      { key: 'corp_id', labelKey: 'datasource.field.corpId', placeholder: '' },
+      { key: 'corp_id', labelKey: 'datasource.field.corpId', placeholder: 'ww_xxxx' },
       { key: 'corp_secret', labelKey: 'datasource.field.corpSecret', placeholder: '', secret: true },
     ],
   },
@@ -142,6 +144,7 @@ watch(visible, (v) => {
   testErrorMsg.value = ''
   tempDsId.value = ''
   prereqExpanded.value = false
+  callbackExpanded.value = false
   resources.value = []
   selectedResourceIds.value = []
 
@@ -315,6 +318,27 @@ async function handleClose() {
   visible.value = false
 }
 
+const resourceTypeLabelMap: Record<string, string> = {
+  wiki_space: 'datasource.resourceType.wikiSpace',
+  doc_category: 'datasource.resourceType.docCategory',
+  wedrive_space: 'datasource.resourceType.wedriveSpace',
+}
+
+function resourceTypeLabel(type: string): string {
+  const key = resourceTypeLabelMap[type]
+  return key ? t(key) : type
+}
+
+const wecomCallbackUrl = computed(() => {
+  if (!tempDsId.value) return ''
+  return `${window.location.origin}/api/v1/wecom/callback/${tempDsId.value}`
+})
+
+function copyCallbackUrl() {
+  navigator.clipboard.writeText(wecomCallbackUrl.value)
+  MessagePlugin.success(t('datasource.copied'))
+}
+
 const stepTitles = computed(() => [
   t('datasource.step.selectType'),
   t('datasource.step.credentials'),
@@ -367,31 +391,34 @@ const stepTitles = computed(() => [
       <!-- Compact collapsible prereq hint -->
       <div v-if="currentDef && currentDef.requiredPermissions.length > 0" class="ds-prereq-bar" @click="prereqExpanded = !prereqExpanded">
         <t-icon name="help-circle" size="14px" />
-        <span>{{ t('datasource.prereqBarText') }}</span>
+        <span>{{ t(`datasource.prereqBarText_${form.type}`, t('datasource.prereqBarText')) }}</span>
         <t-icon :name="prereqExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="ds-prereq-arrow" />
       </div>
       <div v-if="prereqExpanded && currentDef" class="ds-prereq-detail">
         <div class="ds-prereq-item">
           <span class="ds-prereq-num">1</span>
           <div>
-            <div class="ds-prereq-item-title">{{ t('datasource.prereqBotBrief') }}</div>
-            <div class="ds-prereq-item-desc">{{ t('datasource.prereqBotDesc') }}</div>
+            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep1Brief_${form.type}`, t('datasource.prereqBotBrief')) }}</div>
+            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep1Desc_${form.type}`, t('datasource.prereqBotDesc')) }}</div>
           </div>
         </div>
         <div class="ds-prereq-item">
           <span class="ds-prereq-num">2</span>
           <div>
-            <div class="ds-prereq-item-title">{{ t('datasource.prereqPermBrief') }}</div>
+            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep2Brief_${form.type}`, t('datasource.prereqPermBrief')) }}</div>
             <div class="ds-prereq-item-desc">
-              <code v-for="perm in currentDef.requiredPermissions" :key="perm" class="ds-perm-tag">{{ perm }}</code>
+              <template v-if="!t(`datasource.prereqStep2Desc_${form.type}`)">
+                <code v-for="perm in currentDef.requiredPermissions" :key="perm" class="ds-perm-tag">{{ perm }}</code>
+              </template>
+              <template v-else>{{ t(`datasource.prereqStep2Desc_${form.type}`) }}</template>
             </div>
           </div>
         </div>
         <div class="ds-prereq-item">
           <span class="ds-prereq-num">3</span>
           <div>
-            <div class="ds-prereq-item-title">{{ t('datasource.prereqMemberBrief') }}</div>
-            <div class="ds-prereq-item-desc">{{ t('datasource.prereqMemberDesc') }}</div>
+            <div class="ds-prereq-item-title">{{ t(`datasource.prereqStep3Brief_${form.type}`, t('datasource.prereqMemberBrief')) }}</div>
+            <div class="ds-prereq-item-desc">{{ t(`datasource.prereqStep3Desc_${form.type}`, t('datasource.prereqMemberDesc')) }}</div>
           </div>
         </div>
         <a :href="currentDef.permissionPageUrl" target="_blank" rel="noopener" class="ds-prereq-link">
@@ -417,6 +444,34 @@ const stepTitles = computed(() => [
           :placeholder="field.placeholder"
           :type="field.secret ? 'password' : 'text'"
         />
+      </div>
+
+      <!-- WeCom callback URL setup (only for wecom_doc, shown as collapsible) -->
+      <div v-if="form.type === 'wecom_doc'" class="ds-callback-section">
+        <div class="ds-callback-header" @click="callbackExpanded = !callbackExpanded">
+          <t-icon name="link" size="14px" />
+          <span>{{ t('datasource.wecomCallbackTitle') }}</span>
+          <t-icon :name="callbackExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="ds-prereq-arrow" />
+        </div>
+        <div v-if="callbackExpanded" class="ds-callback-body">
+          <p class="ds-callback-desc">{{ t('datasource.wecomCallbackDesc') }}</p>
+          <div class="form-item">
+            <label class="form-label">Token</label>
+            <t-input v-model="form.config.settings.callback_token" placeholder="Token" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">EncodingAESKey</label>
+            <t-input v-model="form.config.settings.callback_aes_key" placeholder="EncodingAESKey" />
+          </div>
+          <div v-if="tempDsId" class="ds-callback-url">
+            <label class="form-label">{{ t('datasource.wecomCallbackUrl') }}</label>
+            <t-input readonly :value="wecomCallbackUrl" />
+            <t-button size="small" variant="outline" @click="copyCallbackUrl" style="margin-top:4px">
+              {{ t('datasource.copyUrl') }}
+            </t-button>
+          </div>
+          <p v-else class="ds-callback-hint">{{ t('datasource.wecomCallbackSaveFirst') }}</p>
+        </div>
       </div>
 
       <div class="form-actions">
@@ -455,7 +510,7 @@ const stepTitles = computed(() => [
           <div class="ds-resource-info">
             <div class="ds-resource-name">{{ r.name }}</div>
             <div class="ds-resource-meta">
-              <span class="ds-resource-type">{{ r.type === 'wiki_space' ? t('datasource.wikiSpace') : r.type }}</span>
+              <span class="ds-resource-type">{{ resourceTypeLabel(r.type) }}</span>
               <span v-if="r.description" class="ds-resource-desc">{{ r.description }}</span>
             </div>
           </div>
@@ -465,19 +520,19 @@ const stepTitles = computed(() => [
       <div v-else class="ds-resource-empty">
         <t-icon name="info-circle" size="32px" style="color: var(--td-warning-color); margin-bottom: 8px;" />
         <p class="ds-empty-title">{{ t('datasource.noResources') }}</p>
-        <p class="ds-empty-desc">{{ t('datasource.noResourcesDesc') }}</p>
+        <p class="ds-empty-desc">{{ t(`datasource.noResourcesDesc_${form.type}`, t('datasource.noResourcesDesc')) }}</p>
         <div class="ds-guide-steps">
           <div class="ds-guide-step">
             <span class="ds-guide-num">1</span>
-            <span>{{ t('datasource.guideStep1') }}</span>
+            <span>{{ t(`datasource.guideStep1_${form.type}`, t('datasource.guideStep1')) }}</span>
           </div>
           <div class="ds-guide-step">
             <span class="ds-guide-num">2</span>
-            <span>{{ t('datasource.guideStep2') }}</span>
+            <span>{{ t(`datasource.guideStep2_${form.type}`, t('datasource.guideStep2')) }}</span>
           </div>
           <div class="ds-guide-step">
             <span class="ds-guide-num">3</span>
-            <span>{{ t('datasource.guideStep3') }}</span>
+            <span>{{ t(`datasource.guideStep3_${form.type}`, t('datasource.guideStep3')) }}</span>
           </div>
         </div>
         <div class="ds-empty-actions">
@@ -679,6 +734,47 @@ const stepTitles = computed(() => [
   font-size: 12px;
   color: var(--td-brand-color);
   padding-left: 30px;
+}
+
+/* --- WeCom callback section --- */
+.ds-callback-section {
+  margin-bottom: 16px;
+}
+.ds-callback-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--td-bg-color-component);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.ds-callback-header:hover {
+  background: var(--td-bg-color-container-hover);
+}
+.ds-callback-body {
+  border: 1px solid var(--td-border-level-2-color);
+  border-radius: 0 0 8px 8px;
+  padding: 14px;
+  margin-top: -2px;
+}
+.ds-callback-desc {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.ds-callback-url {
+  margin-top: 8px;
+}
+.ds-callback-hint {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  margin-top: 8px;
+  font-style: italic;
 }
 
 /* --- Step 1: doc link & form --- */

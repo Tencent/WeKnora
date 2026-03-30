@@ -3480,6 +3480,7 @@ export default {
       yuque: "위큐 (Yuque)",
       github: "GitHub",
       web_crawler: "웹 크롤러",
+      wecom_doc: "WeCom 문서",
     },
     connectorDesc: {
       feishu: "페이슈 위키에서 문서, 스프레드시트, 파일 동기화",
@@ -3488,6 +3489,7 @@ export default {
       yuque: "위큐 지식베이스에서 문서 동기화",
       github: "GitHub 리포지토리에서 문서 및 위키 동기화",
       web_crawler: "사이트맵을 통해 웹사이트 크롤링",
+      wecom_doc: "WeCom(기업 위챗)에서 문서 동기화",
     },
     field: {
       appId: "App ID",
@@ -3498,6 +3500,8 @@ export default {
       apiToken: "API Token",
       personalToken: "Personal Access Token",
       sitemapUrl: "사이트맵 URL",
+      corpId: "Corp ID",
+      corpSecret: "Corp Secret",
     },
     comingSoon: "곧 지원 예정",
     docHint: "다음에서 인증 정보를 받으세요:",
