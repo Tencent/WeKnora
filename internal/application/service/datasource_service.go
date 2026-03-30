@@ -287,7 +287,7 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now())
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = err.Error()
 		_ = s.syncLogRepo.Update(ctx, syncLog)
 		ds.Status = types.DataSourceStatusError
@@ -377,7 +377,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		logger.Warnf(ctx, "data source not found (likely deleted), cancelling sync: ds=%s err=%v", payload.DataSourceID, err)
 		if syncLog, slErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); slErr == nil && syncLog != nil {
 			syncLog.Status = types.SyncLogStatusCanceled
-			syncLog.FinishedAt = timePtr(time.Now())
+			syncLog.FinishedAt = timePtr(time.Now().UTC())
 			syncLog.ErrorMessage = "data source has been deleted"
 			_ = s.syncLogRepo.Update(ctx, syncLog)
 		}
@@ -396,7 +396,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		logger.Errorf(ctx, "connector not found: type=%s", ds.Type)
 		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now())
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
 		ds.Status = types.DataSourceStatusError
@@ -410,7 +410,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse config: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now())
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
 		ds.Status = types.DataSourceStatusError
@@ -438,7 +438,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if fetchErr != nil {
 		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
 		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now())
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
 		ds.Status = types.DataSourceStatusError
@@ -459,7 +459,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	if err != nil {
 		logger.Errorf(ctx, "failed to get tenant info: %v", err)
 		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now())
+		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
 		ds.Status = types.DataSourceStatusError
@@ -527,7 +527,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	syncLog.ItemsSkipped = result.Skipped
 	syncLog.ItemsFailed = result.Failed
 	syncLog.Status = types.SyncLogStatusSuccess
-	syncLog.FinishedAt = timePtr(time.Now())
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
 
 	// Update cursor for next incremental sync
 	if nextCursor != nil {
@@ -535,7 +535,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		ds.LastSyncCursor = cursorJSON
 	}
 
-	ds.LastSyncAt = timePtr(time.Now())
+	ds.LastSyncAt = timePtr(time.Now().UTC())
 	ds.Status = types.DataSourceStatusActive
 	ds.ErrorMessage = ""
 

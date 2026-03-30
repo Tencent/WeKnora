@@ -74,12 +74,12 @@ func (r *ConnectorRegistry) List() []string {
 
 // ConnectorMetadata provides metadata about available connectors
 type ConnectorMetadata struct {
-	Type        string `json:"type"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Icon        string `json:"icon,omitempty"`
-	Priority    int    `json:"priority"`      // Priority order for UI display (lower = higher priority)
-	AuthType    string `json:"auth_type"`     // "oauth2", "api_key", "token", etc.
+	Type         string   `json:"type"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Icon         string   `json:"icon,omitempty"`
+	Priority     int      `json:"priority"`     // Priority order for UI display (lower = higher priority)
+	AuthType     string   `json:"auth_type"`    // "oauth2", "api_key", "token", etc.
 	Capabilities []string `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
 }
 
@@ -150,14 +150,6 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental"},
 	},
-	types.ConnectorTypeWecomDoc: {
-		Type:         types.ConnectorTypeWecomDoc,
-		Name:         "WeCom Docs (企微文档)",
-		Description:  "Sync smart documents and WeDrive files from WeCom",
-		Priority:     8,
-		AuthType:     "corp_secret",
-		Capabilities: []string{"incremental", "deletion_sync"},
-	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,
 		Name:         "Web Crawler (Sitemap)",
@@ -190,12 +182,6 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "none",
 		Capabilities: []string{},
 	},
-}
-
-// GetConnectorMetadata returns metadata for a specific connector type
-func GetConnectorMetadata(connectorType string) (ConnectorMetadata, bool) {
-	meta, ok := ConnectorMetadataRegistry[connectorType]
-	return meta, ok
 }
 
 // ListAvailableConnectors returns all available connector metadata

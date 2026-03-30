@@ -19,7 +19,6 @@ const (
 	ConnectorTypeGoogleDrive = "google_drive"
 	ConnectorTypeOneDrive    = "onedrive"
 	ConnectorTypeDingTalk    = "dingtalk"
-	ConnectorTypeWecomDoc    = "wecom_doc"
 	ConnectorTypeWebCrawler  = "web_crawler"
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"

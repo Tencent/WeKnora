@@ -155,7 +155,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		DataSourceID: dataSourceID,
 		TenantID:     tenantID,
 		Status:       types.SyncLogStatusRunning,
-		StartedAt:    time.Now(),
+		StartedAt:    time.Now().UTC(),
 	}
 	if err := s.syncLogRepo.Create(ctx, syncLog); err != nil {
 		logger.Errorf(ctx, "[Scheduler] failed to create sync log for ds=%s: %v", dataSourceID, err)
@@ -182,7 +182,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		if err == asynq.ErrTaskIDConflict {
 			logger.Infof(ctx, "[Scheduler] sync already enqueued by another instance for ds=%s", dataSourceID)
 			syncLog.Status = types.SyncLogStatusCanceled
-			now := time.Now()
+			now := time.Now().UTC()
 			syncLog.FinishedAt = &now
 			syncLog.ErrorMessage = "deduplicated: another instance enqueued first"
 			_ = s.syncLogRepo.Update(ctx, syncLog)
@@ -190,7 +190,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		}
 		logger.Errorf(ctx, "[Scheduler] failed to enqueue sync task for ds=%s: %v", dataSourceID, err)
 		syncLog.Status = types.SyncLogStatusFailed
-		now := time.Now()
+		now := time.Now().UTC()
 		syncLog.FinishedAt = &now
 		syncLog.ErrorMessage = fmt.Sprintf("enqueue failed: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)

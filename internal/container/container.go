@@ -52,7 +52,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
-	wecomConnector "github.com/Tencent/WeKnora/internal/datasource/connector/wecom"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -258,8 +257,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))
-	must(container.Provide(handler.NewWecomCallbackHandler))
-
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
@@ -356,7 +353,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	case "postgres":
 		// DSN for GORM (key-value format)
 		gormDSN := fmt.Sprintf(
-			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_USER"),
@@ -1282,9 +1279,6 @@ func initConnectorRegistry() *datasource.ConnectorRegistry {
 
 	// Register Feishu connector
 	_ = registry.Register(feishuConnector.NewConnector())
-
-	// Register WeCom document connector
-	_ = registry.Register(wecomConnector.NewConnector())
 
 	// Future connectors will be registered here:
 	// _ = registry.Register(notionConnector.NewConnector())

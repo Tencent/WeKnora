@@ -61,7 +61,6 @@ type RouterParams struct {
 	OrganizationHandler   *handler.OrganizationHandler
 	IMHandler             *handler.IMHandler
 	DataSourceHandler     *handler.DataSourceHandler
-	WecomCallbackHandler  *handler.WecomCallbackHandler
 }
 
 // NewRouter 创建新的路由
@@ -109,9 +108,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
 	RegisterIMRoutes(r, params.IMHandler)
-
-	// WeCom callback verification (before auth — WeCom uses its own signature)
-	RegisterWecomCallbackRoutes(r, params.WecomCallbackHandler)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.Config))
@@ -777,9 +773,3 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 	}
 }
 
-// RegisterWecomCallbackRoutes registers the WeCom callback verification route.
-// Must be registered BEFORE auth middleware since WeCom uses its own msg_signature verification.
-func RegisterWecomCallbackRoutes(r *gin.Engine, h *handler.WecomCallbackHandler) {
-	r.GET("/api/v1/wecom/callback/:datasource_id", h.HandleCallback)
-	r.POST("/api/v1/wecom/callback/:datasource_id", h.HandleCallback)
-}

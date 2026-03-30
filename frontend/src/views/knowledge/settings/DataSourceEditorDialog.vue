@@ -53,8 +53,7 @@ const testErrorMsg = ref('')
 
 // Collapsible prereq in Step 1
 const prereqExpanded = ref(false)
-// WeCom callback section
-const callbackExpanded = ref(false)
+
 
 // Temp data source for resource listing
 const tempDsId = ref('')
@@ -119,18 +118,6 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'api_token', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
     ],
   },
-  {
-    type: 'wecom_doc',
-    available: true,
-    docUrl: 'https://work.weixin.qq.com/wework_admin/frame#apps',
-    permissionDocUrl: '',
-    permissionPageUrl: 'https://work.weixin.qq.com/wework_admin/frame#apps',
-    requiredPermissions: ['wedoc:callable_app'],
-    fields: [
-      { key: 'corp_id', labelKey: 'datasource.field.corpId', placeholder: 'ww_xxxx' },
-      { key: 'corp_secret', labelKey: 'datasource.field.corpSecret', placeholder: '', secret: true },
-    ],
-  },
 ])
 
 
@@ -144,7 +131,6 @@ watch(visible, (v) => {
   testErrorMsg.value = ''
   tempDsId.value = ''
   prereqExpanded.value = false
-  callbackExpanded.value = false
   resources.value = []
   selectedResourceIds.value = []
 
@@ -321,22 +307,11 @@ async function handleClose() {
 const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
-  wedrive_space: 'datasource.resourceType.wedriveSpace',
 }
 
 function resourceTypeLabel(type: string): string {
   const key = resourceTypeLabelMap[type]
   return key ? t(key) : type
-}
-
-const wecomCallbackUrl = computed(() => {
-  if (!tempDsId.value) return ''
-  return `${window.location.origin}/api/v1/wecom/callback/${tempDsId.value}`
-})
-
-function copyCallbackUrl() {
-  navigator.clipboard.writeText(wecomCallbackUrl.value)
-  MessagePlugin.success(t('datasource.copied'))
 }
 
 const stepTitles = computed(() => [
@@ -444,34 +419,6 @@ const stepTitles = computed(() => [
           :placeholder="field.placeholder"
           :type="field.secret ? 'password' : 'text'"
         />
-      </div>
-
-      <!-- WeCom callback URL setup (only for wecom_doc, shown as collapsible) -->
-      <div v-if="form.type === 'wecom_doc'" class="ds-callback-section">
-        <div class="ds-callback-header" @click="callbackExpanded = !callbackExpanded">
-          <t-icon name="link" size="14px" />
-          <span>{{ t('datasource.wecomCallbackTitle') }}</span>
-          <t-icon :name="callbackExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="ds-prereq-arrow" />
-        </div>
-        <div v-if="callbackExpanded" class="ds-callback-body">
-          <p class="ds-callback-desc">{{ t('datasource.wecomCallbackDesc') }}</p>
-          <div class="form-item">
-            <label class="form-label">Token</label>
-            <t-input v-model="form.config.settings.callback_token" placeholder="Token" />
-          </div>
-          <div class="form-item">
-            <label class="form-label">EncodingAESKey</label>
-            <t-input v-model="form.config.settings.callback_aes_key" placeholder="EncodingAESKey" />
-          </div>
-          <div v-if="tempDsId" class="ds-callback-url">
-            <label class="form-label">{{ t('datasource.wecomCallbackUrl') }}</label>
-            <t-input readonly :value="wecomCallbackUrl" />
-            <t-button size="small" variant="outline" @click="copyCallbackUrl" style="margin-top:4px">
-              {{ t('datasource.copyUrl') }}
-            </t-button>
-          </div>
-          <p v-else class="ds-callback-hint">{{ t('datasource.wecomCallbackSaveFirst') }}</p>
-        </div>
       </div>
 
       <div class="form-actions">
@@ -740,47 +687,6 @@ const stepTitles = computed(() => [
   font-size: 12px;
   color: var(--td-brand-color);
   padding-left: 30px;
-}
-
-/* --- WeCom callback section --- */
-.ds-callback-section {
-  margin-bottom: 16px;
-}
-.ds-callback-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: var(--td-bg-color-component);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-  user-select: none;
-}
-.ds-callback-header:hover {
-  background: var(--td-bg-color-container-hover);
-}
-.ds-callback-body {
-  border: 1px solid var(--td-border-level-2-color);
-  border-radius: 0 0 8px 8px;
-  padding: 14px;
-  margin-top: -2px;
-}
-.ds-callback-desc {
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-  margin-bottom: 12px;
-  line-height: 1.6;
-}
-.ds-callback-url {
-  margin-top: 8px;
-}
-.ds-callback-hint {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  margin-top: 8px;
-  font-style: italic;
 }
 
 /* --- Step 1: doc link & form --- */

@@ -98,6 +98,7 @@ function formatHourMin(ts: string | null) {
 function duration(log: SyncLog) {
   if (!log.started_at || !log.finished_at) return '--'
   const ms = new Date(log.finished_at).getTime() - new Date(log.started_at).getTime()
+  if (ms < 0) return '--'
   if (ms < 1000) return `<1s`
   const sec = Math.round(ms / 1000)
   if (sec < 60) return `${sec}s`

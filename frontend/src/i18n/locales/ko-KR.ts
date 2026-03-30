@@ -3238,8 +3238,7 @@ export default {
     },
     im: {
       title: "IM 통합",
-      description: "에이전트를 WeCom, Feishu, Slack, Telegram, DingTalk, Mattermost 등 인스턴트 메시징 플랫폼에 연결",
-      wecom: "WeCom",
+      description: "에이전트를 Feishu, Slack, Telegram, DingTalk, Mattermost 등 인스턴트 메시징 플랫폼에 연결",
       feishu: "Feishu",
       slack: "Slack",
       telegram: "Telegram",
@@ -3259,7 +3258,6 @@ export default {
       empty: "IM 채널이 없습니다. 아래 버튼을 클릭하여 추가하세요.",
       unnamed: "이름 없는 채널",
       docLink: "통합 가이드 보기",
-      wecomConsole: "WeCom 관리 콘솔",
       feishuConsole: "Feishu 개발 플랫폼",
       slackConsole: "Slack API 콘솔",
       telegramConsole: "Telegram BotFather",
@@ -3482,7 +3480,6 @@ export default {
       yuque: "위큐 (Yuque)",
       github: "GitHub",
       web_crawler: "웹 크롤러",
-      wecom_doc: "WeCom 문서",
     },
     connectorDesc: {
       feishu: "페이슈 위키에서 문서, 스프레드시트, 파일 동기화",
@@ -3491,7 +3488,6 @@ export default {
       yuque: "위큐 지식베이스에서 문서 동기화",
       github: "GitHub 리포지토리에서 문서 및 위키 동기화",
       web_crawler: "사이트맵을 통해 웹사이트 크롤링",
-      wecom_doc: "WeCom(기업 위챗)에서 문서 동기화",
     },
     field: {
       appId: "App ID",
@@ -3502,8 +3498,6 @@ export default {
       apiToken: "API Token",
       personalToken: "Personal Access Token",
       sitemapUrl: "사이트맵 URL",
-      corpId: "Corp ID",
-      corpSecret: "Corp Secret",
     },
     comingSoon: "곧 지원 예정",
     docHint: "다음에서 인증 정보를 받으세요:",

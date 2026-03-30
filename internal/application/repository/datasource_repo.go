@@ -226,7 +226,7 @@ func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID 
 	if dsID == "" {
 		return errors.New("data source id is empty")
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	return r.db.WithContext(ctx).
 		Model(&types.SyncLog{}).
 		Where("data_source_id = ?", dsID).
