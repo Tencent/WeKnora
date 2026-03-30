@@ -7576,7 +7576,20 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			convertResult.MarkdownContent = updatedMarkdown
 		}
 		storedImages = images
-		logger.Infof(ctx, "Resolved %d images for knowledge %s", len(storedImages), knowledge.ID)
+
+		// Resolve remote http(s) images (e.g. markdown external URLs) → download + upload to storage.
+		// ResolveAndStore handles inline bytes and base64; ResolveRemoteImages handles http/https URLs.
+		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(ctx, convertResult.MarkdownContent, fileSvc, tenantID)
+		if remoteErr != nil {
+			logger.Warnf(ctx, "Remote image resolution partially failed: %v", remoteErr)
+		}
+		if len(remoteImages) > 0 {
+			logger.Infof(ctx, "Resolved %d remote images for knowledge %s", len(remoteImages), knowledge.ID)
+			convertResult.MarkdownContent = updatedContent
+			storedImages = append(storedImages, remoteImages...)
+		}
+
+		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
 	// Step 3: Split into chunks using Go chunker
