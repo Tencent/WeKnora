@@ -43,11 +43,16 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	// Create S3 client with custom endpoint if provided
+	// Create S3 client with custom endpoint if provided.
+	// For S3-compatible services (non-AWS), use path-style addressing
+	// (endpoint/bucket/key) instead of virtual-hosted style (bucket.endpoint/key).
 	var client *s3.Client
 	if endpoint != "" {
-		// Use S3-specific endpoint resolver for custom endpoints
-		client = s3.NewFromConfig(cfg, s3.WithEndpointResolver(s3.EndpointResolverFromURL(endpoint)))
+		usePathStyle := !strings.Contains(endpoint, "amazonaws.com")
+		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(endpoint)
+			o.UsePathStyle = usePathStyle
+		})
 	} else {
 		// Standard AWS S3
 		client = s3.NewFromConfig(cfg)

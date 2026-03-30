@@ -41,7 +41,7 @@ const DOMPurifyConfig = {
     'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
   ],
   // 允许的协议
-  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   // 禁止的标签和属性
   FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur'],
@@ -119,7 +119,7 @@ function protectProviderImageSrcInHTML(html: string): string {
       .replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"');
   return html.replace(
-    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
+    /<img\b([^>]*?)\ssrc=(["'])(local|minio|cos|tos|s3):(?:\/\/|&#x2f;&#x2f;|&#47;&#47;)([^"']+)\2([^>]*)>/gi,
     (_m, before, quote, provider, restPathRaw, after) => {
       const restPath = decodeProviderURL(restPathRaw);
       const protectedSrc = `${provider}://${restPath}`;
@@ -173,7 +173,7 @@ export function isValidURL(url: string): boolean {
   }
 
   // 允许 provider:// 形式，由前端后续鉴权拉取并替换为 blob URL
-  if (/^(local|minio|cos|tos):\/\/\S+$/i.test(trimmed)) {
+  if (/^(local|minio|cos|tos|s3):\/\/\S+$/i.test(trimmed)) {
     return true;
   }
   
@@ -299,7 +299,7 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
   }
 
   const images = root.querySelectorAll<HTMLImageElement>(
-    'img[data-protected-src], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"]',
+    'img[data-protected-src], img[src^="local://"], img[src^="minio://"], img[src^="cos://"], img[src^="tos://"], img[src^="s3://"]',
   );
   if (!images.length) {
     return;
@@ -319,7 +319,7 @@ export async function hydrateProtectedFileImages(root: ParentNode | null | undef
     }
     img.dataset.authHydrated = '1';
 
-    const isProviderScheme = /^(local|minio|cos|tos):\/\//.test(sourceURL);
+    const isProviderScheme = /^(local|minio|cos|tos|s3):\/\//.test(sourceURL);
     const requestURL = isProviderScheme
       ? `/files?${new URLSearchParams({ file_path: sourceURL }).toString()}`
       : sourceURL;
