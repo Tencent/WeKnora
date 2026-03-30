@@ -13,6 +13,7 @@ import {
 import { humanizeCron, relativeTime } from '@/utils/cronHumanize'
 import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
+import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 
 const props = defineProps<{ kbId: string }>()
 const emit = defineEmits<{ (e: 'count', value: number): void }>()
@@ -202,6 +203,7 @@ onMounted(loadList)
       <div v-for="ds in dataSources" :key="ds.id" class="ds-card">
         <div class="ds-card-header">
           <div class="ds-card-title-wrap">
+            <DataSourceTypeIcon :type="ds.type" :size="24" />
             <div class="ds-title-text">
               <div class="ds-name-row">
                 <span class="ds-name" :title="ds.name">{{ ds.name }}</span>

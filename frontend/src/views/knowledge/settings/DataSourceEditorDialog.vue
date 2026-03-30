@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import {
   createDataSource,
   updateDataSource,
+  triggerSync,
   validateConnection,
   validateCredentials,
   listResources,
@@ -12,6 +13,7 @@ import {
   type DataSource,
   type Resource,
 } from '@/api/datasource'
+import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 
 const props = defineProps<{
   kbId: string
@@ -269,6 +271,8 @@ async function handleSubmit() {
   form.value.config.resource_ids = selectedResourceIds.value
   submitting.value = true
   try {
+    let dataSourceId = tempDsId.value
+
     if (tempDsId.value) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
@@ -276,13 +280,27 @@ async function handleSubmit() {
         status: 'active',
       } as any)
     } else {
-      await createDataSource({
+      const res = await createDataSource({
         ...form.value,
         knowledge_base_id: props.kbId,
         status: 'active',
       } as any)
+      const created = res?.data || res
+      dataSourceId = created.id
+      tempDsId.value = created.id
     }
-    MessagePlugin.success(isEdit.value ? t('datasource.updateSuccess') : t('datasource.createSuccess'))
+
+    if (isEdit.value) {
+      MessagePlugin.success(t('datasource.updateSuccess'))
+    } else {
+      try {
+        await triggerSync(dataSourceId)
+        MessagePlugin.success(t('datasource.createAndSyncSuccess'))
+      } catch (e: any) {
+        MessagePlugin.warning(e?.message || e?.error || t('datasource.createButSyncFailed'))
+      }
+    }
+
     emit('saved')
     visible.value = false
   } catch (e: any) {
@@ -353,6 +371,7 @@ const stepTitles = computed(() => [
           @click="selectType(def)"
         >
           <div class="ds-type-header">
+            <DataSourceTypeIcon :type="def.type" :size="20" />
             <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
             <span v-if="!def.available" class="ds-type-soon">{{ t('datasource.comingSoon') }}</span>
           </div>
@@ -598,10 +617,10 @@ const stepTitles = computed(() => [
 .ds-type-card:hover:not(.disabled) { border-color: var(--td-brand-color); background: var(--td-brand-color-light); }
 .ds-type-card.disabled { opacity: 0.5; cursor: not-allowed; }
 
-.ds-type-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.ds-type-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .ds-type-name { font-size: 13px; font-weight: 600; }
 .ds-type-soon { font-size: 10px; color: var(--td-text-color-placeholder); background: var(--td-bg-color-component); padding: 1px 6px; border-radius: 3px; }
-.ds-type-desc { font-size: 11px; color: var(--td-text-color-secondary); }
+.ds-type-desc { font-size: 11px; color: var(--td-text-color-secondary); line-height: 1.5; }
 
 /* --- Step 1: collapsible prereq --- */
 .ds-prereq-bar {

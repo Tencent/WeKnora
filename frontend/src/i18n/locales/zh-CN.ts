@@ -3397,6 +3397,8 @@ export default {
     syncDeletions: "同步删除（源端删除时同步删除知识库中的条目）",
     createAndSync: "创建并立即同步",
     createSuccess: "数据源创建成功",
+    createAndSyncSuccess: "数据源创建成功，同步任务已提交",
+    createButSyncFailed: "数据源已创建，但触发同步失败",
     updateSuccess: "数据源更新成功",
     saveFailed: "保存失败",
     step: {

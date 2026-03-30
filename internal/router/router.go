@@ -772,4 +772,3 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 		ds.GET("/logs/:log_id", handler.GetSyncLog)
 	}
 }
-
