@@ -1,18 +1,42 @@
+<p align="center">
+  <picture>
+    <img src="./docs/images/logo.png" alt="WeKnora Logo" height="120"/>
+  </picture>
+</p>
 
+<p align="center">
+  <picture>
+    <a href="https://trendshift.io/repositories/15289" target="_blank">
+      <img src="https://trendshift.io/api/badge/repositories/15289" alt="Tencent%2FWeKnora | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/>
+    </a>
+  </picture>
+</p>
+<p align="center">
+    <a href="https://weknora.weixin.qq.com" target="_blank">
+        <img alt="官方网站" src="https://img.shields.io/badge/官方网站-WeKnora-4e6b99">
+    </a>
+    <a href="https://chatbot.weixin.qq.com" target="_blank">
+        <img alt="微信对话开放平台" src="https://img.shields.io/badge/微信对话开放平台-5ac725">
+    </a>
+    <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
+        <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
+    </a>
+    <a href="./CHANGELOG.md">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.3.5-2e6cc4?labelColor=d4eaf7">
+    </a>
+</p>
 
+<p align="center">
+| <a href="./README.md"><b>English</b></a> | <b>简体中文</b> | <a href="./README_JA.md"><b>日本語</b></a> | <a href="./README_KO.md"><b>한국어</b></a> |
+</p>
 
-
-
-
-| **[English](./README.md)** | **简体中文** | **[日本語](./README_JA.md)** |
-
-
-
-
+<p align="center">
+  <h4 align="center">
 
   [项目介绍](#-项目介绍) • [架构设计](#-架构设计) • [核心特性](#-核心特性) • [快速开始](#-快速开始) • [文档](#-文档) • [开发指南](#-开发指南)
 
-
+  </h4>
+</p>
 
 # 💡 WeKnora - 基于大模型的文档理解检索框架
 
@@ -50,7 +74,8 @@
 - **混合检索优化**：按目标分组并复用查询向量，提升检索性能
 - **Final Answer工具**：新增final_answer工具及Agent耗时跟踪，优化Agent工作流
 
-**更早版本**
+<details>
+<summary><b>更早版本</b></summary>
 
 **v0.3.3 版本亮点：**
 
@@ -102,7 +127,7 @@
 - 🎨 **全新UI**：优化对话界面，支持Agent模式/普通模式切换，展示工具调用过程，知识库管理界面全面升级
 - ⚡ **底层升级**：引入MQ异步任务管理，支持数据库自动迁移，提供快速开发模式
 
-
+</details>
 
 ## 🔒 安全声明
 
@@ -115,7 +140,7 @@
 
 ## 🏗️ 架构设计
 
-weknora-pipelone.png
+![weknora-architecture.png](./docs/images/architecture.png)
 
 WeKnora 采用现代化模块化设计，构建了一条完整的文档理解与检索流水线。系统主要包括文档解析、向量化处理、检索引擎和大模型推理等核心模块，每个组件均可灵活配置与扩展。
 
@@ -202,21 +227,17 @@ cp .env.example .env
 # 所有变量说明详见 .env.example 注释
 ```
 
-#### ③ 启动服务 (含 Ollama)
+#### ③ 启动主服务
 
-检查 .env 文件中需要启动的镜像。
-
-```bash
-./scripts/start_all.sh
-```
-
-或者
+检查 `.env` 文件中需要启动的镜像，然后使用 Docker Compose 启动 WeKnora 主服务。
 
 ```bash
-make start-all
+docker compose up -d
 ```
 
-#### ③.0 启动Ollama (可选)
+#### ③.0 单独启动 Ollama（可选）
+
+如果你在 `.env` 中配置了本地 Ollama 模型，还需要额外启动 Ollama 服务：
 
 ```bash
 ollama serve > /dev/null 2>&1 &
@@ -233,39 +254,37 @@ docker compose up -d
 - 启动全部功能
 
 ```bash
-docker-compose --profile full up -d
+docker compose --profile full up -d
 ```
 
 - 需要 tracing 日志
 
 ```bash
-docker-compose --profile jaeger up -d
+docker compose --profile jaeger up -d
 ```
 
 - 需要 neo4j 知识图谱
 
 ```bash
-docker-compose --profile neo4j up -d
+docker compose --profile neo4j up -d
 ```
 
 - 需要 minio 文件存储服务
 
 ```bash
-docker-compose --profile minio up -d
+docker compose --profile minio up -d
 ```
 
 - 多选项组合
 
 ```bash
-docker-compose --profile neo4j --profile minio up -d
+docker compose --profile neo4j --profile minio up -d
 ```
 
 #### ④ 停止服务
 
 ```bash
-./scripts/start_all.sh --stop
-# 或
-make stop-all
+docker compose down
 ```
 
 ### 🌐 服务访问地址
@@ -275,6 +294,40 @@ make stop-all
 - Web UI：`http://localhost`
 - 后端 API：`http://localhost:8080`
 - 链路追踪（Jaeger）：`http://localhost:16686`
+
+## 📱 功能展示
+
+### Web UI 界面
+
+<table>
+  <tr>
+    <td><b>知识库管理</b><br/><img src="./docs/images/knowledgebases.png" alt="知识库管理"></td>
+    <td><b>对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Agent模式工具调用过程</b><br/><img src="./docs/images/agent-qa.png" alt="Agent模式工具调用过程"></td>
+  </tr>
+</table>
+
+
+**知识库管理：** 支持创建FAQ和文档两种类型知识库，支持拖拽上传、文件夹导入、URL导入等多种方式，自动识别文档结构并提取核心知识，建立索引。支持标签管理和在线录入，系统清晰展示处理进度和文档状态，实现高效的知识库管理。
+
+**Agent模式：** 支持开启ReACT Agent模式，可使用内置工具检索知识库，调用用户配置的MCP工具和网络搜索工具访问外部服务，通过多次迭代和反思，最终给出全面的总结报告。支持跨知识库检索，可以选择多个知识库同时检索。
+
+**对话策略：** 支持配置Agent模型、普通模式所需的模型、检索阈值，支持在线配置Prompt，精确控制多轮对话行为和检索召回执行方式。对话输入框支持Agent模式/普通模式切换，支持开启和关闭网络搜索，支持选择对话模型。
+
+### 文档知识图谱
+
+WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
+
+具体配置请参考 [知识图谱配置说明](./docs/KnowledgeGraph.md) 进行相关配置。
+
+### 配套MCP服务器
+
+请参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行相关配置。
 
 ### 🔌 使用微信对话开放平台
 
@@ -330,7 +383,7 @@ python -m weknora-mcp-server
 ### ① 关闭服务
 
 ```bash
-./scripts/start_all.sh --stop
+docker compose down
 ```
 
 ### ② 清空原有数据表（建议在没有重要数据的情况下使用）
@@ -342,7 +395,7 @@ make clean-db
 ### ③ 编译并启动服务
 
 ```bash
-./scripts/start_all.sh
+docker compose up -d --build
 ```
 
 ### ④ 访问Web UI
@@ -350,33 +403,6 @@ make clean-db
 [http://localhost](http://localhost)
 
 首次访问会自动跳转到注册登录页面，完成注册后，请创建一个新的知识库，并在该知识库的设置页面完成相关设置。
-
-## 📱 功能展示
-
-### Web UI 界面
-
-
-|                   |          |
-| ----------------- | -------- |
-| **知识库管理**         | **对话设置** |
-| **Agent模式工具调用过程** |          |
-
-
-**知识库管理：** 支持创建FAQ和文档两种类型知识库，支持拖拽上传、文件夹导入、URL导入等多种方式，自动识别文档结构并提取核心知识，建立索引。支持标签管理和在线录入，系统清晰展示处理进度和文档状态，实现高效的知识库管理。
-
-**Agent模式：** 支持开启ReACT Agent模式，可使用内置工具检索知识库，调用用户配置的MCP工具和网络搜索工具访问外部服务，通过多次迭代和反思，最终给出全面的总结报告。支持跨知识库检索，可以选择多个知识库同时检索。
-
-**对话策略：** 支持配置Agent模型、普通模式所需的模型、检索阈值，支持在线配置Prompt，精确控制多轮对话行为和检索召回执行方式。对话输入框支持Agent模式/普通模式切换，支持开启和关闭网络搜索，支持选择对话模型。
-
-### 文档知识图谱
-
-WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
-
-具体配置请参考 [知识图谱配置说明](./docs/KnowledgeGraph.md) 进行相关配置。
-
-### 配套MCP服务器
-
-请参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行相关配置。
 
 ## 📘 文档
 
@@ -393,18 +419,14 @@ WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间
 如果你需要频繁修改代码，**不需要每次重新构建 Docker 镜像**！使用快速开发模式：
 
 ```bash
-# 方式 1：使用 Make 命令（推荐）
-make dev-start      # 启动基础设施
-make dev-app        # 启动后端（新终端）
-make dev-frontend   # 启动前端（新终端）
+# 启动基础设施
+make dev-start
 
-# 方式 2：一键启动
-./scripts/quick-dev.sh
+# 启动后端（新终端）
+make dev-app
 
-# 方式 3：使用脚本
-./scripts/dev.sh start     # 启动基础设施
-./scripts/dev.sh app       # 启动后端（新终端）
-./scripts/dev.sh frontend  # 启动前端（新终端）
+# 启动前端（新终端）
+make dev-frontend
 ```
 
 **开发优势：**
@@ -476,7 +498,7 @@ refactor: 重构文档解析模块
 
 感谢以下优秀的贡献者们：
 
-[Contributors](https://github.com/Tencent/WeKnora/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=Tencent/WeKnora)](https://github.com/Tencent/WeKnora/graphs/contributors)
 
 ## 📄 许可证
 
@@ -484,4 +506,12 @@ refactor: 重构文档解析模块
 你可以自由使用、修改和分发本项目代码，但需保留原始版权声明。
 
 ## 📈 项目统计
+
+<a href="https://www.star-history.com/#Tencent/WeKnora&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Tencent/WeKnora&type=date&legend=top-left" />
+ </picture>
+</a>
 

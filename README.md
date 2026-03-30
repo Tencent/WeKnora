@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-| <b>English</b> | <a href="./README_CN.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> |
+| <b>English</b> | <a href="./README_CN.md"><b>简体中文</b></a> | <a href="./README_JA.md"><b>日本語</b></a> | <a href="./README_KO.md"><b>한국어</b></a> |
 </p>
 
 <p align="center">
@@ -223,21 +223,17 @@ cp .env.example .env
 # All variables are documented in the .env.example comments
 ```
 
-#### ③ Start the services (include Ollama)
+#### ③ Start the core services
 
-Check the images that need to be started in the .env file.
-
-```bash
-./scripts/start_all.sh
-```
-
-or
+Check which images need to be started in the `.env` file, then start the WeKnora core services with Docker Compose.
 
 ```bash
-make start-all
+docker compose up -d
 ```
 
-#### ③.0 Start ollama services (Optional)
+#### ③.0 Start Ollama separately (Optional)
+
+If you configured a local Ollama model in `.env`, start the Ollama service separately:
 
 ```bash
 ollama serve > /dev/null 2>&1 &
@@ -252,35 +248,33 @@ docker compose up -d
 
 - All features enabled
 ```bash
-docker-compose --profile full up -d
+docker compose --profile full up -d
 ```
 
 - Tracing logs required
 ```bash
-docker-compose --profile jaeger up -d
+docker compose --profile jaeger up -d
 ```
 
 - Neo4j knowledge graph required
 ```bash
-docker-compose --profile neo4j up -d
+docker compose --profile neo4j up -d
 ```
 
 - Minio file storage service required
 ```bash
-docker-compose --profile minio up -d
+docker compose --profile minio up -d
 ```
 
 - Multiple options combination
 ```bash
-docker-compose --profile neo4j --profile minio up -d
+docker compose --profile neo4j --profile minio up -d
 ```
 
 #### ④ Stop the services
 
 ```bash
-./scripts/start_all.sh --stop
-# Or
-make stop-all
+docker compose down
 ```
 
 ### 🌐 Access Services
@@ -290,6 +284,39 @@ Once started, services will be available at:
 * Web UI: `http://localhost`
 * Backend API: `http://localhost:8080`
 * Jaeger Tracing: `http://localhost:16686`
+
+## 📱 Interface Showcase
+
+### Web UI Interface
+
+<table>
+  <tr>
+    <td><b>Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management"></td>
+    <td><b>Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Agent Mode Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process"></td>
+  </tr>
+</table>
+
+**Knowledge Base Management:** Support for creating FAQ and document knowledge base types, with multiple import methods including drag-and-drop, folder import, and URL import. Automatically identifies document structures and extracts core knowledge to establish indexes. Supports tag management and online entry. The system clearly displays processing progress and document status, achieving efficient knowledge base management.
+
+**Agent Mode:** Support for ReACT Agent mode that can use built-in tools to retrieve knowledge bases, call user-configured MCP tools and web search tools to access external services, providing comprehensive summary reports through multiple iterations and reflection. Supports cross-knowledge base retrieval, allowing selection of multiple knowledge bases for simultaneous retrieval.
+
+**Conversation Strategy:** Support for configuring Agent models, normal mode models, retrieval thresholds, and online Prompt configuration, with precise control over multi-turn conversation behavior and retrieval execution methods. The conversation input box supports Agent mode/normal mode switching, enabling/disabling web search, and selecting conversation models.
+
+### Document Knowledge Graph
+
+WeKnora supports transforming documents into knowledge graphs, displaying the relationships between different sections of the documents. Once the knowledge graph feature is enabled, the system analyzes and constructs an internal semantic association network that not only helps users understand document content but also provides structured support for indexing and retrieval, enhancing the relevance and breadth of search results.
+
+For detailed configuration, please refer to the [Knowledge Graph Configuration Guide](./docs/KnowledgeGraph.md).
+
+### MCP Server
+
+Please refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for the necessary setup.
 
 ### 🔌 Using WeChat Dialog Open Platform
 
@@ -341,7 +368,7 @@ If this is your first time using this project, you can skip steps ①② and go 
 ### ① Stop the services
 
 ```bash
-./scripts/start_all.sh --stop
+docker compose down
 ```
 
 ### ② Clear existing data tables (recommended when no important data exists)
@@ -353,7 +380,7 @@ make clean-db
 ### ③ Compile and start services
 
 ```bash
-./scripts/start_all.sh
+docker compose up -d --build
 ```
 
 ### ④ Access Web UI
@@ -361,36 +388,6 @@ make clean-db
 http://localhost
 
 On your first visit, you will be automatically redirected to the registration/login page. After completing registration, please create a new knowledge base and finish the relevant settings on its configuration page.
-
-## 📱 Interface Showcase
-
-### Web UI Interface
-
-<table>
-  <tr>
-    <td><b>Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management"></td>
-    <td><b>Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings"></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>Agent Mode Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process"></td>
-  </tr>
-</table>
-
-**Knowledge Base Management:** Support for creating FAQ and document knowledge base types, with multiple import methods including drag-and-drop, folder import, and URL import. Automatically identifies document structures and extracts core knowledge to establish indexes. Supports tag management and online entry. The system clearly displays processing progress and document status, achieving efficient knowledge base management.
-
-**Agent Mode:** Support for ReACT Agent mode that can use built-in tools to retrieve knowledge bases, call user-configured MCP tools and web search tools to access external services, providing comprehensive summary reports through multiple iterations and reflection. Supports cross-knowledge base retrieval, allowing selection of multiple knowledge bases for simultaneous retrieval.
-
-**Conversation Strategy:** Support for configuring Agent models, normal mode models, retrieval thresholds, and online Prompt configuration, with precise control over multi-turn conversation behavior and retrieval execution methods. The conversation input box supports Agent mode/normal mode switching, enabling/disabling web search, and selecting conversation models.
-
-### Document Knowledge Graph
-
-WeKnora supports transforming documents into knowledge graphs, displaying the relationships between different sections of the documents. Once the knowledge graph feature is enabled, the system analyzes and constructs an internal semantic association network that not only helps users understand document content but also provides structured support for indexing and retrieval, enhancing the relevance and breadth of search results.
-
-For detailed configuration, please refer to the [Knowledge Graph Configuration Guide](./docs/KnowledgeGraph.md).
-
-### MCP Server
-
-Please refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for the necessary setup.
 
 ## 📘 API Reference
 
@@ -407,18 +404,14 @@ Product plans and upcoming features: [Roadmap](./docs/ROADMAP.md)
 If you need to frequently modify code, **you don't need to rebuild Docker images every time**! Use fast development mode:
 
 ```bash
-# Method 1: Using Make commands (Recommended)
-make dev-start      # Start infrastructure
-make dev-app        # Start backend (new terminal)
-make dev-frontend   # Start frontend (new terminal)
+# Start infrastructure
+make dev-start
 
-# Method 2: One-click start
-./scripts/quick-dev.sh
+# Start backend (new terminal)
+make dev-app
 
-# Method 3: Using scripts
-./scripts/dev.sh start     # Start infrastructure
-./scripts/dev.sh app       # Start backend (new terminal)
-./scripts/dev.sh frontend  # Start frontend (new terminal)
+# Start frontend (new terminal)
+make dev-frontend
 ```
 
 **Development Advantages:**
