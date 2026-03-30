@@ -281,11 +281,13 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	_, err = s.taskEnqueuer.Enqueue(task, asynq.Queue("default"))
 	if err != nil {
 		logger.Errorf(ctx, "failed to enqueue sync task: %v", err)
-		// Update sync log as failed
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now())
 		syncLog.ErrorMessage = err.Error()
 		_ = s.syncLogRepo.Update(ctx, syncLog)
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = fmt.Sprintf("Failed to enqueue sync: %v", err)
+		_ = s.dsRepo.Update(ctx, ds)
 		return nil, err
 	}
 
@@ -386,6 +388,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now())
 		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
 
@@ -397,6 +402,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now())
 		syncLog.ErrorMessage = fmt.Sprintf("Invalid configuration: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
 
@@ -422,6 +430,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
 		return fetchErr
 	}
 
@@ -440,6 +451,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		syncLog.FinishedAt = timePtr(time.Now())
 		syncLog.ErrorMessage = fmt.Sprintf("Failed to get tenant info: %v", err)
 		_ = s.syncLogRepo.Update(ctx, syncLog)
+		ds.Status = types.DataSourceStatusError
+		ds.ErrorMessage = syncLog.ErrorMessage
+		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)

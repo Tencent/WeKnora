@@ -207,7 +207,7 @@ async function testConnection() {
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
     testResult.value = 'error'
-    testErrorMsg.value = e?.response?.data?.error || e?.message || ''
+    testErrorMsg.value = e?.message || e?.error || ''
     MessagePlugin.error(t('datasource.testFailed'))
   }
   testing.value = false
@@ -234,8 +234,8 @@ async function loadResources() {
 
     const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
-  } catch {
-    MessagePlugin.error(t('datasource.resourceLoadFailed'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
   }
   loadingResources.value = false
 }
@@ -300,7 +300,7 @@ async function handleSubmit() {
     emit('saved')
     visible.value = false
   } catch (e: any) {
-    MessagePlugin.error(e?.message || t('datasource.saveFailed'))
+    MessagePlugin.error(e?.message || e?.error || t('datasource.saveFailed'))
   }
   submitting.value = false
 }
@@ -478,11 +478,17 @@ const stepTitles = computed(() => [
         <t-button variant="outline" :loading="testing" @click="testConnection">
           {{ t('datasource.testConnection') }}
         </t-button>
-        <span v-if="testResult === 'success'" class="test-ok">{{ t('datasource.connected') }}</span>
-        <span v-if="testResult === 'error'" class="test-fail">
-          {{ t('datasource.connectionFailed') }}
-          <span v-if="testErrorMsg" class="test-error-detail">- {{ testErrorMsg }}</span>
+        <span v-if="testResult === 'success'" class="test-ok">
+          <t-icon name="check-circle-filled" size="14px" />
+          {{ t('datasource.connected') }}
         </span>
+      </div>
+      <div v-if="testResult === 'error'" class="test-error-box">
+        <t-icon name="error-circle-filled" size="16px" />
+        <div class="test-error-content">
+          <span class="test-error-title">{{ t('datasource.connectionFailed') }}</span>
+          <span v-if="testErrorMsg" class="test-error-detail">{{ testErrorMsg }}</span>
+        </div>
       </div>
 
       <div class="ds-dialog-footer">
@@ -799,9 +805,38 @@ const stepTitles = computed(() => [
 .form-label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--td-text-color-primary); }
 .form-tip { font-size: 12px; color: var(--td-text-color-placeholder); margin: 4px 0 12px; }
 .form-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.test-ok { color: #00a870; font-size: 13px; }
-.test-fail { color: #e34d59; font-size: 13px; }
-.test-error-detail { font-size: 11px; color: var(--td-text-color-placeholder); }
+.test-ok { color: var(--td-success-color); font-size: 13px; display: flex; align-items: center; gap: 4px; }
+
+.test-error-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--td-error-color-1);
+  color: var(--td-error-color);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.test-error-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.test-error-title {
+  font-weight: 500;
+}
+
+.test-error-detail {
+  font-size: 12px;
+  color: var(--td-error-color);
+  opacity: 0.8;
+  word-break: break-word;
+}
 
 .ds-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--td-border-level-2-color); }
 

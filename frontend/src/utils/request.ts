@@ -82,7 +82,7 @@ instance.interceptors.response.use(
   (response) => {
     // 根据业务状态码处理逻辑
     const { status, data } = response;
-    if (status === 200 || status === 201) {
+    if (status >= 200 && status < 300) {
       return data;
     } else {
       return Promise.reject(data);
@@ -190,9 +190,18 @@ instance.interceptors.response.use(
     // 将HTTP状态码一并抛出，方便上层判断401等场景
     // 后端返回格式: { success: false, error: { code, message, details } }
     // 提取 error.message 作为顶层 message，方便前端使用 error?.message 获取
-    const errorMessage = typeof data === 'object' && data?.error?.message 
-      ? data.error.message 
-      : (typeof data === 'object' ? data?.message : data);
+    let errorMessage: string | undefined;
+    if (typeof data === 'object') {
+      if (typeof data?.error === 'string') {
+        errorMessage = data.error;
+      } else if (data?.error?.message) {
+        errorMessage = data.error.message;
+      } else {
+        errorMessage = data?.message;
+      }
+    } else if (typeof data === 'string') {
+      errorMessage = data;
+    }
     return Promise.reject({ 
       status, 
       message: errorMessage,

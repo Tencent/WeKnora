@@ -67,8 +67,8 @@ function handleDelete(ds: DataSource) {
         MessagePlugin.success(t('datasource.deleteSuccess'))
         await loadList()
         confirmDialog.hide()
-      } catch {
-        MessagePlugin.error(t('datasource.deleteFailed'))
+      } catch (e: any) {
+        MessagePlugin.error(e?.message || e?.error || t('datasource.deleteFailed'))
       }
     },
   })
@@ -79,8 +79,8 @@ async function handleSync(ds: DataSource) {
     await triggerSync(ds.id)
     MessagePlugin.success(t('datasource.syncTriggered'))
     loadList()
-  } catch {
-    MessagePlugin.error(t('datasource.syncFailed'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.syncFailed'))
   }
 }
 
@@ -89,8 +89,8 @@ async function handlePause(ds: DataSource) {
     await pauseDataSource(ds.id)
     MessagePlugin.success(t('datasource.paused'))
     loadList()
-  } catch {
-    MessagePlugin.error(t('datasource.pauseFailed'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.pauseFailed'))
   }
 }
 
@@ -99,8 +99,8 @@ async function handleResume(ds: DataSource) {
     await resumeDataSource(ds.id)
     MessagePlugin.success(t('datasource.resumed'))
     loadList()
-  } catch {
-    MessagePlugin.error(t('datasource.resumeFailed'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resumeFailed'))
   }
 }
 
