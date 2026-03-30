@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -218,6 +219,23 @@ func (r *SyncLogRepository) Update(ctx context.Context, log *types.SyncLog) erro
 		return err
 	}
 	return nil
+}
+
+// CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
+func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID string) error {
+	if dsID == "" {
+		return errors.New("data source id is empty")
+	}
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&types.SyncLog{}).
+		Where("data_source_id = ?", dsID).
+		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"}).
+		Updates(map[string]interface{}{
+			"status":        types.SyncLogStatusCanceled,
+			"finished_at":   &now,
+			"error_message": "data source deleted",
+		}).Error
 }
 
 // CleanupOldLogs deletes sync logs older than the retention period

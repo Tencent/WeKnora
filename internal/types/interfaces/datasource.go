@@ -95,6 +95,9 @@ type SyncLogRepository interface {
 	// Update updates an existing sync log entry
 	Update(ctx context.Context, log *types.SyncLog) error
 
+	// CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
+	CancelPendingByDataSource(ctx context.Context, dsID string) error
+
 	// CleanupOldLogs deletes sync logs older than the retention period
 	CleanupOldLogs(ctx context.Context, retentionDays int) error
 }

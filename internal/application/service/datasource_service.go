@@ -172,6 +172,11 @@ func (s *DataSourceService) DeleteDataSource(ctx context.Context, id string) err
 	// Remove cron schedule
 	s.scheduler.Remove(id)
 
+	// Cancel any pending/running sync logs so queued asynq tasks won't retry
+	if err := s.syncLogRepo.CancelPendingByDataSource(ctx, id); err != nil {
+		logger.Warnf(ctx, "failed to cancel pending sync logs for ds=%s: %v", id, err)
+	}
+
 	logger.Infof(ctx, "data source deleted: id=%s", id)
 	return nil
 }
@@ -369,15 +374,21 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Get data source
 	ds, err := s.GetDataSource(ctx, payload.DataSourceID)
 	if err != nil {
-		logger.Errorf(ctx, "failed to get data source: %v", err)
-		return err
+		logger.Warnf(ctx, "data source not found (likely deleted), cancelling sync: ds=%s err=%v", payload.DataSourceID, err)
+		if syncLog, slErr := s.syncLogRepo.FindByID(ctx, payload.SyncLogID); slErr == nil && syncLog != nil {
+			syncLog.Status = types.SyncLogStatusCanceled
+			syncLog.FinishedAt = timePtr(time.Now())
+			syncLog.ErrorMessage = "data source has been deleted"
+			_ = s.syncLogRepo.Update(ctx, syncLog)
+		}
+		return nil
 	}
 
 	// Get sync log
 	syncLog, err := s.syncLogRepo.FindByID(ctx, payload.SyncLogID)
 	if err != nil {
 		logger.Errorf(ctx, "failed to get sync log: %v", err)
-		return err
+		return nil
 	}
 
 	// Get connector
