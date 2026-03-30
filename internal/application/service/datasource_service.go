@@ -66,6 +66,9 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if err != nil || kb == nil {
 		return nil, datasource.ErrKnowledgeBaseNotFound
 	}
+	if kb.TenantID != ds.TenantID {
+		return nil, datasource.ErrKnowledgeBaseNotFound
+	}
 
 	// Validate connector type
 	_, err = s.connectorRegistry.Get(ds.Type)
@@ -133,6 +136,20 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	existing, err := s.dsRepo.FindByID(ctx, ds.ID)
 	if err != nil {
 		return nil, err
+	}
+
+	if ds.KnowledgeBaseID == "" {
+		ds.KnowledgeBaseID = existing.KnowledgeBaseID
+	}
+	if ds.KnowledgeBaseID != existing.KnowledgeBaseID {
+		return nil, fmt.Errorf("changing knowledge base is not allowed")
+	}
+
+	if ds.TenantID == 0 {
+		ds.TenantID = existing.TenantID
+	}
+	if ds.TenantID != existing.TenantID {
+		return nil, datasource.ErrDataSourceInvalid
 	}
 
 	// Validate new configuration if changed
