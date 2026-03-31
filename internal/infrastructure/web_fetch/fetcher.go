@@ -31,8 +31,8 @@ func FetchURLContent(ctx context.Context, rawURL string) (string, error) {
 	}
 
 	// SSRF validation
-	if safe, reason := utils.IsSSRFSafeURL(rawURL); !safe {
-		return "", fmt.Errorf("URL rejected: %s", reason)
+	if err := utils.ValidateURLForSSRF(rawURL); err != nil {
+		return "", fmt.Errorf("URL rejected: %w", err)
 	}
 
 	u, err := url.Parse(rawURL)
