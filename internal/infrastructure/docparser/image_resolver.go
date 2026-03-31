@@ -667,9 +667,9 @@ func (r *ImageResolver) ResolveRemoteImages(
 			continue
 		}
 
-		// --- SSRF check ---
-		if safe, reason := secutils.IsSSRFSafeURL(imgURL); !safe {
-			log.Printf("WARN: remote image blocked by SSRF check (%s): %s", reason, imgURL)
+		// --- SSRF check (centralised entry-point with whitelist support) ---
+		if err := secutils.ValidateURLForSSRF(imgURL); err != nil {
+			log.Printf("WARN: remote image blocked by SSRF check (%v): %s", err, imgURL)
 			continue
 		}
 

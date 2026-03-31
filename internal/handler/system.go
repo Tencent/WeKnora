@@ -643,7 +643,7 @@ func sanitizeStorageCheckError(err error) string {
 }
 
 // isBlockedStorageEndpoint checks whether a storage endpoint resolves to a dangerous
-// address (cloud metadata, loopback, link-local). Unlike the stricter IsSSRFSafeURL,
+// address (cloud metadata, loopback, link-local). Unlike the stricter isSSRFSafeURL,
 // this allows private IPs since MinIO is commonly deployed on internal networks.
 // It also respects the SSRF_WHITELIST environment variable for whitelisted hosts.
 func isBlockedStorageEndpoint(endpoint string) (bool, string) {

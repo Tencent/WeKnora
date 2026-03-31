@@ -1,11 +1,13 @@
 package utils
 
 import (
+	"net"
+	"os"
 	"strings"
 	"testing"
 )
 
-func TestIsSSRFSafeURL(t *testing.T) {
+func TestSSRFSafeURL(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -44,6 +46,7 @@ func TestIsSSRFSafeURL(t *testing.T) {
 			wantOK:        false,
 			wantReasonSub: "hostname suffix .internal is restricted",
 		},
+		// --- All direct IPs are blocked by isSSRFSafeURL (strict mode) ---
 		{
 			name:          "direct IPv4 blocked",
 			rawURL:        "https://8.8.8.8/dns-query",
@@ -51,11 +54,36 @@ func TestIsSSRFSafeURL(t *testing.T) {
 			wantReasonSub: "direct IP address access is not allowed",
 		},
 		{
-			name:          "direct IPv6 blocked",
+			name:          "direct public IPv6 blocked",
 			rawURL:        "https://[2001:4860:4860::8888]/dns-query",
 			wantOK:        false,
 			wantReasonSub: "direct IP address access is not allowed",
 		},
+		{
+			name:          "loopback IPv6 blocked",
+			rawURL:        "https://[::1]/admin",
+			wantOK:        false,
+			wantReasonSub: "is restricted",
+		},
+		{
+			name:          "link-local IPv6 blocked",
+			rawURL:        "https://[fe80::1]/admin",
+			wantOK:        false,
+			wantReasonSub: "direct IP address access is not allowed",
+		},
+		{
+			name:          "ULA IPv6 blocked",
+			rawURL:        "https://[fd12:3456:789a::1]/admin",
+			wantOK:        false,
+			wantReasonSub: "direct IP address access is not allowed",
+		},
+		{
+			name:          "IPv4-mapped IPv6 blocked",
+			rawURL:        "https://[::ffff:127.0.0.1]/admin",
+			wantOK:        false,
+			wantReasonSub: "direct IP address access is not allowed",
+		},
+		// --- IP obfuscation ---
 		{
 			name:          "IP-like decimal hostname blocked",
 			rawURL:        "https://2130706433/",
@@ -68,6 +96,7 @@ func TestIsSSRFSafeURL(t *testing.T) {
 			wantOK:        false,
 			wantReasonSub: "IP-like hostname format is not allowed",
 		},
+		// --- Port blocking ---
 		{
 			name:          "blocked internal service port",
 			rawURL:        "https://example.com:3306/db",
@@ -81,21 +110,21 @@ func TestIsSSRFSafeURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			ok, reason := IsSSRFSafeURL(tt.rawURL)
+			ok, reason := isSSRFSafeURL(tt.rawURL)
 			if ok != tt.wantOK {
-				t.Fatalf("IsSSRFSafeURL(%q) ok = %v, want %v, reason = %q", tt.rawURL, ok, tt.wantOK, reason)
+				t.Fatalf("isSSRFSafeURL(%q) ok = %v, want %v, reason = %q", tt.rawURL, ok, tt.wantOK, reason)
 			}
 			if tt.wantReasonSub != "" && !strings.Contains(reason, tt.wantReasonSub) {
-				t.Fatalf("IsSSRFSafeURL(%q) reason = %q, want contains %q", tt.rawURL, reason, tt.wantReasonSub)
+				t.Fatalf("isSSRFSafeURL(%q) reason = %q, want contains %q", tt.rawURL, reason, tt.wantReasonSub)
 			}
 		})
 	}
 }
 
-func TestIsSSRFSafeURL_AllowPublicDomain(t *testing.T) {
+func TestSSRFSafeURL_AllowPublicDomain(t *testing.T) {
 	t.Parallel()
 
-	ok, reason := IsSSRFSafeURL("https://example.com/path")
+	ok, reason := isSSRFSafeURL("https://example.com/path")
 	if !ok {
 		// This path depends on runtime DNS/network. If DNS is unavailable, skip to keep CI stable.
 		if strings.Contains(reason, "DNS resolution failed") {
@@ -103,4 +132,128 @@ func TestIsSSRFSafeURL_AllowPublicDomain(t *testing.T) {
 		}
 		t.Fatalf("expected public domain to be allowed, got ok=%v reason=%q", ok, reason)
 	}
+}
+
+// TestValidateURLForSSRF_IPv6Whitelist verifies that whitelisted IPv6 addresses
+// bypass the strict IP block in isSSRFSafeURL.
+func TestValidateURLForSSRF_IPv6Whitelist(t *testing.T) {
+	tests := []struct {
+		name      string
+		whitelist string
+		rawURL    string
+		wantErr   bool
+	}{
+		{
+			name:      "exact IPv6 whitelisted",
+			whitelist: "2001:4860:4860::8888",
+			rawURL:    "https://[2001:4860:4860::8888]/dns-query",
+			wantErr:   false,
+		},
+		{
+			name:      "IPv6 CIDR whitelisted",
+			whitelist: "2001:db8::/32",
+			rawURL:    "https://[2001:db8::1]/page",
+			wantErr:   false,
+		},
+		{
+			name:      "IPv6 not in whitelist still blocked",
+			whitelist: "2001:db8::/32",
+			rawURL:    "https://[2001:4860:4860::8888]/dns-query",
+			wantErr:   true,
+		},
+		{
+			name:      "IPv4 whitelisted",
+			whitelist: "8.8.8.8",
+			rawURL:    "https://8.8.8.8/dns-query",
+			wantErr:   false,
+		},
+		{
+			name:      "wildcard domain whitelisted",
+			whitelist: "*.example.com",
+			rawURL:    "https://api.example.com/v1",
+			wantErr:   false,
+		},
+		{
+			name:      "wildcard domain root whitelisted",
+			whitelist: "*.example.com",
+			rawURL:    "https://example.com/v1",
+			wantErr:   false,
+		},
+		{
+			name:      "bare host without scheme normalised",
+			whitelist: "internal.service",
+			rawURL:    "internal.service:8080/path",
+			wantErr:   false,
+		},
+		{
+			name:      "empty whitelist blocks direct IP",
+			whitelist: "",
+			rawURL:    "https://8.8.8.8/dns-query",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset whitelist singleton so we can set a new value
+			resetSSRFWhitelistForTest()
+			os.Setenv("SSRF_WHITELIST", tt.whitelist)
+			defer func() {
+				os.Unsetenv("SSRF_WHITELIST")
+				resetSSRFWhitelistForTest()
+			}()
+
+			err := ValidateURLForSSRF(tt.rawURL)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateURLForSSRF(%q) with whitelist=%q: err = %v, wantErr = %v",
+					tt.rawURL, tt.whitelist, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestIsRestrictedIP_IPv6 tests IPv6-specific restricted range detection.
+func TestIsRestrictedIP_IPv6(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		ip         string
+		wantBlock  bool
+		wantReason string
+	}{
+		{"loopback", "::1", true, "loopback"},
+		{"unspecified", "::", true, "unspecified"},
+		{"link-local", "fe80::1", true, "link-local"},
+		{"ULA", "fd12:3456:789a::1", true, ""},
+		{"site-local", "fec0::1", true, "site-local"},
+		{"Teredo", "2001:0000:4136:e378:8000:63bf:3fff:fdd2", true, "Teredo"},
+		{"6to4 private", "2002:c0a8:0101::1", true, "6to4"},
+		{"6to4 public", "2002:0808:0808::1", false, ""},
+		{"public IPv6", "2001:4860:4860::8888", false, ""},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ip := parseIPForTest(t, tt.ip)
+			blocked, reason := isRestrictedIP(ip)
+			if blocked != tt.wantBlock {
+				t.Fatalf("isRestrictedIP(%s) = %v, want %v (reason: %s)", tt.ip, blocked, tt.wantBlock, reason)
+			}
+			if tt.wantReason != "" && !strings.Contains(strings.ToLower(reason), strings.ToLower(tt.wantReason)) {
+				t.Fatalf("isRestrictedIP(%s) reason = %q, want contains %q", tt.ip, reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func parseIPForTest(t *testing.T, s string) net.IP {
+	t.Helper()
+	ip := net.ParseIP(s)
+	if ip == nil {
+		t.Fatalf("invalid test IP: %s", s)
+	}
+	return ip
 }

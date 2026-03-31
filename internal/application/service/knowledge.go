@@ -473,9 +473,9 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		return nil, ErrInvalidURL
 	}
 
-	// SSRF protection: validate URL is safe to fetch
-	if safe, reason := secutils.IsSSRFSafeURL(url); !safe {
-		logger.Errorf(ctx, "URL rejected for SSRF protection: %s, reason: %s", url, reason)
+	// SSRF protection: validate URL is safe to fetch (uses centralised entry-point with whitelist support)
+	if err := secutils.ValidateURLForSSRF(url); err != nil {
+		logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", url, err)
 		return nil, ErrInvalidURL
 	}
 
@@ -659,8 +659,8 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		logger.Error(ctx, "Invalid or unsafe file URL format")
 		return nil, ErrInvalidURL
 	}
-	if safe, reason := secutils.IsSSRFSafeURL(fileURL); !safe {
-		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, reason: %s", fileURL, reason)
+	if err := secutils.ValidateURLForSSRF(fileURL); err != nil {
+		logger.Errorf(ctx, "File URL rejected for SSRF protection: %s, err: %v", fileURL, err)
 		return nil, ErrInvalidURL
 	}
 
@@ -7458,8 +7458,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	if payload.FileURL != "" {
 		// file_url import: SSRF re-check (防 DNS 重绑定), download, persist, then delegate to convert()
-		if safe, reason := secutils.IsSSRFSafeURL(payload.FileURL); !safe {
-			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, reason: %s", payload.FileURL, reason)
+		if err := secutils.ValidateURLForSSRF(payload.FileURL); err != nil {
+			logger.Errorf(ctx, "File URL rejected for SSRF protection in ProcessDocument: %s, err: %v", payload.FileURL, err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "File URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()
@@ -7668,8 +7668,8 @@ func (s *knowledgeService) convert(
 	overrides := s.getParserEngineOverridesFromContext(ctx)
 
 	if isURL {
-		if safe, reason := secutils.IsSSRFSafeURL(payload.URL); !safe {
-			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, reason: %s", payload.URL, reason)
+		if err := secutils.ValidateURLForSSRF(payload.URL); err != nil {
+			logger.Errorf(ctx, "URL rejected for SSRF protection: %s, err: %v", payload.URL, err)
 			knowledge.ParseStatus = "failed"
 			knowledge.ErrorMessage = "URL is not allowed for security reasons"
 			knowledge.UpdatedAt = time.Now()

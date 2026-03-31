@@ -503,8 +503,8 @@ func (a *WebhookAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessa
 func downloadFromURL(ctx context.Context, rawURL, fileName string) (io.ReadCloser, string, error) {
 	// SSRF protection: reject internal/private URLs unless on the WeCom API allowlist.
 	if !isAllowedIMAPIHost(rawURL) {
-		if safe, reason := secutils.IsSSRFSafeURL(rawURL); !safe {
-			return nil, "", fmt.Errorf("URL rejected for security reasons: %s", reason)
+		if err := secutils.ValidateURLForSSRF(rawURL); err != nil {
+			return nil, "", fmt.Errorf("URL rejected for security reasons: %v", err)
 		}
 	}
 
@@ -582,7 +582,7 @@ func downloadFromURL(ctx context.Context, rawURL, fileName string) (io.ReadClose
 }
 
 // allowedIMAPIHosts lists IM platform API hosts that are trusted for file downloads.
-// URLs pointing to these hosts bypass IsSSRFSafeURL checks because the WeCom API
+// URLs pointing to these hosts bypass isSSRFSafeURL checks because the WeCom API
 // itself returns these URLs in callback payloads (e.g. temporary media links).
 var allowedIMAPIHosts = []string{
 	"qyapi.weixin.qq.com",

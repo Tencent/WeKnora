@@ -345,8 +345,8 @@ func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractRe
 var imgRefPattern = regexp.MustCompile(`!\[[^\]]*\]\(([^)]+)\)`)
 
 func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
-	if safe, reason := utils.IsSSRFSafeURL(zipURL); !safe {
-		return "", nil, fmt.Errorf("zip URL blocked by SSRF check: %s", reason)
+	if err := utils.ValidateURLForSSRF(zipURL); err != nil {
+		return "", nil, fmt.Errorf("zip URL blocked by SSRF check: %v", err)
 	}
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
 	resp, err := client.Get(zipURL)

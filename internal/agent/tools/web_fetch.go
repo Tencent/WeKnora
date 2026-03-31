@@ -262,9 +262,9 @@ func (t *WebFetchTool) validateAndResolve(p webFetchParams) (*validatedParams, e
 		return nil, fmt.Errorf("invalid URL format")
 	}
 
-	// SSRF protection: validate URL is safe (scheme, hostname, and that resolved IPs are not restricted)
-	if safe, reason := utils.IsSSRFSafeURL(p.URL); !safe {
-		return nil, fmt.Errorf("URL rejected for security reasons: %s", reason)
+	// SSRF protection: validate URL is safe (uses centralised entry-point with whitelist support)
+	if err := utils.ValidateURLForSSRF(p.URL); err != nil {
+		return nil, fmt.Errorf("URL rejected for security reasons: %v", err)
 	}
 
 	u, err := url.Parse(p.URL)
@@ -281,14 +281,16 @@ func (t *WebFetchTool) validateAndResolve(p webFetchParams) (*validatedParams, e
 		}
 	}
 
-	// Resolve and pin to the first public IP (same resolver as IsSSRFSafeURL; we pin so chromedp cannot re-resolve)
+	// Resolve and pin to the first safe IP (same resolver as isSSRFSafeURL; we pin so chromedp cannot re-resolve).
+	// Whitelisted hosts may resolve to private/restricted IPs, so we allow any IP for them.
 	ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", hostname)
 	if err != nil || len(ips) == 0 {
 		return nil, fmt.Errorf("DNS lookup failed for %s: %w", hostname, err)
 	}
+	isWhitelisted := utils.IsSSRFWhitelisted(hostname)
 	var pinnedIP net.IP
 	for _, ip := range ips {
-		if utils.IsPublicIP(ip) {
+		if isWhitelisted || utils.IsPublicIP(ip) {
 			pinnedIP = ip
 			break
 		}
