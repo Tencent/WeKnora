@@ -93,9 +93,7 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 
 	// 添加可选参数
 	if opts != nil {
-		if opts.Temperature > 0 {
-			chatReq.Options["temperature"] = opts.Temperature
-		}
+		chatReq.Options["temperature"] = opts.Temperature
 		if opts.TopP > 0 {
 			chatReq.Options["top_p"] = opts.TopP
 		}
