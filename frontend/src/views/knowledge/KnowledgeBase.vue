@@ -396,7 +396,10 @@ const handleTagRowClick = (tagId: string) => {
     editingTagId.value = null;
     editingTagName.value = '';
   }
-  if (selectedTagId.value === tagId) return;
+  if (selectedTagId.value === tagId) {
+    handleTagFilterChange('');
+    return;
+  }
   handleTagFilterChange(tagId);
 };
 

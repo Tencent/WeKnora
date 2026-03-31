@@ -1650,6 +1650,7 @@ const handleTagRowClick = (tagSeqId: number) => {
     cancelCreateTag()
   }
   if (selectedTagId.value === tagSeqId) {
+    handleTagFilterChange(0)
     return
   }
   handleTagFilterChange(tagSeqId)
