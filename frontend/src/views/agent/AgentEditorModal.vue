@@ -917,6 +917,32 @@
                     <!-- 网络搜索最大结果数 -->
                     <div v-if="formData.config.web_search_enabled" class="setting-row">
                       <div class="setting-info">
+                        <label>{{ $t('agent.editor.webSearchProvider') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.webSearchProvider') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-select
+                          v-model="formData.config.web_search_provider_id"
+                          clearable
+                          :placeholder="$t('agent.editor.webSearchProviderPlaceholder')"
+                          style="width: 240px;"
+                        >
+                          <t-option
+                            v-for="p in webSearchProviderList"
+                            :key="p.id"
+                            :value="p.id"
+                            :label="p.name"
+                          >
+                            <span>{{ p.name }}</span>
+                            <t-tag v-if="p.is_default" theme="primary" size="small" style="margin-left: 6px;">{{ $t('common.default') }}</t-tag>
+                          </t-option>
+                        </t-select>
+                      </div>
+                    </div>
+
+                    <!-- 网络搜索最大结果数 -->
+                    <div v-if="formData.config.web_search_enabled" class="setting-row">
+                      <div class="setting-info">
                         <label>{{ $t('agent.editor.webSearchMaxResults') }}</label>
                         <p class="desc">{{ $t('agentEditor.desc.webSearchMaxResults') }}</p>
                       </div>
@@ -924,6 +950,31 @@
                         <div class="slider-wrapper">
                           <t-slider v-model="formData.config.web_search_max_results" :min="1" :max="10" />
                           <span class="slider-value">{{ formData.config.web_search_max_results }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 自动抓取页面内容 -->
+                    <div v-if="formData.config.web_search_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.webFetchEnabled') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.webFetchEnabled') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.web_fetch_enabled" />
+                      </div>
+                    </div>
+
+                    <!-- 抓取页面数 -->
+                    <div v-if="formData.config.web_search_enabled && formData.config.web_fetch_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.webFetchTopN') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.webFetchTopN') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <div class="slider-wrapper">
+                          <t-slider v-model="formData.config.web_fetch_top_n" :min="1" :max="10" />
+                          <span class="slider-value">{{ formData.config.web_fetch_top_n }}</span>
                         </div>
                       </div>
                     </div>
@@ -1164,6 +1215,7 @@ import { listModels, type ModelConfig } from '@/api/model';
 import { listKnowledgeBases } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { listSkills, type SkillInfo } from '@/api/skill';
+import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { getAgentConfig, getConversationConfig, getStorageEngineStatus, type StorageEngineStatusItem, type PromptTemplate } from '@/api/system';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
@@ -1195,6 +1247,7 @@ const saving = ref(false);
 const allModels = ref<ModelConfig[]>([]);
 const kbOptions = ref<{ label: string; value: string; type?: 'document' | 'faq'; count?: number; shared?: boolean; orgName?: string }[]>([]);
 const mcpOptions = ref<{ label: string; value: string }[]>([]);
+const webSearchProviderList = ref<WebSearchProviderEntity[]>([]);
 const skillOptions = ref<{ name: string; description: string }[]>([]);
 // 是否允许启用 Skills（取决于后端沙箱是否启用，disabled 时为 false；未请求前为 false 避免闪显）
 const skillsAvailable = ref(false);
@@ -1917,6 +1970,16 @@ const loadDependencies = async () => {
       }
     } catch (e) {
       console.warn('Failed to load storage engine status', e);
+    }
+
+    // 加载网络搜索引擎配置列表
+    try {
+      const wsRes: any = await listWebSearchProviders();
+      if (wsRes?.data && Array.isArray(wsRes.data)) {
+        webSearchProviderList.value = wsRes.data;
+      }
+    } catch (e) {
+      console.warn('Failed to load web search providers', e);
     }
 
     // 加载占位符定义（从统一 API）

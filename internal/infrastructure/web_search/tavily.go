@@ -7,14 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 const (
+	// defaultTavilySearchURL is the hardcoded Tavily API URL.
+	// Not configurable by tenants — prevents SSRF.
 	defaultTavilySearchURL = "https://api.tavily.com/search"
 )
 
@@ -29,11 +31,10 @@ type TavilyProvider struct {
 	apiKey  string
 }
 
-// NewTavilyProvider creates a new Tavily provider
-func NewTavilyProvider() (interfaces.WebSearchProvider, error) {
-	apiKey := os.Getenv("TAVILY_API_KEY")
-	if len(apiKey) == 0 {
-		return nil, fmt.Errorf("TAVILY_API_KEY is not set")
+// NewTavilyProvider creates a new Tavily provider from parameters (no environment variables).
+func NewTavilyProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+	if params.APIKey == "" {
+		return nil, fmt.Errorf("API key is required for Tavily provider")
 	}
 	client := &http.Client{
 		Timeout: defaultTavilyTimeout,
@@ -41,19 +42,8 @@ func NewTavilyProvider() (interfaces.WebSearchProvider, error) {
 	return &TavilyProvider{
 		client:  client,
 		baseURL: defaultTavilySearchURL,
-		apiKey:  apiKey,
+		apiKey:  params.APIKey,
 	}, nil
-}
-
-// TavilyProviderInfo returns the provider info for registration
-func TavilyProviderInfo() types.WebSearchProviderInfo {
-	return types.WebSearchProviderInfo{
-		ID:             "tavily",
-		Name:           "Tavily",
-		Free:           false,
-		RequiresAPIKey: true,
-		Description:    "Tavily Search API",
-	}
 }
 
 // Name returns the provider name
@@ -71,6 +61,7 @@ func (p *TavilyProvider) Search(
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}
+	logger.Infof(ctx, "[WebSearch][Tavily] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
 
 	reqBody := tavilySearchRequest{
 		APIKey:     p.apiKey,
@@ -97,6 +88,7 @@ func (p *TavilyProvider) Search(
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logger.Warnf(ctx, "[WebSearch][Tavily] API returned status %d: %s", resp.StatusCode, string(respBody))
 		return nil, fmt.Errorf("tavily API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -125,6 +117,7 @@ func (p *TavilyProvider) Search(
 		}
 		results = append(results, result)
 	}
+	logger.Infof(ctx, "[WebSearch][Tavily] returned %d results", len(results))
 	return results, nil
 }
 

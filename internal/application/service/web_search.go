@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/application/service/web_search"
+	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -15,10 +15,117 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// WebSearchService provides web search functionality
+// WebSearchService provides web search functionality.
+// It resolves provider configurations from the database and creates provider
+// instances on-demand via the infrastructure registry.
 type WebSearchService struct {
-	providers map[string]interfaces.WebSearchProvider
-	timeout   int
+	registry     *infra_web_search.Registry
+	providerRepo interfaces.WebSearchProviderRepository
+	timeout      int
+}
+
+// NewWebSearchService creates a new web search service.
+// The registry holds provider type factories; the providerRepo loads tenant-specific configurations.
+func NewWebSearchService(
+	cfg *config.Config,
+	registry *infra_web_search.Registry,
+	providerRepo interfaces.WebSearchProviderRepository,
+) (interfaces.WebSearchService, error) {
+	timeout := 10 // default timeout in seconds
+	if cfg.WebSearch != nil && cfg.WebSearch.Timeout > 0 {
+		timeout = cfg.WebSearch.Timeout
+	}
+
+	return &WebSearchService{
+		registry:     registry,
+		providerRepo: providerRepo,
+		timeout:      timeout,
+	}, nil
+}
+
+// Search performs web search using the provider entity identified by providerID.
+// If providerID is empty, it falls back to the deprecated config.Provider field for backward compatibility.
+func (s *WebSearchService) Search(
+	ctx context.Context,
+	providerID string,
+	config *types.WebSearchConfig,
+	query string,
+) ([]*types.WebSearchResult, error) {
+	if config == nil {
+		return nil, fmt.Errorf("web search config is required")
+	}
+
+	// Resolve the provider
+	searchProvider, err := s.resolveProvider(ctx, providerID, config)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set timeout
+	timeout := time.Duration(s.timeout) * time.Second
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Perform search
+	results, err := searchProvider.Search(ctx, query, config.MaxResults, config.IncludeDate)
+	if err != nil {
+		return nil, fmt.Errorf("web search failed: %w", err)
+	}
+
+	// Apply blacklist filtering
+	results = s.filterBlacklist(results, config.Blacklist)
+
+	return results, nil
+}
+
+// resolveProvider resolves a WebSearchProvider instance from either:
+// 1. A provider entity ID (new path) — loads from DB, creates via registry
+// 2. The deprecated config.Provider field (backward compatibility) — creates with empty params
+func (s *WebSearchService) resolveProvider(
+	ctx context.Context,
+	providerID string,
+	cfg *types.WebSearchConfig,
+) (interfaces.WebSearchProvider, error) {
+	// New path: load provider entity from DB
+	if providerID != "" {
+		tenantID, ok := types.TenantIDFromContext(ctx)
+		if !ok {
+			return nil, fmt.Errorf("tenant ID not found in context")
+		}
+
+		entity, err := s.providerRepo.GetByID(ctx, tenantID, providerID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load web search provider %s: %w", providerID, err)
+		}
+		if entity == nil {
+			return nil, fmt.Errorf("web search provider not found: %s", providerID)
+		}
+
+		provider, err := s.registry.CreateProvider(string(entity.Provider), entity.Parameters)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create provider %s (%s): %w", entity.Name, entity.Provider, err)
+		}
+		return provider, nil
+	}
+
+	// Backward compatibility: use the deprecated config.Provider field
+	if cfg.Provider != "" {
+		logger.Warnf(ctx, "Using deprecated WebSearchConfig.Provider field: %s. Please migrate to WebSearchProviderEntity.", cfg.Provider)
+		params := types.WebSearchProviderParameters{
+			APIKey: cfg.APIKey,
+		}
+		provider, err := s.registry.CreateProvider(cfg.Provider, params)
+		if err != nil {
+			return nil, fmt.Errorf("web search provider %s is not available: %w", cfg.Provider, err)
+		}
+		return provider, nil
+	}
+
+	return nil, fmt.Errorf("no web search provider configured")
 }
 
 // CompressWithRAG performs RAG-based compression using a temporary, hidden knowledge base.
@@ -240,72 +347,6 @@ func stripMarker(content string) string {
 		return strings.Join(lines[1:], "\n")
 	}
 	return content
-}
-
-// Search performs web search using the specified provider
-// This method implements the interface expected by PluginSearch
-func (s *WebSearchService) Search(
-	ctx context.Context,
-	config *types.WebSearchConfig,
-	query string,
-) ([]*types.WebSearchResult, error) {
-	if config == nil {
-		return nil, fmt.Errorf("web search config is required")
-	}
-
-	provider, ok := s.providers[config.Provider]
-	if !ok {
-		return nil, fmt.Errorf("web search provider %s is not available", config.Provider)
-	}
-
-	// Set timeout
-	timeout := time.Duration(s.timeout) * time.Second
-	if timeout == 0 {
-		timeout = 10 * time.Second
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Perform search
-	results, err := provider.Search(ctx, query, config.MaxResults, config.IncludeDate)
-	if err != nil {
-		return nil, fmt.Errorf("web search failed: %w", err)
-	}
-
-	// Apply blacklist filtering
-	results = s.filterBlacklist(results, config.Blacklist)
-
-	// Apply compression if needed
-	if config.CompressionMethod != "none" && config.CompressionMethod != "" {
-		// Compression will be handled later in the integration layer
-		// For now, we just return the results
-	}
-
-	return results, nil
-}
-
-// NewWebSearchService creates a new web search service
-func NewWebSearchService(cfg *config.Config, registry *web_search.Registry) (interfaces.WebSearchService, error) {
-	timeout := 10 // default timeout
-	if cfg.WebSearch != nil && cfg.WebSearch.Timeout > 0 {
-		timeout = cfg.WebSearch.Timeout
-	}
-
-	// Create all registered providers
-	providers, err := registry.CreateAllProviders()
-	if err != nil {
-		return nil, err
-	}
-
-	for id := range providers {
-		logger.Infof(context.Background(), "Initialized web search provider: %s", id)
-	}
-
-	return &WebSearchService{
-		providers: providers,
-		timeout:   timeout,
-	}, nil
 }
 
 // filterBlacklist filters results based on blacklist rules

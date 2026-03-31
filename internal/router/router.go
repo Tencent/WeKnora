@@ -53,7 +53,8 @@ type RouterParams struct {
 	InitializationHandler *handler.InitializationHandler
 	SystemHandler         *handler.SystemHandler
 	MCPServiceHandler     *handler.MCPServiceHandler
-	WebSearchHandler      *handler.WebSearchHandler
+	WebSearchHandler              *handler.WebSearchHandler
+	WebSearchProviderHandler      *handler.WebSearchProviderHandler
 	FAQHandler            *handler.FAQHandler
 	TagHandler            *handler.TagHandler
 	CustomAgentHandler    *handler.CustomAgentHandler
@@ -137,6 +138,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterSystemRoutes(v1, params.SystemHandler)
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
+		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
 		RegisterSkillRoutes(v1, params.SkillHandler)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
@@ -474,6 +476,25 @@ func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSe
 	{
 		// Get available providers
 		webSearch.GET("/providers", webSearchHandler.GetProviders)
+	}
+}
+
+// RegisterWebSearchProviderRoutes registers CRUD routes for web search provider configurations
+func RegisterWebSearchProviderRoutes(r *gin.RouterGroup, h *handler.WebSearchProviderHandler) {
+	providers := r.Group("/web-search-providers")
+	{
+		// List available provider types (metadata for UI forms)
+		providers.GET("/types", h.ListProviderTypes)
+		// Test with raw credentials (no persistence)
+		providers.POST("/test", h.TestProviderRaw)
+		// CRUD
+		providers.POST("", h.CreateProvider)
+		providers.GET("", h.ListProviders)
+		providers.GET("/:id", h.GetProvider)
+		providers.PUT("/:id", h.UpdateProvider)
+		providers.DELETE("/:id", h.DeleteProvider)
+		// Test existing saved provider
+		providers.POST("/:id/test", h.TestProviderByID)
 	}
 }
 

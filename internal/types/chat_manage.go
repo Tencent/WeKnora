@@ -46,9 +46,12 @@ type PipelineRequest struct {
 	ChatModelSupportsVision bool     `json:"-"`
 
 	// Misc request-scoped config
-	TenantID         uint64 `json:"-"`
-	WebSearchEnabled bool   `json:"-"`
-	Language         string `json:"-"`
+	TenantID              uint64 `json:"-"`
+	WebSearchEnabled      bool   `json:"-"`
+	WebSearchProviderID   string `json:"-"` // Resolved from agent config or tenant default
+	WebFetchEnabled       bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
+	WebFetchTopN          int    `json:"-"` // Max pages to fetch (default 3)
+	Language              string `json:"-"`
 }
 
 // QueryIntent represents the classified intent of a user query.
@@ -183,6 +186,9 @@ func (c *ChatManage) Clone() *ChatManage {
 			ChatModelSupportsVision:  c.ChatModelSupportsVision,
 			TenantID:                 c.TenantID,
 			WebSearchEnabled:         c.WebSearchEnabled,
+			WebSearchProviderID:     c.WebSearchProviderID,
+			WebFetchEnabled:         c.WebFetchEnabled,
+			WebFetchTopN:            c.WebFetchTopN,
 			Language:                 c.Language,
 		},
 		PipelineState: PipelineState{
@@ -205,6 +211,7 @@ const (
 	CHUNK_SEARCH_PARALLEL  EventType = "chunk_search_parallel"
 	ENTITY_SEARCH          EventType = "entity_search"
 	CHUNK_RERANK           EventType = "chunk_rerank"
+	WEB_FETCH              EventType = "web_fetch"
 	CHUNK_MERGE            EventType = "chunk_merge"
 	DATA_ANALYSIS          EventType = "data_analysis"
 	INTO_CHAT_MESSAGE      EventType = "into_chat_message"

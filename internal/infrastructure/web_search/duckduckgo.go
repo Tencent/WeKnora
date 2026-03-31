@@ -22,24 +22,14 @@ type DuckDuckGoProvider struct {
 	client *http.Client
 }
 
-// NewDuckDuckGoProvider creates a new DuckDuckGo provider
-func NewDuckDuckGoProvider() (interfaces.WebSearchProvider, error) {
+// NewDuckDuckGoProvider creates a new DuckDuckGo provider.
+// DuckDuckGo is free and requires no API key or configuration.
+func NewDuckDuckGoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
 	return &DuckDuckGoProvider{
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}, nil
-}
-
-// DuckDuckGoProviderInfo returns the provider info for registration
-func DuckDuckGoProviderInfo() types.WebSearchProviderInfo {
-	return types.WebSearchProviderInfo{
-		ID:             "duckduckgo",
-		Name:           "DuckDuckGo",
-		Free:           true,
-		RequiresAPIKey: false,
-		Description:    "DuckDuckGo Search API",
-	}
 }
 
 // Name returns the provider name
@@ -82,7 +72,6 @@ func (p *DuckDuckGoProvider) searchHTML(
 	baseURL := "https://html.duckduckgo.com/html/"
 	params := url.Values{}
 	params.Set("q", query)
-	// Prefer Chinese results if applicable; otherwise DDG will auto-detect
 	params.Set("kl", "cn-zh")
 
 	reqURL := baseURL + "?" + params.Encode()
@@ -90,13 +79,11 @@ func (p *DuckDuckGoProvider) searchHTML(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	// Use a realistic UA to avoid blocks
 	req.Header.Set(
 		"User-Agent",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 	)
 
-	// print curl of request
 	curlCommand := fmt.Sprintf(
 		"curl -X GET '%s' -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'",
 		req.URL.String(),
@@ -119,7 +106,6 @@ func (p *DuckDuckGoProvider) searchHTML(
 	}
 
 	results := make([]*types.WebSearchResult, 0, maxResults)
-	// Structure based on DDG HTML page
 	doc.Find(".web-result").Each(func(i int, s *goquery.Selection) {
 		if len(results) >= maxResults {
 			return

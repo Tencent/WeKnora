@@ -15,14 +15,15 @@ import (
 
 // PluginSearch implements search functionality for chat pipeline
 type PluginSearch struct {
-	knowledgeBaseService  interfaces.KnowledgeBaseService
-	knowledgeService      interfaces.KnowledgeService
-	chunkService          interfaces.ChunkService
-	config                *config.Config
-	webSearchService      interfaces.WebSearchService
-	tenantService         interfaces.TenantService
-	sessionService        interfaces.SessionService
-	webSearchStateService interfaces.WebSearchStateService
+	knowledgeBaseService      interfaces.KnowledgeBaseService
+	knowledgeService          interfaces.KnowledgeService
+	chunkService              interfaces.ChunkService
+	config                    *config.Config
+	webSearchService          interfaces.WebSearchService
+	tenantService             interfaces.TenantService
+	sessionService            interfaces.SessionService
+	webSearchStateService     interfaces.WebSearchStateService
+	webSearchProviderRepo     interfaces.WebSearchProviderRepository
 }
 
 func NewPluginSearch(eventManager *EventManager,
@@ -34,6 +35,7 @@ func NewPluginSearch(eventManager *EventManager,
 	tenantService interfaces.TenantService,
 	sessionService interfaces.SessionService,
 	webSearchStateService interfaces.WebSearchStateService,
+	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 ) *PluginSearch {
 	res := &PluginSearch{
 		knowledgeBaseService:  knowledgeBaseService,
@@ -44,6 +46,7 @@ func NewPluginSearch(eventManager *EventManager,
 		tenantService:         tenantService,
 		sessionService:        sessionService,
 		webSearchStateService: webSearchStateService,
+		webSearchProviderRepo: webSearchProviderRepo,
 	}
 	eventManager.Register(res)
 	return res
@@ -617,18 +620,21 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		return nil
 	}
 	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil || tenant.WebSearchConfig == nil || tenant.WebSearchConfig.Provider == "" {
+	if tenant == nil || tenant.WebSearchConfig == nil {
 		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
 		})
 		return nil
 	}
 
+	// Use provider ID already resolved by session layer (agent config > tenant default)
+	providerID := chatManage.WebSearchProviderID
+
 	pipelineInfo(ctx, "Search", "web_request", map[string]interface{}{
-		"tenant_id": chatManage.TenantID,
-		"provider":  tenant.WebSearchConfig.Provider,
+		"tenant_id":   chatManage.TenantID,
+		"provider_id": providerID,
 	})
-	webResults, err := p.webSearchService.Search(ctx, tenant.WebSearchConfig, chatManage.RewriteQuery)
+	webResults, err := p.webSearchService.Search(ctx, providerID, tenant.WebSearchConfig, chatManage.RewriteQuery)
 	if err != nil {
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,

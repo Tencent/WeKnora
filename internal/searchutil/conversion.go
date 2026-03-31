@@ -64,7 +64,7 @@ func ConvertWebSearchResults(
 		result := &types.SearchResult{
 			ID:             chunkID,
 			Content:        content,
-			KnowledgeID:    "",
+			KnowledgeID:    chunkID, // Use URL as KnowledgeID so each web result stays independent during merge
 			ChunkIndex:     0,
 			KnowledgeTitle: webResult.Title,
 			StartAt:        0,

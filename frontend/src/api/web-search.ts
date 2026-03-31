@@ -1,6 +1,7 @@
 import { get, put } from '@/utils/request'
 
-// WebSearchProviderConfig represents information about a web search provider
+// WebSearchProviderConfig represents information about a web search provider type
+// Deprecated: Use WebSearchProviderTypeInfo from web-search-provider.ts instead
 export interface WebSearchProviderConfig {
   id: string
   name: string
@@ -12,7 +13,10 @@ export interface WebSearchProviderConfig {
 
 // WebSearchConfig represents the web search configuration for a tenant
 export interface WebSearchConfig {
-  provider: string
+  // New: references a WebSearchProviderEntity by ID
+  default_provider_id?: string
+  // Deprecated: kept for backward compatibility
+  provider?: string
   api_key?: string
   max_results: number
   include_date: boolean
@@ -24,7 +28,7 @@ export interface WebSearchConfig {
   document_fragments?: number
 }
 
-// Get web search providers
+// Get web search provider types (available engines)
 export function getWebSearchProviders() {
   return get('/api/v1/web-search/providers')
 }
@@ -38,4 +42,3 @@ export function getTenantWebSearchConfig() {
 export function updateTenantWebSearchConfig(config: WebSearchConfig) {
   return put('/api/v1/tenants/kv/web-search-config', config)
 }
-

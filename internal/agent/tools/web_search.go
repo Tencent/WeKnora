@@ -82,6 +82,7 @@ type WebSearchTool struct {
 	webSearchStateService interfaces.WebSearchStateService
 	sessionID             string
 	maxResults            int
+	providerID            string // WebSearchProviderEntity ID (resolved from agent config or tenant default)
 }
 
 // NewWebSearchTool creates a new web search tool
@@ -92,6 +93,7 @@ func NewWebSearchTool(
 	webSearchStateService interfaces.WebSearchStateService,
 	sessionID string,
 	maxResults int,
+	providerID string,
 ) *WebSearchTool {
 	tool := webSearchTool
 	tool.description = fmt.Sprintf(tool.description, maxResults, maxResults)
@@ -104,6 +106,7 @@ func NewWebSearchTool(
 		webSearchStateService: webSearchStateService,
 		sessionID:             sessionID,
 		maxResults:            maxResults,
+		providerID:            providerID,
 	}
 }
 
@@ -150,13 +153,16 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	// Get tenant info from context (same approach as search.go)
 	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil || tenant.WebSearchConfig == nil || tenant.WebSearchConfig.Provider == "" {
+	if tenant == nil || tenant.WebSearchConfig == nil {
 		logger.Errorf(ctx, "[Tool][WebSearch] Web search not configured for tenant %d", tenantID)
 		return &types.ToolResult{
 			Success: false,
 			Error:   "web search is not configured for this tenant",
 		}, fmt.Errorf("web search is not configured for tenant %d", tenantID)
 	}
+
+	// Resolve provider ID: tool-level (set from agent config, which already resolved default)
+	resolvedProviderID := t.providerID
 
 	// Create a copy of web search config with maxResults from agent config
 	searchConfig := *tenant.WebSearchConfig
@@ -165,11 +171,11 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// Perform web search
 	logger.Infof(
 		ctx,
-		"[Tool][WebSearch] Performing web search with provider: %s, maxResults: %d",
-		searchConfig.Provider,
+		"[Tool][WebSearch] Performing web search with providerID: %s, maxResults: %d",
+		resolvedProviderID,
 		searchConfig.MaxResults,
 	)
-	webResults, err := t.webSearchService.Search(ctx, &searchConfig, query)
+	webResults, err := t.webSearchService.Search(ctx, resolvedProviderID, &searchConfig, query)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][WebSearch] Web search failed: %v", err)
 		return &types.ToolResult{

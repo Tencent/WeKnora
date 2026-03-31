@@ -209,6 +209,7 @@ func (s *sessionService) buildAgentConfig(
 		Temperature:                 customAgent.Config.Temperature,
 		WebSearchEnabled:            customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
 		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
+		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
 		HistoryTurns:                customAgent.Config.HistoryTurns,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
@@ -244,6 +245,13 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.WebSearchMaxResults = 5
 		if tenantInfo.WebSearchConfig != nil && tenantInfo.WebSearchConfig.MaxResults > 0 {
 			agentConfig.WebSearchMaxResults = tenantInfo.WebSearchConfig.MaxResults
+		}
+	}
+
+	// Resolve web search provider ID: agent-level > tenant default (is_default=true)
+	if agentConfig.WebSearchProviderID == "" {
+		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil && defaultProvider != nil {
+			agentConfig.WebSearchProviderID = defaultProvider.ID
 		}
 	}
 

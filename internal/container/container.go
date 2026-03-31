@@ -47,7 +47,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 	memoryService "github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
-	"github.com/Tencent/WeKnora/internal/application/service/web_search"
+	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -180,9 +180,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Web search service (needed by AgentService)
 	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
-	must(container.Provide(web_search.NewRegistry))
+	must(container.Provide(infra_web_search.NewRegistry))
 	must(container.Invoke(registerWebSearchProviders))
+	must(container.Provide(repository.NewWebSearchProviderRepository))
 	must(container.Provide(service.NewWebSearchService))
+	must(container.Provide(service.NewWebSearchProviderService))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
@@ -219,6 +221,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
+	must(container.Invoke(chatpipeline.NewPluginWebFetch))
 	must(container.Invoke(chatpipeline.NewPluginMerge))
 	must(container.Invoke(chatpipeline.NewPluginDataAnalysis))
 	must(container.Invoke(chatpipeline.NewPluginIntoChatMessage))
@@ -250,6 +253,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewSystemHandler))
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewWebSearchHandler))
+	must(container.Provide(handler.NewWebSearchProviderHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
@@ -951,27 +955,14 @@ func NewDuckDB() (*sql.DB, error) {
 	return sqlDB, nil
 }
 
-// registerWebSearchProviders registers all web search providers to the registry
-func registerWebSearchProviders(registry *web_search.Registry) {
-	// Register DuckDuckGo provider
-	registry.Register(web_search.DuckDuckGoProviderInfo(), func() (interfaces.WebSearchProvider, error) {
-		return web_search.NewDuckDuckGoProvider()
-	})
-
-	// Register Google provider
-	registry.Register(web_search.GoogleProviderInfo(), func() (interfaces.WebSearchProvider, error) {
-		return web_search.NewGoogleProvider()
-	})
-
-	// Register Bing provider
-	registry.Register(web_search.BingProviderInfo(), func() (interfaces.WebSearchProvider, error) {
-		return web_search.NewBingProvider()
-	})
-
-	// Register Tavily provider
-	registry.Register(web_search.TavilyProviderInfo(), func() (interfaces.WebSearchProvider, error) {
-		return web_search.NewTavilyProvider()
-	})
+// registerWebSearchProviders registers all web search provider types to the registry.
+// Each provider type is registered with its factory function that accepts parameters.
+// Provider instances are created on-demand when tenants configure them.
+func registerWebSearchProviders(registry *infra_web_search.Registry) {
+	registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
+	registry.Register("google", infra_web_search.NewGoogleProvider)
+	registry.Register("bing", infra_web_search.NewBingProvider)
+	registry.Register("tavily", infra_web_search.NewTavilyProvider)
 }
 
 // registerIMAdapterFactories registers adapter factories for each IM platform

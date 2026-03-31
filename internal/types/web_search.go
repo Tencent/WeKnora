@@ -8,8 +8,11 @@ import (
 
 // WebSearchConfig represents the web search configuration for a tenant
 type WebSearchConfig struct {
-	Provider          string   `json:"provider"`           // 搜索引擎提供商ID
-	APIKey            string   `json:"api_key"`            // API密钥（如果需要）
+	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
+	Provider string `json:"provider,omitempty"`
+	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
+	APIKey string `json:"api_key,omitempty"`
+
 	MaxResults        int      `json:"max_results"`        // 最大搜索结果数
 	IncludeDate       bool     `json:"include_date"`       // 是否包含日期
 	CompressionMethod string   `json:"compression_method"` // 压缩方法：none, summary, extract, rag

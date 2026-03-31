@@ -7,22 +7,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 const (
-	// defaultBingSearchURL is the default Bing search API URL.
-	// Reference: https://learn.microsoft.com/en-us/previous-versions/bing/search-apis/bing-web-search/reference/endpoints
+	// defaultBingSearchURL is the hardcoded Bing search API URL.
+	// Not configurable by tenants — prevents SSRF.
 	defaultBingSearchURL = "https://api.bing.microsoft.com/v7.0/search"
 )
 
 var (
-	// defaultUserAgentHeader for PC. https://learn.microsoft.com/en-us/previous-versions/bing/search-apis/bing-web-search/reference/headers
 	defaultUserAgentHeader = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 	defaultBingTimeout     = 10 * time.Second
 )
@@ -50,31 +49,19 @@ type BingProvider struct {
 	apiKey  string
 }
 
-// NewBingProvider creates a new Bing provider
-func NewBingProvider() (interfaces.WebSearchProvider, error) {
-	apiKey := os.Getenv("BING_SEARCH_API_KEY")
-	if len(apiKey) == 0 {
-		return nil, fmt.Errorf("BING_SEARCH_API_KEY is not set")
+// NewBingProvider creates a new Bing provider from parameters (no environment variables).
+func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+	if params.APIKey == "" {
+		return nil, fmt.Errorf("API key is required for Bing provider")
 	}
 	client := &http.Client{
 		Timeout: defaultBingTimeout,
 	}
 	return &BingProvider{
 		client:  client,
-		baseURL: defaultBingSearchURL,
-		apiKey:  apiKey,
+		baseURL: defaultBingSearchURL, // Hardcoded — not tenant-configurable
+		apiKey:  params.APIKey,
 	}, nil
-}
-
-// BingProviderInfo returns the provider info for registration
-func BingProviderInfo() types.WebSearchProviderInfo {
-	return types.WebSearchProviderInfo{
-		ID:             "bing",
-		Name:           "Bing",
-		Free:           false,
-		RequiresAPIKey: true,
-		Description:    "Bing Search API",
-	}
 }
 
 // Name returns the provider name
@@ -92,11 +79,18 @@ func (p *BingProvider) Search(
 	if len(query) == 0 {
 		return nil, fmt.Errorf("query is empty")
 	}
+	logger.Infof(ctx, "[WebSearch][Bing] query=%q maxResults=%d url=%s", query, maxResults, p.baseURL)
 	req, err := p.buildParams(ctx, query, maxResults, includeDate)
 	if err != nil {
 		return nil, err
 	}
-	return p.doSearch(ctx, req)
+	results, err := p.doSearch(ctx, req)
+	if err != nil {
+		logger.Warnf(ctx, "[WebSearch][Bing] failed: %v", err)
+		return nil, err
+	}
+	logger.Infof(ctx, "[WebSearch][Bing] returned %d results", len(results))
+	return results, nil
 }
 
 func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*types.WebSearchResult, error) {
@@ -110,6 +104,12 @@ func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*type
 	if err != nil {
 		return nil, err
 	}
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Warnf(ctx, "[WebSearch][Bing] API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("bing API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
 	var respData bingSearchResponse
 	if err := json.Unmarshal(body, &respData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
@@ -128,7 +128,6 @@ func (p *BingProvider) doSearch(ctx context.Context, req *http.Request) ([]*type
 }
 
 // bingSearchResponse defines the response structure for Bing search API.
-// ref: https://learn.microsoft.com/en-us/previous-versions/bing/search-apis/bing-web-search/quickstarts/rest/go
 type bingSearchResponse struct {
 	Type         string `json:"_type"`
 	QueryContext struct {
@@ -183,8 +182,6 @@ type bingSearchResponse struct {
 	} `json:"rankingResponse"`
 }
 
-// buildParams builds the request parameters for Bing search API.
-// ref: https://learn.microsoft.com/en-us/previous-versions/bing/search-apis/bing-web-search/quickstarts/rest/go
 func (p *BingProvider) buildParams(ctx context.Context, query string, maxResults int, includeDate bool) (*http.Request, error) {
 	params := url.Values{}
 	params.Set("q", query)

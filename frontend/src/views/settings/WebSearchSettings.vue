@@ -6,380 +6,325 @@
     </div>
 
     <div class="settings-group">
-      <!-- 搜索引擎提供商 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('webSearchSettings.providerLabel') }}</label>
-          <p class="desc">{{ t('webSearchSettings.providerDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-select
-            v-model="localProvider"
-            :loading="loadingProviders"
-            filterable
-            :placeholder="t('webSearchSettings.providerPlaceholder')"
-            @change="handleProviderChange"
-            @focus="loadProviders"
-            style="width: 280px;"
-          >
-            <t-option
-              v-for="provider in providers"
-              :key="provider.id"
-              :value="provider.id"
-              :label="provider.name"
-            >
-              <div class="provider-option-wrapper">
-                <div class="provider-option">
-                  <span class="provider-name">{{ provider.name }}</span>
-                </div>
-              </div>
-            </t-option>
-          </t-select>
-        </div>
+      <div class="section-subheader">
+        <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
+        <t-button theme="primary" size="small" @click="openAddDialog">
+          <template #icon><add-icon /></template>
+          {{ t('webSearchSettings.addProvider') }}
+        </t-button>
       </div>
 
-      <!-- API 密钥 -->
-      <div v-if="selectedProvider && selectedProvider.requires_api_key" class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('webSearchSettings.apiKeyLabel') }}</label>
-          <p class="desc">{{ t('webSearchSettings.apiKeyDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-input
-            v-model="localAPIKey"
-            type="password"
-            :placeholder="t('webSearchSettings.apiKeyPlaceholder')"
-            @change="handleAPIKeyChange"
-            style="width: 400px;"
-            :show-password="true"
-          />
-        </div>
-      </div>
-
-      <!-- 最大结果数 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('webSearchSettings.maxResultsLabel') }}</label>
-          <p class="desc">{{ t('webSearchSettings.maxResultsDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <div class="slider-with-value">
-            <t-slider 
-              v-model="localMaxResults" 
-              :min="1" 
-              :max="50" 
-              :step="1"
-              :marks="{ 1: '1', 10: '10', 20: '20', 30: '30', 40: '40', 50: '50' }"
-              @change="handleMaxResultsChange"
-              style="width: 200px;"
-            />
-            <span class="value-display">{{ localMaxResults }}</span>
+      <!-- Provider List -->
+      <div v-if="providerEntities.length > 0" class="provider-list">
+        <div v-for="entity in providerEntities" :key="entity.id" class="provider-item">
+          <div class="item-info">
+            <div class="item-header">
+              <span class="item-name">{{ entity.name }}</span>
+              <t-tag v-if="entity.is_default" theme="primary" size="small" variant="light">
+                {{ t('webSearchSettings.default') }}
+              </t-tag>
+              <t-tag size="small" variant="outline">{{ entity.provider }}</t-tag>
+            </div>
+            <div class="item-desc">{{ entity.description || t('webSearchSettings.noDescription') }}</div>
+          </div>
+          <div class="item-actions">
+            <t-button theme="default" variant="text" size="small" @click="testExistingConnection(entity)" :loading="testingId === entity.id">
+              {{ t('webSearchSettings.testConnection') }}
+            </t-button>
+            <t-button theme="primary" variant="text" size="small" @click="editProvider(entity)">
+              {{ t('common.edit') }}
+            </t-button>
+            <t-popconfirm :content="t('webSearchSettings.deleteConfirm')" @confirm="deleteProvider(entity.id!)">
+              <t-button theme="danger" variant="text" size="small">
+                {{ t('common.delete') }}
+              </t-button>
+            </t-popconfirm>
           </div>
         </div>
       </div>
 
-      <!-- 包含日期 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('webSearchSettings.includeDateLabel') }}</label>
-          <p class="desc">{{ t('webSearchSettings.includeDateDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-switch
-            v-model="localIncludeDate"
-            @change="handleIncludeDateChange"
-          />
-        </div>
-      </div>
-
-      <!-- 压缩方法 -->
-      <div class="setting-row">
-        <div class="setting-info">
-          <label>{{ t('webSearchSettings.compressionLabel') }}</label>
-          <p class="desc">{{ t('webSearchSettings.compressionDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-select
-            v-model="localCompressionMethod"
-            @change="handleCompressionMethodChange"
-            style="width: 280px;"
-            :placeholder="t('webSearchSettings.compressionLabel')"
-          >
-            <t-option value="none" :label="t('webSearchSettings.compressionNone')">
-              {{ t('webSearchSettings.compressionNone') }}
-            </t-option>
-            <t-option value="llm_summary" :label="t('webSearchSettings.compressionSummary')">
-              {{ t('webSearchSettings.compressionSummary') }}
-            </t-option>
-          </t-select>
-        </div>
-      </div>
-
-      <!-- 黑名单 -->
-      <div class="setting-row vertical">
-        <div class="setting-info">
-          <label>{{ t('webSearchSettings.blacklistLabel') }}</label>
-          <p class="desc">{{ t('webSearchSettings.blacklistDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <t-textarea
-            v-model="localBlacklistText"
-            :placeholder="t('webSearchSettings.blacklistPlaceholder')"
-            :autosize="{ minRows: 4, maxRows: 8 }"
-            @change="handleBlacklistChange"
-            style="width: 500px;"
-          />
-        </div>
+      <!-- Empty State -->
+      <div v-else class="empty-providers">
+        <p>{{ t('webSearchSettings.noProvidersDesc') }}</p>
       </div>
     </div>
+
+    <!-- Add/Edit Dialog -->
+    <t-dialog
+      v-model:visible="showAddProviderDialog"
+      :header="editingProvider ? t('webSearchSettings.editProvider') : t('webSearchSettings.addProvider')"
+      width="520px"
+      :footer="false"
+      destroy-on-close
+    >
+      <div class="dialog-form-container">
+        <t-form :data="providerForm" label-align="top" @submit="saveProvider" class="provider-form">
+          <t-form-item :label="t('webSearchSettings.providerTypeLabel')" name="provider">
+            <t-select v-model="providerForm.provider" :disabled="!!editingProvider" @change="onProviderTypeChange">
+              <t-option v-for="pt in providerTypes" :key="pt.id" :value="pt.id" :label="pt.name">
+                <div class="provider-option">
+                  <span>{{ pt.name }}</span>
+                  <t-tag v-if="pt.free" theme="success" size="small" variant="light">{{ t('webSearchSettings.free') }}</t-tag>
+                </div>
+              </t-option>
+            </t-select>
+          </t-form-item>
+
+          <t-form-item :label="t('webSearchSettings.providerNameLabel')" name="name">
+            <t-input v-model="providerForm.name" :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
+          </t-form-item>
+
+          <t-form-item :label="t('webSearchSettings.providerDescLabel')" name="description">
+            <t-input v-model="providerForm.description" :placeholder="t('webSearchSettings.providerDescPlaceholder')" />
+          </t-form-item>
+
+          <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id">
+            <div class="form-divider"></div>
+            
+            <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
+              <a :href="selectedProviderType.docs_url" target="_blank" rel="noopener noreferrer">
+                {{ t('webSearchSettings.viewDocs') }} ↗
+              </a>
+            </div>
+            
+            <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">
+              <t-input
+                v-model="providerForm.parameters.api_key"
+                type="password"
+                :placeholder="editingProvider ? t('webSearchSettings.apiKeyUnchanged') : t('webSearchSettings.apiKeyPlaceholder')"
+              />
+            </t-form-item>
+            <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')" name="parameters.engine_id">
+              <t-input v-model="providerForm.parameters.engine_id" :placeholder="t('webSearchSettings.engineIdLabel')" />
+            </t-form-item>
+          </template>
+
+          <div class="form-divider"></div>
+
+          <t-form-item :label="t('webSearchSettings.setAsDefault')" name="is_default">
+            <template #help>
+              <div class="switch-help">
+                {{ t('webSearchSettings.setAsDefaultDesc') }}
+              </div>
+            </template>
+            <t-switch v-model="providerForm.is_default" />
+          </t-form-item>
+
+          <div class="dialog-footer">
+            <div class="footer-left">
+              <t-button
+                v-if="selectedProviderType && !selectedProviderType.free"
+                theme="default"
+                variant="outline"
+                :loading="testing"
+                @click="testConnection"
+              >
+                {{ testing ? t('webSearchSettings.testing') : t('webSearchSettings.testConnection') }}
+              </t-button>
+            </div>
+            <div class="footer-right">
+              <t-button theme="default" variant="base" @click="showAddProviderDialog = false">{{ t('common.cancel') }}</t-button>
+              <t-button theme="primary" type="submit" :loading="saving">{{ t('common.save') }}</t-button>
+            </div>
+          </div>
+        </t-form>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
-import { getWebSearchProviders, getTenantWebSearchConfig, updateTenantWebSearchConfig, type WebSearchProviderConfig, type WebSearchConfig } from '@/api/web-search'
+import { AddIcon } from 'tdesign-icons-vue-next'
+import {
+  listWebSearchProviders,
+  listWebSearchProviderTypes,
+  createWebSearchProvider,
+  updateWebSearchProvider,
+  deleteWebSearchProvider as deleteWebSearchProviderAPI,
+  testWebSearchProvider,
+  type WebSearchProviderEntity,
+  type WebSearchProviderTypeInfo,
+} from '@/api/web-search-provider'
 
 const { t } = useI18n()
 
-// 本地状态
-const loadingProviders = ref(false)
-const providers = ref<WebSearchProviderConfig[]>([])
-const localProvider = ref<string>('')
-const localAPIKey = ref<string>('')
-const localMaxResults = ref<number>(5)
-const localIncludeDate = ref<boolean>(true)
-const localCompressionMethod = ref<string>('none')
-const localBlacklistText = ref<string>('')
-const isInitializing = ref(true) // 标记是否正在初始化，初始化期间不触发自动保存
-const initialConfig = ref<WebSearchConfig | null>(null) // 保存初始配置，用于比较是否有变化
+// ===== State =====
+const providerEntities = ref<WebSearchProviderEntity[]>([])
+const providerTypes = ref<WebSearchProviderTypeInfo[]>([])
+const showAddProviderDialog = ref(false)
+const editingProvider = ref<WebSearchProviderEntity | null>(null)
+const testing = ref(false)
+const testingId = ref<string | null>(null)
+const saving = ref(false)
 
-// 计算属性：当前选中的提供商
-const selectedProvider = computed(() => {
-  return providers.value.find(p => p.id === localProvider.value)
+const providerForm = ref<{
+  name: string
+  provider: string
+  description: string
+  parameters: { api_key?: string; engine_id?: string }
+  is_default: boolean
+}>({
+  name: '',
+  provider: 'duckduckgo',
+  description: '',
+  parameters: {},
+  is_default: false,
 })
 
-// 加载提供商列表
-const loadProviders = async () => {
-  if (providers.value.length > 0) {
-    return // 已加载过
-  }
-  
-  loadingProviders.value = true
+// ===== Computed =====
+const selectedProviderType = computed(() => {
+  return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
+})
+
+// ===== Methods =====
+const onProviderTypeChange = () => {
+  providerForm.value.parameters = {}
+}
+
+const loadProviderEntities = async () => {
   try {
-    const response = await getWebSearchProviders()
-    // request拦截器已经处理了响应，直接使用data字段
+    const response = await listWebSearchProviders()
     if (response.data && Array.isArray(response.data)) {
-      providers.value = response.data
+      providerEntities.value = response.data
     }
-  } catch (error: any) {
-    console.error('Failed to load web search providers:', error)
-    const errorMessage = error?.message || t('webSearchSettings.errors.unknown')
-    MessagePlugin.error(t('webSearchSettings.toasts.loadProvidersFailed', { message: errorMessage }))
-  } finally {
-    loadingProviders.value = false
+  } catch (error) {
+    console.error('Failed to load provider entities:', error)
   }
 }
 
-// 加载租户配置
-const loadTenantConfig = async () => {
+const loadProviderTypes = async () => {
   try {
-    const response = await getTenantWebSearchConfig()
-    // request拦截器已经处理了响应，直接使用data字段
-    if (response.data) {
-      const config = response.data
-      // 在设置初始值时，禁用自动保存
-      isInitializing.value = true
-      
-      // 保存初始配置的副本（用于后续比较）
-      const blacklist = (config.blacklist || []).join('\n')
-      initialConfig.value = {
-        provider: config.provider || '',
-        api_key: config.api_key === '***' ? '***' : config.api_key || '',
-        max_results: config.max_results || 5,
-        include_date: config.include_date !== undefined ? config.include_date : true,
-        compression_method: config.compression_method || 'none',
-        blacklist: config.blacklist || []
-      }
-      
-      // 设置本地状态值
-      localProvider.value = config.provider || ''
-      // API key 在响应中被隐藏，如果是 "***"，说明已配置但未返回实际值
-      localAPIKey.value = config.api_key === '***' ? '***' : config.api_key || ''
-      localMaxResults.value = config.max_results || 5
-      localIncludeDate.value = config.include_date !== undefined ? config.include_date : true
-      localCompressionMethod.value = config.compression_method || 'none'
-      localBlacklistText.value = blacklist
-      
-      // 等待所有响应式更新完成后再启用自动保存
-      await nextTick()
-      await nextTick()
-      // 使用 setTimeout 确保所有事件都已处理完毕
-      setTimeout(() => {
-        isInitializing.value = false
-      }, 100)
-    } else {
-      // 如果没有配置数据，保存默认配置
-      initialConfig.value = {
-        provider: '',
-        api_key: '',
-        max_results: 5,
-        include_date: true,
-        compression_method: 'none',
-        blacklist: []
-      }
-      await nextTick()
-      setTimeout(() => {
-        isInitializing.value = false
-      }, 100)
-    }
-  } catch (error: any) {
-    console.error('Failed to load tenant web search config:', error)
-    // 如果配置不存在，使用默认值（不显示错误）
-    initialConfig.value = {
-      provider: '',
+    providerTypes.value = await listWebSearchProviderTypes()
+  } catch (error) {
+    console.error('Failed to load provider types:', error)
+  }
+}
+
+const openAddDialog = () => {
+  editingProvider.value = null
+  providerForm.value = { 
+    name: '', 
+    provider: providerTypes.value[0]?.id || 'duckduckgo', 
+    description: '', 
+    parameters: {}, 
+    is_default: providerEntities.value.length === 0 
+  }
+  showAddProviderDialog.value = true
+}
+
+const editProvider = (entity: WebSearchProviderEntity) => {
+  editingProvider.value = entity
+  providerForm.value = {
+    name: entity.name,
+    provider: entity.provider,
+    description: entity.description || '',
+    parameters: {
       api_key: '',
-      max_results: 5,
-      include_date: true,
-      compression_method: 'none',
-      blacklist: []
-    }
-    await nextTick()
-    setTimeout(() => {
-      isInitializing.value = false
-    }, 100)
+      engine_id: entity.parameters?.engine_id || '',
+    },
+    is_default: entity.is_default || false,
   }
+  showAddProviderDialog.value = true
 }
 
-// 检查配置是否有变化
-const hasConfigChanged = (): boolean => {
-  if (!initialConfig.value) {
-    return true // 如果没有初始配置，认为有变化
-  }
-  
-  const blacklist = localBlacklistText.value
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-  
-  const currentConfig: WebSearchConfig = {
-    provider: localProvider.value,
-    api_key: localAPIKey.value,
-    max_results: localMaxResults.value,
-    include_date: localIncludeDate.value,
-    compression_method: localCompressionMethod.value,
-    blacklist: blacklist
-  }
-  
-  // 比较配置是否有变化（忽略 API key 的 '***' 占位符）
-  const initial = initialConfig.value
-  if (currentConfig.provider !== initial.provider) return true
-  if (currentConfig.api_key !== initial.api_key && 
-      !(currentConfig.api_key === '***' && initial.api_key === '***')) return true
-  if (currentConfig.max_results !== initial.max_results) return true
-  if (currentConfig.include_date !== initial.include_date) return true
-  if (currentConfig.compression_method !== initial.compression_method) return true
-  
-  // 比较黑名单数组
-  const currentBlacklist = blacklist.sort().join(',')
-  const initialBlacklist = (initial.blacklist || []).sort().join(',')
-  if (currentBlacklist !== initialBlacklist) return true
-  
-  return false
-}
-
-// 保存配置
-const saveConfig = async () => {
-  // 如果配置没有变化，不保存
-  if (!hasConfigChanged()) {
+const saveProvider = async ({ validateResult, firstError }: any) => {
+  if (validateResult !== true && validateResult !== undefined) {
+    MessagePlugin.warning(firstError || 'Please check the form fields')
     return
   }
   
+  saving.value = true
   try {
-    const blacklist = localBlacklistText.value
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.length > 0)
-    
-    const config: WebSearchConfig = {
-      provider: localProvider.value,
-      api_key: localAPIKey.value,
-      max_results: localMaxResults.value,
-      include_date: localIncludeDate.value,
-      compression_method: localCompressionMethod.value,
-      blacklist: blacklist
+    const data: Partial<WebSearchProviderEntity> = {
+      name: providerForm.value.name.trim() || selectedProviderType.value?.name || providerForm.value.provider,
+      provider: providerForm.value.provider as any,
+      description: providerForm.value.description,
+      parameters: { ...providerForm.value.parameters },
+      is_default: providerForm.value.is_default,
     }
     
-    await updateTenantWebSearchConfig(config)
-    
-    // 更新初始配置，避免重复保存
-    initialConfig.value = {
-      provider: config.provider,
-      api_key: config.api_key,
-      max_results: config.max_results,
-      include_date: config.include_date,
-      compression_method: config.compression_method,
-      blacklist: [...config.blacklist]
+    if (editingProvider.value && !data.parameters!.api_key) {
+      delete data.parameters!.api_key
     }
-    
-    MessagePlugin.success(t('webSearchSettings.toasts.saveSuccess'))
+
+    if (editingProvider.value) {
+      await updateWebSearchProvider(editingProvider.value.id!, data)
+      MessagePlugin.success(t('webSearchSettings.toasts.providerUpdated'))
+    } else {
+      await createWebSearchProvider(data)
+      MessagePlugin.success(t('webSearchSettings.toasts.providerCreated'))
+    }
+    showAddProviderDialog.value = false
+    await loadProviderEntities()
   } catch (error: any) {
-    console.error('Failed to save web search config:', error)
-    const errorMessage = error?.message || t('webSearchSettings.errors.unknown')
-    MessagePlugin.error(t('webSearchSettings.toasts.saveFailed', { message: errorMessage }))
-    throw error
+    MessagePlugin.error(error?.message || 'Failed to save provider')
+  } finally {
+    saving.value = false
   }
 }
 
-// 防抖保存
-let saveTimer: number | null = null
-const debouncedSave = () => {
-  // 初始化期间不触发自动保存
-  if (isInitializing.value) {
-    return
+const deleteProvider = async (id: string) => {
+  try {
+    await deleteWebSearchProviderAPI(id)
+    MessagePlugin.success(t('webSearchSettings.toasts.providerDeleted'))
+    await loadProviderEntities()
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || 'Failed to delete provider')
   }
-  if (saveTimer) {
-    clearTimeout(saveTimer)
+}
+
+const testConnection = async () => {
+  testing.value = true
+  try {
+    const data = {
+      provider: providerForm.value.provider,
+      parameters: { ...providerForm.value.parameters },
+    }
+    
+    if (editingProvider.value && !data.parameters.api_key) {
+      const res = await testWebSearchProvider(editingProvider.value.id!)
+      if (res.success) {
+        MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))
+      } else {
+        MessagePlugin.error(res.error || t('webSearchSettings.toasts.testFailed'))
+      }
+    } else {
+      const res = await testWebSearchProvider(undefined, data)
+      if (res.success) {
+        MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))
+      } else {
+        MessagePlugin.error(res.error || t('webSearchSettings.toasts.testFailed'))
+      }
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('webSearchSettings.toasts.testFailed'))
+  } finally {
+    testing.value = false
   }
-  saveTimer = window.setTimeout(() => {
-    saveConfig().catch(() => {
-      // 错误已在 saveConfig 中处理
-    })
-  }, 500)
 }
 
-// 处理变化
-const handleProviderChange = () => {
-  debouncedSave()
+const testExistingConnection = async (entity: WebSearchProviderEntity) => {
+  testingId.value = entity.id!
+  try {
+    const res = await testWebSearchProvider(entity.id!)
+    if (res.success) {
+      MessagePlugin.success(t('webSearchSettings.toasts.testSuccess'))
+    } else {
+      MessagePlugin.error(res.error || t('webSearchSettings.toasts.testFailed'))
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('webSearchSettings.toasts.testFailed'))
+  } finally {
+    testingId.value = null
+  }
 }
 
-const handleAPIKeyChange = () => {
-  debouncedSave()
-}
-
-const handleMaxResultsChange = () => {
-  debouncedSave()
-}
-
-const handleIncludeDateChange = () => {
-  debouncedSave()
-}
-
-const handleCompressionMethodChange = () => {
-  debouncedSave()
-}
-
-const handleBlacklistChange = () => {
-  debouncedSave()
-}
-
-// 初始化
+// ===== Init =====
 onMounted(async () => {
-  isInitializing.value = true
-  await loadProviders()
-  await loadTenantConfig()
-  // loadTenantConfig 内部已经处理了 isInitializing，这里不需要再设置
+  await Promise.all([loadProviderTypes(), loadProviderEntities()])
 })
 </script>
 
@@ -409,139 +354,130 @@ onMounted(async () => {
 .settings-group {
   display: flex;
   flex-direction: column;
-  gap: 0;
 }
 
-.setting-row {
+.section-subheader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
+  margin-bottom: 16px;
 
-  &:last-child {
-    border-bottom: none;
-  }
-
-  &.vertical {
-    flex-direction: column;
-    gap: 12px;
-
-    .setting-control {
-      width: 100%;
-      max-width: 100%;
-    }
-  }
-}
-
-.setting-info {
-  flex: 1;
-  max-width: 65%;
-  padding-right: 24px;
-
-  label {
-    font-size: 15px;
-    font-weight: 500;
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
     color: var(--td-text-color-primary);
-    display: block;
-    margin-bottom: 4px;
-  }
-
-  .desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
     margin: 0;
-    line-height: 1.5;
   }
 }
 
-.setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
+.provider-list {
   display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.slider-with-value {
+.provider-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+  }
 }
 
-.value-display {
-  min-width: 40px;
-  text-align: right;
+.item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.item-name {
   font-size: 14px;
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
-.provider-option-wrapper {
+.item-desc {
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
+.item-actions {
   display: flex;
-  flex-direction: column;
   gap: 4px;
-  padding: 2px 0;
+  align-items: center;
+}
+
+.empty-providers {
+  padding: 32px;
+  text-align: center;
+  color: var(--td-text-color-placeholder);
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.dialog-form-container {
+  margin-top: 12px;
 }
 
 .provider-option {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.provider-name {
-  font-weight: 500;
-  font-size: 14px;
-  color: var(--td-text-color-primary);
-  flex-shrink: 0;
-}
-
-.provider-tags {
-  display: flex;
   align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
+  width: 100%;
 }
 
-.provider-desc {
+.form-divider {
+  height: 1px;
+  background: var(--td-component-border);
+  margin: 20px 0;
+}
+
+.credentials-hint {
+  margin-bottom: 12px;
+  font-size: 13px;
+  
+  a {
+    color: var(--td-brand-color);
+    text-decoration: none;
+    
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.switch-help {
   font-size: 12px;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-text-color-secondary);
+  margin-top: 4px;
   line-height: 1.4;
-  margin-top: 2px;
 }
 
-/* 修复下拉项描述与条目重叠：让选项支持多行自适应高度 */
-:deep(.t-select-option) {
-  height: auto;
-  align-items: flex-start;
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-
-:deep(.t-select-option__content) {
-  white-space: normal;
-}
-
-</style>
-<style lang="less">
-.t-select__dropdown .t-select-option {
-  height: auto;
-  align-items: flex-start;
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.t-select__dropdown .t-select-option__content {
-  white-space: normal;
-}
-.t-select__dropdown .provider-option-wrapper {
+.dialog-footer {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 2px 0;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--td-component-border);
+
+  .footer-right {
+    display: flex;
+    gap: 12px;
+  }
 }
 </style>
-
