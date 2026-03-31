@@ -140,16 +140,22 @@ func (c *mcpGoClient) onConnectionLost(err error) {
 	logger.Warnf(context.Background(), "MCP server connection has been lost, URL:%s, error:%v", *c.service.URL, err)
 }
 
-// checkErrorAndDisconnectIfNeeded Check for errors and call Disconnect when reconnection is required
+// checkErrorAndDisconnectIfNeeded checks for transport errors that indicate the
+// session is no longer valid and proactively disconnects the client so that
+// subsequent GetOrCreateClient calls will establish a fresh connection.
+// Both SSE and HTTP Streamable transports use server-assigned sessions
+// (via Mcp-Session-Id header) that can expire or be invalidated.
 func (c *mcpGoClient) checkErrorAndDisconnectIfNeeded(err error) {
 	var transportErr *transport.Error
-	// In SSE transport type, connection loss does not always actively trigger onConnectionLost (a go-mcp issue).
-	// Once the connection is lost, the session becomes invalid.
-	// Without reconnecting, it will continuously cause "Invalid session ID" errors.
-	if c.service.TransportType == types.MCPTransportSSE &&
-		errors.As(err, &transportErr) &&
-		transportErr.Err != nil &&
-		strings.Contains(transportErr.Err.Error(), "Invalid session ID") {
+	if !errors.As(err, &transportErr) || transportErr.Err == nil {
+		return
+	}
+	errMsg := transportErr.Err.Error()
+	// Known session invalidation errors from MCP servers:
+	//   - "Invalid session ID"  — server recognises the header but rejects the value
+	//   - "No active connection" — server has no record of the session at all
+	if strings.Contains(errMsg, "Invalid session ID") ||
+		strings.Contains(errMsg, "No active connection") {
 		_ = c.Disconnect()
 	}
 }

@@ -122,8 +122,23 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		}()
 	}
 
-	// Call the tool via MCP
+	// Call the tool via MCP (with one reconnection retry on failure)
 	result, err := client.CallTool(ctx, t.mcpTool.Name, input)
+	if err != nil && !isStdio {
+		logger.GetLogger(ctx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
+		_ = client.Disconnect()
+
+		client, err = t.mcpManager.GetOrCreateClient(t.service)
+		if err != nil {
+			logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client: %v", err)
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to reconnect to MCP service: %v", err),
+			}, nil
+		}
+
+		result, err = client.CallTool(ctx, t.mcpTool.Name, input)
+	}
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("MCP tool call failed: %v", err)
 		return &types.ToolResult{
@@ -350,11 +365,26 @@ func RegisterMCPTools(
 			}()
 		}
 
-		// List tools from the service with timeout
-		// Create a new context with timeout for this specific operation
+		// List tools from the service with timeout.
+		// If the cached connection is stale, disconnect and retry once.
 		listCtx, cancel := context.WithTimeout(ctx, listToolsTimeout)
-		tools, err := client.ListTools(listCtx)
-		cancel() // Cancel after ListTools completes
+		mcpTools, err := client.ListTools(listCtx)
+		cancel()
+
+		if err != nil && !isStdio {
+			logger.GetLogger(ctx).Warnf("Failed to list tools from MCP service %s (will retry with fresh connection): %v", service.Name, err)
+			_ = client.Disconnect()
+
+			client, err = mcpManager.GetOrCreateClient(service)
+			if err != nil {
+				logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
+				continue
+			}
+
+			retryCtx, retryCancel := context.WithTimeout(ctx, listToolsTimeout)
+			mcpTools, err = client.ListTools(retryCtx)
+			retryCancel()
+		}
 
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("Failed to list tools from MCP service %s: %v", service.Name, err)
@@ -362,7 +392,7 @@ func RegisterMCPTools(
 		}
 
 		// Register each tool
-		for _, mcpTool := range tools {
+		for _, mcpTool := range mcpTools {
 			tool := NewMCPTool(service, mcpTool, mcpManager)
 			toolName := tool.Name()
 
