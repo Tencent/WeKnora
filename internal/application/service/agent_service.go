@@ -395,7 +395,7 @@ func (s *agentService) registerTools(
 		case tools.ToolGetDocumentInfo:
 			toolToRegister = tools.NewGetDocumentInfoTool(s.knowledgeService, s.chunkService, config.SearchTargets)
 		case tools.ToolDatabaseQuery:
-			toolToRegister = tools.NewDatabaseQueryTool(s.db)
+			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:
 			toolToRegister = tools.NewWebSearchTool(
 				s.webSearchService,

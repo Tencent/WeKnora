@@ -104,14 +104,16 @@ type DatabaseQueryInput struct {
 // DatabaseQueryTool allows AI to query the database with auto-injected tenant_id for security
 type DatabaseQueryTool struct {
 	BaseTool
-	db *gorm.DB
+	db            *gorm.DB
+	searchTargets types.SearchTargets
 }
 
 // NewDatabaseQueryTool creates a new database query tool
-func NewDatabaseQueryTool(db *gorm.DB) *DatabaseQueryTool {
+func NewDatabaseQueryTool(db *gorm.DB, searchTargets types.SearchTargets) *DatabaseQueryTool {
 	return &DatabaseQueryTool{
-		BaseTool: databaseQueryTool,
-		db:       db,
+		BaseTool:      databaseQueryTool,
+		db:            db,
+		searchTargets: searchTargets,
 	}
 }
 
@@ -253,12 +255,21 @@ func (t *DatabaseQueryTool) Execute(ctx context.Context, args json.RawMessage) (
 
 // validateAndSecureSQL validates the SQL query and injects tenant_id conditions
 func (t *DatabaseQueryTool) validateAndSecureSQL(sqlQuery string, tenantID uint64) (string, error) {
+	kbIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
+	var knowledgeIDs []string
+	for _, target := range t.searchTargets {
+		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
+			knowledgeIDs = append(knowledgeIDs, target.KnowledgeIDs...)
+		}
+	}
+
 	securedSQL, validationResult, err := utils.ValidateAndSecureSQL(
 		sqlQuery,
 		utils.WithSecurityDefaults(tenantID),
 		utils.WithSoftDeleteFilter("knowledge_bases", "knowledges", "chunks"),
 		utils.WithHiddenKBFilter(),
 		utils.WithInjectionRiskCheck(),
+		utils.WithSearchScopeFilter(kbIDs, knowledgeIDs),
 	)
 	if err != nil {
 		return "", err

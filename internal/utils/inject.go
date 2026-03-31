@@ -139,6 +139,11 @@ type sqlValidator struct {
 
 	// Hidden knowledge base filtering (is_temporary = false)
 	enableHiddenKBFilter bool
+
+	// Search scope filtering (restrict to specific KBs and knowledges)
+	enableSearchScopeFilter  bool
+	searchScopeKBIDs         []string
+	searchScopeKnowledgeIDs  []string
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -610,6 +615,21 @@ func WithHiddenKBFilter() SQLValidationOption {
 	}
 }
 
+// WithSearchScopeFilter restricts queries to the specified knowledge bases and
+// (optionally) specific knowledge documents. For the knowledge_bases table it
+// filters by id; for knowledges it filters by knowledge_base_id (and id when
+// knowledgeIDs is non-empty); for chunks it filters by knowledge_base_id (and
+// knowledge_id when knowledgeIDs is non-empty).
+func WithSearchScopeFilter(kbIDs []string, knowledgeIDs []string) SQLValidationOption {
+	return func(v *sqlValidator) {
+		if len(kbIDs) > 0 {
+			v.enableSearchScopeFilter = true
+			v.searchScopeKBIDs = kbIDs
+			v.searchScopeKnowledgeIDs = knowledgeIDs
+		}
+	}
+}
+
 // WithSecurityDefaults applies a comprehensive set of security validations
 func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 	return func(v *sqlValidator) {
@@ -816,7 +836,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	}
 
 	// If no SQL rewriting is enabled, return original SQL
-	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter {
+	if !validator.enableTenantInjection && !validator.enableSoftDeleteInjection && !validator.enableHiddenKBFilter && !validator.enableSearchScopeFilter {
 		return sql, validationResult, nil
 	}
 
@@ -841,6 +861,8 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 	securedSQL = validator.injectSoftDeleteConditions(securedSQL, tablesInQuery)
 	// Inject hidden KB filter (exclude is_temporary = true knowledge bases)
 	securedSQL = validator.injectHiddenKBFilter(securedSQL, tablesInQuery)
+	// Inject search scope filter (restrict to allowed KBs and knowledges)
+	securedSQL = validator.injectSearchScopeConditions(securedSQL, tablesInQuery)
 
 	return securedSQL, validationResult, nil
 }
@@ -982,6 +1004,54 @@ func (v *sqlValidator) injectHiddenKBFilter(sql string, tablesInQuery map[string
 		return sql
 	}
 	return InjectAndConditions(sql, fmt.Sprintf("%s.is_temporary = false", alias))
+}
+
+// injectSearchScopeConditions restricts queries to the allowed knowledge bases
+// and (optionally) specific knowledge documents.
+func (v *sqlValidator) injectSearchScopeConditions(sql string, tablesInQuery map[string]string) string {
+	if !v.enableSearchScopeFilter || len(v.searchScopeKBIDs) == 0 {
+		return sql
+	}
+
+	quotedKBIDs := quoteStringSlice(v.searchScopeKBIDs)
+	kbList := strings.Join(quotedKBIDs, ", ")
+
+	var conditions []string
+
+	if alias, ok := tablesInQuery["knowledge_bases"]; ok {
+		conditions = append(conditions, fmt.Sprintf("%s.id IN (%s)", alias, kbList))
+	}
+
+	if alias, ok := tablesInQuery["knowledges"]; ok {
+		conditions = append(conditions, fmt.Sprintf("%s.knowledge_base_id IN (%s)", alias, kbList))
+		if len(v.searchScopeKnowledgeIDs) > 0 {
+			quotedKIDs := quoteStringSlice(v.searchScopeKnowledgeIDs)
+			conditions = append(conditions, fmt.Sprintf("%s.id IN (%s)", alias, strings.Join(quotedKIDs, ", ")))
+		}
+	}
+
+	if alias, ok := tablesInQuery["chunks"]; ok {
+		conditions = append(conditions, fmt.Sprintf("%s.knowledge_base_id IN (%s)", alias, kbList))
+		if len(v.searchScopeKnowledgeIDs) > 0 {
+			quotedKIDs := quoteStringSlice(v.searchScopeKnowledgeIDs)
+			conditions = append(conditions, fmt.Sprintf("%s.knowledge_id IN (%s)", alias, strings.Join(quotedKIDs, ", ")))
+		}
+	}
+
+	if len(conditions) == 0 {
+		return sql
+	}
+
+	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
+}
+
+func quoteStringSlice(ss []string) []string {
+	quoted := make([]string, len(ss))
+	for i, s := range ss {
+		escaped := strings.ReplaceAll(s, "'", "''")
+		quoted[i] = fmt.Sprintf("'%s'", escaped)
+	}
+	return quoted
 }
 
 // checkSQLInjectionRisks checks for common SQL injection patterns in WHERE clause
