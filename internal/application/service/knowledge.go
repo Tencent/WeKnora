@@ -7578,12 +7578,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 
-	// For URL imports, resolve relative image paths to absolute URLs
-	// so that ResolveRemoteImages can download them.
-	if payload.URL != "" && convertResult != nil {
-		convertResult.MarkdownContent = docparser.ResolveRelativeImageURLs(convertResult.MarkdownContent, payload.URL)
-	}
-
 	if s.imageResolver != nil && convertResult != nil {
 		fileSvc := s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
