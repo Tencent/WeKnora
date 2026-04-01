@@ -128,7 +128,9 @@ type KnowledgeService interface {
 	// ExportFAQEntries exports all FAQ entries for a knowledge base as CSV data.
 	ExportFAQEntries(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
-	UpdateKnowledgeTagBatch(ctx context.Context, updates map[string]*string) error
+	// authorizedKBID restricts all updates to knowledge items belonging to this KB;
+	// pass empty string to skip (caller must ensure authorization by other means).
+	UpdateKnowledgeTagBatch(ctx context.Context, authorizedKBID string, updates map[string]*string) error
 	// UpdateFAQEntryTagBatch updates tag for FAQ entries in batch.
 	// Key: entry seq_id, Value: tag seq_id (nil to remove tag)
 	UpdateFAQEntryTagBatch(ctx context.Context, kbID string, updates map[int64]*int64) error

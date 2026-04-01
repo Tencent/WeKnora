@@ -913,6 +913,10 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 		return
 	}
 
+	// agentAllowedKBIDs restricts results to the agent's configured KB scope.
+	// nil = no agent restriction; empty slice = agent has no KB access (none mode).
+	var agentAllowedKBIDs []string
+
 	// Optional agent_id: when using shared agent, resolve agent and use its tenant for batch retrieval (so shared KB files can be loaded after refresh)
 	if agentID := secutils.SanitizeForLog(req.AgentID); agentID != "" && h.agentShareService != nil {
 		userIDVal, ok := c.Get(types.UserIDContextKey.String())
@@ -933,12 +937,21 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			return
 		}
 		effectiveTenantID = agent.TenantID
-		logger.Infof(ctx, "Batch retrieving knowledge with agent_id, effective tenant ID: %d, IDs count: %d",
-			effectiveTenantID, len(req.IDs))
+		agentAllowedKBIDs = resolveAgentAllowedKBIDs(agent)
+
+		if agentAllowedKBIDs != nil && len(agentAllowedKBIDs) == 0 {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": []*types.Knowledge{}})
+			return
+		}
+		logger.Infof(ctx, "Batch retrieving knowledge with agent_id, effective tenant ID: %d, IDs count: %d, allowed KBs: %v",
+			effectiveTenantID, len(req.IDs), agentAllowedKBIDs)
 	}
 
 	var knowledges []*types.Knowledge
 	var err error
+
+	// scopeKBID tracks the single KB the results must belong to (set by explicit kb_id).
+	var scopeKBID string
 
 	// Optional kb_id: validate KB access and use effective tenant for shared KB
 	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
@@ -947,6 +960,11 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			c.Error(err)
 			return
 		}
+		if agentAllowedKBIDs != nil && !sliceContains(agentAllowedKBIDs, kbID) {
+			c.Error(errors.NewForbiddenError("Knowledge base not accessible through this agent"))
+			return
+		}
+		scopeKBID = kbID
 		effectiveTenantID = effID
 		ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
 
@@ -960,6 +978,28 @@ func (h *KnowledgeHandler) GetKnowledgeBatch(c *gin.Context) {
 			effectiveTenantID, len(req.IDs))
 
 		knowledges, err = h.kgService.GetKnowledgeBatchWithSharedAccess(ctx, effectiveTenantID, req.IDs)
+	}
+
+	// Build the effective allowed-KB set from both scopeKBID and agentAllowedKBIDs.
+	// scopeKBID (from explicit kb_id) restricts to a single KB;
+	// agentAllowedKBIDs (from shared agent) restricts to the agent's configured KBs.
+	var allowedKBSet map[string]bool
+	if scopeKBID != "" {
+		allowedKBSet = map[string]bool{scopeKBID: true}
+	} else if agentAllowedKBIDs != nil {
+		allowedKBSet = make(map[string]bool, len(agentAllowedKBIDs))
+		for _, id := range agentAllowedKBIDs {
+			allowedKBSet[id] = true
+		}
+	}
+	if allowedKBSet != nil && len(knowledges) > 0 {
+		filtered := make([]*types.Knowledge, 0, len(knowledges))
+		for _, k := range knowledges {
+			if allowedKBSet[k.KnowledgeBaseID] {
+				filtered = append(filtered, k)
+			}
+		}
+		knowledges = filtered
 	}
 
 	if err != nil {
@@ -1171,7 +1211,8 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("请求参数不合法").WithDetails(err.Error()))
 		return
 	}
-	// Resolve effective tenant: explicit kb_id, or infer from first knowledge ID (for shared KB when frontend doesn't send kb_id)
+	// Resolve effective tenant and the authorized KB scope.
+	var authorizedKBID string
 	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
 		_, _, effID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, kbID)
 		if err != nil {
@@ -1182,6 +1223,7 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 			c.Error(errors.NewForbiddenError("No permission to update knowledge tags"))
 			return
 		}
+		authorizedKBID = kbID
 		ctx = context.WithValue(ctx, types.TenantIDContextKey, effID)
 	} else if len(req.Updates) > 0 {
 		// No kb_id: infer from first knowledge ID so shared-KB updates work without client sending kb_id
@@ -1191,15 +1233,16 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 			break
 		}
 		if firstKnowledgeID != "" {
-			_, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstKnowledgeID, types.OrgRoleEditor)
+			knowledge, effCtx, err := h.resolveKnowledgeAndValidateKBAccess(c, firstKnowledgeID, types.OrgRoleEditor)
 			if err != nil {
 				c.Error(err)
 				return
 			}
+			authorizedKBID = knowledge.KnowledgeBaseID
 			ctx = effCtx
 		}
 	}
-	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, req.Updates); err != nil {
+	if err := h.kgService.UpdateKnowledgeTagBatch(ctx, authorizedKBID, req.Updates); err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
 		return
@@ -1570,4 +1613,33 @@ func (h *KnowledgeHandler) GetKnowledgeMoveProgress(c *gin.Context) {
 		"success": true,
 		"data":    progress,
 	})
+}
+
+// resolveAgentAllowedKBIDs returns the set of knowledge base IDs that the
+// shared agent is allowed to access based on its KBSelectionMode config.
+// Returns nil when no restriction applies ("all" mode), or a concrete slice
+// (possibly empty for "none" mode) when the results must be filtered.
+func resolveAgentAllowedKBIDs(agent *types.CustomAgent) []string {
+	switch agent.Config.KBSelectionMode {
+	case "all":
+		return nil
+	case "none":
+		return []string{}
+	case "selected":
+		return agent.Config.KnowledgeBases
+	default:
+		if len(agent.Config.KnowledgeBases) > 0 {
+			return agent.Config.KnowledgeBases
+		}
+		return nil
+	}
+}
+
+func sliceContains(ss []string, target string) bool {
+	for _, s := range ss {
+		if s == target {
+			return true
+		}
+	}
+	return false
 }

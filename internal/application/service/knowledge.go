@@ -5269,7 +5269,9 @@ func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID s
 }
 
 // UpdateKnowledgeTagBatch updates tags for document knowledge items in batch.
-func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, updates map[string]*string) error {
+// authorizedKBID restricts all updates to knowledge items belonging to this KB;
+// pass empty string to skip the check (caller must ensure authorization by other means).
+func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authorizedKBID string, updates map[string]*string) error {
 	if len(updates) == 0 {
 		return nil
 	}
@@ -5290,6 +5292,19 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, updates 
 	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
 	if err != nil {
 		return err
+	}
+
+	// Validate all requested IDs were found and belong to the authorized KB
+	if authorizedKBID != "" {
+		if len(knowledgeList) != len(updates) {
+			return werrors.NewForbiddenError("some knowledge IDs are not accessible in the authorized scope")
+		}
+		for _, k := range knowledgeList {
+			if k.KnowledgeBaseID != authorizedKBID {
+				return werrors.NewForbiddenError(
+					fmt.Sprintf("knowledge %s does not belong to authorized knowledge base", k.ID))
+			}
+		}
 	}
 
 	// Build tag ID map for validation
