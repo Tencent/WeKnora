@@ -39,6 +39,7 @@ type DocumentProcessPayload struct {
 	EnableMultimodel         bool     `json:"enable_multimodel"`
 	EnableQuestionGeneration bool     `json:"enable_question_generation"` // 是否启用问题生成
 	QuestionCount            int      `json:"question_count,omitempty"`   // 每个chunk生成的问题数量
+	Language                 string   `json:"language,omitempty"`         // Request locale for {{language}} in prompt templates
 }
 
 // FAQImportPayload represents the FAQ import task payload (including dry run mode)
@@ -151,6 +152,7 @@ type ImageMultimodalPayload struct {
 	ImageLocalPath  string `json:"image_local_path"`   // deprecated: kept for backward compat with in-flight tasks
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
+	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

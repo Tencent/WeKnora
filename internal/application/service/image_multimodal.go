@@ -79,6 +79,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 
 	vlmModel, err := s.resolveVLM(ctx, payload.KnowledgeBaseID)
 	if err != nil {
@@ -437,6 +440,7 @@ func (s *ImageMultimodalService) enqueueQuestionGenerationIfEnabled(ctx context.
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		KnowledgeID:     payload.KnowledgeID,
 		QuestionCount:   questionCount,
+		Language:        payload.Language,
 	}
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {

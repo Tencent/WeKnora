@@ -1,6 +1,24 @@
 package types
 
-import "context"
+import (
+	"context"
+	"os"
+	"strings"
+)
+
+// EnvLanguage returns the WEKNORA_LANGUAGE environment variable value, or empty string if unset.
+func EnvLanguage() string {
+	return strings.TrimSpace(os.Getenv("WEKNORA_LANGUAGE"))
+}
+
+// DefaultLanguage returns the configured default language locale.
+// It reads the WEKNORA_LANGUAGE environment variable; if unset, falls back to "zh-CN".
+func DefaultLanguage() string {
+	if lang := EnvLanguage(); lang != "" {
+		return lang
+	}
+	return "zh-CN"
+}
 
 // TenantIDFromContext extracts the tenant ID from ctx.
 // Returns (0, false) when the key is absent or the value is not uint64.
@@ -55,10 +73,11 @@ func LanguageFromContext(ctx context.Context) (string, bool) {
 
 // LanguageNameFromContext returns the human-readable language name for use in prompts.
 // e.g. "zh-CN" -> "Chinese (Simplified)", "en-US" -> "English", "ko-KR" -> "Korean"
+// Falls back to DefaultLanguage() (WEKNORA_LANGUAGE env, then "zh-CN").
 func LanguageNameFromContext(ctx context.Context) string {
 	lang, ok := LanguageFromContext(ctx)
 	if !ok {
-		lang = "zh-CN"
+		lang = DefaultLanguage()
 	}
 	return LanguageLocaleName(lang)
 }

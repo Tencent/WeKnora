@@ -383,6 +383,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		}
 	}
 
+	lang, _ := types.LanguageFromContext(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -393,6 +394,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		EnableMultimodel:         enableMultimodelValue,
 		EnableQuestionGeneration: enableQuestionGeneration,
 		QuestionCount:            questionCount,
+		Language:                 lang,
 	}
 
 	payloadBytes, err := json.Marshal(taskPayload)
@@ -557,6 +559,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		}
 	}
 
+	lang, _ := types.LanguageFromContext(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -565,6 +568,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		EnableMultimodel:         enableMultimodelValue,
 		EnableQuestionGeneration: enableQuestionGeneration,
 		QuestionCount:            questionCount,
+		Language:                 lang,
 	}
 
 	payloadBytes, err := json.Marshal(taskPayload)
@@ -770,6 +774,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		}
 	}
 
+	lang, _ := types.LanguageFromContext(ctx)
 	taskPayload := types.DocumentProcessPayload{
 		TenantID:                 tenantID,
 		KnowledgeID:              knowledge.ID,
@@ -780,6 +785,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		EnableMultimodel:         enableMultimodelValue,
 		EnableQuestionGeneration: enableQuestionGeneration,
 		QuestionCount:            questionCount,
+		Language:                 lang,
 	}
 
 	payloadBytes, err := json.Marshal(taskPayload)
@@ -988,6 +994,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			}
 		}
 
+		lang, _ := types.LanguageFromContext(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
@@ -996,6 +1003,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			EnableMultimodel:         false, // 文本段落不支持多模态
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
+			Language:                 lang,
 		}
 
 		payloadBytes, err := json.Marshal(taskPayload)
@@ -2704,6 +2712,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			}
 		}
 
+		lang, _ := types.LanguageFromContext(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              existing.ID,
@@ -2714,6 +2723,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableMultimodel:         enableMultimodel,
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
+			Language:                 lang,
 		}
 
 		payloadBytes, err := json.Marshal(taskPayload)
@@ -2754,6 +2764,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			}
 		}
 
+		lang, _ := types.LanguageFromContext(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              existing.ID,
@@ -2764,6 +2775,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableMultimodel:         enableMultimodel,
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
+			Language:                 lang,
 		}
 
 		payloadBytes, err := json.Marshal(taskPayload)
@@ -2799,6 +2811,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			}
 		}
 
+		lang, _ := types.LanguageFromContext(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              existing.ID,
@@ -2807,6 +2820,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			EnableMultimodel:         enableMultimodel,
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
+			Language:                 lang,
 		}
 
 		payloadBytes, err := json.Marshal(taskPayload)
@@ -7365,6 +7379,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "document_process", payload.KnowledgeID)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	if payload.Language != "" {
+		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
+	}
 
 	// 获取任务重试信息，用于判断是否是最后一次重试
 	retryCount, _ := asynq.GetRetryCount(ctx)
@@ -7810,6 +7827,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			chunkID = chunks[0].ChunkID
 		}
 
+		lang, _ := types.LanguageFromContext(ctx)
 		payload := types.ImageMultimodalPayload{
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
@@ -7818,6 +7836,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageURL:        img.ServingURL,
 			EnableOCR:       true,
 			EnableCaption:   true,
+			Language:        lang,
 		}
 
 		payloadBytes, err := json.Marshal(payload)
@@ -9010,6 +9029,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			}
 		}
 
+		lang, _ := types.LanguageFromContext(ctx)
 		taskPayload := types.DocumentProcessPayload{
 			TenantID:                 tenantID,
 			KnowledgeID:              knowledge.ID,
@@ -9020,6 +9040,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			EnableMultimodel:         enableMultimodel,
 			EnableQuestionGeneration: enableQuestionGeneration,
 			QuestionCount:            questionCount,
+			Language:                 lang,
 		}
 
 		payloadBytes, err := json.Marshal(taskPayload)
