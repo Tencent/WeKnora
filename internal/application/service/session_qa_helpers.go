@@ -32,6 +32,11 @@ func (s *sessionService) resolveKnowledgeBases(
 
 	if hasExplicitMention {
 		logger.Infof(ctx, "Using request-specified targets: kbs=%v, docs=%v", kbIDs, knowledgeIDs)
+		// When using a shared agent, restrict @mentions to the agent's allowed KB scope
+		// to prevent users from injecting KB/knowledge IDs outside the agent's configured range.
+		if customAgent != nil && req.Session != nil && req.Session.TenantID != customAgent.TenantID {
+			kbIDs, knowledgeIDs = s.restrictMentionsToAgentScope(ctx, customAgent, req.Session.TenantID, kbIDs, knowledgeIDs)
+		}
 	} else if customAgent != nil && customAgent.Config.RetrieveKBOnlyWhenMentioned {
 		kbIDs = nil
 		knowledgeIDs = nil
@@ -189,4 +194,60 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		logger.Infof(ctx, "FAQ priority enabled: threshold=%.2f, boost=%.2f",
 			cm.FAQDirectAnswerThreshold, cm.FAQScoreBoost)
 	}
+}
+
+// restrictMentionsToAgentScope filters user-provided @mention targets (KB IDs
+// and knowledge IDs) so that only those within the shared agent's allowed KB
+// scope are retained. This prevents users from bypassing the agent's
+// KBSelectionMode by injecting arbitrary KB/knowledge IDs into the request.
+func (s *sessionService) restrictMentionsToAgentScope(
+	ctx context.Context,
+	agent *types.CustomAgent,
+	sessionTenantID uint64,
+	kbIDs []string,
+	knowledgeIDs []string,
+) ([]string, []string) {
+	allowedKBIDs := s.resolveKnowledgeBasesFromAgent(ctx, agent, sessionTenantID)
+	if len(allowedKBIDs) == 0 {
+		logger.Warnf(ctx, "Shared agent has no allowed KBs, blocking all @mentions")
+		return nil, nil
+	}
+
+	allowedSet := make(map[string]bool, len(allowedKBIDs))
+	for _, id := range allowedKBIDs {
+		allowedSet[id] = true
+	}
+
+	filteredKBs := make([]string, 0, len(kbIDs))
+	for _, id := range kbIDs {
+		if allowedSet[id] {
+			filteredKBs = append(filteredKBs, id)
+		} else {
+			logger.Warnf(ctx, "Blocking @mentioned KB %s: not in shared agent's allowed scope", id)
+		}
+	}
+
+	filteredKnowledge := knowledgeIDs
+	if len(knowledgeIDs) > 0 {
+		knowledgeList, err := s.knowledgeService.GetKnowledgeBatch(ctx, agent.TenantID, knowledgeIDs)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to validate knowledge IDs against agent scope: %v, blocking all", err)
+			filteredKnowledge = nil
+		} else {
+			filteredKnowledge = make([]string, 0, len(knowledgeList))
+			for _, k := range knowledgeList {
+				if k != nil && allowedSet[k.KnowledgeBaseID] {
+					filteredKnowledge = append(filteredKnowledge, k.ID)
+				} else if k != nil {
+					logger.Warnf(ctx, "Blocking @mentioned knowledge %s (KB %s): not in shared agent's allowed scope",
+						k.ID, k.KnowledgeBaseID)
+				}
+			}
+		}
+	}
+
+	logger.Infof(ctx, "Restricted @mentions to agent scope: kbs %d->%d, knowledge %d->%d",
+		len(kbIDs), len(filteredKBs), len(knowledgeIDs), len(filteredKnowledge))
+
+	return filteredKBs, filteredKnowledge
 }
