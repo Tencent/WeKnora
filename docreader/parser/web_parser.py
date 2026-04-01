@@ -138,16 +138,34 @@ class WebParser(PipelineParser):
 
 
 if __name__ == "__main__":
-    # Configure logging for debugging
-    logging.basicConfig(level=logging.DEBUG)
-    logger.setLevel(logging.DEBUG)
+    import sys
 
-    # Example URL to scrape
-    url = "https://cloud.tencent.com/document/product/457/6759"
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    # Create parser instance and parse the web page
+    url = sys.argv[1] if len(sys.argv) > 1 else "https://cloud.tencent.com/document/product/457/6759"
+    print(f"\n{'='*60}")
+    print(f"URL: {url}")
+    print(f"{'='*60}\n")
+
     parser = WebParser(title="")
-    cc = parser.parse_into_text(url.encode())
-    # Save the parsed markdown content to file
-    with open("./tencent.md", "w") as f:
-        f.write(cc.content)
+    doc = parser.parse_into_text(url.encode())
+
+    print(f"--- metadata ---")
+    for k, v in doc.metadata.items():
+        print(f"  {k}: {v}")
+
+    print(f"\n--- images ({len(doc.images)}) ---")
+    for path in list(doc.images.keys())[:10]:
+        print(f"  {path}  ({len(doc.images[path])} chars base64)")
+
+    print(f"\n--- content ({len(doc.content)} chars) ---")
+    print(doc.content[:300000])
+    if len(doc.content) > 300000:
+        print(f"\n... (truncated, total {len(doc.content)} chars)")
+
+    print(f"\n--- chunks ({len(doc.chunks)}) ---")
+    for i, chunk in enumerate(doc.chunks[:5]):
+        print(f"  [{i}] seq={chunk.seq} range=[{chunk.start}:{chunk.end}] len={len(chunk.content)}")
+        print(f"      {chunk.content[:120]}{'...' if len(chunk.content) > 120 else ''}")
+    if len(doc.chunks) > 5:
+        print(f"  ... ({len(doc.chunks) - 5} more chunks)")

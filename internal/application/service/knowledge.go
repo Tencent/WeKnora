@@ -2369,14 +2369,14 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	// Build context section
 	var contextSection string
 	if prevContent != "" || nextContent != "" {
-		contextSection = "## Context Information (for reference only, to help understand the main content)\n"
+		contextSection = "<surrounding_context>\n"
 		if prevContent != "" {
-			contextSection += fmt.Sprintf("[Preceding Context] %s\n", prevContent)
+			contextSection += fmt.Sprintf("[Preceding Content]\n%s\n\n", prevContent)
 		}
 		if nextContent != "" {
-			contextSection += fmt.Sprintf("[Following Context] %s\n", nextContent)
+			contextSection += fmt.Sprintf("[Following Content]\n%s\n\n", nextContent)
 		}
-		contextSection += "\n"
+		contextSection += "</surrounding_context>\n\n"
 	}
 
 	langName := types.LanguageNameFromContext(ctx)
@@ -7577,6 +7577,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
+
+	// For URL imports, resolve relative image paths to absolute URLs
+	// so that ResolveRemoteImages can download them.
+	if payload.URL != "" && convertResult != nil {
+		convertResult.MarkdownContent = docparser.ResolveRelativeImageURLs(convertResult.MarkdownContent, payload.URL)
+	}
+
 	if s.imageResolver != nil && convertResult != nil {
 		fileSvc := s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)

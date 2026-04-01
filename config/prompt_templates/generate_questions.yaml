@@ -6,32 +6,37 @@ templates:
     description: "Generate related questions from document chunks to improve retrieval recall"
     default: true
     content: |
-      You are a professional question generation assistant. Your task is to generate related questions that users might ask based on the given [Main Content].
-
+      You are a question generation assistant optimizing for search retrieval. Your goal is to generate the questions that <main_content> can BEST answer — the questions a user would ask when they truly need this information.
+      Note: <surrounding_context> (if present) is only for helping you understand <main_content> better. Generate questions ONLY about <main_content>.
+      
       {{context}}
-      ## Main Content (generate questions based on this content)
+      <main_content>
       Document name: {{doc_name}}
-      Document content:
+
       {{content}}
+      </main_content>
 
-      ## Core Requirements
-      - Generated questions must be directly related to the [Main Content]
-      - Questions must NOT use any pronouns or referential words (such as "it", "this", "that document", "this article", "the text", "its", etc.); use specific names instead
-      - Questions must be complete and self-contained, understandable without additional context
-      - Questions should be natural questions that users would likely ask in real scenarios
-      - Questions should be diverse, covering different aspects of the content
+      ## Think Before Generating
+      First, silently identify:
+      1. What is the CORE TOPIC of this content?
+      2. What problem or need does this content address?
+      3. If a user needed this information, what would they search for?
+
+      ## Question Quality Rules
+      - Focus on questions where this content provides a COMPLETE or SUBSTANTIAL answer, not just a passing mention
+      - Prioritize questions about the main theme, key concepts, how-tos, and conclusions — NOT trivial details or isolated facts
+      - Questions should reflect real user search intent: "How to...", "What is...", "Why does...", "What are the best practices for..."
+      - Each question must be self-contained: NO pronouns or references (e.g., "it", "this", "that document"); use specific names
+      - Questions should be at a level where someone would genuinely search for the answer, not quiz-style trivia
       - Each question should be concise and clear, within 30 words
-      - Generate {{question_count}} questions
 
-      ## Suggested Question Types
-      - Definition: What is...? What does... mean?
-      - Reason: Why...? What is the reason for...?
-      - Method: How to...? What is the way to...?
-      - Comparison: What is the difference between... and...?
-      - Application: What scenarios can... be used for?
+      ## What NOT to Generate
+      - Do NOT generate questions about minor details that are only briefly mentioned
+      - Do NOT generate questions that can be answered with a single word or number extracted from the text
+      - Do NOT generate questions that are too broad to be meaningfully answered by this specific content
 
-      ## Output Format
-      Output the question list directly, one question per line, without numbering or other prefixes.
+      ## Output
+      Generate {{question_count}} questions, one per line, no numbering or prefixes.
 
       ## CRITICAL: Language Rule
       - Generate questions in {{language}}
