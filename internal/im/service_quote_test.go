@@ -18,19 +18,34 @@ func TestFormatQuotedContext(t *testing.T) {
 			want:  "",
 		},
 		{
-			name:  "empty content",
+			name:  "empty content no NonTextType",
 			quote: &QuotedMessage{Content: ""},
 			want:  "",
 		},
 		{
+			name:  "non-text image quote generates instruction",
+			quote: &QuotedMessage{NonTextType: "image"},
+			want:  "用户引用了一条图片消息，但你无法查看该内容。请直接告知用户你目前无法处理图片消息，建议用户用文字描述问题。不要猜测该消息的内容。",
+		},
+		{
+			name:  "non-text file quote generates instruction",
+			quote: &QuotedMessage{NonTextType: "file"},
+			want:  "用户引用了一条文件消息，但你无法查看该内容。请直接告知用户你目前无法处理文件消息，建议用户用文字描述问题。不要猜测该消息的内容。",
+		},
+		{
+			name:  "non-text unknown type uses fallback label",
+			quote: &QuotedMessage{NonTextType: "location"},
+			want:  "用户引用了一条该类型的消息，但你无法查看该内容。请直接告知用户你目前无法处理该类型的消息，建议用户用文字描述问题。不要猜测该消息的内容。",
+		},
+		{
 			name:  "bot message",
 			quote: &QuotedMessage{Content: "bot reply text", IsBotMessage: true},
-			want:  "[引用的机器人回复]\nbot reply text",
+			want:  "以下是用户引用的你（机器人）之前的回复，仅作为上下文参考：\n<quoted_message>\nbot reply text\n</quoted_message>",
 		},
 		{
 			name:  "user message",
 			quote: &QuotedMessage{Content: "user message text", IsBotMessage: false},
-			want:  "[被引用的消息]\nuser message text",
+			want:  "以下是用户引用的一条历史消息，仅作为上下文参考：\n<quoted_message>\nuser message text\n</quoted_message>",
 		},
 		{
 			name: "truncation at 500 runes",
@@ -38,7 +53,7 @@ func TestFormatQuotedContext(t *testing.T) {
 				Content:      string(make([]rune, 600)),
 				IsBotMessage: false,
 			},
-			want: "[被引用的消息]\n" + string(make([]rune, 500)) + "...",
+			want: "以下是用户引用的一条历史消息，仅作为上下文参考：\n<quoted_message>\n" + string(make([]rune, 500)) + "...\n</quoted_message>",
 		},
 	}
 
@@ -74,7 +89,7 @@ func TestBuildIMQARequest_QuotedContext(t *testing.T) {
 		if req.Query != "follow up" {
 			t.Errorf("Query = %q, want %q", req.Query, "follow up")
 		}
-		want := "[引用的机器人回复]\nbot reply"
+		want := "以下是用户引用的你（机器人）之前的回复，仅作为上下文参考：\n<quoted_message>\nbot reply\n</quoted_message>"
 		if req.QuotedContext != want {
 			t.Errorf("QuotedContext = %q, want %q", req.QuotedContext, want)
 		}
@@ -83,7 +98,7 @@ func TestBuildIMQARequest_QuotedContext(t *testing.T) {
 	t.Run("user quote sets QuotedContext with user label", func(t *testing.T) {
 		quote := &QuotedMessage{Content: "user msg", IsBotMessage: false}
 		req := buildIMQARequest(session, "question", "a1", "u1", nil, nil, quote)
-		want := "[被引用的消息]\nuser msg"
+		want := "以下是用户引用的一条历史消息，仅作为上下文参考：\n<quoted_message>\nuser msg\n</quoted_message>"
 		if req.QuotedContext != want {
 			t.Errorf("QuotedContext = %q, want %q", req.QuotedContext, want)
 		}

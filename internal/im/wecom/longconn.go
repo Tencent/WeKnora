@@ -573,8 +573,8 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 	if incoming != nil && msg.Quote != nil {
 		incoming.Quote = buildQuotedMessage(msg.Quote, msg.AiBotID)
 		if incoming.Quote != nil {
-			logger.Infof(ctx, "[WeCom] Quote detected: msgid=%s sender=%s is_bot=%v content_len=%d",
-				msg.Quote.MsgID, msg.Quote.From.UserID, incoming.Quote.IsBotMessage, len(incoming.Quote.Content))
+			logger.Infof(ctx, "[WeCom] Quote detected: msgid=%s sender=%s is_bot=%v content_len=%d non_text_type=%s",
+				msg.Quote.MsgID, msg.Quote.From.UserID, incoming.Quote.IsBotMessage, len(incoming.Quote.Content), incoming.Quote.NonTextType)
 			// Debug: log raw IDs for bot identity verification during initial rollout
 			logger.Debugf(ctx, "[WeCom] Quote identity debug: quote.from.userid=%q quote.aibotid=%q msg.aibotid=%q",
 				msg.Quote.From.UserID, msg.Quote.AiBotID, msg.AiBotID)

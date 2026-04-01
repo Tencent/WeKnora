@@ -83,12 +83,17 @@ type IncomingMessage struct {
 type QuotedMessage struct {
 	// MessageID is the platform message ID of the quoted message.
 	MessageID string
-	// Content is the text content (or placeholder like "[图片]" for non-text).
+	// Content is the text content. Empty for non-text message types.
 	Content string
 	// SenderID is the platform user ID of the quoted message's author.
 	SenderID string
 	// IsBotMessage indicates whether the quoted message was from the bot.
 	IsBotMessage bool
+	// NonTextType records the original message type when the quoted message
+	// has no extractable text (e.g. "image", "file", "video").
+	// Empty when Content is populated. Used to generate LLM instructions
+	// instead of content placeholders that cause hallucination.
+	NonTextType string
 }
 
 // ChatType represents the IM chat type.

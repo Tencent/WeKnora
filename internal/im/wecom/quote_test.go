@@ -28,30 +28,30 @@ func TestExtractQuoteContent(t *testing.T) {
 		{
 			name: "voice without STT content",
 			msg:  &botMessage{MsgType: "voice"},
-			want: "[语音消息]",
+			want: "",
 		},
 		{
-			name: "image",
+			name: "image returns empty (discarded to prevent hallucination)",
 			msg:  &botMessage{MsgType: "image"},
-			want: "[图片]",
+			want: "",
 		},
 		{
-			name: "file",
+			name: "file returns empty",
 			msg:  &botMessage{MsgType: "file"},
-			want: "[文件]",
+			want: "",
 		},
 		{
-			name: "video",
+			name: "video returns empty",
 			msg:  &botMessage{MsgType: "video"},
-			want: "[视频]",
+			want: "",
 		},
 		{
-			name: "unknown type",
+			name: "unknown type returns empty",
 			msg:  &botMessage{MsgType: "location"},
-			want: "[消息]",
+			want: "",
 		},
 		{
-			name: "mixed text and image",
+			name: "mixed text and image keeps only text",
 			msg: &botMessage{
 				MsgType: "mixed",
 				Mixed: struct{ MsgItem []botMixedItem `json:"msg_item"` }{
@@ -62,10 +62,10 @@ func TestExtractQuoteContent(t *testing.T) {
 					},
 				},
 			},
-			want: "part1\n[图片]\npart2",
+			want: "part1\npart2",
 		},
 		{
-			name: "mixed with only images",
+			name: "mixed with only images returns empty",
 			msg: &botMessage{
 				MsgType: "mixed",
 				Mixed: struct{ MsgItem []botMixedItem `json:"msg_item"` }{
@@ -74,7 +74,7 @@ func TestExtractQuoteContent(t *testing.T) {
 					},
 				},
 			},
-			want: "[图片]",
+			want: "",
 		},
 	}
 
@@ -95,6 +95,12 @@ func TestIsQuoteFromBot(t *testing.T) {
 		aiBotID string
 		want    bool
 	}{
+		{
+			name:    "nil quote",
+			quote:   nil,
+			aiBotID: "bot123",
+			want:    false,
+		},
 		{
 			name:    "matching from.userid",
 			quote:   &botMessage{From: struct{ UserID string `json:"userid"` }{UserID: "bot123"}, AiBotID: ""},
@@ -161,6 +167,42 @@ func TestBuildQuotedMessage(t *testing.T) {
 		}
 		if !got.IsBotMessage {
 			t.Error("IsBotMessage = false, want true")
+		}
+		if got.NonTextType != "" {
+			t.Errorf("NonTextType = %q, want empty for text quote", got.NonTextType)
+		}
+	})
+
+	t.Run("image quote sets NonTextType", func(t *testing.T) {
+		msg := &botMessage{
+			MsgID:   "msg-img",
+			MsgType: "image",
+			From:    struct{ UserID string `json:"userid"` }{UserID: "user456"},
+		}
+		got := buildQuotedMessage(msg, "bot1")
+		if got == nil {
+			t.Fatal("expected non-nil for image quote")
+		}
+		if got.Content != "" {
+			t.Errorf("Content = %q, want empty", got.Content)
+		}
+		if got.NonTextType != "image" {
+			t.Errorf("NonTextType = %q, want %q", got.NonTextType, "image")
+		}
+	})
+
+	t.Run("video quote sets NonTextType", func(t *testing.T) {
+		msg := &botMessage{
+			MsgID:   "msg-vid",
+			MsgType: "video",
+			From:    struct{ UserID string `json:"userid"` }{UserID: "user456"},
+		}
+		got := buildQuotedMessage(msg, "bot1")
+		if got == nil {
+			t.Fatal("expected non-nil for video quote")
+		}
+		if got.NonTextType != "video" {
+			t.Errorf("NonTextType = %q, want %q", got.NonTextType, "video")
 		}
 	})
 

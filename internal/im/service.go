@@ -162,10 +162,31 @@ func makeUserKey(channelID, userID, chatID, threadID string) string {
 	return fmt.Sprintf("%s:%s:%s", channelID, userID, chatID)
 }
 
+// nonTextTypeLabel maps a message type to a Chinese label for LLM instructions.
+var nonTextTypeLabel = map[string]string{
+	"image": "图片",
+	"file":  "文件",
+	"video": "视频",
+	"voice": "语音",
+}
+
 // formatQuotedContext formats a QuotedMessage into a labeled string for LLM context.
-// Returns empty string if quote is nil or has no content.
+// Returns empty string if quote is nil.
+// For non-text quotes, generates an instruction telling the LLM to acknowledge
+// the unprocessable content instead of a placeholder that causes hallucination.
 func formatQuotedContext(quote *QuotedMessage) string {
-	if quote == nil || quote.Content == "" {
+	if quote == nil {
+		return ""
+	}
+	// Non-text quote: generate instruction, not content placeholder.
+	if quote.NonTextType != "" {
+		label := nonTextTypeLabel[quote.NonTextType]
+		if label == "" {
+			label = "该类型的"
+		}
+		return "用户引用了一条" + label + "消息，但你无法查看该内容。请直接告知用户你目前无法处理" + label + "消息，建议用户用文字描述问题。不要猜测该消息的内容。"
+	}
+	if quote.Content == "" {
 		return ""
 	}
 	content := quote.Content
@@ -173,11 +194,13 @@ func formatQuotedContext(quote *QuotedMessage) string {
 	if len(runes) > maxQuoteContentLength {
 		content = string(runes[:maxQuoteContentLength]) + "..."
 	}
-	label := "[被引用的消息]"
+	// Prevent quoted content from escaping the XML tag boundary.
+	content = strings.ReplaceAll(content, "</quoted_message>", "")
+	label := "以下是用户引用的一条历史消息，仅作为上下文参考："
 	if quote.IsBotMessage {
-		label = "[引用的机器人回复]"
+		label = "以下是用户引用的你（机器人）之前的回复，仅作为上下文参考："
 	}
-	return label + "\n" + content
+	return label + "\n<quoted_message>\n" + content + "\n</quoted_message>"
 }
 
 func buildIMQARequest(
@@ -194,11 +217,6 @@ func buildIMQARequest(
 	// so we derive it from the agent config (the single source of truth).
 	webSearchEnabled := customAgent != nil && customAgent.Config.WebSearchEnabled
 	quotedContext := formatQuotedContext(quote)
-	if quotedContext != "" {
-		// Note: using context.Background() because buildIMQARequest is a pure function without ctx.
-		// This debug log won't carry trace/span IDs — acceptable for a debug-level log.
-		logger.Debugf(context.Background(), "[IM] QuotedContext set: length=%d", len(quotedContext))
-	}
 	return &types.QARequest{
 		Session:            session,
 		Query:              query,
@@ -825,6 +843,21 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// handle it separately without entering the QA pipeline.
 	if (msg.MessageType == MessageTypeFile || msg.MessageType == MessageTypeImage) && channel.KnowledgeBaseID != "" {
 		return s.handleFileMessage(ctx, msg, adapter, channel)
+	}
+
+	// ── Non-text message without text content ──
+	// If the message is an image/file/video but has no text content, the QA pipeline
+	// cannot do anything useful (no vision support in IM yet). Sending an empty query
+	// to KB retrieval would return irrelevant results and cause hallucination.
+	if msg.Content == "" && (msg.MessageType == MessageTypeImage || msg.MessageType == MessageTypeFile) {
+		logger.Infof(ctx, "[IM] Skipping QA for non-text message without content: type=%s", msg.MessageType)
+		if err := adapter.SendReply(ctx, msg, &ReplyMessage{
+			Content: "当前渠道未配置文件知识库，无法处理图片/文件消息。请在渠道设置中配置文件知识库后再发送，或直接用文字描述您的问题。",
+			IsFinal: true,
+		}); err != nil {
+			logger.Warnf(ctx, "[IM] Failed to send non-text hint reply: %v", err)
+		}
+		return nil
 	}
 
 	// 1. Get tenant
@@ -1589,6 +1622,9 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	go func() {
 		var err error
 		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote)
+		if req.QuotedContext != "" {
+			logger.Debugf(qaCtx, "[IM] QuotedContext set: length=%d", len(req.QuotedContext))
+		}
 		if useAgent {
 			err = s.sessionService.AgentQA(qaCtx, req, eventBus)
 		} else {
@@ -1779,6 +1815,9 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	go func() {
 		var err error
 		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote)
+		if req.QuotedContext != "" {
+			logger.Debugf(ctx, "[IM] QuotedContext set: length=%d", len(req.QuotedContext))
+		}
 		if useAgent {
 			err = s.sessionService.AgentQA(ctx, req, eventBus)
 		} else {
