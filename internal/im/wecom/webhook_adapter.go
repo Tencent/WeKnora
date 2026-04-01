@@ -167,13 +167,20 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 	// Determine chat type
 	chatType := im.ChatTypeDirect
 	chatID := ""
-	if msg.ChatID != "" {
+	isGroup := msg.ChatID != ""
+	if isGroup {
 		chatType = im.ChatTypeGroup
 		chatID = msg.ChatID
 	}
 
 	switch msg.MsgType {
 	case "text":
+		// Strip @mention in group chat (same issue as long connection mode).
+		// Webhook adapter has no persistent state, so use the standalone helper.
+		textContent := msg.Content
+		if isGroup {
+			textContent = stripAtMentionBasic(textContent)
+		}
 		return &im.IncomingMessage{
 			Platform:    im.PlatformWeCom,
 			MessageType: im.MessageTypeText,
@@ -181,7 +188,7 @@ func (a *WebhookAdapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, err
 			UserName:    msg.FromUserName,
 			ChatID:      chatID,
 			ChatType:    chatType,
-			Content:     strings.TrimSpace(msg.Content),
+			Content:     strings.TrimSpace(textContent),
 			MessageID:   msg.MsgID,
 		}, nil
 

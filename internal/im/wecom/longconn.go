@@ -136,15 +136,24 @@ type LongConnClient struct {
 	// the previously displayed text, so we must send the full accumulated text.
 	streamBufsMu sync.Mutex
 	streamBufs   map[string]*strings.Builder
+
+	// botDisplayName caches the bot's display name for @mention stripping.
+	// Set from credentials "bot_name", or learned from double-space messages.
+	botDisplayName atomic.Value // string
 }
 
 // NewLongConnClient creates a WeCom long connection client.
-func NewLongConnClient(botID, secret string, handler MessageHandler) *LongConnClient {
-	return &LongConnClient{
+// botName is the bot's display name for @mention stripping; empty to auto-detect.
+func NewLongConnClient(botID, secret, botName string, handler MessageHandler) *LongConnClient {
+	c := &LongConnClient{
 		botID:   botID,
 		secret:  secret,
 		handler: handler,
 	}
+	if botName != "" {
+		c.botDisplayName.Store(botName)
+	}
+	return c
 }
 
 // Start connects and runs the long connection loop. It reconnects automatically on failure.
@@ -475,7 +484,8 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 
 	chatType := im.ChatTypeDirect
 	chatID := ""
-	if msg.ChatType == "group" {
+	isGroup := msg.ChatType == "group"
+	if isGroup {
 		chatType = im.ChatTypeGroup
 		chatID = msg.ChatID
 	}
@@ -490,6 +500,12 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 
 	switch msg.MsgType {
 	case "text":
+		// WeCom does not strip @mention in group chat; strip it so slash
+		// commands (/stop, /clear) are recognized.
+		textContent := msg.Text.Content
+		if isGroup {
+			textContent = c.stripAtMention(textContent)
+		}
 		incoming = &im.IncomingMessage{
 			Platform:    im.PlatformWeCom,
 			MessageType: im.MessageTypeText,
@@ -497,7 +513,7 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 			UserName:    msg.From.UserID,
 			ChatID:      chatID,
 			ChatType:    chatType,
-			Content:     strings.TrimSpace(msg.Text.Content),
+			Content:     strings.TrimSpace(textContent),
 			MessageID:   msg.MsgID,
 			Extra:       map[string]string{"req_id": reqID},
 		}
@@ -558,7 +574,7 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 
 	case "mixed":
 		// Extract text parts for QA content, and detect if any images are present
-		incoming = convertMixedMessage(&msg, chatID, chatType, reqID)
+		incoming = c.convertMixedMessage(&msg, chatID, chatType, reqID)
 		if incoming == nil {
 			logger.Infof(ctx, "[WeCom] Ignoring empty mixed message")
 			return
@@ -588,7 +604,8 @@ func (c *LongConnClient) handleCallback(ctx context.Context, frame wsFrame) {
 
 // convertMixedMessage converts a WeCom mixed (text+image) message.
 // Extracts all text content for QA; if there's only images, treat as image message.
-func convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, reqID string) *im.IncomingMessage {
+func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, reqID string) *im.IncomingMessage {
+	isGroup := chatType == im.ChatTypeGroup
 	var textParts []string
 	var firstImageURL string
 	var firstImageAESKey string
@@ -596,7 +613,11 @@ func convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, r
 	for _, item := range msg.Mixed.MsgItem {
 		switch item.MsgType {
 		case "text":
-			if t := strings.TrimSpace(item.Text.Content); t != "" {
+			t := strings.TrimSpace(item.Text.Content)
+			if isGroup {
+				t = c.stripAtMention(t)
+			}
+			if t != "" {
 				textParts = append(textParts, t)
 			}
 		case "image":
@@ -649,6 +670,68 @@ func (c *LongConnClient) closeConn() {
 	if c.conn != nil {
 		_ = c.conn.Close()
 	}
+}
+
+// stripAtMentionBasic removes a leading "@Name" prefix from group chat content.
+// Strategies: double-space split → heuristic (space + "/" or CJK) → first @word.
+// Used directly by the webhook adapter (stateless) and as the base for
+// LongConnClient.stripAtMention (stateful).
+func stripAtMentionBasic(content string) string {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "@") {
+		return content
+	}
+	// Some WeCom clients insert two spaces between @mention and user text.
+	if idx := strings.Index(content, "  "); idx > 0 {
+		return strings.TrimSpace(content[idx+2:])
+	}
+	// Heuristic: bot names are ASCII words; user content starts with "/"
+	// or non-ASCII (CJK). Scan for the transition.
+	for i := 1; i < len(content); i++ {
+		if content[i] == ' ' && i+1 < len(content) {
+			if next := content[i+1]; next == '/' || next >= 0x80 {
+				return strings.TrimSpace(content[i+1:])
+			}
+		}
+	}
+	// Fallback: strip first @word.
+	if idx := strings.Index(content, " "); idx > 0 {
+		return strings.TrimSpace(content[idx+1:])
+	}
+	return content
+}
+
+// stripAtMention removes the leading "@BotName" prefix from group chat messages.
+// Bot names may contain spaces (e.g., "WeKnora Bot"), so this adds two strategies
+// on top of stripAtMentionBasic: (1) double-space split with bot-name learning,
+// (2) cached/configured bot name prefix match.
+// Concurrent calls are safe; atomic.Value races are benign (same bot name).
+func (c *LongConnClient) stripAtMention(content string) string {
+	content = strings.TrimSpace(content)
+	if !strings.HasPrefix(content, "@") {
+		return content
+	}
+
+	// Strategy 1: double-space separator. Learn bot name on first occurrence
+	// (skip if already cached to avoid false positives from user double-spaces).
+	if idx := strings.Index(content, "  "); idx > 0 {
+		botName := content[1:idx] // between "@" and "  "
+		if cached, _ := c.botDisplayName.Load().(string); cached == "" && botName != "" {
+			c.botDisplayName.Store(botName)
+		}
+		return strings.TrimSpace(content[idx+2:])
+	}
+
+	// Strategy 2: cached/configured bot name with word-boundary check.
+	if name, _ := c.botDisplayName.Load().(string); name != "" {
+		prefix := "@" + name
+		if strings.HasPrefix(content, prefix) && (len(content) == len(prefix) || content[len(prefix)] == ' ') {
+			return strings.TrimSpace(content[len(prefix):])
+		}
+	}
+
+	// Strategy 3: delegate to stateless helper (heuristic scan + first-@word fallback).
+	return stripAtMentionBasic(content)
 }
 
 func (c *LongConnClient) writeJSON(v interface{}) error {

@@ -1009,6 +1009,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 			client := wecom.NewLongConnClient(
 				getString(creds, "bot_id"),
 				getString(creds, "bot_secret"),
+				getString(creds, "bot_name"),
 				msgHandler,
 			)
 
