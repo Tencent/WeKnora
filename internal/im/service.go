@@ -35,6 +35,8 @@ const (
 	dedupCleanupInterval = 1 * time.Minute
 	// maxContentLength is the maximum allowed message content length.
 	maxContentLength = 4096
+	// maxQuoteContentLength is the max runes to include from a quoted message.
+	maxQuoteContentLength = 500
 	// streamFlushInterval is how often buffered stream content is flushed to the IM platform.
 	// This prevents API rate-limiting while keeping perceived latency low.
 	streamFlushInterval = 300 * time.Millisecond
@@ -160,6 +162,24 @@ func makeUserKey(channelID, userID, chatID, threadID string) string {
 	return fmt.Sprintf("%s:%s:%s", channelID, userID, chatID)
 }
 
+// formatQuotedContext formats a QuotedMessage into a labeled string for LLM context.
+// Returns empty string if quote is nil or has no content.
+func formatQuotedContext(quote *QuotedMessage) string {
+	if quote == nil || quote.Content == "" {
+		return ""
+	}
+	content := quote.Content
+	runes := []rune(content)
+	if len(runes) > maxQuoteContentLength {
+		content = string(runes[:maxQuoteContentLength]) + "..."
+	}
+	label := "[被引用的消息]"
+	if quote.IsBotMessage {
+		label = "[引用的机器人回复]"
+	}
+	return label + "\n" + content
+}
+
 func buildIMQARequest(
 	session *types.Session,
 	query string,
@@ -167,6 +187,7 @@ func buildIMQARequest(
 	userMessageID string,
 	customAgent *types.CustomAgent,
 	kbIDs []string,
+	quote *QuotedMessage,
 ) *types.QARequest {
 	// WebSearchEnabled: the web handler passes this per-request from the
 	// frontend toggle; for IM channels the user has no per-message toggle,
@@ -180,6 +201,7 @@ func buildIMQARequest(
 		KnowledgeBaseIDs:   kbIDs,
 		UserMessageID:      userMessageID,
 		WebSearchEnabled:   webSearchEnabled,
+		QuotedContext:      formatQuotedContext(quote),
 	}
 }
 
@@ -723,6 +745,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		attribute.String("im.chat_id", msg.ChatID),
 		attribute.String("im.thread_id", msg.ThreadID),
 		attribute.String("im.message_type", string(msg.MessageType)),
+		attribute.Bool("im.has_quote", msg.Quote != nil),
 	)
 
 	// Dedup: skip if this message was already processed (IM platforms may retry)
@@ -937,7 +960,7 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	}
 
 	// Non-streaming fallback: collect full answer then send.
-	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, req.userKey)
+	answer, err := s.runQA(ctx, req.session, req.msg.Content, req.agent, kbIDs, req.userKey, req.msg.Quote)
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 		logger.Errorf(ctx, "[IM] QA failed: %v, sending fallback reply", err)
@@ -1559,7 +1582,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	// Run QA async
 	go func() {
 		var err error
-		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs)
+		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote)
 		if useAgent {
 			err = s.sessionService.AgentQA(qaCtx, req, eventBus)
 		} else {
@@ -1649,7 +1672,7 @@ loop:
 
 // fallbackNonStream is used when streaming initialization fails.
 func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, session *types.Session, customAgent *types.CustomAgent, kbIDs []string, adapter Adapter, userKey string) error {
-	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, userKey)
+	answer, err := s.runQA(ctx, session, msg.Content, customAgent, kbIDs, userKey, msg.Quote)
 	if err != nil {
 		logger.Errorf(ctx, "[IM] QA fallback failed: %v", err)
 		answer = "抱歉，处理您的问题时出现了异常，请稍后再试。"
@@ -1659,7 +1682,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 }
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
-func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, userKey string) (string, error) {
+func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, userKey string, quote *QuotedMessage) (string, error) {
 	// Add timeout to prevent indefinite blocking
 	ctx, cancel := context.WithTimeout(ctx, qaTimeout)
 	defer cancel()
@@ -1749,7 +1772,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	// Run QA async
 	go func() {
 		var err error
-		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs)
+		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote)
 		if useAgent {
 			err = s.sessionService.AgentQA(ctx, req, eventBus)
 		} else {

@@ -99,6 +99,7 @@ type PipelineState struct {
 	RenderedContexts     string            `json:"-"`
 	ChatResponse         *ChatResponse     `json:"-"`
 	ImageDescription     string            `json:"-"`
+	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
 	SystemPromptOverride string            `json:"-"`
 }
 
@@ -195,6 +196,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			RewriteQuery:         c.RewriteQuery,
 			Intent:               c.Intent,
 			ImageDescription:     c.ImageDescription,
+			QuotedContext:        c.QuotedContext,
 			SystemPromptOverride: c.SystemPromptOverride,
 			RenderedContexts:     c.RenderedContexts,
 		},
