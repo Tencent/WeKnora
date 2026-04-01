@@ -258,13 +258,16 @@ func buildUnitsWithProtection(text string, protected []span, separators []string
 
 // mergeUnits combines split units into chunks with overlap tracking.
 // Enforces an absolute maximum chunk size to prevent exceeding downstream limits (e.g., embedding APIs).
+// Active contextual headers (e.g., Markdown table headers) are prepended to new
+// chunks so that every chunk carries its own header context.
 func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 	if len(units) == 0 {
 		return nil
 	}
 
-	// Absolute maximum chunk size (留余量给标题等额外内容)
 	const absoluteMaxSize = 7500
+
+	ht := newHeaderTracker()
 
 	var chunks []Chunk
 	var current []splitUnit
@@ -282,6 +285,9 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 				curLen = 0
 			}
 
+			// Update header state even for oversized units
+			ht.update(u.text)
+
 			// Split this oversized unit into smaller chunks
 			runes := []rune(u.text)
 			offset := 0
@@ -290,7 +296,6 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 				if chunkEnd > len(runes) {
 					chunkEnd = len(runes)
 				} else {
-					// Try to break at a newline or space
 					for i := chunkEnd - 1; i > offset && i > chunkEnd-200; i-- {
 						if runes[i] == '\n' || runes[i] == ' ' {
 							chunkEnd = i + 1
@@ -311,17 +316,47 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 			continue
 		}
 
-		// If adding this unit exceeds chunk size and we have content, flush
-		if curLen+uLen > chunkSize && len(current) > 0 {
+		// Update header tracking
+		ht.update(u.text)
+		headers := ht.getHeaders()
+		headersLen := runeLen(headers)
+		if headersLen > chunkSize {
+			headers = ""
+			headersLen = 0
+		}
+
+		// If adding this unit (plus reserving space for headers in a potential
+		// next chunk) would exceed chunk size, flush the current chunk.
+		if curLen+uLen+headersLen > chunkSize && len(current) > 0 {
 			chunks = append(chunks, buildChunk(current, len(chunks)))
 
 			// Keep overlap from the end of current
 			current, curLen = computeOverlap(current, chunkOverlap, chunkSize, uLen)
+
+			// Shrink overlap further if needed to fit headers + next unit
+			if headers != "" && headersLen+uLen <= chunkSize {
+				for len(current) > 0 && curLen+uLen+headersLen > chunkSize {
+					curLen -= runeLen(current[0].text)
+					current = current[1:]
+				}
+
+				// Prepend headers if the column-name context is not already present
+				// in the overlap or the next unit being added.
+				overlapText := unitsText(current)
+				if !headerAlreadyPresent(headers, overlapText, u.text) {
+					startPos := u.start
+					if len(current) > 0 {
+						startPos = current[0].start
+					}
+					hUnit := splitUnit{text: headers, start: startPos, end: startPos}
+					current = append([]splitUnit{hUnit}, current...)
+					curLen += headersLen
+				}
+			}
 		}
 
 		// Check if adding this unit would exceed absolute max
 		if curLen+uLen > absoluteMaxSize {
-			// Flush current and start fresh
 			if len(current) > 0 {
 				chunks = append(chunks, buildChunk(current, len(chunks)))
 				current = nil
@@ -339,6 +374,57 @@ func mergeUnits(units []splitUnit, chunkSize, chunkOverlap int) []Chunk {
 	}
 
 	return chunks
+}
+
+// unitsText concatenates the text of all units.
+func unitsText(units []splitUnit) string {
+	var sb strings.Builder
+	for _, u := range units {
+		sb.WriteString(u.text)
+	}
+	return sb.String()
+}
+
+// headerAlreadyPresent returns true if the column-name row from the header
+// is already present in the overlap or the next unit, preventing duplication.
+func headerAlreadyPresent(headers, overlapText, unitText string) bool {
+	// Fast path: full header already in overlap or unit
+	if strings.Contains(overlapText, headers) || strings.Contains(unitText, headers) {
+		return true
+	}
+
+	// Extract the column-name row (first meaningful non-separator line).
+	// For a rewritten header like "| col1 | col2 |\n| --- | --- |\n",
+	// the first line is the column names.
+	colRow := headerColumnRow(headers)
+	if colRow == "" {
+		return false
+	}
+
+	return strings.Contains(overlapText, colRow) || strings.Contains(unitText, colRow)
+}
+
+// headerColumnRow extracts the column-name line from a header string.
+// Returns empty string if the header has no meaningful column names.
+func headerColumnRow(header string) string {
+	for _, line := range strings.Split(header, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "---") {
+			continue
+		}
+		// Skip lines that are only pipes/whitespace (empty header rows)
+		onlyPipes := true
+		for _, r := range line {
+			if r != '|' && r != ' ' && r != '\t' {
+				onlyPipes = false
+				break
+			}
+		}
+		if !onlyPipes {
+			return line
+		}
+	}
+	return ""
 }
 
 func buildChunk(units []splitUnit, seq int) Chunk {
@@ -376,11 +462,12 @@ func computeOverlap(current []splitUnit, chunkOverlap, chunkSize, nextLen int) (
 		startIdx = i
 	}
 
-	// Skip leading separators-only units in the overlap
+	// Skip leading separator-only and header-marker units in the overlap
 	for startIdx < len(current) {
 		u := current[startIdx]
+		isHeaderMarker := u.start == u.end
 		trimmed := strings.TrimSpace(u.text)
-		if trimmed == "" || isSeparatorOnly(u.text) {
+		if isHeaderMarker || trimmed == "" || isSeparatorOnly(u.text) {
 			overlapLen -= runeLen(u.text)
 			startIdx++
 		} else {
@@ -439,9 +526,11 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 		for _, sub := range subs {
 			// Adjust offsets: sub positions are relative to parent content,
 			// shift to document-level offsets.
+			// Use additive shift (not Content-length based) so that chunks with
+			// prepended context headers keep correct positional tracking.
 			sub.Seq = childSeq
 			sub.Start += parent.Start
-			sub.End = sub.Start + runeLen(sub.Content)
+			sub.End += parent.Start
 			children = append(children, ChildChunk{
 				Chunk:       sub,
 				ParentIndex: pi,
