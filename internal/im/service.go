@@ -193,6 +193,12 @@ func buildIMQARequest(
 	// frontend toggle; for IM channels the user has no per-message toggle,
 	// so we derive it from the agent config (the single source of truth).
 	webSearchEnabled := customAgent != nil && customAgent.Config.WebSearchEnabled
+	quotedContext := formatQuotedContext(quote)
+	if quotedContext != "" {
+		// Note: using context.Background() because buildIMQARequest is a pure function without ctx.
+		// This debug log won't carry trace/span IDs — acceptable for a debug-level log.
+		logger.Debugf(context.Background(), "[IM] QuotedContext set: length=%d", len(quotedContext))
+	}
 	return &types.QARequest{
 		Session:            session,
 		Query:              query,
@@ -201,7 +207,7 @@ func buildIMQARequest(
 		KnowledgeBaseIDs:   kbIDs,
 		UserMessageID:      userMessageID,
 		WebSearchEnabled:   webSearchEnabled,
-		QuotedContext:      formatQuotedContext(quote),
+		QuotedContext:      quotedContext,
 	}
 }
 

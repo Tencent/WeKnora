@@ -92,6 +92,9 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
 			userContent += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription
 		}
+		if chatManage.QuotedContext != "" {
+			userContent += "\n\n" + chatManage.QuotedContext
+		}
 
 		if tpl := chatManage.SummaryConfig.ContextTemplate; tpl != "" {
 			chatManage.UserContent = types.RenderPromptPlaceholders(tpl, types.PlaceholderValues{
@@ -173,6 +176,9 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	// process images directly. Vision-capable models see images via MultiContent.
 	if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
 		userContent += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription
+	}
+	if chatManage.QuotedContext != "" {
+		userContent += "\n\n" + chatManage.QuotedContext
 	}
 
 	// Set formatted content back to chat management

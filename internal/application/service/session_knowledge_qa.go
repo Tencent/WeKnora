@@ -126,6 +126,7 @@ func (s *sessionService) KnowledgeQA(
 		PipelineState: types.PipelineState{
 			RewriteQuery:     req.Query,
 			ImageDescription: req.ImageDescription,
+			QuotedContext:    req.QuotedContext,
 		},
 		PipelineContext: types.PipelineContext{
 			EventBus:      eventBus.AsEventBusInterface(),
@@ -149,6 +150,9 @@ func (s *sessionService) KnowledgeQA(
 		userContent := req.Query
 		if req.ImageDescription != "" && !chatModelSupportsVision {
 			userContent += "\n\n[用户上传图片内容]\n" + req.ImageDescription
+		}
+		if req.QuotedContext != "" {
+			userContent += "\n\n" + req.QuotedContext
 		}
 		chatManage.UserContent = userContent
 
@@ -731,6 +735,9 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 
 	if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
 		result += "\n\n[用户上传图片内容]\n" + chatManage.ImageDescription
+	}
+	if chatManage.QuotedContext != "" {
+		result += "\n\n" + chatManage.QuotedContext
 	}
 	return result, nil
 }

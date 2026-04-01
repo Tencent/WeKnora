@@ -2,6 +2,8 @@ package im
 
 import (
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestFormatQuotedContext(t *testing.T) {
@@ -51,4 +53,39 @@ func TestFormatQuotedContext(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildIMQARequest_QuotedContext(t *testing.T) {
+	session := &types.Session{ID: "s1"}
+
+	t.Run("nil quote produces empty QuotedContext", func(t *testing.T) {
+		req := buildIMQARequest(session, "hello", "a1", "u1", nil, nil, nil)
+		if req.QuotedContext != "" {
+			t.Errorf("QuotedContext = %q, want empty", req.QuotedContext)
+		}
+		if req.Query != "hello" {
+			t.Errorf("Query = %q, want %q", req.Query, "hello")
+		}
+	})
+
+	t.Run("bot quote sets QuotedContext with bot label", func(t *testing.T) {
+		quote := &QuotedMessage{Content: "bot reply", IsBotMessage: true}
+		req := buildIMQARequest(session, "follow up", "a1", "u1", nil, nil, quote)
+		if req.Query != "follow up" {
+			t.Errorf("Query = %q, want %q", req.Query, "follow up")
+		}
+		want := "[引用的机器人回复]\nbot reply"
+		if req.QuotedContext != want {
+			t.Errorf("QuotedContext = %q, want %q", req.QuotedContext, want)
+		}
+	})
+
+	t.Run("user quote sets QuotedContext with user label", func(t *testing.T) {
+		quote := &QuotedMessage{Content: "user msg", IsBotMessage: false}
+		req := buildIMQARequest(session, "question", "a1", "u1", nil, nil, quote)
+		want := "[被引用的消息]\nuser msg"
+		if req.QuotedContext != want {
+			t.Errorf("QuotedContext = %q, want %q", req.QuotedContext, want)
+		}
+	})
 }

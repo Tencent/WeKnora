@@ -174,6 +174,9 @@ func (s *sessionService) AgentQA(
 		agentQuery = req.Query + "\n\n[用户上传图片内容]\n" + req.ImageDescription
 		logger.Infof(ctx, "Agent model does not support vision, appending image description (%d chars)", len(req.ImageDescription))
 	}
+	if req.QuotedContext != "" {
+		agentQuery += "\n\n" + req.QuotedContext
+	}
 
 	// Execute agent with streaming (asynchronously)
 	// Events will be emitted to EventBus and handled by the Handler layer
