@@ -425,6 +425,20 @@ func (r *chunkRepository) DeleteChunksByKnowledgeID(ctx context.Context, tenantI
 	).Delete(&types.Chunk{}).Error
 }
 
+// ListImageInfoByKnowledgeIDs returns non-empty image_info values for the given knowledge IDs.
+// No chunk_type filter — collects from text, image_ocr, and image_caption chunks.
+func (r *chunkRepository) ListImageInfoByKnowledgeIDs(
+	ctx context.Context, tenantID uint64, knowledgeIDs []string,
+) ([]interfaces.ChunkImageInfo, error) {
+	var results []interfaces.ChunkImageInfo
+	err := r.db.WithContext(ctx).
+		Model(&types.Chunk{}).
+		Select("knowledge_id, image_info").
+		Where("tenant_id = ? AND knowledge_id IN ? AND image_info != ''", tenantID, knowledgeIDs).
+		Scan(&results).Error
+	return results, err
+}
+
 // DeleteByKnowledgeList deletes all chunks for a knowledge list
 func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error {
 	return r.db.WithContext(ctx).Where(

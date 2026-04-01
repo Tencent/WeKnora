@@ -453,6 +453,17 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
+		// Collect image URLs before chunks are deleted
+		chunkImageInfos, imgErr := s.chunkRepo.ListImageInfoByKnowledgeIDs(ctx, tenantID, knowledgeIDs)
+		if imgErr != nil {
+			logger.Warnf(ctx, "Failed to collect image URLs for KB delete: %v", imgErr)
+		}
+		var imageInfoStrs []string
+		for _, ci := range chunkImageInfos {
+			imageInfoStrs = append(imageInfoStrs, ci.ImageInfo)
+		}
+		imageURLs := collectImageURLs(ctx, imageInfoStrs)
+
 		// Delete all chunks
 		logger.Infof(ctx, "Deleting all chunks in knowledge base")
 		for _, knowledgeID := range knowledgeIDs {
@@ -461,8 +472,8 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 		}
 
-		// Delete physical files and adjust storage
-		logger.Infof(ctx, "Deleting physical files")
+		// Delete physical files, extracted images, and adjust storage
+		logger.Infof(ctx, "Deleting physical files and extracted images")
 		storageAdjust := int64(0)
 		for _, knowledge := range knowledgeList {
 			if knowledge.FilePath != "" {
@@ -472,6 +483,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			}
 			storageAdjust -= knowledge.StorageSize
 		}
+		deleteExtractedImages(ctx, s.fileSvc, imageURLs)
 		if storageAdjust != 0 {
 			if err := s.tenantRepo.AdjustStorageUsed(ctx, tenantID, storageAdjust); err != nil {
 				logger.Warnf(ctx, "Failed to adjust tenant storage: %v", err)

@@ -6,6 +6,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// ChunkImageInfo holds (knowledge_id, image_info) pairs for image cleanup before chunk deletion.
+type ChunkImageInfo struct {
+	KnowledgeID string `gorm:"column:knowledge_id"`
+	ImageInfo   string `gorm:"column:image_info"`
+}
+
 // ChunkRepository defines the interface for chunk repository operations
 type ChunkRepository interface {
 	// CreateChunks creates chunks
@@ -58,6 +64,8 @@ type ChunkRepository interface {
 	DeleteChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) error
 	// DeleteByKnowledgeList deletes all chunks for a knowledge list
 	DeleteByKnowledgeList(ctx context.Context, tenantID uint64, knowledgeIDs []string) error
+	// ListImageInfoByKnowledgeIDs returns non-empty (knowledge_id, image_info) pairs for image cleanup.
+	ListImageInfoByKnowledgeIDs(ctx context.Context, tenantID uint64, knowledgeIDs []string) ([]ChunkImageInfo, error)
 	// MoveChunksByKnowledgeID updates knowledge_base_id for all chunks of a knowledge item
 	MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error
 	// DeleteChunksByTagID deletes all chunks with the specified tag ID
