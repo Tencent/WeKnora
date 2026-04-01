@@ -11,9 +11,10 @@ from io import BytesIO
 from multiprocessing import Manager
 from typing import Any, Dict, List, Optional, Tuple
 
+
+# patch from https://github.com/python-openxml/python-docx/issues/1105#issuecomment-1298075246
 from docx.opc.pkgreader import _SerializedRelationships, _SerializedRelationship
 from docx.opc.oxml import parse_xml
-
 
 def load_from_xml_v2(baseURI, rels_item_xml):
     """
@@ -29,7 +30,6 @@ def load_from_xml_v2(baseURI, rels_item_xml):
                 continue
             srels._srels.append(_SerializedRelationship(baseURI, rel_elm))
     return srels
-
 
 _SerializedRelationships.load_from_xml = load_from_xml_v2
 
