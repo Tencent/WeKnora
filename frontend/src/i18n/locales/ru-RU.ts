@@ -110,6 +110,17 @@ export default {
     typeURL: 'URL',
     typeManual: 'Вручную',
     typeFile: 'Файл',
+    channelLabel: 'Канал источника',
+    channelWeb: 'Веб',
+    channelApi: 'API',
+    channelBrowserExtension: 'Расширение браузера',
+    channelWechat: 'WeChat',
+    channelWecom: 'WeCom',
+    channelFeishu: 'Feishu',
+    channelDingtalk: 'DingTalk',
+    channelSlack: 'Slack',
+    channelIm: 'IM канал',
+    channelUnknown: 'Неизвестно',
     urlSource: 'Исходный URL',
     documentTitle: 'Название документа',
     webContent: 'Веб-содержимое',
@@ -272,6 +283,7 @@ export default {
   },
   agent: {
     taskLabel: 'Задача:',
+    think: 'Размышление',
     copy: 'Копировать',
     addToKnowledgeBase: 'Добавить в базу знаний',
     updatePlan: 'Обновить план',
@@ -1593,6 +1605,7 @@ export default {
       advanced: 'Дополнительные настройки',
       faq: 'FAQ настройки',
       graph: 'Граф знаний',
+      multimodal: 'Мультимодальность',
       storage: 'Storage Engine',
       share: 'Sharing'
     },
@@ -1784,6 +1797,10 @@ export default {
       parentChunkSizeDescription: 'Размер родительских блоков для контекста (256-4096)',
       childChunkSizeLabel: 'Размер дочернего блока',
       childChunkSizeDescription: 'Размер дочерних блоков для поиска по эмбеддингам (64-1024)'
+    },
+    multimodal: {
+      title: 'Мультимодальная конфигурация',
+      description: 'Настройка понимания мультимодального контента для парсинга и поиска нетекстового содержимого, такого как изображения',
     },
     advanced: {
       title: 'Расширенные настройки',

@@ -219,7 +219,7 @@
                     <t-icon name="relation" size="14px" />
                   </div>
                 </t-tooltip>
-                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_config?.provider && kb.storage_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+                <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')" :content="$t('knowledgeList.features.multimodal')" placement="top">
                   <div class="feature-badge multimodal">
                     <t-icon name="image" size="14px" />
                   </div>
@@ -324,7 +324,7 @@
                   <t-icon name="relation" size="14px" />
                 </div>
               </t-tooltip>
-              <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_config?.provider && kb.storage_config?.bucket_name)" :content="$t('knowledgeList.features.multimodal')" placement="top">
+              <t-tooltip v-if="kb.vlm_config?.enabled || (kb.storage_provider_config?.provider && kb.storage_provider_config.provider !== 'local')" :content="$t('knowledgeList.features.multimodal')" placement="top">
                 <div class="feature-badge multimodal">
                   <t-icon name="image" size="14px" />
                 </div>
@@ -632,7 +632,8 @@ interface KB {
   showMore?: boolean;
   vlm_config?: { enabled?: boolean; model_id?: string };
   extract_config?: { enabled?: boolean };
-  storage_config?: { provider?: string; bucket_name?: string };
+  storage_provider_config?: { provider?: string };
+  storage_config?: { provider?: string; bucket_name?: string }; // legacy
   question_generation_config?: { enabled?: boolean; question_count?: number };
   knowledge_count?: number;
   chunk_count?: number;
