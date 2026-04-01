@@ -71,8 +71,24 @@ type IncomingMessage struct {
 	// In thread mode, top-level messages use their own ID as ThreadID,
 	// effectively creating a new session per top-level message.
 	ThreadID string
+	// Quote is the quoted/replied message, if any.
+	// Populated by adapters on platforms that support quote-reply.
+	Quote *QuotedMessage
 	// Extra holds platform-specific fields (e.g., WeCom stream ID).
 	Extra map[string]string
+}
+
+// QuotedMessage holds the content and metadata of a quoted/replied message.
+// Populated by platform adapters that support quote-reply (e.g. WeCom long-connection).
+type QuotedMessage struct {
+	// MessageID is the platform message ID of the quoted message.
+	MessageID string
+	// Content is the text content (or placeholder like "[图片]" for non-text).
+	Content string
+	// SenderID is the platform user ID of the quoted message's author.
+	SenderID string
+	// IsBotMessage indicates whether the quoted message was from the bot.
+	IsBotMessage bool
 }
 
 // ChatType represents the IM chat type.
