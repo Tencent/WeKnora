@@ -151,6 +151,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     markdown_content=_c(result.content),
                     image_refs=image_refs,
                     image_dir_path=image_dir,
+                    metadata={k: _c(str(v)) for k, v in result.metadata.items()} if result.metadata else {},
                 )
                 logger.info(
                     "Read response: content_len=%d, images=%d",

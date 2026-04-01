@@ -132,8 +132,9 @@ class PipelineParser(BaseParser):
             Document: Final document after processing through all parsers,
                      with accumulated images from all stages
         """
-        # Accumulate images from all parsers
+        # Accumulate images and metadata from all parsers
         images: Dict[str, str] = {}
+        metadata: Dict = {}
         document = Document()
         for p in self._parsers:
             logger.info(f"PipelineParser: using parser {p.__class__.__name__}")
@@ -141,10 +142,12 @@ class PipelineParser(BaseParser):
             document = p.parse_into_text(content)
             # Convert document content back to bytes for next parser
             content = endecode.encode_bytes(document.content)
-            # Accumulate images from this parser
+            # Accumulate images and metadata from this parser
             images.update(document.images)
-        # Merge all accumulated images into final document
+            metadata.update(document.metadata)
+        # Merge all accumulated images and metadata into final document
         document.images.update(images)
+        document.metadata.update(metadata)
         return document
 
     @classmethod

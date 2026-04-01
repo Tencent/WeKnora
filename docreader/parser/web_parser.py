@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 from playwright.async_api import async_playwright
 from trafilatura import extract
@@ -110,7 +111,18 @@ class StdWebParser(BaseParser):
         if not md_text:
             logger.error("Failed to parse web page")
             return Document(content=f"Error parsing web page: {url}")
-        return Document(content=md_text)
+
+        # Extract title from trafilatura metadata output (e.g. "title: xxx" line)
+        metadata = {}
+        title_match = re.search(r"^title:\s*(.+)", md_text, re.MULTILINE)
+        if title_match:
+            extracted_title = title_match.group(1).strip()
+            if extracted_title:
+                metadata["title"] = extracted_title
+                logger.info(f"Extracted article title from trafilatura: {extracted_title}")
+        else:
+            logger.info(f"No title found in trafilatura output, first 200 chars: {md_text[:200]!r}")
+        return Document(content=md_text, metadata=metadata)
 
 
 class WebParser(PipelineParser):
