@@ -306,16 +306,9 @@ func (s *userService) LoginWithOIDC(ctx context.Context, code, redirectURI strin
 		return nil, fmt.Errorf("failed to generate local tokens: %w", err)
 	}
 
-	tenant, err := s.tenantService.GetTenantByID(ctx, user.TenantID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to get tenant info after OIDC login: %v", err)
-	}
-
 	return &types.OIDCCallbackResponse{
 		Success:      true,
-		Message:      "Login successful",
-		User:         user,
-		Tenant:       tenant,
+		Message:      "登录成功",
 		Token:        accessToken,
 		RefreshToken: refreshToken,
 		IsNewUser:    isNewUser,

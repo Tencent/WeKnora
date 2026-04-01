@@ -34,9 +34,9 @@
    - 若用户不存在，则自动创建本地账号和默认租户；
    - 最终签发 WeKnora 自己的本地 JWT（`token` / `refresh_token`）。
 4. 后端不会直接把登录结果放在 query string 中，而是：
-   - 将结果 JSON 序列化后再做 base64url 编码；
+   - 将登录结果 JSON（ `success`、`token`、`refresh_token` 等字段）序列化后再做 base64url 编码；
    - 以 `#oidc_result=...` 的形式重定向回前端；
-   - 前端在 `App.vue` 中统一解析 hash，完成登录态持久化。
+   - 前端在 `App.vue` 中统一解析 hash，再调用 `/api/v1/auth/me` 补全用户和租户信息。
 
 因此，**OIDC Provider 的 token 只用于后端换取用户身份，本项目真正的业务访问凭证仍然是 WeKnora 自己签发的 JWT**。
 
@@ -93,7 +93,9 @@ sequenceDiagram
     BE-->>FE: 302 到 /#oidc_result=...
 
     FE->>FE: App.vue 解析 hash
-    FE->>FE: 写入 authStore/token/tenant
+    FE->>BE: GET /api/v1/auth/me
+    BE-->>FE: { user, tenant }
+    FE->>FE: 写入 authStore/token/user/tenant
     FE-->>U: 跳转 /platform/knowledge-bases
 ```
 
@@ -120,7 +122,7 @@ flowchart TD
     M -- 是 --> O[使用现有用户]
     N --> P[签发 WeKnora JWT]
     O --> P
-    P --> Q[编码为 oidc_result]
+    P --> Q[编码最小必要登录结果为 oidc_result]
     Q --> R[302 重定向到前端首页 hash]
 ```
 
@@ -422,12 +424,12 @@ GenerateTokens(ctx, user)
 
 并写入本地 `auth_tokens` 存储（通过 `tokenRepo.CreateToken`）。
 
-最终后端还会查询当前用户所属租户，并返回：
+最终后端会返回 OIDC 回调载荷，其中包含：
 
-- `user`
-- `tenant`
 - `token`
 - `refresh_token`
+- `success`
+- `message`
 - `is_new_user`
 
 这一步意味着：
@@ -502,10 +504,10 @@ window.location.hash
 
 1. base64url 解码并反序列化；
 2. 如果 `response.success=true`：
-   - 写入 `authStore.setUser(...)`
-   - 写入 `authStore.setToken(...)`
-   - 写入 `authStore.setRefreshToken(...)`
-   - 写入 `authStore.setTenant(...)`
+   - 先写入 `authStore.setToken(...)`
+   - 再写入 `authStore.setRefreshToken(...)`
+   - 随后调用 `/api/v1/auth/me`
+   - 用 `/auth/me` 返回的 `user` / `tenant` 执行 `authStore.setUser(...)` 与 `authStore.setTenant(...)`
 3. 最终跳转到：
 
 ```text
