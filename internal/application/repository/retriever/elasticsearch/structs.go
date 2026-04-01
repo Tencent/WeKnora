@@ -7,40 +7,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// VectorEmbedding defines the Elasticsearch document structure for vector embeddings.
-//
-// Expected index mapping (all ID fields must be "keyword" type, not "text"):
-//
-//	{
-//	  "settings": {
-//	    "analysis": {
-//	      "analyzer": {
-//	        "ik_max_word": { "type": "custom", "tokenizer": "ik_max_word" },
-//	        "ik_smart":    { "type": "custom", "tokenizer": "ik_smart" }
-//	      }
-//	    }
-//	  },
-//	  "mappings": {
-//	    "dynamic_templates": [
-//	      { "strings": { "match_mapping_type": "string", "mapping": { "type": "keyword" } } }
-//	    ],
-//	    "properties": {
-//	      "content":           { "type": "text", "analyzer": "ik_max_word", "search_analyzer": "ik_smart" },
-//	      "chunk_id":          { "type": "keyword" },
-//	      "knowledge_id":      { "type": "keyword" },
-//	      "knowledge_base_id": { "type": "keyword" },
-//	      "source_id":         { "type": "keyword" },
-//	      "tag_id":            { "type": "keyword" },
-//	      "source_type":       { "type": "long" },
-//	      "is_enabled":        { "type": "boolean" },
-//	      "is_recommended":    { "type": "boolean" },
-//	      "embedding":         { "type": "dense_vector", "dims": "<model_dims>" }
-//	    }
-//	  }
-//	}
-//
-// IMPORTANT: Do NOT use ".keyword" suffix in queries for ID fields (e.g. use "chunk_id", not
-// "chunk_id.keyword"), because these fields are already "keyword" type without a ".keyword" sub-field.
+// VectorEmbedding defines the Elasticsearch document structure for vector embeddings
 type VectorEmbedding struct {
 	Content         string    `json:"content"           gorm:"column:content;not null"`     // Text content of the chunk
 	SourceID        string    `json:"source_id"         gorm:"column:source_id;not null"`   // ID of the source document
