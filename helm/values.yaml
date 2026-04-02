@@ -104,6 +104,43 @@ app:
   # - name: OLLAMA_BASE_URL
   #   value: "http://ollama:11434"
 
+  # -- Sandbox configuration for Agent Skills script execution
+  sandbox:
+    # -- Sandbox mode: local, docker, kubernetes, opensandbox, disabled
+    # In Kubernetes, "local" is recommended as the baseline.
+    # Use "kubernetes" for container-level isolation without Docker daemon.
+    # Use "opensandbox" to integrate with an external OpenSandbox service.
+    mode: local
+    # -- Script execution timeout in seconds
+    timeout: 60
+    # -- Sandbox container image (used by docker/kubernetes modes)
+    image: wechatopenai/weknora-sandbox:latest
+    # -- Kubernetes sandbox mode configuration
+    kubernetes:
+      # -- Namespace for sandbox Pods
+      namespace: weknora-sandbox
+      # -- Max concurrent sandbox Jobs per WeKnora instance
+      maxConcurrentSandboxes: 5
+      # -- Resource limits per sandbox Pod
+      podResources:
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+      # -- ResourceQuota for sandbox namespace
+      quota:
+        maxPods: 10
+        maxMemory: "2Gi"
+        maxCPU: "4"
+    # -- OpenSandbox mode configuration
+    opensandbox:
+      # -- OpenSandbox Server URL
+      apiURL: ""
+      # -- API Key (plain text, used when existingSecret is not set)
+      apiKey: ""
+      # -- Use an existing Secret for the API key (recommended for production)
+      # The Secret must contain a key named "apiKey"
+      existingSecret: ""
+
   # -- Service configuration
   service:
     type: ClusterIP

@@ -1,0 +1,53 @@
+{{/*
+Sandbox RBAC resources for kubernetes sandbox mode.
+Only created when sandbox mode is "kubernetes".
+*/}}
+{{- if eq .Values.app.sandbox.mode "kubernetes" }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.app.sandbox.kubernetes.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: weknora
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: weknora-sandbox-runner
+  namespace: {{ .Values.app.sandbox.kubernetes.namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: weknora-sandbox-manager
+  namespace: {{ .Values.app.sandbox.kubernetes.namespace }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "delete", "get", "list"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: weknora-sandbox-manager
+  namespace: {{ .Values.app.sandbox.kubernetes.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: weknora-sandbox-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "weknora.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

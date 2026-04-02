@@ -1,0 +1,30 @@
+{{/*
+Sandbox ResourceQuota and NetworkPolicy for kubernetes sandbox mode.
+Only created when sandbox mode is "kubernetes".
+*/}}
+{{- if eq .Values.app.sandbox.mode "kubernetes" }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: weknora-sandbox-quota
+  namespace: {{ .Values.app.sandbox.kubernetes.namespace }}
+spec:
+  hard:
+    pods: {{ .Values.app.sandbox.kubernetes.quota.maxPods | quote }}
+    limits.memory: {{ .Values.app.sandbox.kubernetes.quota.maxMemory | quote }}
+    limits.cpu: {{ .Values.app.sandbox.kubernetes.quota.maxCPU | quote }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: weknora-sandbox-deny-all
+  namespace: {{ .Values.app.sandbox.kubernetes.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: sandbox
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}

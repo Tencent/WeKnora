@@ -29,6 +29,9 @@ spec:
     spec:
       {{- include "weknora.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- if eq .Values.app.sandbox.mode "kubernetes" }}
+      automountServiceAccountToken: true
+      {{- end }}
       {{- with .Values.app.podSecurityContext | default .Values.global.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -140,6 +143,32 @@ spec:
                 secretKeyRef:
                   name: {{ include "weknora.secretName" . }}
                   key: NEO4J_PASSWORD
+            {{- end }}
+            # Sandbox configuration
+            - name: WEKNORA_SANDBOX_MODE
+              value: {{ .Values.app.sandbox.mode | quote }}
+            - name: WEKNORA_SANDBOX_TIMEOUT
+              value: {{ .Values.app.sandbox.timeout | quote }}
+            - name: WEKNORA_SANDBOX_IMAGE
+              value: {{ .Values.app.sandbox.image | quote }}
+            {{- if eq .Values.app.sandbox.mode "kubernetes" }}
+            - name: WEKNORA_SANDBOX_KUBE_NAMESPACE
+              value: {{ .Values.app.sandbox.kubernetes.namespace | quote }}
+            - name: WEKNORA_SANDBOX_MAX_CONCURRENT
+              value: {{ .Values.app.sandbox.kubernetes.maxConcurrentSandboxes | quote }}
+            {{- end }}
+            {{- if eq .Values.app.sandbox.mode "opensandbox" }}
+            - name: WEKNORA_SANDBOX_OPENSANDBOX_API_URL
+              value: {{ .Values.app.sandbox.opensandbox.apiURL | quote }}
+            - name: WEKNORA_SANDBOX_OPENSANDBOX_API_KEY
+              {{- if .Values.app.sandbox.opensandbox.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.app.sandbox.opensandbox.existingSecret }}
+                  key: apiKey
+              {{- else }}
+              value: {{ .Values.app.sandbox.opensandbox.apiKey | quote }}
+              {{- end }}
             {{- end }}
             {{- with .Values.app.extraEnv }}
             # Additional environment variables
