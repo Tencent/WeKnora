@@ -52,6 +52,9 @@ class DocReaderConfig:
     grpc_max_file_size_mb: int
     grpc_port: int
 
+    # Parser
+    docx_max_pages: int
+
     # Proxy
     external_http_proxy: str
     external_https_proxy: str
@@ -70,6 +73,7 @@ def load_config() -> DocReaderConfig:
         * 1024
     )
     grpc_port = _get_int(["DOCREADER_GRPC_PORT", "PORT"], 50051)
+    docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 100)
 
     external_http_proxy = _get_str(
         ["DOCREADER_EXTERNAL_HTTP_PROXY", "EXTERNAL_HTTP_PROXY"], ""
@@ -86,6 +90,7 @@ def load_config() -> DocReaderConfig:
         grpc_max_workers=grpc_max_workers,
         grpc_max_file_size_mb=grpc_max_file_size_mb,
         grpc_port=grpc_port,
+        docx_max_pages=docx_max_pages,
         external_http_proxy=external_http_proxy,
         external_https_proxy=external_https_proxy,
         image_output_dir=image_output_dir,
@@ -101,6 +106,7 @@ def dump_config(mask_secrets: bool = True) -> Dict[str, Any]:
         "DOCREADER_GRPC_MAX_WORKERS": cfg.grpc_max_workers,
         "DOCREADER_GRPC_MAX_FILE_SIZE_MB": cfg.grpc_max_file_size_mb,
         "DOCREADER_GRPC_PORT": cfg.grpc_port,
+        "DOCREADER_DOCX_MAX_PAGES": cfg.docx_max_pages,
         "DOCREADER_EXTERNAL_HTTP_PROXY": cfg.external_http_proxy,
         "DOCREADER_EXTERNAL_HTTPS_PROXY": cfg.external_https_proxy,
         "DOCREADER_IMAGE_OUTPUT_DIR": cfg.image_output_dir,

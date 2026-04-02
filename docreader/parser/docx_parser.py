@@ -41,6 +41,7 @@ from docx.image.exceptions import (
 )
 from PIL import Image
 
+from docreader.config import CONFIG
 from docreader.models.document import Document as DocumentModel
 from docreader.parser.base_parser import BaseParser
 from docreader.utils import endecode
@@ -76,7 +77,7 @@ class DocxParser(BaseParser):
 
     def __init__(
         self,
-        max_pages: int = 100,  # Maximum number of pages to process
+        max_pages: Optional[int] = None,  # Maximum number of pages to process
         **kwargs,
     ):
         """Initialize DOCX document parser
@@ -95,8 +96,8 @@ class DocxParser(BaseParser):
             max_pages: Maximum number of pages to process
         """
         super().__init__(**kwargs)
-        self.max_pages = max_pages
-        logger.info(f"DocxParser initialized with max_pages={max_pages}")
+        self.max_pages = CONFIG.docx_max_pages if max_pages is None else max_pages
+        logger.info(f"DocxParser initialized with max_pages={self.max_pages}")
 
     def parse_into_text(self, content: bytes) -> DocumentModel:
         """Parse DOCX document, extract text content and image Markdown links"""
