@@ -186,6 +186,11 @@ renderer.image = function ({href, title, text}) {
 
 // 自定义代码块渲染器，只显示语言标签
 renderer.code = function ({text, lang}) {
+  // 空值校验：防止 text 为 undefined 或 null
+  if (!text || typeof text !== 'string') {
+    text = '';
+  }
+
   // Mermaid 图表处理
   if (lang === 'mermaid') {
     // 生成唯一ID

@@ -192,12 +192,24 @@ async function renderText(blob: Blob, fileType: string) {
 async function renderMarkdown(blob: Blob) {
   const { marked } = await import('marked');
   const text = await blob.text();
+
+  // 校验文本内容是否有效
+  if (!text || typeof text !== 'string') {
+    markdownHtml.value = '<p style="color: var(--td-text-color-disabled); text-align: center; padding: 20px;">文档内容为空</p>';
+    return;
+  }
+
   marked.use({
     breaks: true,
     gfm: true,
   });
   const renderer = new marked.Renderer();
   renderer.code = function ({text, lang}) {
+    // 空值校验：防止 text 为 undefined 或 null
+    if (!text || typeof text !== 'string') {
+      text = '';
+    }
+
     let highlighted = '';
     if (lang && hljs.getLanguage(lang)) {
       try { highlighted = hljs.highlight(text, { language: lang }).value; }
