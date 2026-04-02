@@ -265,13 +265,29 @@ func (p *PluginMerge) resolveParentChunks(
 	// within their own range, but the parent content spans all children.
 	parentImageInfoMap := p.collectParentImageInfo(ctx, tenantID, ids)
 
-	// Replace child content with parent content
+	// Replace child content with parent content.
+	// Only replace for text chunks whose parent is a parent_text chunk
+	// (i.e., the parent-child chunking strategy). Summary chunks also carry
+	// a ParentChunkID that points to their source chunk, but that is a
+	// different semantic — replacing summary content with its source would
+	// degrade quality.
 	for _, r := range results {
 		if r.ParentChunkID == "" {
 			continue
 		}
+		// Skip non-text chunks (e.g., summary, image_caption) — their
+		// ParentChunkID has a different meaning than the parent-child
+		// chunking strategy.
+		if r.ChunkType != string(types.ChunkTypeText) {
+			continue
+		}
 		parent, ok := parentMap[r.ParentChunkID]
 		if !ok || parent.Content == "" {
+			continue
+		}
+		// Only replace if the parent is actually a parent_text chunk from
+		// the parent-child chunking strategy.
+		if parent.ChunkType != types.ChunkTypeParentText {
 			continue
 		}
 		pipelineInfo(ctx, "Merge", "parent_resolve", map[string]interface{}{
