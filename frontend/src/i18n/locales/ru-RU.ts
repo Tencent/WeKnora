@@ -208,6 +208,7 @@ export default {
     parsingFailed: 'Парсинг не удался',
     parsingInProgress: 'Парсинг...',
     generatingSummary: 'Генерация резюме...',
+    documentSummary: 'Резюме',
     deleteConfirmation: 'Подтверждение удаления',
     confirmDeleteDocument: 'Подтвердить удаление документа "{fileName}", после удаления восстановление невозможно',
     cancel: 'Отмена',

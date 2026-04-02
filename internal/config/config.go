@@ -111,6 +111,7 @@ type ConversationConfig struct {
 
 // SummaryConfig 摘要配置
 type SummaryConfig struct {
+	MaxInputChars       int     `yaml:"max_input_chars"       json:"max_input_chars"` // Max input characters for summary generation (default: 16384)
 	MaxTokens           int     `yaml:"max_tokens"            json:"max_tokens"`
 	RepeatPenalty       float64 `yaml:"repeat_penalty"        json:"repeat_penalty"`
 	TopK                int     `yaml:"top_k"                 json:"top_k"`

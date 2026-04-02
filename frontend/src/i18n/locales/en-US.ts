@@ -236,6 +236,7 @@ export default {
     parsingFailed: 'Parsing failed',
     parsingInProgress: 'Parsing...',
     generatingSummary: 'Generating summary...',
+    documentSummary: 'Summary',
     deleteConfirmation: 'Delete Confirmation',
     confirmDeleteDocument: 'Confirm deletion of document "{fileName}", recovery will be impossible after deletion',
     cancel: 'Cancel',

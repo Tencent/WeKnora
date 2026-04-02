@@ -240,6 +240,7 @@ export default {
     parsingFailed: "파싱 실패",
     parsingInProgress: "파싱 중...",
     generatingSummary: "요약 생성 중...",
+    documentSummary: "요약",
     deleteConfirmation: "삭제 확인",
     confirmDeleteDocument: '"{fileName}" 문서를 삭제하시겠습니까? 삭제 후 복구할 수 없습니다',
     cancel: "취소",

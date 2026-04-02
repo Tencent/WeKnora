@@ -237,6 +237,7 @@ export default {
     parsingFailed: "解析失败",
     parsingInProgress: "解析中...",
     generatingSummary: "生成摘要中...",
+    documentSummary: "摘要",
     deleteConfirmation: "删除确认",
     confirmDeleteDocument: '确认删除文档"{fileName}"，删除后将无法恢复',
     cancel: "取消",

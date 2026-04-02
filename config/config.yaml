@@ -23,6 +23,7 @@ conversation:
   generate_summary_prompt_id: "default_summary"  # from prompt_templates/generate_summary.yaml
   generate_session_title_prompt_id: "default_session_title"  # from prompt_templates/generate_session_title.yaml
   summary:
+    max_input_chars: 16384
     repeat_penalty: 1.0
     temperature: 0.3
     max_completion_tokens: 2048

@@ -1910,13 +1910,22 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.GetLogger(ctx).Infof("processChunks successfully")
 }
 
-// GetSummary generates a summary for knowledge content using an AI model
+// defaultMaxInputChars is the default maximum characters used as input for summary generation.
+const defaultMaxInputChars = 16384
+
+// getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
 ) (string, error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
 		return "", fmt.Errorf("no chunks provided for summary generation")
+	}
+
+	// Determine max input chars from config
+	maxInputChars := defaultMaxInputChars
+	if s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxInputChars > 0 {
+		maxInputChars = s.config.Conversation.Summary.MaxInputChars
 	}
 
 	// concat chunk contents
@@ -1930,11 +1939,8 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		return sortedChunks[i].StartAt < sortedChunks[j].StartAt
 	})
 
-	// concat chunk contents and collect image infos
+	// concat ALL chunk contents (no early truncation) and collect image infos
 	for _, chunk := range sortedChunks {
-		if chunk.EndAt > 4096 {
-			break
-		}
 		// Ensure we don't slice beyond the current content length
 		runes := []rune(chunkContents)
 		if chunk.StartAt <= len(runes) {
@@ -1970,9 +1976,11 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		chunkContents = chunkContents + imageAnnotations
 	}
 
-	if len(chunkContents) < 300 {
-		return chunkContents, nil
-	}
+	// Apply length limit: sample long content to fit within maxInputChars
+	chunkContents = sampleLongContent(chunkContents, maxInputChars)
+
+	logger.GetLogger(ctx).Infof("getSummary: content length=%d chars (max=%d) for knowledge %s",
+		len([]rune(chunkContents)), maxInputChars, knowledge.ID)
 
 	// Prepare content with metadata for summary generation
 	contentWithMetadata := chunkContents
@@ -1988,6 +1996,12 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 
 		// Prepend metadata to content
 		contentWithMetadata = metadataIntro + "\nContent:\n" + contentWithMetadata
+	}
+
+	// Determine max output tokens from config
+	maxTokens := 2048
+	if s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxCompletionTokens > 0 {
+		maxTokens = s.config.Conversation.Summary.MaxCompletionTokens
 	}
 
 	// Generate summary using AI model
@@ -2006,7 +2020,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		},
 	}, &chat.ChatOptions{
 		Temperature: 0.3,
-		MaxTokens:   1024,
+		MaxTokens:   maxTokens,
 		Thinking:    &thinking,
 	})
 	if err != nil {
@@ -2015,6 +2029,51 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	}
 	logger.GetLogger(ctx).WithField("summary", summary.Content).Infof("GetSummary success")
 	return summary.Content, nil
+}
+
+// sampleLongContent returns content that fits within maxChars.
+// For short content (≤ maxChars), it is returned as-is.
+// For long content, it samples: head (60%), tail (20%), and evenly-spaced middle (20%),
+// joined by "[...content omitted...]" markers so the LLM knows content was skipped.
+func sampleLongContent(content string, maxChars int) string {
+	runes := []rune(content)
+	if len(runes) <= maxChars {
+		return content
+	}
+
+	const omitMarker = "\n\n[...content omitted...]\n\n"
+	omitRunes := len([]rune(omitMarker))
+
+	// Reserve space for two omit markers (head→middle, middle→tail)
+	usable := maxChars - 2*omitRunes
+	if usable < 100 {
+		// Fallback: just truncate
+		return string(runes[:maxChars])
+	}
+
+	headLen := usable * 60 / 100
+	tailLen := usable * 20 / 100
+	midLen := usable - headLen - tailLen
+
+	head := string(runes[:headLen])
+	tail := string(runes[len(runes)-tailLen:])
+
+	// Sample middle portion: take a contiguous block from the center of the document
+	midStart := len(runes)/2 - midLen/2
+	if midStart < headLen {
+		midStart = headLen
+	}
+	midEnd := midStart + midLen
+	if midEnd > len(runes)-tailLen {
+		midEnd = len(runes) - tailLen
+		midStart = midEnd - midLen
+		if midStart < headLen {
+			midStart = headLen
+		}
+	}
+	middle := string(runes[midStart:midEnd])
+
+	return head + omitMarker + middle + omitMarker + tail
 }
 
 // enqueueQuestionGenerationTask enqueues an async task for question generation

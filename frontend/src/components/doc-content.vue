@@ -5,7 +5,7 @@ import { marked } from "marked";
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
-import { onMounted, ref, nextTick, onUnmounted, watch } from "vue";
+import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
 import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
@@ -66,8 +66,7 @@ let url = ref('')
 // file 类型默认「预览」，URL / 手动创建 默认「全文」
 const viewMode = ref<'chunks' | 'merged' | 'preview'>('merged');
 
-// 合并后的文档内容
-const mergedContent = ref<string>('');
+// 合并后的文档内容（在下方通过 computed 定义）
 
 /**
  * 根据 start_at 和 end_at 字段合并有 overlap 的 chunks
@@ -136,8 +135,11 @@ const mergeChunks = (chunks: any[]): string => {
 
 onMounted(() => {
   nextTick(() => {
-    doc = document.getElementsByClassName('t-drawer__body')[0]
-    doc.addEventListener('scroll', handleDetailsScroll);
+    const drawers = document.getElementsByClassName('t-drawer__body');
+    if (drawers && drawers.length > 0) {
+      doc = drawers[0];
+      doc.addEventListener('scroll', handleDetailsScroll);
+    }
   })
 })
 watch(() => props.details?.id, () => {
@@ -162,7 +164,9 @@ watch(() => props.details?.chunkLoading, (val) => {
   }
 });
 onUnmounted(() => {
-  doc.removeEventListener('scroll', handleDetailsScroll);
+  if (doc) {
+    doc.removeEventListener('scroll', handleDetailsScroll);
+  }
 })
 const checkImage = (url) => {
   return new Promise((resolve) => {
@@ -223,14 +227,28 @@ renderer.code = function ({text, lang}) {
     </div>
   `;
 };
-// 监听 chunks 变化，自动更新合并内容
-watch(() => props.details?.md, (newChunks) => {
+// 监听 chunks 变化，自动更新合并内容（已改为 computed 属性）
+const mergedContent = computed(() => {
+  const newChunks = props.details?.md;
   if (newChunks && newChunks.length > 0) {
-    mergedContent.value = mergeChunks(newChunks);
-  } else {
-    mergedContent.value = '';
+    return mergeChunks(newChunks);
   }
-}, { immediate: true, deep: true });
+  return '';
+});
+
+// 计算处理后的分块数据，避免在模板中频繁调用方法和 JSON.parse
+const processedChunks = computed(() => {
+  return (props.details?.md || []).map((item: any, index: number) => {
+    return {
+      original: item,
+      processedContent: processMarkdown(item.content),
+      questions: getGeneratedQuestions(item),
+      meta: getChunkMeta(item),
+      hasParent: hasParentChunk(item),
+      chunkClass: getChunkClass(index)
+    };
+  });
+});
 
 const previewSupportedTypes = new Set([
   'pdf', 'docx', 'pptx', 'ppt', 'xlsx', 'xls', 'csv',
@@ -353,8 +371,11 @@ const bindMermaidClickEvents = () => {
 const processMarkdown = (markdownText) => {
   if (!markdownText || typeof markdownText !== 'string') return '';
 
+  // 去除 Markdown 头部的 YAML Frontmatter（例如 --- title: xxx ---）
+  let processedText = markdownText.replace(/^\s*---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+
   // 先还原原始文本中的 HTML 实体，让它们作为普通字符参与渲染
-  let processedText = markdownText
+  processedText = processedText
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/gi, "'")
     .replace(/&apos;/g, "'")
@@ -387,7 +408,7 @@ const processMarkdown = (markdownText) => {
 };
 const handleClose = () => {
   emit("closeDoc", false);
-  doc.scrollTop = 0;
+  if (doc) doc.scrollTop = 0;
   viewMode.value = 'merged';
 };
 
@@ -724,6 +745,19 @@ const handleDetailsScroll = () => {
         </div>
       </div>
       
+      <!-- 文档摘要 -->
+      <div v-if="details.description" class="summary_box">
+        <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
+        <div class="summary_content">{{ details.description }}</div>
+      </div>
+      <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'" class="summary_box">
+        <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
+        <div class="summary_loading">
+          <t-loading size="small" />
+          <span>{{ $t('knowledgeBase.generatingSummary') }}</span>
+        </div>
+      </div>
+
       <div class="content_header">
         <div class="header-left">
           <div class="title-row">
@@ -733,10 +767,12 @@ const handleDetailsScroll = () => {
             </span>
           </div>
           <div class="meta-row">
-            <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
-            <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning" class="channel-tag">
-              {{ getChannelLabel(details.channel) }}
-            </t-tag>
+            <div class="meta-left">
+              <span class="time"> {{ getTimeLabel() }}：{{ details.time }} </span>
+              <t-tag v-if="details.channel && details.channel !== 'web'" size="small" variant="light" theme="warning" class="channel-tag">
+                {{ getChannelLabel(details.channel) }}
+              </t-tag>
+            </div>
             <div class="view-mode-buttons">
               <t-button 
                 v-if="canPreview()"
@@ -780,18 +816,17 @@ const handleDetailsScroll = () => {
       
       <!-- 分块视图 -->
       <div v-else-if="viewMode === 'chunks'">
-        <div v-if="details.md.length == 0" class="no_content">{{ $t('common.noData') }}</div>
+        <div v-if="!processedChunks.length" class="no_content">{{ $t('common.noData') }}</div>
         <div v-else class="chunk-list">
           <div class="chunk-item" 
-            v-for="(item, index) in details.md" 
+            v-for="(chunk, index) in processedChunks" 
             :key="index"
-            :class="getChunkClass(index)"
           >
             <div class="chunk-header">
               <span class="chunk-index">{{ $t('knowledgeBase.segment') }} {{ index + 1 }}</span>
               <div class="chunk-header-right">
                 <t-tag 
-                  v-if="hasParentChunk(item)" 
+                  v-if="chunk.hasParent" 
                   size="small" 
                   theme="primary" 
                   variant="light"
@@ -799,39 +834,39 @@ const handleDetailsScroll = () => {
                   {{ $t('knowledgeBase.childChunk') }}
                 </t-tag>
                 <t-tag 
-                  v-if="getGeneratedQuestions(item).length > 0" 
+                  v-if="chunk.questions.length > 0" 
                   size="small" 
                   theme="success" 
                   variant="light"
                 >
-                  {{ $t('knowledgeBase.questions') }} {{ getGeneratedQuestions(item).length }}
+                  {{ $t('knowledgeBase.questions') }} {{ chunk.questions.length }}
                 </t-tag>
-                <span class="chunk-meta">{{ getChunkMeta(item) }}</span>
+                <span class="chunk-meta">{{ chunk.meta }}</span>
               </div>
             </div>
-            <div class="md-content" v-html="processMarkdown(item.content)"></div>
+            <div class="md-content" v-html="chunk.processedContent"></div>
             
             <!-- 父 Chunk 上下文展开 -->
-            <div v-if="hasParentChunk(item)" class="parent-context-section">
-              <div class="parent-context-toggle" @click="toggleParentContext(item, index)">
+            <div v-if="chunk.hasParent" class="parent-context-section">
+              <div class="parent-context-toggle" @click="toggleParentContext(chunk.original, index)">
                 <t-icon v-if="!parentContextLoading.has(index)" :name="isParentExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
                 <t-loading v-else size="small" style="width: 14px; height: 14px;" />
                 <span>{{ $t('knowledgeBase.viewParentContext') }}</span>
               </div>
               <div v-show="isParentExpanded(index)" class="parent-context-content">
-                <div class="md-content" v-html="processMarkdown(getParentContent(item))"></div>
+                <div class="md-content" v-html="processMarkdown(getParentContent(chunk.original))"></div>
               </div>
             </div>
             
             <!-- 生成的问题展示 -->
-            <div v-if="getGeneratedQuestions(item).length > 0" class="questions-section">
+            <div v-if="chunk.questions.length > 0" class="questions-section">
               <div class="questions-toggle" @click="toggleQuestions(index)">
                 <t-icon :name="isExpanded(index) ? 'chevron-down' : 'chevron-right'" size="14px" />
-                <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ getGeneratedQuestions(item).length }})</span>
+                <span>{{ $t('knowledgeBase.generatedQuestions') }} ({{ chunk.questions.length }})</span>
               </div>
               <div v-show="isExpanded(index)" class="questions-list">
                 <div 
-                  v-for="question in getGeneratedQuestions(item)" 
+                  v-for="question in chunk.questions" 
                   :key="question.id" 
                   class="question-item"
                 >
@@ -843,7 +878,7 @@ const handleDetailsScroll = () => {
                     size="small"
                     class="delete-question-btn"
                     :loading="isDeleting(index, question.id)"
-                    @click.stop="handleDeleteQuestion(item, index, question)"
+                    @click.stop="handleDeleteQuestion(chunk.original, index, question)"
                   >
                     <template #icon>
                       <t-icon name="delete" size="14px" />
@@ -928,38 +963,80 @@ const handleDetailsScroll = () => {
 }
 
 :deep(.t-drawer__header) {
-  font-weight: 800;
+  font-weight: normal;
 }
 
 :deep(.t-drawer__body.narrow-scrollbar) {
-  padding: 16px 24px;
+  padding: 16px 20px;
 }
 
 .drawer-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   
   .header-title {
     flex: 1;
-    font-weight: 600;
+    font-size: 16px;
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
 
-.doc_box, .url_box, .manual_box {
+// 信息面板通用样式
+.info_panel {
   display: flex;
   flex-direction: column;
   margin-bottom: 16px;
+}
+
+.doc_box, .url_box, .manual_box {
+  .info_panel();
+}
+
+// 文档摘要区域
+.summary_box {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 24px;
+  margin-top: 8px;
+
+  .label {
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .summary_content {
+    padding: 12px;
+    background: var(--td-bg-color-container-hover);
+    border-radius: 4px;
+    color: var(--td-text-color-primary);
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .summary_loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: var(--td-bg-color-container-hover);
+    border-radius: 4px;
+    color: var(--td-text-color-placeholder);
+    font-size: 13px;
+  }
 }
 
 .label {
   color: var(--td-text-color-primary);
   font-size: 14px;
   font-style: normal;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 22px;
   margin-bottom: 8px;
 }
@@ -968,61 +1045,46 @@ const handleDetailsScroll = () => {
 .download_box {
   display: flex;
   align-items: center;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 4px;
+  padding: 6px 10px;
 }
 
 .doc_t {
-  box-sizing: border-box;
   display: flex;
-  padding: 5px 8px;
   align-items: center;
-  border-radius: 3px;
-  border: 1px solid var(--td-component-border);
-  background: var(--td-bg-color-container-hover);
   word-break: break-all;
-  text-align: justify;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  flex: 1;
 }
 
 .icon_box {
-  margin-left: 18px;
+  margin-left: 12px;
   display: flex;
-  overflow: hidden;
+  align-items: center;
+  justify-content: center;
   color: var(--td-brand-color);
+  cursor: pointer;
 
-  .download_box {
+  img.download_box {
     width: 16px;
     height: 16px;
-    fill: currentColor;
-    overflow: hidden;
-    cursor: pointer;
   }
 }
 
 // URL链接区域
 .url_link_box {
   border-radius: 4px;
-  border: 1px solid var(--td-success-color-focus);
-  background: var(--td-success-color-light);
+  background: var(--td-bg-color-container-hover);
   padding: 8px 12px;
   
   .url_link {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: var(--td-brand-color-active);
+    color: var(--td-brand-color);
     text-decoration: none;
-    transition: all 0.2s ease;
-    
-    &:hover {
-      color: var(--td-brand-color);
-      background: var(--td-success-color-light);
-      border-radius: 3px;
-      padding: 4px 6px;
-      margin: -4px -6px;
-      
-      .jump-icon {
-        transform: translateX(2px);
-      }
-    }
     
     .url_text {
       flex: 1;
@@ -1031,52 +1093,67 @@ const handleDetailsScroll = () => {
     }
     
     .jump-icon {
-      transition: transform 0.2s ease;
       flex-shrink: 0;
-      color: var(--td-brand-color-active);
+      color: var(--td-brand-color);
     }
   }
 }
 
 // 手动创建标题区域
 .manual_title_box {
-  border-radius: 4px;
-  border: 1px solid var(--td-component-border);
-  background: var(--td-bg-color-container-hover);
-  padding: 8px 12px;
+  flex: 1;
+  display: flex;
+  align-items: center;
   
   .manual_title {
     color: var(--td-text-color-primary);
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 13px;
     word-break: break-word;
   }
 }
 
 .content_header {
-  margin-top: 22px;
+  margin-top: 16px;
   margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
 
   .header-left {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    width: 100%;
   }
 
   .title-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    
+    .label {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+    }
   }
 
   .meta-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  .meta-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     flex-wrap: wrap;
   }
 
@@ -1085,11 +1162,11 @@ const handleDetailsScroll = () => {
   }
 
   .chunk-count {
-    color: var(--td-brand-color);
+    color: var(--td-text-color-secondary);
     font-size: 12px;
-    background: var(--td-brand-color)14;
-    padding: 4px 8px;
-    border-radius: 12px;
+    background: var(--td-bg-color-container-hover);
+    padding: 2px 8px;
+    border-radius: 4px;
   }
 
   .view-mode-buttons {
@@ -1101,26 +1178,20 @@ const handleDetailsScroll = () => {
       min-width: 60px;
     }
   }
-
-  .view-mode-toggle {
-    height: 28px;
-  }
 }
 
 .time {
-  color: var(--td-text-color-disabled);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   font-style: normal;
   font-weight: 400;
-  line-height: 20px;
 }
 
 .no_content {
   margin-top: 12px;
   color: var(--td-text-color-disabled);
-  font-size: 12px;
+  font-size: 13px;
   padding: 16px;
-  background: var(--td-bg-color-container);
   text-align: center;
 }
 
@@ -1132,23 +1203,10 @@ const handleDetailsScroll = () => {
 }
 
 .chunk-item {
-  border-radius: 6px;
-  padding: 12px;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
-  
-  &.chunk-even {
-    background: var(--td-bg-color-container-hover);
-  }
-  
-  &.chunk-odd {
-    background: var(--td-brand-color)0d;
-  }
-  
-  &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 2px 8px rgba(7, 192, 95, 0.1);
-  }
+  border-radius: 4px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-border);
 }
 
 .chunk-header {
@@ -1194,11 +1252,6 @@ const handleDetailsScroll = () => {
   font-size: 12px;
   font-weight: 500;
   padding: 4px 0;
-  transition: color 0.2s ease;
-  
-  &:hover {
-    color: var(--td-brand-color);
-  }
 }
 
 .parent-context-content {
@@ -1230,11 +1283,6 @@ const handleDetailsScroll = () => {
   font-size: 12px;
   font-weight: 500;
   padding: 4px 0;
-  transition: color 0.2s ease;
-  
-  &:hover {
-    color: var(--td-brand-color);
-  }
 }
 
 .questions-list {
@@ -1253,11 +1301,8 @@ const handleDetailsScroll = () => {
   font-size: 13px;
   color: var(--td-text-color-primary);
   line-height: 1.5;
-  transition: background-color 0.2s ease;
   
   &:hover {
-    background: var(--td-success-color-light);
-    
     .delete-question-btn {
       opacity: 1;
     }
@@ -1278,7 +1323,6 @@ const handleDetailsScroll = () => {
     opacity: 0;
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
-    transition: opacity 0.2s ease, color 0.2s ease;
     
     &:hover {
       color: var(--td-error-color);
