@@ -1944,9 +1944,9 @@ export default {
       advanced: "高级设置",
       faq: "FAQ 设置",
       graph: "知识图谱",
-      multimodal: "多模态",
+      multimodal: "图像处理",
+      asr: "音频处理",
       datasource: "数据源",
-      asr: "语音识别",
       share: "共享管理",
     },
     basic: {
@@ -2146,11 +2146,11 @@ export default {
       childChunkSizeDescription: "用于向量匹配的子块字符数（64-1024）",
     },
     multimodal: {
-      title: "多模态配置",
-      description: "配置多模态内容理解能力，启用后支持图片等非文本内容的解析和检索",
+      title: "图像处理配置",
+      description: "配置图像内容理解能力，启用后支持图片等非文本内容的解析和检索",
     },
     asr: {
-      title: "语音识别配置",
+      title: "音频处理配置",
       description: "配置语音识别功能，启用后支持上传音频文件（mp3、wav、m4a、flac、ogg）并自动转录为文本",
       label: "启用语音识别",
       desc: "启用后可以上传音频文件到知识库，系统将自动转录为文本进行处理",
@@ -3095,6 +3095,7 @@ export default {
       fileTypeText: "纯文本",
       fileTypeJson: "JSON 文件",
       fileTypeImage: "图片",
+      fileTypeAudio: "音频文件",
       engines: {
         builtin: {
           name: "内置",

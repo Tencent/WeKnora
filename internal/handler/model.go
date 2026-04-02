@@ -402,6 +402,8 @@ func modelTypeToFrontend(mt types.ModelType) string {
 		return "rerank"
 	case types.ModelTypeVLLM:
 		return "vllm"
+	case types.ModelTypeASR:
+		return "asr"
 	default:
 		return string(mt)
 	}
@@ -437,6 +439,8 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		backendModelType = types.ModelTypeRerank
 	case "vllm":
 		backendModelType = types.ModelTypeVLLM
+	case "asr":
+		backendModelType = types.ModelTypeASR
 	default:
 		backendModelType = types.ModelType(modelType)
 	}

@@ -202,7 +202,7 @@
                   </div>
                 </div>
 
-                <!-- ASR 语音识别设置 -->
+                <!-- 音频处理（ASR）设置 -->
                 <div v-if="!isFAQ" v-show="currentSection === 'asr'" class="section">
                   <div v-if="formData" class="kb-multimodal-settings">
                     <div class="section-header">
@@ -337,11 +337,11 @@ const navItems = computed(() => {
   } else {
     items.push(
       { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
+      { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
+      { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
       { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
       { key: 'chunking', icon: 'file-copy', label: t('knowledgeEditor.sidebar.chunking') },
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
-      { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
-      { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
     if (props.mode === 'edit' && props.kbId) {

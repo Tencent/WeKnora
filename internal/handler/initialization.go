@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -28,6 +30,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/ollama/ollama/api"
 )
+
+//go:embed testdata/asr_test.wav
+var asrTestWAV []byte
 
 // DownloadTask 下载任务信息
 type DownloadTask struct {
@@ -89,6 +94,7 @@ type KBModelConfigRequest struct {
 	LLMModelID       string           `json:"llmModelId"       binding:"required"`
 	EmbeddingModelID string           `json:"embeddingModelId" binding:"required"`
 	VLMConfig        *types.VLMConfig `json:"vlm_config"`
+	ASRConfig        *types.ASRConfig `json:"asr_config"`
 
 	// 文档分块配置
 	DocumentSplitting struct {
@@ -279,6 +285,19 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if !kb.VLMConfig.Enabled {
 		kb.VLMConfig.ModelID = ""
+	}
+
+	// 处理ASR语音识别配置
+	kb.ASRConfig = types.ASRConfig{}
+	if req.ASRConfig != nil && req.ASRConfig.Enabled && req.ASRConfig.ModelID != "" {
+		asrModel, err := h.modelService.GetModelByID(ctx, req.ASRConfig.ModelID)
+		if err != nil || asrModel == nil {
+			logger.Warn(ctx, "ASR model not found")
+		} else {
+			kb.ASRConfig.Enabled = true
+			kb.ASRConfig.ModelID = req.ASRConfig.ModelID
+			kb.ASRConfig.Language = req.ASRConfig.Language
+		}
 	}
 
 	// 更新文档分块配置
@@ -1758,6 +1777,106 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	)
 
 	logger.Infof(ctx, "Rerank model check completed, available: %v, message: %s", available, message)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"available": available,
+			"message":   message,
+		},
+	})
+}
+
+// CheckASRModel godoc
+// @Summary      检查ASR模型
+// @Description  检查ASR（语音识别）模型连接是否正常，通过发送一段静默音频测试 /v1/audio/transcriptions 端点
+// @Tags         初始化
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object  true  "ASR检查请求"
+// @Success      200      {object}  map[string]interface{}  "检查结果"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /initialization/models/asr/check [post]
+func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	logger.Info(ctx, "Checking ASR model connection")
+
+	var req struct {
+		ModelName string `json:"modelName" binding:"required"`
+		BaseURL   string `json:"baseUrl" binding:"required"`
+		APIKey    string `json:"apiKey"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse ASR model check request", err)
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	if req.ModelName == "" || req.BaseURL == "" {
+		logger.Error(ctx, "Model name and base URL are required for ASR check")
+		c.Error(errors.NewBadRequestError("模型名称和Base URL不能为空"))
+		return
+	}
+
+	// SSRF validation
+	if err := utils.ValidateURLForSSRF(req.BaseURL); err != nil {
+		logger.Warnf(ctx, "SSRF validation failed for ASR BaseURL: %v", err)
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
+		return
+	}
+
+	// 使用 ASR 模块测试连接：发送一段极短的静默 WAV 音频
+	asrInstance, err := asr.NewASR(&asr.Config{
+		BaseURL:   req.BaseURL,
+		ModelName: req.ModelName,
+		APIKey:    req.APIKey,
+		Source:    "remote",
+	})
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create ASR instance for check: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data": gin.H{
+				"available": false,
+				"message":   fmt.Sprintf("创建ASR实例失败: %v", err),
+			},
+		})
+		return
+	}
+
+	text, err := asrInstance.Transcribe(ctx, asrTestWAV, "asr_test.wav")
+	available := true
+	message := "ASR连接成功"
+
+	if err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "authentication"):
+			available = false
+			message = "认证失败，请检查API Key"
+		case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "Not Found"):
+			available = false
+			message = "API端点不存在，请检查Base URL"
+		case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") || strings.Contains(errMsg, "dial tcp"):
+			available = false
+			message = "无法连接到服务器，请检查Base URL"
+		case strings.Contains(errMsg, "model") && strings.Contains(errMsg, "not found"):
+			available = false
+			message = "模型不存在，请检查模型名称"
+		default:
+			logger.Infof(ctx, "ASR check got non-fatal error (endpoint reachable): %v", err)
+			available = true
+			message = fmt.Sprintf("ASR端点可达（非致命错误: %s）", errMsg)
+		}
+	} else if text != "" {
+		message = fmt.Sprintf("ASR连接成功，转写结果: %s", text)
+	}
+
+	logger.Infof(ctx, "ASR model check completed, available: %v, message: %s", available, message)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

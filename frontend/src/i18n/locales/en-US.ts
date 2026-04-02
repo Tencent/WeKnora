@@ -1469,9 +1469,9 @@ export default {
       advanced: 'Advanced Settings',
       faq: 'FAQ Settings',
       graph: 'Knowledge Graph',
-      multimodal: 'Multimodal',
+      multimodal: 'Image Processing',
+      asr: 'Audio Processing',
       datasource: 'Data Sources',
-      asr: 'Speech Recognition',
       share: 'Sharing'
     },
     basic: {
@@ -1674,11 +1674,11 @@ export default {
       childChunkSizeDescription: 'Size of child chunks used for embedding matching (64-1024)'
     },
     multimodal: {
-      title: 'Multimodal Configuration',
-      description: 'Configure multimodal content understanding for parsing and retrieving non-text content like images',
+      title: 'Image Processing Configuration',
+      description: 'Configure image content understanding for parsing and retrieving non-text content like images',
     },
     asr: {
-      title: 'Speech Recognition Configuration',
+      title: 'Audio Processing Configuration',
       description: 'Configure speech recognition to upload audio files (mp3, wav, m4a, flac, ogg) and automatically transcribe to text',
       label: 'Enable Speech Recognition',
       desc: 'When enabled, audio files can be uploaded to the knowledge base and automatically transcribed to text',
@@ -3097,6 +3097,7 @@ export default {
       fileTypeText: 'Plain Text',
       fileTypeJson: 'JSON Files',
       fileTypeImage: 'Images',
+      fileTypeAudio: 'Audio Files',
       engines: {
         builtin: {
           name: 'Built-in',

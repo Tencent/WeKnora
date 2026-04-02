@@ -124,10 +124,11 @@
           <!-- 厂商选择器 -->
           <div class="form-item">
             <label class="form-label">{{ $t('model.editor.providerLabel') }}</label>
-            <t-select 
-              v-model="formData.provider" 
+            <t-select
+              v-model="formData.provider"
               :placeholder="$t('model.editor.providerPlaceholder')"
               @change="handleProviderChange"
+              :popup-props="{ overlayClassName: 'provider-select-popup' }"
             >
               <t-option 
                 v-for="opt in providerOptions" 
@@ -260,7 +261,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
+import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 
@@ -323,11 +324,10 @@ const fallbackProviderOptions = computed(() => [
       chat: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       embedding: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       rerank: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
-      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      asr: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     },
     description: t('model.editor.providers.aliyun.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
   },
   { 
     value: 'zhipu', 
@@ -851,9 +851,8 @@ const checkRemoteAPI = async () => {
         break
 
       case 'asr':
-        // ASR 模型（语音识别）
-        // ASR 使用 checkRemoteModel 进行基础连接测试
-        result = await checkRemoteModel({
+        // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）
+        result = await checkASRModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || ''
@@ -1252,24 +1251,8 @@ const handleOverlayMouseUp = () => {
   }
 }
 
-// 厂商选择器样式
-.provider-option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
-
-  .provider-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .provider-desc {
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-  }
-}
+// 厂商选择器样式 — 移至非 scoped 块，因为 t-select popup 渲染到 body 下
+// .provider-option 样式见文件末尾
 
 // 单选按钮组
 :deep(.t-radio-group) {
@@ -1637,6 +1620,40 @@ const handleOverlayMouseUp = () => {
       line-height: 1 !important;
       display: inline-flex !important;
       align-items: center !important;
+    }
+  }
+}
+</style>
+
+<!-- 非 scoped 样式：t-select popup 渲染到 body 下，scoped 样式无法覆盖 -->
+<style lang="less">
+.provider-select-popup {
+  // 覆盖 TDesign option 默认固定高度，让两行内容正常展示
+  .t-select-option {
+    height: auto !important;
+    padding: 0 8px;
+  }
+
+  .provider-option {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 0;
+
+    .provider-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+      line-height: 22px;
+    }
+
+    .provider-desc {
+      font-size: 12px;
+      color: var(--td-text-color-placeholder);
+      line-height: 18px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
 }

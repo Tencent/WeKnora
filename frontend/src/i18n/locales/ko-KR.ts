@@ -1957,8 +1957,8 @@ export default {
       advanced: "고급 설정",
       faq: "FAQ 설정",
       graph: "지식 그래프",
-      multimodal: "멀티모달",
-      asr: "음성 인식",
+      multimodal: "이미지 처리",
+      asr: "오디오 처리",
       share: "공유관리",
       storage: "스토리지 엔진",
       datasource: "데이터 소스",
@@ -2173,11 +2173,11 @@ export default {
       childChunkSizeDescription: "임베딩 매칭에 사용되는 자식 청크의 문자 수 (64-1024)",
     },
     multimodal: {
-      title: "멀티모달 설정",
-      description: "멀티모달 콘텐츠 이해 기능을 설정하여 이미지 등 비텍스트 콘텐츠의 파싱 및 검색을 지원합니다",
+      title: "이미지 처리 설정",
+      description: "이미지 콘텐츠 이해 기능을 설정하여 이미지 등 비텍스트 콘텐츠의 파싱 및 검색을 지원합니다",
     },
     asr: {
-      title: "음성 인식 설정",
+      title: "오디오 처리 설정",
       description: "음성 인식 기능을 설정하여 오디오 파일(mp3, wav, m4a, flac, ogg)을 업로드하고 자동으로 텍스트로 전사합니다",
       label: "음성 인식 활성화",
       desc: "활성화하면 오디오 파일을 지식베이스에 업로드하고 자동으로 텍스트로 전사할 수 있습니다",
@@ -3151,6 +3151,7 @@ export default {
       fileTypeText: '일반 텍스트',
       fileTypeJson: 'JSON 파일',
       fileTypeImage: '이미지',
+      fileTypeAudio: '오디오 파일',
       engines: {
         builtin: {
           name: '내장',

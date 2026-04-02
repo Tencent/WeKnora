@@ -483,18 +483,12 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 
 	logger.Infof(ctx, "Getting ASR model: %s, source: %s", model.Name, model.Source)
 
-	ifType := model.Parameters.InterfaceType
-	if ifType == "" {
-		ifType = "openai"
-	}
-
 	sttModel, err := asr.NewASR(&asr.Config{
-		ModelID:       model.ID,
-		APIKey:        model.Parameters.APIKey,
-		BaseURL:       model.Parameters.BaseURL,
-		ModelName:     model.Name,
-		Source:        model.Source,
-		InterfaceType: ifType,
+		ModelID:   model.ID,
+		APIKey:    model.Parameters.APIKey,
+		BaseURL:   model.Parameters.BaseURL,
+		ModelName: model.Name,
+		Source:    model.Source,
 	})
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

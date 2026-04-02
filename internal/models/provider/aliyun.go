@@ -32,14 +32,12 @@ func (p *AliyunProvider) Info() ProviderInfo {
 			types.ModelTypeEmbedding:   AliyunChatBaseURL,
 			types.ModelTypeRerank:      AliyunRerankBaseURL,
 			types.ModelTypeVLLM:        AliyunChatBaseURL,
-			types.ModelTypeASR:         AliyunChatBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
-			types.ModelTypeASR,
 		},
 		RequiresAuth: true,
 	}

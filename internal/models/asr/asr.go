@@ -2,8 +2,6 @@ package asr
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -19,26 +17,16 @@ type ASR interface {
 
 // Config holds the configuration needed to create an ASR instance.
 type Config struct {
-	Source        types.ModelSource
-	BaseURL       string
-	ModelName     string
-	APIKey        string
-	ModelID       string
-	InterfaceType string // "openai" (default)
-	Language      string // optional: specify language for transcription
+	Source    types.ModelSource
+	BaseURL   string
+	ModelName string
+	APIKey    string
+	ModelID   string
+	Language  string // optional: specify language for transcription
 }
 
 // NewASR creates an ASR instance based on the provided configuration.
+// All ASR vendors use the OpenAI-compatible /v1/audio/transcriptions API.
 func NewASR(config *Config) (ASR, error) {
-	ifType := strings.ToLower(config.InterfaceType)
-	if ifType == "" {
-		ifType = "openai"
-	}
-
-	switch ifType {
-	case "openai":
-		return NewOpenAIASR(config)
-	default:
-		return nil, fmt.Errorf("unsupported ASR interface type: %s", ifType)
-	}
+	return NewOpenAIASR(config)
 }
