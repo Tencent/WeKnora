@@ -2,7 +2,6 @@ package chat
 
 import (
 	"bufio"
-	"errors"
 	"io"
 	"strings"
 )
@@ -55,5 +54,5 @@ func (r *SSEReader) ReadEvent() (*SSEEvent, error) {
 		return nil, err
 	}
 
-	return nil, errors.New("EOF")
+	return nil, io.EOF
 }

@@ -546,7 +546,20 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 	for {
 		event, err := reader.ReadEvent()
 		if err != nil {
-			if err != io.EOF {
+			if err == io.EOF {
+				// 部分模型不发送 [DONE] 标记，直接关闭连接，视为正常结束
+				if state.usage != nil {
+					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
+						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
+				}
+				streamChan <- types.StreamResponse{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      "",
+					Done:         true,
+					ToolCalls:    state.buildOrderedToolCalls(),
+					Usage:        state.usage,
+				}
+			} else {
 				logger.Errorf(ctx, "Stream read error: %v", err)
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeError,
