@@ -275,8 +275,6 @@ docker compose down
 
 ## 📱 功能展示
 
-### Web UI 界面
-
 <table>
   <tr>
     <td colspan="2"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话"></td>
@@ -292,17 +290,17 @@ docker compose down
 
 
 
-### 文档知识图谱
+## 文档知识图谱
 
 WeKnora 支持将文档转化为知识图谱，展示文档中不同段落之间的关联关系。开启知识图谱功能后，系统会分析并构建文档内部的语义关联网络，不仅帮助用户理解文档内容，还为索引和检索提供结构化支撑，提升检索结果的相关性和广度。
 
 具体配置请参考 [知识图谱配置说明](./docs/KnowledgeGraph.md) 进行相关配置。
 
-### 配套MCP服务器
+## 配套MCP服务器
 
 请参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行相关配置。
 
-### 🔌 使用微信对话开放平台
+## 🔌 使用微信对话开放平台
 
 WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心技术框架，提供更简便的使用方式：
 

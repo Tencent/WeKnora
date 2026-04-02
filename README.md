@@ -268,8 +268,6 @@ Once started, services will be available at:
 
 ## 📱 Interface Showcase
 
-### Web UI Interface
-
 <table>
   <tr>
     <td colspan="2"><b>Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation"></td>
@@ -283,23 +281,12 @@ Once started, services will be available at:
   </tr>
 </table>
 
-**Knowledge Base Management:** Support for creating FAQ and document knowledge base types, with multiple import methods including drag-and-drop, folder import, and URL import. Automatically identifies document structures and extracts core knowledge to establish indexes. Supports tag management and online entry. The system clearly displays processing progress and document status, achieving efficient knowledge base management.
 
-**Agent Mode:** Support for ReACT Agent mode that can use built-in tools to retrieve knowledge bases, call user-configured MCP tools and web search tools to access external services, providing comprehensive summary reports through multiple iterations and reflection. Supports cross-knowledge base retrieval, allowing selection of multiple knowledge bases for simultaneous retrieval.
-
-**Conversation Strategy:** Support for configuring Agent models, normal mode models, retrieval thresholds, and online Prompt configuration, with precise control over multi-turn conversation behavior and retrieval execution methods. The conversation input box supports Agent mode/normal mode switching, enabling/disabling web search, and selecting conversation models.
-
-### Document Knowledge Graph
-
-WeKnora supports transforming documents into knowledge graphs, displaying the relationships between different sections of the documents. Once the knowledge graph feature is enabled, the system analyzes and constructs an internal semantic association network that not only helps users understand document content but also provides structured support for indexing and retrieval, enhancing the relevance and breadth of search results.
-
-For detailed configuration, please refer to the [Knowledge Graph Configuration Guide](./docs/KnowledgeGraph.md).
-
-### MCP Server
+## MCP Server
 
 Please refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for the necessary setup.
 
-### 🔌 Using WeChat Dialog Open Platform
+## 🔌 Using WeChat Dialog Open Platform
 
 WeKnora serves as the core technology framework for the [WeChat Dialog Open Platform](https://chatbot.weixin.qq.com), providing a more convenient usage approach:
 
@@ -307,12 +294,6 @@ WeKnora serves as the core technology framework for the [WeChat Dialog Open Plat
 - **Efficient Question Management**: Support for categorized management of high-frequency questions, with rich data tools to ensure accurate, reliable, and easily maintainable answers
 - **WeChat Ecosystem Integration**: Through the WeChat Dialog Open Platform, WeKnora's intelligent Q&A capabilities can be seamlessly integrated into WeChat Official Accounts, Mini Programs, and other WeChat scenarios, enhancing user interaction experiences
 
-### 🔗 Access WeKnora via MCP Server
-
-#### 1️⃣ Clone the repository
-```
-git clone https://github.com/Tencent/WeKnora
-```
 
 
 ## 📘 API Reference
