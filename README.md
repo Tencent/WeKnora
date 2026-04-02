@@ -42,9 +42,11 @@
 
 ## 📌 Overview
 
-[**WeKnora**](https://weknora.weixin.qq.com) is an LLM-powered framework designed for deep document understanding and semantic retrieval, especially for handling complex, heterogeneous documents. 
+[**WeKnora**](https://weknora.weixin.qq.com) is an LLM-powered intelligent knowledge management and Q&A framework built for enterprise-grade document understanding and semantic retrieval.
 
-It adopts a modular architecture that combines multimodal preprocessing, semantic vector indexing, intelligent retrieval, and large language model inference. At its core, WeKnora follows the **RAG (Retrieval-Augmented Generation)** paradigm, enabling high-quality, context-aware answers by combining relevant document chunks with model reasoning.
+WeKnora offers two Q&A modes — **Quick Q&A** and **Intelligent Reasoning**. Quick Q&A uses a **RAG (Retrieval-Augmented Generation)** pipeline to rapidly retrieve relevant chunks and generate answers, ideal for everyday knowledge queries. Intelligent Reasoning is powered by a **ReACT Agent** engine that employs a **progressive strategy** to autonomously orchestrate knowledge retrieval, MCP tools, and web search, iteratively reasoning and reflecting to arrive at a final conclusion — suited for multi-source synthesis and complex tasks. Custom agents are also supported, allowing flexible configuration of dedicated knowledge bases, tool sets, and system prompts. Choose the right mode for the task, balancing response speed with reasoning depth.
+
+The framework supports auto-syncing knowledge from Feishu (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty.
 
 **Website:** https://weknora.weixin.qq.com
 
@@ -129,69 +131,54 @@ It adopts a modular architecture that combines multimodal preprocessing, semanti
 
 </details>
 
-## 🔒 Security Notice
-
-**Important:** Starting from v0.1.3, WeKnora includes login authentication functionality to enhance system security. For production deployments, we strongly recommend:
-
-- Deploy WeKnora services in internal/private network environments rather than public internet
-- Avoid exposing the service directly to public networks to prevent potential information leakage
-- Configure proper firewall rules and access controls for your deployment environment
-- Regularly update to the latest version for security patches and improvements
 
 ## 🏗️ Architecture
 
 ![weknora-architecture.png](./docs/images/architecture.png)
 
-WeKnora employs a modern modular design to build a complete document understanding and retrieval pipeline. The system primarily includes document parsing, vector processing, retrieval engine, and large model inference as core modules, with each component being flexibly configurable and extendable.
+Fully modular pipeline from document parsing, vectorization, and retrieval to LLM inference — every component is swappable and extensible. Supports local / private cloud deployment with full data sovereignty and a zero-barrier Web UI for quick onboarding.
 
-## 🎯 Key Features
+## 🧩 Feature Overview
 
-- **🤖 Agent Mode**: Support for ReACT Agent mode that can use built-in tools to retrieve knowledge bases, MCP tools, and web search tools to access external services, providing comprehensive summary reports through multiple iterations and reflection
-- **🔍 Precise Understanding**: Structured content extraction from PDFs, Word documents, images and more into unified semantic views
-- **🧠 Intelligent Reasoning**: Leverages LLMs to understand document context and user intent for accurate Q&A and multi-turn conversations
-- **📚 Multi-Type Knowledge Bases**: Support for FAQ and document knowledge base types, with folder import, URL import, tag management, and online entry capabilities
-- **🔧 Flexible Extension**: All components from parsing and embedding to retrieval and generation are decoupled for easy customization
-- **⚡ Efficient Retrieval**: Hybrid retrieval strategies combining keywords, vectors, and knowledge graphs, with cross-knowledge base retrieval support
-- **🌐 Web Search**: Support for extensible web search engines with built-in DuckDuckGo search engine
-- **🔌 MCP Tool Integration**: Support for extending Agent capabilities through MCP, with built-in uvx and npx launchers, supporting multiple transport methods
-- **⚙️ Conversation Strategy**: Support for configuring Agent models, normal mode models, retrieval thresholds, and Prompts, with precise control over multi-turn conversation behavior
-- **🎯 User-Friendly**: Intuitive web interface and standardized APIs for zero technical barriers
-- **🔒 Secure & Controlled**: Support for local deployment and private cloud, ensuring complete data sovereignty
+**🤖 Intelligent Conversation**
 
-## 📊 Application Scenarios
+| Capability | Details |
+|------------|---------|
+| Intelligent Reasoning | ReACT progressive multi-step reasoning, autonomously orchestrating knowledge retrieval, MCP tools, and web search; custom agent support |
+| Quick Q&A | RAG-based Q&A over knowledge bases for fast and accurate answers |
+| Tool Calling | Built-in tools, MCP tools, web search |
+| Conversation Strategy | Online Prompt editing, retrieval threshold tuning, multi-turn context awareness |
+| Suggested Questions | Auto-generated question suggestions based on knowledge base content |
 
-| Scenario | Applications | Core Value |
-|---------|----------|----------|
-| **Enterprise Knowledge Management** | Internal document retrieval, policy Q&A, operation manual search | Improve knowledge discovery efficiency, reduce training costs |
-| **Academic Research Analysis** | Paper retrieval, research report analysis, scholarly material organization | Accelerate literature review, assist research decisions |
-| **Product Technical Support** | Product manual Q&A, technical documentation search, troubleshooting | Enhance customer service quality, reduce support burden |
-| **Legal & Compliance Review** | Contract clause retrieval, regulatory policy search, case analysis | Improve compliance efficiency, reduce legal risks |
-| **Medical Knowledge Assistance** | Medical literature retrieval, treatment guideline search, case analysis | Support clinical decisions, improve diagnosis quality |
+**📚 Knowledge Management**
 
-## 🧩 Feature Matrix
+| Capability | Details |
+|------------|---------|
+| Knowledge Base Types | FAQ / Document with folder import, URL import, tag management, and online entry |
+| Data Source Import | Auto-sync from Feishu (more data sources coming soon); incremental and full sync |
+| Document Formats | PDF / Word / Txt / Markdown / HTML / Images / CSV / Excel / PPT / JSON |
+| Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / multi-dimensional indexing |
+| E2E Testing | Full-pipeline visualization with recall hit rate, BLEU / ROUGE metric evaluation |
 
-| Module | Support | Description |
-|---------|---------|-------------|
-| Agent Mode | ✅ ReACT Agent Mode | Built-in tools for knowledge base retrieval, MCP tool calls, and web search; cross-knowledge base retrieval with multi-step iteration |
-| Knowledge Base Types | ✅ FAQ / Document | FAQ and document knowledge bases with folder import, URL import, tag management, online entry, and knowledge move |
-| Document Formats | ✅ PDF / Word / Txt / Markdown / HTML / Images (OCR + Caption) | Structured and unstructured document parsing; image text extraction via OCR; image caption generation via VLM |
-| IM Channel Integration | ✅ WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost | WebSocket and Webhook modes; streaming replies; slash commands (/help, /info, /search, /stop, /clear); per-user rate limiting; Redis-based multi-instance coordination |
-| Model Management | ✅ Centralized configuration, built-in model sharing | Centralized model config with per-knowledge-base model selection; multi-tenant shared built-in model support |
-| Embedding Models | ✅ Local models (Ollama), BGE / GTE / OpenAI-compatible APIs | Customizable embedding models compatible with local deployment and cloud vector generation APIs |
-| Vector DB Integration | ✅ PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant | Five vector index backends with flexible switching to match retrieval scenario requirements |
-| Object Storage | ✅ Local / MinIO / AWS S3 / Volcengine TOS | Pluggable storage adapters for file and image assets; bucket auto-creation on startup |
-| Retrieval Strategies | ✅ BM25 / Dense Retrieval / GraphRAG | Sparse/dense recall and knowledge graph-enhanced retrieval; customizable retrieve-rerank-generate pipeline |
-| LLM Integration | ✅ Qwen / DeepSeek / MiniMax / NVIDIA / Novita AI / OpenAI-compatible | Local models via Ollama or external API services; thinking/non-thinking mode switching; vLLM streaming reasoning content support |
-| Conversation Strategy | ✅ Agent model, normal model, retrieval threshold, Prompt configuration | Online Prompt editing; retrieval threshold tuning; precise multi-turn conversation behavior control |
-| Web Search | ✅ DuckDuckGo / Bing / Google (extensible) | Pluggable search engine providers; web search toggle per conversation |
-| MCP Tools | ✅ uvx / npx launchers, Stdio / HTTP Streamable / SSE | Extend agent capabilities via MCP; stable tool naming with collision protection; VLM auto-description for tool-returned images |
-| Suggested Questions | ✅ Knowledge-base-driven question suggestions | Agent surfaces context-aware suggested questions in chat interface; image knowledge auto-generates questions |
-| QA Capabilities | ✅ Context-aware, multi-turn dialogue, prompt templates | Complex semantic modeling, instruction control, chain-of-thought Q&A with configurable prompts and context windows |
-| Security | ✅ AES-256-GCM at-rest encryption, SSRF protection | API keys encrypted at rest; SSRF-safe HTTP client for remote API calls; sandbox execution for agent skills |
-| E2E Testing | ✅ Retrieval + generation visualization and metric evaluation | End-to-end test tools for evaluating recall hit rates, answer coverage, BLEU/ROUGE metrics |
-| Deployment Modes | ✅ Local / Docker / Kubernetes (Helm) | Private and offline deployment; fast development mode with hot-reload; Helm chart for Kubernetes |
-| User Interfaces | ✅ Web UI + RESTful API | Interactive web interface and standard API; Agent/normal mode switching; tool call process display |
-| Task Management | ✅ MQ async tasks, automatic database migration | MQ-based async task state; automatic schema and data migration on version upgrade |
+**🔌 Integrations & Extensions**
+
+| Capability | Details |
+|------------|---------|
+| LLMs | OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
+| Embeddings | Ollama / BGE / GTE / OpenAI-compatible APIs |
+| Vector DBs | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
+| Object Storage | Local / MinIO / AWS S3 / Volcengine TOS |
+| IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost |
+| Web Search | DuckDuckGo / Bing / Google / Tavily |
+
+**🛡️ Platform**
+
+| Capability | Details |
+|------------|---------|
+| Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
+| UI | Web UI / RESTful API / Chrome Extension |
+| Task Management | MQ async tasks, automatic database migration on version upgrade |
+| Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing |
 
 ## 🚀 Getting Started
 
@@ -225,13 +212,7 @@ cp .env.example .env
 
 #### ③ Start the core services
 
-Check which images need to be started in the `.env` file, then start the WeKnora core services with Docker Compose.
-
-```bash
-docker compose up -d
-```
-
-#### ③.0 Start Ollama separately (Optional)
+#### Start Ollama separately (Optional)
 
 If you configured a local Ollama model in `.env`, start the Ollama service separately:
 
@@ -239,7 +220,7 @@ If you configured a local Ollama model in `.env`, start the Ollama service separ
 ollama serve > /dev/null 2>&1 &
 ```
 
-#### ③.1 Activate different combinations of features
+#### Activate different combinations of features
 
 - Minimum core services
 ```bash
@@ -422,6 +403,15 @@ docs: Update API documentation
 test: Add retrieval engine test cases
 refactor: Restructure document parsing module
 ```
+
+## 🔒 Security Notice
+
+**Important:** Starting from v0.1.3, WeKnora includes login authentication functionality to enhance system security. For production deployments, we strongly recommend:
+
+- Deploy WeKnora services in internal/private network environments rather than public internet
+- Avoid exposing the service directly to public networks to prevent potential information leakage
+- Configure proper firewall rules and access controls for your deployment environment
+- Regularly update to the latest version for security patches and improvements
 
 ## 👥 Contributors
 
