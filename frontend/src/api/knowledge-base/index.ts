@@ -21,6 +21,11 @@ export function createKnowledgeBase(data: {
   };
   storage_provider_config?: { provider: string };
   storage_config?: any; // legacy, kept for backward compat (dual-write)
+  asr_config?: {
+    enabled: boolean;
+    model_id?: string;
+    language?: string;
+  };
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
 }) {

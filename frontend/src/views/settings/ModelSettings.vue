@@ -221,6 +221,54 @@
       </div>
     </div>
 
+    <!-- STT 语音模型 -->
+    <div class="model-category-section" data-model-type="asr">
+      <div class="category-header">
+        <div class="header-info">
+          <h3>{{ $t('modelSettings.asr.title') }}</h3>
+          <p>{{ $t('modelSettings.asr.desc') }}</p>
+        </div>
+        <t-button size="small" theme="primary" @click="openAddDialog('asr')" class="add-model-btn">
+          <template #icon>
+            <t-icon name="add" class="add-icon" />
+          </template>
+          {{ $t('modelSettings.actions.addModel') }}
+        </t-button>
+      </div>
+
+      <div v-if="asrModels.length > 0" class="model-list-container">
+        <div v-for="model in asrModels" :key="model.id" class="model-card" :class="{ 'builtin-model': model.isBuiltin }">
+          <div class="model-info">
+            <div class="model-name">
+              {{ model.name }}
+              <t-tag v-if="model.isBuiltin" theme="primary" size="small">{{ $t('modelSettings.builtinTag') }}</t-tag>
+            </div>
+            <div class="model-meta">
+              <span class="source-tag">{{ model.source === 'local' ? 'Ollama' : $t('modelSettings.source.openaiCompatible') }}</span>
+            </div>
+          </div>
+          <div class="model-actions">
+            <t-dropdown
+              :options="getModelOptions('asr', model)"
+              @click="(data: any) => handleMenuAction(data, 'asr', model)"
+              placement="bottom-right"
+              attach="body"
+            >
+              <t-button variant="text" shape="square" size="small" class="more-btn">
+                <t-icon name="more" />
+              </t-button>
+            </t-dropdown>
+          </div>
+        </div>
+      </div>
+      <div v-else class="empty-state">
+        <p class="empty-text">{{ $t('modelSettings.asr.empty') }}</p>
+        <t-button theme="default" variant="outline" size="small" @click="openAddDialog('asr')">
+          {{ $t('modelSettings.actions.addModel') }}
+        </t-button>
+      </div>
+    </div>
+
     <!-- 模型编辑器弹窗 -->
     <ModelEditorDialog
       v-model:visible="showDialog"
@@ -242,7 +290,7 @@ import { listModels, createModel, updateModel as updateModelAPI, deleteModel as 
 const { t } = useI18n()
 
 const showDialog = ref(false)
-const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm'>('chat')
+const currentModelType = ref<'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
 
@@ -268,9 +316,15 @@ const rerankModels = computed(() =>
     .map(convertToLegacyFormat)
 )
 
-const vllmModels = computed(() => 
+const vllmModels = computed(() =>
   allModels.value
     .filter(m => m.type === 'VLLM')
+    .map(convertToLegacyFormat)
+)
+
+const asrModels = computed(() =>
+  allModels.value
+    .filter(m => m.type === 'ASR')
     .map(convertToLegacyFormat)
 )
 
@@ -306,14 +360,14 @@ const loadModels = async () => {
 }
 
 // 打开添加对话框
-const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm') => {
+const openAddDialog = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr') => {
   currentModelType.value = type
   editingModel.value = null
   showDialog.value = true
 }
 
 // 编辑模型
-const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: any) => {
+const editModel = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
   // 内置模型不能编辑
   if (model.isBuiltin) {
     MessagePlugin.warning(t('modelSettings.toasts.builtinCannotEdit'))
@@ -405,7 +459,7 @@ const handleModelSave = async (modelData: any) => {
 }
 
 // 删除模型
-const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string) => {
+const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
   // 检查是否是内置模型
   const model = allModels.value.find(m => m.id === modelId)
   if (model?.is_builtin) {
@@ -425,7 +479,7 @@ const deleteModel = async (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model
 }
 
 // 获取模型操作菜单选项
-const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: any) => {
+const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
   const options: any[] = []
   
   // 内置模型不能编辑和删除
@@ -450,7 +504,7 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: 
 }
 
 // 处理菜单操作
-const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: any) => {
+const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', model: any) => {
   const value = data.value
   
   if (value.indexOf('edit-') === 0) {
@@ -464,12 +518,13 @@ const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 
 }
 
 // 获取后端模型类型
-function getModelType(type: 'chat' | 'embedding' | 'rerank' | 'vllm'): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' {
+function getModelType(type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
   const typeMap = {
     chat: 'KnowledgeQA' as const,
     embedding: 'Embedding' as const,
     rerank: 'Rerank' as const,
-    vllm: 'VLLM' as const
+    vllm: 'VLLM' as const,
+    asr: 'ASR' as const
   }
   return typeMap[type]
 }

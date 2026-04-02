@@ -60,6 +60,8 @@ type KnowledgeBase struct {
 	SummaryModelID string `yaml:"summary_model_id"        json:"summary_model_id"`
 	// VLM config
 	VLMConfig VLMConfig `yaml:"vlm_config"              json:"vlm_config"              gorm:"type:json"`
+	// ASR config (Automatic Speech Recognition)
+	ASRConfig ASRConfig `yaml:"asr_config"              json:"asr_config"              gorm:"type:json"`
 	// Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
@@ -376,6 +378,35 @@ func (c VLMConfig) Value() (driver.Value, error) {
 
 // Scan implements the sql.Scanner interface, used to convert database value to VLMConfig
 func (c *VLMConfig) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	b, ok := value.([]byte)
+	if !ok {
+		return nil
+	}
+	return json.Unmarshal(b, c)
+}
+
+// ASRConfig represents the ASR (Automatic Speech Recognition) configuration
+type ASRConfig struct {
+	Enabled  bool   `yaml:"enabled"  json:"enabled"`
+	ModelID  string `yaml:"model_id" json:"model_id"`
+	Language string `yaml:"language" json:"language"` // optional: language hint for transcription
+}
+
+// IsASREnabled checks if ASR is enabled with a valid model
+func (c ASRConfig) IsASREnabled() bool {
+	return c.Enabled && c.ModelID != ""
+}
+
+// Value implements the driver.Valuer interface, used to convert ASRConfig to database value
+func (c ASRConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
+// Scan implements the sql.Scanner interface, used to convert database value to ASRConfig
+func (c *ASRConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}

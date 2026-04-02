@@ -1534,6 +1534,7 @@ export default {
         embedding: "텍스트 벡터화용 임베딩 모델 설정",
         rerank: "결과 재정렬용 모델 설정",
         vllm: "시각 이해 및 멀티모달용 비전 언어 모델 설정",
+        asr: "음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정",
         default: "모델 정보 설정",
       },
       modelNamePlaceholder: {
@@ -1541,10 +1542,12 @@ export default {
         remote: "예: gpt-4, claude-3-opus",
         localVllm: "예: llava:latest",
         remoteVllm: "예: gpt-4-vision-preview",
+        remoteAsr: "예: whisper-1",
       },
       baseUrlLabel: "Base URL",
       baseUrlPlaceholder: "예: https://api.openai.com/v1",
       baseUrlPlaceholderVllm: "예: http://localhost:11434/v1",
+      baseUrlPlaceholderAsr: "예: https://api.openai.com/v1",
       apiKeyOptional: "API 키 (선택)",
       apiKeyPlaceholder: "API 키 입력",
       connectionTest: "연결 테스트",
@@ -1955,6 +1958,7 @@ export default {
       faq: "FAQ 설정",
       graph: "지식 그래프",
       multimodal: "멀티모달",
+      asr: "음성 인식",
       share: "공유관리",
       storage: "스토리지 엔진",
       datasource: "데이터 소스",
@@ -2170,7 +2174,16 @@ export default {
     },
     multimodal: {
       title: "멀티모달 설정",
-      description: "멀티모달 콘텐츠 이해 기능을 설정합니다. 활성화하면 이미지 등 텍스트가 아닌 콘텐츠의 파싱 및 검색을 지원합니다.",
+      description: "멀티모달 콘텐츠 이해 기능을 설정하여 이미지 등 비텍스트 콘텐츠의 파싱 및 검색을 지원합니다",
+    },
+    asr: {
+      title: "음성 인식 설정",
+      description: "음성 인식 기능을 설정하여 오디오 파일(mp3, wav, m4a, flac, ogg)을 업로드하고 자동으로 텍스트로 전사합니다",
+      label: "음성 인식 활성화",
+      desc: "활성화하면 오디오 파일을 지식베이스에 업로드하고 자동으로 텍스트로 전사할 수 있습니다",
+      modelLabel: "ASR 모델",
+      modelDescription: "오디오 전사를 위한 음성 인식 모델 (예: OpenAI Whisper)",
+      modelPlaceholder: "ASR 모델을 선택해주세요",
     },
     advanced: {
       title: "고급 설정",
@@ -2614,6 +2627,11 @@ export default {
       title: "VLLM 비전 모델",
       desc: "시각 이해 및 멀티모달용 비전 언어 모델 설정",
       empty: "VLLM 비전 모델 없음",
+    },
+    asr: {
+      title: "ASR 음성 모델",
+      desc: "음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정 (예: OpenAI Whisper)",
+      empty: "ASR 음성 모델 없음",
     },
     toasts: {
       nameRequired: "모델 이름은 비워둘 수 없습니다",

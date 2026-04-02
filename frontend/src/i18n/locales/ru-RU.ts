@@ -1381,17 +1381,20 @@ export default {
         embedding: 'Настройте модель встраивания для текстовой векторизации',
         rerank: 'Настройте модель для повторного ранжирования результатов',
         vllm: 'Настройте визуально-языковую модель для мультимодального понимания',
+        asr: 'Настройте модель распознавания речи для транскрибации аудио',
         default: 'Настройте информацию о модели'
       },
       modelNamePlaceholder: {
         local: 'например: llama2:latest',
         remote: 'например: gpt-4, claude-3-opus',
         localVllm: 'например: llava:latest',
-        remoteVllm: 'например: gpt-4-vision-preview'
+        remoteVllm: 'например: gpt-4-vision-preview',
+        remoteAsr: 'например: whisper-1'
       },
       baseUrlLabel: 'Base URL',
       baseUrlPlaceholder: 'например: https://api.openai.com/v1',
       baseUrlPlaceholderVllm: 'например: http://localhost:11434/v1',
+      baseUrlPlaceholderAsr: 'например: https://api.openai.com/v1',
       apiKeyOptional: 'API Key (опционально)',
       apiKeyPlaceholder: 'Введите API Key',
       connectionTest: 'Проверка соединения',
@@ -1641,6 +1644,7 @@ export default {
       faq: 'FAQ настройки',
       graph: 'Граф знаний',
       multimodal: 'Мультимодальность',
+      asr: 'Распознавание речи',
       storage: 'Storage Engine',
       datasource: 'Источники данных',
       share: 'Sharing'
@@ -1836,7 +1840,16 @@ export default {
     },
     multimodal: {
       title: 'Мультимодальная конфигурация',
-      description: 'Настройка понимания мультимодального контента для парсинга и поиска нетекстового содержимого, такого как изображения',
+      description: 'Настройте мультимодальное понимание контента для парсинга и поиска нетекстового контента, например изображений',
+    },
+    asr: {
+      title: 'Конфигурация распознавания речи',
+      description: 'Настройте распознавание речи для загрузки аудиофайлов (mp3, wav, m4a, flac, ogg) и автоматической транскрибации в текст',
+      label: 'Включить распознавание речи',
+      desc: 'При включении аудиофайлы могут быть загружены в базу знаний и автоматически транскрибированы в текст',
+      modelLabel: 'Модель ASR',
+      modelDescription: 'Модель распознавания речи для транскрибации аудио (например, OpenAI Whisper)',
+      modelPlaceholder: 'Выберите модель ASR',
     },
     advanced: {
       title: 'Расширенные настройки',
@@ -2379,6 +2392,11 @@ export default {
       title: 'VLLM модели зрения',
       desc: 'Визуально-языковые модели для мультимодального понимания',
       empty: 'Нет VLLM моделей'
+    },
+    asr: {
+      title: 'ASR модели речи',
+      desc: 'Модели распознавания речи для транскрибации аудио (например, OpenAI Whisper)',
+      empty: 'Нет ASR моделей'
     },
     toasts: {
       nameRequired: 'Название модели не может быть пустым',

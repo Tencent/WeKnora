@@ -46,7 +46,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
 interface Props {
-  modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM'
+  modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
   selectedModelId?: string
   disabled?: boolean
   placeholder?: string

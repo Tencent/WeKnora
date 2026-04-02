@@ -18,6 +18,7 @@ const (
 	ModelTypeRerank      ModelType = "Rerank"      // Rerank model
 	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
 	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
+	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
 )
 
 // ModelStatus represents the status of the model

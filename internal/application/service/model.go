@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -458,3 +459,50 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 // Note: default model selection logic has been removed; models no longer
 // maintain a per-type default flag at the service layer.
+
+// GetASRModel retrieves and initializes an automatic speech recognition model instance.
+func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {
+	if modelId == "" {
+		return nil, errors.New("model ID cannot be empty")
+	}
+
+	tenantID := types.MustTenantIDFromContext(ctx)
+
+	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":  modelId,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+
+	if model == nil {
+		return nil, ErrModelNotFound
+	}
+
+	logger.Infof(ctx, "Getting ASR model: %s, source: %s", model.Name, model.Source)
+
+	ifType := model.Parameters.InterfaceType
+	if ifType == "" {
+		ifType = "openai"
+	}
+
+	sttModel, err := asr.NewASR(&asr.Config{
+		ModelID:       model.ID,
+		APIKey:        model.Parameters.APIKey,
+		BaseURL:       model.Parameters.BaseURL,
+		ModelName:     model.Name,
+		Source:        model.Source,
+		InterfaceType: ifType,
+	})
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   model.ID,
+			"model_name": model.Name,
+		})
+		return nil, err
+	}
+
+	return sttModel, nil
+}

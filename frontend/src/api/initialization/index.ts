@@ -81,6 +81,11 @@ export interface KBModelConfigRequest {
         enabled: boolean
         model_id?: string
     }
+    asr_config?: {
+        enabled: boolean
+        model_id?: string
+        language?: string
+    }
     documentSplitting: {
         chunkSize: number
         chunkOverlap: number

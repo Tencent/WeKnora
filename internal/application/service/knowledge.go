@@ -259,6 +259,15 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		logger.Info(ctx, "Image multimodal configuration validation passed")
 	}
 
+	// 检查音频ASR配置完整性 - 只在音频文件时校验
+	if IsAudioType(getFileType(fileName)) {
+		if !kb.ASRConfig.IsASREnabled() {
+			logger.Error(ctx, "ASR model is not configured")
+			return nil, werrors.NewBadRequestError("上传音频文件需要设置ASR语音识别模型")
+		}
+		logger.Info(ctx, "Audio ASR configuration validation passed")
+	}
+
 	// Validate file type
 	logger.Infof(ctx, "Checking file type: %s", fileName)
 	if !isValidFileType(fileName) {
@@ -596,6 +605,11 @@ var allowedFileURLExtensions = map[string]bool{
 	"pdf":  true,
 	"docx": true,
 	"doc":  true,
+	"mp3":  true,
+	"wav":  true,
+	"m4a":  true,
+	"flac": true,
+	"ogg":  true,
 }
 
 // maxFileURLSize is the maximum allowed file size for file URL import (10MB)
@@ -2987,7 +3001,8 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 // isValidFileType checks if a file type is supported
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
-	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json":
+	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
+		"mp3", "wav", "m4a", "flac", "ogg":
 		return true
 	default:
 		return false
@@ -7399,6 +7414,16 @@ func IsImageType(fileType string) bool {
 	}
 }
 
+// IsAudioType checks if a file type is an audio format
+func IsAudioType(fileType string) bool {
+	switch strings.ToLower(fileType) {
+	case "mp3", "wav", "m4a", "flac", "ogg":
+		return true
+	default:
+		return false
+	}
+}
+
 // downloadFileFromURL downloads a remote file to a temp file and returns its binary content.
 // payloadFileName and payloadFileType are in/out pointers: if they point to an empty string,
 // the function resolves the value from Content-Disposition / URL path and writes it back.
@@ -7641,6 +7666,17 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	// 检查音频ASR配置（仅对文件导入）
+	if payload.FilePath != "" && IsAudioType(payload.FileType) && !kb.ASRConfig.IsASREnabled() {
+		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
+			Errorf("processDocument audio without ASR model configured")
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "上传音频文件需要设置ASR语音识别模型"
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil
+	}
+
 	// New pipeline: convert -> store images -> chunk -> vectorize -> multimodal tasks
 	var convertResult *types.ReadResult
 	var chunks []types.ParsedChunk
@@ -7762,6 +7798,54 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		if convertResult == nil {
 			return nil
 		}
+	}
+
+	// Step 1.5: ASR transcription for audio files
+	if convertResult != nil && convertResult.IsAudio && len(convertResult.AudioData) > 0 {
+		if !kb.ASRConfig.IsASREnabled() {
+			logger.Error(ctx, "Audio file detected but ASR is not configured")
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = "ASR model is not configured for audio transcription"
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+
+		logger.Infof(ctx, "[ASR] Starting audio transcription for knowledge %s, audio size=%d bytes",
+			knowledge.ID, len(convertResult.AudioData))
+
+		asrModel, err := s.modelService.GetASRModel(ctx, kb.ASRConfig.ModelID)
+		if err != nil {
+			logger.Errorf(ctx, "[ASR] Failed to get ASR model: %v", err)
+			knowledge.ParseStatus = "failed"
+			knowledge.ErrorMessage = fmt.Sprintf("failed to get ASR model: %v", err)
+			knowledge.UpdatedAt = time.Now()
+			s.repo.UpdateKnowledge(ctx, knowledge)
+			return nil
+		}
+
+		transcribedText, err := asrModel.Transcribe(ctx, convertResult.AudioData, knowledge.FileName)
+		if err != nil {
+			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
+			if isLastRetry {
+				knowledge.ParseStatus = "failed"
+				knowledge.ErrorMessage = fmt.Sprintf("audio transcription failed: %v", err)
+				knowledge.UpdatedAt = time.Now()
+				s.repo.UpdateKnowledge(ctx, knowledge)
+			}
+			return fmt.Errorf("audio transcription failed: %w", err)
+		}
+
+		if transcribedText == "" {
+			logger.Warn(ctx, "[ASR] Transcription returned empty text")
+			transcribedText = "[No speech detected in audio file]"
+		}
+
+		logger.Infof(ctx, "[ASR] Transcription completed, text length=%d", len(transcribedText))
+		// Replace the audio placeholder with the transcribed text
+		convertResult.MarkdownContent = transcribedText
+		convertResult.IsAudio = false
+		convertResult.AudioData = nil
 	}
 
 	// Step 2: Store images and update markdown references

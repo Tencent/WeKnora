@@ -28,12 +28,14 @@ func (p *OpenAIProvider) Info() ProviderInfo {
 			types.ModelTypeEmbedding:   OpenAIBaseURL,
 			types.ModelTypeRerank:      OpenAIBaseURL,
 			types.ModelTypeVLLM:        OpenAIBaseURL,
+			types.ModelTypeASR:         OpenAIBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		RequiresAuth: true,
 	}

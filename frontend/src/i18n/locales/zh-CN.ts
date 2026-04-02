@@ -1528,6 +1528,7 @@ export default {
         embedding: "配置用于文本向量化的嵌入模型",
         rerank: "配置用于结果重排序的模型",
         vllm: "配置用于视觉理解和多模态的视觉语言模型",
+        asr: "配置用于语音识别和音频转录的语音转文本模型",
         default: "配置模型信息",
       },
       modelNamePlaceholder: {
@@ -1535,10 +1536,12 @@ export default {
         remote: "例如：gpt-4, claude-3-opus",
         localVllm: "例如：llava:latest",
         remoteVllm: "例如：gpt-4-vision-preview",
+        remoteAsr: "例如：whisper-1",
       },
       baseUrlLabel: "Base URL",
       baseUrlPlaceholder: "例如：https://api.openai.com/v1",
       baseUrlPlaceholderVllm: "例如：http://localhost:11434/v1",
+      baseUrlPlaceholderAsr: "例如：https://api.openai.com/v1",
       apiKeyOptional: "API Key（可选）",
       apiKeyPlaceholder: "输入 API Key",
       connectionTest: "连接测试",
@@ -1943,6 +1946,7 @@ export default {
       graph: "知识图谱",
       multimodal: "多模态",
       datasource: "数据源",
+      asr: "语音识别",
       share: "共享管理",
     },
     basic: {
@@ -2144,6 +2148,15 @@ export default {
     multimodal: {
       title: "多模态配置",
       description: "配置多模态内容理解能力，启用后支持图片等非文本内容的解析和检索",
+    },
+    asr: {
+      title: "语音识别配置",
+      description: "配置语音识别功能，启用后支持上传音频文件（mp3、wav、m4a、flac、ogg）并自动转录为文本",
+      label: "启用语音识别",
+      desc: "启用后可以上传音频文件到知识库，系统将自动转录为文本进行处理",
+      modelLabel: "ASR 模型",
+      modelDescription: "用于语音转文本的语音识别模型（如 OpenAI Whisper）",
+      modelPlaceholder: "请选择 ASR 模型",
     },
     advanced: {
       title: "高级设置",
@@ -2579,6 +2592,11 @@ export default {
       title: "VLLM 视觉模型",
       desc: "配置用于视觉理解和多模态的视觉语言模型",
       empty: "暂无 VLLM 视觉模型",
+    },
+    asr: {
+      title: "ASR 语音模型",
+      desc: "配置用于语音识别和音频转录的语音转文本模型（如 OpenAI Whisper）",
+      empty: "暂无 ASR 语音模型",
     },
     toasts: {
       nameRequired: "模型名称不能为空",

@@ -25,6 +25,7 @@ func (p *GenericProvider) Info() ProviderInfo {
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
 			types.ModelTypeVLLM,
+			types.ModelTypeASR,
 		},
 		RequiresAuth: false, // 可能需要也可能不需要
 	}

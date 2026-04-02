@@ -280,7 +280,7 @@ interface ModelFormData {
 
 interface Props {
   visible: boolean
-  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm'
+  modelType: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
   modelData?: ModelFormData | null
 }
 
@@ -303,29 +303,31 @@ const loadingProviders = ref(false)
 
 // 硬编码的后备 Provider 配置 (当 API 不可用时使用)
 const fallbackProviderOptions = computed(() => [
-  { 
-    value: 'openai', 
-    label: t('model.editor.providers.openai.label'), 
+  {
+    value: 'openai',
+    label: t('model.editor.providers.openai.label'),
     defaultUrls: {
       chat: 'https://api.openai.com/v1',
       embedding: 'https://api.openai.com/v1',
       rerank: 'https://api.openai.com/v1',
-      vllm: 'https://api.openai.com/v1'
+      vllm: 'https://api.openai.com/v1',
+      asr: 'https://api.openai.com/v1'
     },
     description: t('model.editor.providers.openai.description'),
-    modelTypes: ['chat', 'embedding', 'vllm']
+    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
   },
-  { 
-    value: 'aliyun', 
-    label: t('model.editor.providers.aliyun.label'), 
+  {
+    value: 'aliyun',
+    label: t('model.editor.providers.aliyun.label'),
     defaultUrls: {
       chat: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       embedding: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       rerank: 'https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank',
-      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+      vllm: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      asr: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
     },
     description: t('model.editor.providers.aliyun.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
   },
   { 
     value: 'zhipu', 
@@ -394,10 +396,10 @@ const fallbackProviderOptions = computed(() => [
   },
   { 
     value: 'generic', 
-    label: t('model.editor.providers.generic.label'), 
+    label: t('model.editor.providers.generic.label'),
     defaultUrls: {},
     description: t('model.editor.providers.generic.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm']
+    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
   },
 ])
 
@@ -536,15 +538,22 @@ const getModelNamePlaceholder = () => {
       ? t('model.editor.modelNamePlaceholder.localVllm')
       : t('model.editor.modelNamePlaceholder.remoteVllm')
   }
+  if (props.modelType === 'asr') {
+    return t('model.editor.modelNamePlaceholder.remoteAsr')
+  }
   return formData.value.source === 'local'
     ? t('model.editor.modelNamePlaceholder.local')
     : t('model.editor.modelNamePlaceholder.remote')
 }
 
 const getBaseUrlPlaceholder = () => {
-  return props.modelType === 'vllm'
-    ? t('model.editor.baseUrlPlaceholderVllm')
-    : t('model.editor.baseUrlPlaceholder')
+  if (props.modelType === 'vllm') {
+    return t('model.editor.baseUrlPlaceholderVllm')
+  }
+  if (props.modelType === 'asr') {
+    return t('model.editor.baseUrlPlaceholderAsr')
+  }
+  return t('model.editor.baseUrlPlaceholder')
 }
 
 // 检查Ollama服务状态
@@ -840,7 +849,17 @@ const checkRemoteAPI = async () => {
           apiKey: formData.value.apiKey || ''
         })
         break
-        
+
+      case 'asr':
+        // ASR 模型（语音识别）
+        // ASR 使用 checkRemoteModel 进行基础连接测试
+        result = await checkRemoteModel({
+          modelName: formData.value.modelName,
+          baseUrl: formData.value.baseUrl,
+          apiKey: formData.value.apiKey || ''
+        })
+        break
+
       default:
         MessagePlugin.error(t('model.editor.unsupportedModelType'))
         return
