@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
+	"github.com/Tencent/WeKnora/internal/assets"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -30,9 +30,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/ollama/ollama/api"
 )
-
-//go:embed testdata/asr_test.wav
-var asrTestWAV []byte
 
 // DownloadTask 下载任务信息
 type DownloadTask struct {
@@ -1848,7 +1845,7 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		return
 	}
 
-	text, err := asrInstance.Transcribe(ctx, asrTestWAV, "asr_test.wav")
+	text, err := asrInstance.Transcribe(ctx, assets.ASRTestWAV, "asr_test.wav")
 	available := true
 	message := "ASR连接成功"
 
