@@ -231,6 +231,60 @@ func TestExecuteResultHelpers(t *testing.T) {
 	}
 }
 
+func TestValidateConfigKubernetes(t *testing.T) {
+	config := &Config{
+		Type:           SandboxTypeKubernetes,
+		DefaultTimeout: 30 * time.Second,
+	}
+	if err := ValidateConfig(config); err != nil {
+		t.Errorf("Expected kubernetes type to be valid, got: %v", err)
+	}
+}
+
+func TestValidateConfigOpenSandbox(t *testing.T) {
+	config := &Config{
+		Type:           SandboxTypeOpenSandbox,
+		DefaultTimeout: 30 * time.Second,
+	}
+	if err := ValidateConfig(config); err != nil {
+		t.Errorf("Expected opensandbox type to be valid, got: %v", err)
+	}
+}
+
+func TestDefaultConfigSharedFields(t *testing.T) {
+	config := DefaultConfig()
+	if config.MaxConcurrentSandboxes != 5 {
+		t.Errorf("Expected MaxConcurrentSandboxes=5, got %d", config.MaxConcurrentSandboxes)
+	}
+	if config.MaxScriptSize != 512*1024 {
+		t.Errorf("Expected MaxScriptSize=524288, got %d", config.MaxScriptSize)
+	}
+	if config.MaxLogSize != 1048576 {
+		t.Errorf("Expected MaxLogSize=1048576, got %d", config.MaxLogSize)
+	}
+}
+
+func TestNewManagerFromTypeKubernetes(t *testing.T) {
+	manager, err := NewManagerFromType("kubernetes", true, "sandbox:latest")
+	if err != nil {
+		t.Fatalf("Expected fallback to succeed, got: %v", err)
+	}
+	// Not in K8s, should fall back to local
+	if manager.GetType() != SandboxTypeLocal {
+		t.Logf("Manager type: %s (may be kubernetes if running in K8s)", manager.GetType())
+	}
+}
+
+func TestNewManagerFromTypeOpenSandbox(t *testing.T) {
+	manager, err := NewManagerFromType("opensandbox", true, "")
+	if err != nil {
+		t.Fatalf("Expected fallback to succeed, got: %v", err)
+	}
+	if manager.GetType() != SandboxTypeLocal {
+		t.Logf("Manager type: %s (may be opensandbox if server running)", manager.GetType())
+	}
+}
+
 func TestPythonScriptExecution(t *testing.T) {
 	// Create a temporary Python script
 	tmpDir, err := os.MkdirTemp("", "sandbox-test")
