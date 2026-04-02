@@ -74,6 +74,30 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = NewLocalSandbox(m.config)
 		return nil
 
+	case SandboxTypeKubernetes:
+		kubeSandbox := NewKubernetesSandbox(m.config, nil)
+		if kubeSandbox.IsAvailable(ctx) {
+			m.sandbox = kubeSandbox
+			return nil
+		}
+		if m.config.FallbackEnabled {
+			m.sandbox = NewLocalSandbox(m.config)
+			return nil
+		}
+		return fmt.Errorf("kubernetes is not available and fallback is disabled")
+
+	case SandboxTypeOpenSandbox:
+		osSandbox := NewOpenSandboxSandbox(m.config)
+		if osSandbox.IsAvailable(ctx) {
+			m.sandbox = osSandbox
+			return nil
+		}
+		if m.config.FallbackEnabled {
+			m.sandbox = NewLocalSandbox(m.config)
+			return nil
+		}
+		return fmt.Errorf("opensandbox is not available and fallback is disabled")
+
 	default:
 		return fmt.Errorf("unknown sandbox type: %s", m.config.Type)
 	}
@@ -233,6 +257,10 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		sType = SandboxTypeLocal
 	case "disabled", "":
 		sType = SandboxTypeDisabled
+	case "kubernetes":
+		sType = SandboxTypeKubernetes
+	case "opensandbox":
+		sType = SandboxTypeOpenSandbox
 	default:
 		return nil, fmt.Errorf("unknown sandbox type: %s", sandboxType)
 	}

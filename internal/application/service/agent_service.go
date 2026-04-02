@@ -251,7 +251,10 @@ func (s *agentService) initializeSkillsManager(
 	if sandboxMode == "" {
 		sandboxMode = "disabled"
 	}
-	dockerImage := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE")
+	dockerImage := os.Getenv("WEKNORA_SANDBOX_IMAGE")
+	if dockerImage == "" {
+		dockerImage = os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE") // backward compat
+	}
 	if dockerImage == "" {
 		dockerImage = sandbox.DefaultDockerImage
 	}
@@ -262,6 +265,19 @@ func (s *agentService) initializeSkillsManager(
 			sandboxTimeout = v
 		}
 	}
+
+	// Read additional env vars for new sandbox modes
+	kubeNamespace := os.Getenv("WEKNORA_SANDBOX_KUBE_NAMESPACE")
+	kubeServiceAccount := os.Getenv("WEKNORA_SANDBOX_KUBE_SERVICE_ACCOUNT")
+	maxConcurrentStr := os.Getenv("WEKNORA_SANDBOX_MAX_CONCURRENT")
+	maxConcurrent := sandbox.DefaultMaxConcurrentSandboxes
+	if maxConcurrentStr != "" {
+		if v, err := strconv.Atoi(maxConcurrentStr); err == nil && v > 0 {
+			maxConcurrent = v
+		}
+	}
+	opensandboxAPIURL := os.Getenv("WEKNORA_SANDBOX_OPENSANDBOX_API_URL")
+	opensandboxAPIKey := os.Getenv("WEKNORA_SANDBOX_OPENSANDBOX_API_KEY")
 
 	switch sandboxMode {
 	case "docker":
@@ -274,6 +290,36 @@ func (s *agentService) initializeSkillsManager(
 		sandboxMgr, err = sandbox.NewManagerFromType("local", false, "")
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
+			sandboxMgr = sandbox.NewDisabledManager()
+		}
+	case "kubernetes":
+		config := sandbox.DefaultConfig()
+		config.Type = sandbox.SandboxTypeKubernetes
+		config.FallbackEnabled = true
+		config.DockerImage = dockerImage
+		if kubeNamespace != "" {
+			config.KubeNamespace = kubeNamespace
+		}
+		if kubeServiceAccount != "" {
+			config.KubeServiceAccount = kubeServiceAccount
+		}
+		config.MaxConcurrentSandboxes = maxConcurrent
+		sandboxMgr, err = sandbox.NewManager(config)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to initialize kubernetes sandbox, falling back to disabled: %v", err)
+			sandboxMgr = sandbox.NewDisabledManager()
+		}
+	case "opensandbox":
+		config := sandbox.DefaultConfig()
+		config.Type = sandbox.SandboxTypeOpenSandbox
+		config.FallbackEnabled = true
+		config.DockerImage = dockerImage
+		config.OpenSandboxAPIURL = opensandboxAPIURL
+		config.OpenSandboxAPIKey = opensandboxAPIKey
+		config.MaxConcurrentSandboxes = maxConcurrent
+		sandboxMgr, err = sandbox.NewManager(config)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to initialize opensandbox, falling back to disabled: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()
 		}
 	default:
