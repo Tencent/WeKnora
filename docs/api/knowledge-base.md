@@ -2,6 +2,13 @@
 
 [返回目录](./README.md)
 
+**字段说明（知识库对象）**
+
+- 知识库类型 `type` 为 `document`（文档）或 `faq`（FAQ），默认 `document`。
+- JSON 中对象存储相关字段：**`storage_config`** 为序列化字段名（对应数据库列 `cos_config`，兼容旧数据）。旧客户端若仍发送或接收 `cos_config`，服务端会兼容解析；新集成请使用 **`storage_config`**。
+- **`storage_provider_config`** 为新版存储提供者选择（如 `{"provider": "local"}`），与租户级存储引擎凭证配合使用；无配置时可为 `null`。
+
+
 | 方法   | 路径                                 | 描述                     |
 | ------ | ------------------------------------ | ------------------------ |
 | POST   | `/knowledge-bases`                   | 创建知识库               |
@@ -12,7 +19,7 @@
 | POST   | `/knowledge-bases/copy`              | 拷贝知识库               |
 | GET    | `/knowledge-bases/copy/progress/:task_id` | 获取拷贝进度      |
 | GET    | `/knowledge-bases/:id/hybrid-search` | 混合搜索（向量+关键词）  |
-| POST   | `/knowledge-bases/:id/pin`           | 置顶/取消置顶知识库      |
+| PUT    | `/knowledge-bases/:id/pin`           | 置顶/取消置顶知识库      |
 | GET    | `/knowledge-bases/:id/move-targets`  | 获取可迁移目标知识库列表 |
 
 ## POST `/knowledge-bases` - 创建知识库
@@ -26,31 +33,55 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
 --data '{
     "name": "weknora",
     "description": "weknora description",
+    "type": "document",
+    "is_temporary": false,
     "chunking_config": {
         "chunk_size": 1000,
         "chunk_overlap": 200,
         "separators": [
             "."
         ],
-        "enable_multimodal": true
+        "enable_multimodal": true,
+        "parser_engine_rules": [
+            {
+                "file_types": [".pdf", ".docx"],
+                "engine": "builtin"
+            }
+        ],
+        "enable_parent_child": false,
+        "parent_chunk_size": 4096,
+        "child_chunk_size": 384
     },
     "image_processing_config": {
         "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
     },
     "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
     "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-    "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
     "vlm_config": {
         "enabled": true,
         "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
     },
-    "cos_config": {
+    "asr_config": {
+        "enabled": false,
+        "model_id": "",
+        "language": ""
+    },
+    "storage_provider_config": {
+        "provider": "local"
+    },
+    "storage_config": {
         "secret_id": "",
         "secret_key": "",
         "region": "",
         "bucket_name": "",
         "app_id": "",
         "path_prefix": ""
+    },
+    "extract_config": null,
+    "faq_config": null,
+    "question_generation_config": {
+        "enabled": false,
+        "question_count": 3
     }
 }'
 ```
@@ -63,6 +94,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
         "id": "b5829e4a-3845-4624-a7fb-ea3b35e843b0",
         "name": "weknora",
         "description": "weknora description",
+        "type": "document",
+        "is_temporary": false,
         "tenant_id": 1,
         "chunking_config": {
             "chunk_size": 1000,
@@ -70,19 +103,35 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
             "separators": [
                 "."
             ],
-            "enable_multimodal": true
+            "enable_multimodal": true,
+            "parser_engine_rules": [
+                {
+                    "file_types": [".pdf", ".docx"],
+                    "engine": "builtin"
+                }
+            ],
+            "enable_parent_child": false,
+            "parent_chunk_size": 4096,
+            "child_chunk_size": 384
         },
         "image_processing_config": {
             "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
         },
         "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
         "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-        "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
         "vlm_config": {
             "enabled": true,
             "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
         },
-        "cos_config": {
+        "asr_config": {
+            "enabled": false,
+            "model_id": "",
+            "language": ""
+        },
+        "storage_provider_config": {
+            "provider": "local"
+        },
+        "storage_config": {
             "secret_id": "",
             "secret_key": "",
             "region": "",
@@ -90,6 +139,17 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
             "app_id": "",
             "path_prefix": ""
         },
+        "extract_config": null,
+        "faq_config": null,
+        "question_generation_config": {
+            "enabled": false,
+            "question_count": 3
+        },
+        "is_pinned": false,
+        "pinned_at": null,
+        "knowledge_count": 0,
+        "chunk_count": 0,
+        "processing_count": 0,
         "created_at": "2025-08-12T11:30:09.206238645+08:00",
         "updated_at": "2025-08-12T11:30:09.206238854+08:00",
         "deleted_at": null
@@ -117,6 +177,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
             "id": "kb-00000001",
             "name": "Default Knowledge Base",
             "description": "System Default Knowledge Base",
+            "type": "document",
+            "is_temporary": false,
             "tenant_id": 1,
             "chunking_config": {
                 "chunk_size": 1000,
@@ -130,19 +192,30 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
                     ";",
                     "；"
                 ],
-                "enable_multimodal": true
+                "enable_multimodal": true,
+                "parser_engine_rules": [],
+                "enable_parent_child": false,
+                "parent_chunk_size": 4096,
+                "child_chunk_size": 384
             },
             "image_processing_config": {
                 "model_id": ""
             },
             "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
             "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-            "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
             "vlm_config": {
                 "enabled": true,
                 "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
             },
-            "cos_config": {
+            "asr_config": {
+                "enabled": false,
+                "model_id": "",
+                "language": ""
+            },
+            "storage_provider_config": {
+                "provider": "local"
+            },
+            "storage_config": {
                 "secret_id": "",
                 "secret_key": "",
                 "region": "",
@@ -150,6 +223,14 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
                 "app_id": "",
                 "path_prefix": ""
             },
+            "extract_config": null,
+            "faq_config": null,
+            "question_generation_config": null,
+            "is_pinned": false,
+            "pinned_at": null,
+            "knowledge_count": 12,
+            "chunk_count": 340,
+            "processing_count": 0,
             "created_at": "2025-08-11T20:10:41.817794+08:00",
             "updated_at": "2025-08-12T11:23:00.593097+08:00",
             "deleted_at": null
@@ -177,6 +258,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
         "id": "kb-00000001",
         "name": "Default Knowledge Base",
         "description": "System Default Knowledge Base",
+        "type": "document",
+        "is_temporary": false,
         "tenant_id": 1,
         "chunking_config": {
             "chunk_size": 1000,
@@ -190,19 +273,30 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
                 ";",
                 "；"
             ],
-            "enable_multimodal": true
+            "enable_multimodal": true,
+            "parser_engine_rules": [],
+            "enable_parent_child": false,
+            "parent_chunk_size": 4096,
+            "child_chunk_size": 384
         },
         "image_processing_config": {
             "model_id": ""
         },
         "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
         "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-        "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
         "vlm_config": {
             "enabled": true,
             "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
         },
-        "cos_config": {
+        "asr_config": {
+            "enabled": false,
+            "model_id": "",
+            "language": ""
+        },
+        "storage_provider_config": {
+            "provider": "local"
+        },
+        "storage_config": {
             "secret_id": "",
             "secret_key": "",
             "region": "",
@@ -210,6 +304,20 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
             "app_id": "",
             "path_prefix": ""
         },
+        "extract_config": {
+            "enabled": false,
+            "text": "",
+            "tags": [],
+            "nodes": [],
+            "relations": []
+        },
+        "faq_config": null,
+        "question_generation_config": null,
+        "is_pinned": false,
+        "pinned_at": null,
+        "knowledge_count": 12,
+        "chunk_count": 340,
+        "processing_count": 0,
         "created_at": "2025-08-11T20:10:41.817794+08:00",
         "updated_at": "2025-08-12T11:23:00.593097+08:00",
         "deleted_at": null
@@ -242,7 +350,16 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b582
                 ";",
                 "；"
             ],
-            "enable_multimodal": true
+            "enable_multimodal": true,
+            "parser_engine_rules": [
+                {
+                    "file_types": [".md", ".txt"],
+                    "engine": "builtin"
+                }
+            ],
+            "enable_parent_child": true,
+            "parent_chunk_size": 4096,
+            "child_chunk_size": 384
         },
         "image_processing_config": {
             "model_id": ""
@@ -259,6 +376,8 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b582
         "id": "b5829e4a-3845-4624-a7fb-ea3b35e843b0",
         "name": "weknora new",
         "description": "weknora description new",
+        "type": "document",
+        "is_temporary": false,
         "tenant_id": 1,
         "chunking_config": {
             "chunk_size": 1000,
@@ -272,19 +391,35 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b582
                 ";",
                 "；"
             ],
-            "enable_multimodal": true
+            "enable_multimodal": true,
+            "parser_engine_rules": [
+                {
+                    "file_types": [".md", ".txt"],
+                    "engine": "builtin"
+                }
+            ],
+            "enable_parent_child": true,
+            "parent_chunk_size": 4096,
+            "child_chunk_size": 384
         },
         "image_processing_config": {
             "model_id": ""
         },
         "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
         "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
-        "rerank_model_id": "b30171a1-787b-426e-a293-735cd5ac16c0",
         "vlm_config": {
             "enabled": true,
             "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
         },
-        "cos_config": {
+        "asr_config": {
+            "enabled": false,
+            "model_id": "",
+            "language": ""
+        },
+        "storage_provider_config": {
+            "provider": "local"
+        },
+        "storage_config": {
             "secret_id": "",
             "secret_key": "",
             "region": "",
@@ -292,6 +427,14 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/b582
             "app_id": "",
             "path_prefix": ""
         },
+        "extract_config": null,
+        "faq_config": null,
+        "question_generation_config": null,
+        "is_pinned": false,
+        "pinned_at": null,
+        "knowledge_count": 3,
+        "chunk_count": 48,
+        "processing_count": 1,
         "created_at": "2025-08-12T11:30:09.206238+08:00",
         "updated_at": "2025-08-12T11:36:09.083577609+08:00",
         "deleted_at": null
@@ -434,14 +577,14 @@ curl --location --request GET 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 }
 ```
 
-## POST `/knowledge-bases/:id/pin` - 置顶/取消置顶知识库
+## PUT `/knowledge-bases/:id/pin` - 置顶/取消置顶知识库
 
 切换知识库的置顶状态。无需请求体，每次调用会自动切换当前置顶状态。
 
 **请求**:
 
 ```curl
-curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/pin' \
+curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/pin' \
 --header 'X-API-Key: sk-vQHV2NZI_LK5W7wHQvH3yGYExX8YnhaHwZipUYbiZKCYJbBQ' \
 --header 'Content-Type: application/json'
 ```
@@ -454,8 +597,52 @@ curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-
         "id": "kb-00000001",
         "name": "Default Knowledge Base",
         "description": "System Default Knowledge Base",
+        "type": "document",
+        "is_temporary": false,
         "tenant_id": 1,
+        "chunking_config": {
+            "chunk_size": 1000,
+            "chunk_overlap": 200,
+            "separators": ["\n\n", "\n", "。", "！", "？", ";", "；"],
+            "enable_multimodal": true,
+            "parser_engine_rules": [],
+            "enable_parent_child": false,
+            "parent_chunk_size": 4096,
+            "child_chunk_size": 384
+        },
+        "image_processing_config": {
+            "model_id": ""
+        },
+        "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+        "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+        "vlm_config": {
+            "enabled": true,
+            "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
+        },
+        "asr_config": {
+            "enabled": false,
+            "model_id": "",
+            "language": ""
+        },
+        "storage_provider_config": {
+            "provider": "local"
+        },
+        "storage_config": {
+            "secret_id": "",
+            "secret_key": "",
+            "region": "",
+            "bucket_name": "",
+            "app_id": "",
+            "path_prefix": ""
+        },
+        "extract_config": null,
+        "faq_config": null,
+        "question_generation_config": null,
         "is_pinned": true,
+        "pinned_at": "2025-08-12T15:00:00.000000+08:00",
+        "knowledge_count": 12,
+        "chunk_count": 340,
+        "processing_count": 0,
         "created_at": "2025-08-11T20:10:41.817794+08:00",
         "updated_at": "2025-08-12T15:00:00.000000+08:00",
         "deleted_at": null
@@ -485,9 +672,55 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/move-t
             "id": "kb-00000002",
             "name": "技术文档知识库",
             "description": "技术文档相关知识",
+            "type": "document",
+            "is_temporary": false,
+            "tenant_id": 1,
+            "chunking_config": {
+                "chunk_size": 1000,
+                "chunk_overlap": 200,
+                "separators": ["\n\n", "\n"],
+                "enable_multimodal": true,
+                "parser_engine_rules": [],
+                "enable_parent_child": false,
+                "parent_chunk_size": 4096,
+                "child_chunk_size": 384
+            },
+            "image_processing_config": {
+                "model_id": ""
+            },
             "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
+            "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
+            "vlm_config": {
+                "enabled": false,
+                "model_id": ""
+            },
+            "asr_config": {
+                "enabled": false,
+                "model_id": "",
+                "language": ""
+            },
+            "storage_provider_config": {
+                "provider": "local"
+            },
+            "storage_config": {
+                "secret_id": "",
+                "secret_key": "",
+                "region": "",
+                "bucket_name": "",
+                "app_id": "",
+                "path_prefix": ""
+            },
+            "extract_config": null,
+            "faq_config": null,
+            "question_generation_config": null,
+            "is_pinned": false,
+            "pinned_at": null,
+            "knowledge_count": 8,
+            "chunk_count": 210,
+            "processing_count": 0,
             "created_at": "2025-08-12T11:30:09.206238+08:00",
-            "updated_at": "2025-08-12T11:30:09.206238+08:00"
+            "updated_at": "2025-08-12T11:30:09.206238+08:00",
+            "deleted_at": null
         }
     ],
     "success": true

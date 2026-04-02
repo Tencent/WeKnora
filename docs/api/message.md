@@ -84,6 +84,9 @@ curl --location --request GET 'http://localhost:8080/api/v1/messages/ceb9babb-1e
             ],
             "agent_steps": [],
             "is_completed": true,
+            "is_fallback": false,
+            "agent_duration_ms": 2500,
+            "channel": "web",
             "created_at": "2025-08-12T10:24:38.370548+08:00",
             "updated_at": "2025-08-12T10:25:40.416382+08:00",
             "deleted_at": null
@@ -97,6 +100,9 @@ curl --location --request GET 'http://localhost:8080/api/v1/messages/ceb9babb-1e
             "knowledge_references": [],
             "agent_steps": [],
             "is_completed": true,
+            "mentioned_items": [],
+            "images": [],
+            "channel": "web",
             "created_at": "2025-08-12T14:30:39.732246+08:00",
             "updated_at": "2025-08-12T14:30:39.733277+08:00",
             "deleted_at": null
@@ -153,6 +159,9 @@ curl --location --request GET 'http://localhost:8080/api/v1/messages/ceb9babb-1e
             ],
             "agent_steps": [],
             "is_completed": true,
+            "is_fallback": false,
+            "agent_duration_ms": 2500,
+            "channel": "web",
             "created_at": "2025-08-12T14:30:39.735108+08:00",
             "updated_at": "2025-08-12T14:31:17.829926+08:00",
             "deleted_at": null

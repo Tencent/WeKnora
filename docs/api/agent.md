@@ -418,7 +418,9 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `agent_mode` | string | - | 智能体模式：`quick-answer`（RAG）或 `smart-reasoning`（ReAct） |
 | `system_prompt` | string | - | 系统提示词，支持使用占位符 |
+| `system_prompt_id` | string | - | 系统提示词模板 ID（引用 `prompt_templates/` YAML 文件中的模板） |
 | `context_template` | string | - | 上下文模板（仅 quick-answer 模式使用） |
+| `context_template_id` | string | - | 上下文模板 ID（引用 `prompt_templates/` YAML 文件中的模板） |
 
 ### 模型设置
 
@@ -428,6 +430,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 | `rerank_model_id` | string | - | 重排序模型 ID |
 | `temperature` | float | 0.7 | 温度参数（0-1） |
 | `max_completion_tokens` | int | 2048 | 最大生成 token 数 |
+| `thinking` | *bool | nil | 是否启用思考模式（适用于支持扩展思考的模型） |
 
 ### Agent 模式设置
 
@@ -435,9 +438,10 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `max_iterations` | int | 10 | ReAct 最大迭代次数 |
 | `allowed_tools` | []string | - | 允许使用的工具列表 |
-| `reflection_enabled` | bool | false | 是否启用反思 |
 | `mcp_selection_mode` | string | - | MCP 服务选择模式：`all`/`selected`/`none` |
 | `mcp_services` | []string | - | 选中的 MCP 服务 ID 列表 |
+| `skills_selection_mode` | string | - | Skills 选择模式：`all`/`selected`/`none` |
+| `selected_skills` | []string | - | 选中的 Skill 名称列表（mode 为 `selected` 时） |
 
 ### 知识库设置
 
@@ -445,7 +449,16 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `kb_selection_mode` | string | - | 知识库选择模式：`all`/`selected`/`none` |
 | `knowledge_bases` | []string | - | 关联的知识库 ID 列表 |
+| `retrieve_kb_only_when_mentioned` | bool | false | 仅在用户通过 @ 显式提及时才检索知识库 |
 | `supported_file_types` | []string | - | 支持的文件类型（如 `["csv", "xlsx"]`） |
+
+### 图片上传 / 多模态设置
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `image_upload_enabled` | bool | false | 是否允许上传图片 |
+| `vlm_model_id` | string | - | 图片分析所用的 VLM 模型 ID |
+| `image_storage_provider` | string | - | 图片存储提供者：`local`/`minio`/`cos`/`tos`，为空使用全局默认 |
 
 ### FAQ 策略设置
 
@@ -461,6 +474,9 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `web_search_enabled` | bool | true | 是否启用网络搜索 |
 | `web_search_max_results` | int | 5 | 网络搜索最大结果数 |
+| `web_search_provider_id` | string | - | 网络搜索提供者 ID，为空使用租户默认提供者 |
+| `web_fetch_enabled` | bool | false | 是否自动获取重排后的搜索结果页面全文 |
+| `web_fetch_top_n` | int | 3 | 重排后获取全文的最大页面数 |
 
 ### 多轮对话设置
 
@@ -479,6 +495,12 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 | `rerank_top_k` | int | 5 | 重排序 TopK |
 | `rerank_threshold` | float | 0.5 | 重排序阈值 |
 
+### 推荐问题设置
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `suggested_prompts` | []string | - | 推荐问题列表，用于在前端对话面板展示快捷提问 |
+
 ### 高级设置
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -487,7 +509,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 | `enable_rewrite` | bool | true | 是否启用多轮对话查询改写 |
 | `rewrite_prompt_system` | string | - | 改写系统提示词 |
 | `rewrite_prompt_user` | string | - | 改写用户提示词模板 |
-| `fallback_strategy` | string | model | 回退策略：`fixed`（固定回复）或 `model`（模型生成） |
+| `fallback_strategy` | string | `model` | 回退策略：`fixed`（固定回复）或 `model`（模型生成）；未设置时在服务端默认为 `model` |
 | `fallback_response` | string | - | 固定回退回复（`fallback_strategy` 为 `fixed` 时使用） |
 | `fallback_prompt` | string | - | 回退提示词（`fallback_strategy` 为 `model` 时使用） |
 
