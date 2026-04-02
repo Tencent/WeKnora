@@ -301,14 +301,14 @@ docker compose down
 
 <table>
   <tr>
-    <td><b>知识库管理</b><br/><img src="./docs/images/knowledgebases.png" alt="知识库管理"></td>
-    <td><b>对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置"></td>
-  </tr>
-  <tr>
     <td colspan="2"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话"></td>
   </tr>
   <tr>
     <td colspan="2"><b>Agent模式工具调用过程</b><br/><img src="./docs/images/agent-qa.png" alt="Agent模式工具调用过程"></td>
+  </tr>
+  <tr>
+    <td><b>知识库管理</b><br/><img src="./docs/images/knowledgebases.png" alt="知识库管理"></td>
+    <td><b>对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置"></td>
   </tr>
 </table>
 
@@ -337,72 +337,6 @@ WeKnora 作为[微信对话开放平台](https://chatbot.weixin.qq.com)的核心
 - **高效问题管理**：支持高频问题的独立分类管理，提供丰富的数据工具，确保回答精准可靠且易于维护
 - **微信生态覆盖**：通过微信对话开放平台，WeKnora 的智能问答能力可无缝集成到公众号、小程序等微信场景中，提升用户交互体验
 
-### 🔗 MCP 服务器访问已经部署好的 WeKnora
-
-#### 1️⃣克隆储存库
-
-```
-git clone https://github.com/Tencent/WeKnora
-```
-
-#### 2️⃣配置MCP服务器
-
-> 推荐直接参考 [MCP配置说明](./mcp-server/MCP_CONFIG.md) 进行配置。
-
-mcp客户端配置服务器
-
-```json
-{
-  "mcpServers": {
-    "weknora": {
-      "args": [
-        "path/to/WeKnora/mcp-server/run_server.py"
-      ],
-      "command": "python",
-      "env":{
-        "WEKNORA_API_KEY":"进入你的weknora实例，打开开发者工具，查看请求头x-api-key，以sk开头",
-        "WEKNORA_BASE_URL":"http(s)://你的weknora地址/api/v1"
-      }
-    }
-  }
-}
-```
-
-使用stdio命令直接运行
-
-```
-pip install weknora-mcp-server
-python -m weknora-mcp-server
-```
-
-## 🔧 初始化配置引导
-
-为了方便用户快速配置各类模型，降低试错成本，我们改进了原来的配置文件初始化方式，增加了Web UI界面进行各种模型的配置。在使用之前，请确保代码更新到最新版本。具体使用步骤如下：
-如果是第一次使用本项目，可跳过①②步骤，直接进入③④步骤。
-
-### ① 关闭服务
-
-```bash
-docker compose down
-```
-
-### ② 清空原有数据表（建议在没有重要数据的情况下使用）
-
-```bash
-make clean-db
-```
-
-### ③ 编译并启动服务
-
-```bash
-docker compose up -d --build
-```
-
-### ④ 访问Web UI
-
-[http://localhost](http://localhost)
-
-首次访问会自动跳转到注册登录页面，完成注册后，请创建一个新的知识库，并在该知识库的设置页面完成相关设置。
 
 ## 📘 文档
 

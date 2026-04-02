@@ -291,14 +291,14 @@ Once started, services will be available at:
 
 <table>
   <tr>
-    <td><b>Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management"></td>
-    <td><b>Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings"></td>
-  </tr>
-  <tr>
     <td colspan="2"><b>Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation"></td>
   </tr>
   <tr>
     <td colspan="2"><b>Agent Mode Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process"></td>
+  </tr>
+    <tr>
+    <td><b>Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management"></td>
+    <td><b>Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings"></td>
   </tr>
 </table>
 
@@ -333,61 +333,6 @@ WeKnora serves as the core technology framework for the [WeChat Dialog Open Plat
 git clone https://github.com/Tencent/WeKnora
 ```
 
-#### 2️⃣ Configure MCP Server
-> It is recommended to directly refer to the [MCP Configuration Guide](./mcp-server/MCP_CONFIG.md) for configuration.
-
-Configure the MCP client to connect to the server:
-```json
-{
-  "mcpServers": {
-    "weknora": {
-      "args": [
-        "path/to/WeKnora/mcp-server/run_server.py"
-      ],
-      "command": "python",
-      "env":{
-        "WEKNORA_API_KEY":"Enter your WeKnora instance, open developer tools, check the request header x-api-key starting with sk",
-        "WEKNORA_BASE_URL":"http(s)://your-weknora-address/api/v1"
-      }
-    }
-  }
-}
-```
-
-Run directly using stdio command:
-```
-pip install weknora-mcp-server
-python -m weknora-mcp-server
-```
-
-## 🔧 Initialization Configuration Guide
-
-To help users quickly configure various models and reduce trial-and-error costs, we've improved the original configuration file initialization method by adding a Web UI interface for model configuration. Before using, please ensure the code is updated to the latest version. The specific steps are as follows:
-If this is your first time using this project, you can skip steps ①② and go directly to steps ③④.
-
-### ① Stop the services
-
-```bash
-docker compose down
-```
-
-### ② Clear existing data tables (recommended when no important data exists)
-
-```bash
-make clean-db
-```
-
-### ③ Compile and start services
-
-```bash
-docker compose up -d --build
-```
-
-### ④ Access Web UI
-
-http://localhost
-
-On your first visit, you will be automatically redirected to the registration/login page. After completing registration, please create a new knowledge base and finish the relevant settings on its configuration page.
 
 ## 📘 API Reference
 

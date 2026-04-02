@@ -291,14 +291,14 @@ docker compose down
 
 <table>
   <tr>
-    <td><b>ナレッジベース管理</b><br/><img src="./docs/images/knowledgebases.png" alt="ナレッジベース管理"></td>
-    <td><b>対話設定</b><br/><img src="./docs/images/settings.png" alt="対話設定"></td>
-  </tr>
-  <tr>
     <td colspan="2"><b>インテリジェントQ&A対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェントQ&A対話"></td>
   </tr>
   <tr>
     <td colspan="2"><b>Agentモードツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agentモードツール呼び出しプロセス"></td>
+  </tr>
+    <tr>
+    <td><b>ナレッジベース管理</b><br/><img src="./docs/images/knowledgebases.png" alt="ナレッジベース管理"></td>
+    <td><b>対話設定</b><br/><img src="./docs/images/settings.png" alt="対話設定"></td>
   </tr>
 </table>
 
@@ -327,69 +327,6 @@ WeKnoraは[WeChat対話オープンプラットフォーム](https://chatbot.wei
 - **効率的な問題管理**：高頻度の問題の独立した分類管理をサポートし、豊富なデータツールを提供して、正確で信頼性が高く、メンテナンスが容易な回答を保証
 - **WeChatエコシステムカバレッジ**：WeChat対話オープンプラットフォームを通じて、WeKnoraのインテリジェントQ&A能力を公式アカウント、ミニプログラムなどのWeChatシナリオにシームレスに統合し、ユーザーインタラクション体験を向上
 
-### 🔗 MCP サーバーを使用してデプロイ済みの WeKnora にアクセス
-
-#### 1️⃣リポジトリのクローン
-```
-git clone https://github.com/Tencent/WeKnora
-```
-
-#### 2️⃣ MCPサーバーの設定
-
-> 設定には直接 [MCP設定説明](./mcp-server/MCP_CONFIG.md) を参照することをお勧めします。
-
-MCPクライアントでサーバーを設定
-```json
-{
-  "mcpServers": {
-    "weknora": {
-      "args": [
-        "path/to/WeKnora/mcp-server/run_server.py"
-      ],
-      "command": "python",
-      "env":{
-        "WEKNORA_API_KEY":"WeKnoraインスタンスに入り、開発者ツールを開いて、リクエストヘッダーx-api-keyを確認、skで始まる",
-        "WEKNORA_BASE_URL":"http(s)://あなたのWeKnoraアドレス/api/v1"
-      }
-    }
-  }
-}
-```
-
-stdioコマンドで直接実行
-```
-pip install weknora-mcp-server
-python -m weknora-mcp-server
-```
-
-## 🔧 初期設定ガイド
-
-ユーザーが各種モデルを素早く設定し、試行錯誤のコストを削減するために、元の設定ファイル初期化方法を改善し、Web UIインターフェースを追加して各種モデルの設定を行えるようにしました。使用前に、コードが最新バージョンに更新されていることを確認してください。具体的な使用手順は以下の通りです：
-本プロジェクトを初めて使用する場合は、①②の手順をスキップして、直接③④の手順に進んでください。
-
-### ① サービスの停止
-
-```bash
-docker compose down
-```
-
-### ② 既存のデータテーブルをクリア（重要なデータがない場合の推奨）
-
-```bash
-make clean-db
-```
-
-### ③ コンパイルしてサービスを起動
-
-```bash
-docker compose up -d --build
-```
-
-### ④ Web UIにアクセス
-
-http://localhost
-
-初回アクセス時は自動的に登録・ログインページに遷移します。登録完了後、新規にナレッジベースを作成し、その設定画面で必要な項目を構成してください。
 
 ## 📘 ドキュメント
 
