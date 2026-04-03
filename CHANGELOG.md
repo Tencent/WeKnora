@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.6] - 2026-04-03
+
+### 🚀 New Features
+- **NEW**: ASR (Automatic Speech Recognition) — integrated ASR model support with audio file upload, in-document audio preview, and transcription capabilities; added ASR model connectivity check endpoint
+- **NEW**: Data Source Auto-Sync (Feishu) — complete data source management with CRUD operations, Feishu Wiki/Drive auto-sync (incremental and full), sync logs with polling, tenant isolation, and data source type icons
+- **NEW**: OIDC Authentication — OpenID Connect (OIDC) login support with auto-discovery, custom endpoint configuration, and user info field mapping
+- **NEW**: IM Quote/Reply Context — extract quoted messages in IM channels (WeCom) and inject QuotedContext into LLM prompts for contextual replies; anti-hallucination handling for non-text quotes and unprocessable media
+- **NEW**: Thread-Based IM Sessions — per-thread session mode for IM channels (Slack, Mattermost, Feishu, Telegram), enabling multi-user collaboration within message threads
+- **NEW**: Document Summarization — AI-generated document summaries with configurable max_input_chars, dedicated summary section in document detail view with loading states
+- **NEW**: Tavily Web Search Provider — added Tavily as a web search provider option; refactored web search provider architecture for extensibility
+- **NEW**: MCP Auto-Reconnection — automatic reconnection logic for MCP tool calls and tool listing when server connection is lost
+- **NEW**: Parallel Tool Calling — concurrent execution of multiple tool calls in agent mode via errgroup when ParallelToolCalls is enabled; sequential execution remains default
+- **NEW**: Agent @Mention Scope Restriction — restrict user @mentions to agent's allowed knowledge base scope, preventing unauthorized access to knowledge bases and knowledge entries
+
+### ⚡ Improvements
+- Refined parent-child chunk replacement logic to only apply to text chunks whose parent is a parent_text chunk
+- Optimized login page rendering performance: removed all backdrop-filter blur, reduced animated elements, added GPU compositing hints and prefers-reduced-motion support
+- Unified NVIDIA API for both chat and VLM model types
+- Prompt language fallback now uses WEKNORA_LANGUAGE environment variable instead of hardcoded zh-CN, with language propagated through document and image processing pipelines
+- Fixed enable_thinking for Aliyun Qwen models in streaming mode
+- Enhanced document processing with metadata extraction and handling
+- Added header tracking for Markdown tables during chunking to preserve table context
+- Elasticsearch ID field handling with dynamic .keyword suffix detection based on index mapping
+- Added DOCREADER_DOCX_MAX_PAGES environment variable to limit DOCX parsing for large documents
+- Knowledge tag batch update now includes authorization checks with agent-scoped KB access validation
+- System proxy support for remote API calls
+- DatabaseQueryTool enhanced with search scope filtering
+
+### 🐛 Bug Fixes
+- Fixed WeCom group chat @mention not being stripped from message text, causing all slash commands to fail
+- Fixed SSEReader returning errors.New("EOF") instead of io.EOF, causing silent stream termination without done response
+- Fixed extracted images not being deleted from storage when knowledge is removed, preventing orphan file accumulation
+- Fixed S3 provider scheme not recognized in frontend/backend allowlists; added auto path-style addressing for non-AWS S3-compatible endpoints
+- Fixed remote images in markdown files not being resolved during file upload (only base64/inline were handled)
+- Fixed SSRF validation lacking IPv6 support; added IPv6 address and CIDR handling in whitelist mechanism
+- Fixed web_fetch using removed IsSSRFSafeURL function; replaced with ValidateURLForSSRF
+- Fixed mermaid diagrams not rendering on page refresh
+- Fixed doc-content.vue renderer incompatible with marked v5+ token API
+- Fixed null reference error when rendering empty markdown code blocks
+- Fixed frontend using legacy storage_config instead of storage_provider_config, causing incorrect storage provider display
+- Fixed knowledge document category not deselectable by clicking again
+- Fixed duplicate click binding in frontend components
+- Fixed migration numbering errors and removed broken update_updated_at_column trigger
+- Fixed monkey patch for docx parse error handling
+
+### 📚 Documentation
+- Enhanced agent and knowledge base API documentation
+- Added data source import documentation with architecture overview and quick start guide
+- Updated README files with streamlined sections and feature overview across all languages
+- Updated architecture diagram
+
+### 🔧 Refactoring
+- Improved question generation prompt template with better guidelines and context handling
+- Simplified temperature option handling in chat request builders
+
 ## [0.3.5] - 2026-03-27
 
 ### 🚀 New Features
@@ -792,6 +847,7 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.3.6]: https://github.com/Tencent/WeKnora/tree/v0.3.6
 [0.3.5]: https://github.com/Tencent/WeKnora/tree/v0.3.5
 [0.3.4]: https://github.com/Tencent/WeKnora/tree/v0.3.4
 [0.3.3]: https://github.com/Tencent/WeKnora/tree/v0.3.3

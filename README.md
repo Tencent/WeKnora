@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.3.5-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.3.6-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -52,6 +52,20 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 
 ## ✨ Latest Updates
 
+**v0.3.6 Highlights:**
+
+- **ASR (Automatic Speech Recognition)**: Integrated ASR model support with audio file upload, in-document audio preview, and transcription capabilities
+- **Data Source Auto-Sync (Feishu)**: Complete data source management with Feishu Wiki/Drive auto-sync, incremental and full sync, sync logs, and tenant isolation
+- **OIDC Authentication**: OpenID Connect login support with auto-discovery, custom endpoints, and user info mapping
+- **IM Quote/Reply Context**: Quoted messages extracted in IM channels and injected into LLM prompts for contextual replies; anti-hallucination for non-text quotes
+- **Thread-Based IM Sessions**: Per-thread session mode for IM channels (Slack, Mattermost, Feishu, Telegram), enabling multi-user collaboration within threads
+- **Document Summarization**: AI-generated document summaries with configurable input limits and a dedicated summary section in document detail view
+- **Tavily Web Search**: Added Tavily as a web search provider; refactored web search provider architecture for extensibility
+- **MCP Auto-Reconnection**: Automatic reconnection for MCP tool calls when server connection is lost
+- **Parallel Tool Calling**: Concurrent execution of multiple agent tool calls via errgroup for faster complex task handling
+- **Agent @Mention Scope Restriction**: User @mentions restricted to agent's allowed knowledge base scope, preventing unauthorized access
+- **Login Page Performance**: Removed all backdrop-filter blur effects, reduced animations, added GPU compositing hints for faster page load
+
 **v0.3.5 Highlights:**
 
 - **Telegram, DingTalk & Mattermost IM Integration**: Added Telegram bot (webhook/long-polling, streaming via editMessageText), DingTalk bot (webhook/Stream mode, AI Card streaming), and Mattermost adapter; IM channel coverage now includes WeCom, Feishu, Slack, Telegram, DingTalk, and Mattermost
@@ -62,6 +76,9 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 - **MCP Tool Name Stability**: Tool names now based on service name (stable across reconnections) instead of UUID; unique name constraint added; frontend formats names into human-readable form
 - **Channel Tracking**: Knowledge entries and messages record source channel (web/api/im/browser_extension) for traceability
 - **Bug Fixes**: Fixed agent empty response when no knowledge base is configured, UTF-8 truncation in summaries for Chinese/emoji documents, API key encryption loss on tenant settings update, vLLM streaming reasoning content propagation, and rerank empty passage errors
+
+<details>
+<summary><b>Earlier Releases</b></summary>
 
 **v0.3.4 Highlights:**
 
@@ -75,9 +92,6 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 - **Built-in MCP Service**: Built-in MCP service support for extending agent capabilities
 - **Hybrid Search Optimization**: Grouped targets and reused query embeddings for better retrieval performance
 - **Final Answer Tool**: New final_answer tool with agent duration tracking for improved agent workflows
-
-<details>
-<summary><b>Earlier Releases</b></summary>
 
 **v0.3.3 Highlights:**
 

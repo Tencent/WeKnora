@@ -1,6 +1,6 @@
 {
   "name": "knowledage-base",
-  "version": "0.3.4",
+  "version": "0.3.6",
   "private": true,
   "type": "module",
   "scripts": {
