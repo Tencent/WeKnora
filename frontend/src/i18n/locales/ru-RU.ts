@@ -2682,6 +2682,8 @@ export default {
     unsupportedHint: 'Скачайте файл и откройте локально',
     fullscreen: 'Полноэкранный режим',
     exitFullscreen: 'Выйти из полноэкранного режима',
+    audioLoading: 'Загрузка аудио…',
+    audioNotSupported: 'Ваш браузер не поддерживает воспроизведение аудио',
   },
   knowledgeSearch: {
     title: 'Поиск',

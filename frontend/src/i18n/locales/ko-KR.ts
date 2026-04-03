@@ -3065,6 +3065,8 @@ export default {
     unsupportedHint: '파일을 다운로드하여 로컬 앱으로 열어주세요',
     fullscreen: '전체 화면',
     exitFullscreen: '전체 화면 종료',
+    audioLoading: '오디오 로딩 중…',
+    audioNotSupported: '브라우저가 오디오 재생을 지원하지 않습니다',
   },
   knowledgeSearch: {
     title: '검색',

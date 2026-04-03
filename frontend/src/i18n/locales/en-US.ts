@@ -3011,6 +3011,8 @@ export default {
     unsupportedHint: 'Please download and open with a local application',
     fullscreen: 'Fullscreen',
     exitFullscreen: 'Exit Fullscreen',
+    audioLoading: 'Loading audio…',
+    audioNotSupported: 'Your browser does not support audio playback',
   },
   knowledgeSearch: {
     title: 'Search',

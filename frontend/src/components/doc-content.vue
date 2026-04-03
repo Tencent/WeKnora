@@ -6,7 +6,7 @@ import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
 import mermaid from "mermaid";
 import { onMounted, ref, nextTick, onUnmounted, watch, computed } from "vue";
-import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly } from "@/api/knowledge-base/index";
+import { downKnowledgeDetails, deleteGeneratedQuestion, getChunkByIdOnly, previewKnowledgeFile } from "@/api/knowledge-base/index";
 import { MessagePlugin, DialogPlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -167,6 +167,9 @@ onUnmounted(() => {
   if (doc) {
     doc.removeEventListener('scroll', handleDetailsScroll);
   }
+  if (audioBlobUrl.value) {
+    URL.revokeObjectURL(audioBlobUrl.value);
+  }
 })
 const checkImage = (url) => {
   return new Promise((resolve) => {
@@ -257,18 +260,29 @@ const previewSupportedTypes = new Set([
   'py', 'java', 'go', 'cpp', 'c', 'h', 'sh', 'yaml', 'yml',
   'ini', 'conf', 'log', 'sql', 'rs', 'rb', 'php', 'swift', 'kt',
   'scala', 'r', 'lua', 'pl', 'toml',
+  'mp3', 'wav', 'm4a', 'flac', 'ogg',
 ]);
 
 const canPreview = (): boolean => {
   if (props.details?.type !== 'file') return false;
   const ft = props.details?.file_type?.toLowerCase();
-  return !!ft && previewSupportedTypes.has(ft);
+  if (!ft) return false;
+  if (audioExtensions.has(ft)) return false; // 音频不走预览tab，播放器已内嵌
+  return previewSupportedTypes.has(ft);
 };
 
-// 当文档详情加载完成时，file 类型自动切换到「预览」
+// 当文档详情加载完成时，file 类型自动切换到「预览」；音频类型使用 merged + 播放器
 watch(() => props.details?.id, (newId) => {
+  // 清理旧音频
+  if (audioBlobUrl.value) {
+    URL.revokeObjectURL(audioBlobUrl.value);
+    audioBlobUrl.value = '';
+  }
   if (!newId) return;
-  if (props.details?.type === 'file' && canPreview()) {
+  if (isAudioFile(props.details?.file_type)) {
+    viewMode.value = 'merged'; // 音频默认全文视图，播放器已内嵌
+    loadAudioPreview();
+  } else if (props.details?.type === 'file' && canPreview()) {
     viewMode.value = 'preview';
   } else {
     viewMode.value = 'merged';
@@ -284,6 +298,28 @@ const isMarkdownFile = (fileType?: string): boolean => {
   if (!fileType) return false;
   const markdownTypes = ['md', 'markdown'];
   return markdownTypes.includes(fileType.toLowerCase());
+};
+
+// 音频文件判断与播放器状态
+const audioExtensions = new Set(['mp3', 'wav', 'm4a', 'flac', 'ogg']);
+const isAudioFile = (fileType?: string): boolean => {
+  if (!fileType) return false;
+  return audioExtensions.has(fileType.toLowerCase());
+};
+const audioBlobUrl = ref('');
+const audioLoading = ref(false);
+
+const loadAudioPreview = async () => {
+  if (!props.details?.id || audioBlobUrl.value) return;
+  audioLoading.value = true;
+  try {
+    const blob = await previewKnowledgeFile(props.details.id);
+    audioBlobUrl.value = URL.createObjectURL(blob);
+  } catch (err) {
+    console.error('Audio preview load failed:', err);
+  } finally {
+    audioLoading.value = false;
+  }
 };
 const runMarkdownPostRenderPipeline = async () => {
   await nextTick();
@@ -807,7 +843,18 @@ const handleDetailsScroll = () => {
           </div>
         </div>
       </div>
-      
+
+      <!-- 音频播放器（音频文件时固定显示在内容区顶部） -->
+      <div v-if="isAudioFile(details.file_type)" class="audio-player-section">
+        <div v-if="audioLoading" class="audio-loading">
+          <t-loading size="small" />
+          <span>{{ $t('preview.audioLoading') }}</span>
+        </div>
+        <audio v-else-if="audioBlobUrl" controls class="audio-player" :src="audioBlobUrl">
+          {{ $t('preview.audioNotSupported') }}
+        </audio>
+      </div>
+
       <!-- 合并视图 -->
       <div v-if="viewMode === 'merged'">
         <div v-if="!mergedContent" class="no_content">{{ $t('common.noData') }}</div>
@@ -1327,6 +1374,29 @@ const handleDetailsScroll = () => {
     &:hover {
       color: var(--td-error-color);
     }
+  }
+}
+
+// 音频播放器样式
+.audio-player-section {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 6px;
+  border: 1px solid var(--td-component-border);
+
+  .audio-player {
+    width: 100%;
+    height: 40px;
+  }
+
+  .audio-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--td-text-color-placeholder);
+    font-size: 13px;
+    padding: 4px 0;
   }
 }
 

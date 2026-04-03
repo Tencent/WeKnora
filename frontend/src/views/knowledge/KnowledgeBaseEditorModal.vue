@@ -237,6 +237,7 @@
                             :selected-model-id="formData.asrConfig.modelId"
                             :all-models="allModels"
                             @update:selected-model-id="(val: string) => { if (formData) formData.asrConfig.modelId = val }"
+                            @add-model="handleAddASRModel"
                             :placeholder="$t('knowledgeEditor.asr.modelPlaceholder')"
                           />
                         </div>
@@ -555,6 +556,10 @@ const handleMultimodalVLLMChange = (modelId: string) => {
 
 const handleAddVLLMModel = () => {
   uiStore.openSettings('models', 'vllm')
+}
+
+const handleAddASRModel = () => {
+  uiStore.openSettings('models', 'asr')
 }
 
 const handleStorageProviderUpdate = (value: string) => {

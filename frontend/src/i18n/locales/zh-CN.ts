@@ -3009,6 +3009,8 @@ export default {
     unsupportedHint: "请下载文件后使用本地应用查看",
     fullscreen: "全屏预览",
     exitFullscreen: "退出全屏",
+    audioLoading: "加载音频中…",
+    audioNotSupported: "您的浏览器不支持音频播放",
   },
   knowledgeSearch: {
     title: "搜索",
