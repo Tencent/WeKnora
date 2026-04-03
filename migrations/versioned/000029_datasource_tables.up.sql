@@ -1,6 +1,6 @@
--- Migration: 000028_datasource_tables
+-- Migration: 000029_datasource_tables
 -- Description: Create data_sources and sync_logs tables for external data source management
-DO $$ BEGIN RAISE NOTICE '[Migration 000028] Creating data_sources and sync_logs tables'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000029] Creating data_sources and sync_logs tables'; END $$;
 
 -- Create data_sources table for managing external data source configurations
 CREATE TABLE IF NOT EXISTS data_sources (
@@ -57,4 +57,4 @@ CREATE INDEX IF NOT EXISTS idx_sync_logs_status ON sync_logs (status);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_started_at ON sync_logs (started_at);
 
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000028] data_sources and sync_logs tables created successfully'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000029] data_sources and sync_logs tables created successfully'; END $$;
