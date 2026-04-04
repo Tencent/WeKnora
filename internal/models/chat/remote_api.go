@@ -780,7 +780,11 @@ func (c *RemoteAPIChat) processToolCallsDelta(ctx context.Context, toolCalls []o
 			toolCallEntry.Type = string(tc.Type)
 		}
 		if tc.Function.Name != "" {
-			toolCallEntry.Function.Name += tc.Function.Name
+			// 防御性校验：解决部分供应商（如vLLM Ascend等）在每个流 Chunk 中重复发送完整工具名的问题。
+			// 如果当前已存名字与新收到名字一致，则视为冗余重复，不进行叠加。
+			if toolCallEntry.Function.Name != tc.Function.Name {
+				toolCallEntry.Function.Name += tc.Function.Name
+			}
 		}
 
 		argsUpdated := false
