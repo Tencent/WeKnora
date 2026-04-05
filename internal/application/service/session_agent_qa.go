@@ -219,6 +219,12 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		Thinking:                    customAgent.Config.Thinking,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
+		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
+	}
+
+	// Falls back to global configuration if no specific timeout is set for the agent.
+	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
+		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
 	}
 
 	// Configure skills based on CustomAgentConfig

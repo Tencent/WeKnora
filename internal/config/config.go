@@ -29,6 +29,14 @@ type Config struct {
 	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
+	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+}
+
+// AgentConfig represents the global agent settings.
+type AgentConfig struct {
+	// LLMCallTimeout is the default timeout for a single LLM call in seconds.
+	// Default: 120 (standard agents) or 300 (can be overridden by Env).
+	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout"`
 }
 
 // IMConfig configures the IM integration service.
@@ -408,6 +416,7 @@ func LoadConfig() (*Config, error) {
 
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
+	applyAgentEnvOverrides(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -532,6 +541,20 @@ func applyOIDCEnvOverrides(cfg *Config) {
 	}
 	if cfg.OIDCAuth.DiscoveryURL == "" && cfg.OIDCAuth.IssuerURL != "" {
 		cfg.OIDCAuth.DiscoveryURL = strings.TrimRight(cfg.OIDCAuth.IssuerURL, "/") + "/.well-known/openid-configuration"
+	}
+}
+
+func applyAgentEnvOverrides(cfg *Config) {
+	if cfg.Agent == nil {
+		cfg.Agent = &AgentConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_AGENT_LLM_TIMEOUT")); value != "" {
+		if timeout, err := time.ParseDuration(value); err == nil {
+			cfg.Agent.LLMCallTimeout = int(timeout.Seconds())
+		} else if sec, err := time.ParseDuration(value + "s"); err == nil {
+			// Handle case where user just provides a number like "300"
+			cfg.Agent.LLMCallTimeout = int(sec.Seconds())
+		}
 	}
 }
 
