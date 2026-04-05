@@ -5,6 +5,10 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -18,6 +22,10 @@ const (
 	SandboxTypeLocal SandboxType = "local"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
+	// SandboxTypeKubernetes uses K8s Jobs for isolation
+	SandboxTypeKubernetes SandboxType = "kubernetes"
+	// SandboxTypeOpenSandbox uses external OpenSandbox service
+	SandboxTypeOpenSandbox SandboxType = "opensandbox"
 )
 
 // Default configuration values
@@ -25,7 +33,12 @@ const (
 	DefaultTimeout     = 60 * time.Second
 	DefaultMemoryLimit = 256 * 1024 * 1024 // 256MB
 	DefaultCPULimit    = 1.0               // 1 CPU core
-	DefaultDockerImage = "wechatopenai/weknora-sandbox:latest"
+	DefaultDockerImage            = "wechatopenai/weknora-sandbox:latest"
+	DefaultMaxConcurrentSandboxes = 5
+	DefaultMaxScriptSize          = 512 * 1024 // 512KB (ConfigMap has 1MB limit; leave room for metadata)
+	DefaultMaxLogSize             = 1 * 1024 * 1024 // 1MB
+	DefaultKubeNamespace          = "weknora-sandbox"
+	DefaultKubeServiceAccount     = "weknora-sandbox-runner"
 )
 
 // Common errors
@@ -149,6 +162,59 @@ func (r *ExecuteResult) GetOutput() string {
 	return r.Stderr
 }
 
+const stdinFileName = ".stdin"
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes.
+// Null bytes are stripped to prevent shell string truncation attacks.
+func shellQuote(s string) string {
+	s = strings.ReplaceAll(s, "\x00", "")
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// buildShellCommand builds a shell command string from interpreter, script path, and args.
+// All arguments are shell-quoted. If hasStdin is true, the command is wrapped with
+// cat /workspace/.stdin | ... to pipe stdin content from a pre-uploaded file.
+func buildShellCommand(interpreter, scriptPath string, args []string, hasStdin bool) string {
+	parts := []string{shellQuote(interpreter), shellQuote(scriptPath)}
+	for _, arg := range args {
+		parts = append(parts, shellQuote(arg))
+	}
+	cmd := strings.Join(parts, " ")
+	if hasStdin {
+		cmd = "cat " + shellQuote("/workspace/"+stdinFileName) + " | " + cmd
+	}
+	return cmd
+}
+
+// buildExecCommand builds an exec-form command (no shell) for use as a container entrypoint.
+// Returns ["interpreter", "scriptPath", args...]. This form is preferred when no stdin
+// piping is needed because it avoids shell interpretation entirely.
+func buildExecCommand(interpreter, scriptPath string, args []string) []string {
+	cmd := []string{interpreter, scriptPath}
+	cmd = append(cmd, args...)
+	return cmd
+}
+
+// resolveScript reads script content and name from an ExecuteConfig.
+// It returns the script body, a filename suitable for use as an entry point, and any error.
+func resolveScript(config *ExecuteConfig) (content string, name string, err error) {
+	if config.ScriptContent != "" {
+		name = "script.sh"
+		if config.Script != "" {
+			name = filepath.Base(config.Script)
+		}
+		return config.ScriptContent, name, nil
+	}
+	if config.Script != "" {
+		data, err := os.ReadFile(config.Script)
+		if err != nil {
+			return "", "", fmt.Errorf("%w: %v", ErrScriptNotFound, err)
+		}
+		return string(data), filepath.Base(config.Script), nil
+	}
+	return "", "", ErrInvalidScript
+}
+
 // Config holds sandbox manager configuration
 type Config struct {
 	// Type is the preferred sandbox type
@@ -174,18 +240,44 @@ type Config struct {
 
 	// MaxCPU is the maximum CPU cores
 	MaxCPU float64
+
+	// MaxConcurrentSandboxes limits parallel sandbox executions per instance (kubernetes/opensandbox)
+	MaxConcurrentSandboxes int
+
+	// MaxScriptSize is the maximum script content size in bytes (kubernetes/opensandbox)
+	MaxScriptSize int64
+
+	// MaxLogSize is the maximum output size to read in bytes (kubernetes/opensandbox)
+	MaxLogSize int64
+
+	// KubeNamespace is the namespace for sandbox Jobs (kubernetes mode)
+	KubeNamespace string
+
+	// KubeServiceAccount is the ServiceAccount name for sandbox Pods (kubernetes mode)
+	KubeServiceAccount string
+
+	// OpenSandboxAPIURL is the OpenSandbox server URL (opensandbox mode)
+	OpenSandboxAPIURL string
+
+	// OpenSandboxAPIKey is the API key for OpenSandbox (opensandbox mode)
+	OpenSandboxAPIKey string
 }
 
 // DefaultConfig returns a default sandbox configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Type:            SandboxTypeLocal,
-		FallbackEnabled: true,
-		DefaultTimeout:  DefaultTimeout,
-		DockerImage:     DefaultDockerImage,
-		AllowedCommands: defaultAllowedCommands(),
-		MaxMemory:       DefaultMemoryLimit,
-		MaxCPU:          DefaultCPULimit,
+		Type:                   SandboxTypeLocal,
+		FallbackEnabled:        true,
+		DefaultTimeout:         DefaultTimeout,
+		DockerImage:            DefaultDockerImage,
+		AllowedCommands:        defaultAllowedCommands(),
+		MaxMemory:              DefaultMemoryLimit,
+		MaxCPU:                 DefaultCPULimit,
+		MaxConcurrentSandboxes: DefaultMaxConcurrentSandboxes,
+		MaxScriptSize:          DefaultMaxScriptSize,
+		MaxLogSize:             DefaultMaxLogSize,
+		KubeNamespace:          DefaultKubeNamespace,
+		KubeServiceAccount:     DefaultKubeServiceAccount,
 	}
 }
 
@@ -222,7 +314,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeDisabled, SandboxTypeKubernetes, SandboxTypeOpenSandbox:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")
