@@ -54,6 +54,7 @@ export interface Resource {
   description: string
   url: string
   parent_id?: string
+  has_children?: boolean
 }
 
 // --- API calls ---

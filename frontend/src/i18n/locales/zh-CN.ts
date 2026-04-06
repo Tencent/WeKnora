@@ -3448,6 +3448,7 @@ export default {
     connectionFailed: "连接失败",
     isRequired: "为必填项",
     resourceHint: "选择要同步的内容空间/文件夹",
+    untitled: "无标题",
     resourceLoadFailed: "加载资源列表失败",
     noResources: "未找到可同步的知识库空间",
     noResourcesDesc: "应用需要通过群聊获得知识库访问权限才能拉取内容",

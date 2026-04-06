@@ -3501,6 +3501,7 @@ export default {
     connectionFailed: "연결 실패",
     isRequired: "은(는) 필수입니다",
     resourceHint: "동기화할 공간/폴더를 선택하세요",
+    untitled: "제목 없음",
     resourceLoadFailed: "리소스 목록 로드 실패",
     noResources: "동기화 가능한 위키 공간을 찾을 수 없습니다",
     noResourcesHint: "먼저 데이터 소스를 저장하고 권한 설정을 확인하세요",

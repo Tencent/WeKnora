@@ -3449,6 +3449,7 @@ export default {
     connectionFailed: 'Connection failed',
     isRequired: 'is required',
     resourceHint: 'Select the spaces or folders to sync',
+    untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
     noResources: 'No wiki spaces found',
     noResourcesDesc: 'The app needs wiki access via a group chat to fetch content',
