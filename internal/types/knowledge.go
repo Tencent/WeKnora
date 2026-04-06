@@ -28,6 +28,7 @@ const (
 	ChannelDingtalk         = "dingtalk"          // DingTalk
 	ChannelSlack            = "slack"             // Slack
 	ChannelIM               = "im"                // Generic IM channel
+	ChannelNotion           = "notion"            // Notion
 )
 
 // Knowledge parse status constants
