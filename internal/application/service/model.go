@@ -256,6 +256,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
+		Extra:                stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -311,6 +312,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
+		Extra:                stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
