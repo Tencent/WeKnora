@@ -2148,6 +2148,10 @@ export default {
           label: 'OpenAI',
           description: 'gpt-5.2, gpt-5-mini, etc.',
         },
+        azure_openai: {
+          label: 'Azure OpenAI',
+          description: 'OpenAI service hosted on Microsoft Azure',
+        },
         aliyun: {
           label: 'Aliyun DashScope',
           description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.',

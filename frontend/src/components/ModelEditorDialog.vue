@@ -318,6 +318,18 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding', 'vllm', 'asr']
   },
   {
+    value: 'azure_openai',
+    label: t('model.editor.providers.azure_openai.label'),
+    defaultUrls: {
+      chat: 'https://{resource}.openai.azure.com',
+      embedding: 'https://{resource}.openai.azure.com',
+      vllm: 'https://{resource}.openai.azure.com',
+      asr: 'https://{resource}.openai.azure.com'
+    },
+    description: t('model.editor.providers.azure_openai.description'),
+    modelTypes: ['chat', 'embedding', 'vllm', 'asr']
+  },
+  {
     value: 'aliyun',
     label: t('model.editor.providers.aliyun.label'),
     defaultUrls: {
