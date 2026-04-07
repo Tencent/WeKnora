@@ -394,6 +394,8 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		BaseURL:   model.Parameters.BaseURL,
 		ModelName: model.Name,
 		Source:    model.Source,
+		Provider:  model.Parameters.Provider,
+		Extra:     stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -499,4 +501,15 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	}
 
 	return sttModel, nil
+}
+
+func stringMapToAnyMap(m map[string]string) map[string]any {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]any, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
 }
