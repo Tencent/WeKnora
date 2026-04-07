@@ -822,7 +822,8 @@ const checkRemoteAPI = async () => {
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
-          apiKey: formData.value.apiKey || ''
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider
         })
         break
         
@@ -858,7 +859,8 @@ const checkRemoteAPI = async () => {
         result = await checkRemoteModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
-          apiKey: formData.value.apiKey || ''
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider
         })
         break
 

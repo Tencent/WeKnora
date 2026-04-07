@@ -1468,6 +1468,7 @@ type RemoteModelCheckRequest struct {
 	ModelName string `json:"modelName" binding:"required"`
 	BaseURL   string `json:"baseUrl"   binding:"required"`
 	APIKey    string `json:"apiKey"`
+	Provider  string `json:"provider"`
 }
 
 // CheckRemoteModel godoc
@@ -1513,8 +1514,9 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		Name:   req.ModelName,
 		Source: "remote",
 		Parameters: types.ModelParameters{
-			BaseURL: req.BaseURL,
-			APIKey:  req.APIKey,
+			BaseURL:  req.BaseURL,
+			APIKey:   req.APIKey,
+			Provider: req.Provider,
 		},
 		Type: "llm", // 默认类型，实际检查时不区分具体类型
 	}
@@ -1644,6 +1646,7 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 		ModelName: model.Name,
 		APIKey:    model.Parameters.APIKey,
 		ModelID:   model.Name,
+		Provider:  model.Parameters.Provider,
 	}
 
 	// 创建聊天实例
