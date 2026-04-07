@@ -447,6 +447,8 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		ModelName:     model.Name,
 		Source:        model.Source,
 		InterfaceType: ifType,
+		Provider:      model.Parameters.Provider,
+		Extra:         stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
