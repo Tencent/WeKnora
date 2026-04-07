@@ -66,6 +66,9 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	var config openai.ClientConfig
 	if providerName == provider.ProviderAzureOpenAI {
 		config = openai.DefaultAzureConfig(apiKey, chatConfig.BaseURL)
+		config.AzureModelMapperFunc = func(model string) string {
+			return model
+		}
 		if chatConfig.Extra != nil {
 			if v, ok := chatConfig.Extra["api_version"]; ok {
 				if vs, ok := v.(string); ok && vs != "" {
