@@ -77,6 +77,9 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 		Input:          texts,
 		EncodingFormat: "float",
 	}
+	if e.dimensions > 0 {
+		reqBody.Dimensions = e.dimensions
+	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -157,4 +160,4 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 
 func (e *AzureOpenAIEmbedder) GetModelName() string { return e.modelName }
 func (e *AzureOpenAIEmbedder) GetDimensions() int   { return e.dimensions }
-func (e *AzureOpenAIEmbedder) GetModelID() string    { return e.modelID }
+func (e *AzureOpenAIEmbedder) GetModelID() string   { return e.modelID }
