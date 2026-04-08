@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -24,6 +25,13 @@ type AzureOpenAIEmbedder struct {
 	httpClient           *http.Client
 	maxRetries           int
 	EmbedderPooler
+}
+
+type azureOpenAIEmbedRequest struct {
+	Model          string   `json:"model"`
+	Input          []string `json:"input"`
+	EncodingFormat string   `json:"encoding_format,omitempty"`
+	Dimensions     int      `json:"dimensions,omitempty"`
 }
 
 // NewAzureOpenAIEmbedder creates a new Azure OpenAI embedder
@@ -72,12 +80,12 @@ func (e *AzureOpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32
 }
 
 func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
-	reqBody := OpenAIEmbedRequest{
+	reqBody := azureOpenAIEmbedRequest{
 		Model:          e.modelName,
 		Input:          texts,
 		EncodingFormat: "float",
 	}
-	if e.dimensions > 0 {
+	if e.supportsDimensionsParam() {
 		reqBody.Dimensions = e.dimensions
 	}
 
@@ -156,6 +164,30 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 		}
 	}
 	return nil, err
+}
+
+func (e *AzureOpenAIEmbedder) supportsDimensionsParam() bool {
+	if e.dimensions <= 0 {
+		return false
+	}
+
+	// Azure only supports the dimensions parameter on newer embeddings APIs.
+	if strings.TrimSpace(e.apiVersion) < "2024-10-21" {
+		return false
+	}
+
+	modelRef := strings.ToLower(strings.TrimSpace(e.modelID))
+	if modelRef == "" {
+		modelRef = strings.ToLower(strings.TrimSpace(e.modelName))
+	}
+
+	// Fixed-dimension legacy models reject the field entirely.
+	if strings.Contains(modelRef, "ada-002") {
+		return false
+	}
+
+	return strings.Contains(modelRef, "text-embedding-3-small") ||
+		strings.Contains(modelRef, "text-embedding-3-large")
 }
 
 func (e *AzureOpenAIEmbedder) GetModelName() string { return e.modelName }
