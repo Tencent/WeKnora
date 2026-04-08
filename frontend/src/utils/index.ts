@@ -40,7 +40,7 @@ export function formatStringDate(date: any) {
     year + "-" + month + "-" + day + " " + hour + ":" + minute + ":" + second
   );
 }
-const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "jpg", "jpeg", "png", "csv", "xlsx", "xls"]);
+const DEFAULT_VALID_TYPES = new Set(["pdf", "txt", "md", "docx", "doc", "pptx", "ppt", "jpg", "jpeg", "png", "csv", "xlsx", "xls", "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv", "mp3", "wav", "m4a", "flac", "ogg"]);
 
 /**
  * Returns true when the file should be **rejected**.

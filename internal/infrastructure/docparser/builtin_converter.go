@@ -28,11 +28,18 @@ var audioFormats = map[string]bool{
 	"mp3": true, "wav": true, "m4a": true, "flac": true, "ogg": true,
 }
 
+var videoFormats = map[string]bool{
+	"mp4": true, "mov": true, "avi": true, "mkv": true, "webm": true, "wmv": true, "flv": true,
+}
+
 func init() {
 	for k := range imageFormats {
 		simpleFormats[k] = true
 	}
 	for k := range audioFormats {
+		simpleFormats[k] = true
+	}
+	for k := range videoFormats {
 		simpleFormats[k] = true
 	}
 }
@@ -74,6 +81,8 @@ func (b *SimpleFormatReader) Read(_ context.Context, req *types.ReadRequest) (*t
 		return imageToResult(req.FileName, req.FileContent), nil
 	case audioFormats[ft]:
 		return audioToResult(req.FileName, req.FileContent), nil
+	case videoFormats[ft]:
+		return videoToResult(req.FileName, req.FileContent), nil
 	default:
 		return nil, fmt.Errorf("unsupported simple format: %s", ft)
 	}
@@ -113,6 +122,11 @@ func IsAudioFormat(fileType string) bool {
 	return audioFormats[strings.ToLower(strings.TrimPrefix(fileType, "."))]
 }
 
+// IsVideoFormat returns true if the file type is a recognized video format.
+func IsVideoFormat(fileType string) bool {
+	return videoFormats[strings.ToLower(strings.TrimPrefix(fileType, "."))]
+}
+
 // audioToResult wraps a standalone audio file. The actual transcription is
 // handled by the ASR model in the knowledge service pipeline. Here we just
 // return a placeholder markdown with the raw bytes preserved for upstream
@@ -127,6 +141,22 @@ func audioToResult(fileName string, data []byte) *types.ReadResult {
 		MarkdownContent: fmt.Sprintf("[Audio file: %s]", fileName),
 		IsAudio:         true,
 		AudioData:       data,
+	}
+}
+
+// videoToResult wraps a standalone video file. The actual frame extraction,
+// VLM analysis and ASR transcription is handled by the VideoMultimodalService
+// in the knowledge service pipeline. Here we just return a placeholder markdown
+// with the raw bytes preserved for upstream processing.
+func videoToResult(fileName string, data []byte) *types.ReadResult {
+	if fileName == "" {
+		fileName = "video.mp4"
+	}
+	// Return a placeholder; the knowledge service will handle the actual processing.
+	return &types.ReadResult{
+		MarkdownContent: fmt.Sprintf("[Video file: %s]", fileName),
+		IsVideo:         true,
+		VideoData:       data,
 	}
 }
 

@@ -22,6 +22,8 @@ type ReadResult struct {
 	Error           string
 	IsAudio         bool   // true when the result contains raw audio data needing ASR transcription
 	AudioData       []byte // raw audio bytes for ASR processing
+	IsVideo         bool   // true when the result contains raw video data needing multimodal processing
+	VideoData       []byte // raw video bytes for video multimodal processing
 }
 
 // ImageRef represents an image reference extracted from the document.

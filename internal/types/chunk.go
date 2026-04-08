@@ -20,6 +20,12 @@ const (
 	ChunkTypeImageOCR ChunkType = "image_ocr"
 	// ChunkTypeImageCaption 表示图片描述的 Chunk
 	ChunkTypeImageCaption ChunkType = "image_caption"
+	// ChunkTypeVideoFrame 表示视频帧分析内容的 Chunk
+	ChunkTypeVideoFrame ChunkType = "video_frame"
+	// ChunkTypeVideoCaption 表示视频整体描述的 Chunk
+	ChunkTypeVideoCaption ChunkType = "video_caption"
+	// ChunkTypeVideoASR 表示视频音频转录的 Chunk
+	ChunkTypeVideoASR ChunkType = "video_asr"
 	// ChunkTypeSummary 表示摘要类型的 Chunk
 	ChunkTypeSummary = "summary"
 	// ChunkTypeEntity 表示实体类型的 Chunk
@@ -95,6 +101,24 @@ type ImageInfo struct {
 	OCRText string `json:"ocr_text"`
 }
 
+// VideoInfo 表示与 Chunk 关联的视频信息
+type VideoInfo struct {
+	// 视频URL
+	URL string `json:"url"          gorm:"type:text"`
+	// 帧数量
+	FrameCount int `json:"frame_count"`
+	// 是否有VLM分析
+	HasVLMAnalysis bool `json:"has_vlm_analysis"`
+	// 是否有ASR转录
+	HasASR bool `json:"has_asr"`
+	// 视频摘要
+	VideoSummary string `json:"video_summary"`
+	// ASR转录文本
+	ASRText string `json:"asr_text"`
+	// 帧描述列表
+	FrameDescriptions []string `json:"frame_descriptions"`
+}
+
 // Chunk represents a document chunk
 // Chunks are meaningful text segments extracted from original documents
 // and are the basic units of knowledge base retrieval
@@ -147,6 +171,8 @@ type Chunk struct {
 	ContentHash string `json:"content_hash"             gorm:"type:varchar(64);index"`
 	// 图片信息，存储为 JSON
 	ImageInfo string `json:"image_info"               gorm:"type:text"`
+	// 视频信息，存储为 JSON
+	VideoInfo string `json:"video_info"               gorm:"type:text"`
 	// Chunk creation time
 	CreatedAt time.Time `json:"created_at"`
 	// Chunk last update time

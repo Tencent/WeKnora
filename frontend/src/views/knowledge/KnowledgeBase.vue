@@ -210,6 +210,18 @@ const fileTypeOptions = computed(() => [
   { content: 'MD', value: 'md' },
   { content: 'URL', value: 'url' },
   { content: t('knowledgeBase.typeManual'), value: 'manual' },
+    { content: 'MP4', value: 'mp4' },
+  { content: 'MOV', value: 'mov' },
+  { content: 'AVI', value: 'avi' },
+  { content: 'MKV', value: 'mkv' },
+  { content: 'WEBM', value: 'webm' },
+  { content: 'WMV', value: 'wmv' },
+  { content: 'FLV', value: 'flv' },
+  { content: 'MP3', value: 'mp3' },
+  { content: 'WAV', value: 'wav' },
+  { content: 'M4A', value: 'm4a' },
+  { content: 'FLAC', value: 'flac' },
+  { content: 'OGG', value: 'ogg' },
 ]);
 type TagInputInstance = ComponentPublicInstance<{ focus: () => void; select: () => void }>;
 const tagDropdownOptions = computed(() =>
@@ -1115,11 +1127,14 @@ const handleFolderUpload = async (event: Event) => {
   }
 
   const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
+  const asrEnabled = kbInfo.value?.asr_config?.enabled || false;
   const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
 
   const validFiles: File[] = [];
   let hiddenFileCount = 0;
   let imageFilteredCount = 0;
+  let videoFilteredCount = 0;
+  let audioFilteredCount = 0;
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
@@ -1132,13 +1147,25 @@ const handleFolderUpload = async (event: Event) => {
       continue;
     }
     
+    const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
+    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
+    const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
+    
     if (!vlmEnabled) {
-      const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
-      const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
       if (imageTypes.includes(fileExt)) {
         imageFilteredCount++;
         continue;
       }
+      if (videoTypes.includes(fileExt)) {
+        videoFilteredCount++;
+        continue;
+      }
+    }
+    
+    if (!asrEnabled && audioTypes.includes(fileExt)) {
+      audioFilteredCount++;
+      continue;
     }
     
     if (!kbFileTypeVerification(file, true, dynamicTypes)) {
@@ -1151,7 +1178,6 @@ const handleFolderUpload = async (event: Event) => {
     if (input) input.value = '';
     return;
   }
-
   MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: validFiles.length }));
 
   // 批量上传
@@ -1514,7 +1540,7 @@ async function createNewSession(value: string): Promise<void> {
         ref="uploadInputRef"
         type="file"
         class="document-upload-input"
-        :accept="acceptFileTypes || '.pdf,.docx,.doc,.txt,.md,.json,.jpg,.jpeg,.png,.csv,.xlsx,.xls,.pptx,.ppt,.mp3,.wav,.m4a,.flac,.ogg'"
+          :accept="acceptFileTypes || '.pdf,.docx,.doc,.txt,.md,.json,.jpg,.jpeg,.png,.csv,.xlsx,.xls,.pptx,.ppt,.mp3,.wav,.m4a,.flac,.ogg,.mp4,.mov,.avi,.mkv,.webm,.wmv,.flv'"
         multiple
         @change="handleDocumentUpload"
       />
