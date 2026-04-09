@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -28,9 +29,29 @@ type RemoteAPIVLM struct {
 
 // NewRemoteAPIVLM creates a remote-API backed VLM instance.
 func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
-	apiCfg := openai.DefaultConfig(config.APIKey)
-	if config.BaseURL != "" {
-		apiCfg.BaseURL = config.BaseURL
+	providerName := provider.ProviderName(config.Provider)
+	if providerName == "" {
+		providerName = provider.DetectProvider(config.BaseURL)
+	}
+
+	var apiCfg openai.ClientConfig
+	if providerName == provider.ProviderAzureOpenAI {
+		apiCfg = openai.DefaultAzureConfig(config.APIKey, config.BaseURL)
+		apiCfg.AzureModelMapperFunc = func(model string) string {
+			return model
+		}
+		if config.Extra != nil {
+			if v, ok := config.Extra["api_version"]; ok {
+				if vs, ok := v.(string); ok && vs != "" {
+					apiCfg.APIVersion = vs
+				}
+			}
+		}
+	} else {
+		apiCfg = openai.DefaultConfig(config.APIKey)
+		if config.BaseURL != "" {
+			apiCfg.BaseURL = config.BaseURL
+		}
 	}
 	apiCfg.HTTPClient = &http.Client{Timeout: defaultTimeout}
 

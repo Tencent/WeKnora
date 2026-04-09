@@ -12,19 +12,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestRemoteChat() *RemoteAPIChat {
-	chat, _ := NewRemoteAPIChat(&ChatConfig{
+func newTestRemoteChat(t *testing.T) *RemoteAPIChat {
+	t.Helper()
+
+	chat, err := NewRemoteAPIChat(&ChatConfig{
 		Source:    types.ModelSourceRemote,
-		BaseURL:   "https://api.example.com/v1",
+		BaseURL:   "https://example.com/v1",
 		ModelName: "test-model",
 		APIKey:    "test-key",
 		ModelID:   "test-model",
 	})
+	require.NoError(t, err)
 	return chat
 }
 
 func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
-	chat := newTestRemoteChat()
+	chat := newTestRemoteChat(t)
 	messages := []Message{{Role: "user", Content: "hello"}}
 
 	t.Run("nil ParallelToolCalls leaves default", func(t *testing.T) {
@@ -65,7 +68,7 @@ func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
 }
 
 func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
-	chat := newTestRemoteChat()
+	chat := newTestRemoteChat(t)
 	messages := []Message{{Role: "user", Content: "查询乙醇的理化性质"}}
 
 	mcpTools := []Tool{
@@ -111,7 +114,7 @@ func TestBuildChatCompletionRequest_MCPToolsFormat(t *testing.T) {
 }
 
 func TestBuildChatCompletionRequest_ToolChoice(t *testing.T) {
-	chat := newTestRemoteChat()
+	chat := newTestRemoteChat(t)
 	messages := []Message{{Role: "user", Content: "test"}}
 
 	t.Run("auto tool choice", func(t *testing.T) {

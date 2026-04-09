@@ -26,6 +26,8 @@ type Config struct {
 	APIKey        string
 	ModelID       string
 	InterfaceType string // "ollama" or "openai" (default)
+	Provider      string
+	Extra         map[string]any
 }
 
 // NewVLM creates a VLM instance based on the provided configuration.

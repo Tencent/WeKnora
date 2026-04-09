@@ -255,6 +255,7 @@ export function checkRemoteModel(modelConfig: {
     modelName: string;
     baseUrl: string;
     apiKey?: string;
+    provider?: string;
 }): Promise<{
     available: boolean;
     message?: string;

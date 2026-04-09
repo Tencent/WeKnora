@@ -1444,6 +1444,10 @@ export default {
           label: 'OpenAI',
           description: 'gpt-5.2, gpt-5-mini, etc.'
         },
+        azure_openai: {
+          label: 'Azure OpenAI',
+          description: 'Сервис OpenAI на платформе Microsoft Azure',
+        },
         aliyun: {
           label: 'Aliyun DashScope',
           description: 'qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.'
@@ -3410,6 +3414,7 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     resourceHint: 'Выберите пространства или папки для синхронизации',
+    untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
     noResources: 'Пространства вики не найдены',
     noResourcesHint: 'Сначала сохраните источник данных и проверьте права доступа',

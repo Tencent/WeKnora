@@ -1468,6 +1468,7 @@ type RemoteModelCheckRequest struct {
 	ModelName string `json:"modelName" binding:"required"`
 	BaseURL   string `json:"baseUrl"   binding:"required"`
 	APIKey    string `json:"apiKey"`
+	Provider  string `json:"provider"`
 }
 
 // CheckRemoteModel godoc
@@ -1513,8 +1514,9 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		Name:   req.ModelName,
 		Source: "remote",
 		Parameters: types.ModelParameters{
-			BaseURL: req.BaseURL,
-			APIKey:  req.APIKey,
+			BaseURL:  req.BaseURL,
+			APIKey:   req.APIKey,
+			Provider: req.Provider,
 		},
 		Type: "llm", // 默认类型，实际检查时不区分具体类型
 	}
@@ -1644,6 +1646,7 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 		ModelName: model.Name,
 		APIKey:    model.Parameters.APIKey,
 		ModelID:   model.Name,
+		Provider:  model.Parameters.Provider,
 	}
 
 	// 创建聊天实例
@@ -1669,15 +1672,20 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 	// 使用聊天实例进行测试
 	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
+		errMsg := err.Error()
 		// 根据错误类型返回不同的错误信息
-		if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "unauthorized") {
+		if strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized") {
 			return false, "认证失败，请检查API Key"
-		} else if strings.Contains(err.Error(), "403") || strings.Contains(err.Error(), "forbidden") {
-			return false, "权限不足，请检查API Key权限：" + err.Error()
-		} else if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
+		} else if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "forbidden") {
+			return false, "权限不足，请检查API Key权限：" + errMsg
+		} else if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found") {
 			return false, "API端点不存在，请检查Base URL"
-		} else if strings.Contains(err.Error(), "timeout") {
+		} else if strings.Contains(errMsg, "timeout") {
 			return false, "连接超时，请检查网络连接"
+		} else if strings.Contains(errMsg, "status code: 400") {
+			// 400 错误说明 API 端点可达、认证通过，只是请求参数不兼容（如 max_tokens vs max_completion_tokens）
+			// 视为连接成功
+			return true, "连接正常，模型可用"
 		} else {
 			return false, fmt.Sprintf("连接失败: %v", err)
 		}

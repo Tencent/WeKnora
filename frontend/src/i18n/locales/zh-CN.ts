@@ -1592,6 +1592,10 @@ export default {
           label: "OpenAI",
           description: "gpt-5.2, gpt-5-mini, etc.",
         },
+        azure_openai: {
+          label: 'Azure OpenAI',
+          description: 'Microsoft Azure 上的 OpenAI 服务',
+        },
         aliyun: {
           label: "阿里云 DashScope",
           description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.",
@@ -3450,6 +3454,7 @@ export default {
     connectionFailed: "连接失败",
     isRequired: "为必填项",
     resourceHint: "选择要同步的内容空间/文件夹",
+    untitled: "无标题",
     resourceLoadFailed: "加载资源列表失败",
     noResources: "未找到可同步的知识库空间",
     noResourcesDesc: "应用需要通过群聊获得知识库访问权限才能拉取内容",

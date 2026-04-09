@@ -513,6 +513,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	for _, item := range items {
 		if item.IsDeleted {
 			if ds.SyncDeletions {
+				// Count only — actual KB deletion is intentionally not performed.
+				// Users manage knowledge removal explicitly via the KB UI to avoid
+				// accidental data loss from connector misdetection or reconfiguration.
 				result.Deleted++
 			}
 			continue

@@ -232,6 +232,9 @@ type Resource struct {
 	// For hierarchical resources (parent ID if applicable)
 	ParentID string `json:"parent_id,omitempty"`
 
+	// Whether this resource has children that can be expanded
+	HasChildren bool `json:"has_children,omitempty"`
+
 	// Additional metadata
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }

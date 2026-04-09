@@ -47,6 +47,7 @@ type Config struct {
 	Dimensions           int               `json:"dimensions"`
 	ModelID              string            `json:"model_id"`
 	Provider             string            `json:"provider"`
+	Extra                map[string]any    `json:"extra,omitempty"`
 }
 
 // NewEmbedder creates an embedder based on the configuration
@@ -124,6 +125,24 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 				config.TruncatePromptTokens,
 				config.Dimensions,
 				config.ModelID,
+				pooler)
+			return embedder, err
+		case provider.ProviderAzureOpenAI:
+			apiVersion := "2024-10-21"
+			if config.Extra != nil {
+				if v, ok := config.Extra["api_version"]; ok {
+					if vs, ok := v.(string); ok && vs != "" {
+						apiVersion = vs
+					}
+				}
+			}
+			embedder, err = NewAzureOpenAIEmbedder(config.APIKey,
+				config.BaseURL,
+				config.ModelName,
+				config.TruncatePromptTokens,
+				config.Dimensions,
+				config.ModelID,
+				apiVersion,
 				pooler)
 			return embedder, err
 		case provider.ProviderNvidia:

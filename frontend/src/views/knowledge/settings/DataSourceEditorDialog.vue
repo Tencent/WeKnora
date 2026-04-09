@@ -47,6 +47,78 @@ const form = ref({
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
 const selectedResourceIds = ref<string[]>([])
+const expandedResourceIds = ref(new Set<string>())
+
+// Shared children/parent indexes — used by tree rendering and selection logic
+const childrenMap = computed(() => {
+  const map = new Map<string, Resource[]>()
+  for (const r of resources.value) {
+    if (r.parent_id) {
+      const siblings = map.get(r.parent_id)
+      if (siblings) siblings.push(r)
+      else map.set(r.parent_id, [r])
+    }
+  }
+  return map
+})
+
+const parentMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const r of resources.value) {
+    if (r.parent_id) map.set(r.external_id, r.parent_id)
+  }
+  return map
+})
+
+// `selectedResourceIds` is a MINIMAL COVER SET: only the roots of fully-selected
+// subtrees. Sending this to the backend gives "sync these IDs and all descendants"
+// semantics — including any pages added later under a selected parent.
+type CheckState = 'checked' | 'indeterminate' | 'unchecked'
+
+const checkStates = computed(() => {
+  const states = new Map<string, CheckState>()
+  const cover = new Set(selectedResourceIds.value)
+
+  // Single post-order walk: a node is `checked` if itself or any ancestor is
+  // in the cover set; otherwise `indeterminate` if any descendant is checked;
+  // otherwise `unchecked`. Returns whether the subtree contains a checked node.
+  function walk(node: Resource, ancestorChecked: boolean): boolean {
+    const selfChecked = ancestorChecked || cover.has(node.external_id)
+    let descendantChecked = false
+    for (const c of childrenMap.value.get(node.external_id) || []) {
+      if (walk(c, selfChecked)) descendantChecked = true
+    }
+    if (selfChecked) states.set(node.external_id, 'checked')
+    else states.set(node.external_id, descendantChecked ? 'indeterminate' : 'unchecked')
+    return selfChecked || descendantChecked
+  }
+  for (const r of resources.value) {
+    if (!r.parent_id) walk(r, false)
+  }
+  return states
+})
+
+function toggleExpand(id: string) {
+  const next = new Set(expandedResourceIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedResourceIds.value = next
+}
+
+const visibleTree = computed(() => {
+  const roots = resources.value.filter(r => !r.parent_id)
+  const result: { resource: Resource; depth: number }[] = []
+  function walk(items: Resource[], depth: number) {
+    for (const r of items) {
+      result.push({ resource: r, depth })
+      if (r.has_children && expandedResourceIds.value.has(r.external_id)) {
+        walk(childrenMap.value.get(r.external_id) || [], depth + 1)
+      }
+    }
+  }
+  walk(roots, 0)
+  return result
+})
 
 // Connection test
 const testing = ref(false)
@@ -100,7 +172,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
   },
   {
     type: 'notion',
-    available: false,
+    available: true,
     docUrl: 'https://www.notion.so/my-integrations',
     permissionDocUrl: '',
     permissionPageUrl: '',
@@ -228,13 +300,74 @@ async function loadResources() {
   loadingResources.value = false
 }
 
-function toggleResource(id: string) {
-  const idx = selectedResourceIds.value.indexOf(id)
-  if (idx >= 0) {
-    selectedResourceIds.value.splice(idx, 1)
-  } else {
-    selectedResourceIds.value.push(id)
+function getDescendantIds(id: string): string[] {
+  const ids: string[] = []
+  const children = childrenMap.value.get(id) || []
+  for (const c of children) {
+    ids.push(c.external_id)
+    ids.push(...getDescendantIds(c.external_id))
   }
+  return ids
+}
+
+function getAncestorChain(id: string): string[] {
+  const chain = [id]
+  for (let p = parentMap.value.get(id); p; p = parentMap.value.get(p)) {
+    chain.push(p)
+  }
+  return chain
+}
+
+function isCovered(id: string, cover: Set<string>): boolean {
+  for (let cur: string | undefined = id; cur; cur = parentMap.value.get(cur)) {
+    if (cover.has(cur)) return true
+  }
+  return false
+}
+
+function checkResource(id: string, cover: Set<string>) {
+  if (isCovered(id, cover)) return
+  const descendants = new Set(getDescendantIds(id))
+  for (const d of [...cover]) {
+    if (descendants.has(d)) cover.delete(d)
+  }
+  cover.add(id)
+}
+
+// Removes id from the cover set. If id is covered transitively (an ancestor is
+// in the cover set), the ancestor is replaced with explicit entries for each
+// sibling along the path so the rest of the subtree stays selected.
+function uncheckResource(id: string, cover: Set<string>) {
+  const chain = getAncestorChain(id) // [id, parent, ..., root]
+  let highestIdx = -1
+  for (let i = chain.length - 1; i >= 0; i--) {
+    if (cover.has(chain[i])) { highestIdx = i; break }
+  }
+  if (highestIdx > 0) {
+    cover.delete(chain[highestIdx])
+    for (let i = highestIdx; i > 0; i--) {
+      const parent = chain[i]
+      const next = chain[i - 1]
+      for (const sib of childrenMap.value.get(parent) || []) {
+        if (sib.external_id !== next) cover.add(sib.external_id)
+      }
+    }
+  }
+  cover.delete(id)
+  const descendants = new Set(getDescendantIds(id))
+  for (const d of [...cover]) {
+    if (descendants.has(d)) cover.delete(d)
+  }
+}
+
+function toggleResource(id: string) {
+  const cover = new Set(selectedResourceIds.value)
+  if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
+    checkResource(id, cover)
+  } else {
+    uncheckResource(id, cover)
+  }
+  selectedResourceIds.value = [...cover]
 }
 
 function validateStep1Fields(): boolean {
@@ -469,18 +602,28 @@ const stepTitles = computed(() => [
       <div v-if="loadingResources" style="text-align:center;padding:20px"><t-loading /></div>
       <div v-else-if="resources.length > 0" class="ds-resource-list">
         <div
-          v-for="r in resources"
+          v-for="{ resource: r, depth } in visibleTree"
           :key="r.external_id"
-          :class="['ds-resource-row', { selected: selectedResourceIds.includes(r.external_id) }]"
+          :class="['ds-resource-row', { selected: checkStates.get(r.external_id) === 'checked' }]"
+          :style="{ paddingLeft: `${12 + depth * 24}px` }"
           @click="toggleResource(r.external_id)"
         >
+          <span
+            v-if="r.has_children"
+            class="ds-expand-btn"
+            @click.stop="toggleExpand(r.external_id)"
+          >
+            <t-icon :name="expandedResourceIds.has(r.external_id) ? 'chevron-down' : 'chevron-right'" size="16px" />
+          </span>
+          <span v-else class="ds-expand-placeholder" />
           <t-checkbox
-            :checked="selectedResourceIds.includes(r.external_id)"
+            :checked="checkStates.get(r.external_id) === 'checked'"
+            :indeterminate="checkStates.get(r.external_id) === 'indeterminate'"
             @click.stop
             @change="toggleResource(r.external_id)"
           />
           <div class="ds-resource-info">
-            <div class="ds-resource-name">{{ r.name }}</div>
+            <div class="ds-resource-name">{{ r.name || t('datasource.untitled') }}</div>
             <div class="ds-resource-meta">
               <span class="ds-resource-type">{{ resourceTypeLabel(r.type) }}</span>
               <span v-if="r.description" class="ds-resource-desc">{{ r.description }}</span>
@@ -766,7 +909,22 @@ const stepTitles = computed(() => [
 .ds-dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--td-border-level-2-color); }
 
 /* --- Step 2: resource list --- */
-.ds-resource-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.ds-resource-list { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+
+.ds-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--td-text-color-secondary);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.ds-expand-btn:hover { background: var(--td-bg-color-component-hover); }
+.ds-expand-placeholder { width: 20px; flex-shrink: 0; }
 
 .ds-resource-row {
   display: flex;

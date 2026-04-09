@@ -256,6 +256,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
+		Extra:                stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -311,6 +312,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
+		Extra:                stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -394,6 +396,8 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		BaseURL:   model.Parameters.BaseURL,
 		ModelName: model.Name,
 		Source:    model.Source,
+		Provider:  model.Parameters.Provider,
+		Extra:     stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -445,6 +449,8 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		ModelName:     model.Name,
 		Source:        model.Source,
 		InterfaceType: ifType,
+		Provider:      model.Parameters.Provider,
+		Extra:         stringMapToAnyMap(model.Parameters.ExtraConfig),
 	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -499,4 +505,15 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	}
 
 	return sttModel, nil
+}
+
+func stringMapToAnyMap(m map[string]string) map[string]any {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]any, len(m))
+	for k, v := range m {
+		result[k] = v
+	}
+	return result
 }
