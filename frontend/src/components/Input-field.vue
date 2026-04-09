@@ -15,7 +15,7 @@ import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { listModels, type ModelConfig } from '@/api/model';
 import { listAgents, type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
-import { getTenantWebSearchConfig } from '@/api/web-search';
+import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider';
 import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
 import { useI18n } from 'vue-i18n';
 
@@ -192,6 +192,11 @@ const agentWebSearchEnabled = computed(() => {
   return currentAgentConfig.value?.web_search_enabled ?? true;
 });
 
+const agentWebSearchProviderId = computed(() => {
+  if (!hasAgentConfig.value) return '';
+  return currentAgentConfig.value?.web_search_provider_id || '';
+});
+
 // 网络搜索是否被智能体禁用（只读状态）- 只有明确设置为 false 时才禁用
 const isWebSearchDisabledByAgent = computed(() => {
   return hasAgentConfig.value && agentWebSearchEnabled.value === false;
@@ -282,7 +287,6 @@ const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
-const isWebSearchConfigured = ref(false);
 
 // 获取已选择的知识库信息
 const knowledgeBases = ref<Array<{ id: string; name: string; type?: 'document' | 'faq'; knowledge_count?: number; chunk_count?: number }>>([]);
@@ -521,19 +525,29 @@ watch(selectedFileIds, () => {
   loadFiles();
 }, { immediate: true });
 
+const webSearchProviders = ref<WebSearchProviderEntity[]>([]);
+
+const isWebSearchConfigured = computed(() => {
+  const agentProviderId = agentWebSearchProviderId.value;
+  if (agentProviderId) {
+    return webSearchProviders.value.some(p => p.id === agentProviderId);
+  }
+
+  return webSearchProviders.value.some(p => p.is_default);
+});
+
 const loadWebSearchConfig = async () => {
   try {
-    const response: any = await getTenantWebSearchConfig();
-    const config = response?.data;
-    const configured = !!(config && config.provider);
-    isWebSearchConfigured.value = configured;
+    const response = await listWebSearchProviders();
+    const providers = (response as any)?.data;
+    webSearchProviders.value = Array.isArray(providers) ? providers : [];
 
-    if (!configured && settingsStore.isWebSearchEnabled) {
+    if (!isWebSearchConfigured.value && settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }
   } catch (error) {
     console.error('Failed to load web search config:', error);
-    isWebSearchConfigured.value = false;
+    webSearchProviders.value = [];
     if (settingsStore.isWebSearchEnabled) {
       settingsStore.toggleWebSearch(false);
     }

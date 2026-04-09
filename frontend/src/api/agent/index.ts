@@ -47,6 +47,7 @@ export interface CustomAgentConfig {
 
   // ===== 网络搜索设置 =====
   web_search_enabled?: boolean;
+  web_search_provider_id?: string;
   web_search_max_results?: number;
 
   // ===== 多轮对话设置 =====

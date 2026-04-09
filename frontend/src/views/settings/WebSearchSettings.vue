@@ -64,7 +64,7 @@
               <t-option v-for="pt in providerTypes" :key="pt.id" :value="pt.id" :label="pt.name">
                 <div class="provider-option">
                   <span>{{ pt.name }}</span>
-                  <t-tag v-if="pt.free" theme="success" size="small" variant="light">{{ t('webSearchSettings.free') }}</t-tag>
+                  <t-tag v-if="isProviderFree(pt)" theme="success" size="small" variant="light">{{ t('webSearchSettings.free') }}</t-tag>
                 </div>
               </t-option>
             </t-select>
@@ -113,7 +113,7 @@
           <div class="dialog-footer">
             <div class="footer-left">
               <t-button
-                v-if="selectedProviderType && !selectedProviderType.free"
+                v-if="selectedProviderType && !isProviderFree(selectedProviderType)"
                 theme="default"
                 variant="outline"
                 :loading="testing"
@@ -178,6 +178,10 @@ const providerForm = ref<{
 const selectedProviderType = computed(() => {
   return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
 })
+
+const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
+  return !providerType.requires_api_key && !providerType.requires_engine_id
+}
 
 // ===== Methods =====
 const onProviderTypeChange = () => {
