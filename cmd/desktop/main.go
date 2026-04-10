@@ -30,7 +30,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/joho/godotenv"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/sys/unix"
 )
 
 // dragHandlerJS is injected into the webview on DomReady.
@@ -360,16 +359,9 @@ func migrateLegacyDesktopData(resourcesDir, targetDataDir string) {
 }
 
 func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.Listener, error) {
-	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			return c.Control(func(fd uintptr) {
-				_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-			})
-		},
-	}
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
-		listener, err := lc.Listen(context.Background(), "tcp", addr)
+		listener, err := net.Listen("tcp", addr)
 		if err == nil {
 			return listener, nil
 		}
