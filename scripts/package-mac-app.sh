@@ -48,14 +48,18 @@ export CGO_CFLAGS="-Wno-deprecated-declarations"
 export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
 export EDITION=lite
 
+# 获取版本号并配置 LDFLAGS
+eval "$(./scripts/get_version.sh env)"
+LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
+
 # 我们实际上只用 Wails 构建外壳，前端仍然由后台服务提供
-wails build -clean -buildmode default -tags "sqlite_fts5" -o "${APP_NAME}"
+(cd cmd/desktop && wails build -skipbindings -clean -tags "sqlite_fts5" -ldflags="$LDFLAGS" -o "${APP_NAME}")
 
 # ── Step 3: Copy generated .app to dist ──
 echo ">> Assembling package..."
 mkdir -p dist
 rm -rf "${DIST_DIR}"
-cp -R "build/bin/${APP_BUNDLE}" "dist/"
+cp -R "cmd/desktop/build/bin/${APP_BUNDLE}" "dist/"
 
 # 将配置文件和初始数据库迁移脚本塞进 .app 内部资源里
 RESOURCES_DIR="${DIST_DIR}/Contents/Resources"
