@@ -173,10 +173,10 @@ func main() {
 			css := `
 			const style = document.createElement('style');
 			style.innerHTML = ` + "`" + `
-				.logo_row, .menu_top, .chat-header {
+				.logo_row, .menu_top, .chat-header, .header, .dialog-header, .sidebar-header, .document-header {
 					--wails-draggable: drag !important;
 				}
-				.logo_row *, .menu_top *, .chat-header * {
+				.logo_row *, .menu_top *, .chat-header *, .header *, .dialog-header *, .sidebar-header *, .document-header * {
 					--wails-draggable: no-drag !important;
 				}
 				.sidebar-toggle, .logo_box {
@@ -187,7 +187,7 @@ func main() {
 			`
 			wailsruntime.WindowExecJS(ctx, css)
 		},
-		OnShutdown:  app.shutdown,
+		OnShutdown: app.shutdown,
 		Bind: []interface{}{
 			app,
 		},
