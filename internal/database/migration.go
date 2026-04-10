@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/database/sqlite3"
+	sqlite3migrate "github.com/golang-migrate/migrate/v4/database/sqlite3"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
@@ -46,6 +47,12 @@ type MigrationOptions struct {
 	// AutoRecoverDirty when true, automatically attempts to recover from dirty state
 	// by forcing to the previous version and retrying the migration
 	AutoRecoverDirty bool
+
+	// SQLiteDBPath is the raw filesystem path to the SQLite database file.
+	// When set, the migrator opens the DB directly via sql.Open instead of
+	// parsing a URL-based DSN, which avoids breakage when the path contains
+	// spaces (e.g. macOS "Application Support").
+	SQLiteDBPath string
 }
 
 // RunMigrationsWithOptions executes all pending database migrations with custom options
@@ -59,10 +66,31 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		migrationsPath = "file://migrations/sqlite"
 	}
 
-	m, err := migrate.New(migrationsPath, dsn)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
-		return fmt.Errorf("failed to create migrate instance: %w", err)
+	var m *migrate.Migrate
+	if opts.SQLiteDBPath != "" {
+		sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to open sqlite db for migration: %v", err)
+			return fmt.Errorf("failed to open sqlite db for migration: %w", err)
+		}
+		driver, err := sqlite3migrate.WithInstance(sqlDB, &sqlite3migrate.Config{})
+		if err != nil {
+			sqlDB.Close()
+			logger.Errorf(ctx, "Failed to create sqlite3 migrate driver: %v", err)
+			return fmt.Errorf("failed to create sqlite3 migrate driver: %w", err)
+		}
+		m, err = migrate.NewWithDatabaseInstance(migrationsPath, "sqlite3", driver)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
+			return fmt.Errorf("failed to create migrate instance: %w", err)
+		}
+	} else {
+		var err error
+		m, err = migrate.New(migrationsPath, dsn)
+		if err != nil {
+			logger.Errorf(ctx, "Failed to create migrate instance: %v", err)
+			return fmt.Errorf("failed to create migrate instance: %w", err)
+		}
 	}
 	defer m.Close()
 

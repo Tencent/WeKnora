@@ -419,7 +419,7 @@ async function loadChannels() {
 }
 
 function getCallbackUrl(channel: IMChannel): string {
-  const base = import.meta.env.VITE_IS_DOCKER ? window.location.origin : 'http://127.0.0.1:8080';
+  const base = window.location.origin;
   return `${base}/api/v1/im/callback/${channel.id}`;
 }
 

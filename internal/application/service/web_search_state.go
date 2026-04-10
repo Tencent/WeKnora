@@ -36,6 +36,9 @@ func (s *webSearchStateService) GetWebSearchTempKBState(
 	ctx context.Context,
 	sessionID string,
 ) (tempKBID string, seenURLs map[string]bool, knowledgeIDs []string) {
+	if s.redisClient == nil {
+		return "", make(map[string]bool), []string{}
+	}
 	stateKey := fmt.Sprintf("tempkb:%s", sessionID)
 	if raw, getErr := s.redisClient.Get(ctx, stateKey).Bytes(); getErr == nil && len(raw) > 0 {
 		var state struct {
@@ -65,6 +68,9 @@ func (s *webSearchStateService) SaveWebSearchTempKBState(
 	seenURLs map[string]bool,
 	knowledgeIDs []string,
 ) {
+	if s.redisClient == nil {
+		return
+	}
 	stateKey := fmt.Sprintf("tempkb:%s", sessionID)
 	state := struct {
 		KBID         string          `json:"kbID"`

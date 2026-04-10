@@ -176,6 +176,11 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		cm.FallbackPrompt = customAgent.Config.FallbackPrompt
 	}
 
+	// Override web search settings
+	if customAgent.Config.WebSearchMaxResults > 0 {
+		cm.WebSearchMaxResults = customAgent.Config.WebSearchMaxResults
+	}
+
 	// Override history turns
 	if customAgent.Config.HistoryTurns > 0 {
 		cm.MaxRounds = customAgent.Config.HistoryTurns

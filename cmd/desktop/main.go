@@ -33,6 +33,73 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// dragHandlerJS is injected into the webview on DomReady.
+// It bypasses Wails' built-in CSS-variable-based drag detection (which uses
+// getComputedStyle and has timing/inheritance issues with dynamic SPA content)
+// and instead uses robust DOM-traversal via el.closest() plus a Y-position
+// fallback for the macOS title-bar region on layout containers. The "drag"
+// message is sent directly through the WKWebView script-message bridge,
+// which the native Objective-C handler in WailsContext.m converts to
+// [NSWindow performWindowDragWithEvent:].
+const dragHandlerJS = `(function(){
+if(window.__wkDragBound)return;
+window.__wkDragBound=true;
+
+if(window.wails&&window.wails.flags){
+  window.wails.flags.cssDragProperty='__disabled__';
+  window.wails.flags.cssDragValue='__never__';
+}
+
+var TITLEBAR_H=38;
+
+var dragSel='.logo_row,.menu_top,.header,.header-title,.title-row,' +
+  '.dialogue-title,.section-header,.dialog-header,.sidebar-header,' +
+  '.document-header,.drag-region,[data-wails-drag]';
+
+var noDragSel='button,a,input,select,textarea,[role="button"],' +
+  '.t-button,.t-input,.t-select,.t-textarea,' +
+  '.header-actions,.header-action-btn,.sidebar-toggle,.logo_box,' +
+  '.close-btn,.menu_item,.submenu,.submenu_item,.menu_bottom,' +
+  '.t-popup,.t-dropdown,.t-tooltip,.t-dialog,[data-no-drag]';
+
+var layoutClasses=['main','chat','dialogue-wrap','kb-list-container',
+  'agent-list-container','org-list-container','aside_box',
+  'ks-container','settings-overlay','knowledge-layout',
+  'faq-manager-wrapper','login-layout'];
+
+function sendDrag(){
+  try{window.webkit.messageHandlers.external.postMessage('drag')}
+  catch(_){try{window.WailsInvoke('drag')}catch(e){}}
+}
+
+function isLayoutEl(el){
+  for(var i=0;i<layoutClasses.length;i++){
+    if(el.classList.contains(layoutClasses[i]))return true;
+  }
+  var tag=el.tagName;
+  return tag==='BODY'||tag==='HTML';
+}
+
+function shouldDrag(el,y){
+  if(!(el instanceof Element))return false;
+  if(el.closest(noDragSel))return false;
+  if(el.closest(dragSel))return true;
+  if(y<=TITLEBAR_H&&isLayoutEl(el))return true;
+  return false;
+}
+
+window.addEventListener('mousedown',function(e){
+  var target=e.target;
+  if(target&&target.nodeType===Node.TEXT_NODE){
+    target=target.parentElement;
+  }
+  if(e.button!==0||e.detail!==1)return;
+  if(!shouldDrag(target,e.clientY))return;
+  e.preventDefault();
+  sendDrag();
+},true);
+})();`
+
 func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
@@ -44,6 +111,8 @@ func main() {
 
 	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
 	_ = godotenv.Load()
+	configureDesktopStorage(execPath)
+	logger.ConfigureFromEnv()
 
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
@@ -143,14 +212,14 @@ func main() {
 		os.Exit(0)
 	})
 
-	EditMenu := AppMenu.AddSubmenu("Edit")
-	EditMenu.AddText("Undo", keys.CmdOrCtrl("z"), func(_ *menu.CallbackData) {})
-	EditMenu.AddText("Redo", keys.CmdOrCtrl("y"), func(_ *menu.CallbackData) {})
-	EditMenu.AddSeparator()
-	EditMenu.AddText("Cut", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) {})
-	EditMenu.AddText("Copy", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {})
-	EditMenu.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {})
-	EditMenu.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {})
+	AppMenu.Append(menu.EditMenu())
+
+	ViewMenu := AppMenu.AddSubmenu("View")
+	ViewMenu.AddText("Reload", keys.CmdOrCtrl("r"), func(_ *menu.CallbackData) {
+		if app.ctx != nil {
+			wailsruntime.WindowReloadApp(app.ctx)
+		}
+	})
 
 	// Wait for the backend URL to be set
 	targetURL, _ := url.Parse(app.backendURL)
@@ -159,150 +228,18 @@ func main() {
 	// Start Wails application
 	// We use a Reverse Proxy to seamlessly proxy Wails' frontend to our Go backend
 	err := wails.Run(&options.App{
-		Title:  "WeKnora Lite",
-		Width:  1280,
-		Height: 800,
-		DisableResize: true,
-		Menu:   AppMenu,
+		Title:         "WeKnora Lite",
+		Width:         1280,
+		Height:        800,
+		DisableResize: false,
+		Menu:          AppMenu,
 		AssetServer: &assetserver.Options{
 			Handler: proxy,
 		},
 		StartHidden: false, // Show window on startup
 		OnStartup:   app.startup,
 		OnDomReady: func(ctx context.Context) {
-			// Inject CSS and event delegation to make top areas draggable for macOS hiddenInset titlebar.
-			// Wails checks the clicked element itself, so for dynamic SPA content we also bind a document-level
-			// mousedown handler and directly trigger native dragging for matching header regions.
-			css := `
-			const style = document.createElement('style');
-			style.innerHTML = ` + "`" + `
-				.logo_row, .logo_row *,
-				.menu_top, .menu_top *,
-				.chat-header, .chat-header *,
-				.header, .header *,
-				.dialog-header, .dialog-header *,
-				.sidebar-header, .sidebar-header *,
-				.document-header, .document-header *,
-				.section-header, .section-header *,
-				.header-title, .header-title * {
-					--wails-draggable: drag !important;
-				}
-				.header-actions, .header-actions *,
-				.header-action-btn, .header-action-btn *,
-				.sidebar-toggle, .sidebar-toggle *,
-				.logo_box, .logo_box *,
-				.close-btn, .close-btn *,
-				button, button *,
-				a, a *,
-				input, select, textarea,
-				[role="button"], [role="button"] *,
-				.t-button, .t-button *,
-				.t-input, .t-select, .t-textarea,
-				svg[data-no-drag], svg[data-no-drag] * {
-					--wails-draggable: no-drag !important;
-				}
-			` + "`" + `;
-			document.head.appendChild(style);
-
-			(function() {
-				if (window.__weknoraDragBound) return;
-				window.__weknoraDragBound = true;
-
-				const dragSelectors = [
-					'.logo_row',
-					'.menu_top',
-					'.chat-header',
-					'.header',
-					'.header-title',
-					'.section-header',
-					'.dialog-header',
-					'.sidebar-header',
-					'.document-header'
-				];
-
-				const noDragSelectors = [
-					'.header-actions',
-					'.header-action-btn',
-					'.sidebar-toggle',
-					'.logo_box',
-					'.close-btn',
-					'button',
-					'a',
-					'input',
-					'select',
-					'textarea',
-					'[role="button"]',
-					'.t-button',
-					'.t-input',
-					'.t-select',
-					'.t-textarea',
-					'[data-no-drag]'
-				];
-
-				const isNoDrag = (el) => {
-					return noDragSelectors.some((selector) => el.closest(selector));
-				};
-
-				const findDragTarget = (el) => {
-					for (const selector of dragSelectors) {
-						const match = el.closest(selector);
-						if (match) return match;
-					}
-					return null;
-				};
-
-				const applyDragMarkers = () => {
-					for (const selector of dragSelectors) {
-						document.querySelectorAll(selector).forEach((root) => {
-							if (!(root instanceof HTMLElement)) return;
-							root.style.setProperty('--wails-draggable', 'drag');
-							root.querySelectorAll('*').forEach((child) => {
-								if (!(child instanceof HTMLElement)) return;
-								child.style.setProperty('--wails-draggable', 'drag');
-							});
-						});
-					}
-
-					for (const selector of noDragSelectors) {
-						document.querySelectorAll(selector).forEach((node) => {
-							if (!(node instanceof HTMLElement)) return;
-							node.style.setProperty('--wails-draggable', 'no-drag');
-							node.querySelectorAll('*').forEach((child) => {
-								if (!(child instanceof HTMLElement)) return;
-								child.style.setProperty('--wails-draggable', 'no-drag');
-							});
-						});
-					}
-				};
-
-				applyDragMarkers();
-				const observer = new MutationObserver(() => {
-					applyDragMarkers();
-				});
-				observer.observe(document.body, {
-					childList: true,
-					subtree: true,
-					attributes: false
-				});
-
-				document.addEventListener('mousedown', (e) => {
-					if (e.button !== 0 || e.detail !== 1) return;
-					let target = e.target;
-					if (target instanceof Text) {
-						target = target.parentElement;
-					}
-					if (!(target instanceof Element)) return;
-					if (isNoDrag(target)) return;
-					const dragTarget = findDragTarget(target);
-					if (!dragTarget) return;
-					e.preventDefault();
-					if (typeof window.WailsInvoke === 'function') {
-						window.WailsInvoke('drag');
-					}
-				}, true);
-			})();
-			`
-			wailsruntime.WindowExecJS(ctx, css)
+			wailsruntime.WindowExecJS(ctx, dragHandlerJS)
 		},
 		OnShutdown: app.shutdown,
 		Bind: []interface{}{
@@ -343,6 +280,83 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	a.shutdownCh <- struct{}{}
+}
+
+func configureDesktopStorage(execPath string) {
+	if execPath == "" || !strings.Contains(execPath, ".app/Contents/MacOS") {
+		return
+	}
+
+	appSupportDir, err := defaultMacAppSupportDir(execPath)
+	if err != nil {
+		logger.Warnf(context.Background(), "Failed to resolve app support dir: %v", err)
+		return
+	}
+
+	legacyResourcesDir := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
+	targetDataDir := filepath.Join(appSupportDir, "data")
+	migrateLegacyDesktopData(legacyResourcesDir, targetDataDir)
+
+	dbPath := resolveDesktopDataPath(os.Getenv("DB_PATH"), filepath.Join("data", "weknora.db"), appSupportDir)
+	filesPath := resolveDesktopDataPath(os.Getenv("LOCAL_STORAGE_BASE_DIR"), filepath.Join("data", "files"), appSupportDir)
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		logger.Warnf(context.Background(), "Failed to create desktop DB directory %s: %v", filepath.Dir(dbPath), err)
+	}
+	if err := os.MkdirAll(filesPath, 0o755); err != nil {
+		logger.Warnf(context.Background(), "Failed to create desktop files directory %s: %v", filesPath, err)
+	}
+
+	_ = os.Setenv("DB_PATH", dbPath)
+	_ = os.Setenv("LOCAL_STORAGE_BASE_DIR", filesPath)
+}
+
+func defaultMacAppSupportDir(execPath string) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	appName := "WeKnora Lite"
+	if idx := strings.Index(execPath, ".app/Contents/MacOS"); idx >= 0 {
+		bundleName := filepath.Base(execPath[:idx+4])
+		if trimmed := strings.TrimSuffix(bundleName, ".app"); trimmed != "" {
+			appName = trimmed
+		}
+	}
+
+	return filepath.Join(homeDir, "Library", "Application Support", appName), nil
+}
+
+func resolveDesktopDataPath(rawPath, defaultRelativePath, appSupportDir string) string {
+	trimmed := strings.TrimSpace(rawPath)
+	if trimmed == "" {
+		trimmed = defaultRelativePath
+	}
+	if filepath.IsAbs(trimmed) {
+		return filepath.Clean(trimmed)
+	}
+	trimmed = strings.TrimPrefix(trimmed, "."+string(filepath.Separator))
+	return filepath.Join(appSupportDir, filepath.Clean(trimmed))
+}
+
+func migrateLegacyDesktopData(resourcesDir, targetDataDir string) {
+	legacyDataDir := filepath.Join(resourcesDir, "data")
+	if info, err := os.Stat(legacyDataDir); err != nil || !info.IsDir() {
+		return
+	}
+	if _, err := os.Stat(targetDataDir); err == nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(targetDataDir), 0o755); err != nil {
+		logger.Warnf(context.Background(), "Failed to create app support parent dir %s: %v", filepath.Dir(targetDataDir), err)
+		return
+	}
+	if err := os.Rename(legacyDataDir, targetDataDir); err != nil {
+		logger.Warnf(context.Background(), "Failed to migrate legacy desktop data from %s to %s: %v", legacyDataDir, targetDataDir, err)
+		return
+	}
+	logger.Infof(context.Background(), "Migrated legacy desktop data to %s", targetDataDir)
 }
 
 func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.Listener, error) {

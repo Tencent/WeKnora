@@ -2,11 +2,12 @@
 import axios from "axios";
 import { generateRandomString } from "./index";
 import i18n from '@/i18n'
+import { getApiBaseUrl } from './api-base';
 
 const t = (key: string) => i18n.global.t(key)
 
 // API基础URL
-const BASE_URL = import.meta.env.VITE_IS_DOCKER ? "" : "http://localhost:8080";
+const BASE_URL = getApiBaseUrl();
 
 
 // 创建Axios实例

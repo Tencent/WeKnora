@@ -15,15 +15,15 @@ import (
 
 // PluginSearch implements search functionality for chat pipeline
 type PluginSearch struct {
-	knowledgeBaseService      interfaces.KnowledgeBaseService
-	knowledgeService          interfaces.KnowledgeService
-	chunkService              interfaces.ChunkService
-	config                    *config.Config
-	webSearchService          interfaces.WebSearchService
-	tenantService             interfaces.TenantService
-	sessionService            interfaces.SessionService
-	webSearchStateService     interfaces.WebSearchStateService
-	webSearchProviderRepo     interfaces.WebSearchProviderRepository
+	knowledgeBaseService  interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeService
+	chunkService          interfaces.ChunkService
+	config                *config.Config
+	webSearchService      interfaces.WebSearchService
+	tenantService         interfaces.TenantService
+	sessionService        interfaces.SessionService
+	webSearchStateService interfaces.WebSearchStateService
+	webSearchProviderRepo interfaces.WebSearchProviderRepository
 }
 
 func NewPluginSearch(eventManager *EventManager,
@@ -620,21 +620,34 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		return nil
 	}
 	tenant, _ := types.TenantInfoFromContext(ctx)
-	if tenant == nil || tenant.WebSearchConfig == nil {
+	providerID := chatManage.WebSearchProviderID
+
+	var webConfig *types.WebSearchConfig
+	if tenant != nil && tenant.WebSearchConfig != nil {
+		// Clone tenant config so we can safely override MaxResults
+		cfg := *tenant.WebSearchConfig
+		webConfig = &cfg
+	} else if providerID != "" {
+		webConfig = &types.WebSearchConfig{
+			MaxResults: 10,
+		}
+	} else {
 		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
 		})
 		return nil
 	}
 
-	// Use provider ID already resolved by session layer (agent config > tenant default)
-	providerID := chatManage.WebSearchProviderID
+	// Apply agent-level web search overrides
+	if chatManage.WebSearchMaxResults > 0 {
+		webConfig.MaxResults = chatManage.WebSearchMaxResults
+	}
 
 	pipelineInfo(ctx, "Search", "web_request", map[string]interface{}{
 		"tenant_id":   chatManage.TenantID,
 		"provider_id": providerID,
 	})
-	webResults, err := p.webSearchService.Search(ctx, providerID, tenant.WebSearchConfig, chatManage.RewriteQuery)
+	webResults, err := p.webSearchService.Search(ctx, providerID, webConfig, chatManage.RewriteQuery)
 	if err != nil {
 		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
@@ -643,22 +656,22 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		return nil
 	}
 	// Build questions using RewriteQuery only
-	questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
+	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
 	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
-	tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
-	compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
-		ctx, chatManage.SessionID, tempKBID, questions, webResults, tenant.WebSearchConfig,
-		p.knowledgeBaseService, p.knowledgeService, seen, ids,
-	)
-	if err != nil {
-		pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
-			"error": err.Error(),
-		})
-	} else {
-		webResults = compressed
-		// Persist temp KB state back into Redis using WebSearchStateRepository
-		p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
-	}
+	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
+	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
+	// 	ctx, chatManage.SessionID, tempKBID, questions, webResults, webConfig,
+	// 	p.knowledgeBaseService, p.knowledgeService, seen, ids,
+	// )
+	// if err != nil {
+	// 	pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
+	// 		"error": err.Error(),
+	// 	})
+	// } else {
+	// 	webResults = compressed
+	// 	// Persist temp KB state back into Redis using WebSearchStateRepository
+	// 	p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
+	// }
 	res := searchutil.ConvertWebSearchResults(webResults)
 	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{
 		"hit_count": len(res),

@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from "@/api/agent";
+import { getApiBaseUrl } from "@/utils/api-base";
 
 // 定义设置接口
 interface Settings {
@@ -63,7 +64,7 @@ interface OllamaConfig {
 
 // 默认设置
 const defaultSettings: Settings = {
-  endpoint: import.meta.env.VITE_IS_DOCKER ? "" : "http://localhost:8080",
+  endpoint: getApiBaseUrl(),
   apiKey: "",
   knowledgeBaseId: "",
   isAgentEnabled: false,

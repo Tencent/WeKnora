@@ -355,6 +355,7 @@ func initContextStorage(redisClient *redis.Client) (llmcontext.ContextStorage, e
 func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	var migrateDSN string
+	var sqliteDBPath string
 	switch os.Getenv("DB_DRIVER") {
 	case "postgres":
 		// DSN for GORM (key-value format)
@@ -412,6 +413,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		sqlite_vec.Auto()
 		dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
 		dialector = sqlite.Open(dsn)
+		sqliteDBPath = dbPath
 		migrateDSN = "sqlite3://" + dbPath
 		logger.Infof(context.Background(), "DB Config: driver=sqlite path=%s", dbPath)
 	default:
@@ -445,6 +447,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
+			SQLiteDBPath:     sqliteDBPath,
 		}
 
 		// Run base migrations (all versioned migrations including embeddings)
@@ -504,6 +507,56 @@ func resolveStorageProviderPending(db *gorm.DB) {
 		logger.Warnf(context.Background(), "Failed to resolve __pending_env__ storage providers: %v", result.Error)
 	} else if result.RowsAffected > 0 {
 		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
+	}
+
+	// Reset any pending tasks left over from previous aborted runs (Lite App mode)
+	resetPendingTasks(db)
+}
+
+// resetPendingTasks resets the state of any knowledge items or sync logs stuck in processing
+// due to an unexpected application restart when using in-memory queues (Lite mode).
+func resetPendingTasks(db *gorm.DB) {
+	if os.Getenv("REDIS_ADDR") != "" {
+		return // Distributed queue (Asynq) will handle its own retries
+	}
+
+	// 1. Reset knowledge parsing tasks
+	result := db.Model(&types.Knowledge{}).
+		Where("parse_status IN ?", []string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusDeleting}).
+		Updates(map[string]interface{}{
+			"parse_status":  types.ParseStatusFailed,
+			"error_message": "Task interrupted due to application restart",
+		})
+	if result.Error != nil {
+		logger.Warnf(context.Background(), "Failed to reset pending knowledge tasks: %v", result.Error)
+	} else if result.RowsAffected > 0 {
+		logger.Infof(context.Background(), "Reset %d stuck knowledge parsing tasks to failed state", result.RowsAffected)
+	}
+
+	// 2. Reset knowledge summary tasks
+	resultSummary := db.Model(&types.Knowledge{}).
+		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing}).
+		Updates(map[string]interface{}{
+			"summary_status": types.SummaryStatusFailed,
+		})
+	if resultSummary.Error != nil {
+		logger.Warnf(context.Background(), "Failed to reset pending summary tasks: %v", resultSummary.Error)
+	} else if resultSummary.RowsAffected > 0 {
+		logger.Infof(context.Background(), "Reset %d stuck summary generation tasks to failed state", resultSummary.RowsAffected)
+	}
+
+	// 3. Reset data source sync tasks
+	resultSync := db.Model(&types.SyncLog{}).
+		Where("status IN ?", []string{types.SyncLogStatusRunning, "pending"}).
+		Updates(map[string]interface{}{
+			"status":        types.SyncLogStatusFailed,
+			"error_message": "Sync interrupted due to application restart",
+			"end_time":      time.Now(),
+		})
+	if resultSync.Error != nil {
+		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
+	} else if resultSync.RowsAffected > 0 {
+		logger.Infof(context.Background(), "Reset %d stuck data source sync tasks to failed state", resultSync.RowsAffected)
 	}
 }
 

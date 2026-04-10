@@ -286,6 +286,7 @@ func (c *LongConnClient) SendStreamChunk(ctx context.Context, incoming *im.Incom
 }
 
 // EndStream sends the final frame with the full accumulated content and cleans up.
+// It retries briefly if the connection is temporarily unavailable during a reconnect.
 func (c *LongConnClient) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
 	c.streamBufsMu.Lock()
 	buf, ok := c.streamBufs[streamID]
@@ -296,7 +297,23 @@ func (c *LongConnClient) EndStream(ctx context.Context, incoming *im.IncomingMes
 	}
 	c.streamBufsMu.Unlock()
 
-	return c.sendStreamFrame(incoming, streamID, fullContent, true)
+	err := c.sendStreamFrame(incoming, streamID, fullContent, true)
+	if err == nil {
+		return nil
+	}
+
+	// Retry up to 3 times with short delays to ride out a reconnection window.
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+		if retryErr := c.sendStreamFrame(incoming, streamID, fullContent, true); retryErr == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID, content string, finish bool) error {
@@ -342,12 +359,11 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		c.conn = nil
 		c.mu.Unlock()
 		_ = conn.Close()
-
-		// Clear in-flight stream buffers to prevent memory leaks on reconnect.
-		// Streams interrupted by a connection drop cannot be resumed.
-		c.streamBufsMu.Lock()
-		c.streamBufs = nil
-		c.streamBufsMu.Unlock()
+		// NOTE: streamBufs is intentionally NOT cleared on reconnect.
+		// Active streams survive reconnections — the WeCom replace-based
+		// protocol means the next SendStreamChunk will resend the full
+		// accumulated content on the new connection. EndStream always
+		// cleans up the buffer, so there is no memory leak.
 	}()
 
 	// Authenticate

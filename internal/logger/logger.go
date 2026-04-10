@@ -3,11 +3,14 @@ package logger
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
@@ -15,6 +18,11 @@ import (
 
 // appLogger 使用私有实例，避免外部依赖改写 logrus 全局状态导致日志丢失
 var appLogger = logrus.New()
+
+var (
+	loggerMu      sync.Mutex
+	activeLogFile *os.File
+)
 
 // LogLevel 日志级别类型
 type LogLevel string
@@ -130,12 +138,38 @@ func (f *CustomFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 // 初始化全局日志设置
 func init() {
+	ConfigureFromEnv()
+}
+
+// ConfigureFromEnv 重新从环境变量应用日志配置。
+// 这允许在 main() 中加载 .env 后，让 LOG_LEVEL / LOG_PATH 立即生效。
+func ConfigureFromEnv() {
+	loggerMu.Lock()
+	defer loggerMu.Unlock()
+
+	if activeLogFile != nil {
+		_ = activeLogFile.Close()
+		activeLogFile = nil
+	}
+
 	// 根据环境变量设置全局日志级别
 	logLevel := getLogLevelFromEnv()
 	appLogger.SetLevel(logLevel)
 
-	// 统一输出到 stdout，确保在 Docker 容器中与 GORM/GIN 日志合并展示
-	appLogger.SetOutput(os.Stdout)
+	writer := io.Writer(os.Stdout)
+	logPath := resolveLogPathFromEnv()
+	if logPath != "" {
+		file, err := openLogFile(logPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "logger: failed to open log file %s: %v\n", logPath, err)
+		} else {
+			activeLogFile = file
+			writer = io.MultiWriter(os.Stdout, file)
+		}
+	}
+
+	// 默认继续输出到 stdout，同时在可用时落盘到文件
+	appLogger.SetOutput(writer)
 
 	// 非终端（如 Docker 日志采集）禁用 ANSI 颜色，避免日志聚合/检索异常
 	forceColor := false
@@ -197,6 +231,45 @@ func getLogLevelFromEnv() logrus.Level {
 	default:
 		return logrus.DebugLevel // 无效配置时使用默认值
 	}
+}
+
+func resolveLogPathFromEnv() string {
+	if logPath := strings.TrimSpace(os.Getenv("LOG_PATH")); logPath != "" {
+		return filepath.Clean(logPath)
+	}
+	return defaultMacAppLogPath()
+}
+
+func defaultMacAppLogPath() string {
+	execPath, err := os.Executable()
+	if err != nil || !strings.Contains(execPath, ".app/Contents/MacOS") {
+		return ""
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	appName := "WeKnora Lite"
+	if idx := strings.Index(execPath, ".app/Contents/MacOS"); idx >= 0 {
+		bundleName := filepath.Base(execPath[:idx+4])
+		if trimmed := strings.TrimSuffix(bundleName, ".app"); trimmed != "" {
+			appName = trimmed
+		}
+	}
+
+	return filepath.Join(homeDir, "Library", "Logs", appName, appName+".log")
+}
+
+func openLogFile(logPath string) (*os.File, error) {
+	dir := filepath.Dir(logPath)
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
+	}
+	return os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 }
 
 // 添加调用者字段

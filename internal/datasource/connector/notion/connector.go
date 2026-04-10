@@ -394,9 +394,6 @@ func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id 
 	if err != nil || len(records) == 0 {
 		return nil
 	}
-	// Same database may be reached via two different IDs (data_source_id from search
-	// vs database_container_id from child_database blocks). Mark the canonical
-	// data_source_id as visited so the second path is deduped.
 	if queryID != "" && queryID != id {
 		if visited[queryID] {
 			return nil
@@ -404,18 +401,15 @@ func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id 
 		visited[queryID] = true
 	}
 
-	propNames := extractPropertySchema(records[0])
-	var items []types.FetchedItem
 	for _, record := range records {
-		if record.InTrash {
-			continue
-		}
-		item := c.buildRecordItem(ctx, client, record, propNames, dbTitle)
-		if item != nil {
-			items = append(items, *item)
-		}
+		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
 	}
-	return items
+
+	item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
+	if item != nil {
+		return []types.FetchedItem{*item}
+	}
+	return nil
 }
 
 // fetchDatabaseIncremental syncs only changed records by comparing edit times against cursor.
@@ -438,32 +432,33 @@ func (c *Connector) fetchDatabaseIncremental(ctx context.Context, client *notion
 	}
 
 	recordEditTimes := make(map[string]time.Time, len(records))
-	var propNames []string
-	if len(records) > 0 {
-		propNames = extractPropertySchema(records[0])
-	}
-
-	var items []types.FetchedItem
 	changedCount := 0
+
 	for _, record := range records {
+		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
+
 		if record.InTrash {
 			continue
 		}
 		recordEditTimes[record.ID] = record.LastEditedTime
 
 		prevTime, existed := prevEditTimes[record.ID]
-		if existed && record.LastEditedTime.Equal(prevTime) {
-			continue
-		}
-		changedCount++
-		item := c.buildRecordItem(ctx, client, record, propNames, dbTitle)
-		if item != nil {
-			items = append(items, *item)
+		if !existed || !record.LastEditedTime.Equal(prevTime) {
+			changedCount++
 		}
 	}
 
 	logger.Infof(ctx, "[Notion] database %s incremental: %d changed out of %d records", id, changedCount, len(records))
-	return items, recordEditTimes
+
+	// Rebuild the entire database table if any record changed, or if we don't have previous times (first sync)
+	if changedCount > 0 || len(prevEditTimes) == 0 {
+		item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
+		if item != nil {
+			return []types.FetchedItem{*item}, recordEditTimes
+		}
+	}
+
+	return nil, recordEditTimes
 }
 
 // queryDatabaseRecords resolves the database ID and queries all records.
@@ -541,6 +536,103 @@ func (c *Connector) buildRecordItem(ctx context.Context, client *notionClient, r
 			"channel":     types.ChannelNotion,
 			"object_type": objectTypePage,
 			"database":    dbTitle,
+		},
+	}
+}
+
+// buildDatabaseItem converts a database into a single Markdown table document.
+func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient, id string, dbTitle string, records []notionPage) *types.FetchedItem {
+	if len(records) == 0 {
+		return nil
+	}
+
+	propNames := extractPropertySchema(records[0])
+
+	var content strings.Builder
+	title := dbTitle
+	if title == "" {
+		title = defaultUntitledName
+	}
+	content.WriteString("# " + title + "\n\n")
+
+	// Table header
+	content.WriteString("| Title ")
+	for _, name := range propNames {
+		content.WriteString("| " + strings.ReplaceAll(name, "|", "\\|") + " ")
+	}
+	content.WriteString("|\n|")
+	content.WriteString("---|")
+	for range propNames {
+		content.WriteString("---|")
+	}
+	content.WriteString("\n")
+
+	var extraContent strings.Builder
+
+	// Table rows
+	for _, record := range records {
+		if record.InTrash {
+			continue
+		}
+
+		recordTitle := record.Title
+		if recordTitle == "" {
+			recordTitle = defaultUntitledName
+		}
+
+		content.WriteString("| " + strings.ReplaceAll(recordTitle, "|", "\\|") + " ")
+
+		if record.RawProperties != nil {
+			var props map[string]interface{}
+			json.Unmarshal(record.RawProperties, &props)
+			for _, name := range propNames {
+				val := ""
+				if propMap, ok := props[name].(map[string]interface{}); ok {
+					val = propertyToString(propMap)
+				}
+				val = strings.ReplaceAll(val, "\n", "<br>")
+				val = strings.ReplaceAll(val, "|", "\\|")
+				content.WriteString("| " + val + " ")
+			}
+		}
+		content.WriteString("|\n")
+
+		// Fetch blocks for the record, in case it has page content
+		blocks, err := client.GetBlockChildrenAll(ctx, record.ID)
+		if err == nil && len(blocks) > 0 {
+			resolveFileUploads(ctx, client, blocks)
+			markdown, _ := BlocksToMarkdown(blocks)
+			if strings.TrimSpace(markdown) != "" {
+				extraContent.WriteString("\n## " + recordTitle + " 内容\n\n" + markdown + "\n")
+			}
+		}
+	}
+
+	if extraContent.Len() > 0 {
+		content.WriteString("\n" + extraContent.String())
+	}
+
+	bodyStr := strings.TrimSpace(content.String())
+	if bodyStr == "" {
+		return nil
+	}
+
+	updatedAt := time.Now()
+	if len(records) > 0 {
+		updatedAt = records[0].LastEditedTime
+	}
+
+	return &types.FetchedItem{
+		ExternalID:  id,
+		Title:       title,
+		Content:     []byte(bodyStr),
+		ContentType: contentTypeMarkdown,
+		FileName:    title + ".md",
+		URL:         fmt.Sprintf("https://notion.so/%s", strings.ReplaceAll(id, "-", "")),
+		UpdatedAt:   updatedAt,
+		Metadata: map[string]string{
+			"channel":     types.ChannelNotion,
+			"object_type": objectTypeDatabase,
 		},
 	}
 }

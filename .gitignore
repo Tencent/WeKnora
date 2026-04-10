@@ -29,6 +29,7 @@ logs/
 
 WeKnora
 WeKnora-lite
+cmd/desktop/build/bin/
 /models/
 test/data/mswag.txt
 data/files/

@@ -2,6 +2,7 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { ref, type Ref, onUnmounted, nextTick } from 'vue'
 import { generateRandomString } from '@/utils/index';
 import i18n from '@/i18n';
+import { getApiBaseUrl } from '@/utils/api-base';
 
 
 
@@ -37,7 +38,7 @@ export function useStream() {
     isLoading.value = true;
 
     // 获取API配置
-    const apiUrl = import.meta.env.VITE_IS_DOCKER ? "" : "http://localhost:8080";
+    const apiUrl = getApiBaseUrl();
     
     // 获取JWT Token
     const token = localStorage.getItem('weknora_token');

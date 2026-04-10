@@ -60,13 +60,44 @@ func NewSQLiteRetrieveEngineRepository(db *gorm.DB) interfaces.RetrieveEngineRep
 }
 
 func initFTS5(db *gorm.DB) {
-	sql := `CREATE VIRTUAL TABLE IF NOT EXISTS lite_embeddings_fts USING fts5(
-		content, source_id, chunk_id, knowledge_id, knowledge_base_id,
-		content='lite_embeddings', content_rowid='id',
-		tokenize='unicode61'
-	)`
-	if err := db.Exec(sql).Error; err != nil {
-		logger.GetLogger(context.Background()).Warnf("[SQLite] Failed to create FTS5 table: %v", err)
+	var sqlStr string
+	db.Raw("SELECT sql FROM sqlite_master WHERE type='table' AND name='lite_embeddings_fts'").Scan(&sqlStr)
+	// If the table exists but is not contentless (i.e. uses content='lite_embeddings'), recreate it
+	if sqlStr != "" && strings.Contains(sqlStr, "content='lite_embeddings'") {
+		logger.GetLogger(context.Background()).Infof("[SQLite] Migrating FTS5 table to contentless table with manual bigram tokenization")
+		db.Exec("DROP TABLE IF EXISTS lite_embeddings_fts")
+		sqlStr = "" // Trigger recreate
+	}
+
+	if sqlStr == "" {
+		createSQL := `CREATE VIRTUAL TABLE IF NOT EXISTS lite_embeddings_fts USING fts5(
+			content, source_id, chunk_id, knowledge_id, knowledge_base_id,
+			content='',
+			contentless_delete=1,
+			tokenize='unicode61'
+		)`
+		if err := db.Exec(createSQL).Error; err != nil {
+			logger.GetLogger(context.Background()).Warnf("[SQLite] Failed to create FTS5 table: %v", err)
+			return
+		}
+		logger.GetLogger(context.Background()).Infof("[SQLite] Populating contentless FTS5 table from lite_embeddings with bigrams")
+
+		// To populate, we need to read all rows and insert them via Go to apply bigram tokenization
+		type Row struct {
+			ID              uint
+			Content         string
+			SourceID        string
+			ChunkID         string
+			KnowledgeID     string
+			KnowledgeBaseID string
+		}
+		var rows []Row
+		db.Raw("SELECT id, content, source_id, chunk_id, knowledge_id, knowledge_base_id FROM lite_embeddings").Scan(&rows)
+		for _, r := range rows {
+			db.Exec(`INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) 
+				VALUES(?, ?, ?, ?, ?, ?)`,
+				r.ID, tokenizeCJKBigram(r.Content), r.SourceID, r.ChunkID, r.KnowledgeID, r.KnowledgeBaseID)
+		}
 	}
 }
 
@@ -276,7 +307,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		SELECT e.id, e.source_id, e.source_type, e.chunk_id,
 			e.knowledge_id, e.knowledge_base_id, e.tag_id,
 			e.content,
-			bm25(lite_embeddings_fts) AS score
+			(bm25(lite_embeddings_fts) * -1000000.0) AS score
 		FROM lite_embeddings_fts
 		JOIN lite_embeddings e ON e.id = lite_embeddings_fts.rowid
 		WHERE lite_embeddings_fts MATCH ?
@@ -290,7 +321,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		args = append(args, wp.args...)
 	}
 
-	sql += " ORDER BY score ASC LIMIT ?"
+	sql += " ORDER BY score DESC LIMIT ?"
 	args = append(args, params.TopK)
 
 	type ftsResult struct {
@@ -315,11 +346,12 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 	items := make([]*types.IndexWithScore, len(rows))
 	for i, row := range rows {
 
-		// bm25 越小越相关 → 转成正向分数
-		score := -row.Score
+		// bm25 is originally negative and very small, we multiplied it by -1000000.0 in SQL
+		// to make it positive and human-readable.
+		score := row.Score
 
-		logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: #%d chunk_id=%s, bm25_raw=%.4f, score=%.4f, content_preview=%.60s",
-			i+1, row.ChunkID, row.Score, score, row.Content)
+		logger.GetLogger(ctx).Infof("[SQLite] keywordsRetrieve: #%d chunk_id=%s, score=%.4f, content_preview=%.60s",
+			i+1, row.ChunkID, score, row.Content)
 
 		items[i] = &types.IndexWithScore{
 			ID:              fmt.Sprintf("%d", row.ID),
@@ -488,6 +520,9 @@ func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmb
 			r.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", tbl), id)
 		}
 	}
+	for _, row := range rows {
+		r.db.Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID)
+	}
 }
 
 func (r *sqliteRepository) copyVec(_ context.Context, srcID, dstID uint, dim int) {
@@ -505,8 +540,9 @@ func (r *sqliteRepository) syncFTS5Insert(_ context.Context, row *sqliteEmbeddin
 	if row.ID == 0 {
 		return
 	}
+	tokenizedContent := tokenizeCJKBigram(row.Content)
 	sql := `INSERT INTO lite_embeddings_fts(rowid, content, source_id, chunk_id, knowledge_id, knowledge_base_id) VALUES(?, ?, ?, ?, ?, ?)`
-	r.db.Exec(sql, row.ID, row.Content, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID)
+	r.db.Exec(sql, row.ID, tokenizedContent, row.SourceID, row.ChunkID, row.KnowledgeID, row.KnowledgeBaseID)
 }
 
 type whereClause struct {
@@ -553,61 +589,77 @@ func toInterfaceSlice(ss []string) []interface{} {
 	return out
 }
 
-// sanitizeFTS5Query builds an FTS5 query from user input.
-// CJK characters are split into overlapping bigrams (mimicking CJK analyzers used
-// by Elasticsearch etc.) and joined with OR for broad partial matching.
-// Non-CJK words are kept intact. BM25 ranking naturally boosts documents
-// that match more tokens.
+// tokenizeCJKBigram splits continuous CJK character sequences into overlapping bigrams.
+// Non-CJK words are kept intact. This approach maximizes recall for CJK search.
+func tokenizeCJKBigram(text string) string {
+	var parts []string
+	var currentCJK []rune
+	var currentNonCJK strings.Builder
+
+	flushCJK := func() {
+		if len(currentCJK) == 0 {
+			return
+		}
+		if len(currentCJK) == 1 {
+			parts = append(parts, string(currentCJK[0]))
+		} else {
+			for i := 0; i < len(currentCJK)-1; i++ {
+				parts = append(parts, string(currentCJK[i])+string(currentCJK[i+1]))
+			}
+		}
+		currentCJK = currentCJK[:0]
+	}
+
+	flushNonCJK := func() {
+		if currentNonCJK.Len() > 0 {
+			parts = append(parts, currentNonCJK.String())
+			currentNonCJK.Reset()
+		}
+	}
+
+	for _, r := range text {
+		// unicode.Han covers Chinese characters
+		if unicode.Is(unicode.Han, r) {
+			flushNonCJK()
+			currentCJK = append(currentCJK, r)
+		} else if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			// Delimiters
+			flushCJK()
+			flushNonCJK()
+		} else {
+			// Alphanumeric or other languages
+			flushCJK()
+			currentNonCJK.WriteRune(r)
+		}
+	}
+	flushCJK()
+	flushNonCJK()
+
+	return strings.Join(parts, " ")
+}
+
+// sanitizeFTS5Query builds an FTS5 query from user input by applying bigram tokenization.
 func sanitizeFTS5Query(q string) string {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return q
 	}
 
-	var cjkRunes []rune
-	var nonCJKWords []string
-	var buf strings.Builder
-
-	flushNonCJK := func() {
-		if buf.Len() > 0 {
-			nonCJKWords = append(nonCJKWords, buf.String())
-			buf.Reset()
-		}
-	}
-
-	for _, r := range q {
-		if unicode.Is(unicode.Han, r) {
-			flushNonCJK()
-			cjkRunes = append(cjkRunes, r)
-		} else if unicode.IsSpace(r) || r == '|' {
-			flushNonCJK()
-		} else if r == '"' || r == '*' || r == '(' || r == ')' || r == '{' || r == '}' {
-			// skip FTS5 special characters
-		} else {
-			buf.WriteRune(r)
-		}
-	}
-	flushNonCJK()
+	// Tokenize input query with bigrams (same as during indexing)
+	tokenized := tokenizeCJKBigram(q)
+	fields := strings.Fields(tokenized)
 
 	var parts []string
-
-	// CJK bigrams for better matching (e.g. "苹果第四季度" → "苹果" OR "果第" OR "第四" OR ...)
-	if len(cjkRunes) == 1 {
-		parts = append(parts, `"`+string(cjkRunes[0])+`"`)
-	} else {
-		for i := 0; i < len(cjkRunes)-1; i++ {
-			bigram := string(cjkRunes[i]) + string(cjkRunes[i+1])
-			parts = append(parts, `"`+bigram+`"`)
+	for _, f := range fields {
+		if f != "" {
+			parts = append(parts, `"`+f+`"`)
 		}
-	}
-
-	for _, w := range nonCJKWords {
-		w = strings.ReplaceAll(w, `"`, `""`)
-		parts = append(parts, `"`+w+`"`)
 	}
 
 	if len(parts) == 0 {
-		return `"` + strings.ReplaceAll(q, `"`, `""`) + `"`
+		return ""
 	}
+
+	// Use OR because we want fuzzy match across multiple bigrams/words
 	return strings.Join(parts, " OR ")
 }
