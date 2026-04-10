@@ -173,13 +173,10 @@ func main() {
 			css := `
 			const style = document.createElement('style');
 			style.innerHTML = ` + "`" + `
-				.logo_row, .menu_top, .chat-header, .header, .dialog-header, .sidebar-header, .document-header {
+				.logo_row, .menu_top, .chat-header, .header, .dialog-header, .sidebar-header, .document-header, .section-header, .header-title {
 					--wails-draggable: drag !important;
 				}
-				.logo_row *, .menu_top *, .chat-header *, .header *, .dialog-header *, .sidebar-header *, .document-header * {
-					--wails-draggable: no-drag !important;
-				}
-				.sidebar-toggle, .logo_box {
+				.header-actions, .header-action-btn, .sidebar-toggle, .logo_box, .close-btn, button, a, input, select, textarea, .t-button {
 					--wails-draggable: no-drag !important;
 				}
 			` + "`" + `;
