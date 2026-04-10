@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -68,7 +70,7 @@ func main() {
 			resourceCleaner interfaces.ResourceCleaner,
 		) error {
 			server := &http.Server{Handler: router}
-			
+
 			// Use port 0 to assign a random free port for the desktop app
 			// Force localhost binding to prevent firewall popups on macOS
 			addr := "127.0.0.1:0"
@@ -77,11 +79,11 @@ func main() {
 			if err != nil {
 				return fmt.Errorf("failed to start server: %v", err)
 			}
-			
+
 			// Get the actual assigned port
 			actualPort := listener.Addr().(*net.TCPAddr).Port
 			actualAddr := fmt.Sprintf("127.0.0.1:%d", actualPort)
-			
+
 			// Store the backend URL so Wails can load it
 			app.backendURL = fmt.Sprintf("http://%s", actualAddr)
 
@@ -89,7 +91,7 @@ func main() {
 			go func() {
 				<-app.shutdownCh
 				logger.Infof(context.Background(), "Wails shutting down, stopping Go backend...")
-				
+
 				listener.Close()
 				shutdownTimeout := cfg.Server.ShutdownTimeout
 				if shutdownTimeout == 0 {
@@ -97,7 +99,7 @@ func main() {
 				}
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 				defer cancel()
-				
+
 				if err := server.Shutdown(shutdownCtx); err != nil {
 					server.Close()
 				}
@@ -118,7 +120,7 @@ func main() {
 			}
 			return nil
 		})
-		
+
 		if err != nil {
 			serverErrCh <- err
 			logger.Fatalf(context.Background(), "Failed to run backend: %v", err)
@@ -150,20 +152,41 @@ func main() {
 	EditMenu.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {})
 	EditMenu.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {})
 
+	// Wait for the backend URL to be set
+	targetURL, _ := url.Parse(app.backendURL)
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+
 	// Start Wails application
-	// We use a dummy handler for AssetServer to prevent wails from complaining
+	// We use a Reverse Proxy to seamlessly proxy Wails' frontend to our Go backend
 	err := wails.Run(&options.App{
 		Title:  "WeKnora Lite",
 		Width:  1280,
 		Height: 800,
 		Menu:   AppMenu,
 		AssetServer: &assetserver.Options{
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNotFound)
-			}),
+			Handler: proxy,
 		},
 		StartHidden: false, // Show window on startup
 		OnStartup:   app.startup,
+		OnDomReady: func(ctx context.Context) {
+			// Inject CSS to make the top area draggable for macOS hiddenInset titlebar
+			css := `
+			const style = document.createElement('style');
+			style.innerHTML = ` + "`" + `
+				.logo_row, .menu_top, .chat-header {
+					--wails-draggable: drag !important;
+				}
+				.logo_row *, .menu_top *, .chat-header * {
+					--wails-draggable: no-drag !important;
+				}
+				.sidebar-toggle, .logo_box {
+					--wails-draggable: no-drag !important;
+				}
+			` + "`" + `;
+			document.head.appendChild(style);
+			`
+			wailsruntime.WindowExecJS(ctx, css)
+		},
 		OnShutdown:  app.shutdown,
 		Bind: []interface{}{
 			app,
@@ -199,16 +222,6 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	
-	// Navigate the Wails webview to our local Go backend
-	// We use the wails runtime to change the URL programmatically
-	go func() {
-		// Navigate the Wails webview to our local Go backend
-		// Wait a tiny bit just to ensure window is ready
-		time.Sleep(100 * time.Millisecond)
-		// Instead of WindowNavigate, we change the URL via javascript
-		wailsruntime.WindowExecJS(a.ctx, fmt.Sprintf("window.location.href = '%s';", a.backendURL))
-	}()
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -232,7 +245,9 @@ func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.
 		lastErr = err
 		if i < maxRetries-1 {
 			delay := baseDelay * time.Duration(1<<uint(i))
-			if delay > 3*time.Second { delay = 3 * time.Second }
+			if delay > 3*time.Second {
+				delay = 3 * time.Second
+			}
 			time.Sleep(delay)
 		}
 	}
