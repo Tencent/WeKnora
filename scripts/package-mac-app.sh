@@ -72,6 +72,12 @@ fi
 if [ -d migrations/sqlite ]; then
     cp -r migrations/sqlite/* "${RESOURCES_DIR}/migrations/sqlite/"
 fi
+if [ -d config ]; then
+    cp -r config/* "${RESOURCES_DIR}/config/"
+fi
+if [ -d web ]; then
+    cp -r web "${RESOURCES_DIR}/"
+fi
 
 # 注意：Wails build 生成的二进制文件工作目录默认是 app 的 Contents/MacOS 目录
 # 后续可能需要调整代码中对配置文件的路径读取逻辑。

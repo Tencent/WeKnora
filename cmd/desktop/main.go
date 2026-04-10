@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,12 +25,24 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/joho/godotenv"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/sys/unix"
 )
 
 func main() {
+	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
+	// We need to change the working directory to the Resources folder where our configs are.
+	execPath, errPath := os.Executable()
+	if errPath == nil && strings.Contains(execPath, ".app/Contents/MacOS") {
+		resPath := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
+		_ = os.Chdir(resPath)
+	}
+
+	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
+	_ = godotenv.Load()
+
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -137,13 +151,16 @@ func main() {
 	EditMenu.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {})
 
 	// Start Wails application
+	// We use a dummy handler for AssetServer to prevent wails from complaining
 	err := wails.Run(&options.App{
 		Title:  "WeKnora Lite",
 		Width:  1280,
 		Height: 800,
 		Menu:   AppMenu,
 		AssetServer: &assetserver.Options{
-			Assets: nil,
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+			}),
 		},
 		StartHidden: false, // Show window on startup
 		OnStartup:   app.startup,
