@@ -169,18 +169,100 @@ func main() {
 		StartHidden: false, // Show window on startup
 		OnStartup:   app.startup,
 		OnDomReady: func(ctx context.Context) {
-			// Inject CSS to make the top area draggable for macOS hiddenInset titlebar
+			// Inject CSS and event delegation to make top areas draggable for macOS hiddenInset titlebar.
+			// Wails checks the clicked element itself, so for dynamic SPA content we also bind a document-level
+			// mousedown handler and directly trigger native dragging for matching header regions.
 			css := `
 			const style = document.createElement('style');
 			style.innerHTML = ` + "`" + `
-				.logo_row, .menu_top, .chat-header, .header, .dialog-header, .sidebar-header, .document-header, .section-header, .header-title {
+				.logo_row, .logo_row *,
+				.menu_top, .menu_top *,
+				.chat-header, .chat-header *,
+				.header, .header *,
+				.dialog-header, .dialog-header *,
+				.sidebar-header, .sidebar-header *,
+				.document-header, .document-header *,
+				.section-header, .section-header *,
+				.header-title, .header-title * {
 					--wails-draggable: drag !important;
 				}
-				.header-actions, .header-action-btn, .sidebar-toggle, .logo_box, .close-btn, button, a, input, select, textarea, .t-button {
+				.header-actions, .header-actions *,
+				.header-action-btn, .header-action-btn *,
+				.sidebar-toggle, .sidebar-toggle *,
+				.logo_box, .logo_box *,
+				.close-btn, .close-btn *,
+				button, button *,
+				a, a *,
+				input, select, textarea,
+				[role="button"], [role="button"] *,
+				.t-button, .t-button *,
+				.t-input, .t-select, .t-textarea,
+				svg[data-no-drag], svg[data-no-drag] * {
 					--wails-draggable: no-drag !important;
 				}
 			` + "`" + `;
 			document.head.appendChild(style);
+
+			(function() {
+				if (window.__weknoraDragBound) return;
+				window.__weknoraDragBound = true;
+
+				const dragSelectors = [
+					'.logo_row',
+					'.menu_top',
+					'.chat-header',
+					'.header',
+					'.header-title',
+					'.section-header',
+					'.dialog-header',
+					'.sidebar-header',
+					'.document-header'
+				];
+
+				const noDragSelectors = [
+					'.header-actions',
+					'.header-action-btn',
+					'.sidebar-toggle',
+					'.logo_box',
+					'.close-btn',
+					'button',
+					'a',
+					'input',
+					'select',
+					'textarea',
+					'[role="button"]',
+					'.t-button',
+					'.t-input',
+					'.t-select',
+					'.t-textarea',
+					'[data-no-drag]'
+				];
+
+				const isNoDrag = (el) => {
+					return noDragSelectors.some((selector) => el.closest(selector));
+				};
+
+				const findDragTarget = (el) => {
+					for (const selector of dragSelectors) {
+						const match = el.closest(selector);
+						if (match) return match;
+					}
+					return null;
+				};
+
+				document.addEventListener('mousedown', (e) => {
+					if (e.button !== 0 || e.detail !== 1) return;
+					const target = e.target;
+					if (!(target instanceof Element)) return;
+					if (isNoDrag(target)) return;
+					const dragTarget = findDragTarget(target);
+					if (!dragTarget) return;
+					e.preventDefault();
+					if (typeof window.WailsInvoke === 'function') {
+						window.WailsInvoke('drag');
+					}
+				}, true);
+			})();
 			`
 			wailsruntime.WindowExecJS(ctx, css)
 		},
