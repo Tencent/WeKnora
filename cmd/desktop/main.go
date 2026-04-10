@@ -54,15 +54,22 @@ func main() {
 			resourceCleaner interfaces.ResourceCleaner,
 		) error {
 			server := &http.Server{Handler: router}
-			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			
-			// Store the backend URL so Wails can load it
-			app.backendURL = fmt.Sprintf("http://%s", addr)
+			// Use port 0 to assign a random free port for the desktop app
+			// Force localhost binding to prevent firewall popups on macOS
+			addr := "127.0.0.1:0"
 
 			listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
 			if err != nil {
 				return fmt.Errorf("failed to start server: %v", err)
 			}
+			
+			// Get the actual assigned port
+			actualPort := listener.Addr().(*net.TCPAddr).Port
+			actualAddr := fmt.Sprintf("127.0.0.1:%d", actualPort)
+			
+			// Store the backend URL so Wails can load it
+			app.backendURL = fmt.Sprintf("http://%s", actualAddr)
 
 			// Handle graceful shutdown from Wails OnShutdown hook
 			go func() {
@@ -91,7 +98,7 @@ func main() {
 				app.shutdownCh <- struct{}{} // trigger shutdown
 			}()
 
-			logger.Infof(context.Background(), "Server is running at %s", addr)
+			logger.Infof(context.Background(), "Server is running at %s", actualAddr)
 			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 				return fmt.Errorf("server error: %v", err)
 			}
