@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS tenants (
     web_search_config TEXT DEFAULT NULL,
     parser_engine_config TEXT DEFAULT NULL,
     storage_engine_config TEXT DEFAULT NULL,
+    chat_history_config TEXT,
+    retrieval_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -61,6 +63,9 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     faq_config TEXT,
     question_generation_config TEXT NULL,
     is_temporary BOOLEAN NOT NULL DEFAULT 0,
+    is_pinned INTEGER NOT NULL DEFAULT 0,
+    pinned_at DATETIME NULL,
+    asr_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -89,6 +94,7 @@ CREATE TABLE IF NOT EXISTS knowledges (
     tag_id VARCHAR(36),
     summary_status VARCHAR(32) DEFAULT 'none',
     last_faq_import_result TEXT DEFAULT NULL,
+    channel VARCHAR(50) NOT NULL DEFAULT 'web',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     processed_at DATETIME,
@@ -142,15 +148,19 @@ CREATE TABLE IF NOT EXISTS messages (
     knowledge_references TEXT NOT NULL DEFAULT '[]',
     agent_steps TEXT DEFAULT NULL,
     mentioned_items TEXT DEFAULT '[]',
+    images TEXT DEFAULT '[]',
     is_completed BOOLEAN NOT NULL DEFAULT 0,
     is_fallback BOOLEAN NOT NULL DEFAULT 0,
     channel VARCHAR(50) NOT NULL DEFAULT '',
+    agent_duration_ms INTEGER DEFAULT 0,
+    knowledge_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_messages_knowledge_id ON messages(knowledge_id);
 
 CREATE TABLE IF NOT EXISTS chunks (
     id VARCHAR(36) PRIMARY KEY,
@@ -167,6 +177,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_type VARCHAR(20) NOT NULL DEFAULT 'text',
     parent_chunk_id VARCHAR(36),
     image_info TEXT,
+    video_info TEXT,
     relation_chunks TEXT,
     indirect_relation_chunks TEXT,
     metadata TEXT,
@@ -186,6 +197,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
 CREATE INDEX IF NOT EXISTS idx_chunks_tag ON chunks(tag_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_content_hash ON chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chunks_seq_id ON chunks(seq_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_kb_tenant ON chunks(knowledge_base_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_knowledge_enabled ON chunks(knowledge_id, is_enabled, deleted_at);
 
 CREATE TABLE IF NOT EXISTS users (
     id VARCHAR(36) PRIMARY KEY,
@@ -382,3 +395,143 @@ CREATE TABLE IF NOT EXISTS tenant_disabled_shared_agents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenant_disabled_shared_agents_tenant_id ON tenant_disabled_shared_agents(tenant_id);
+
+CREATE TABLE IF NOT EXISTS im_channel_sessions (
+    id VARCHAR(36) PRIMARY KEY,
+    platform VARCHAR(20) NOT NULL,
+    user_id VARCHAR(128) NOT NULL,
+    chat_id VARCHAR(128) NOT NULL DEFAULT '',
+    session_id VARCHAR(36) NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL,
+    agent_id VARCHAR(36) DEFAULT '',
+    im_channel_id VARCHAR(36) DEFAULT '',
+    thread_id VARCHAR(128) NOT NULL DEFAULT '',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    metadata TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_lookup
+    ON im_channel_sessions (platform, user_id, chat_id, tenant_id)
+    WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_thread_lookup
+    ON im_channel_sessions (platform, chat_id, thread_id, tenant_id)
+    WHERE deleted_at IS NULL AND thread_id != '';
+CREATE INDEX IF NOT EXISTS idx_im_channel_tenant ON im_channel_sessions (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_im_channel_session ON im_channel_sessions (session_id);
+CREATE INDEX IF NOT EXISTS idx_im_channel_sessions_channel ON im_channel_sessions (im_channel_id)
+    WHERE im_channel_id != '';
+
+CREATE TABLE IF NOT EXISTS im_channels (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    agent_id VARCHAR(36) NOT NULL,
+    platform VARCHAR(20) NOT NULL,
+    name VARCHAR(255) NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    mode VARCHAR(20) NOT NULL DEFAULT 'websocket',
+    output_mode VARCHAR(20) NOT NULL DEFAULT 'stream',
+    credentials TEXT NOT NULL DEFAULT '{}',
+    knowledge_base_id VARCHAR(36) DEFAULT '',
+    bot_identity VARCHAR(255) NOT NULL DEFAULT '',
+    session_mode VARCHAR(20) NOT NULL DEFAULT 'user',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_im_channels_tenant ON im_channels (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_im_channels_agent ON im_channels (agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_im_channels_bot_identity
+    ON im_channels (bot_identity)
+    WHERE deleted_at IS NULL AND bot_identity != '';
+
+CREATE TABLE IF NOT EXISTS data_sources (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    config TEXT,
+    sync_schedule VARCHAR(100),
+    sync_mode VARCHAR(20) DEFAULT 'incremental',
+    status VARCHAR(32) DEFAULT 'active',
+    conflict_strategy VARCHAR(32) DEFAULT 'overwrite',
+    sync_deletions INTEGER DEFAULT 1,
+    last_sync_at DATETIME NULL,
+    last_sync_cursor TEXT,
+    last_sync_result TEXT,
+    error_message TEXT,
+    sync_log_retention_days INTEGER DEFAULT 30,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_data_sources_tenant_id ON data_sources (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_data_sources_knowledge_base_id ON data_sources (knowledge_base_id);
+CREATE INDEX IF NOT EXISTS idx_data_sources_type ON data_sources (type);
+CREATE INDEX IF NOT EXISTS idx_data_sources_status ON data_sources (status);
+CREATE INDEX IF NOT EXISTS idx_data_sources_deleted_at ON data_sources (deleted_at);
+
+CREATE TABLE IF NOT EXISTS sync_logs (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    data_source_id VARCHAR(36) NOT NULL REFERENCES data_sources(id) ON DELETE CASCADE,
+    tenant_id INTEGER NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME NULL,
+    items_total INTEGER DEFAULT 0,
+    items_created INTEGER DEFAULT 0,
+    items_updated INTEGER DEFAULT 0,
+    items_deleted INTEGER DEFAULT 0,
+    items_skipped INTEGER DEFAULT 0,
+    items_failed INTEGER DEFAULT 0,
+    error_message TEXT,
+    result TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_logs_data_source_id ON sync_logs (data_source_id);
+CREATE INDEX IF NOT EXISTS idx_sync_logs_tenant_id ON sync_logs (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_sync_logs_status ON sync_logs (status);
+CREATE INDEX IF NOT EXISTS idx_sync_logs_started_at ON sync_logs (started_at);
+
+CREATE TABLE IF NOT EXISTS web_search_providers (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    tenant_id INTEGER NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    provider VARCHAR(50) NOT NULL,
+    description TEXT,
+    parameters TEXT,
+    is_default INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_search_providers_tenant_id ON web_search_providers (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_web_search_providers_provider ON web_search_providers (provider);
+CREATE INDEX IF NOT EXISTS idx_web_search_providers_deleted_at ON web_search_providers (deleted_at);
+
+CREATE TABLE IF NOT EXISTS vector_stores (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    engine_type VARCHAR(50) NOT NULL,
+    connection_config TEXT NOT NULL DEFAULT '{}',
+    index_config TEXT NOT NULL DEFAULT '{}',
+    tenant_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
+    ON vector_stores(name, tenant_id)
+    WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
+CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
