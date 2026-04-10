@@ -55,6 +55,7 @@ type RouterParams struct {
 	MCPServiceHandler        *handler.MCPServiceHandler
 	WebSearchHandler         *handler.WebSearchHandler
 	WebSearchProviderHandler *handler.WebSearchProviderHandler
+	VectorStoreHandler       *handler.VectorStoreHandler
 	FAQHandler               *handler.FAQHandler
 	TagHandler               *handler.TagHandler
 	CustomAgentHandler       *handler.CustomAgentHandler
@@ -62,7 +63,7 @@ type RouterParams struct {
 	OrganizationHandler      *handler.OrganizationHandler
 	IMHandler                *handler.IMHandler
 	DataSourceHandler        *handler.DataSourceHandler
-	WeKnoraCloudHandler         *handler.WeKnoraCloudHandler
+	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
 }
 
 // NewRouter 创建新的路由
@@ -140,6 +141,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler)
 		RegisterWebSearchRoutes(v1, params.WebSearchHandler)
 		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler)
+		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler)
 		RegisterSkillRoutes(v1, params.SkillHandler)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
@@ -499,6 +501,25 @@ func RegisterWebSearchProviderRoutes(r *gin.RouterGroup, h *handler.WebSearchPro
 		providers.DELETE("/:id", h.DeleteProvider)
 		// Test existing saved provider
 		providers.POST("/:id/test", h.TestProviderByID)
+	}
+}
+
+// RegisterVectorStoreRoutes registers CRUD routes for vector store configurations
+func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler) {
+	stores := r.Group("/vector-stores")
+	{
+		// List available engine types (metadata for UI forms)
+		stores.GET("/types", h.ListStoreTypes)
+		// Test with raw credentials (no persistence)
+		stores.POST("/test", h.TestStoreRaw)
+		// CRUD
+		stores.POST("", h.CreateStore)
+		stores.GET("", h.ListStores)
+		stores.GET("/:id", h.GetStore)
+		stores.PUT("/:id", h.UpdateStore)
+		stores.DELETE("/:id", h.DeleteStore)
+		// Test existing saved or env store
+		stores.POST("/:id/test", h.TestStoreByID)
 	}
 }
 

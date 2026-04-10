@@ -187,8 +187,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(infra_web_search.NewRegistry))
 	must(container.Invoke(registerWebSearchProviders))
 	must(container.Provide(repository.NewWebSearchProviderRepository))
+	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(service.NewWebSearchService))
 	must(container.Provide(service.NewWebSearchProviderService))
+	must(container.Provide(service.NewVectorStoreService))
 
 	// Agent service layer (requires event bus, web search service)
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
@@ -258,6 +260,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMCPServiceHandler))
 	must(container.Provide(handler.NewWebSearchHandler))
 	must(container.Provide(handler.NewWebSearchProviderHandler))
+	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
