@@ -162,6 +162,7 @@ func main() {
 		Title:  "WeKnora Lite",
 		Width:  1280,
 		Height: 800,
+		DisableResize: true,
 		Menu:   AppMenu,
 		AssetServer: &assetserver.Options{
 			Handler: proxy,
@@ -250,9 +251,46 @@ func main() {
 					return null;
 				};
 
+				const applyDragMarkers = () => {
+					for (const selector of dragSelectors) {
+						document.querySelectorAll(selector).forEach((root) => {
+							if (!(root instanceof HTMLElement)) return;
+							root.style.setProperty('--wails-draggable', 'drag');
+							root.querySelectorAll('*').forEach((child) => {
+								if (!(child instanceof HTMLElement)) return;
+								child.style.setProperty('--wails-draggable', 'drag');
+							});
+						});
+					}
+
+					for (const selector of noDragSelectors) {
+						document.querySelectorAll(selector).forEach((node) => {
+							if (!(node instanceof HTMLElement)) return;
+							node.style.setProperty('--wails-draggable', 'no-drag');
+							node.querySelectorAll('*').forEach((child) => {
+								if (!(child instanceof HTMLElement)) return;
+								child.style.setProperty('--wails-draggable', 'no-drag');
+							});
+						});
+					}
+				};
+
+				applyDragMarkers();
+				const observer = new MutationObserver(() => {
+					applyDragMarkers();
+				});
+				observer.observe(document.body, {
+					childList: true,
+					subtree: true,
+					attributes: false
+				});
+
 				document.addEventListener('mousedown', (e) => {
 					if (e.button !== 0 || e.detail !== 1) return;
-					const target = e.target;
+					let target = e.target;
+					if (target instanceof Text) {
+						target = target.parentElement;
+					}
 					if (!(target instanceof Element)) return;
 					if (isNoDrag(target)) return;
 					const dragTarget = findDragTarget(target);
