@@ -9,16 +9,17 @@
       hide-shared
     />
     <div class="agent-list-content">
-      <div class="header">
-        <div class="header-title">
-          <div class="title-row">
-            <h2>{{ $t('agent.title') }}</h2>
+      <div class="header" style="--wails-draggable: drag">
+        <div class="header-title" style="--wails-draggable: drag">
+          <div class="title-row" style="--wails-draggable: drag">
+            <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
             <t-tooltip :content="$t('agent.createAgent')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
                 size="small"
                 class="header-action-btn"
+                style="--wails-draggable: no-drag"
                 @click="handleCreateAgent"
               >
                 <template #icon>
@@ -33,7 +34,7 @@
               </t-button>
             </t-tooltip>
           </div>
-          <p class="header-subtitle">{{ $t('agent.subtitle') }}</p>
+          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
       <div class="agent-list-main">

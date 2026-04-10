@@ -8,23 +8,24 @@
       :count-by-org="effectiveSharedCountByOrg"
     />
     <div class="kb-list-content">
-      <div class="header">
-        <div class="header-title">
-          <div class="title-row">
-            <h2>{{ $t('knowledgeBase.title') }}</h2>
+      <div class="header" style="--wails-draggable: drag">
+        <div class="header-title" style="--wails-draggable: drag">
+          <div class="title-row" style="--wails-draggable: drag">
+            <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
             <t-tooltip :content="$t('knowledgeList.create')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
                 size="small"
                 class="header-action-btn"
+                style="--wails-draggable: no-drag"
                 @click="handleCreateKnowledgeBase"
               >
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
               </t-button>
             </t-tooltip>
           </div>
-          <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
+          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
       </div>
       <div class="kb-list-main">

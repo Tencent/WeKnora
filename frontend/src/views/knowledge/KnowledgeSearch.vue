@@ -1,13 +1,13 @@
 <template>
   <div class="ks-container">
     <div class="ks-content">
-      <div class="header">
-        <div class="header-title">
-          <h2>{{ $t('knowledgeSearch.title') }}</h2>
-          <p class="header-subtitle">{{ $t('knowledgeSearch.subtitle') }}</p>
+      <div class="header" style="--wails-draggable: drag">
+        <div class="header-title" style="--wails-draggable: drag">
+          <h2 style="--wails-draggable: drag">{{ $t('knowledgeSearch.title') }}</h2>
+          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeSearch.subtitle') }}</p>
         </div>
-        <div class="header-actions">
-          <t-button variant="text" shape="square" :class="{ active: showSettings }" @click="showSettings = !showSettings">
+        <div class="header-actions" style="--wails-draggable: no-drag">
+          <t-button variant="text" shape="square" :class="{ active: showSettings }" style="--wails-draggable: no-drag" @click="showSettings = !showSettings">
             <template #icon><t-icon name="setting" /></template>
           </t-button>
         </div>
