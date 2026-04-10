@@ -61,6 +61,7 @@ help:
 	@echo "  build-lite        构建 Lite 版本（先构建前端到 web/，再构建 Go；SKIP_FRONTEND=1 跳过前端）"
 	@echo "  run-lite          构建并启动 Lite 版本"
 	@echo "  package-lite      构建并打包 Lite 发行包（tarball）"
+	@echo "  package-mac-app   构建并打包 macOS 桌面应用 (.app)"
 
 # Go related variables
 BINARY_NAME=WeKnora
@@ -250,7 +251,7 @@ build-lite:
 	fi
 	export EDITION=lite; \
 	eval "$$(./scripts/get_version.sh env)"; \
-	LDFLAGS="$$(./scripts/get_version.sh ldflags)"; \
+	LDFLAGS="$$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"; \
 	CGO_ENABLED=1 \
 	CGO_CFLAGS="-Wno-deprecated-declarations" \
 	CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries" \
@@ -264,6 +265,10 @@ run-lite: build-lite
 # Package Lite version into distributable tarball
 package-lite:
 	./scripts/package-lite.sh
+
+# Package Mac App
+package-mac-app:
+	./scripts/package-mac-app.sh
 
 download_spatial:
 	go run cmd/download/duckdb/duckdb.go
