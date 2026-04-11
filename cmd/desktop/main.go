@@ -311,7 +311,7 @@ func main() {
 	ViewMenu := AppMenu.AddSubmenu("View")
 	ViewMenu.AddText("Reload", keys.CmdOrCtrl("r"), func(_ *menu.CallbackData) {
 		if app.ctx != nil {
-			wailsruntime.WindowReloadApp(app.ctx)
+			wailsruntime.EventsEmit(app.ctx, "app:reload")
 		}
 	})
 

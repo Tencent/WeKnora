@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -135,6 +135,7 @@ const handleGlobalOIDCCallback = async () => {
 onMounted(() => {
   handleGlobalOIDCCallback()
 })
+
 </script>
 <template>
   <t-config-provider :globalConfig="tdGlobalConfig">
