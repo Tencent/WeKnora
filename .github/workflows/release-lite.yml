@@ -59,7 +59,7 @@ jobs:
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
-          - os: macos-13
+          - os: macos-14
             goos: darwin
             goarch: amd64
           - os: macos-14
@@ -143,7 +143,7 @@ jobs:
             platform: darwin/universal
             arch_label: macOS_universal
             artifact_name: desktop-macos-universal
-          - os: macos-13
+          - os: macos-14
             platform: darwin/amd64
             arch_label: macOS_amd64
             artifact_name: desktop-macos-amd64
