@@ -29,6 +29,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Generate Wails bindings
+        run: |
+          export EDITION=lite
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+          export CGO_ENABLED=1
+          sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          cd cmd/desktop
+          wails generate module
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -44,7 +61,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist/
+          path: |
+            frontend/dist/
+            frontend/src/wailsjs/
           retention-days: 1
 
   # ── 2a. Build Web CLI binary per platform (native CGO) ──
@@ -177,6 +196,11 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: .
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
@@ -233,8 +257,15 @@ jobs:
             NSIS_FLAG="-nsis"
           fi
 
+          # Only skip bindings generation on Windows to avoid Go AST GC crash bug.
+          # Bindings are already generated and downloaded from build-frontend step.
+          SKIP_BINDINGS=""
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            SKIP_BINDINGS="-skipbindings"
+          fi
+
           cd cmd/desktop
-          wails build -clean \
+          wails build -clean ${SKIP_BINDINGS} \
             -tags "${BUILD_TAGS}" \
             -platform "${{ matrix.platform }}" \
             ${NSIS_FLAG} \
