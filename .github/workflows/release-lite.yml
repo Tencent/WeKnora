@@ -196,12 +196,6 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
@@ -220,12 +214,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
-
-      - name: Install NSIS (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          choco install nsis -y
-          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
       - name: Prepare SQLite headers (Windows)
         if: runner.os == 'Windows'
@@ -273,15 +261,10 @@ jobs:
             OUT_NAME="WeKnora Lite.exe" # keep with extension
           fi
 
-          # Only skip bindings generation on Windows to avoid Go AST GC crash bug.
-          # Bindings are already generated and downloaded from build-frontend step.
-          SKIP_BINDINGS=""
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            SKIP_BINDINGS="-skipbindings"
-          fi
-
+          # Skip bindings generation and frontend build because they were already
+          # generated and downloaded from the build-frontend step.
           cd cmd/desktop
-          wails build -clean ${SKIP_BINDINGS} \
+          wails build -clean -skipbindings -s \
             -tags "${BUILD_TAGS}" \
             -platform "${{ matrix.platform }}" \
             ${NSIS_FLAG} \
