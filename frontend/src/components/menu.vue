@@ -4,7 +4,7 @@
         <div class="logo_row" v-if="!uiStore.sidebarCollapsed">
             <div class="logo_box" @click="router.push('/platform/knowledge-bases')" style="cursor: pointer;">
                 <img class="logo" src="@/assets/img/weknora.png" alt="">
-                <span v-if="isLiteEdition" class="lite-badge">Lite</span>
+                <sup v-if="isLiteEdition" class="lite-badge">Lite</sup>
             </div>
             <div class="sidebar-toggle"
                  @click="uiStore.toggleSidebar"
@@ -157,7 +157,7 @@ const submenuscrollContainer = ref(null);
 const totalPages = computed(() => Math.ceil(total.value / page_size.value));
 const hasMore = computed(() => currentPage.value < totalPages.value);
 type MenuItem = { title: string; icon: string; path: string; childrenPath?: string; children?: any[] };
-const { menuArr } = storeToRefs(usemenuStore);
+const { menuArr, visibleMenuArr } = storeToRefs(usemenuStore);
 let activeSubmenu = ref<string>('');
 const isLiteEdition = ref(false);
 
@@ -253,15 +253,15 @@ const getIconActiveState = (itemPath: string) => {
     };
 };
 
-// 分离上下两部分菜单
+// 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
-    return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
+    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
         item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
     );
 });
 
 const bottomMenuItems = computed<MenuItem[]>(() => {
-    return (menuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
+    return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => {
         if (item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat') {
             return false;
         }
@@ -542,8 +542,12 @@ onMounted(async () => {
         currentSecondpath.value = `chat/${route.params.chatid}`;
     }
 
+    isLiteEdition.value = authStore.isLiteMode
     getSystemInfo().then(res => {
-        isLiteEdition.value = res.data?.edition === 'lite'
+        if (res.data?.edition === 'lite') {
+            isLiteEdition.value = true
+            authStore.setLiteMode(true)
+        }
     }).catch(() => {})
     
     // 初始化知识库信息
@@ -844,22 +848,20 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         flex: 1;
         min-width: 0;
         overflow: hidden;
+
         .logo{
             width: 134px;
             height: auto;
         }
         .lite-badge {
-            margin-left: 4px;
-            padding: 1px 6px;
-            font-size: 11px;
+            margin-left: 2px;
+            align-self: flex-start;
+            margin-top: 2px;
+            font-size: 9px;
             font-weight: 600;
-            line-height: 18px;
-            color: #07c05f;
-            background: #07c05f1a;
-            border: 1px solid #07c05f40;
-            border-radius: 4px;
-            letter-spacing: 0.5px;
+            color: var(--td-text-color-placeholder);
             user-select: none;
+            white-space: nowrap;
         }
     }
 

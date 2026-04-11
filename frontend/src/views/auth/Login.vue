@@ -678,6 +678,7 @@ onMounted(async () => {
   try {
     const response = await autoSetup()
     if (response.success) {
+      authStore.setLiteMode(true)
       await persistLoginResponse(response)
       return
     }

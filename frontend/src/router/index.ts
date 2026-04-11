@@ -160,6 +160,7 @@ router.beforeEach(async (to, from, next) => {
           const response = await autoSetup()
           if (response.success) {
             persistLoginResponse(authStore, response)
+            authStore.setLiteMode(true)
             next(to.fullPath)
             return
           }

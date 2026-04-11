@@ -40,6 +40,11 @@
                 </div>
             </div>
         </div>
+        <transition name="scroll-btn-fade">
+            <div v-show="userHasScrolledUp" class="scroll-to-bottom-btn" @click="onClickScrollToBottom">
+                <t-icon name="chevron-down" size="20px" />
+            </div>
+        </transition>
         <div style="min-height: 115px; margin: 16px auto 4px;width: 100%;max-width: 800px;">
             <InputField
                 ref="inputFieldRef"
@@ -101,6 +106,15 @@ const loading = ref(false);
 let fullContent = ref('')
 let userquery = ref('')
 const scrollContainer = ref(null)
+const userHasScrolledUp = ref(false)
+const SCROLL_BOTTOM_THRESHOLD = 80
+
+const isNearBottom = () => {
+    if (!scrollContainer.value) return true;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value;
+    return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
+}
+
 const handleKBEditorSuccess = (kbId) => {
     navigateToKnowledgeBaseList(kbId)
 }
@@ -202,6 +216,7 @@ watch([() => route.params], (newvalue) => {
         loading.value = false;
         isReplying.value = false;
         currentAssistantMessageId.value = '';
+        userHasScrolledUp.value = false;
         
         checkmenuTitle(session_id.value)
         let data = {
@@ -212,12 +227,17 @@ watch([() => route.params], (newvalue) => {
         getmsgList(data);
     }
 });
-const scrollToBottom = () => {
+const scrollToBottom = (force = false) => {
+    if (!force && userHasScrolledUp.value) return;
     nextTick(() => {
         if (scrollContainer.value) {
             scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;
         }
     })
+}
+const onClickScrollToBottom = () => {
+    userHasScrolledUp.value = false;
+    scrollToBottom(true);
 }
 const debounce = (fn, delay) => {
     let timer
@@ -239,7 +259,11 @@ const onChatScrollTop = () => {
         getmsgList(data, true, scrollHeight);
     }
 }
-const handleScroll = debounce(onChatScrollTop, 500);
+const debouncedScrollTop = debounce(onChatScrollTop, 500);
+const handleScroll = () => {
+    userHasScrolledUp.value = !isNearBottom();
+    debouncedScrollTop();
+};
 
 const getmsgList = (data, isScrollType = false, scrollHeight) => {
     getMessageList(data).then(res => {
@@ -381,7 +405,7 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
         }
         messagesList.unshift(item);
         if (isFirstEnter.value) {
-            scrollToBottom();
+            scrollToBottom(true);
         } else if (isScrollType) {
             nextTick(() => {
                 const { scrollHeight } = scrollContainer.value;
@@ -443,7 +467,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // 将@提及的知识库和文件信息存入用户消息
     messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, channel: 'web' });
-    scrollToBottom();
+    userHasScrolledUp.value = false;
+    scrollToBottom(true);
     
     // Get agent mode status from settings store
     const agentEnabled = useSettingsStoreInstance.isAgentEnabled;
@@ -605,7 +630,7 @@ onChunk((data) => {
             };
             messagesList.push(existingMessage);
             loading.value = false; // 消息已创建，关闭 loading
-            scrollToBottom();
+            scrollToBottom(true);
         }
         
         existingMessage.knowledge_references = data.knowledge_references || data.data?.references || [];
@@ -707,7 +732,7 @@ const handleAgentChunk = (data) => {
         };
         messagesList.push(newMsg);
         loading.value = false; // 消息已创建，关闭 loading
-        scrollToBottom();
+        scrollToBottom(true);
         // Don't return - continue to process the current event data
         message = newMsg;
     }
@@ -1147,6 +1172,45 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
+.scroll-to-bottom-btn {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 140px;
+    z-index: 10;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--td-bg-color-container);
+    border: 1px solid var(--td-component-stroke);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--td-text-color-secondary);
+    transition: all 0.2s ease;
+
+    &:hover {
+        background: var(--td-bg-color-container-hover);
+        color: var(--td-text-color-primary);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    &:active {
+        transform: translateX(-50%) scale(0.92);
+    }
+}
+
+.scroll-btn-fade-enter-active,
+.scroll-btn-fade-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.scroll-btn-fade-enter-from,
+.scroll-btn-fade-leave-to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+}
 
 .agent-mode-indicator {
     display: flex;
