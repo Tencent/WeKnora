@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p web
-          tar -xzf frontend-dist.tar.gz -C web/ dist --strip-components=1
+          tar -xzf frontend-dist.tar.gz -C web/ --strip-components=1 dist/
 
       - name: Resolve version
         id: ver
