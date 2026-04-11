@@ -185,7 +185,7 @@
                 </t-tooltip>
               </div>
             </div>
-            <div class="bottom-right">
+            <div v-if="!authStore.isLiteMode" class="bottom-right">
               <div class="personal-source">
                 <t-icon name="user" size="14px" />
                 <span>{{ $t('knowledgeList.myLabel') }}</span>
@@ -359,7 +359,7 @@
               </t-tooltip>
             </div>
           </div>
-          <div class="bottom-right">
+          <div v-if="!authStore.isLiteMode" class="bottom-right">
             <div class="personal-source">
               <t-icon name="user" size="14px" />
               <span>{{ $t('knowledgeList.myLabel') }}</span>

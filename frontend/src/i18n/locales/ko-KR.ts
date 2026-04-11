@@ -1008,6 +1008,7 @@ export default {
     clawhubSkill: 'Claw Skill',
     newBadge: 'New',
     github: 'GitHub',
+    githubStarTip: 'GitHub에서 저장소로 이동합니다. 유용하다면 Star를 부탁드립니다',
     on: "켜기",
     off: "끄기",
     resetToDefault: "기본값 복원",

@@ -79,10 +79,15 @@
             </svg>
           </span>
         </div>
-        <div class="menu-item" @click="openGithub">
+        <div
+          class="menu-item"
+          :title="$t('common.githubStarTip')"
+          @click="openGithub"
+        >
           <t-icon name="logo-github" class="menu-icon" />
           <span class="menu-text-with-icon">
-            <span>GitHub</span>
+            <span>{{ $t('common.github') }}</span>
+            <t-icon name="star-filled" class="menu-github-star-icon" size="14px" aria-hidden="true" />
             <svg class="menu-external-icon" viewBox="0 0 16 16" aria-hidden="true">
               <path
                 fill="currentColor"
@@ -457,6 +462,11 @@ onUnmounted(() => {
     background: var(--td-brand-color-light);
     color: var(--td-brand-color);
     letter-spacing: 0.02em;
+  }
+
+  .menu-github-star-icon {
+    flex-shrink: 0;
+    color: var(--td-warning-color);
   }
 
   .menu-external-icon {

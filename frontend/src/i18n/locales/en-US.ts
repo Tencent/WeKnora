@@ -1165,6 +1165,7 @@ export default {
     clawhubSkill: 'Claw Skill',
     newBadge: 'New',
     github: 'GitHub',
+    githubStarTip: 'Open the repo on GitHub — star it if you find it useful',
     on: 'On',
     off: 'Off',
     resetToDefault: 'Reset to default',

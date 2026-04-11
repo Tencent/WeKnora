@@ -1012,6 +1012,7 @@ export default {
     clawhubSkill: "Claw Skill",
     newBadge: "New",
     github: 'GitHub',
+    githubStarTip: '在 GitHub 打开仓库，若觉得有用欢迎点个 Star',
     on: "开启",
     off: "关闭",
     resetToDefault: "恢复默认",

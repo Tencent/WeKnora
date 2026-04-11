@@ -1473,8 +1473,13 @@ async function createNewSession(value: string): Promise<void> {
                   :disabled="!kbId"
                   @click.stop="handleNavigateToCurrentKB"
                 >
-                  <span>{{ kbInfo?.name || '--' }}</span>
-                  <t-icon name="chevron-down" />
+                  <template v-if="!kbInfo">
+                    <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
+                  </template>
+                  <template v-else>
+                    <span>{{ kbInfo.name }}</span>
+                    <t-icon name="chevron-down" />
+                  </template>
                 </button>
               </t-dropdown>
               <button
@@ -1484,13 +1489,18 @@ async function createNewSession(value: string): Promise<void> {
                 :disabled="!kbId"
                 @click="handleNavigateToCurrentKB"
               >
-                {{ kbInfo?.name || '--' }}
+                <template v-if="!kbInfo">
+                  <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
+                </template>
+                <template v-else>
+                  {{ kbInfo.name }}
+                </template>
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
               <span class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
             </h2>
             <!-- 身份与最后更新：紧凑单行，置于标题行右侧，悬停显示权限说明 -->
-            <div v-if="kbInfo" class="kb-access-meta">
+            <div v-if="kbInfo && !authStore.isLiteMode" class="kb-access-meta">
               <t-tooltip :content="accessPermissionSummary" placement="top">
                 <span class="kb-access-meta-inner">
                   <t-tag size="small" :theme="isOwner ? 'success' : (effectiveKBPermission === 'admin' ? 'primary' : effectiveKBPermission === 'editor' ? 'warning' : 'default')" class="kb-access-role-tag">
@@ -1570,7 +1580,7 @@ async function createNewSession(value: string): Promise<void> {
                 :title="$t('knowledgeBase.tagCreateAction')"
                 @click="startCreateTag"
               >
-                <span class="create-tag-plus" aria-hidden="true">+</span>
+                <t-icon name="add" />
               </t-button>
             </div>
           </div>
@@ -1586,11 +1596,18 @@ async function createNewSession(value: string): Promise<void> {
               </template>
             </t-input>
           </div>
-          <t-loading :loading="tagLoading" size="small">
-            <div class="tag-list">
+          <div class="tag-list">
+            <template v-if="tagLoading && !filteredTags.length">
+              <div v-for="n in 8" :key="'skel-tag-'+n" class="tag-list-item" style="cursor: default; pointer-events: none;">
+                <div class="tag-list-left" style="gap: 12px; width: 100%;">
+                  <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '18px' }]" />
+                </div>
+              </div>
+            </template>
+            <template v-else>
               <div v-if="creatingTag" class="tag-list-item tag-editing" @click.stop>
                 <div class="tag-list-left">
-                  <t-icon name="folder" size="18px" />
+                  <span class="tag-hash-icon">#</span>
                   <div class="tag-edit-input">
                     <t-input
                       ref="newTagInputRef"
@@ -1635,7 +1652,7 @@ async function createNewSession(value: string): Promise<void> {
                   @click="handleTagRowClick(tag.id)"
                 >
                   <div class="tag-list-left">
-                    <t-icon name="folder" size="18px" />
+                    <span class="tag-hash-icon">#</span>
                     <template v-if="editingTagId === tag.id">
                       <div class="tag-edit-input" @click.stop>
                         <t-input
@@ -1714,8 +1731,8 @@ async function createNewSession(value: string): Promise<void> {
                   {{ $t('tenant.loadMore') }}
                 </t-button>
               </div>
-            </div>
-          </t-loading>
+            </template>
+          </div>
         </aside>
         <div class="tag-content">
           <div class="doc-card-area">
@@ -2121,19 +2138,18 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex: 1;
   min-height: 0;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  overflow: hidden;
+  background: transparent;
+  border: none;
 }
 
-// 与列表页筛选区一致：白底卡片感、细分界
+// 贴近整体系统设计语言的极简侧栏（对齐 menu 与右侧主窗口质感）
 .tag-sidebar {
-  width: 200px;
-  background: var(--td-bg-color-container);
+  width: 180px;
+  background: transparent;
+  border: none;
   border-right: 1px solid var(--td-component-stroke);
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
-  padding: 16px;
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
+  padding: 0 16px 0 0;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -2144,62 +2160,71 @@ async function createNewSession(value: string): Promise<void> {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+    padding: 0 4px;
     color: var(--td-text-color-primary);
 
     .sidebar-title {
       display: flex;
       align-items: baseline;
-      gap: 4px;
-      font-size: 13px;
+      gap: 6px;
+      font-size: 14px;
       font-weight: 600;
+      letter-spacing: 0.5px;
 
       .sidebar-count {
         font-size: 12px;
-        color: var(--td-text-color-secondary);
+        color: var(--td-text-color-placeholder);
+        font-weight: 400;
       }
     }
 
     .sidebar-actions {
       display: flex;
       gap: 6px;
-      color: var(--td-text-color-placeholder);
       align-items: center;
 
       .create-tag-btn {
         width: 24px;
         height: 24px;
         padding: 0;
-        border-radius: 6px;
+        border-radius: 4px;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 16px;
-        font-weight: 600;
-        color: var(--td-success-color);
-        line-height: 1;
-        transition: background 0.2s ease, color 0.2s ease;
+        color: var(--td-text-color-secondary);
+        transition: all 0.2s ease;
+
+        .t-icon {
+          font-size: 16px;
+        }
 
         &:hover {
           background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-brand-color-active);
+          color: var(--td-brand-color);
         }
-      }
-
-      .create-tag-plus {
-        line-height: 1;
       }
     }
   }
 
   .tag-search-bar {
-    margin-bottom: 10px;
+    margin-bottom: 12px;
+    padding: 0 4px;
 
     :deep(.t-input) {
       font-size: 13px;
-      background-color: var(--td-bg-color-container);
-      border-color: var(--td-component-stroke);
+      background-color: var(--td-bg-color-secondarycontainer);
+      border-color: transparent;
       border-radius: 6px;
+      box-shadow: none !important;
+
+      &:hover,
+      &:focus,
+      &.t-is-focused {
+        border-color: var(--td-brand-color);
+        background-color: var(--td-bg-color-container);
+        box-shadow: none !important;
+      }
     }
   }
 
@@ -2233,13 +2258,13 @@ async function createNewSession(value: string): Promise<void> {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 9px 12px;
+      padding: 8px 8px;
       border-radius: 6px;
       color: var(--td-text-color-primary);
       cursor: pointer;
       transition: all 0.2s ease;
       font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 14px;
+      font-size: 13px;
       -webkit-font-smoothing: antialiased;
 
       .tag-list-left {
@@ -2249,11 +2274,24 @@ async function createNewSession(value: string): Promise<void> {
         min-width: 0;
         flex: 1;
 
-        .t-icon {
+        .t-icon,
+        .tag-hash-icon {
           flex-shrink: 0;
           color: var(--td-text-color-secondary);
-          font-size: 14px;
           transition: color 0.2s ease;
+        }
+
+        .t-icon {
+          font-size: 16px;
+        }
+
+        .tag-hash-icon {
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 16px;
+          font-weight: 500;
+          width: 16px;
+          text-align: center;
+          display: inline-block;
         }
       }
 
@@ -2264,10 +2302,9 @@ async function createNewSession(value: string): Promise<void> {
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
-        font-size: 14px;
-        font-weight: 450;
+        font-size: 13px;
+        font-weight: 400;
         line-height: 1.4;
-        letter-spacing: 0.01em;
       }
 
       .tag-list-right {
@@ -2280,37 +2317,34 @@ async function createNewSession(value: string): Promise<void> {
 
       .tag-count {
         font-size: 12px;
-        color: var(--td-text-color-secondary);
-        font-weight: 500;
-        min-width: 28px;
-        padding: 3px 7px;
-        border-radius: 8px;
-        background: var(--td-bg-color-secondarycontainer);
+        color: var(--td-text-color-placeholder);
+        font-weight: 400;
         transition: all 0.2s ease;
-        text-align: center;
-        box-sizing: border-box;
+        text-align: right;
+        padding-left: 8px;
+        background: transparent;
       }
 
       &:hover {
         background: var(--td-bg-color-secondarycontainer);
         color: var(--td-text-color-primary);
 
-        .tag-list-left .t-icon {
-          color: var(--td-text-color-primary);
+        .tag-list-left .t-icon,
+        .tag-list-left .tag-hash-icon {
+          color: var(--td-text-color-secondary);
         }
 
         .tag-count {
-          background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-text-color-primary);
+          color: var(--td-text-color-secondary);
         }
       }
 
       &.active {
-        background: var(--td-success-color-light);
+        background: var(--td-brand-color-light);
         color: var(--td-brand-color);
-        font-weight: 500;
 
-        .tag-list-left .t-icon {
+        .tag-list-left .t-icon,
+        .tag-list-left .tag-hash-icon {
           color: var(--td-brand-color);
         }
 
@@ -2319,9 +2353,7 @@ async function createNewSession(value: string): Promise<void> {
         }
 
         .tag-count {
-          background: var(--td-success-color-light);
           color: var(--td-brand-color);
-          font-weight: 600;
         }
       }
 
@@ -2365,22 +2397,22 @@ async function createNewSession(value: string): Promise<void> {
         }
 
         :deep(.tag-action-btn.confirm) {
-          background: var(--td-success-color-light);
-          color: var(--td-brand-color-active);
-
-          &:hover {
-            background: var(--td-success-color-light);
-            color: var(--td-success-color);
-          }
-        }
-
-        :deep(.tag-action-btn.cancel) {
-          background: var(--td-bg-color-secondarycontainer);
+          background: transparent;
           color: var(--td-text-color-secondary);
 
           &:hover {
             background: var(--td-bg-color-secondarycontainer);
-            color: var(--td-text-color-secondary);
+            color: var(--td-brand-color);
+          }
+        }
+
+        :deep(.tag-action-btn.cancel) {
+          background: transparent;
+          color: var(--td-text-color-secondary);
+
+          &:hover {
+            background: var(--td-bg-color-secondarycontainer);
+            color: var(--td-error-color);
           }
         }
       }
@@ -2391,48 +2423,38 @@ async function createNewSession(value: string): Promise<void> {
         max-width: 100%;
 
         :deep(.t-input) {
-          font-size: 12px;
+          font-size: 13px;
           background-color: transparent;
           border: none;
-          border-bottom: 1px solid var(--td-component-stroke);
           border-radius: 0;
           box-shadow: none;
-          padding-left: 0;
-          padding-right: 0;
+          padding: 0;
         }
 
         :deep(.t-input__wrap) {
           background-color: transparent;
           border: none;
-          border-bottom: 1px solid var(--td-component-stroke);
           border-radius: 0;
           box-shadow: none;
         }
 
         :deep(.t-input__inner) {
-          padding-left: 0;
-          padding-right: 0;
+          padding: 0;
           color: var(--td-text-color-primary);
-          caret-color: var(--td-text-color-primary);
+          caret-color: var(--td-brand-color);
         }
 
         :deep(.t-input:hover),
         :deep(.t-input.t-is-focused),
         :deep(.t-input__wrap:hover),
         :deep(.t-input__wrap.t-is-focused) {
-          border-bottom-color: var(--td-success-color);
+          border-color: transparent;
         }
       }
 
       .tag-more {
         display: flex;
         align-items: center;
-        opacity: 0;
-        transition: opacity 0.2s ease;
-      }
-
-      &:hover .tag-more {
-        opacity: 1;
       }
 
       .tag-more-btn {
@@ -2442,7 +2464,7 @@ async function createNewSession(value: string): Promise<void> {
         align-items: center;
         justify-content: center;
         border-radius: 4px;
-        color: var(--td-text-color-secondary);
+        color: var(--td-text-color-placeholder);
         transition: all 0.2s ease;
 
         &:hover {
@@ -2456,7 +2478,7 @@ async function createNewSession(value: string): Promise<void> {
       text-align: center;
       padding: 10px 6px;
       color: var(--td-text-color-placeholder);
-      font-size: 11px;
+      font-size: 12px;
     }
   }
 }
@@ -2507,9 +2529,10 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 12px;
+  padding: 0 0 0 16px;
+  border: none;
   overflow: hidden;
-  background: var(--td-bg-color-container);
+  background: transparent;
 }
 
 .doc-card-area {
@@ -2551,29 +2574,33 @@ async function createNewSession(value: string): Promise<void> {
 
   :deep(.t-input) {
     font-size: 13px;
-    background-color: var(--td-bg-color-container);
-    border-color: var(--td-component-stroke);
+    background-color: var(--td-bg-color-secondarycontainer);
+    border-color: transparent;
     border-radius: 6px;
+    box-shadow: none !important;
 
     &:hover,
     &:focus,
     &.t-is-focused {
       border-color: var(--td-brand-color);
       background-color: var(--td-bg-color-container);
+      box-shadow: none !important;
     }
   }
 
   :deep(.t-select) {
     .t-input {
       font-size: 13px;
-      background-color: var(--td-bg-color-container);
-      border-color: var(--td-component-stroke);
+      background-color: var(--td-bg-color-secondarycontainer);
+      border-color: transparent;
       border-radius: 6px;
+      box-shadow: none !important;
 
       &:hover,
       &.t-is-focused {
         border-color: var(--td-brand-color);
         background-color: var(--td-bg-color-container);
+        box-shadow: none !important;
       }
     }
   }
