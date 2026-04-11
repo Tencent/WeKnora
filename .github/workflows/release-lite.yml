@@ -270,7 +270,7 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
-            OUT_NAME="WeKnora Lite" # keep without extension, Wails builds .exe and installer automatically
+            OUT_NAME="WeKnora Lite.exe" # keep with extension
           fi
 
           # Only skip bindings generation on Windows to avoid Go AST GC crash bug.
@@ -353,6 +353,10 @@ jobs:
           ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
           # Wails -nsis generates an installer named {app}-amd64-installer.exe
           INSTALLER="cmd/desktop/build/bin/WeKnora Lite-amd64-installer.exe"
+          
+          # 加上 ls 来看看编译出来的是什么文件
+          ls -la cmd/desktop/build/bin/ || true
+          
           if [ -f "$INSTALLER" ]; then
             cp "$INSTALLER" "${ARCHIVE}_setup.exe"
             sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
