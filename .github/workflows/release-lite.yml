@@ -160,6 +160,7 @@ jobs:
             platform: windows/amd64
             arch_label: windows_amd64
             artifact_name: desktop-windows-amd64
+            go_version: "1.23"
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
@@ -168,7 +169,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: ${{ matrix.go_version || env.GO_VERSION }}
           cache: true
 
       - uses: actions/setup-node@v4
@@ -212,16 +213,6 @@ jobs:
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Pre-compile Go packages (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
-          export CGO_CFLAGS="-Wno-deprecated-declarations -I${SQLITE_HEADER_DIR}"
-          cd cmd/desktop
-          go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
-          rm -f _prebuild_tmp.exe
 
       - name: Build desktop app
         shell: bash
