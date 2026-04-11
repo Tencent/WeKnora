@@ -220,6 +220,7 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
+            export GOFLAGS="-p=1"
           fi
 
           cd cmd/desktop
