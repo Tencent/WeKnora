@@ -213,7 +213,9 @@ jobs:
 
       - name: Install NSIS (Windows)
         if: runner.os == 'Windows'
-        run: choco install nsis -y
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
       - name: Prepare SQLite headers (Windows)
         if: runner.os == 'Windows'
@@ -248,6 +250,7 @@ jobs:
           BUILD_TAGS="sqlite_fts5"
           NSIS_FLAG=""
 
+          OUT_NAME="WeKnora Lite"
           if [ "${{ runner.os }}" = "Linux" ]; then
             BUILD_TAGS="sqlite_fts5 webkit2_41"
           fi
@@ -256,6 +259,7 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
+            OUT_NAME="WeKnora Lite.exe"
           fi
 
           # Only skip bindings generation on Windows to avoid Go AST GC crash bug.
@@ -271,7 +275,7 @@ jobs:
             -platform "${{ matrix.platform }}" \
             ${NSIS_FLAG} \
             -ldflags="${LDFLAGS}" \
-            -o "WeKnora Lite"
+            -o "${OUT_NAME}"
 
       # ── macOS: bundle .app with resources, then create DMG ──
       - name: Package macOS app
