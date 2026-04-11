@@ -161,9 +161,11 @@ jobs:
             arch_label: windows_amd64
             artifact_name: desktop-windows-amd64
             go_version: "1.23"
+            gotoolchain: local
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
+      GOTOOLCHAIN: ${{ matrix.gotoolchain || 'auto' }}
     steps:
       - uses: actions/checkout@v4
 
