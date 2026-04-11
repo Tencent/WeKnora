@@ -30,7 +30,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.0
 	github.com/milvus-io/milvus/client/v2 v2.6.2
 	github.com/minio/minio-go/v7 v7.0.91
-	github.com/neo4j/neo4j-go-driver/v6 v6.0.0
+	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/ollama/ollama v0.11.4
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/panjf2000/ants/v2 v2.11.3
