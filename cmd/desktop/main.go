@@ -27,6 +27,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing"
@@ -143,6 +144,29 @@ window.open=function(url){
 // wailsThemeSyncJS：与 index.html 首屏一致，在 DomReady 再跑一遍，覆盖 Ctrl+R 后 runtime 就绪时机
 const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_theme')||'light';if(t==='system')t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var bg=t==='dark'?'#181818':'#eee';document.documentElement.setAttribute('theme-mode',t);document.documentElement.style.background=bg;document.documentElement.style.minHeight='100%';document.documentElement.style.colorScheme=t==='dark'?'dark':'light';if(document.body){document.body.style.background=bg;document.body.style.minHeight='100%';}var w=window.runtime;if(!w)return;if(t==='dark'){if(w.WindowSetDarkTheme)w.WindowSetDarkTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(24,24,24,255);}else{if(w.WindowSetLightTheme)w.WindowSetLightTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(238,238,238,255);}}catch(e){}})()`
 
+const weknoraGitHubRepoURL = "https://github.com/Tencent/WeKnora"
+
+// desktopAboutVersion 优先使用构建脚本注入的 handler.Version，否则尝试读取仓库根目录 VERSION（本地 wails dev 等未带 ldflags 时）。
+func desktopAboutVersion() string {
+	if v := strings.TrimSpace(handler.Version); v != "" && v != "unknown" {
+		return v
+	}
+	for _, p := range []string{
+		"VERSION",
+		filepath.Join("..", "..", "VERSION"),
+		filepath.Join("..", "..", "..", "VERSION"),
+	} {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v
+		}
+	}
+	return "unknown"
+}
+
 func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
@@ -254,7 +278,23 @@ func main() {
 	AppMenu := menu.NewMenu()
 	FileMenu := AppMenu.AddSubmenu("WeKnora Lite")
 	FileMenu.AddText("About WeKnora", keys.CmdOrCtrl("i"), func(_ *menu.CallbackData) {
-		println("WeKnora Lite Desktop App")
+		if app.ctx == nil {
+			return
+		}
+		choice, err := wailsruntime.MessageDialog(app.ctx, wailsruntime.MessageDialogOptions{
+			Type:          wailsruntime.InfoDialog,
+			Title:         "WeKnora Lite",
+			Message:       fmt.Sprintf("WeKnora Lite — Desktop Edition\n\nA RAG framework for document understanding and semantic Q&A over complex, heterogeneous content.\n\nVersion %s\n© 2026 Tencent\n\nGitHub:\n%s", desktopAboutVersion(), weknoraGitHubRepoURL),
+			Buttons:       []string{"Open GitHub", "OK"},
+			DefaultButton: "OK",
+		})
+		if err != nil {
+			logger.Warnf(context.Background(), "About dialog: %v", err)
+			return
+		}
+		if choice == "Open GitHub" {
+			wailsruntime.BrowserOpenURL(app.ctx, weknoraGitHubRepoURL)
+		}
 	})
 	FileMenu.AddSeparator()
 	FileMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
