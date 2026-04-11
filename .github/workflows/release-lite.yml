@@ -342,6 +342,7 @@ jobs:
           fi
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
+          rm -rf "${ARCHIVE}"
 
       # ── Windows: package NSIS installer or plain exe ──
       - name: Package Windows app
@@ -363,7 +364,12 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: |
-            WeKnora-Lite-App_*
+            WeKnora-Lite-App_*.dmg
+            WeKnora-Lite-App_*.dmg.sha256
+            WeKnora-Lite-App_*.tar.gz
+            WeKnora-Lite-App_*.tar.gz.sha256
+            WeKnora-Lite-App_*.exe
+            WeKnora-Lite-App_*.exe.sha256
           retention-days: 3
 
   # ── 3. Create GitHub Release ──
