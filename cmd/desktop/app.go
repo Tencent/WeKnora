@@ -36,3 +36,13 @@ func (a *App) GetAPIBaseURL() string {
 	}
 	return strings.TrimRight(a.backendURL, "/") + "/api/v1"
 }
+
+// GetDesktopHTTPPortSetting returns the saved local API port (0 = random port each launch).
+func (a *App) GetDesktopHTTPPortSetting() int {
+	return LoadDesktopPrefsHTTPPort()
+}
+
+// SetDesktopHTTPPortSetting saves the preferred local API port to application support. Restart the app for it to take effect unless it matches the current listener.
+func (a *App) SetDesktopHTTPPortSetting(port int) error {
+	return SaveDesktopHTTPPortPreference(port)
+}

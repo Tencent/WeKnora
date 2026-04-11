@@ -1428,6 +1428,13 @@ export default {
       noKey: "API 키 없음",
       copySuccess: "API 키가 클립보드에 복사되었습니다",
       copyFailed: "복사 실패, 수동으로 복사해주세요",
+      desktopPortLabel: "로컬 API 포트 (데스크톱)",
+      desktopPortDescription:
+        "Chrome 확장 프로그램 등에서 동일한 API 주소를 쓰려면 고정 포트(예: 37841)를 지정하세요. 0이면 매번 다른 포트입니다. 저장 후 앱을 다시 시작하세요.",
+      desktopPortSave: "저장",
+      desktopPortSaved: "저장되었습니다. 적용하려면 앱을 다시 시작하세요.",
+      desktopPortSaveFailed: "저장 실패",
+      desktopPortInvalid: "0~65535 사이의 포트를 입력하세요",
     },
   },
   system: {

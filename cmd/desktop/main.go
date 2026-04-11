@@ -214,18 +214,15 @@ func main() {
 		) error {
 			server := &http.Server{Handler: router}
 
-			// Use port 0 to assign a random free port for the desktop app
-			// Force localhost binding to prevent firewall popups on macOS
-			addr := "127.0.0.1:0"
+			// 127.0.0.1 + saved port from settings (desktop-prefs.json), or :0 for random free port.
+			addr := desktopBackendListenAddr()
 
 			listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
 			if err != nil {
 				return fmt.Errorf("failed to start server: %v", err)
 			}
 
-			// Get the actual assigned port
-			actualPort := listener.Addr().(*net.TCPAddr).Port
-			actualAddr := fmt.Sprintf("127.0.0.1:%d", actualPort)
+			actualAddr := listener.Addr().(*net.TCPAddr).String()
 
 			// Store the backend URL so Wails can load it
 			app.backendURL = fmt.Sprintf("http://%s", actualAddr)
@@ -411,6 +408,17 @@ func resolveDesktopDataPath(rawPath, defaultRelativePath, appSupportDir string) 
 	}
 	trimmed = strings.TrimPrefix(trimmed, "."+string(filepath.Separator))
 	return filepath.Join(appSupportDir, filepath.Clean(trimmed))
+}
+
+// desktopBackendListenAddr returns the TCP address for the embedded Gin server (Wails desktop).
+// Always binds loopback 127.0.0.1. Uses saved UI preference (desktop-prefs.json) when set, else ephemeral port :0.
+func desktopBackendListenAddr() string {
+	const host = "127.0.0.1"
+	pref := LoadDesktopPrefsHTTPPort()
+	if pref >= 1 && pref <= 65535 {
+		return net.JoinHostPort(host, strconv.Itoa(pref))
+	}
+	return net.JoinHostPort(host, "0")
 }
 
 func migrateLegacyDesktopData(resourcesDir, targetDataDir string) {

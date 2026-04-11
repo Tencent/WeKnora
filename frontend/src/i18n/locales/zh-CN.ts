@@ -1422,6 +1422,13 @@ export default {
       noKey: "暂无 API Key",
       copySuccess: "API Key 已复制到剪贴板",
       copyFailed: "复制失败，请手动复制",
+      desktopPortLabel: "本地 API 端口（桌面版）",
+      desktopPortDescription:
+        "填写固定端口（如 37841）后，Chrome 扩展等工具可长期使用同一 API 地址；0 表示每次启动随机端口。保存后请重启应用生效。",
+      desktopPortSave: "保存",
+      desktopPortSaved: "已保存，请重启应用后生效",
+      desktopPortSaveFailed: "保存失败",
+      desktopPortInvalid: "请输入 0–65535 之间的端口",
     },
   },
   system: {

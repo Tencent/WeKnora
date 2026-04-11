@@ -81,6 +81,29 @@
         </div>
       </div>
 
+      <!-- Desktop (Wails): fixed local API port for Chrome extension etc. -->
+      <div v-if="showDesktopPortSetting" class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('tenant.api.desktopPortLabel') }}</label>
+          <p class="desc">{{ $t('tenant.api.desktopPortDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <div class="api-key-control">
+            <div class="desktop-port-input-wrap">
+              <t-input-number
+                v-model="desktopPortInput"
+                :min="0"
+                :max="65535"
+                theme="normal"
+              />
+            </div>
+            <t-button size="small" variant="text" @click="saveDesktopPort">
+              {{ $t('tenant.api.desktopPortSave') }}
+            </t-button>
+          </div>
+        </div>
+      </div>
+
       <!-- API docs -->
       <div class="setting-row">
         <div class="setting-info">
@@ -163,6 +186,8 @@ const error = ref('')
 const showApiKey = ref(false)
 /** WeKnora Lite (Wails): real API origin is loopback + dynamic port, not window.location.origin */
 const wailsApiBaseURL = ref<string | null>(null)
+const showDesktopPortSetting = ref(false)
+const desktopPortInput = ref<number | undefined>(0)
 
 // Computed
 const displayApiKey = computed(() => {
@@ -196,6 +221,8 @@ type WeKnoraDesktopWindow = Window & {
     main?: {
       App?: {
         GetAPIBaseURL?: () => Promise<string> | string
+        GetDesktopHTTPPortSetting?: () => Promise<number> | number
+        SetDesktopHTTPPortSetting?: (port: number) => Promise<void> | void
       }
     }
   }
@@ -222,6 +249,41 @@ async function tryLoadWailsApiBaseURL() {
       return
     }
     await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
+function desktopPortBindingsAvailable(win: WeKnoraDesktopWindow) {
+  const app = win.go?.main?.App
+  return typeof app?.GetDesktopHTTPPortSetting === 'function' && typeof app?.SetDesktopHTTPPortSetting === 'function'
+}
+
+async function loadDesktopPortPrefs() {
+  const win = window as WeKnoraDesktopWindow
+  if (!desktopPortBindingsAvailable(win)) return
+  showDesktopPortSetting.value = true
+  try {
+    const p = await Promise.resolve(win.go!.main!.App!.GetDesktopHTTPPortSetting!())
+    desktopPortInput.value = typeof p === 'number' ? p : 0
+  } catch {
+    desktopPortInput.value = 0
+  }
+}
+
+const saveDesktopPort = async () => {
+  const v = desktopPortInput.value
+  const port = typeof v === 'number' && !Number.isNaN(v) ? Math.floor(v) : 0
+  if (port < 0 || port > 65535) {
+    MessagePlugin.warning(t('tenant.api.desktopPortInvalid'))
+    return
+  }
+  const win = window as WeKnoraDesktopWindow
+  const fn = win.go?.main?.App?.SetDesktopHTTPPortSetting
+  if (typeof fn !== 'function') return
+  try {
+    await Promise.resolve(fn(port))
+    MessagePlugin.success(t('tenant.api.desktopPortSaved'))
+  } catch (err: unknown) {
+    MessagePlugin.error(err instanceof Error ? err.message : t('tenant.api.desktopPortSaveFailed'))
   }
 }
 
@@ -314,8 +376,9 @@ const formatDate = (dateStr: string | undefined) => {
 }
 
 // Lifecycle
-onMounted(() => {
-  void tryLoadWailsApiBaseURL()
+onMounted(async () => {
+  await tryLoadWailsApiBaseURL()
+  await loadDesktopPortPrefs()
   loadInfo()
 })
 </script>
@@ -421,7 +484,7 @@ onMounted(() => {
   min-width: 280px;
   display: flex;
   justify-content: flex-end;
-  align-items: center;
+  align-items: flex-start;
 
   .info-value {
     font-size: 14px;
@@ -447,6 +510,25 @@ onMounted(() => {
 
   &:first-child {
     margin-top: 0;
+  }
+}
+
+/* 与 API Key / API 地址 行一致：输入区占满 flex 剩余宽度，文案按钮贴右 */
+.desktop-port-input-wrap {
+  flex: 1;
+  min-width: 0;
+
+  :deep(.t-input-number) {
+    width: 100%;
+  }
+
+  :deep(.t-input__wrap) {
+    width: 100%;
+  }
+
+  :deep(input) {
+    font-family: monospace;
+    font-size: 12px;
   }
 }
 </style>

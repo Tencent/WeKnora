@@ -5,3 +5,11 @@
 export function GetAPIBaseURL() {
   return window['go']['main']['App']['GetAPIBaseURL']();
 }
+
+export function GetDesktopHTTPPortSetting() {
+  return window['go']['main']['App']['GetDesktopHTTPPortSetting']();
+}
+
+export function SetDesktopHTTPPortSetting(arg1) {
+  return window['go']['main']['App']['SetDesktopHTTPPortSetting'](arg1);
+}

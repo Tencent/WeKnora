@@ -1979,7 +1979,14 @@ export default {
       createdAtDescription: 'Time when the account was created',
       noKey: 'No API Key available',
       copySuccess: 'API Key copied to clipboard',
-      copyFailed: 'Copy failed, please copy manually'
+      copyFailed: 'Copy failed, please copy manually',
+      desktopPortLabel: 'Local API port (desktop)',
+      desktopPortDescription:
+        'Use a fixed port (e.g. 37841) so tools like the Chrome extension can keep the same API URL. 0 means a random port each launch. Restart the app after saving.',
+      desktopPortSave: 'Save',
+      desktopPortSaved: 'Saved. Restart the app for it to take effect.',
+      desktopPortSaveFailed: 'Save failed',
+      desktopPortInvalid: 'Enter a port between 0 and 65535',
     }
   },
   system: {
