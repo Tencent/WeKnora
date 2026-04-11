@@ -14,6 +14,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // appLogger 使用私有实例，避免外部依赖改写 logrus 全局状态导致日志丢失
@@ -21,7 +22,7 @@ var appLogger = logrus.New()
 
 var (
 	loggerMu      sync.Mutex
-	activeLogFile *os.File
+	activeLogFile io.WriteCloser
 )
 
 // LogLevel 日志级别类型
@@ -262,14 +263,20 @@ func defaultMacAppLogPath() string {
 	return filepath.Join(homeDir, "Library", "Logs", appName, appName+".log")
 }
 
-func openLogFile(logPath string) (*os.File, error) {
+func openLogFile(logPath string) (io.WriteCloser, error) {
 	dir := filepath.Dir(logPath)
 	if dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	return os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	return &lumberjack.Logger{
+		Filename:   logPath,
+		MaxSize:    50, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28, // days
+		Compress:   true,
+	}, nil
 }
 
 // 添加调用者字段
