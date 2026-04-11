@@ -266,10 +266,11 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "macOS" ]; then
             export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+            OUT_NAME="WeKnora Lite" # keep without extension, Wails builds .app bundle
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
-            OUT_NAME="WeKnora Lite.exe"
+            OUT_NAME="WeKnora Lite" # keep without extension, Wails builds .exe and installer automatically
           fi
 
           # Only skip bindings generation on Windows to avoid Go AST GC crash bug.
