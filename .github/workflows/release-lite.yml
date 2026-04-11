@@ -155,6 +155,7 @@ jobs:
 
   # ── 2b. Build Desktop APP per platform (Wails) ──
   build-desktop-app:
+    needs: build-frontend
     strategy:
       fail-fast: false
       matrix:
