@@ -269,7 +269,7 @@ jobs:
             OUT_NAME="WeKnora Lite" # keep without extension, Wails builds .app bundle
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
-            NSIS_FLAG="-nsis"
+            NSIS_FLAG=""
             OUT_NAME="WeKnora Lite.exe" # keep with extension
           fi
 
@@ -308,6 +308,9 @@ jobs:
           if [ -d config ]; then
             cp -r config/* "${RESOURCES}/config/"
           fi
+          if [ -d frontend/dist ]; then
+            cp -r frontend/dist "${RESOURCES}/web"
+          fi
 
           DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
 
@@ -341,29 +344,39 @@ jobs:
             mkdir -p "${ARCHIVE}/migrations/sqlite"
             cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
           fi
+          if [ -d frontend/dist ]; then
+            cp -r frontend/dist "${ARCHIVE}/web"
+          fi
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
           rm -rf "${ARCHIVE}"
 
-      # ── Windows: package NSIS installer or plain exe ──
+      # ── Windows: package zip archive ──
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
         run: |
           ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
-          # Wails -nsis generates an installer named {app}-amd64-installer.exe
-          INSTALLER="cmd/desktop/build/bin/WeKnora Lite-amd64-installer.exe"
-          
-          # 加上 ls 来看看编译出来的是什么文件
-          ls -la cmd/desktop/build/bin/ || true
-          
-          if [ -f "$INSTALLER" ]; then
-            cp "$INSTALLER" "${ARCHIVE}_setup.exe"
-            sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
-          else
-            cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${ARCHIVE}.exe"
-            sha256sum "${ARCHIVE}.exe" > "${ARCHIVE}.exe.sha256"
+          mkdir -p "${ARCHIVE}"
+          cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${ARCHIVE}/"
+          if [ -f .env.lite.example ]; then
+            cp .env.lite.example "${ARCHIVE}/"
           fi
+          cp docs/LITE.md "${ARCHIVE}/README.md"
+          if [ -d config ]; then
+            cp -r config "${ARCHIVE}/config"
+          fi
+          if [ -d migrations/sqlite ]; then
+            mkdir -p "${ARCHIVE}/migrations/sqlite"
+            cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
+          fi
+          if [ -d frontend/dist ]; then
+            cp -r frontend/dist "${ARCHIVE}/web"
+          fi
+          # Create zip archive
+          powershell -Command "Compress-Archive -Path '${ARCHIVE}' -DestinationPath '${ARCHIVE}.zip'"
+          sha256sum "${ARCHIVE}.zip" > "${ARCHIVE}.zip.sha256"
+          rm -rf "${ARCHIVE}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -373,8 +386,8 @@ jobs:
             WeKnora-Lite-App_*.dmg.sha256
             WeKnora-Lite-App_*.tar.gz
             WeKnora-Lite-App_*.tar.gz.sha256
-            WeKnora-Lite-App_*.exe
-            WeKnora-Lite-App_*.exe.sha256
+            WeKnora-Lite-App_*.zip
+            WeKnora-Lite-App_*.zip.sha256
           retention-days: 3
 
   # ── 3. Create GitHub Release ──

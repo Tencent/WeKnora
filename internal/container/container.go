@@ -551,7 +551,7 @@ func resetPendingTasks(db *gorm.DB) {
 		Updates(map[string]interface{}{
 			"status":        types.SyncLogStatusFailed,
 			"error_message": "Sync interrupted due to application restart",
-			"end_time":      time.Now(),
+			"finished_at":   time.Now(),
 		})
 	if resultSync.Error != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
