@@ -1,3 +1,5 @@
+//go:build !bindings
+
 package main
 
 import (
@@ -10,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -113,6 +116,13 @@ func main() {
 	if errPath == nil && strings.Contains(execPath, ".app/Contents/MacOS") {
 		resPath := filepath.Join(filepath.Dir(filepath.Dir(execPath)), "Resources")
 		_ = os.Chdir(resPath)
+	} else if _, err := os.Stat(filepath.Join("config", "config.yaml")); os.IsNotExist(err) {
+		// wails build 生成绑定时 cwd 多为 cmd/desktop，LoadConfig 默认找 ./config/config.yaml；
+		// 仓库实际配置在 <repo>/config/，向上两级即可。
+		repoRoot := filepath.Clean(filepath.Join("..", ".."))
+		if _, err := os.Stat(filepath.Join(repoRoot, "config", "config.yaml")); err == nil {
+			_ = os.Chdir(repoRoot)
+		}
 	}
 
 	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
@@ -246,6 +256,12 @@ func main() {
 		OnStartup:   app.startup,
 		OnDomReady: func(ctx context.Context) {
 			wailsruntime.WindowExecJS(ctx, dragHandlerJS)
+			// 注入真实 API 根路径（与 window.location.origin 不同）；无 Go 绑定时仍可显示。
+			if u := strings.TrimSpace(app.backendURL); u != "" {
+				apiRoot := strings.TrimRight(u, "/") + "/api/v1"
+				inject := fmt.Sprintf(`try{window.__WEKNORA_API_BASE__=%s}catch(e){}`, strconv.Quote(apiRoot))
+				wailsruntime.WindowExecJS(ctx, inject)
+			}
 		},
 		OnShutdown: app.shutdown,
 		Bind: []interface{}{
@@ -262,30 +278,6 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
-}
-
-// App struct
-type App struct {
-	ctx        context.Context
-	backendURL string
-	shutdownCh chan struct{}
-}
-
-// NewApp creates a new App application struct
-func NewApp() *App {
-	return &App{
-		shutdownCh: make(chan struct{}, 1),
-	}
-}
-
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
-}
-
-func (a *App) shutdown(ctx context.Context) {
-	a.shutdownCh <- struct{}{}
 }
 
 func configureDesktopStorage(execPath string) {

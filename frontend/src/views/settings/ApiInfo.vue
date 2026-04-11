@@ -55,6 +55,32 @@
         </div>
       </div>
 
+      <!-- API base URL -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('tenant.api.urlLabel') }}</label>
+          <p class="desc">{{ $t('tenant.api.urlDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <div class="api-key-control">
+            <t-input
+              :model-value="apiBaseUrlDisplay"
+              readonly
+              type="text"
+              style="width: 100%; font-family: monospace; font-size: 12px;"
+            />
+            <t-button
+              size="small"
+              variant="text"
+              @click="copyApiUrl"
+              :title="$t('tenant.api.copyUrlTitle')"
+            >
+              <t-icon name="file-copy" />
+            </t-button>
+          </div>
+        </div>
+      </div>
+
       <!-- API docs -->
       <div class="setting-row">
         <div class="setting-info">
@@ -123,6 +149,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { getCurrentUser, type TenantInfo, type UserInfo } from '@/api/auth'
+import { getApiBaseUrl } from '@/utils/api-base'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
@@ -134,6 +161,8 @@ const userInfo = ref<UserInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
 const showApiKey = ref(false)
+/** WeKnora Lite (Wails): real API origin is loopback + dynamic port, not window.location.origin */
+const wailsApiBaseURL = ref<string | null>(null)
 
 // Computed
 const displayApiKey = computed(() => {
@@ -147,6 +176,54 @@ const displayApiKey = computed(() => {
   }
   return masked
 })
+
+const apiBaseUrlDisplay = computed(() => {
+  if (wailsApiBaseURL.value) {
+    return wailsApiBaseURL.value
+  }
+  const configured = getApiBaseUrl().trim().replace(/\/$/, '')
+  let origin = typeof window !== 'undefined' ? window.location.origin : ''
+  if (!origin || origin === 'null') {
+    origin = ''
+  }
+  const base = configured || origin
+  return `${base}/api/v1`
+})
+
+type WeKnoraDesktopWindow = Window & {
+  __WEKNORA_API_BASE__?: string
+  go?: {
+    main?: {
+      App?: {
+        GetAPIBaseURL?: () => Promise<string> | string
+      }
+    }
+  }
+}
+
+async function tryLoadWailsApiBaseURL() {
+  const win = window as WeKnoraDesktopWindow
+  for (let i = 0; i < 40; i++) {
+    const injected = win.__WEKNORA_API_BASE__
+    if (typeof injected === 'string' && injected.trim()) {
+      wailsApiBaseURL.value = injected.trim().replace(/\/$/, '')
+      return
+    }
+    const fn = win.go?.main?.App?.GetAPIBaseURL
+    if (typeof fn === 'function') {
+      try {
+        const raw = await Promise.resolve(fn())
+        if (typeof raw === 'string' && raw.trim()) {
+          wailsApiBaseURL.value = raw.trim().replace(/\/$/, '')
+        }
+      } catch {
+        /* binding error */
+      }
+      return
+    }
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
 
 // Methods
 const loadInfo = async () => {
@@ -203,6 +280,21 @@ const copyApiKey = async () => {
   }
 }
 
+const copyApiUrl = async () => {
+  const text = apiBaseUrlDisplay.value
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      fallbackCopyText(text)
+    }
+    MessagePlugin.success(t('tenant.api.urlCopySuccess'))
+  } catch {
+    fallbackCopyText(text)
+    MessagePlugin.success(t('tenant.api.urlCopySuccess'))
+  }
+}
+
 const formatDate = (dateStr: string | undefined) => {
   if (!dateStr) return t('tenant.unknown')
   
@@ -223,6 +315,7 @@ const formatDate = (dateStr: string | undefined) => {
 
 // Lifecycle
 onMounted(() => {
+  void tryLoadWailsApiBaseURL()
   loadInfo()
 })
 </script>

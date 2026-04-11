@@ -26,9 +26,17 @@ if [ "${SKIP_FRONTEND:-}" != "1" ]; then
     if [ -f frontend/package.json ]; then
         echo ">> Building frontend..."
         (cd frontend && npm ci --prefer-offline && npm run build)
+        # Lite 后端从 ./web 提供 SPA（见 internal/router serveFrontendStatic），与 package-lite.sh 一致须用 dist 更新 web
+        echo ">> Sync frontend/dist -> web/"
+        rm -rf web
+        cp -r frontend/dist web
     else
         echo ">> No frontend/package.json found, skipping frontend build"
     fi
+fi
+
+if [ ! -f web/index.html ]; then
+    echo "WARNING: web/index.html not found. Lite 桌面会从 Resources/web 提供前端；请先完整构建前端（勿使用 SKIP_FRONTEND），或手动: cp -r frontend/dist web"
 fi
 
 # ── Step 2: Build with Wails ──
@@ -48,12 +56,17 @@ export CGO_CFLAGS="-Wno-deprecated-declarations"
 export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
 export EDITION=lite
 
+# Milvus 与 Qdrant 的 gRPC 生成代码均注册名为 "common.proto" 的描述符，同一进程内会冲突。
+# -ldflags -X conflictPolicy=warn 只作用于最终链接，无法覆盖 Wails「生成绑定」时单独启动的 go 子进程。
+# 官方做法：见 https://protobuf.dev/reference/go/faq#namespace-conflict
+export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+
 # 获取版本号并配置 LDFLAGS
 eval "$(./scripts/get_version.sh env)"
 LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
 
-# 我们实际上只用 Wails 构建外壳，前端仍然由后台服务提供
-(cd cmd/desktop && wails build -skipbindings -clean -tags "sqlite_fts5" -ldflags="$LDFLAGS" -o "${APP_NAME}")
+# 默认生成 Wails 绑定（供 window.go.main.App.* 等）；若加 -skipbindings 则需在 OnDomReady 注入 __WEKNORA_API_BASE__
+(cd cmd/desktop && wails build -clean -tags "sqlite_fts5" -ldflags="$LDFLAGS" -o "${APP_NAME}")
 
 # ── Step 3: Copy generated .app to dist ──
 echo ">> Assembling package..."
