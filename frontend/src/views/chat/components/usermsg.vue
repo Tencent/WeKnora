@@ -27,6 +27,15 @@
                 @click="previewImage($event)"
             />
         </div>
+        <!-- 显示上传的附件 -->
+        <div v-if="hasAttachments" class="user_attachments">
+            <div v-for="(att, idx) in props.attachments" :key="idx" class="user_attachment_card">
+                <div class="attachment_card_icon">
+                    <t-icon :name="getAttachmentIcon(att.file_name || att.file_type)" />
+                </div>
+                <div class="attachment_card_name">{{ att.file_name }}</div>
+            </div>
+        </div>
         <div class="user_msg">
             {{ content }}
         </div>
@@ -56,6 +65,11 @@ const props = defineProps({
         required: false,
         default: () => []
     },
+    attachments: {
+        type: Array,
+        required: false,
+        default: () => []
+    },
     channel: {
         type: String,
         required: false,
@@ -79,6 +93,25 @@ const channelClass = computed(() => props.channel ? `channel-${props.channel}` :
 
 const containerRef = ref(null);
 const hasImages = computed(() => props.images && props.images.length > 0);
+const hasAttachments = computed(() => props.attachments && props.attachments.length > 0);
+
+const getAttachmentIcon = (fileNameOrType) => {
+    const ext = (fileNameOrType || '').split('.').pop()?.toLowerCase();
+    if (['pdf'].includes(ext)) return 'file-pdf';
+    if (['doc', 'docx'].includes(ext)) return 'file-word';
+    if (['xls', 'xlsx'].includes(ext)) return 'file-excel';
+    if (['ppt', 'pptx'].includes(ext)) return 'file-powerpoint';
+    if (['txt', 'md'].includes(ext)) return 'file-text';
+    if (['mp3', 'wav', 'm4a', 'flac', 'ogg', 'aac'].includes(ext)) return 'sound';
+    return 'file';
+};
+
+const formatFileSize = (bytes) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
 
 const hydrateImages = async () => {
     await nextTick();
@@ -196,6 +229,47 @@ const closePreImg = () => {
     gap: 6px;
     justify-content: flex-end;
     max-width: 100%;
+}
+
+.user_attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    max-width: 100%;
+}
+
+.user_attachment_card {
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    border: 1px solid var(--td-border-level-1-color, #e7e7e7);
+    background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    overflow: hidden;
+    cursor: default;
+
+    .attachment_card_icon {
+        font-size: 22px;
+        color: var(--td-brand-color, #07C05F);
+        line-height: 1;
+    }
+
+    .attachment_card_name {
+        font-size: 10px;
+        color: var(--td-text-color-secondary, #666);
+        text-align: center;
+        width: 100%;
+        padding: 0 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        box-sizing: border-box;
+    }
 }
 
 .user_image_thumb {

@@ -415,6 +415,11 @@ export default {
     imageTooMany: "최대 5장까지 업로드 가능합니다",
     imageTypeSizeError: "JPG/PNG/GIF/WEBP 형식만 지원하며, 단일 파일 10MB 이하",
     imageUploadTooltip: "이미지 업로드 (붙여넣기/드래그 지원)",
+    attachmentUploadTooltip: "첨부 파일 업로드 (문서, 오디오 등)",
+    attachmentWithCount: "{count}개 파일 업로드됨",
+    attachmentTooMany: "최대 {max}개 파일까지 업로드 가능합니다",
+    attachmentTooLarge: "파일 {name}이(가) {max}MB 제한을 초과합니다",
+    attachmentTypeNotSupported: "지원하지 않는 파일 형식: {name}",
   },
   settings: {
     title: "설정",
@@ -3398,6 +3403,13 @@ export default {
       storageDefault: '시스템 기본값',
       notConfigured: '미설정',
       goStorageSettings: '저장소 설정으로 이동',
+    },
+    audioUpload: {
+      label: '음성 업로드',
+      desc: '활성화하면 사용자가 대화에서 오디오 파일을 업로드할 수 있으며, ASR 모델로 자동 변환됩니다',
+      asrModel: 'ASR 모델',
+      asrModelDesc: '음성 인식 모델입니다. 설정하지 않으면 오디오 파일이 플레이스홀더로 전달됩니다',
+      asrModelPlaceholder: 'ASR 모델 선택',
     },
     faq: {
       title: 'FAQ 우선 전략',

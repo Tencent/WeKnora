@@ -120,6 +120,10 @@ type CustomAgentConfig struct {
 	ImageUploadEnabled bool `yaml:"image_upload_enabled" json:"image_upload_enabled"`
 	// VLM model ID for image analysis (optional, falls back to tenant-level VLM)
 	VLMModelID string `yaml:"vlm_model_id" json:"vlm_model_id"`
+	// Whether audio upload (ASR transcription) is enabled for this agent (default: false)
+	AudioUploadEnabled bool `yaml:"audio_upload_enabled" json:"audio_upload_enabled"`
+	// ASR model ID for audio transcription (optional)
+	ASRModelID string `yaml:"asr_model_id" json:"asr_model_id"`
 	// Storage provider for image uploads: "local", "minio", "cos", "tos"
 	// Empty means use the global/tenant default provider.
 	ImageStorageProvider string `yaml:"image_storage_provider" json:"image_storage_provider"`

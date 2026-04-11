@@ -23,7 +23,7 @@
                 </div>
                 <div v-for="(session, id) in messagesList" :key='id'>
                     <div v-if="session.role == 'user'">
-                        <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images"></usermsg>
+                        <usermsg :content="session.content" :mentioned_items="session.mentioned_items" :images="session.images" :attachments="session.attachments"></usermsg>
                     </div>
                     <div v-if="session.role == 'assistant'">
                         <botmsg :content="session.content" :session="session" :user-query="getUserQuery(id)" @scroll-bottom="scrollToBottom"
@@ -43,7 +43,7 @@
         <div style="min-height: 115px; margin: 16px auto 4px;width: 100%;max-width: 800px;">
             <InputField
                 ref="inputFieldRef"
-                @send-msg="(query, modelId, mentionedItems, imageFiles) => sendMsg(query, modelId, mentionedItems, imageFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
                 @stop-generation="handleStopGeneration"
                 :isReplying="isReplying"
                 :sessionId="session_id"
@@ -82,7 +82,7 @@ const useSettingsStoreInstance = useSettingsStore();
 const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
-const { menuArr, isFirstSession, firstQuery, firstMentionedItems, firstModelId, firstImageFiles } = storeToRefs(usemenuStore);
+const { menuArr, isFirstSession, firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles } = storeToRefs(usemenuStore);
 const { output, onChunk, isStreaming, isLoading, error, startStream, stopStream } = useStream();
 const route = useRoute();
 const router = useRouter();
@@ -418,7 +418,7 @@ const handleStopGeneration = () => {
     // API 调用成功后，后端的 stop 事件会清空它
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
     userquery.value = value;
     isReplying.value = true;
     loading.value = true;
@@ -441,8 +441,39 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         }
     }
 
+    // Convert attachment files to base64 for backend processing
+    let attachmentUploads = [];
+    if (attachmentFiles && attachmentFiles.length > 0) {
+        try {
+            for (const attachment of attachmentFiles) {
+                const reader = new FileReader();
+                const base64Promise = new Promise((resolve, reject) => {
+                    reader.onload = () => {
+                        const result = reader.result;
+                        // Extract base64 content (remove data:...;base64, prefix)
+                        const base64 = result.split(',')[1];
+                        resolve(base64);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(attachment.file);
+                });
+                const base64Data = await base64Promise;
+                attachmentUploads.push({
+                    data: base64Data,
+                    file_name: attachment.name,
+                    file_size: attachment.size
+                });
+            }
+        } catch (e) {
+            console.error('[Attachment] Failed to read attachments:', e);
+            loading.value = false;
+            isReplying.value = false;
+            return;
+        }
+    }
+
     // 将@提及的知识库和文件信息存入用户消息
-    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, channel: 'web' });
+    messagesList.push({ content: value, role: 'user', mentioned_items: mentionedItems, images: userImages, attachments: attachmentFiles.map(a => ({ file_name: a.name, file_size: a.size, file_type: '.' + a.name.split('.').pop()?.toLowerCase() })), channel: 'web' });
     scrollToBottom();
     
     // Get agent mode status from settings store
@@ -492,6 +523,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         mcp_service_ids: mcpServiceIds,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
+        attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
         query: value, 
         method: 'POST', 
         url: endpoint
@@ -1078,8 +1110,8 @@ onMounted(async () => {
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
-        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || []);
-        usemenuStore.changeFirstQuery('', [], '', []);
+        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
+        usemenuStore.changeFirstQuery('', [], '', [], []);
     } else {
         scrollLock.value = false;
         let data = {

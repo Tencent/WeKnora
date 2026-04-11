@@ -45,6 +45,9 @@ type PipelineRequest struct {
 	VLMModelID              string   `json:"-"`
 	ChatModelSupportsVision bool     `json:"-"`
 
+	// File attachments support
+	Attachments MessageAttachments `json:"-"`
+
 	// Misc request-scoped config
 	TenantID              uint64 `json:"-"`
 	WebSearchEnabled      bool   `json:"-"`
@@ -185,6 +188,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			Images:                   append([]string(nil), c.Images...),
 			VLMModelID:               c.VLMModelID,
 			ChatModelSupportsVision:  c.ChatModelSupportsVision,
+			Attachments:              append(MessageAttachments(nil), c.Attachments...),
 			TenantID:                 c.TenantID,
 			WebSearchEnabled:         c.WebSearchEnabled,
 			WebSearchProviderID:     c.WebSearchProviderID,

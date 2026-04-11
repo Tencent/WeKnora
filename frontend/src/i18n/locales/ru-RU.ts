@@ -2038,6 +2038,11 @@ export default {
     imageTooMany: 'Максимум 5 изображений',
     imageTypeSizeError: 'Поддерживаются только JPG/PNG/GIF/WEBP до 10 МБ',
     imageUploadTooltip: 'Загрузить изображение (вставка/перетаскивание)',
+    attachmentUploadTooltip: 'Загрузить вложение (документы, аудио и т.д.)',
+    attachmentWithCount: 'Загружено файлов: {count}',
+    attachmentTooMany: 'Максимум {max} файлов',
+    attachmentTooLarge: 'Файл {name} превышает лимит {max} МБ',
+    attachmentTypeNotSupported: 'Неподдерживаемый тип файла: {name}',
     thinkingAlt: 'Обдумывание...',
     deepThoughtCompleted: 'Глубокий анализ завершён',
     deepThoughtAlt: 'Глубокий анализ'
@@ -3014,6 +3019,13 @@ export default {
       storageDefault: 'Системное значение',
       notConfigured: 'Не настроено',
       goStorageSettings: 'Перейти к настройкам хранилища'
+    },
+    audioUpload: {
+      label: 'Загрузка аудио',
+      desc: 'Позволяет пользователям загружать аудиофайлы в чате. Система автоматически транскрибирует их с помощью ASR-модели.',
+      asrModel: 'ASR-модель',
+      asrModelDesc: 'Модель распознавания речи. Если не настроена, аудиофайлы передаются как заглушки.',
+      asrModelPlaceholder: 'Выберите ASR-модель',
     },
     faq: {
       title: 'Стратегия приоритета FAQ',

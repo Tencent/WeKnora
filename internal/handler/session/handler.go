@@ -5,6 +5,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -24,6 +25,7 @@ type Handler struct {
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
 	modelService         interfaces.ModelService         // Service for model management (VLM access)
+	attachmentProcessor  *AttachmentProcessor            // Processor for file attachments
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -38,6 +40,8 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	fileService interfaces.FileService,
 	modelService interfaces.ModelService,
+	documentReader interfaces.DocumentReader,
+	imageResolver *docparser.ImageResolver,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -50,6 +54,12 @@ func NewHandler(
 		agentShareService:    agentShareService,
 		fileService:          fileService,
 		modelService:         modelService,
+		attachmentProcessor: NewAttachmentProcessor(
+			fileService,
+			documentReader,
+			imageResolver,
+			modelService,
+		),
 	}
 }
 

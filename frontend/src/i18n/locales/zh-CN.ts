@@ -412,6 +412,11 @@ export default {
     imageTooMany: "最多上传5张图片",
     imageTypeSizeError: "仅支持 JPG/PNG/GIF/WEBP 格式，单张不超过 10MB",
     imageUploadTooltip: "上传图片（支持粘贴/拖拽）",
+    attachmentUploadTooltip: "上传附件（文档、音频等）",
+    attachmentWithCount: "已上传 {count} 个附件",
+    attachmentTooMany: "最多上传 {max} 个附件",
+    attachmentTooLarge: "文件 {name} 超过 {max}MB 限制",
+    attachmentTypeNotSupported: "不支持的文件类型：{name}",
   },
   settings: {
     title: "设置",
@@ -3346,6 +3351,13 @@ export default {
       storageDefault: "系统默认",
       notConfigured: "未配置",
       goStorageSettings: "去存储设置中配置",
+    },
+    audioUpload: {
+      label: "语音上传",
+      desc: "启用后用户可在对话中上传音频文件，系统将使用 ASR 模型自动转录为文字",
+      asrModel: "ASR 模型",
+      asrModelDesc: "用于音频转录的语音识别模型，未配置时音频文件将以占位符形式传递",
+      asrModelPlaceholder: "请选择 ASR 模型",
     },
     faq: {
       title: "FAQ 优先策略",

@@ -1866,6 +1866,11 @@ export default {
     imageTooMany: 'Maximum 5 images allowed',
     imageTypeSizeError: 'Only JPG/PNG/GIF/WEBP under 10MB supported',
     imageUploadTooltip: 'Upload image (paste/drop supported)',
+    attachmentUploadTooltip: 'Upload attachment (documents, audio, etc.)',
+    attachmentWithCount: '{count} attachment(s) uploaded',
+    attachmentTooMany: 'Maximum {max} attachments allowed',
+    attachmentTooLarge: 'File {name} exceeds {max}MB limit',
+    attachmentTypeNotSupported: 'Unsupported file type: {name}',
   },
   tenant: {
     title: 'Tenant Information',
@@ -3347,6 +3352,13 @@ export default {
       storageDefault: 'System Default',
       notConfigured: 'Not Configured',
       goStorageSettings: 'Go to Storage Settings',
+    },
+    audioUpload: {
+      label: 'Audio Upload',
+      desc: 'When enabled, users can upload audio files in conversations. The system will automatically transcribe them using the ASR model.',
+      asrModel: 'ASR Model',
+      asrModelDesc: 'Speech recognition model for audio transcription. If not configured, audio files will be passed as placeholders.',
+      asrModelPlaceholder: 'Select ASR Model',
     },
     faq: {
       title: 'FAQ Priority Strategy',

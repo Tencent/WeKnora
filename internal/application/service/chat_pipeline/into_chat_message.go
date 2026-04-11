@@ -95,6 +95,10 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		if chatManage.QuotedContext != "" {
 			userContent += "\n\n" + chatManage.QuotedContext
 		}
+		// Inject attachment content (documents, audio transcripts, etc.)
+		if len(chatManage.Attachments) > 0 {
+			userContent += chatManage.Attachments.BuildPrompt()
+		}
 
 		if tpl := chatManage.SummaryConfig.ContextTemplate; tpl != "" {
 			chatManage.UserContent = types.RenderPromptPlaceholders(tpl, types.PlaceholderValues{
@@ -179,6 +183,10 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	}
 	if chatManage.QuotedContext != "" {
 		userContent += "\n\n" + chatManage.QuotedContext
+	}
+	// Inject attachment content (documents, audio transcripts, etc.)
+	if len(chatManage.Attachments) > 0 {
+		userContent += chatManage.Attachments.BuildPrompt()
 	}
 
 	// Set formatted content back to chat management

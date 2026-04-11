@@ -394,6 +394,35 @@
                         </a>
                       </div>
                     </div>
+
+                    <!-- 音频上传开关 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.audioUpload.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.audioUpload.desc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-switch v-model="formData.config.audio_upload_enabled" />
+                      </div>
+                    </div>
+
+                    <!-- ASR模型（音频上传启用时） -->
+                    <div v-if="formData.config.audio_upload_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.audioUpload.asrModel') }}</label>
+                        <p class="desc">{{ $t('agentEditor.audioUpload.asrModelDesc') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <ModelSelector
+                          model-type="ASR"
+                          :selected-model-id="formData.config.asr_model_id"
+                          :all-models="allModels"
+                          @update:selected-model-id="(val: string) => formData.config.asr_model_id = val"
+                          @add-model="handleAddModel('asr')"
+                          :placeholder="$t('agentEditor.audioUpload.asrModelPlaceholder')"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 

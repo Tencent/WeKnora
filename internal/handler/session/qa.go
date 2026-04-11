@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -37,6 +38,7 @@ type qaRequestContext struct {
 	images            []ImageAttachment // Uploaded images with analysis text
 	userMessageID     string            // Created user message ID (populated after createUserMessage)
 	channel           string            // Source channel: "web", "api", "im", etc.
+	attachments       types.MessageAttachments // Processed file attachments
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
@@ -55,6 +57,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		UserMessageID:      rc.userMessageID,
 		WebSearchEnabled:   rc.webSearchEnabled,
 		EnableMemory:       rc.enableMemory,
+		Attachments:        rc.attachments,
 	}
 }
 
@@ -135,6 +138,67 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		// - Normal pure-chat mode: runs in the async goroutine with progress events
 	}
 
+	// Process file attachments: decode and save to storage, extract content
+	var processedAttachments types.MessageAttachments
+	if len(request.AttachmentUploads) > 0 {
+		logger.Infof(ctx, "[%s] processing %d attachment(s)", logPrefix, len(request.AttachmentUploads))
+
+		maxSize := secutils.GetMaxFileSize()
+		for i, upload := range request.AttachmentUploads {
+			if upload.FileSize > maxSize {
+				return nil, nil, errors.NewBadRequestError(
+					fmt.Sprintf("attachment %d exceeds size limit of %dMB", i+1, secutils.GetMaxFileSizeMB()))
+			}
+		}
+
+		tenantID := c.GetUint64(types.TenantIDContextKey.String())
+
+		// Use ASR only when the agent has audio upload enabled.
+		asrModelID := ""
+		if customAgent != nil && customAgent.Config.AudioUploadEnabled && customAgent.Config.ASRModelID != "" {
+			asrModelID = customAgent.Config.ASRModelID
+		}
+
+		// Process all attachments concurrently.
+		processedAttachments = make(types.MessageAttachments, len(request.AttachmentUploads))
+		var wg sync.WaitGroup
+		errChan := make(chan error, len(request.AttachmentUploads))
+
+		for i, upload := range request.AttachmentUploads {
+			wg.Add(1)
+			go func(idx int, att AttachmentUpload) {
+				defer wg.Done()
+
+				data, err := DecodeBase64Attachment(att.Data)
+				if err != nil {
+					errChan <- fmt.Errorf("attachment %d decode failed: %w", idx+1, err)
+					return
+				}
+
+				processed, err := h.attachmentProcessor.ProcessAttachment(
+					ctx, data, att.FileName, att.FileSize, tenantID, asrModelID,
+				)
+				if err != nil {
+					errChan <- fmt.Errorf("attachment %d processing failed: %w", idx+1, err)
+					return
+				}
+
+				processedAttachments[idx] = *processed
+			}(i, upload)
+		}
+
+		wg.Wait()
+		close(errChan)
+
+		if len(errChan) > 0 {
+			err := <-errChan
+			logger.Errorf(ctx, "[%s] attachment processing failed: %v", logPrefix, err)
+			return nil, nil, errors.NewBadRequestError(fmt.Sprintf("attachment processing failed: %v", err))
+		}
+
+		logger.Infof(ctx, "[%s] all attachments processed", logPrefix)
+	}
+
 	// Build request context
 	reqCtx := &qaRequestContext{
 		ctx:         ctx,
@@ -160,6 +224,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		effectiveTenantID: effectiveTenantID,
 		images:            request.Images,
 		channel:           request.Channel,
+		attachments:       processedAttachments,
 	}
 
 	return reqCtx, &request, nil
@@ -478,7 +543,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	}
 
 	// Create user message
-	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.channel)
+	userMsg, err := h.createUserMessage(ctx, sessionID, reqCtx.query, reqCtx.requestID, reqCtx.mentionedItems, convertImageAttachments(reqCtx.images), reqCtx.attachments, reqCtx.channel)
 	if err != nil {
 		reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		return
