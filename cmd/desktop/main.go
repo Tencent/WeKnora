@@ -49,21 +49,28 @@ if(window.wails&&window.wails.flags){
   window.wails.flags.cssDragValue='__never__';
 }
 
+// Prevent native text/image drag-out to fix the "selected and dragged away" issue
+window.addEventListener('dragstart', function(e){
+  e.preventDefault();
+}, true);
+
 var TITLEBAR_H=38;
 
-var dragSel='.logo_row,.menu_top,.header,.header-title,.title-row,' +
-  '.dialogue-title,.section-header,.dialog-header,.sidebar-header,' +
-  '.document-header,.drag-region,[data-wails-drag]';
+// We specifically look for Wails' inline style attributes injected by Vue,
+// and custom drag classes, avoiding generic headers like .section-header
+var dragSel='.logo_row,.menu_top,.drag-region,[data-wails-drag],' +
+  '[style*="--wails-draggable: drag"],[style*="--wails-draggable:drag"]';
 
 var noDragSel='button,a,input,select,textarea,[role="button"],' +
   '.t-button,.t-input,.t-select,.t-textarea,' +
   '.header-actions,.header-action-btn,.sidebar-toggle,.logo_box,' +
   '.close-btn,.menu_item,.submenu,.submenu_item,.menu_bottom,' +
-  '.t-popup,.t-dropdown,.t-tooltip,.t-dialog,[data-no-drag]';
+  '.t-popup,.t-dropdown,.t-tooltip,.t-dialog,[data-no-drag],' +
+  '[style*="--wails-draggable: no-drag"],[style*="--wails-draggable:no-drag"]';
 
-var layoutClasses=['main','chat','dialogue-wrap','kb-list-container',
-  'agent-list-container','org-list-container','aside_box',
-  'ks-container','settings-overlay','knowledge-layout',
+var layoutClasses=['main','chat','dialogue-wrap','kb-list-container','kb-list-content',
+  'agent-list-container','agent-list-content','org-list-container','org-list-content','aside_box',
+  'ks-container','ks-content','settings-overlay','knowledge-layout',
   'faq-manager-wrapper','login-layout'];
 
 function sendDrag(){
