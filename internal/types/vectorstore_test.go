@@ -10,6 +10,245 @@ import (
 	"gorm.io/gorm"
 )
 
+// ---------------------------------------------------------------------------
+// PR2 additions: env store builder, response DTO, types metadata
+// ---------------------------------------------------------------------------
+
+// mockEnvLookup creates a simple env lookup function from a map.
+func mockEnvLookup(env map[string]string) EnvLookupFunc {
+	return func(key string) string {
+		return env[key]
+	}
+}
+
+func TestIsEnvStoreID(t *testing.T) {
+	tests := []struct {
+		name     string
+		id       string
+		expected bool
+	}{
+		{"env postgres ID", "__env_postgres__", true},
+		{"env elasticsearch ID", "__env_elasticsearch_v8__", true},
+		{"env prefix only", "__env_", true},
+		{"UUID ID", "550e8400-e29b-41d4-a716-446655440000", false},
+		{"empty string", "", false},
+		{"similar but not prefix", "_env_postgres__", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, IsEnvStoreID(tt.id))
+		})
+	}
+}
+
+func TestBuildEnvVectorStores(t *testing.T) {
+	envMap := map[string]string{
+		"ELASTICSEARCH_ADDR":     "http://es:9200",
+		"ELASTICSEARCH_USERNAME": "elastic",
+		"ELASTICSEARCH_PASSWORD": "secret",
+		"ELASTICSEARCH_INDEX":    "my_index",
+		"QDRANT_HOST":            "qdrant-host",
+		"QDRANT_API_KEY":         "qd-key",
+		"MILVUS_ADDRESS":         "milvus:19530",
+		"WEAVIATE_HOST":          "weaviate:8080",
+	}
+	lookup := mockEnvLookup(envMap)
+
+	t.Run("empty RETRIEVE_DRIVER returns nil", func(t *testing.T) {
+		stores := BuildEnvVectorStores("", lookup)
+		assert.Nil(t, stores)
+	})
+
+	t.Run("single driver postgres", func(t *testing.T) {
+		stores := BuildEnvVectorStores("postgres", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "__env_postgres__", stores[0].ID)
+		assert.Equal(t, "postgres (env)", stores[0].Name)
+		assert.Equal(t, PostgresRetrieverEngineType, stores[0].EngineType)
+		assert.True(t, stores[0].ConnectionConfig.UseDefaultConnection)
+	})
+
+	t.Run("multiple drivers", func(t *testing.T) {
+		stores := BuildEnvVectorStores("postgres,elasticsearch_v8", lookup)
+		require.Len(t, stores, 2)
+		assert.Equal(t, "__env_postgres__", stores[0].ID)
+		assert.Equal(t, "__env_elasticsearch_v8__", stores[1].ID)
+		assert.Equal(t, "http://es:9200", stores[1].ConnectionConfig.Addr)
+		assert.Equal(t, "elastic", stores[1].ConnectionConfig.Username)
+		assert.Equal(t, "secret", stores[1].ConnectionConfig.Password) // unmasked
+		assert.Equal(t, "my_index", stores[1].IndexConfig.IndexName)
+	})
+
+	t.Run("env store retains raw password (not masked)", func(t *testing.T) {
+		stores := BuildEnvVectorStores("elasticsearch_v8", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "secret", stores[0].ConnectionConfig.Password)
+	})
+
+	t.Run("unknown driver is skipped", func(t *testing.T) {
+		stores := BuildEnvVectorStores("postgres,unknown_db", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "__env_postgres__", stores[0].ID)
+	})
+
+	t.Run("whitespace trimmed", func(t *testing.T) {
+		stores := BuildEnvVectorStores(" postgres , elasticsearch_v8 ", lookup)
+		require.Len(t, stores, 2)
+	})
+
+	t.Run("all supported drivers", func(t *testing.T) {
+		stores := BuildEnvVectorStores("postgres,sqlite,elasticsearch_v8,elasticsearch_v7,qdrant,milvus,weaviate", lookup)
+		require.Len(t, stores, 7)
+
+		ids := make([]string, len(stores))
+		for i, s := range stores {
+			ids[i] = s.ID
+		}
+		assert.Contains(t, ids, "__env_postgres__")
+		assert.Contains(t, ids, "__env_sqlite__")
+		assert.Contains(t, ids, "__env_elasticsearch_v8__")
+		assert.Contains(t, ids, "__env_elasticsearch_v7__")
+		assert.Contains(t, ids, "__env_qdrant__")
+		assert.Contains(t, ids, "__env_milvus__")
+		assert.Contains(t, ids, "__env_weaviate__")
+	})
+
+	t.Run("qdrant env store", func(t *testing.T) {
+		stores := BuildEnvVectorStores("qdrant", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "qdrant-host", stores[0].ConnectionConfig.Host)
+		assert.Equal(t, "qd-key", stores[0].ConnectionConfig.APIKey)
+	})
+
+	t.Run("milvus env store", func(t *testing.T) {
+		stores := BuildEnvVectorStores("milvus", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "milvus:19530", stores[0].ConnectionConfig.Addr)
+	})
+
+	t.Run("weaviate env store", func(t *testing.T) {
+		stores := BuildEnvVectorStores("weaviate", lookup)
+		require.Len(t, stores, 1)
+		assert.Equal(t, "weaviate:8080", stores[0].ConnectionConfig.Host)
+	})
+}
+
+func TestFindEnvVectorStore(t *testing.T) {
+	lookup := mockEnvLookup(map[string]string{})
+
+	t.Run("found", func(t *testing.T) {
+		store := FindEnvVectorStore("postgres", lookup, "__env_postgres__")
+		require.NotNil(t, store)
+		assert.Equal(t, "__env_postgres__", store.ID)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		store := FindEnvVectorStore("postgres", lookup, "__env_unknown__")
+		assert.Nil(t, store)
+	})
+
+	t.Run("empty driver returns nil", func(t *testing.T) {
+		store := FindEnvVectorStore("", lookup, "__env_postgres__")
+		assert.Nil(t, store)
+	})
+}
+
+func TestNewVectorStoreResponse(t *testing.T) {
+	store := &VectorStore{
+		ID:         "test-id",
+		Name:       "test-store",
+		EngineType: ElasticsearchRetrieverEngineType,
+		ConnectionConfig: ConnectionConfig{
+			Addr:     "http://es:9200",
+			Password: "secret",
+			APIKey:   "my-api-key",
+		},
+	}
+
+	t.Run("masks sensitive fields", func(t *testing.T) {
+		resp := NewVectorStoreResponse(store, "user", false)
+		assert.Equal(t, "***", resp.ConnectionConfig.Password)
+		assert.Equal(t, "***", resp.ConnectionConfig.APIKey)
+		assert.Equal(t, "http://es:9200", resp.ConnectionConfig.Addr) // non-sensitive preserved
+	})
+
+	t.Run("preserves source and readonly", func(t *testing.T) {
+		resp := NewVectorStoreResponse(store, "env", true)
+		assert.Equal(t, "env", resp.Source)
+		assert.True(t, resp.ReadOnly)
+	})
+
+	t.Run("does not mutate original store", func(t *testing.T) {
+		_ = NewVectorStoreResponse(store, "user", false)
+		assert.Equal(t, "secret", store.ConnectionConfig.Password)
+		assert.Equal(t, "my-api-key", store.ConnectionConfig.APIKey)
+	})
+
+	t.Run("empty sensitive fields not masked to ***", func(t *testing.T) {
+		noSecret := &VectorStore{
+			ID:               "test-id",
+			ConnectionConfig: ConnectionConfig{Addr: "http://es:9200"},
+		}
+		resp := NewVectorStoreResponse(noSecret, "user", false)
+		assert.Equal(t, "", resp.ConnectionConfig.Password)
+		assert.Equal(t, "", resp.ConnectionConfig.APIKey)
+	})
+}
+
+func TestGetVectorStoreTypes(t *testing.T) {
+	types := GetVectorStoreTypes()
+
+	t.Run("returns 6 engine types", func(t *testing.T) {
+		assert.Len(t, types, 6)
+	})
+
+	t.Run("type names match engine constants", func(t *testing.T) {
+		typeNames := make([]string, len(types))
+		for i, typ := range types {
+			typeNames[i] = typ.Type
+		}
+		assert.Contains(t, typeNames, "elasticsearch")
+		assert.Contains(t, typeNames, "postgres")
+		assert.Contains(t, typeNames, "qdrant")
+		assert.Contains(t, typeNames, "milvus")
+		assert.Contains(t, typeNames, "weaviate")
+		assert.Contains(t, typeNames, "sqlite")
+	})
+
+	t.Run("elasticsearch has connection and index fields", func(t *testing.T) {
+		var esType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "elasticsearch" {
+				esType = typ
+				break
+			}
+		}
+		assert.NotEmpty(t, esType.ConnectionFields)
+		assert.NotEmpty(t, esType.IndexFields)
+
+		// Check sensitive field marking
+		var passwordField VectorStoreFieldInfo
+		for _, f := range esType.ConnectionFields {
+			if f.Name == "password" {
+				passwordField = f
+				break
+			}
+		}
+		assert.True(t, passwordField.Sensitive)
+	})
+
+	t.Run("sqlite has no connection fields", func(t *testing.T) {
+		var sqliteType VectorStoreTypeInfo
+		for _, typ := range types {
+			if typ.Type == "sqlite" {
+				sqliteType = typ
+				break
+			}
+		}
+		assert.Empty(t, sqliteType.ConnectionFields)
+	})
+}
+
 // testAESKey is a 32-byte key for testing AES-GCM encryption.
 const testAESKey = "01234567890123456789012345678901"
 

@@ -79,3 +79,4 @@ WeKnora API 按功能分为以下几类：
 | 组织管理 | 组织、成员、知识库/智能体共享 | [organization.md](./organization.md) |
 | Skills | 预装智能体技能 | [skill.md](./skill.md) |
 | 网络搜索 | 网络搜索服务商 | [web-search.md](./web-search.md) |
+| 向量存储 | 向量数据库连接管理 | [vector-store.md](./vector-store.md) |

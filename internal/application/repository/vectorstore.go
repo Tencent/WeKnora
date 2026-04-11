@@ -59,6 +59,15 @@ func (r *vectorStoreRepository) Update(ctx context.Context, store *types.VectorS
 	).Select("name").Updates(store).Error
 }
 
+// UpdateConnectionConfig updates only the connection_config JSONB column.
+// Used for saving auto-detected metadata (e.g., server version) without
+// touching user-immutable fields like engine_type or index_config.
+func (r *vectorStoreRepository) UpdateConnectionConfig(ctx context.Context, store *types.VectorStore) error {
+	return r.db.WithContext(ctx).Model(&types.VectorStore{}).Where(
+		"id = ? AND tenant_id = ?", store.ID, store.TenantID,
+	).Select("connection_config").Updates(store).Error
+}
+
 // Delete soft-deletes a vector store
 func (r *vectorStoreRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
 	return r.db.WithContext(ctx).Where(

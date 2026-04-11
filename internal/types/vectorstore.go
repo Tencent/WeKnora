@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -11,6 +12,18 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// EnvStoreIDPrefix is the prefix for virtual env store IDs.
+const EnvStoreIDPrefix = "__env_"
+
+// IsEnvStoreID checks if the given ID is an env store virtual ID.
+func IsEnvStoreID(id string) bool {
+	return strings.HasPrefix(id, EnvStoreIDPrefix)
+}
+
+// EnvLookupFunc is a function type for looking up environment variables.
+// In production: os.Getenv, in tests: custom lookup function.
+type EnvLookupFunc func(string) string
 
 // VectorStore represents a configured vector database instance for a tenant.
 // Each tenant can register multiple VectorStore entries (even of the same engine type)
@@ -100,6 +113,9 @@ type ConnectionConfig struct {
 	Scheme      string `yaml:"scheme" json:"scheme,omitempty"`
 	// Postgres
 	UseDefaultConnection bool `yaml:"use_default_connection" json:"use_default_connection,omitempty"`
+	// Version is the detected server version (e.g., "7.10.1", "16.2", "1.12.6").
+	// Auto-populated by TestConnection on successful connectivity check.
+	Version string `yaml:"version" json:"version,omitempty"`
 }
 
 // Value implements the driver.Valuer interface.
@@ -235,5 +251,255 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 		return "WeKnora"
 	default:
 		return c.IndexName
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VectorStoreResponse — API response DTO
+// ---------------------------------------------------------------------------
+
+// VectorStoreResponse is the API response DTO for vector store.
+// Wraps VectorStore with additional metadata (source, readonly).
+type VectorStoreResponse struct {
+	VectorStore
+	Source   string `json:"source"`   // "env" or "user"
+	ReadOnly bool   `json:"readonly"` // env stores are read-only
+}
+
+// NewVectorStoreResponse creates a response DTO from a VectorStore
+// with sensitive fields masked.
+func NewVectorStoreResponse(store *VectorStore, source string, readonly bool) VectorStoreResponse {
+	masked := *store
+	masked.ConnectionConfig = store.ConnectionConfig.MaskSensitiveFields()
+	return VectorStoreResponse{
+		VectorStore: masked,
+		Source:      source,
+		ReadOnly:    readonly,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// VectorStore type metadata — for /types endpoint
+// ---------------------------------------------------------------------------
+
+// VectorStoreTypeInfo describes a supported engine type and its configuration schema.
+type VectorStoreTypeInfo struct {
+	Type             string                 `json:"type"`
+	DisplayName      string                 `json:"display_name"`
+	ConnectionFields []VectorStoreFieldInfo `json:"connection_fields"`
+	IndexFields      []VectorStoreFieldInfo `json:"index_fields,omitempty"`
+}
+
+// VectorStoreFieldInfo describes a single configuration field.
+type VectorStoreFieldInfo struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"` // "string", "number", "boolean"
+	Required    bool   `json:"required"`
+	Sensitive   bool   `json:"sensitive,omitempty"`
+	Default     any    `json:"default,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// GetVectorStoreTypes returns metadata for all supported engine types.
+func GetVectorStoreTypes() []VectorStoreTypeInfo {
+	return []VectorStoreTypeInfo{
+		{
+			Type:        "elasticsearch",
+			DisplayName: "Elasticsearch (Keywords + Vector)",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "Elasticsearch URL (e.g., http://localhost:9200)"},
+				{Name: "username", Type: "string", Required: false},
+				{Name: "password", Type: "string", Required: false, Sensitive: true},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "index_name", Type: "string", Required: false, Default: "xwrag_default"},
+				{Name: "number_of_shards", Type: "number", Required: false},
+				{Name: "number_of_replicas", Type: "number", Required: false},
+			},
+		},
+		{
+			Type:        "postgres",
+			DisplayName: "PostgreSQL (Keywords + Vector)",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "use_default_connection", Type: "boolean", Required: false, Default: true,
+					Description: "Use the application's default database connection"},
+				{Name: "addr", Type: "string", Required: false,
+					Description: "PostgreSQL connection string (required if use_default_connection is false)"},
+				{Name: "username", Type: "string", Required: false},
+				{Name: "password", Type: "string", Required: false, Sensitive: true},
+			},
+		},
+		{
+			Type:        "qdrant",
+			DisplayName: "Qdrant (Keywords + Vector)",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "host", Type: "string", Required: true, Description: "Qdrant host"},
+				{Name: "port", Type: "number", Required: false, Default: 6334},
+				{Name: "api_key", Type: "string", Required: false, Sensitive: true},
+				{Name: "use_tls", Type: "boolean", Required: false, Default: false},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_prefix", Type: "string", Required: false, Default: "weknora_embeddings"},
+			},
+		},
+		{
+			Type:        "milvus",
+			DisplayName: "Milvus (Keywords + Vector)",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "addr", Type: "string", Required: true, Description: "Milvus address (e.g., localhost:19530)"},
+				{Name: "username", Type: "string", Required: false},
+				{Name: "password", Type: "string", Required: false, Sensitive: true},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_name", Type: "string", Required: false, Default: "weknora_embeddings"},
+			},
+		},
+		{
+			Type:        "weaviate",
+			DisplayName: "Weaviate (Keywords + Vector)",
+			ConnectionFields: []VectorStoreFieldInfo{
+				{Name: "host", Type: "string", Required: true, Description: "Weaviate host (e.g., weaviate:8080)"},
+				{Name: "grpc_address", Type: "string", Required: false, Default: "weaviate:50051"},
+				{Name: "scheme", Type: "string", Required: false, Default: "http"},
+				{Name: "api_key", Type: "string", Required: false, Sensitive: true},
+			},
+			IndexFields: []VectorStoreFieldInfo{
+				{Name: "collection_prefix", Type: "string", Required: false, Default: "WeKnora"},
+			},
+		},
+		{
+			Type:        "sqlite",
+			DisplayName: "SQLite (Keywords + Vector)",
+			ConnectionFields: []VectorStoreFieldInfo{},
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BuildEnvVectorStores — virtual stores from RETRIEVE_DRIVER env var
+// ---------------------------------------------------------------------------
+
+// BuildEnvVectorStores builds virtual VectorStore entries from RETRIEVE_DRIVER.
+// Returns []VectorStore (not VectorStoreResponse) so that business logic (e.g.,
+// duplicate checking) can use them directly. API responses should wrap them
+// via NewVectorStoreResponse.
+//
+// Pure function — does not call os.Getenv directly.
+//
+// Usage:
+//
+//	types.BuildEnvVectorStores(os.Getenv("RETRIEVE_DRIVER"), os.Getenv)
+func BuildEnvVectorStores(retrieveDriver string, envLookup EnvLookupFunc) []VectorStore {
+	if retrieveDriver == "" {
+		return nil
+	}
+
+	drivers := strings.Split(retrieveDriver, ",")
+	var stores []VectorStore
+
+	for _, driver := range drivers {
+		driver = strings.TrimSpace(driver)
+		if driver == "" {
+			continue
+		}
+
+		store := buildEnvStoreForDriver(driver, envLookup)
+		if store != nil {
+			stores = append(stores, *store)
+		}
+	}
+	return stores
+}
+
+// FindEnvVectorStore finds a specific env store by its virtual ID.
+func FindEnvVectorStore(retrieveDriver string, envLookup EnvLookupFunc, id string) *VectorStore {
+	for _, s := range BuildEnvVectorStores(retrieveDriver, envLookup) {
+		if s.ID == id {
+			return &s
+		}
+	}
+	return nil
+}
+
+func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore {
+	switch driver {
+	case "postgres":
+		return &VectorStore{
+			ID:         "__env_postgres__",
+			Name:       "postgres (env)",
+			EngineType: PostgresRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				UseDefaultConnection: true,
+			},
+		}
+	case "sqlite":
+		return &VectorStore{
+			ID:         "__env_sqlite__",
+			Name:       "sqlite (env)",
+			EngineType: SQLiteRetrieverEngineType,
+		}
+	case "elasticsearch_v8":
+		return &VectorStore{
+			ID:         "__env_elasticsearch_v8__",
+			Name:       "elasticsearch v8 (env)",
+			EngineType: ElasticsearchRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     envLookup("ELASTICSEARCH_ADDR"),
+				Username: envLookup("ELASTICSEARCH_USERNAME"),
+				Password: envLookup("ELASTICSEARCH_PASSWORD"),
+			},
+			IndexConfig: IndexConfig{
+				IndexName: envLookup("ELASTICSEARCH_INDEX"),
+			},
+		}
+	case "elasticsearch_v7":
+		return &VectorStore{
+			ID:         "__env_elasticsearch_v7__",
+			Name:       "elasticsearch v7 (env)",
+			EngineType: ElasticsearchRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     envLookup("ELASTICSEARCH_ADDR"),
+				Username: envLookup("ELASTICSEARCH_USERNAME"),
+				Password: envLookup("ELASTICSEARCH_PASSWORD"),
+			},
+			IndexConfig: IndexConfig{
+				IndexName: envLookup("ELASTICSEARCH_INDEX"),
+			},
+		}
+	case "qdrant":
+		return &VectorStore{
+			ID:         "__env_qdrant__",
+			Name:       "qdrant (env)",
+			EngineType: QdrantRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Host:   envLookup("QDRANT_HOST"),
+				APIKey: envLookup("QDRANT_API_KEY"),
+			},
+		}
+	case "milvus":
+		return &VectorStore{
+			ID:         "__env_milvus__",
+			Name:       "milvus (env)",
+			EngineType: MilvusRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Addr:     envLookup("MILVUS_ADDRESS"),
+				Username: envLookup("MILVUS_USERNAME"),
+				Password: envLookup("MILVUS_PASSWORD"),
+			},
+		}
+	case "weaviate":
+		return &VectorStore{
+			ID:         "__env_weaviate__",
+			Name:       "weaviate (env)",
+			EngineType: WeaviateRetrieverEngineType,
+			ConnectionConfig: ConnectionConfig{
+				Host:        envLookup("WEAVIATE_HOST"),
+				GrpcAddress: envLookup("WEAVIATE_GRPC_ADDRESS"),
+				Scheme:      envLookup("WEAVIATE_SCHEME"),
+				APIKey:      envLookup("WEAVIATE_API_KEY"),
+			},
+		}
+	default:
+		return nil
 	}
 }
