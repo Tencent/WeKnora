@@ -248,12 +248,9 @@ func main() {
 
 		if err != nil {
 			serverErrCh <- err
-			logger.Fatalf(context.Background(), "Failed to run backend: %v", err)
+			return
 		}
 	}()
-
-	// Give the server a moment to start and determine its port
-	time.Sleep(500 * time.Millisecond)
 
 	// Create application with options
 	// macOS app menu
@@ -299,8 +296,33 @@ func main() {
 		}
 	})
 
-	// Wait for the backend URL to be set
-	targetURL, _ := url.Parse(app.backendURL)
+	// Wait until the embedded Gin server has bound a port. Cold start (SQLite
+	// migrations, DI) often exceeds 500ms; building the proxy too early leaves
+	// an empty target and the webview cannot load.
+	const backendStartupTimeout = 3 * time.Minute
+	deadline := time.Now().Add(backendStartupTimeout)
+	for strings.TrimSpace(app.backendURL) == "" {
+		select {
+		case err := <-serverErrCh:
+			if err != nil {
+				logger.Fatalf(context.Background(), "Failed to run backend: %v", err)
+			}
+		default:
+		}
+		if time.Now().After(deadline) {
+			logger.Fatalf(
+				context.Background(),
+				"Timed out after %v waiting for embedded API server to listen (check logs under ~/Library/Logs on macOS)",
+				backendStartupTimeout,
+			)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	targetURL, errParse := url.Parse(app.backendURL)
+	if errParse != nil || targetURL == nil || targetURL.Host == "" {
+		logger.Fatalf(context.Background(), "Invalid backend URL %q: %v", app.backendURL, errParse)
+	}
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
 	// Start Wails application
