@@ -78,6 +78,21 @@
       </div>
     </div>
 
+    <!-- 骨架屏占位 -->
+    <div v-if="loading && kbs.length === 0" class="kb-card-wrap">
+      <div v-for="n in 6" :key="'skel-'+n" class="kb-card kb-card-skeleton">
+        <div class="card-header">
+          <t-skeleton animation="gradient" :row-col="[{ width: '60%', height: '20px' }]" />
+        </div>
+        <div class="card-content">
+          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '80%', height: '14px' }]" />
+        </div>
+        <div class="card-bottom">
+          <t-skeleton animation="gradient" :row-col="[[{ width: '28px', height: '28px', type: 'rect' }, { width: '28px', height: '28px', type: 'rect' }]]" />
+        </div>
+      </div>
+    </div>
+
     <!-- 卡片网格：全部 -->
     <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length > 0" class="kb-card-wrap">
       <!-- 全部：我的知识库 + 共享给我的知识库 -->
@@ -1583,10 +1598,16 @@ const handleUploadFinishedEvent = (event: Event) => {
   transition: width 0.2s ease;
 }
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .kb-card-wrap {
   display: grid;
   gap: 20px;
   grid-template-columns: 1fr;
+  animation: contentFadeIn 0.32s ease-out;
 }
 
 .kb-card {
@@ -1604,6 +1625,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   flex-direction: column;
   height: 160px;
   min-height: 160px;
+
+  &.kb-card-skeleton {
+    cursor: default;
+    .card-header { margin-bottom: 16px; }
+    .card-content { flex: 1; }
+    .card-bottom { margin-top: auto; }
+  }
 
   &:hover {
     border-color: var(--td-brand-color);

@@ -145,6 +145,11 @@ onMounted(() => {
   </t-config-provider>
 </template>
 <style>
+html {
+    /* 提示 UA 使用对应配色绘制滚动条等，减少主题切换时的额外重绘 */
+    color-scheme: light dark;
+}
+
 body,
 html,
 #app {
@@ -159,5 +164,12 @@ html,
     -moz-osx-font-smoothing: grayscale;
     background: var(--td-bg-color-page);
     color: var(--td-text-color-primary);
+}
+
+#app {
+    /* 独立合成层，减轻 WebKit 全量重绘时整窗与内容的撕裂感（桌面 WebView 尤其明显） */
+    isolation: isolate;
+    transform: translateZ(0);
+    backface-visibility: hidden;
 }
 </style>

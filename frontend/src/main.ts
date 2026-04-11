@@ -20,4 +20,7 @@ app.use(createPinia());
 app.use(router);
 app.use(i18n);
 
-app.mount("#app");
+// 等首屏路由（含导航守卫、Lite 自动登录）完成后再挂载，避免先闪默认页再跳转
+router.isReady().finally(() => {
+  app.mount("#app");
+});

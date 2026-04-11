@@ -42,6 +42,7 @@ const uploadInputRef = ref<HTMLInputElement | null>(null);
 const folderUploadInputRef = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const kbLoading = ref(false);
+const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const missingStorageEngine = computed(() => {
   if (!kbInfo.value || isFAQ.value) return false
@@ -566,6 +567,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string) => {
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.setSelectedTagId('');
     if (!isFAQ.value) {
+      docListLoading.value = true;
       loadKnowledgeFiles(targetKbId);
     } else {
       cardList.value = [];
@@ -723,6 +725,7 @@ onUnmounted(() => {
 });
 watch(() => cardList.value, (newValue) => {
   if (isFAQ.value) return;
+  docListLoading.value = false;
 
   // Auto-open document if navigated with ?knowledge_id=xxx
   if (pendingKnowledgeId.value && newValue?.length) {
@@ -1758,8 +1761,22 @@ async function createNewSession(value: string): Promise<void> {
               ref="knowledgeScroll"
               @scroll="handleScroll"
             >
-              <template v-if="cardList.length">
-                <div class="doc-card-list">
+              <!-- 文档骨架屏 -->
+              <div v-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
+                <div v-for="n in 8" :key="'doc-skel-'+n" class="knowledge-card knowledge-card-skeleton">
+                  <div class="card-content">
+                    <div class="card-content-nav">
+                      <t-skeleton animation="gradient" :row-col="[{ width: '70%', height: '18px' }]" />
+                    </div>
+                    <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                  </div>
+                  <div class="card-bottom">
+                    <t-skeleton animation="gradient" :row-col="[[{ width: '80px', height: '14px' }, { width: '40px', height: '18px', type: 'rect' }]]" />
+                  </div>
+                </div>
+              </div>
+              <template v-else-if="cardList.length">
+                <div class="doc-card-list doc-card-list-animated">
                   <!-- 现有文档卡片 -->
                   <div
                     class="knowledge-card"
@@ -1978,7 +1995,7 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </Teleport>
               </template>
-              <template v-else>
+              <template v-else-if="!docListLoading">
                 <div class="doc-empty-state">
                   <EmptyKnowledge />
                 </div>
@@ -2898,6 +2915,11 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .doc-card-list {
   box-sizing: border-box;
   display: grid;
@@ -2905,6 +2927,29 @@ async function createNewSession(value: string): Promise<void> {
   gap: 14px;
   align-content: flex-start;
   width: 100%;
+
+  &.doc-card-list-animated {
+    animation: contentFadeIn 0.32s ease-out;
+  }
+}
+
+.knowledge-card-skeleton {
+  cursor: default;
+  .card-content { padding: 15px 17px 13px; }
+  .card-content-nav { margin-bottom: 14px; }
+  .card-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 0 17px;
+    box-sizing: border-box;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--td-component-stroke);
+  }
 }
 
 .doc-empty-state {

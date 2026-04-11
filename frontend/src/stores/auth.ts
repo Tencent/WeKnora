@@ -135,6 +135,11 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('weknora_selected_tenant_name')
     localStorage.removeItem('weknora_lite_mode')
     isLiteMode.value = false
+    try {
+      sessionStorage.removeItem('weknora_lite_last_path')
+    } catch {
+      /* ignore */
+    }
   }
 
   const initFromStorage = () => {

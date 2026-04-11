@@ -140,6 +140,9 @@ window.open=function(url){
 };
 })();`
 
+// wailsThemeSyncJS：与 index.html 首屏一致，在 DomReady 再跑一遍，覆盖 Ctrl+R 后 runtime 就绪时机
+const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_theme')||'light';if(t==='system')t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var bg=t==='dark'?'#181818':'#eee';document.documentElement.setAttribute('theme-mode',t);document.documentElement.style.background=bg;document.documentElement.style.minHeight='100%';document.documentElement.style.colorScheme=t==='dark'?'dark':'light';if(document.body){document.body.style.background=bg;document.body.style.minHeight='100%';}var w=window.runtime;if(!w)return;if(t==='dark'){if(w.WindowSetDarkTheme)w.WindowSetDarkTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(24,24,24,255);}else{if(w.WindowSetLightTheme)w.WindowSetLightTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(238,238,238,255);}}catch(e){}})()`
+
 func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
 	// We need to change the working directory to the Resources folder where our configs are.
@@ -286,6 +289,7 @@ func main() {
 		StartHidden: false, // Show window on startup
 		OnStartup:   app.startup,
 		OnDomReady: func(ctx context.Context) {
+			wailsruntime.WindowExecJS(ctx, wailsThemeSyncJS)
 			wailsruntime.WindowExecJS(ctx, dragHandlerJS)
 			// 注入真实 API 根路径（与 window.location.origin 不同）；无 Go 绑定时仍可显示。
 			if u := strings.TrimSpace(app.backendURL); u != "" {

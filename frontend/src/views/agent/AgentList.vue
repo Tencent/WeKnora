@@ -39,6 +39,23 @@
         </div>
       </div>
       <div class="agent-list-main">
+    <!-- 骨架屏占位 -->
+    <div v-if="loading && agents.length === 0" class="agent-card-wrap">
+      <div v-for="n in 6" :key="'skel-'+n" class="agent-card agent-card-skeleton">
+        <div class="card-header">
+          <div class="card-header-left">
+            <t-skeleton animation="gradient" :row-col="[[{ width: '32px', height: '32px', type: 'circle' }, { width: '40%', height: '18px' }]]" />
+          </div>
+        </div>
+        <div class="card-content">
+          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '70%', height: '14px' }]" />
+        </div>
+        <div class="card-bottom">
+          <t-skeleton animation="gradient" :row-col="[[{ width: '60px', height: '22px', type: 'rect' }, { width: '60px', height: '22px', type: 'rect' }]]" />
+        </div>
+      </div>
+    </div>
+
     <!-- 全部：我的 + 共享 -->
     <div v-if="spaceSelection === 'all' && filteredAgents.length > 0" class="agent-card-wrap">
       <div
@@ -1184,10 +1201,23 @@ defineExpose({
 }
 
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .agent-card-wrap {
   display: grid;
   gap: 20px;
   grid-template-columns: 1fr;
+  animation: contentFadeIn 0.32s ease-out;
+}
+
+.agent-card-skeleton {
+  cursor: default;
+  .card-header { margin-bottom: 16px; }
+  .card-content { flex: 1; }
+  .card-bottom { margin-top: auto; }
 }
 
 /* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */

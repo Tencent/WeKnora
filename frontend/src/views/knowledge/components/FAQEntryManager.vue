@@ -394,9 +394,22 @@
           </div>
           <!-- Card List Container with Scroll -->
           <div ref="scrollContainer" class="faq-scroll-container" @scroll="handleScroll">
-          <t-loading :loading="loading && entries.length === 0" size="medium">
+            <!-- FAQ 骨架屏 -->
+            <div v-if="loading && entries.length === 0" class="faq-skeleton-grid">
+              <div v-for="n in 6" :key="'faq-skel-'+n" class="faq-card faq-card-skeleton">
+                <div class="faq-card-header">
+                  <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '16px' }]" />
+                </div>
+                <div class="faq-card-body">
+                  <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '13px' }, { width: '90%', height: '13px' }, { width: '60%', height: '13px' }]" />
+                </div>
+                <div class="faq-skel-footer">
+                  <t-skeleton animation="gradient" :row-col="[[{ width: '50px', height: '18px', type: 'rect' }, { width: '60px', height: '18px', type: 'rect' }]]" />
+                </div>
+              </div>
+            </div>
             <!-- Card List -->
-            <template v-if="entries.length > 0">
+            <template v-else-if="entries.length > 0">
               <div ref="cardListRef" class="faq-card-list">
                 <div
                   v-for="entry in entries"
@@ -614,8 +627,8 @@
                 </div>
               </div>
             </template>
-            <template v-else>
-              <div v-if="!loading" class="faq-empty-state">
+            <template v-else-if="!loading">
+              <div class="faq-empty-state">
                 <div class="empty-content">
                   <t-icon name="file-add" size="48px" class="empty-icon" />
                   <div class="empty-text">{{ $t('knowledgeEditor.faq.emptyTitle') }}</div>
@@ -623,7 +636,6 @@
                 </div>
               </div>
             </template>
-          </t-loading>
           <div v-if="loadingMore" class="faq-load-more">
             <t-loading size="small" :text="$t('common.loading')" />
           </div>
@@ -1363,7 +1375,7 @@ const handleFaqAction = (data: { value: string }) => {
   }
 }
 
-const loading = ref(false)
+const loading = ref(true)
 const loadingMore = ref(false)
 const entries = ref<FAQEntry[]>([])
 const entryStatusLoading = reactive<Record<number, boolean>>({})
@@ -4171,10 +4183,40 @@ watch(() => entries.value.map(e => ({
   padding-right: 4px;
 }
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.faq-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  width: 100%;
+  animation: contentFadeIn 0.32s ease-out;
+}
+
+.faq-card-skeleton {
+  cursor: default;
+  height: auto;
+  .faq-card-header {
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+  .faq-card-body {
+    padding: 8px 0;
+  }
+  .faq-skel-footer {
+    padding-top: 8px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+}
+
 // 卡片列表样式 - 使用绝对定位实现瀑布流，下一行补齐上一行空缺
 .faq-card-list {
   position: relative;
   width: 100%;
+  animation: contentFadeIn 0.32s ease-out;
   min-width: 0;
 }
 

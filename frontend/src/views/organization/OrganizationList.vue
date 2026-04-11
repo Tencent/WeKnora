@@ -43,6 +43,21 @@
         </div>
       </div>
       <div class="org-list-main">
+    <!-- 骨架屏占位 -->
+    <div v-if="loading && filteredOrganizations.length === 0" class="org-card-wrap">
+      <div v-for="n in 4" :key="'skel-'+n" class="org-card org-card-skeleton">
+        <div class="card-header">
+          <t-skeleton animation="gradient" :row-col="[[{ width: '36px', height: '36px', type: 'circle' }, { width: '50%', height: '20px' }]]" />
+        </div>
+        <div style="flex:1;margin-top:12px">
+          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '70%', height: '14px' }]" />
+        </div>
+        <div style="margin-top:auto">
+          <t-skeleton animation="gradient" :row-col="[[{ width: '60px', height: '22px', type: 'rect' }, { width: '60px', height: '22px', type: 'rect' }]]" />
+        </div>
+      </div>
+    </div>
+
     <!-- 卡片网格 -->
     <div v-if="filteredOrganizations.length > 0" class="org-card-wrap">
       <div
@@ -1406,10 +1421,24 @@ onUnmounted(() => {
   }
 }
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .org-card-wrap {
   display: grid;
   gap: 20px;
   grid-template-columns: 1fr;
+  animation: contentFadeIn 0.32s ease-out;
+}
+
+.org-card-skeleton {
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  height: 160px;
+  min-height: 160px;
 }
 
 /* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */

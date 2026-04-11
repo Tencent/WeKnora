@@ -61,6 +61,14 @@
                 </div>
                 </t-tooltip>
                 <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children && !uiStore.sidebarCollapsed">
+                    <!-- 骨架屏占位 -->
+                    <template v-if="loading && groupedSessions.length === 0">
+                        <div v-for="n in 5" :key="'skel-'+n" class="submenu_item_p">
+                            <div class="submenu_item">
+                                <t-skeleton animation="gradient" style="margin-left:18px;width:80%" :row-col="[{ width: '100%', height: '16px' }]" />
+                            </div>
+                        </div>
+                    </template>
                     <template v-for="(group, groupIndex) in groupedSessions" :key="groupIndex">
                         <div class="timeline_header">{{ group.label }}</div>
                         <div class="submenu_item_p" v-for="(subitem, subindex) in group.items" :key="subitem.id">
@@ -1025,6 +1033,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         margin-left: 4px;
     }
     
+    @keyframes menuItemFadeIn {
+        from { opacity: 0; transform: translateX(-4px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+
     .timeline_header {
         font-family: "PingFang SC";
         font-size: 12px;
@@ -1034,6 +1047,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         margin-top: 8px;
         line-height: 20px;
         user-select: none;
+        animation: menuItemFadeIn 0.25s ease-out;
         
         &:first-child {
             margin-top: 4px;
@@ -1044,6 +1058,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         height: 44px;
         padding: 4px 0px 4px 0px;
         box-sizing: border-box;
+        animation: menuItemFadeIn 0.25s ease-out;
     }
 
 

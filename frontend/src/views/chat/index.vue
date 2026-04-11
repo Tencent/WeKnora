@@ -2,9 +2,33 @@
     <div class="chat">
         <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
             <div class="msg_list">
+                <!-- 消息列表骨架屏 -->
+                <div v-if="historyLoading && messagesList.length === 0" class="msg-skeleton-list">
+                    <div class="msg-skeleton msg-skeleton-user">
+                        <t-skeleton animation="gradient" :row-col="[{ width: '45%', height: '36px', type: 'rect' }]" />
+                    </div>
+                    <div class="msg-skeleton msg-skeleton-bot">
+                        <t-skeleton animation="gradient" :row-col="[{ width: '80%', height: '16px' }, { width: '100%', height: '16px' }, { width: '60%', height: '16px' }]" />
+                    </div>
+                    <div class="msg-skeleton msg-skeleton-user">
+                        <t-skeleton animation="gradient" :row-col="[{ width: '35%', height: '36px', type: 'rect' }]" />
+                    </div>
+                    <div class="msg-skeleton msg-skeleton-bot">
+                        <t-skeleton animation="gradient" :row-col="[{ width: '70%', height: '16px' }, { width: '90%', height: '16px' }]" />
+                    </div>
+                </div>
                 <!-- 推荐问题卡片 - 仅在新会话（无消息）时展示 -->
-                <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 }">
-                    <transition name="sq-fade">
+                <div v-if="messagesList.length === 0 && !loading" class="suggested-questions-container" :class="{ 'has-questions': suggestedQuestions.length > 0 || suggestedQuestionsLoading }">
+                    <!-- 骨架屏占位 -->
+                    <div v-if="suggestedQuestionsLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
+                        <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                        <div class="suggested-questions-grid">
+                            <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
+                                <t-skeleton animation="gradient" :row-col="[{ width: '90%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                            </div>
+                        </div>
+                    </div>
+                    <transition v-else appear name="sq-fade">
                         <div v-if="suggestedQuestions.length > 0" class="suggested-questions-inner">
                             <div class="suggested-questions-title">{{ t('chat.suggestedQuestions') }}</div>
                             <div class="suggested-questions-grid">
@@ -103,6 +127,7 @@ const scrollLock = ref(false);
 const isNeedTitle = ref(false);
 const isFirstEnter = ref(true);
 const loading = ref(false);
+const historyLoading = ref(true);
 let fullContent = ref('')
 let userquery = ref('')
 const scrollContainer = ref(null)
@@ -212,7 +237,8 @@ watch([() => route.params], (newvalue) => {
         messagesList.splice(0);
         session_id.value = newvalue[0].chatid;
         
-        // 切换会话时，重置状态（加载历史消息不应显示loading）
+        // 切换会话时，重置状态
+        historyLoading.value = true;
         loading.value = false;
         isReplying.value = false;
         currentAssistantMessageId.value = '';
@@ -271,6 +297,8 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
             created_at.value = res.data[0].created_at;
             handleMsgList(res.data, isScrollType, scrollHeight);
         }
+    }).finally(() => {
+        historyLoading.value = false;
     })
 }
 
@@ -1103,6 +1131,7 @@ onMounted(async () => {
     checkmenuTitle(session_id.value)
     if (firstQuery.value) {
         scrollLock.value = true;
+        historyLoading.value = false;
         sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || []);
         usemenuStore.changeFirstQuery('', [], '', []);
     } else {
@@ -1236,6 +1265,30 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 }
 
+@keyframes contentFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.msg-skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 800px;
+    padding: 16px 0;
+    animation: contentFadeIn 0.3s ease-out;
+}
+.msg-skeleton-user {
+    display: flex;
+    justify-content: flex-end;
+}
+.msg-skeleton-bot {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 4px;
+}
+
 .msg_list {
     display: flex;
     flex-direction: column;
@@ -1308,6 +1361,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-direction: column;
     align-items: center;
     width: 100%;
+    animation: contentFadeIn 0.3s ease-out;
 }
 
 .sq-fade-enter-active,
