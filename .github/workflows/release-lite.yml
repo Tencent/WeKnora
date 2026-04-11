@@ -57,13 +57,13 @@ jobs:
         run: |
           npm ci
           npm run build
+          # Archive the outputs directly to avoid upload-artifact path issues
+          tar -czf ../frontend-dist.tar.gz dist/ src/wailsjs/
 
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: |
-            frontend/dist/
-            frontend/src/wailsjs/
+          path: frontend-dist.tar.gz
           retention-days: 1
 
   # ── 2a. Build Web CLI binary per platform (native CGO) ──
@@ -99,7 +99,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: web/
+
+      - name: Extract frontend to web
+        shell: bash
+        run: |
+          mkdir -p web
+          tar -xzf frontend-dist.tar.gz -C web/ dist --strip-components=1
 
       - name: Resolve version
         id: ver
@@ -200,7 +205,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: .
+
+      - name: Extract frontend directories
+        shell: bash
+        run: |
+          mkdir -p frontend
+          tar -xzf frontend-dist.tar.gz -C frontend/
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
