@@ -1,6 +1,6 @@
 module github.com/Tencent/WeKnora
 
-go 1.24.11
+go 1.26.2
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0

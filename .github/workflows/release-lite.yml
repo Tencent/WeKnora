@@ -18,7 +18,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.26"
   NODE_VERSION: "22"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
@@ -160,18 +160,15 @@ jobs:
             platform: windows/amd64
             arch_label: windows_amd64
             artifact_name: desktop-windows-amd64
-            go_version: "1.23"
-            gotoolchain: local
     runs-on: ${{ matrix.os }}
     env:
       CGO_ENABLED: 1
-      GOTOOLCHAIN: ${{ matrix.gotoolchain || 'auto' }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go_version || env.GO_VERSION }}
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - uses: actions/setup-node@v4
@@ -234,7 +231,6 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
-            sed -i 's/^go 1\.24\..*/go 1.23/' go.mod
           fi
 
           cd cmd/desktop
