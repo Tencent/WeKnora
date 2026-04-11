@@ -201,10 +201,21 @@ jobs:
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: Pre-compile Go packages (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          cd cmd/desktop
+          go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
+          rm -f _prebuild_tmp.exe
+
       - name: Build desktop app
         shell: bash
         run: |
           export EDITION=lite
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
           eval "$(./scripts/get_version.sh env)"
           LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
           export CGO_CFLAGS="-Wno-deprecated-declarations"
@@ -220,11 +231,10 @@ jobs:
           fi
           if [ "${{ runner.os }}" = "Windows" ]; then
             NSIS_FLAG="-nsis"
-            export GOFLAGS="-p=1"
           fi
 
           cd cmd/desktop
-          wails build -skipbindings -clean \
+          wails build -clean \
             -tags "${BUILD_TAGS}" \
             -platform "${{ matrix.platform }}" \
             ${NSIS_FLAG} \
