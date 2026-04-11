@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser } from '@/api/auth'
 
 // TDesign locale configs
@@ -16,6 +17,7 @@ import ruRUConfig from 'tdesign-vue-next/esm/locale/ru_RU'
 const { locale } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
+const settingsStore = useSettingsStore()
 
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
@@ -132,8 +134,38 @@ const handleGlobalOIDCCallback = async () => {
   }
 }
 
+let updateCheckTimer: ReturnType<typeof setInterval> | null = null
+
 onMounted(() => {
   handleGlobalOIDCCallback()
+
+  // Auto check for updates on startup
+  setTimeout(() => {
+    if (settingsStore.isAutoCheckUpdateEnabled) {
+      // @ts-ignore
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoCheckForUpdates) {
+        // @ts-ignore
+        window.go.main.App.AutoCheckForUpdates()
+      }
+    }
+  }, 2000)
+
+  // Periodically check for updates (every 4 hours)
+  updateCheckTimer = setInterval(() => {
+    if (settingsStore.isAutoCheckUpdateEnabled) {
+      // @ts-ignore
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.AutoCheckForUpdates) {
+        // @ts-ignore
+        window.go.main.App.AutoCheckForUpdates()
+      }
+    }
+  }, 4 * 60 * 60 * 1000)
+})
+
+onUnmounted(() => {
+  if (updateCheckTimer) {
+    clearInterval(updateCheckTimer)
+  }
 })
 
 </script>

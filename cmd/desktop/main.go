@@ -27,7 +27,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
-	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing"
@@ -145,27 +144,6 @@ window.open=function(url){
 const wailsThemeSyncJS = `(function(){try{var t=localStorage.getItem('WeKnora_theme')||'light';if(t==='system')t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var bg=t==='dark'?'#181818':'#eee';document.documentElement.setAttribute('theme-mode',t);document.documentElement.style.background=bg;document.documentElement.style.minHeight='100%';document.documentElement.style.colorScheme=t==='dark'?'dark':'light';if(document.body){document.body.style.background=bg;document.body.style.minHeight='100%';}var w=window.runtime;if(!w)return;if(t==='dark'){if(w.WindowSetDarkTheme)w.WindowSetDarkTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(24,24,24,255);}else{if(w.WindowSetLightTheme)w.WindowSetLightTheme();if(w.WindowSetBackgroundColour)w.WindowSetBackgroundColour(238,238,238,255);}}catch(e){}})()`
 
 const weknoraGitHubRepoURL = "https://github.com/Tencent/WeKnora"
-
-// desktopAboutVersion 优先使用构建脚本注入的 handler.Version，否则尝试读取仓库根目录 VERSION（本地 wails dev 等未带 ldflags 时）。
-func desktopAboutVersion() string {
-	if v := strings.TrimSpace(handler.Version); v != "" && v != "unknown" {
-		return v
-	}
-	for _, p := range []string{
-		"VERSION",
-		filepath.Join("..", "..", "VERSION"),
-		filepath.Join("..", "..", "..", "VERSION"),
-	} {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		if v := strings.TrimSpace(string(b)); v != "" {
-			return v
-		}
-	}
-	return "unknown"
-}
 
 func main() {
 	// For macOS .app bundle, the working directory is usually "/" or the MacOS folder.
@@ -299,6 +277,12 @@ func main() {
 		if choice == "Open GitHub" {
 			wailsruntime.BrowserOpenURL(app.ctx, weknoraGitHubRepoURL)
 		}
+	})
+	FileMenu.AddText("Check for Updates...", nil, func(_ *menu.CallbackData) {
+		if app.ctx == nil {
+			return
+		}
+		checkUpdate(app.ctx, desktopAboutVersion(), true, false)
 	})
 	FileMenu.AddSeparator()
 	FileMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {

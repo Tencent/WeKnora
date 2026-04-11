@@ -423,6 +423,8 @@ export default {
     webSearchConfig: "网络搜索",
     enableMemory: "开启记忆功能",
     enableMemoryDesc: "开启后，系统将记录您的对话历史，并在后续对话中自动回忆相关内容，提供更个性化的回答。",
+    autoCheckUpdate: '自动下载更新',
+    autoCheckUpdateDesc: '开启后自动检查并在后台下载最新版本安装包。',
     memoryRequiresNeo4j: "记忆功能依赖 Neo4j 图数据库，请先配置并启用 Neo4j（设置环境变量 NEO4J_ENABLE=true）后再开启此功能。",
     memoryHowToEnable: "查看 Neo4j 配置指南",
     parserEngine: "解析引擎",

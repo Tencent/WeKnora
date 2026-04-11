@@ -68,3 +68,17 @@ func (a *App) GetAPILanBaseURL() string {
 func (a *App) GetDesktopListenPublicActive() bool {
 	return a.listenPublic
 }
+
+// CheckForUpdates manually triggers the update check from the frontend.
+func (a *App) CheckForUpdates() {
+	if a.ctx != nil {
+		checkUpdate(a.ctx, desktopAboutVersion(), true, false)
+	}
+}
+
+// AutoCheckForUpdates silently checks for updates and downloads them.
+func (a *App) AutoCheckForUpdates() {
+	if a.ctx != nil {
+		checkUpdate(a.ctx, desktopAboutVersion(), false, true)
+	}
+}
