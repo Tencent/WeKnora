@@ -222,10 +222,17 @@ func main() {
 				return fmt.Errorf("failed to start server: %v", err)
 			}
 
-			actualAddr := listener.Addr().(*net.TCPAddr).String()
-
-			// Store the backend URL so Wails can load it
-			app.backendURL = fmt.Sprintf("http://%s", actualAddr)
+			tcpAddr := listener.Addr().(*net.TCPAddr)
+			port := tcpAddr.Port
+			app.listenPublic = LoadDesktopHTTPBindPublic()
+			// Reverse proxy and webview API calls always use loopback; avoid 0.0.0.0 / [::] as dial target.
+			app.backendURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+			app.apiLanBaseURL = ""
+			if app.listenPublic {
+				if ip := desktopPreferredLANIPv4(); ip != nil {
+					app.apiLanBaseURL = fmt.Sprintf("http://%s:%d/api/v1", ip.String(), port)
+				}
+			}
 
 			// Handle graceful shutdown from Wails OnShutdown hook
 			go func() {
@@ -254,7 +261,7 @@ func main() {
 				app.shutdownCh <- struct{}{} // trigger shutdown
 			}()
 
-			logger.Infof(context.Background(), "Server is running at %s", actualAddr)
+			logger.Infof(context.Background(), "Server is running at %s (proxy -> %s)", tcpAddr.String(), app.backendURL)
 			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 				return fmt.Errorf("server error: %v", err)
 			}
@@ -334,6 +341,10 @@ func main() {
 				inject := fmt.Sprintf(`try{window.__WEKNORA_API_BASE__=%s}catch(e){}`, strconv.Quote(apiRoot))
 				wailsruntime.WindowExecJS(ctx, inject)
 			}
+			if lan := strings.TrimSpace(app.apiLanBaseURL); lan != "" {
+				injectLan := fmt.Sprintf(`try{window.__WEKNORA_API_LAN_BASE__=%s}catch(e){}`, strconv.Quote(lan))
+				wailsruntime.WindowExecJS(ctx, injectLan)
+			}
 		},
 		OnShutdown: app.shutdown,
 		Bind: []interface{}{
@@ -411,14 +422,76 @@ func resolveDesktopDataPath(rawPath, defaultRelativePath, appSupportDir string) 
 }
 
 // desktopBackendListenAddr returns the TCP address for the embedded Gin server (Wails desktop).
-// Always binds loopback 127.0.0.1. Uses saved UI preference (desktop-prefs.json) when set, else ephemeral port :0.
+// Binds 127.0.0.1 by default, or 0.0.0.0 when http_bind_public is set in desktop-prefs.json.
 func desktopBackendListenAddr() string {
-	const host = "127.0.0.1"
+	host := "127.0.0.1"
+	if LoadDesktopHTTPBindPublic() {
+		host = "0.0.0.0"
+	}
 	pref := LoadDesktopPrefsHTTPPort()
 	if pref >= 1 && pref <= 65535 {
 		return net.JoinHostPort(host, strconv.Itoa(pref))
 	}
 	return net.JoinHostPort(host, "0")
+}
+
+// desktopPreferredLANIPv4 picks a non-loopback IPv4 for “other devices on this network” URL hints.
+func desktopPreferredLANIPv4() net.IP {
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, aerr := iface.Addrs()
+			if aerr != nil {
+				continue
+			}
+			for _, a := range addrs {
+				ipNet, ok := a.(*net.IPNet)
+				if !ok || ipNet.IP == nil {
+					continue
+				}
+				ip4 := ipNet.IP.To4()
+				if ip4 == nil || ip4.IsLoopback() {
+					continue
+				}
+				if ip4.IsPrivate() {
+					return ip4
+				}
+			}
+		}
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, aerr := iface.Addrs()
+			if aerr != nil {
+				continue
+			}
+			for _, a := range addrs {
+				ipNet, ok := a.(*net.IPNet)
+				if !ok || ipNet.IP == nil {
+					continue
+				}
+				ip4 := ipNet.IP.To4()
+				if ip4 == nil || ip4.IsLoopback() || ip4.IsUnspecified() {
+					continue
+				}
+				return ip4
+			}
+		}
+	}
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	la, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || la.IP == nil {
+		return nil
+	}
+	return la.IP.To4()
 }
 
 func migrateLegacyDesktopData(resourcesDir, targetDataDir string) {

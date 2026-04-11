@@ -1429,6 +1429,18 @@ export default {
       desktopPortSaved: "已保存，请重启应用后生效",
       desktopPortSaveFailed: "保存失败",
       desktopPortInvalid: "请输入 0–65535 之间的端口",
+      desktopBindPublicLabel: "允许局域网访问 API",
+      desktopBindPublicDescription:
+        "开启后内嵌服务监听 0.0.0.0，同一局域网内其他设备可通过下方地址调用 API。存在数据暴露风险，请在防火墙与路由侧自行做好访问控制；修改后需重启应用。",
+      desktopBindPublicSaved: "已保存，请重启应用后生效",
+      desktopBindPublicSaveFailed: "保存失败",
+      lanUrlLabel: "局域网 API 地址",
+      lanUrlDescription:
+        "在已开启「允许局域网访问」且应用已重启后显示；若 IP 不准确，请在本机网络设置中查看实际 IPv4 后替换主机部分。",
+      lanUrlCopyTitle: "复制局域网 API 地址",
+      lanUrlCopySuccess: "局域网 API 地址已复制",
+      lanUrlUnavailable:
+        "当前已监听所有网卡，但未能自动识别本机 IPv4。请在本机网络设置中查看局域网地址，并手动拼接为 http://你的IP:端口/api/v1。",
     },
   },
   system: {

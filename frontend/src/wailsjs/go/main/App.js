@@ -6,8 +6,24 @@ export function GetAPIBaseURL() {
   return window['go']['main']['App']['GetAPIBaseURL']();
 }
 
+export function GetAPILanBaseURL() {
+  return window['go']['main']['App']['GetAPILanBaseURL']();
+}
+
+export function GetDesktopHTTPBindPublicSetting() {
+  return window['go']['main']['App']['GetDesktopHTTPBindPublicSetting']();
+}
+
 export function GetDesktopHTTPPortSetting() {
   return window['go']['main']['App']['GetDesktopHTTPPortSetting']();
+}
+
+export function GetDesktopListenPublicActive() {
+  return window['go']['main']['App']['GetDesktopListenPublicActive']();
+}
+
+export function SetDesktopHTTPBindPublicSetting(arg1) {
+  return window['go']['main']['App']['SetDesktopHTTPBindPublicSetting'](arg1);
 }
 
 export function SetDesktopHTTPPortSetting(arg1) {

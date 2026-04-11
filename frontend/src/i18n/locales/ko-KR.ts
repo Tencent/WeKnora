@@ -1435,8 +1435,21 @@ export default {
       desktopPortSaved: "저장되었습니다. 적용하려면 앱을 다시 시작하세요.",
       desktopPortSaveFailed: "저장 실패",
       desktopPortInvalid: "0~65535 사이의 포트를 입력하세요",
+      desktopBindPublicLabel: "Allow LAN access to the API",
+      desktopBindPublicDescription:
+        "When enabled, the embedded server listens on 0.0.0.0 so other devices on your LAN can reach the API via the address below. This increases exposure—use host firewalls and routing rules as needed. Restart the app after changing this.",
+      desktopBindPublicSaved: "Saved. Restart the app for it to take effect.",
+      desktopBindPublicSaveFailed: "Save failed",
+      lanUrlLabel: "LAN API base URL",
+      lanUrlDescription:
+        "Shown after \"Allow LAN access\" is on and the app has restarted. If the IP is wrong, replace the host with your machine IPv4 from system network settings.",
+      lanUrlCopyTitle: "Copy LAN API URL",
+      lanUrlCopySuccess: "LAN API URL copied",
+      lanUrlUnavailable:
+        "The API is listening on all interfaces, but no LAN IPv4 could be detected automatically. Find your IPv4 in network settings and build http://YOUR_IP:PORT/api/v1 manually.",
     },
   },
+
   system: {
     title: "시스템 정보",
     sectionDescription: "시스템 버전 정보 및 사용자 계정 설정 보기",

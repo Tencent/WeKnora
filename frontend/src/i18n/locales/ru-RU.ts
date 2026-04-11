@@ -1282,6 +1282,18 @@ export default {
       desktopPortSaved: 'Сохранено. Перезапустите приложение, чтобы применить.',
       desktopPortSaveFailed: 'Не удалось сохранить',
       desktopPortInvalid: 'Введите порт от 0 до 65535',
+      desktopBindPublicLabel: 'Разрешить доступ к API в LAN',
+      desktopBindPublicDescription:
+        'Встроенный сервер слушает 0.0.0.0 — другие устройства в локальной сети смогут обращаться к API по адресу ниже. Риски доступа выше; настройте брандмауэр и маршрутизацию. После изменения перезапустите приложение.',
+      desktopBindPublicSaved: 'Сохранено. Перезапустите приложение, чтобы применить.',
+      desktopBindPublicSaveFailed: 'Не удалось сохранить',
+      lanUrlLabel: 'Базовый URL API для LAN',
+      lanUrlDescription:
+        'Отображается после включения доступа в LAN и перезапуска. Если IP неверный, подставьте IPv4 из сетевых настроек системы.',
+      lanUrlCopyTitle: 'Копировать LAN URL API',
+      lanUrlCopySuccess: 'LAN URL API скопирован',
+      lanUrlUnavailable:
+        'API слушает все интерфейсы, но LAN IPv4 не удалось определить автоматически. Узнайте IPv4 в настройках сети и соберите http://ВАШ_IP:ПОРТ/api/v1 вручную.',
     }
   },
   system: {

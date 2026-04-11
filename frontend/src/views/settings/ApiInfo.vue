@@ -81,28 +81,69 @@
         </div>
       </div>
 
-      <!-- Desktop (Wails): fixed local API port for Chrome extension etc. -->
-      <div v-if="showDesktopPortSetting" class="setting-row">
-        <div class="setting-info">
-          <label>{{ $t('tenant.api.desktopPortLabel') }}</label>
-          <p class="desc">{{ $t('tenant.api.desktopPortDescription') }}</p>
-        </div>
-        <div class="setting-control">
-          <div class="api-key-control">
-            <div class="desktop-port-input-wrap">
-              <t-input-number
-                v-model="desktopPortInput"
-                :min="0"
-                :max="65535"
-                theme="normal"
-              />
+      <!-- Desktop (Wails): fixed local API port + optional LAN/public listen -->
+      <template v-if="showDesktopPortSetting || showDesktopBindPublicSetting">
+        <div v-if="showDesktopPortSetting" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.api.desktopPortLabel') }}</label>
+            <p class="desc">{{ $t('tenant.api.desktopPortDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <div class="api-key-control">
+              <div class="desktop-port-input-wrap">
+                <t-input-number
+                  v-model="desktopPortInput"
+                  :min="0"
+                  :max="65535"
+                  theme="normal"
+                />
+              </div>
+              <t-button size="small" variant="text" @click="saveDesktopPort">
+                {{ $t('tenant.api.desktopPortSave') }}
+              </t-button>
             </div>
-            <t-button size="small" variant="text" @click="saveDesktopPort">
-              {{ $t('tenant.api.desktopPortSave') }}
-            </t-button>
           </div>
         </div>
-      </div>
+
+        <div v-if="showDesktopBindPublicSetting" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.api.desktopBindPublicLabel') }}</label>
+            <p class="desc">{{ $t('tenant.api.desktopBindPublicDescription') }}</p>
+          </div>
+          <div class="setting-control desktop-bind-public-control">
+            <t-switch v-model="desktopBindPublicInput" @change="onDesktopBindPublicChange" />
+          </div>
+        </div>
+
+        <div v-if="wailsApiLanBaseURL" class="setting-row">
+          <div class="setting-info">
+            <label>{{ $t('tenant.api.lanUrlLabel') }}</label>
+            <p class="desc">{{ $t('tenant.api.lanUrlDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <div class="api-key-control">
+              <t-input
+                :model-value="wailsApiLanBaseURL"
+                readonly
+                type="text"
+                style="width: 100%; font-family: monospace; font-size: 12px;"
+              />
+              <t-button
+                size="small"
+                variant="text"
+                @click="copyLanApiUrl"
+                :title="$t('tenant.api.lanUrlCopyTitle')"
+              >
+                <t-icon name="file-copy" />
+              </t-button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showLanUrlUnavailableHint" class="setting-row lan-url-hint-row">
+          <t-alert theme="warning" :message="$t('tenant.api.lanUrlUnavailable')" />
+        </div>
+      </template>
 
       <!-- API docs -->
       <div class="setting-row">
@@ -187,7 +228,11 @@ const showApiKey = ref(false)
 /** WeKnora Lite (Wails): real API origin is loopback + dynamic port, not window.location.origin */
 const wailsApiBaseURL = ref<string | null>(null)
 const showDesktopPortSetting = ref(false)
+const showDesktopBindPublicSetting = ref(false)
 const desktopPortInput = ref<number | undefined>(0)
+const desktopBindPublicInput = ref(false)
+const wailsApiLanBaseURL = ref<string | null>(null)
+const desktopListenPublicActive = ref(false)
 
 // Computed
 const displayApiKey = computed(() => {
@@ -201,6 +246,13 @@ const displayApiKey = computed(() => {
   }
   return masked
 })
+
+const showLanUrlUnavailableHint = computed(
+  () =>
+    showDesktopBindPublicSetting.value &&
+    desktopListenPublicActive.value &&
+    !wailsApiLanBaseURL.value
+)
 
 const apiBaseUrlDisplay = computed(() => {
   if (wailsApiBaseURL.value) {
@@ -217,12 +269,17 @@ const apiBaseUrlDisplay = computed(() => {
 
 type WeKnoraDesktopWindow = Window & {
   __WEKNORA_API_BASE__?: string
+  __WEKNORA_API_LAN_BASE__?: string
   go?: {
     main?: {
       App?: {
         GetAPIBaseURL?: () => Promise<string> | string
+        GetAPILanBaseURL?: () => Promise<string> | string
         GetDesktopHTTPPortSetting?: () => Promise<number> | number
+        GetDesktopHTTPBindPublicSetting?: () => Promise<boolean> | boolean
+        GetDesktopListenPublicActive?: () => Promise<boolean> | boolean
         SetDesktopHTTPPortSetting?: (port: number) => Promise<void> | void
+        SetDesktopHTTPBindPublicSetting?: (v: boolean) => Promise<void> | void
       }
     }
   }
@@ -234,6 +291,7 @@ async function tryLoadWailsApiBaseURL() {
     const injected = win.__WEKNORA_API_BASE__
     if (typeof injected === 'string' && injected.trim()) {
       wailsApiBaseURL.value = injected.trim().replace(/\/$/, '')
+      await tryLoadWailsLanHints(win)
       return
     }
     const fn = win.go?.main?.App?.GetAPIBaseURL
@@ -246,9 +304,37 @@ async function tryLoadWailsApiBaseURL() {
       } catch {
         /* binding error */
       }
+      await tryLoadWailsLanHints(win)
       return
     }
     await new Promise((r) => setTimeout(r, 50))
+  }
+  await tryLoadWailsLanHints(win)
+}
+
+async function tryLoadWailsLanHints(win: WeKnoraDesktopWindow) {
+  const injectedLan = win.__WEKNORA_API_LAN_BASE__
+  if (typeof injectedLan === 'string' && injectedLan.trim()) {
+    wailsApiLanBaseURL.value = injectedLan.trim().replace(/\/$/, '')
+  }
+  const fnLan = win.go?.main?.App?.GetAPILanBaseURL
+  if (typeof fnLan === 'function' && !wailsApiLanBaseURL.value) {
+    try {
+      const raw = await Promise.resolve(fnLan())
+      if (typeof raw === 'string' && raw.trim()) {
+        wailsApiLanBaseURL.value = raw.trim().replace(/\/$/, '')
+      }
+    } catch {
+      /* binding error */
+    }
+  }
+  const fnAct = win.go?.main?.App?.GetDesktopListenPublicActive
+  if (typeof fnAct === 'function') {
+    try {
+      desktopListenPublicActive.value = !!(await Promise.resolve(fnAct()))
+    } catch {
+      desktopListenPublicActive.value = false
+    }
   }
 }
 
@@ -257,15 +343,47 @@ function desktopPortBindingsAvailable(win: WeKnoraDesktopWindow) {
   return typeof app?.GetDesktopHTTPPortSetting === 'function' && typeof app?.SetDesktopHTTPPortSetting === 'function'
 }
 
-async function loadDesktopPortPrefs() {
+function desktopBindPublicBindingsAvailable(win: WeKnoraDesktopWindow) {
+  const app = win.go?.main?.App
+  return (
+    typeof app?.GetDesktopHTTPBindPublicSetting === 'function' &&
+    typeof app?.SetDesktopHTTPBindPublicSetting === 'function'
+  )
+}
+
+async function loadDesktopApiPrefs() {
   const win = window as WeKnoraDesktopWindow
-  if (!desktopPortBindingsAvailable(win)) return
-  showDesktopPortSetting.value = true
+  if (desktopPortBindingsAvailable(win)) {
+    showDesktopPortSetting.value = true
+    try {
+      const p = await Promise.resolve(win.go!.main!.App!.GetDesktopHTTPPortSetting!())
+      desktopPortInput.value = typeof p === 'number' ? p : 0
+    } catch {
+      desktopPortInput.value = 0
+    }
+  }
+  if (desktopBindPublicBindingsAvailable(win)) {
+    showDesktopBindPublicSetting.value = true
+    try {
+      const b = await Promise.resolve(win.go!.main!.App!.GetDesktopHTTPBindPublicSetting!())
+      desktopBindPublicInput.value = !!b
+    } catch {
+      desktopBindPublicInput.value = false
+    }
+  }
+}
+
+const onDesktopBindPublicChange = async (value: boolean) => {
+  const v = value === true
+  const win = window as WeKnoraDesktopWindow
+  const fn = win.go?.main?.App?.SetDesktopHTTPBindPublicSetting
+  if (typeof fn !== 'function') return
   try {
-    const p = await Promise.resolve(win.go!.main!.App!.GetDesktopHTTPPortSetting!())
-    desktopPortInput.value = typeof p === 'number' ? p : 0
-  } catch {
-    desktopPortInput.value = 0
+    await Promise.resolve(fn(v))
+    MessagePlugin.success(t('tenant.api.desktopBindPublicSaved'))
+  } catch (err: unknown) {
+    MessagePlugin.error(err instanceof Error ? err.message : t('tenant.api.desktopBindPublicSaveFailed'))
+    desktopBindPublicInput.value = !v
   }
 }
 
@@ -342,6 +460,22 @@ const copyApiKey = async () => {
   }
 }
 
+const copyLanApiUrl = async () => {
+  const text = wailsApiLanBaseURL.value
+  if (!text) return
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      fallbackCopyText(text)
+    }
+    MessagePlugin.success(t('tenant.api.lanUrlCopySuccess'))
+  } catch {
+    fallbackCopyText(text)
+    MessagePlugin.success(t('tenant.api.lanUrlCopySuccess'))
+  }
+}
+
 const copyApiUrl = async () => {
   const text = apiBaseUrlDisplay.value
   try {
@@ -378,7 +512,7 @@ const formatDate = (dateStr: string | undefined) => {
 // Lifecycle
 onMounted(async () => {
   await tryLoadWailsApiBaseURL()
-  await loadDesktopPortPrefs()
+  await loadDesktopApiPrefs()
   loadInfo()
 })
 </script>
@@ -529,6 +663,19 @@ onMounted(async () => {
   :deep(input) {
     font-family: monospace;
     font-size: 12px;
+  }
+}
+
+.desktop-bind-public-control {
+  padding-top: 4px;
+}
+
+.lan-url-hint-row {
+  padding-top: 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  :deep(.t-alert) {
+    width: 100%;
   }
 }
 </style>
