@@ -46,6 +46,11 @@ import (
 const dragHandlerJS = `(function(){
 if(window.__wkDragBound)return;
 window.__wkDragBound=true;
+document.documentElement.classList.add('wails-desktop');
+
+// Disable rubber-band overscroll that reveals the dark window background
+document.documentElement.style.overscrollBehavior='none';
+document.body.style.overscrollBehavior='none';
 
 if(window.wails&&window.wails.flags){
   window.wails.flags.cssDragProperty='__disabled__';
@@ -107,6 +112,32 @@ window.addEventListener('mousedown',function(e){
   e.preventDefault();
   sendDrag();
 },true);
+
+// Intercept external link clicks and window.open so they open in the system browser
+document.addEventListener('click',function(e){
+  var el=e.target;
+  while(el&&el.tagName!=='A')el=el.parentElement;
+  if(!el||!el.href)return;
+  var href=el.href;
+  if(href.indexOf('http://')===0||href.indexOf('https://')===0){
+    if(window.runtime&&window.runtime.BrowserOpenURL){
+      e.preventDefault();
+      e.stopPropagation();
+      window.runtime.BrowserOpenURL(href);
+    }
+  }
+},true);
+
+var origOpen=window.open;
+window.open=function(url){
+  if(url&&(typeof url==='string')&&(url.indexOf('http://')===0||url.indexOf('https://')===0)){
+    if(window.runtime&&window.runtime.BrowserOpenURL){
+      window.runtime.BrowserOpenURL(url);
+      return null;
+    }
+  }
+  return origOpen.apply(window,arguments);
+};
 })();`
 
 func main() {
@@ -267,11 +298,11 @@ func main() {
 		Bind: []interface{}{
 			app,
 		},
+		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
 		Mac: &mac.Options{
-			TitleBar:             mac.TitleBarHiddenInset(), // Beautiful borderless titlebar
-			Appearance:           mac.NSAppearanceNameDarkAqua,
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
+			TitleBar:             mac.TitleBarHiddenInset(),
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
 		},
 	})
 

@@ -768,6 +768,11 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     transition: width 0.25s ease, min-width 0.25s ease;
     position: relative;
 
+    // macOS Wails 桌面：红绿灯位于 HiddenInset 标题栏区域，需让出顶部空间
+    html.wails-desktop & {
+        padding-top: 30px;
+    }
+
     &--collapsed {
         min-width: 60px;
         width: 60px;

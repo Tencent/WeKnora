@@ -21,6 +21,7 @@ var noAuthAPI = map[string][]string{
 	"/health":                    {"GET"},
 	"/api/v1/auth/register":      {"POST"},
 	"/api/v1/auth/login":         {"POST"},
+	"/api/v1/auth/auto-setup":    {"POST"},
 	"/api/v1/auth/oidc/config":   {"GET"},
 	"/api/v1/auth/oidc/url":      {"GET"},
 	"/api/v1/auth/oidc/callback": {"GET"},

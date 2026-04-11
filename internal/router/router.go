@@ -31,37 +31,37 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                *config.Config
-	UserService           interfaces.UserService
-	KBService             interfaces.KnowledgeBaseService
-	KnowledgeService      interfaces.KnowledgeService
-	ChunkService          interfaces.ChunkService
-	SessionService        interfaces.SessionService
-	MessageService        interfaces.MessageService
-	ModelService          interfaces.ModelService
-	EvaluationService     interfaces.EvaluationService
-	KBHandler             *handler.KnowledgeBaseHandler
-	KnowledgeHandler      *handler.KnowledgeHandler
-	TenantHandler         *handler.TenantHandler
-	TenantService         interfaces.TenantService
-	ChunkHandler          *handler.ChunkHandler
-	SessionHandler        *session.Handler
-	MessageHandler        *handler.MessageHandler
-	ModelHandler          *handler.ModelHandler
-	EvaluationHandler     *handler.EvaluationHandler
-	AuthHandler           *handler.AuthHandler
-	InitializationHandler *handler.InitializationHandler
-	SystemHandler         *handler.SystemHandler
-	MCPServiceHandler     *handler.MCPServiceHandler
-	WebSearchHandler              *handler.WebSearchHandler
-	WebSearchProviderHandler      *handler.WebSearchProviderHandler
-	FAQHandler            *handler.FAQHandler
-	TagHandler            *handler.TagHandler
-	CustomAgentHandler    *handler.CustomAgentHandler
-	SkillHandler          *handler.SkillHandler
-	OrganizationHandler   *handler.OrganizationHandler
-	IMHandler             *handler.IMHandler
-	DataSourceHandler     *handler.DataSourceHandler
+	Config                   *config.Config
+	UserService              interfaces.UserService
+	KBService                interfaces.KnowledgeBaseService
+	KnowledgeService         interfaces.KnowledgeService
+	ChunkService             interfaces.ChunkService
+	SessionService           interfaces.SessionService
+	MessageService           interfaces.MessageService
+	ModelService             interfaces.ModelService
+	EvaluationService        interfaces.EvaluationService
+	KBHandler                *handler.KnowledgeBaseHandler
+	KnowledgeHandler         *handler.KnowledgeHandler
+	TenantHandler            *handler.TenantHandler
+	TenantService            interfaces.TenantService
+	ChunkHandler             *handler.ChunkHandler
+	SessionHandler           *session.Handler
+	MessageHandler           *handler.MessageHandler
+	ModelHandler             *handler.ModelHandler
+	EvaluationHandler        *handler.EvaluationHandler
+	AuthHandler              *handler.AuthHandler
+	InitializationHandler    *handler.InitializationHandler
+	SystemHandler            *handler.SystemHandler
+	MCPServiceHandler        *handler.MCPServiceHandler
+	WebSearchHandler         *handler.WebSearchHandler
+	WebSearchProviderHandler *handler.WebSearchProviderHandler
+	FAQHandler               *handler.FAQHandler
+	TagHandler               *handler.TagHandler
+	CustomAgentHandler       *handler.CustomAgentHandler
+	SkillHandler             *handler.SkillHandler
+	OrganizationHandler      *handler.OrganizationHandler
+	IMHandler                *handler.IMHandler
+	DataSourceHandler        *handler.DataSourceHandler
 }
 
 // NewRouter 创建新的路由
@@ -397,6 +397,7 @@ func RegisterEvaluationRoutes(r *gin.RouterGroup, handler *handler.EvaluationHan
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler) {
 	r.POST("/auth/register", handler.Register)
 	r.POST("/auth/login", handler.Login)
+	r.POST("/auth/auto-setup", handler.AutoSetup)
 	r.GET("/auth/oidc/config", handler.GetOIDCConfig)
 	r.GET("/auth/oidc/url", handler.GetOIDCAuthorizationURL)
 	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)

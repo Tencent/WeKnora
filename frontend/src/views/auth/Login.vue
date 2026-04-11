@@ -377,7 +377,7 @@ import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
 import 'swiper/css/effect-fade'
 import 'swiper/css/pagination'
-import { login, register, getOIDCAuthorizationURL, getOIDCConfig } from '@/api/auth'
+import { login, register, getOIDCAuthorizationURL, getOIDCConfig, autoSetup } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useI18n } from 'vue-i18n'
 
@@ -668,11 +668,21 @@ const handleRegister = async () => {
   }
 }
 
-// Check if already logged in
-onMounted(() => {
+// Check if already logged in; for lite edition, attempt transparent auto-setup
+onMounted(async () => {
   if (authStore.isLoggedIn) {
     router.replace('/platform/knowledge-bases')
     return
+  }
+
+  try {
+    const response = await autoSetup()
+    if (response.success) {
+      await persistLoginResponse(response)
+      return
+    }
+  } catch {
+    // auto-setup not available (standard edition) — show normal login form
   }
 
   loadOIDCConfig()
