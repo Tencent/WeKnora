@@ -190,6 +190,18 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install nsis -y
 
+      - name: Prepare SQLite headers (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          go mod download github.com/mattn/go-sqlite3
+          SQLITE3_DIR=$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)
+          HEADER_DIR="${GITHUB_WORKSPACE}/_sqlite_headers"
+          mkdir -p "${HEADER_DIR}"
+          cp "${SQLITE3_DIR}/sqlite3-binding.h" "${HEADER_DIR}/sqlite3.h"
+          cp "${SQLITE3_DIR}/sqlite3ext.h" "${HEADER_DIR}/sqlite3ext.h"
+          echo "SQLITE_HEADER_DIR=${HEADER_DIR}" >> $GITHUB_ENV
+
       - name: Resolve version
         id: ver
         shell: bash
@@ -206,7 +218,7 @@ jobs:
         shell: bash
         run: |
           export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
-          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          export CGO_CFLAGS="-Wno-deprecated-declarations -I${SQLITE_HEADER_DIR}"
           cd cmd/desktop
           go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
           rm -f _prebuild_tmp.exe
@@ -218,7 +230,7 @@ jobs:
           export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
           eval "$(./scripts/get_version.sh env)"
           LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
-          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          export CGO_CFLAGS="-Wno-deprecated-declarations ${SQLITE_HEADER_DIR:+-I${SQLITE_HEADER_DIR}}"
 
           BUILD_TAGS="sqlite_fts5"
           NSIS_FLAG=""
