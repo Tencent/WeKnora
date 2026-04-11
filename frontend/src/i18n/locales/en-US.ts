@@ -1177,6 +1177,8 @@ export default {
     defaultUser: 'User',
     copyFailed: 'Copy failed',
     retry: 'Retry',
+    expand: 'Expand',
+    collapse: 'Collapse',
   },
   mentionDetail: {
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',

@@ -1024,6 +1024,8 @@ export default {
     defaultUser: "用户",
     copyFailed: "复制失败",
     retry: "重试",
+    expand: "展开",
+    collapse: "收起",
   },
   mentionDetail: {
     faqCount: "共 {count} 条问答",

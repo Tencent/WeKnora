@@ -1,6 +1,7 @@
 <template>
   <div class="kb-list-container">
     <ListSpaceSidebar
+      v-if="!authStore.isLiteMode"
       v-model="spaceSelection"
       :count-all="allKnowledgeBases"
       :count-mine="kbs.length"
@@ -606,6 +607,7 @@ import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
@@ -616,6 +618,7 @@ import { useI18n } from 'vue-i18n'
 const router = useRouter()
 const route = useRoute()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
 

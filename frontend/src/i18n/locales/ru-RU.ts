@@ -1139,6 +1139,8 @@ export default {
     defaultUser: 'Пользователь',
     copyFailed: 'Ошибка копирования',
     retry: 'Повторить',
+    expand: 'Развернуть',
+    collapse: 'Свернуть',
     me: 'Я',
     copy: 'Копировать',
     copied: 'Скопировано'

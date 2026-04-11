@@ -1020,6 +1020,8 @@ export default {
     defaultUser: "사용자",
     copyFailed: "복사 실패",
     retry: "재시도",
+    expand: "펼치기",
+    collapse: "접기",
   },
   mentionDetail: {
     faqCount: "Q&A {count}개",

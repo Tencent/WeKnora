@@ -1,6 +1,7 @@
 <template>
   <div class="agent-list-container">
     <ListSpaceSidebar
+      v-if="!authStore.isLiteMode"
       v-model="spaceSelection"
       :count-all="allAgentsCount"
       :count-mine="agents.length"
@@ -545,10 +546,12 @@ import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organiz
 import AgentEditorModal from './AgentEditorModal.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
 interface AgentWithUI extends CustomAgent {
