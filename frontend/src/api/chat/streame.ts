@@ -1,5 +1,5 @@
-import { fetchEventSource } from '@microsoft/fetch-event-source'
-import { ref, type Ref, onUnmounted, nextTick } from 'vue'
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+import { ref, onUnmounted } from 'vue';
 import { generateRandomString } from '@/utils/index';
 import i18n from '@/i18n';
 import { getApiBaseUrl } from '@/utils/api-base';

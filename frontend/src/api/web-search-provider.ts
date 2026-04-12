@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama'
+  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu'
   description?: string
   parameters: {
     api_key?: string

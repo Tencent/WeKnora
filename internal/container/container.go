@@ -1019,6 +1019,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("bing", infra_web_search.NewBingProvider)
 	registry.Register("tavily", infra_web_search.NewTavilyProvider)
 	registry.Register("ollama", infra_web_search.NewOllamaProvider)
+	registry.Register("baidu", infra_web_search.NewBaiduProvider)
 }
 
 // registerIMAdapterFactories registers adapter factories for each IM platform
