@@ -355,15 +355,12 @@ function buildConfigPayload(): ParserEngineConfig {
 }
 
 async function onCheck() {
-  if (!connected) {
-    checkMessage.value = t('settings.parser.ensureDocreaderConnected')
-    return
-  }
   checking.value = true
   checkMessage.value = ''
   try {
     const res = await checkParserEngines(buildConfigPayload())
     engines.value = res?.data ?? []
+    connected.value = res?.connected ?? false
     checkMessage.value = t('settings.parser.checkDoneStatusUpdated')
     setTimeout(() => { checkMessage.value = '' }, 3000)
   } catch (e: any) {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -134,7 +135,6 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	docreaderAddr, docreaderTransport := h.getDocReaderConnInfo()
-	connected := h.documentReader != nil && h.documentReader.IsConnected()
 
 	var overrides map[string]string
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
@@ -143,7 +143,8 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 		}
 	}
 
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	remoteEngines, fetchErr := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	connected := fetchErr == nil
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
@@ -194,7 +195,12 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 			overrides = tenant.ParserEngineConfig.ToOverridesMap()
 		}
 	}
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	remoteEngines, listErr := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	if listErr != nil {
+		logger.Errorf(c.Request.Context(), "DocReader reconnect: dial ok but ListEngines failed: %v", listErr)
+		c.JSON(200, gin.H{"code": 1, "msg": fmt.Sprintf("地址已更新但无法连接 DocReader: %v", listErr)})
+		return
+	}
 	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
 
 	_, docreaderTransport := h.getDocReaderConnInfo()
@@ -212,7 +218,6 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 // @Router       /system/parser-engines/check [post]
 func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 	docreaderAddr, docreaderTransport := h.getDocReaderConnInfo()
-	connected := h.documentReader != nil && h.documentReader.IsConnected()
 
 	var body types.ParserEngineConfig
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -220,24 +225,28 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		return
 	}
 	overrides := body.ToOverridesMap()
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	remoteEngines, fetchErr := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	connected := fetchErr == nil
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
 
 // fetchRemoteEngines queries the remote docreader for its engine list.
-// Returns nil on any error (e.g. not connected), letting the caller
-// fall back to Go's static registry only.
-func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, overrides map[string]string) []types.ParserEngineInfo {
-	if h.documentReader == nil || !h.documentReader.IsConnected() {
-		return nil
+// Uses a real ListEngines RPC so "connected" reflects reachability (gRPC Dial
+// without WithBlock returns before the TCP session exists; HTTP IsConnected
+// only meant base URL was non-empty).
+func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, overrides map[string]string) ([]types.ParserEngineInfo, error) {
+	if h.documentReader == nil {
+		return nil, fmt.Errorf("document reader not initialized")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
 	engines, err := h.documentReader.ListEngines(ctx, overrides)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to fetch remote engines from docreader: %v", err)
-		return nil
+		return nil, err
 	}
-	return engines
+	return engines, nil
 }
 
 // getKeywordIndexEngine returns the keyword index engine name
