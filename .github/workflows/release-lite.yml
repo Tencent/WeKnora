@@ -384,10 +384,15 @@ jobs:
 
           OUTNAME="WeKnora-Lite-App_${VERSION}_${{ matrix.arch_label }}_setup.exe"
 
+          # makensis is a native Windows exe; convert paths so it can resolve them
+          WIN_INST_DIR="$(cygpath -wa "${INST_DIR}")"
+          WIN_OUTFILE="$(cygpath -wa .)\\${OUTNAME}"
+          WIN_SCRIPT="$(cygpath -wa scripts/windows-installer.nsi)"
+
           makensis -DVERSION="${VERSION}" \
-            -DINST_DIR="${INST_DIR}" \
-            -DOUTFILE="${OUTNAME}" \
-            scripts/windows-installer.nsi
+            "-DINST_DIR=${WIN_INST_DIR}" \
+            "-DOUTFILE=${WIN_OUTFILE}" \
+            "${WIN_SCRIPT}"
 
           sha256sum "${OUTNAME}" > "${OUTNAME}.sha256"
 

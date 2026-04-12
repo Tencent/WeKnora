@@ -27,24 +27,24 @@ Unicode true
 Section "Install"
   SetOutPath $INSTDIR
 
-  ; Main executable
-  File "${INST_DIR}\WeKnora Lite.exe"
+  ; Main executable (use /oname because the filename contains a space)
+  File "/oname=WeKnora Lite.exe" "${INST_DIR}\WeKnora Lite.exe"
 
-  ; .env config
-  File "${INST_DIR}\.env"
+  ; .env config (dotfile — no extension, so use /oname)
+  File "/oname=.env" "${INST_DIR}\.env"
 
-  ; Sub-directories
+  ; Sub-directories — use *.* for files with extensions, then * for all
   SetOutPath $INSTDIR\config
-  File /r "${INST_DIR}\config\*.*"
+  File /r "${INST_DIR}\config\*"
 
   SetOutPath $INSTDIR\migrations\sqlite
-  File /r "${INST_DIR}\migrations\sqlite\*.*"
+  File /r "${INST_DIR}\migrations\sqlite\*"
 
   SetOutPath $INSTDIR\web
-  File /r "${INST_DIR}\web\*.*"
+  File /r "${INST_DIR}\web\*"
 
   SetOutPath $INSTDIR\jieba_dict
-  File /r "${INST_DIR}\jieba_dict\*.*"
+  File /r "${INST_DIR}\jieba_dict\*"
 
   ; Reset output path and write uninstaller
   SetOutPath $INSTDIR
