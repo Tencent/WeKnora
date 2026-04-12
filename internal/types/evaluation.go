@@ -2,13 +2,61 @@ package types
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/yanyiwu/gojieba"
 )
 
-// Jieba is a global instance of Chinese text segmentation tool
-var Jieba *gojieba.Jieba = gojieba.NewJieba()
+var (
+	jiebaOnce sync.Once
+	jiebaInst *gojieba.Jieba
+)
+
+// Jieba returns the global gojieba instance, created on first call.
+// It looks for bundled dictionaries next to the executable (or in a
+// well-known "jieba_dict" subdirectory of the working directory) so
+// that binaries built on CI work on any machine.
+func GetJieba() *gojieba.Jieba {
+	jiebaOnce.Do(func() {
+		if dir := findJiebaDict(); dir != "" {
+			jiebaInst = gojieba.NewJieba(
+				filepath.Join(dir, "jieba.dict.utf8"),
+				filepath.Join(dir, "hmm_model.utf8"),
+				filepath.Join(dir, "user.dict.utf8"),
+				filepath.Join(dir, "idf.utf8"),
+				filepath.Join(dir, "stop_words.utf8"),
+			)
+		} else {
+			jiebaInst = gojieba.NewJieba()
+		}
+	})
+	return jiebaInst
+}
+
+func findJiebaDict() string {
+	candidates := []string{}
+
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		// macOS .app: Contents/MacOS/../Resources/jieba_dict
+		if strings.Contains(exe, ".app/Contents/MacOS") {
+			candidates = append(candidates, filepath.Join(filepath.Dir(exeDir), "Resources", "jieba_dict"))
+		}
+		candidates = append(candidates, filepath.Join(exeDir, "jieba_dict"))
+	}
+	candidates = append(candidates, "jieba_dict")
+
+	for _, d := range candidates {
+		if _, err := os.Stat(filepath.Join(d, "jieba.dict.utf8")); err == nil {
+			return d
+		}
+	}
+	return ""
+}
 
 // EvaluationStatue represents the status of an evaluation task
 type EvaluationStatue int

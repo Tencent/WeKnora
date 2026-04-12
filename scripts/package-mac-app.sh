@@ -92,6 +92,15 @@ if [ -d web ]; then
     cp -r web "${RESOURCES_DIR}/"
 fi
 
+# gojieba 字典文件（中文分词）
+JIEBA_SRC="$(go env GOMODCACHE)/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict"
+if [ -d "${JIEBA_SRC}" ]; then
+    mkdir -p "${RESOURCES_DIR}/jieba_dict"
+    cp "${JIEBA_SRC}/jieba.dict.utf8" "${JIEBA_SRC}/hmm_model.utf8" \
+       "${JIEBA_SRC}/user.dict.utf8" "${JIEBA_SRC}/idf.utf8" \
+       "${JIEBA_SRC}/stop_words.utf8" "${RESOURCES_DIR}/jieba_dict/"
+fi
+
 # 注意：Wails build 生成的二进制文件工作目录默认是 app 的 Contents/MacOS 目录
 # 后续可能需要调整代码中对配置文件的路径读取逻辑。
 

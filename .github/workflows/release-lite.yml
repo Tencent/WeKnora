@@ -147,6 +147,11 @@ jobs:
           if [ -f deploy/weknora-lite.service ]; then
             cp deploy/weknora-lite.service "${ARCHIVE}/"
           fi
+          JIEBA_SRC="$(go env GOMODCACHE)/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict"
+          if [ -d "${JIEBA_SRC}" ]; then
+            mkdir -p "${ARCHIVE}/jieba_dict"
+            cp "${JIEBA_SRC}"/{jieba.dict.utf8,hmm_model.utf8,user.dict.utf8,idf.utf8,stop_words.utf8} "${ARCHIVE}/jieba_dict/"
+          fi
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
@@ -294,6 +299,11 @@ jobs:
           if [ -d frontend/dist ]; then
             cp -r frontend/dist "${RESOURCES}/web"
           fi
+          JIEBA_SRC="$(go env GOMODCACHE)/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict"
+          if [ -d "${JIEBA_SRC}" ]; then
+            mkdir -p "${RESOURCES}/jieba_dict"
+            cp "${JIEBA_SRC}"/{jieba.dict.utf8,hmm_model.utf8,user.dict.utf8,idf.utf8,stop_words.utf8} "${RESOURCES}/jieba_dict/"
+          fi
 
           DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
 
@@ -330,6 +340,11 @@ jobs:
           if [ -d frontend/dist ]; then
             cp -r frontend/dist "${ARCHIVE}/web"
           fi
+          JIEBA_SRC="$(go env GOMODCACHE)/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict"
+          if [ -d "${JIEBA_SRC}" ]; then
+            mkdir -p "${ARCHIVE}/jieba_dict"
+            cp "${JIEBA_SRC}"/{jieba.dict.utf8,hmm_model.utf8,user.dict.utf8,idf.utf8,stop_words.utf8} "${ARCHIVE}/jieba_dict/"
+          fi
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
           rm -rf "${ARCHIVE}"
@@ -355,6 +370,11 @@ jobs:
           fi
           if [ -d frontend/dist ]; then
             cp -r frontend/dist "${ARCHIVE}/web"
+          fi
+          JIEBA_SRC="$(go env GOMODCACHE)/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict"
+          if [ -d "${JIEBA_SRC}" ]; then
+            mkdir -p "${ARCHIVE}/jieba_dict"
+            cp "${JIEBA_SRC}"/{jieba.dict.utf8,hmm_model.utf8,user.dict.utf8,idf.utf8,stop_words.utf8} "${ARCHIVE}/jieba_dict/"
           fi
           # Create zip archive
           powershell -Command "Compress-Archive -Path '${ARCHIVE}' -DestinationPath '${ARCHIVE}.zip'"

@@ -85,7 +85,7 @@ func splitIntoWords(sentences []string) []string {
 
 			switch {
 			case chineseBlock != "": // 处理中文部分
-				words := types.Jieba.Cut(chineseBlock, true)
+				words := types.GetJieba().Cut(chineseBlock, true)
 				tokens = append(tokens, words...)
 			case englishBlock != "": // 处理英文部分
 				engTokens := strings.Fields(englishBlock)

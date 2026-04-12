@@ -46,7 +46,7 @@ func TokenizeSimple(text string) map[string]struct{} {
 	var words []string
 	if containsChinese(text) {
 		// Use jieba for Chinese text segmentation (search mode for finer granularity)
-		words = types.Jieba.CutForSearch(text, true)
+		words = types.GetJieba().CutForSearch(text, true)
 	} else {
 		words = strings.Fields(text)
 	}
