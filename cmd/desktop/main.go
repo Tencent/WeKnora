@@ -24,6 +24,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
@@ -328,15 +329,16 @@ func main() {
 	// Start Wails application
 	// We use a Reverse Proxy to seamlessly proxy Wails' frontend to our Go backend
 	err := wails.Run(&options.App{
-		Title:         "WeKnora Lite",
-		Width:         1280,
-		Height:        800,
-		DisableResize: false,
-		Menu:          AppMenu,
+		Title:            "WeKnora Lite",
+		Width:            1280,
+		Height:           800,
+		DisableResize:    false,
+		WindowStartState: options.Normal,
+		Menu:             AppMenu,
 		AssetServer: &assetserver.Options{
 			Handler: proxy,
 		},
-		StartHidden: false, // Show window on startup
+		StartHidden: false,
 		OnStartup:   app.startup,
 		OnDomReady: func(ctx context.Context) {
 			wailsruntime.WindowExecJS(ctx, wailsThemeSyncJS)
@@ -359,6 +361,10 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 255},
 		Mac: &mac.Options{
 			TitleBar:             mac.TitleBarHiddenInset(),
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
+		},
+		Windows: &windows.Options{
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
 		},

@@ -327,7 +327,7 @@ jobs:
           mkdir -p "${ARCHIVE}"
           cp "cmd/desktop/build/bin/WeKnora Lite" "${ARCHIVE}/"
           if [ -f .env.lite.example ]; then
-            cp .env.lite.example "${ARCHIVE}/"
+            cp .env.lite.example "${ARCHIVE}/.env"
           fi
           cp docs/LITE.md "${ARCHIVE}/README.md"
           if [ -d config ]; then
@@ -349,37 +349,47 @@ jobs:
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
           rm -rf "${ARCHIVE}"
 
-      # ── Windows: package zip archive ──
+      # ── Windows: assemble install directory, then create NSIS installer ──
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
-          mkdir -p "${ARCHIVE}"
-          cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${ARCHIVE}/"
+          VERSION="${{ steps.ver.outputs.version }}"
+          INST_DIR="nsis_staging"
+          mkdir -p "${INST_DIR}/config" "${INST_DIR}/migrations/sqlite" "${INST_DIR}/web" "${INST_DIR}/jieba_dict"
+
+          cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${INST_DIR}/"
           if [ -f .env.lite.example ]; then
-            cp .env.lite.example "${ARCHIVE}/"
+            cp .env.lite.example "${INST_DIR}/.env"
           fi
-          cp docs/LITE.md "${ARCHIVE}/README.md"
           if [ -d config ]; then
-            cp -r config "${ARCHIVE}/config"
+            cp -r config/* "${INST_DIR}/config/"
           fi
           if [ -d migrations/sqlite ]; then
-            mkdir -p "${ARCHIVE}/migrations/sqlite"
-            cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
+            cp -r migrations/sqlite/* "${INST_DIR}/migrations/sqlite/"
           fi
           if [ -d frontend/dist ]; then
-            cp -r frontend/dist "${ARCHIVE}/web"
+            cp -r frontend/dist/* "${INST_DIR}/web/"
           fi
           JIEBA_SRC="$(go env GOMODCACHE)/github.com/yanyiwu/gojieba@v1.4.5/deps/cppjieba/dict"
           if [ -d "${JIEBA_SRC}" ]; then
-            mkdir -p "${ARCHIVE}/jieba_dict"
-            cp "${JIEBA_SRC}"/{jieba.dict.utf8,hmm_model.utf8,user.dict.utf8,idf.utf8,stop_words.utf8} "${ARCHIVE}/jieba_dict/"
+            cp "${JIEBA_SRC}"/{jieba.dict.utf8,hmm_model.utf8,user.dict.utf8,idf.utf8,stop_words.utf8} "${INST_DIR}/jieba_dict/"
           fi
-          # Create zip archive
-          powershell -Command "Compress-Archive -Path '${ARCHIVE}' -DestinationPath '${ARCHIVE}.zip'"
-          sha256sum "${ARCHIVE}.zip" > "${ARCHIVE}.zip.sha256"
-          rm -rf "${ARCHIVE}"
+
+          OUTNAME="WeKnora-Lite-App_${VERSION}_${{ matrix.arch_label }}_setup.exe"
+
+          makensis -DVERSION="${VERSION}" \
+            -DINST_DIR="${INST_DIR}" \
+            -DOUTFILE="${OUTNAME}" \
+            scripts/windows-installer.nsi
+
+          sha256sum "${OUTNAME}" > "${OUTNAME}.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -389,8 +399,8 @@ jobs:
             WeKnora-Lite-App_*.dmg.sha256
             WeKnora-Lite-App_*.tar.gz
             WeKnora-Lite-App_*.tar.gz.sha256
-            WeKnora-Lite-App_*.zip
-            WeKnora-Lite-App_*.zip.sha256
+            WeKnora-Lite-App_*_setup.exe
+            WeKnora-Lite-App_*_setup.exe.sha256
           retention-days: 3
 
   # ── 3. Create GitHub Release ──
