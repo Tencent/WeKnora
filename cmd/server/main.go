@@ -25,11 +25,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,8 +38,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-
-	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -76,7 +72,7 @@ func main() {
 		ctx, done := context.WithCancel(context.Background())
 
 		signals := make(chan os.Signal, 1)
-		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		signal.Notify(signals, shutdownSignals...)
 		go func() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
@@ -124,34 +120,4 @@ func main() {
 	if err != nil {
 		logger.Fatalf(context.Background(), "Failed to run application: %v", err)
 	}
-}
-
-// listenWithRetry retries listening with exponential backoff and SO_REUSEPORT,
-// useful during hot-reload when the previous process may not have released the port yet.
-func listenWithRetry(addr string, maxRetries int, baseDelay time.Duration) (net.Listener, error) {
-	lc := net.ListenConfig{
-		Control: func(network, address string, c syscall.RawConn) error {
-			return c.Control(func(fd uintptr) {
-				_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-			})
-		},
-	}
-
-	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		listener, err := lc.Listen(context.Background(), "tcp", addr)
-		if err == nil {
-			return listener, nil
-		}
-		lastErr = err
-		if i < maxRetries-1 {
-			delay := baseDelay * time.Duration(1<<uint(i))
-			if delay > 3*time.Second {
-				delay = 3 * time.Second
-			}
-			logger.Warnf(context.Background(), "Port %s in use, retrying in %v... (%d/%d)", addr, delay, i+1, maxRetries)
-			time.Sleep(delay)
-		}
-	}
-	return nil, lastErr
 }

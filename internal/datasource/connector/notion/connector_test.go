@@ -2,6 +2,7 @@ package notion
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -121,16 +122,13 @@ func TestConnectorFetchAll_Database(t *testing.T) {
 		t.Fatal("expected at least 1 item")
 	}
 
-	// Each database record should be synced as an individual knowledge item
+	// The entire database should be synced as a single table knowledge item
 	found := false
 	for _, item := range items {
-		if item.ExternalID == "record-1" {
+		if item.ExternalID == "db-1" {
 			found = true
-			if item.Metadata["object_type"] != "page" {
-				t.Errorf("object_type = %q, want %q", item.Metadata["object_type"], "page")
-			}
-			if item.Metadata["database"] != "Test Database" {
-				t.Errorf("database = %q, want %q", item.Metadata["database"], "Test Database")
+			if item.Metadata["object_type"] != "database" {
+				t.Errorf("object_type = %q, want %q", item.Metadata["object_type"], "database")
 			}
 			if item.ContentType != "text/markdown" {
 				t.Errorf("ContentType = %q", item.ContentType)
@@ -138,10 +136,15 @@ func TestConnectorFetchAll_Database(t *testing.T) {
 			if len(item.Content) == 0 {
 				t.Error("expected non-empty content")
 			}
+			// Verify it contains table headers
+			contentStr := string(item.Content)
+			if !strings.Contains(contentStr, "| Title |") {
+				t.Errorf("expected table header in content, got: %s", contentStr)
+			}
 		}
 	}
 	if !found {
-		t.Error("record-1 not found in items")
+		t.Error("db-1 not found in items")
 	}
 }
 

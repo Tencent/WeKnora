@@ -1,6 +1,7 @@
 <template>
   <div class="kb-list-container">
     <ListSpaceSidebar
+      v-if="!authStore.isLiteMode"
       v-model="spaceSelection"
       :count-all="allKnowledgeBases"
       :count-mine="kbs.length"
@@ -8,23 +9,24 @@
       :count-by-org="effectiveSharedCountByOrg"
     />
     <div class="kb-list-content">
-      <div class="header">
-        <div class="header-title">
-          <div class="title-row">
-            <h2>{{ $t('knowledgeBase.title') }}</h2>
+      <div class="header" style="--wails-draggable: drag">
+        <div class="header-title" style="--wails-draggable: drag">
+          <div class="title-row" style="--wails-draggable: drag">
+            <h2 style="--wails-draggable: drag">{{ $t('knowledgeBase.title') }}</h2>
             <t-tooltip :content="$t('knowledgeList.create')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
                 size="small"
                 class="header-action-btn"
+                style="--wails-draggable: no-drag"
                 @click="handleCreateKnowledgeBase"
               >
                 <template #icon><t-icon name="folder-add" size="16px" /></template>
               </t-button>
             </t-tooltip>
           </div>
-          <p class="header-subtitle">{{ $t('knowledgeList.subtitle') }}</p>
+          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
       </div>
       <div class="kb-list-main">
@@ -72,6 +74,21 @@
           <div class="progress-bar">
             <div class="progress-bar-inner" :style="{ width: summary.progress + '%' }"></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 骨架屏占位 -->
+    <div v-if="loading && kbs.length === 0" class="kb-card-wrap">
+      <div v-for="n in 6" :key="'skel-'+n" class="kb-card kb-card-skeleton">
+        <div class="card-header">
+          <t-skeleton animation="gradient" :row-col="[{ width: '60%', height: '20px' }]" />
+        </div>
+        <div class="card-content">
+          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '80%', height: '14px' }]" />
+        </div>
+        <div class="card-bottom">
+          <t-skeleton animation="gradient" :row-col="[[{ width: '28px', height: '28px', type: 'rect' }, { width: '28px', height: '28px', type: 'rect' }]]" />
         </div>
       </div>
     </div>
@@ -168,7 +185,7 @@
                 </t-tooltip>
               </div>
             </div>
-            <div class="bottom-right">
+            <div v-if="!authStore.isLiteMode" class="bottom-right">
               <div class="personal-source">
                 <t-icon name="user" size="14px" />
                 <span>{{ $t('knowledgeList.myLabel') }}</span>
@@ -342,7 +359,7 @@
               </t-tooltip>
             </div>
           </div>
-          <div class="bottom-right">
+          <div v-if="!authStore.isLiteMode" class="bottom-right">
             <div class="personal-source">
               <t-icon name="user" size="14px" />
               <span>{{ $t('knowledgeList.myLabel') }}</span>
@@ -605,6 +622,7 @@ import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { listKnowledgeBases, deleteKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { formatStringDate } from '@/utils/index'
 import { useUIStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
 import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
@@ -615,6 +633,7 @@ import { useI18n } from 'vue-i18n'
 const router = useRouter()
 const route = useRoute()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 const { t } = useI18n()
 
@@ -1579,10 +1598,16 @@ const handleUploadFinishedEvent = (event: Event) => {
   transition: width 0.2s ease;
 }
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .kb-card-wrap {
   display: grid;
   gap: 20px;
   grid-template-columns: 1fr;
+  animation: contentFadeIn 0.32s ease-out;
 }
 
 .kb-card {
@@ -1600,6 +1625,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   flex-direction: column;
   height: 160px;
   min-height: 160px;
+
+  &.kb-card-skeleton {
+    cursor: default;
+    .card-header { margin-bottom: 16px; }
+    .card-content { flex: 1; }
+    .card-bottom { margin-top: auto; }
+  }
 
   &:hover {
     border-color: var(--td-brand-color);

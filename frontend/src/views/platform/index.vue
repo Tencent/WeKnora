@@ -1,7 +1,7 @@
 <template>
     <div class="main" ref="dropzone">
         <Menu></Menu>
-        <RouterView />
+        <RouterView v-if="isRouterAlive" />
         <div class="upload-mask" v-show="ismask">
             <input type="file" style="display: none" ref="uploadInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
             <UploadMask></UploadMask>
@@ -12,7 +12,7 @@
 </template>
 <script setup lang="ts">
 import Menu from '@/components/menu.vue'
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick, provide } from 'vue';
 import { useRoute } from 'vue-router'
 import useKnowledgeBase from '@/hooks/useKnowledgeBase'
 import UploadMask from '@/components/upload-mask.vue'
@@ -26,6 +26,22 @@ const route = useRoute();
 let ismask = ref(false)
 let uploadInput = ref();
 const { t } = useI18n();
+
+const isRouterAlive = ref(true)
+const reloadApp = () => {
+    isRouterAlive.value = false
+    nextTick(() => {
+        isRouterAlive.value = true
+    })
+}
+provide('app:reload', reloadApp)
+
+const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        reloadApp()
+    }
+}
 
 // 用于跟踪拖拽进入/离开的计数器，解决子元素触发 dragleave 的问题
 let dragCounter = 0;
@@ -118,6 +134,14 @@ onMounted(() => {
     document.addEventListener('dragover', handleGlobalDragOver, true);
     document.addEventListener('dragleave', handleGlobalDragLeave, true);
     document.addEventListener('drop', handleGlobalDrop, true);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    // @ts-ignore
+    if (window.runtime?.EventsOn) {
+        // @ts-ignore
+        window.runtime.EventsOn('app:reload', () => {
+            reloadApp()
+        })
+    }
 });
 
 // 组件卸载时移除全局事件监听器
@@ -126,6 +150,12 @@ onUnmounted(() => {
     document.removeEventListener('dragover', handleGlobalDragOver, true);
     document.removeEventListener('dragleave', handleGlobalDragLeave, true);
     document.removeEventListener('drop', handleGlobalDrop, true);
+    window.removeEventListener('keydown', handleGlobalKeyDown);
+    // @ts-ignore
+    if (window.runtime?.EventsOff) {
+        // @ts-ignore
+        window.runtime.EventsOff('app:reload')
+    }
     dragCounter = 0;
 });
 </script>

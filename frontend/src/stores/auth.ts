@@ -15,6 +15,7 @@ export const useAuthStore = defineStore('auth', () => {
   const selectedTenantId = ref<number | null>(null)
   const selectedTenantName = ref<string | null>(null)
   const allTenants = ref<TenantInfoFromAPI[]>([])
+  const isLiteMode = ref(false)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -102,6 +103,14 @@ export const useAuthStore = defineStore('auth', () => {
     return selectedTenantId.value
   }
 
+  const setLiteMode = (value: boolean) => {
+    isLiteMode.value = value
+    if (value) {
+      localStorage.setItem('weknora_lite_mode', 'true')
+    } else {
+      localStorage.removeItem('weknora_lite_mode')
+    }
+  }
 
   const logout = () => {
     // 清空状态
@@ -124,7 +133,13 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('weknora_current_kb')
     localStorage.removeItem('weknora_selected_tenant_id')
     localStorage.removeItem('weknora_selected_tenant_name')
-
+    localStorage.removeItem('weknora_lite_mode')
+    isLiteMode.value = false
+    try {
+      sessionStorage.removeItem('weknora_lite_last_path')
+    } catch {
+      /* ignore */
+    }
   }
 
   const initFromStorage = () => {
@@ -192,6 +207,8 @@ export const useAuthStore = defineStore('auth', () => {
         selectedTenantName.value = null
       }
     }
+
+    isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'
   }
 
   // 初始化时从localStorage恢复状态
@@ -216,6 +233,7 @@ export const useAuthStore = defineStore('auth', () => {
     currentUserId,
     canAccessAllTenants,
     effectiveTenantId,
+    isLiteMode,
     
     // 方法
     setUser,
@@ -227,6 +245,7 @@ export const useAuthStore = defineStore('auth', () => {
     setSelectedTenant,
     setAllTenants,
     getSelectedTenant,
+    setLiteMode,
     logout,
     initFromStorage
   }

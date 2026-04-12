@@ -1000,9 +1000,15 @@ const handleCitationActivate = (el: HTMLElement) => {
   const url = el.getAttribute('data-url');
   if (!url) return;
   try {
-    const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!newWindow) {
-      window.location.assign(url);
+    // @ts-ignore: Wails runtime check
+    if (window.runtime && window.runtime.BrowserOpenURL) {
+      // @ts-ignore
+      window.runtime.BrowserOpenURL(url);
+    } else {
+      const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+      if (!newWindow) {
+        window.location.assign(url);
+      }
     }
   } catch {
     window.location.assign(url);
@@ -1200,10 +1206,8 @@ const onRootClick = (e: Event) => {
   // Handle web citation clicks
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl && webEl.getAttribute('data-url')) {
-    if (!(webEl instanceof HTMLAnchorElement)) {
-      e.preventDefault();
-      handleCitationActivate(webEl);
-    }
+    e.preventDefault();
+    handleCitationActivate(webEl);
     return;
   }
   
@@ -1223,6 +1227,18 @@ const onRootClick = (e: Event) => {
     }
     return;
   }
+  
+  // Handle generic a clicks (especially in Wails desktop)
+  const aEl = target.closest?.('a') as HTMLAnchorElement | null;
+  // @ts-ignore
+  if (aEl && aEl.href && window.runtime && window.runtime.BrowserOpenURL) {
+    if (aEl.href.startsWith('http://') || aEl.href.startsWith('https://')) {
+      e.preventDefault();
+      // @ts-ignore
+      window.runtime.BrowserOpenURL(aEl.href);
+      return;
+    }
+  }
 };
 
 const onRootKeydown = (e: KeyboardEvent) => {
@@ -1233,15 +1249,8 @@ const onRootKeydown = (e: KeyboardEvent) => {
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl) {
     if (e.key === 'Enter' || e.key === ' ') {
-      if (webEl instanceof HTMLAnchorElement && e.key === 'Enter') {
-        return;
-      }
       e.preventDefault();
-      if (webEl instanceof HTMLAnchorElement) {
-        webEl.click();
-      } else {
-        handleCitationActivate(webEl);
-      }
+      handleCitationActivate(webEl);
     }
     return;
   }

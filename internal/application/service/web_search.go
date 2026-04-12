@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/config"
+	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -216,8 +216,8 @@ func (s *WebSearchService) CompressWithRAG(
 	for _, q := range questions {
 		params := types.SearchParams{
 			QueryText:        q,
-			VectorThreshold:  0.5,
-			KeywordThreshold: 0.5,
+			VectorThreshold:  0.2,
+			KeywordThreshold: 0.2,
 			MatchCount:       matchCount,
 		}
 		results, err := kbSvc.HybridSearch(ctx, tempKBID, params)

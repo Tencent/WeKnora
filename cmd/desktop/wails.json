@@ -1,0 +1,22 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "WeKnora Lite",
+  "outputfilename": "WeKnora Lite",
+  "frontend:dir": "../../frontend",
+  "wailsjsdir": "../../frontend/src",
+  "author": {
+    "name": "WeKnora Team",
+    "email": ""
+  },
+  "info": {
+    "companyName": "Tencent",
+    "productName": "WeKnora Lite",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2026 Tencent",
+    "comments": "WeKnora Desktop Edition"
+  },
+  "mac": {
+    "category": "public.app-category.productivity",
+    "titlebar": "hiddenInset"
+  }
+}

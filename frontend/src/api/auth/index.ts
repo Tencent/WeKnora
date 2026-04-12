@@ -191,6 +191,21 @@ export async function register(data: RegisterRequest): Promise<RegisterResponse>
 }
 
 /**
+ * Lite 版自动初始化（创建默认用户/租户 + 签发令牌）
+ */
+export async function autoSetup(): Promise<LoginResponse> {
+  try {
+    const response = await post('/api/v1/auth/auto-setup', {})
+    return response as unknown as LoginResponse
+  } catch (error: any) {
+    return {
+      success: false,
+      message: error.message || 'Auto-setup unavailable'
+    }
+  }
+}
+
+/**
  * 获取当前用户信息
  */
 export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant: TenantInfo }; message?: string }> {

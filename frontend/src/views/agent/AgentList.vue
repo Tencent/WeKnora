@@ -1,6 +1,7 @@
 <template>
   <div class="agent-list-container">
     <ListSpaceSidebar
+      v-if="!authStore.isLiteMode"
       v-model="spaceSelection"
       :count-all="allAgentsCount"
       :count-mine="agents.length"
@@ -9,16 +10,17 @@
       hide-shared
     />
     <div class="agent-list-content">
-      <div class="header">
-        <div class="header-title">
-          <div class="title-row">
-            <h2>{{ $t('agent.title') }}</h2>
+      <div class="header" style="--wails-draggable: drag">
+        <div class="header-title" style="--wails-draggable: drag">
+          <div class="title-row" style="--wails-draggable: drag">
+            <h2 style="--wails-draggable: drag">{{ $t('agent.title') }}</h2>
             <t-tooltip :content="$t('agent.createAgent')" placement="bottom">
               <t-button
                 variant="text"
                 theme="default"
                 size="small"
                 class="header-action-btn"
+                style="--wails-draggable: no-drag"
                 @click="handleCreateAgent"
               >
                 <template #icon>
@@ -33,10 +35,27 @@
               </t-button>
             </t-tooltip>
           </div>
-          <p class="header-subtitle">{{ $t('agent.subtitle') }}</p>
+          <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('agent.subtitle') }}</p>
         </div>
       </div>
       <div class="agent-list-main">
+    <!-- 骨架屏占位 -->
+    <div v-if="loading && agents.length === 0" class="agent-card-wrap">
+      <div v-for="n in 6" :key="'skel-'+n" class="agent-card agent-card-skeleton">
+        <div class="card-header">
+          <div class="card-header-left">
+            <t-skeleton animation="gradient" :row-col="[[{ width: '32px', height: '32px', type: 'circle' }, { width: '40%', height: '18px' }]]" />
+          </div>
+        </div>
+        <div class="card-content">
+          <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '14px' }, { width: '70%', height: '14px' }]" />
+        </div>
+        <div class="card-bottom">
+          <t-skeleton animation="gradient" :row-col="[[{ width: '60px', height: '22px', type: 'rect' }, { width: '60px', height: '22px', type: 'rect' }]]" />
+        </div>
+      </div>
+    </div>
+
     <!-- 全部：我的 + 共享 -->
     <div v-if="spaceSelection === 'all' && filteredAgents.length > 0" class="agent-card-wrap">
       <div
@@ -544,10 +563,12 @@ import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organiz
 import AgentEditorModal from './AgentEditorModal.vue'
 import AgentAvatar from '@/components/AgentAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const orgStore = useOrganizationStore()
 
 interface AgentWithUI extends CustomAgent {
@@ -1180,10 +1201,23 @@ defineExpose({
 }
 
 
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .agent-card-wrap {
   display: grid;
   gap: 20px;
   grid-template-columns: 1fr;
+  animation: contentFadeIn 0.32s ease-out;
+}
+
+.agent-card-skeleton {
+  cursor: default;
+  .card-header { margin-bottom: 16px; }
+  .card-content { flex: 1; }
+  .card-bottom { margin-top: auto; }
 }
 
 /* 与知识库列表卡片统一尺寸：160px 高、18px 20px 内边距、12px 圆角 */

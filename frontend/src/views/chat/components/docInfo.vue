@@ -259,19 +259,17 @@ const getWebSearchDisplayText = (item) => {
     line-height: 20px;
     padding: 2px 0;
     transition: all 0.2s ease;
-    border-bottom: 1px solid transparent;
+    border-bottom: 1px dashed var(--td-brand-color);
 
     &:hover {
-        border-bottom-color: var(--td-brand-color);
+        background-color: rgba(7, 192, 95, 0.08);
+        border-radius: 3px;
+        padding-right: 4px;
     }
 
     &.doc-web {
         white-space: normal;
         word-break: break-all;
-
-        &:hover {
-            text-decoration: underline;
-        }
     }
 }
 

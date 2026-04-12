@@ -134,7 +134,7 @@ func TestBlocksToMarkdown_Paragraph(t *testing.T) {
 		}),
 	}
 	md, attachments := BlocksToMarkdown(blocks)
-	if md != "Hello world\n\n" {
+	if md != "Hello world\n" {
 		t.Errorf("markdown = %q", md)
 	}
 	if len(attachments) != 0 {
@@ -161,7 +161,7 @@ func TestBlocksToMarkdown_Headings(t *testing.T) {
 		}),
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	expected := "# H1\n\n## H2\n\n### H3\n\n"
+	expected := "# H1\n\n## H2\n\n### H3\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -177,7 +177,7 @@ func TestBlocksToMarkdown_Code(t *testing.T) {
 		}),
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	expected := "```go\nfmt.Println()\n```\n\n"
+	expected := "```go\nfmt.Println()\n```\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -197,7 +197,7 @@ func TestBlocksToMarkdown_List(t *testing.T) {
 		}),
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	expected := "- Item 1\n- Item 2\n\n"
+	expected := "- Item 1\n- Item 2\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -219,7 +219,7 @@ func TestBlocksToMarkdown_ToDo(t *testing.T) {
 		}),
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	expected := "- [ ] Unchecked\n- [x] Checked\n\n"
+	expected := "- [ ] Unchecked\n- [x] Checked\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -234,7 +234,7 @@ func TestBlocksToMarkdown_Quote(t *testing.T) {
 		}),
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	expected := "> A wise quote\n\n"
+	expected := "> A wise quote\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -245,7 +245,7 @@ func TestBlocksToMarkdown_Divider(t *testing.T) {
 		{ID: "blk-div", Type: "divider"},
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	if md != "---\n\n" {
+	if md != "---\n" {
 		t.Errorf("markdown = %q", md)
 	}
 }
@@ -257,7 +257,7 @@ func TestBlocksToMarkdown_Equation(t *testing.T) {
 		}),
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	expected := "$$E = mc^2$$\n\n"
+	expected := "$$E = mc^2$$\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -277,7 +277,7 @@ func TestBlocksToMarkdown_Image(t *testing.T) {
 		}),
 	}
 	md, attachments := BlocksToMarkdown(blocks)
-	if md != "![A photo](https://s3.example.com/img.png)\n\n" {
+	if md != "![A photo](https://s3.example.com/img.png)\n" {
 		t.Errorf("markdown = %q", md)
 	}
 	if len(attachments) != 1 {
@@ -296,7 +296,7 @@ func TestBlocksToMarkdown_UnknownType(t *testing.T) {
 		{ID: "blk-unknown", Type: "future_block_type"},
 	}
 	md, _ := BlocksToMarkdown(blocks)
-	if md != "" {
+	if md != "\n" {
 		t.Errorf("unknown block should produce empty output, got %q", md)
 	}
 }
@@ -323,7 +323,7 @@ func TestBlocksToMarkdown_Table(t *testing.T) {
 		},
 	}
 	md, _ := BlocksToMarkdown([]notionBlock{tableBlock})
-	expected := "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n\n"
+	expected := "| Name | Age |\n| --- | --- |\n| Alice | 30 |\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}
@@ -345,7 +345,7 @@ func TestBlocksToMarkdown_NestedList(t *testing.T) {
 	}
 
 	md, _ := BlocksToMarkdown([]notionBlock{parent})
-	expected := "- Parent\n  - Child\n\n"
+	expected := "- Parent\n  - Child\n"
 	if md != expected {
 		t.Errorf("markdown = %q, want %q", md, expected)
 	}

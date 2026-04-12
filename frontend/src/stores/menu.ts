@@ -1,6 +1,7 @@
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 import { defineStore } from 'pinia'
 import i18n from '@/i18n'
+import { useAuthStore } from '@/stores/auth'
 
 type MenuChild = Record<string, any>
 
@@ -56,6 +57,16 @@ export const useMenuStore = defineStore('menuStore', () => {
       applyMenuTranslations()
     }
   )
+
+  const liteHiddenPaths = new Set(['logout', 'organizations'])
+
+  const visibleMenuArr = computed(() => {
+    const authStore = useAuthStore()
+    if (authStore.isLiteMode) {
+      return menuArr.filter(item => !liteHiddenPaths.has(item.path))
+    }
+    return menuArr
+  })
 
   const chatMenuIndex = menuArr.findIndex(item => item.path === 'creatChat')
 
@@ -118,6 +129,7 @@ export const useMenuStore = defineStore('menuStore', () => {
 
   return {
     menuArr,
+    visibleMenuArr,
     isFirstSession,
     firstQuery,
     firstMentionedItems,

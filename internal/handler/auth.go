@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -501,6 +503,79 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Password changed successfully",
+	})
+}
+
+// AutoSetup godoc
+// @Summary      自动初始化（Lite 桌面版）
+// @Description  Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  types.LoginResponse
+// @Failure      403  {object}  errors.AppError  "非 Lite 版本"
+// @Router       /auth/auto-setup [post]
+func (h *AuthHandler) AutoSetup(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	if Edition != "lite" {
+		appErr := errors.NewForbiddenError("auto-setup is only available in lite edition")
+		c.Error(appErr)
+		return
+	}
+
+	const defaultEmail = "admin@weknora.local"
+
+	user, _ := h.userService.GetUserByEmail(ctx, defaultEmail)
+	if user == nil {
+		logger.Info(ctx, "Auto-setup: creating default user and tenant for lite edition")
+
+		randomBytes := make([]byte, 24)
+		if _, err := rand.Read(randomBytes); err != nil {
+			appErr := errors.NewInternalServerError("auto-setup failed: unable to generate credentials")
+			c.Error(appErr)
+			return
+		}
+		randomPassword := base64.RawURLEncoding.EncodeToString(randomBytes)
+		randomUsername := fmt.Sprintf("user_%s", base64.RawURLEncoding.EncodeToString(randomBytes[:6]))
+
+		_, err := h.userService.Register(ctx, &types.RegisterRequest{
+			Username: randomUsername,
+			Email:    defaultEmail,
+			Password: randomPassword,
+		})
+		if err != nil {
+			logger.Errorf(ctx, "Auto-setup: failed to register default user: %v", err)
+			appErr := errors.NewInternalServerError("auto-setup failed").WithDetails(err.Error())
+			c.Error(appErr)
+			return
+		}
+		user, _ = h.userService.GetUserByEmail(ctx, defaultEmail)
+		if user == nil {
+			appErr := errors.NewInternalServerError("auto-setup failed: user not found after registration")
+			c.Error(appErr)
+			return
+		}
+	}
+
+	accessToken, refreshToken, err := h.userService.GenerateTokens(ctx, user)
+	if err != nil {
+		logger.Errorf(ctx, "Auto-setup: failed to generate tokens: %v", err)
+		appErr := errors.NewInternalServerError("auto-setup failed").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	tenant, _ := h.tenantService.GetTenantByID(ctx, user.TenantID)
+
+	logger.Info(ctx, "Auto-setup: completed successfully")
+	c.JSON(http.StatusOK, &types.LoginResponse{
+		Success:      true,
+		Message:      "Auto-setup successful",
+		User:         user,
+		Tenant:       tenant,
+		Token:        accessToken,
+		RefreshToken: refreshToken,
 	})
 }
 

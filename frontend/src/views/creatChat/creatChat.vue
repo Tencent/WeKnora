@@ -1,12 +1,21 @@
 <template>
     <div class="dialogue-wrap">
         <div class="dialogue-answers">
-            <div class="dialogue-title">
-                <span>{{ $t('createChat.title') }}</span>
+            <div class="dialogue-title" style="--wails-draggable: drag">
+                <span style="--wails-draggable: drag">{{ $t('createChat.title') }}</span>
             </div>
             <!-- 推荐问题 -->
             <div ref="sqContainerRef" class="suggested-questions-container">
-                <transition name="sq-slide-fade" mode="out-in"
+                <!-- 骨架屏占位 -->
+                <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
+                    <div class="suggested-questions-title"><t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '18px' }]" /></div>
+                    <div class="suggested-questions-grid">
+                        <div v-for="n in 6" :key="'sq-skel-'+n" class="suggested-question-card sq-card-skeleton">
+                            <t-skeleton animation="gradient" :row-col="[{ width: '90%', height: '14px' }, { width: '60%', height: '14px' }]" />
+                        </div>
+                    </div>
+                </div>
+                <transition v-else appear name="sq-slide-fade" mode="out-in"
                     @before-leave="onBeforeLeave"
                     @after-leave="onAfterLeave"
                     @enter="onEnter"
@@ -69,6 +78,7 @@ const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 
 // ===== 推荐问题 =====
 const suggestedQuestions = ref<SuggestedQuestion[]>([]);
+const sqLoading = ref(true);
 const sqCardsRevealed = ref(false);
 const sqRenderKey = ref(0);
 const sqContainerRef = ref<HTMLElement | null>(null);
@@ -119,7 +129,7 @@ const onQuestionsEntered = () => {
 
 const fetchSuggestedQuestions = async () => {
     const fetchId = ++suggestedQuestionsFetchId;
-    // 加载期间保留旧数据，不清空，避免布局抖动
+    if (suggestedQuestions.value.length === 0) sqLoading.value = true;
     try {
         const agentId = settingsStore.selectedAgentId;
         if (!agentId) return;
@@ -139,6 +149,10 @@ const fetchSuggestedQuestions = async () => {
         console.warn('[SuggestedQuestions] Failed to fetch:', err);
         if (fetchId === suggestedQuestionsFetchId) {
             suggestedQuestions.value = [];
+        }
+    } finally {
+        if (fetchId === suggestedQuestionsFetchId) {
+            sqLoading.value = false;
         }
     }
 };
@@ -277,11 +291,17 @@ const handleKBEditorSuccess = (kbId: string) => {
     transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+@keyframes skeletonFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 .suggested-questions-inner {
     display: flex;
     flex-direction: column;
     align-items: center;
     width: 100%;
+    animation: skeletonFadeIn 0.3s ease-out;
 }
 
 // 容器整体过渡：淡入 + 轻微上滑
@@ -334,6 +354,12 @@ const handleKBEditorSuccess = (kbId: string) => {
                 border-color 0.2s ease,
                 background 0.2s ease,
                 box-shadow 0.2s ease;
+
+    &.sq-card-skeleton {
+        opacity: 1;
+        transform: none;
+        cursor: default;
+    }
 
     &.sq-card-visible {
         opacity: 1;

@@ -1,7 +1,27 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { listKnowledgeBases } from '@/api/knowledge-base'
+import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { validateToken } from '@/api/auth'
+import { autoSetup } from '@/api/auth'
+
+/** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
+const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
+
+function isLiteEdition(authStore: ReturnType<typeof useAuthStore>) {
+  return authStore.isLiteMode || localStorage.getItem('weknora_lite_mode') === 'true'
+}
+
+function isLiteSpaDefaultEntry(to: RouteLocationNormalized) {
+  return (
+    to.path === '/' ||
+    to.path === '/platform' ||
+    to.path === '/platform/knowledge-bases' ||
+    to.name === 'knowledgeBaseList'
+  )
+}
+
+function isSafeLiteRestoreTarget(path: string) {
+  return path.startsWith('/platform/') && !path.startsWith('/platform/organizations')
+}
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -105,10 +125,55 @@ const router = createRouter({
   ],
 });
 
+// 持久化 auto-setup / login 返回的认证信息到 store
+function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, response: any) {
+  if (response.user && response.tenant && response.token) {
+    authStore.setUser({
+      id: response.user.id || '',
+      username: response.user.username || '',
+      email: response.user.email || '',
+      avatar: response.user.avatar,
+      tenant_id: String(response.tenant.id) || '',
+      can_access_all_tenants: response.user.can_access_all_tenants || false,
+      created_at: response.user.created_at || new Date().toISOString(),
+      updated_at: response.user.updated_at || new Date().toISOString()
+    })
+    authStore.setToken(response.token)
+    if (response.refresh_token) {
+      authStore.setRefreshToken(response.refresh_token)
+    }
+    authStore.setTenant({
+      id: String(response.tenant.id) || '',
+      name: response.tenant.name || '',
+      api_key: response.tenant.api_key || '',
+      owner_id: response.user.id || '',
+      created_at: response.tenant.created_at || new Date().toISOString(),
+      updated_at: response.tenant.updated_at || new Date().toISOString()
+    })
+  }
+}
+
+let autoSetupAttempted = false
+let liteDeepLinkRestoreDone = false
+
 // 路由守卫：检查认证状态和系统初始化状态
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-  
+
+  // Lite：硬刷新后若落在默认首页，恢复本次会话中最后访问的 /platform 子路径
+  if (!liteDeepLinkRestoreDone) {
+    liteDeepLinkRestoreDone = true
+    if (isLiteEdition(authStore)) {
+      const saved = sessionStorage.getItem(LITE_LAST_PATH_KEY)
+      if (saved && isSafeLiteRestoreTarget(saved) && isLiteSpaDefaultEntry(to)) {
+        if (saved !== to.fullPath) {
+          next(saved)
+          return
+        }
+      }
+    }
+  }
+
   // 如果访问的是登录页面或初始化页面，直接放行
   if (to.meta.requiresAuth === false || to.meta.requiresInit === false) {
     // 如果已登录用户访问登录页面，重定向到知识库列表页面
@@ -123,29 +188,34 @@ router.beforeEach(async (to, from, next) => {
   // 检查用户认证状态
   if (to.meta.requiresAuth !== false) {
     if (!authStore.isLoggedIn) {
-      // 未登录，跳转到登录页面
+      // Lite 版：尝试自动初始化（仅一次），成功则跳过登录页
+      if (!autoSetupAttempted) {
+        autoSetupAttempted = true
+        try {
+          const response = await autoSetup()
+          if (response.success) {
+            persistLoginResponse(authStore, response)
+            authStore.setLiteMode(true)
+            next(to.fullPath)
+            return
+          }
+        } catch {
+          // auto-setup 不可用（非 lite 版本），走正常登录流程
+        }
+      }
       next('/login')
       return
     }
-
-    // 验证Token有效性
-    // try {
-    //   const { valid } = await validateToken()
-    //   if (!valid) {
-    //     // Token无效，清空认证信息并跳转到登录页面
-    //     authStore.logout()
-    //     next('/login')
-    //     return
-    //   }
-    // } catch (error) {
-    //   console.error('Token验证失败:', error)
-    //   authStore.logout()
-    //   next('/login')
-    //   return
-    // }
   }
 
   next()
-});
+})
+
+router.afterEach((to) => {
+  if (!isLiteEdition(useAuthStore())) return
+  if (to.path === '/login') return
+  if (!to.path.startsWith('/platform')) return
+  sessionStorage.setItem(LITE_LAST_PATH_KEY, to.fullPath)
+})
 
 export default router

@@ -690,6 +690,24 @@ const getParentContent = (item: any) => {
   return parentContextCache.value.get(item.parent_chunk_id) || '';
 };
 
+const summaryExpanded = ref(false);
+const summaryRef = ref<HTMLElement>();
+const summaryOverflow = ref(false);
+
+const checkSummaryOverflow = () => {
+  nextTick(() => {
+    const el = summaryRef.value;
+    if (!el) { summaryOverflow.value = false; return; }
+    summaryOverflow.value = el.scrollHeight > el.clientHeight + 1;
+  });
+};
+
+watch(() => props.details?.description, () => {
+  summaryExpanded.value = false;
+  checkSummaryOverflow();
+});
+watch(summaryRef, () => checkSummaryOverflow());
+
 const downloadFile = () => {
   downKnowledgeDetails(props.details.id)
     .then((result) => {
@@ -734,7 +752,7 @@ const handleDetailsScroll = () => {
 </script>
 <template>
   <div class="doc_content" ref="mdContentWrap">
-    <t-drawer :visible="visible" :zIndex="2000" :closeBtn="true" @close="handleClose">
+    <t-drawer :visible="visible" :zIndex="2000" :closeBtn="true" :footer="false" @close="handleClose">
       <template #header>
         <div class="drawer-header">
           <span class="header-title">{{ getDisplayTitle() }}</span>
@@ -784,7 +802,12 @@ const handleDetailsScroll = () => {
       <!-- 文档摘要 -->
       <div v-if="details.description" class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
-        <div class="summary_content">{{ details.description }}</div>
+        <div class="summary_wrapper" :class="{ 'summary_clickable': summaryOverflow || summaryExpanded }" @click="(summaryOverflow || summaryExpanded) && (summaryExpanded = !summaryExpanded)">
+          <div ref="summaryRef" :class="['summary_content', { 'summary_collapsed': !summaryExpanded }]">{{ details.description }}</div>
+          <div v-if="(summaryOverflow && !summaryExpanded) || summaryExpanded" class="summary_fade" :class="{ 'summary_fade_expanded': summaryExpanded }">
+            <t-icon :name="summaryExpanded ? 'chevron-up' : 'chevron-down'" size="14px" class="summary_fade_icon" />
+          </div>
+        </div>
       </div>
       <div v-else-if="details.summary_status === 'pending' || details.summary_status === 'processing'" class="summary_box">
         <span class="label">{{ $t('knowledgeBase.documentSummary') }}</span>
@@ -948,10 +971,6 @@ const handleDetailsScroll = () => {
         />
       </div>
       
-      <template #footer>
-        <t-button @click="handleClose">{{ $t('common.confirm') }}</t-button>
-        <t-button theme="default" @click="handleClose">{{ $t('common.cancel') }}</t-button>
-      </template>
     </t-drawer>
   </div>
 </template>
@@ -1056,15 +1075,50 @@ const handleDetailsScroll = () => {
     font-size: 14px;
   }
 
-  .summary_content {
-    padding: 12px;
+  .summary_wrapper {
+    position: relative;
     background: var(--td-bg-color-container-hover);
     border-radius: 4px;
+
+    &.summary_clickable {
+      cursor: pointer;
+    }
+  }
+
+  .summary_content {
+    padding: 12px;
     color: var(--td-text-color-primary);
     font-size: 13px;
     line-height: 1.5;
     word-break: break-word;
     white-space: pre-wrap;
+
+    &.summary_collapsed {
+      max-height: 4.5em;
+      overflow: hidden;
+    }
+  }
+
+  .summary_fade {
+    display: flex;
+    justify-content: center;
+    padding-bottom: 4px;
+    pointer-events: none;
+
+    &:not(.summary_fade_expanded) {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 28px;
+      background: linear-gradient(transparent, var(--td-bg-color-container-hover) 80%);
+      border-radius: 0 0 4px 4px;
+      align-items: flex-end;
+    }
+  }
+
+  .summary_fade_icon {
+    color: var(--td-text-color-placeholder);
   }
 
   .summary_loading {

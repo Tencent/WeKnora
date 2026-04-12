@@ -1,0 +1,451 @@
+name: Release Lite Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.2.0)"
+        required: true
+
+concurrency:
+  group: release-lite-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.24"
+  NODE_VERSION: "22"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ── 1. Build frontend once, share as artifact (for Web CLI) ──
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ── 2a. Build Web CLI binary per platform (native CGO) ──
+  build-binary:
+    needs: build-frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - os: macos-14
+            goos: darwin
+            goarch: amd64
+          - os: macos-14
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building ${VERSION} for ${{ matrix.goos }}/${{ matrix.goarch }}"
+
+      - name: Build
+        run: |
+          export EDITION=lite
+          eval "$(./scripts/get_version.sh env)"
+          LDFLAGS="-w -s $(./scripts/get_version.sh ldflags)"
+          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+          fi
+          go build -tags "sqlite_fts5" -ldflags="${LDFLAGS}" \
+            -o WeKnora-lite ./cmd/server
+
+      - name: Package tarball
+        run: |
+          ARCHIVE="WeKnora-lite_${{ steps.ver.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "${ARCHIVE}/web"
+          cp WeKnora-lite "${ARCHIVE}/"
+          cp -r web/* "${ARCHIVE}/web/"
+          cp .env.lite.example "${ARCHIVE}/"
+          cp docs/LITE.md "${ARCHIVE}/README.md"
+          if [ -d config ]; then
+            cp -r config "${ARCHIVE}/config"
+          fi
+          if [ -d migrations/sqlite ]; then
+            mkdir -p "${ARCHIVE}/migrations/sqlite"
+            cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
+          fi
+          if [ -f deploy/weknora-lite.service ]; then
+            cp deploy/weknora-lite.service "${ARCHIVE}/"
+          fi
+          tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+          shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            WeKnora-lite_*.tar.gz
+            WeKnora-lite_*.tar.gz.sha256
+          retention-days: 3
+
+  # ── 2b. Build Desktop APP per platform (Wails) ──
+  build-desktop-app:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin/universal
+            arch_label: macOS_universal
+            artifact_name: desktop-macos-universal
+          - os: macos-14
+            platform: darwin/amd64
+            arch_label: macOS_amd64
+            artifact_name: desktop-macos-amd64
+          - os: macos-14
+            platform: darwin/arm64
+            arch_label: macOS_arm64
+            artifact_name: desktop-macos-arm64
+          - os: ubuntu-latest
+            platform: linux/amd64
+            arch_label: linux_amd64
+            artifact_name: desktop-linux-amd64
+          - os: windows-latest
+            platform: windows/amd64
+            arch_label: windows_amd64
+            artifact_name: desktop-windows-amd64
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        run: choco install nsis -y
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Pre-compile Go packages (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+          export CGO_CFLAGS="-Wno-deprecated-declarations"
+          cd cmd/desktop
+          go build -p 1 -buildvcs=false -tags "desktop,sqlite_fts5,production" -o _prebuild_tmp.exe . || true
+          rm -f _prebuild_tmp.exe
+
+      - name: Build desktop app
+        shell: bash
+        run: |
+          export EDITION=lite
+          export GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+          eval "$(./scripts/get_version.sh env)"
+          LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
+          export CGO_CFLAGS="-Wno-deprecated-declarations"
+
+          BUILD_TAGS="sqlite_fts5"
+          NSIS_FLAG=""
+
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            BUILD_TAGS="sqlite_fts5 webkit2_41"
+          fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            export CGO_LDFLAGS="-Wl,-no_warn_duplicate_libraries"
+          fi
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            NSIS_FLAG="-nsis"
+          fi
+
+          cd cmd/desktop
+          wails build -clean \
+            -tags "${BUILD_TAGS}" \
+            -platform "${{ matrix.platform }}" \
+            ${NSIS_FLAG} \
+            -ldflags="${LDFLAGS}" \
+            -o "WeKnora Lite"
+
+      # ── macOS: bundle .app with resources, then create DMG ──
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          APP_BUNDLE="WeKnora Lite.app"
+          SRC="cmd/desktop/build/bin/${APP_BUNDLE}"
+          RESOURCES="${SRC}/Contents/Resources"
+
+          mkdir -p "${RESOURCES}/config"
+          mkdir -p "${RESOURCES}/migrations/sqlite"
+
+          if [ -f .env.lite.example ]; then
+            cp .env.lite.example "${RESOURCES}/.env"
+          fi
+          if [ -d migrations/sqlite ]; then
+            cp -r migrations/sqlite/* "${RESOURCES}/migrations/sqlite/"
+          fi
+          if [ -d config ]; then
+            cp -r config/* "${RESOURCES}/config/"
+          fi
+
+          DMG_NAME="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
+
+          DMG_SRC="dmg_staging"
+          mkdir -p "${DMG_SRC}"
+          cp -R "cmd/desktop/build/bin/${APP_BUNDLE}" "${DMG_SRC}/"
+          ln -s /Applications "${DMG_SRC}/Applications"
+
+          hdiutil create -volname "WeKnora Lite" \
+            -srcfolder "${DMG_SRC}" \
+            -ov -format UDZO \
+            "${DMG_NAME}.dmg"
+
+          shasum -a 256 "${DMG_NAME}.dmg" > "${DMG_NAME}.dmg.sha256"
+
+      # ── Linux: package tarball ──
+      - name: Package Linux app
+        if: runner.os == 'Linux'
+        run: |
+          ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
+          mkdir -p "${ARCHIVE}"
+          cp "cmd/desktop/build/bin/WeKnora Lite" "${ARCHIVE}/"
+          if [ -f .env.lite.example ]; then
+            cp .env.lite.example "${ARCHIVE}/"
+          fi
+          cp docs/LITE.md "${ARCHIVE}/README.md"
+          if [ -d config ]; then
+            cp -r config "${ARCHIVE}/config"
+          fi
+          if [ -d migrations/sqlite ]; then
+            mkdir -p "${ARCHIVE}/migrations/sqlite"
+            cp -r migrations/sqlite/* "${ARCHIVE}/migrations/sqlite/"
+          fi
+          tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+          shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
+
+      # ── Windows: package NSIS installer or plain exe ──
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
+          # Wails -nsis generates an installer named {app}-amd64-installer.exe
+          INSTALLER="cmd/desktop/build/bin/WeKnora Lite-amd64-installer.exe"
+          if [ -f "$INSTALLER" ]; then
+            cp "$INSTALLER" "${ARCHIVE}_setup.exe"
+            sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
+          else
+            cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${ARCHIVE}.exe"
+            sha256sum "${ARCHIVE}.exe" > "${ARCHIVE}.exe.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            WeKnora-Lite-App_*
+          retention-days: 3
+
+  # ── 3. Create GitHub Release ──
+  release:
+    needs: [build-binary, build-desktop-app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          cat > notes.md << 'NOTES'
+          ## WeKnora Lite ${{ steps.ver.outputs.version }}
+
+          ### Web CLI 版（命令行 / 服务器部署）
+
+          单二进制部署，零外部依赖（无需 Docker / PostgreSQL / Redis）。
+
+          ```bash
+          # 1. 解压
+          tar xzf WeKnora-lite_${{ steps.ver.outputs.version }}_<os>_<arch>.tar.gz
+          cd WeKnora-lite_${{ steps.ver.outputs.version }}_<os>_<arch>
+
+          # 2. 配置
+          cp .env.lite.example .env.lite
+          # 编辑 .env.lite，至少确认 OLLAMA_BASE_URL 正确
+
+          # 3. 启动 Ollama（如尚未运行）
+          ollama serve &
+          ollama pull qwen2.5:7b
+          ollama pull nomic-embed-text
+
+          # 4. 运行
+          set -a && source .env.lite && set +a
+          ./WeKnora-lite
+          # 访问 http://localhost:8080
+          ```
+
+          | 文件 | 平台 |
+          |------|------|
+          | `WeKnora-lite_*_linux_amd64.tar.gz` | Linux x86_64 |
+          | `WeKnora-lite_*_linux_arm64.tar.gz` | Linux ARM64 |
+          | `WeKnora-lite_*_darwin_amd64.tar.gz` | macOS Intel |
+          | `WeKnora-lite_*_darwin_arm64.tar.gz` | macOS Apple Silicon |
+
+          ---
+
+          ### 桌面 APP 版（开箱即用，无需命令行）
+
+          原生桌面应用，内置 Web 服务，双击即可运行。
+
+          | 文件 | 平台 |
+          |------|------|
+          | `WeKnora-Lite-App_*_macOS_universal.dmg` | macOS (Intel + Apple Silicon) |
+          | `WeKnora-Lite-App_*_macOS_amd64.dmg` | macOS Intel |
+          | `WeKnora-Lite-App_*_macOS_arm64.dmg` | macOS Apple Silicon |
+          | `WeKnora-Lite-App_*_linux_amd64.tar.gz` | Linux x86_64 |
+          | `WeKnora-Lite-App_*_windows_amd64_setup.exe` | Windows x86_64 (安装包) |
+
+          详细文档见 [LITE.md](docs/LITE.md)。
+          NOTES
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.version }}" \
+            --title "WeKnora Lite ${{ steps.ver.outputs.version }}" \
+            --notes-file notes.md \
+            WeKnora-lite_*.tar.gz \
+            WeKnora-lite_*.tar.gz.sha256 \
+            WeKnora-Lite-App_* || true
+
+  # ── 4. Update Homebrew Formula ──
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            VERSION="${{ inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for release assets to be available
+        run: sleep 15
+
+      - name: Update Formula
+        run: ./scripts/update-homebrew-formula.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/weknora-lite.rb
+          if git diff --cached --quiet; then
+            echo "No changes to Formula"
+          else
+            git commit -m "formula: update weknora-lite to ${{ steps.ver.outputs.version }}"
+            git push origin main
+          fi
