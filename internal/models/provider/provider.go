@@ -87,6 +87,7 @@ func AllProviders() []ProviderName {
 		ProviderNvidia,
 		ProviderNovita,
 		ProviderAzureOpenAI,
+		ProviderWeKnoraCloud,
 	}
 }
 

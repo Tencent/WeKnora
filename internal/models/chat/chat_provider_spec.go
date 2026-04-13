@@ -2,10 +2,13 @@ package chat
 
 import (
 	"context"
+	"net/http"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/google/uuid"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -20,11 +23,22 @@ type ProviderSpec struct {
 	RequestCustomizer func(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool)
 	// EndpointCustomizer: provider-specific endpoint URL override.
 	EndpointCustomizer func(baseURL string, modelID string, isStream bool) string
+	// HeaderCustomizer: provider-specific raw HTTP header customization.
+	HeaderCustomizer func(chat *RemoteAPIChat, req *http.Request, body []byte) error
 }
 
 // chatProviderSpecs is the ordered list of provider specs.
 // Order matters: more specific specs (with ModelMatcher) should come before generic ones.
 var chatProviderSpecs = []ProviderSpec{
+	// WeKnoraCloud
+	{
+		Provider:          provider.ProviderWeKnoraCloud,
+		RequestCustomizer: weKnoraCloudRequestCustomizer,
+		EndpointCustomizer: func(baseURL string, _ string, _ bool) string {
+			return strings.TrimRight(baseURL, "/") + "/api/v1/chat/completions"
+		},
+		HeaderCustomizer: weKnoraCloudHeaderCustomizer,
+	},
 	// Aliyun Qwen Thinking Models (must be before generic Aliyun)
 	{
 		Provider:          provider.ProviderAliyun,
@@ -94,6 +108,61 @@ type ThinkingChatCompletionRequest struct {
 }
 
 // --- Customizer functions ---
+
+type weKnoraCloudChatRequest struct {
+	Model       string             `json:"model"`
+	Messages    []weKnoraCloudMessage `json:"messages"`
+	Stream      bool               `json:"stream"`
+	MaxTokens   int                `json:"max_tokens,omitempty"`
+	Temperature float64            `json:"temperature,omitempty"`
+	TopP        float64            `json:"top_p,omitempty"`
+}
+
+type weKnoraCloudMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+func weKnoraCloudRequestCustomizer(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool) (any, bool) {
+	weKnoraCloudReq := weKnoraCloudChatRequest{
+		Model:    req.Model,
+		Messages: convertToWeKnoraCloudMessagesFromOpenAI(req.Messages),
+		Stream:   isStream,
+	}
+	if opts != nil {
+		weKnoraCloudReq.Temperature = opts.Temperature
+		weKnoraCloudReq.TopP = opts.TopP
+		weKnoraCloudReq.MaxTokens = opts.MaxTokens
+	}
+	return weKnoraCloudReq, true
+}
+
+func weKnoraCloudHeaderCustomizer(chat *RemoteAPIChat, req *http.Request, body []byte) error {
+	requestID := uuid.NewString()
+	headers := modelutils.Sign(chat.appID, chat.appSecret, requestID, string(body))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	return nil
+}
+
+func convertToWeKnoraCloudMessagesFromOpenAI(messages []openai.ChatCompletionMessage) []weKnoraCloudMessage {
+	result := make([]weKnoraCloudMessage, 0, len(messages))
+	for _, m := range messages {
+		content := m.Content
+		if content == "" && len(m.MultiContent) > 0 {
+			var textParts []string
+			for _, part := range m.MultiContent {
+				if part.Type == openai.ChatMessagePartTypeText && part.Text != "" {
+					textParts = append(textParts, part.Text)
+				}
+			}
+			content = strings.Join(textParts, "\n")
+		}
+		result = append(result, weKnoraCloudMessage{Role: m.Role, Content: content})
+	}
+	return result
+}
 
 // qwenThinkingRequestCustomizer 自定义 Qwen 系列（阿里云）模型的思考请求
 func qwenThinkingRequestCustomizer(

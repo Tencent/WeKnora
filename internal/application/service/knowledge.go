@@ -65,6 +65,7 @@ type knowledgeService struct {
 	repo           interfaces.KnowledgeRepository
 	kbService      interfaces.KnowledgeBaseService
 	tenantRepo     interfaces.TenantRepository
+	tenantService  interfaces.TenantService
 	documentReader interfaces.DocumentReader
 	chunkService   interfaces.ChunkService
 	chunkRepo      interfaces.ChunkRepository
@@ -92,6 +93,7 @@ func NewKnowledgeService(
 	documentReader interfaces.DocumentReader,
 	kbService interfaces.KnowledgeBaseService,
 	tenantRepo interfaces.TenantRepository,
+	tenantService interfaces.TenantService,
 	chunkService interfaces.ChunkService,
 	chunkRepo interfaces.ChunkRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
@@ -110,6 +112,7 @@ func NewKnowledgeService(
 		repo:           repo,
 		kbService:      kbService,
 		tenantRepo:     tenantRepo,
+		tenantService:  tenantService,
 		documentReader: documentReader,
 		chunkService:   chunkService,
 		chunkRepo:      chunkRepo,
@@ -7994,7 +7997,7 @@ func (s *knowledgeService) convert(
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, kb.ChunkingConfig.ParserEngineRules)
 
-	var reader interfaces.DocReader = s.resolveDocReader(parserEngine, fileType, isURL, overrides)
+	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
 	if reader == nil {
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
@@ -8042,10 +8045,24 @@ func (s *knowledgeService) convert(
 
 // resolveDocReader returns the appropriate DocReader for the given engine.
 // Returns nil when the required service is unavailable.
-func (s *knowledgeService) resolveDocReader(engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
+func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
 	switch engine {
 	case docparser.SimpleEngineName:
 		return &docparser.SimpleFormatReader{}
+	case docparser.WeKnoraCloudEngineName:
+		addr := strings.TrimSpace(overrides["docreader_addr"])
+		if !IsWeKnoraCloudDocReaderAddr(addr) {
+			return nil
+		}
+		creds := s.tenantService.GetDocreaderCredentials(ctx)
+		if creds == nil {
+			return nil
+		}
+		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(addr, creds.AppID, creds.APIKey)
+		if err != nil {
+			return nil
+		}
+		return reader
 	case "mineru":
 		return docparser.NewMinerUReader(overrides)
 	case "mineru_cloud":

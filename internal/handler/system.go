@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -28,14 +29,20 @@ type SystemHandler struct {
 	cfg            *config.Config
 	neo4jDriver    neo4j.Driver
 	documentReader interfaces.DocumentReader
+	tenantSvc      interfaces.TenantService
 }
 
 // NewSystemHandler creates a new system handler
-func NewSystemHandler(cfg *config.Config, neo4jDriver neo4j.Driver, documentReader interfaces.DocumentReader) *SystemHandler {
+func NewSystemHandler(cfg *config.Config,
+	neo4jDriver neo4j.Driver,
+	documentReader interfaces.DocumentReader,
+	tenantSvc interfaces.TenantService,
+) *SystemHandler {
 	return &SystemHandler{
 		cfg:            cfg,
 		neo4jDriver:    neo4jDriver,
 		documentReader: documentReader,
+		tenantSvc:      tenantSvc,
 	}
 }
 
@@ -133,9 +140,6 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 // @Success      200  {object}  map[string]interface{}  "解析引擎列表"
 // @Router       /system/parser-engines [get]
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
-	docreaderAddr, docreaderTransport := h.getDocReaderConnInfo()
-	connected := h.documentReader != nil && h.documentReader.IsConnected()
-
 	var overrides map[string]string
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
@@ -143,7 +147,9 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 		}
 	}
 
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
+	connected := reader != nil && reader.IsConnected()
+	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
@@ -194,7 +200,7 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 			overrides = tenant.ParserEngineConfig.ToOverridesMap()
 		}
 	}
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
 	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
 
 	_, docreaderTransport := h.getDocReaderConnInfo()
@@ -211,28 +217,46 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 // @Success      200
 // @Router       /system/parser-engines/check [post]
 func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
-	docreaderAddr, docreaderTransport := h.getDocReaderConnInfo()
-	connected := h.documentReader != nil && h.documentReader.IsConnected()
-
 	var body types.ParserEngineConfig
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
 	overrides := body.ToOverridesMap()
-	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), overrides)
+	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
+	connected := reader != nil && reader.IsConnected()
+	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
 	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
+}
+
+func (h *SystemHandler) resolveDocReader(ctx context.Context, overrides map[string]string) (interfaces.DocumentReader, string, string) {
+	if len(overrides) > 0 {
+		if addr := strings.TrimSpace(overrides["docreader_addr"]); addr != "" && service.IsWeKnoraCloudDocReaderAddr(addr) {
+			reader := h.ResolveDocumentReader(ctx, addr)
+			return reader, addr, transportFromDocReaderAddr(addr)
+		}
+	}
+
+	addr, transport := h.getDocReaderConnInfo()
+	return h.documentReader, addr, transport
+}
+
+func transportFromDocReaderAddr(addr string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(addr)), "https://") {
+		return "https"
+	}
+	return "http"
 }
 
 // fetchRemoteEngines queries the remote docreader for its engine list.
 // Returns nil on any error (e.g. not connected), letting the caller
 // fall back to Go's static registry only.
-func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, overrides map[string]string) []types.ParserEngineInfo {
-	if h.documentReader == nil || !h.documentReader.IsConnected() {
+func (h *SystemHandler) fetchRemoteEngines(ctx context.Context, reader interfaces.DocumentReader, overrides map[string]string) []types.ParserEngineInfo {
+	if reader == nil || !reader.IsConnected() {
 		return nil
 	}
-	engines, err := h.documentReader.ListEngines(ctx, overrides)
+	engines, err := reader.ListEngines(ctx, overrides)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to fetch remote engines from docreader: %v", err)
 		return nil
@@ -768,7 +792,7 @@ func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *typ
 
 	if cfg.Mode == "remote" {
 		if blocked, reason := isBlockedStorageEndpoint(endpoint); blocked {
-			logger.Warnf(ctx, "Storage check: MinIO endpoint blocked by SSRF protection", "endpoint", endpoint)
+			logger.Warnf(ctx, "Storage check: MinIO endpoint blocked by SSRF protection endpoint=%s", endpoint)
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 			return
 		}
@@ -934,4 +958,28 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: fmt.Sprintf("连接成功，Bucket「%s」已确认存在", cfg.BucketName)}})
+}
+
+func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) interfaces.DocumentReader {
+	if addr == "" {
+		return h.documentReader
+	}
+
+	if service.IsWeKnoraCloudDocReaderAddr(addr) {
+		creds := h.tenantSvc.GetDocreaderCredentials(ctx)
+		if creds == nil {
+			return nil
+		}
+		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(addr, creds.AppID, creds.APIKey)
+		if err != nil {
+			return nil
+		}
+		return reader
+	}
+
+	reader, err := docparser.NewHTTPDocumentReader(addr)
+	if err != nil || reader == nil {
+		return reader
+	}
+	return reader
 }

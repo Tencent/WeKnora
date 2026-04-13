@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/crypto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -23,15 +24,33 @@ type modelService struct {
 	repo          interfaces.ModelRepository
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
+	cryptoSvc     *crypto.CryptoService
 }
 
 // NewModelService creates a new model service instance
-func NewModelService(repo interfaces.ModelRepository, ollamaService *ollama.OllamaService, pooler embedding.EmbedderPooler) interfaces.ModelService {
+func NewModelService(repo interfaces.ModelRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	cryptoSvc *crypto.CryptoService,
+) interfaces.ModelService {
 	return &modelService{
 		repo:          repo,
 		ollamaService: ollamaService,
 		pooler:        pooler,
+		cryptoSvc:     cryptoSvc,
 	}
+}
+
+// decryptAppSecret 解密 AppSecret（如果为空或 cryptoSvc 为空则原样返回）
+func (s *modelService) decryptAppSecret(encrypted string) string {
+	if encrypted == "" {
+		return encrypted
+	}
+	plain, err := s.cryptoSvc.DecryptString(encrypted)
+	if err != nil {
+		return ""
+	}
+	return plain
 }
 
 // CreateModel creates a new model in the repository
@@ -256,7 +275,9 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
-		Extra:                stringMapToAnyMap(model.Parameters.ExtraConfig),
+		ExtraConfig:          model.Parameters.ExtraConfig,
+		AppID:                model.Parameters.AppID,
+		AppSecret:            s.decryptAppSecret(model.Parameters.AppSecret),
 	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -312,7 +333,9 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		Provider:             model.Parameters.Provider,
-		Extra:                stringMapToAnyMap(model.Parameters.ExtraConfig),
+		ExtraConfig:          model.Parameters.ExtraConfig,
+		AppID:                model.Parameters.AppID,
+		AppSecret:            s.decryptAppSecret(model.Parameters.AppSecret),
 	}, s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -343,11 +366,15 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	// Initialize the reranker with model configuration
 	reranker, err := rerank.NewReranker(&rerank.RerankerConfig{
-		ModelID:   model.ID,
-		APIKey:    model.Parameters.APIKey,
-		BaseURL:   model.Parameters.BaseURL,
-		ModelName: model.Name,
-		Source:    model.Source,
+		ModelID:     model.ID,
+		APIKey:      model.Parameters.APIKey,
+		BaseURL:     model.Parameters.BaseURL,
+		ModelName:   model.Name,
+		Source:      model.Source,
+		Provider:    model.Parameters.Provider,
+		ExtraConfig: model.Parameters.ExtraConfig,
+		AppID:       model.Parameters.AppID,
+		AppSecret:   s.decryptAppSecret(model.Parameters.AppSecret),
 	})
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -391,13 +418,15 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	// Initialize the chat model with model configuration
 	chatModel, err := chat.NewChat(&chat.ChatConfig{
-		ModelID:   model.ID,
-		APIKey:    model.Parameters.APIKey,
-		BaseURL:   model.Parameters.BaseURL,
-		ModelName: model.Name,
-		Source:    model.Source,
-		Provider:  model.Parameters.Provider,
-		Extra:     stringMapToAnyMap(model.Parameters.ExtraConfig),
+		ModelID:     model.ID,
+		APIKey:      model.Parameters.APIKey,
+		BaseURL:     model.Parameters.BaseURL,
+		ModelName:   model.Name,
+		Source:      model.Source,
+		Provider:    model.Parameters.Provider,
+		ExtraConfig: model.Parameters.ExtraConfig,
+		AppID:       model.Parameters.AppID,
+		AppSecret:   s.decryptAppSecret(model.Parameters.AppSecret),
 	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

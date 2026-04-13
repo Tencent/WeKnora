@@ -233,7 +233,11 @@ func (c *ConversationConfig) Scan(value interface{}) error {
 // ParserEngineConfig holds tenant-level overrides for document parser engines (e.g. MinerU endpoint, API key).
 // These values take precedence over environment variables when parsing documents.
 type ParserEngineConfig struct {
-	DocReaderAddr  string `json:"docreader_addr"`  // 文档解析服务地址
+	DocReaderAddr string `json:"docreader_addr"` // 文档解析服务地址
+	// docreader 凭证
+	DocreaderAppID  string `json:"docreader_app_id,omitempty"`
+	DocreaderAPIKey string `json:"docreader_api_key,omitempty"`
+
 	MinerUEndpoint string `json:"mineru_endpoint"` // MinerU 自建服务端点
 	MinerUAPIKey   string `json:"mineru_api_key"`  // MinerU 云 API Key
 
@@ -259,6 +263,9 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 		return nil
 	}
 	m := make(map[string]string)
+	if c.DocReaderAddr != "" {
+		m["docreader_addr"] = c.DocReaderAddr
+	}
 	if c.MinerUEndpoint != "" {
 		m["mineru_endpoint"] = c.MinerUEndpoint
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/infrastructure/crypto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -33,12 +34,13 @@ type ListTenantsParams struct {
 
 // tenantService implements the TenantService interface
 type tenantService struct {
-	repo interfaces.TenantRepository // Repository for tenant data operations
+	repo      interfaces.TenantRepository // Repository for tenant data operations
+	cryptoSvc *crypto.CryptoService
 }
 
 // NewTenantService creates a new tenant service instance
-func NewTenantService(repo interfaces.TenantRepository) interfaces.TenantService {
-	return &tenantService{repo: repo}
+func NewTenantService(repo interfaces.TenantRepository, cryptoSvc *crypto.CryptoService) interfaces.TenantService {
+	return &tenantService{repo: repo, cryptoSvc: cryptoSvc}
 }
 
 // CreateTenant creates a new tenant
@@ -341,4 +343,41 @@ func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint6
 	}
 
 	return tenant, nil
+}
+
+func (s *tenantService) GetDocreaderCredentials(ctx context.Context) *types.DocreaderCredentials {
+	// Try to get tenant info directly first
+	if tenant, ok := types.TenantInfoFromContext(ctx); ok {
+		if tenant.ParserEngineConfig != nil {
+			appID := strings.TrimSpace(tenant.ParserEngineConfig.DocreaderAppID)
+			if appID == "" || tenant.ParserEngineConfig.DocreaderAPIKey == "" {
+				return nil
+			}
+			apiKey, err := s.cryptoSvc.DecryptString(tenant.ParserEngineConfig.DocreaderAPIKey)
+			if err != nil || apiKey == "" {
+				return nil
+			}
+			return &types.DocreaderCredentials{AppID: appID, APIKey: apiKey}
+		}
+	}
+
+	// If no tenant info in context, try to get tenant ID and load tenant
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return nil
+	}
+
+	// Load tenant from repo if we only have tenantID
+	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
+	if err == nil && tenant != nil && tenant.ParserEngineConfig != nil {
+		appID := strings.TrimSpace(tenant.ParserEngineConfig.DocreaderAppID)
+		if appID != "" && tenant.ParserEngineConfig.DocreaderAPIKey != "" {
+			apiKey, err := s.cryptoSvc.DecryptString(tenant.ParserEngineConfig.DocreaderAPIKey)
+			if err == nil && apiKey != "" {
+				return &types.DocreaderCredentials{AppID: appID, APIKey: apiKey}
+			}
+		}
+	}
+
+	return nil
 }

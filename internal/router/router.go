@@ -62,6 +62,7 @@ type RouterParams struct {
 	OrganizationHandler      *handler.OrganizationHandler
 	IMHandler                *handler.IMHandler
 	DataSourceHandler        *handler.DataSourceHandler
+	WeKnoraCloudHandler         *handler.WeKnoraCloudHandler
 }
 
 // NewRouter 创建新的路由
@@ -144,6 +145,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler)
 		RegisterIMChannelRoutes(v1, params.IMHandler)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
+		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
 	}
 
 	return r
@@ -797,4 +799,10 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 		ds.GET("/:id/logs", handler.GetSyncLogs)
 		ds.GET("/logs/:log_id", handler.GetSyncLog)
 	}
+}
+
+// RegisterWeKnoraCloudRoutes 注册 WeKnoraCloud 初始化路由
+func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler) {
+	r.POST("/models/weknoracloud/initialize", handler.Initialize)
+	r.GET("/models/weknoracloud/status", handler.Status)
 }

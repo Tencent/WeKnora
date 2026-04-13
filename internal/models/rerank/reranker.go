@@ -78,12 +78,15 @@ func (d *DocumentInfo) UnmarshalJSON(data []byte) error {
 }
 
 type RerankerConfig struct {
-	APIKey    string
-	BaseURL   string
-	ModelName string
-	Source    types.ModelSource
-	ModelID   string
-	Provider  string // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	APIKey      string
+	BaseURL     string
+	ModelName   string
+	Source      types.ModelSource
+	ModelID     string
+	Provider    string // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
+	ExtraConfig map[string]string
+	AppID       string
+	AppSecret   string // 加密值，工厂函数调用方传入，使用前已解密
 }
 
 // NewReranker creates a reranker based on the configuration
@@ -103,6 +106,8 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 		return NewJinaReranker(config)
 	case provider.ProviderNvidia:
 		return NewNvidiaReranker(config)
+	case provider.ProviderWeKnoraCloud:
+		return NewWeKnoraCloudReranker(config)
 	default:
 		return NewOpenAIReranker(config)
 	}

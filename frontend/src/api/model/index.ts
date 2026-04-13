@@ -126,3 +126,45 @@ export function deleteModel(id: string): Promise<void> {
   });
 }
 
+export interface InitializeWeKnoraCloudRequest {
+  app_id: string
+  app_secret: string
+}
+
+export interface InitializeWeKnoraCloudResult {
+  models: Array<{
+    name: string
+    type: string
+    action: 'created' | 'updated'
+  }>
+}
+
+export function initializeWeKnoraCloud(data: InitializeWeKnoraCloudRequest): Promise<InitializeWeKnoraCloudResult> {
+  return post('/api/v1/models/weknoracloud/initialize', data) as Promise<InitializeWeKnoraCloudResult>
+}
+
+export interface WeKnoraCloudStatusResult {
+  has_models: boolean
+  needs_reinit: boolean
+  reason?: string
+}
+
+export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
+  return new Promise((resolve, reject) => {
+    get('/api/v1/models/weknoracloud/status')
+      .then((response: any) => {
+        // status 接口直接返回对象，不包在 success/data 中
+        if (response && typeof response.has_models === 'boolean') {
+          resolve(response)
+        } else if (response?.success && response?.data) {
+          resolve(response.data)
+        } else {
+          resolve({ has_models: false, needs_reinit: false })
+        }
+      })
+      .catch(() => {
+        resolve({ has_models: false, needs_reinit: false })
+      })
+  })
+}
+

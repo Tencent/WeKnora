@@ -116,6 +116,11 @@ services:
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
       - CONCURRENCY_POOL_SIZE=${CONCURRENCY_POOL_SIZE:-5}
       - JWT_SECRET=${JWT_SECRET:-}
+      # Crypto: 主密钥和盐值，用于 AppSecret 等敏感字段的 AES-256 加密
+      # 若不设置则自动生成并持久化到 data-files volume（/data/files/.crypto_state.json）
+      # 重启时自动从文件恢复，保证已加密数据可继续解密
+      - CRYPTO_MASTER_KEY=${CRYPTO_MASTER_KEY:-}
+      - CRYPTO_SALT=${CRYPTO_SALT:-}
       # File size limit (in MB)
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       # Agent Skills Sandbox

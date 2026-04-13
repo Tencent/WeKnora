@@ -68,6 +68,9 @@ type ModelParameters struct {
 	Provider            string              `yaml:"provider"             json:"provider"`        // Provider identifier: openai, aliyun, zhipu, generic
 	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`    // Provider-specific configuration
 	SupportsVision      bool                `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	// WeKnoraCloud 厂商专用凭证
+	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
+	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
 }
 
 // Model represents the AI model

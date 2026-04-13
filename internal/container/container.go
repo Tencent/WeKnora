@@ -6,6 +6,7 @@ package container
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -62,6 +63,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/im/slack"
 	"github.com/Tencent/WeKnora/internal/im/telegram"
 	"github.com/Tencent/WeKnora/internal/im/wecom"
+	"github.com/Tencent/WeKnora/internal/infrastructure/crypto"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -97,6 +99,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Core infrastructure configuration
 	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
+	must(container.Provide(initCryptoService))
 	must(container.Provide(initTracer))
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
@@ -168,6 +171,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDatasetService))
 	must(container.Provide(service.NewEvaluationService))
 	must(container.Provide(service.NewUserService))
+	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
 	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))
@@ -268,6 +272,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(imPkg.NewService))
 	must(container.Invoke(registerIMAdapterFactories))
 	must(container.Provide(handler.NewIMHandler))
+	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Router configuration
@@ -303,6 +308,92 @@ func must(err error) {
 //   - Error if initialization fails
 func initTracer() (*tracing.Tracer, error) {
 	return tracing.InitTracer()
+}
+
+// cryptoStateFile 是持久化 crypto 状态的文件路径，存储在 data-files volume 中
+// 保证重启后能恢复相同的 masterKey 和 salt，避免已加密数据无法解密
+const cryptoStateFile = "/data/files/.crypto_state.json"
+
+// cryptoState 持久化存储的 crypto 配置
+type cryptoState struct {
+	MasterKey string `json:"master_key"`
+	Salt      string `json:"salt"` // base64 编码
+}
+
+func initCryptoService() (*crypto.CryptoService, error) {
+	cfg := crypto.LoadConfigFromEnv()
+
+	// 如果环境变量同时提供了 MasterKey 和 Salt，直接使用（优先级最高）
+	if cfg.MasterKey != "" && cfg.Salt != "" {
+		return crypto.NewCryptoServiceFromConfig(cfg)
+	}
+
+	// 尝试从持久化文件恢复状态
+	if state, err := loadCryptoState(cryptoStateFile); err == nil {
+		// 文件读取成功，环境变量中未覆盖的字段从文件补充
+		if cfg.MasterKey == "" {
+			cfg.MasterKey = state.MasterKey
+		}
+		if cfg.Salt == "" {
+			cfg.Salt = state.Salt
+		}
+		return crypto.NewCryptoServiceFromConfig(cfg)
+	}
+
+	// 文件不存在或读取失败，使用/生成配置后写入文件
+	if cfg.MasterKey == "" {
+		cfg.MasterKey = "weknora-default-key"
+	}
+
+	// 调用 NewCryptoServiceFromConfig 会在 cfg.Salt 为空时自动生成随机 salt
+	svc, err := crypto.NewCryptoServiceFromConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	// 将实际使用的 masterKey 和 salt 持久化，供重启恢复
+	saltB64 := base64.StdEncoding.EncodeToString(svc.GetSalt())
+	state := &cryptoState{
+		MasterKey: cfg.MasterKey,
+		Salt:      saltB64,
+	}
+	if saveErr := saveCryptoState(cryptoStateFile, state); saveErr != nil {
+		// 持久化失败仅记录警告，不阻止服务启动
+		logger.Warnf(context.Background(), "[CryptoService] 无法持久化 crypto 状态到 %s: %v （重启后已加密数据将无法解密）", cryptoStateFile, saveErr)
+	} else {
+		logger.Infof(context.Background(), "[CryptoService] crypto 状态已持久化到 %s", cryptoStateFile)
+	}
+
+	return svc, nil
+}
+
+// loadCryptoState 从文件加载 crypto 状态
+func loadCryptoState(path string) (*cryptoState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var state cryptoState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("parse crypto state: %w", err)
+	}
+	if state.MasterKey == "" || state.Salt == "" {
+		return nil, fmt.Errorf("invalid crypto state: missing fields")
+	}
+	return &state, nil
+}
+
+// saveCryptoState 将 crypto 状态写入文件
+func saveCryptoState(path string, state *cryptoState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	// 权限 0o600：仅 owner 可读写
+	return os.WriteFile(path, data, 0o600)
 }
 
 func initRedisClient() (*redis.Client, error) {
@@ -406,7 +497,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			dbPath = "./data/weknora.db"
 		}
 		if dir := filepath.Dir(dbPath); dir != "." && dir != "" {
-			if err := os.MkdirAll(dir, 0755); err != nil {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return nil, fmt.Errorf("failed to create SQLite data directory %s: %w", dir, err)
 			}
 		}

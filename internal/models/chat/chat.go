@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/provider"
@@ -93,13 +94,15 @@ type Chat interface {
 }
 
 type ChatConfig struct {
-	Source    types.ModelSource
-	BaseURL   string
-	ModelName string
-	APIKey    string
-	ModelID   string
-	Provider  string
-	Extra     map[string]any
+	Source      types.ModelSource
+	BaseURL     string
+	ModelName   string
+	APIKey      string
+	ModelID     string
+	Provider    string
+	ExtraConfig map[string]string
+	AppID       string
+	AppSecret   string // 加密值，由工厂函数调用方传入，在 NewWeKnoraCloudChat 中使用前已解密
 }
 
 // NewChat 创建聊天实例
@@ -133,6 +136,11 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 		}
 		if spec.EndpointCustomizer != nil {
 			remoteChat.SetEndpointCustomizer(spec.EndpointCustomizer)
+		}
+		if spec.HeaderCustomizer != nil {
+			remoteChat.SetHeaderCustomizer(func(req *http.Request, body []byte) error {
+				return spec.HeaderCustomizer(remoteChat, req, body)
+			})
 		}
 	}
 
