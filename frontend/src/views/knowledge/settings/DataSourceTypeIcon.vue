@@ -16,6 +16,11 @@ const iconMap: Record<string, string> = {
   yuque: yuqueIcon,
 }
 
+// Brand colors for connectors without ico files
+const brandColorMap: Record<string, string> = {
+  nutstore: '#3DA8F5',
+}
+
 function fallbackText(type: string) {
   switch (type) {
     case 'feishu':
@@ -24,6 +29,8 @@ function fallbackText(type: string) {
       return 'N'
     case 'yuque':
       return 'Y'
+    case 'nutstore':
+      return '坚'
     default:
       return type.slice(0, 1).toUpperCase() || '?'
   }
@@ -41,7 +48,7 @@ function fallbackText(type: string) {
       :alt="type"
       :style="{ width: `${size}px`, height: `${size}px` }"
     >
-    <span v-else class="ds-type-icon-fallback">{{ fallbackText(type) }}</span>
+    <span v-else class="ds-type-icon-fallback" :style="brandColorMap[type] ? { background: brandColorMap[type], color: '#fff' } : {}">{{ fallbackText(type) }}</span>
   </span>
 </template>
 
