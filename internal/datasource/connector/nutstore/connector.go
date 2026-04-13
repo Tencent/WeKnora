@@ -103,6 +103,17 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 		return nil, err
 	}
 
+	// Filter by file_types if configured (empty = sync all)
+	if len(cfg.FileTypes) > 0 {
+		filtered := filePaths[:0]
+		for _, fi := range filePaths {
+			if matchesFileTypes(fi.Name, cfg.FileTypes) {
+				filtered = append(filtered, fi)
+			}
+		}
+		filePaths = filtered
+	}
+
 	var items []types.FetchedItem
 	for _, fi := range filePaths {
 		item, err := c.fetchFile(ctx, client, fi)
@@ -262,4 +273,20 @@ func nameWithoutExt(name string) string {
 		return name
 	}
 	return strings.TrimSuffix(name, ext)
+}
+
+// matchesFileTypes checks if a filename's extension is in the allowed list.
+// Extensions in the list should be without dots (e.g., "pdf", "docx").
+func matchesFileTypes(filename string, fileTypes []string) bool {
+	ext := strings.ToLower(path.Ext(filename))
+	ext = strings.TrimPrefix(ext, ".")
+	if ext == "" {
+		return false
+	}
+	for _, ft := range fileTypes {
+		if strings.ToLower(ft) == ext {
+			return true
+		}
+	}
+	return false
 }
