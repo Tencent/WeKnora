@@ -26,8 +26,9 @@ func (c *Connector) Type() string {
 }
 
 // Validate verifies connectivity by sending an OPTIONS request.
+// When settings are available (edit stage), also verifies root_path exists.
 // At creation stage, only credentials are available (no settings),
-// so we only validate Ping. RootPath is validated during ListResources.
+// so we only validate Ping. RootPath is validated fully during ListResources.
 func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig) error {
 	cfg, err := parseConfig(config.Credentials, config.Settings)
 	if err != nil {
@@ -37,6 +38,14 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	client := NewClient(cfg)
 	if err := client.Ping(ctx); err != nil {
 		return fmt.Errorf("nutstore connection failed: %w", err)
+	}
+
+	// When settings include root_path (edit stage), verify the path exists
+	if cfg.RootPath != "" && cfg.RootPath != "/" {
+		_, err := client.ListDirectory(ctx, cfg.RootPath, "0")
+		if err != nil {
+			return fmt.Errorf("root path %q not found or not accessible: %w", cfg.RootPath, err)
+		}
 	}
 
 	return nil
