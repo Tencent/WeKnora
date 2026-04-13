@@ -155,6 +155,11 @@ curl --location 'http://localhost:8080/api/v1/system/storage-engine-status' \
                 "name": "s3",
                 "available": false,
                 "description": "AWS S3 对象存储"
+            },
+            {
+                "name": "oss",
+                "available": false,
+                "description": "阿里云 OSS 对象存储"
             }
         ],
         "minio_env_available": true

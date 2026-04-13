@@ -21,6 +21,7 @@ dependencies = [
     "mistletoe>=1.5.0",
     "ollama>=0.6.0",
     "openai>=2.7.1",
+    "oss2>=2.18.0",
     "paddleocr>=2.10.0,<3.0.0",
     "paddlepaddle>=3.0.0,<4.0.0",
     "pdfplumber>=0.11.7",

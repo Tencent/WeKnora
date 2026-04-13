@@ -126,6 +126,16 @@ DocReader 支持多种存储后端：
 - `COS_PATH_PREFIX`: 文件路径前缀
 - `COS_ENABLE_OLD_DOMAIN`: 是否使用旧域名（默认：true）
 
+#### 阿里云 OSS 存储
+
+- `STORAGE_TYPE`: 设置为 `oss`
+- `OSS_ACCESS_KEY_ID`: OSS 访问密钥 ID
+- `OSS_ACCESS_KEY_SECRET`: OSS 访问密钥
+- `OSS_ENDPOINT`: OSS 端点（如 `oss-cn-hangzhou.aliyuncs.com`）
+- `OSS_BUCKET_NAME`: OSS 存储桶名称
+- `OSS_REGION`: OSS 区域（如 `cn-hangzhou`）
+- `OSS_PATH_PREFIX`: 文件路径前缀
+
 ### 代理配置
 
 如果需要通过代理访问外部服务：
@@ -175,6 +185,20 @@ docreader:
     - COS_REGION=ap-guangzhou
     - COS_BUCKET_NAME=your-bucket
     - COS_APP_ID=your_app_id
+    - MAX_FILE_SIZE_MB=50
+```
+
+### 使用阿里云 OSS
+
+```yaml
+docreader:
+  environment:
+    - STORAGE_TYPE=oss
+    - OSS_ACCESS_KEY_ID=your_access_key_id
+    - OSS_ACCESS_KEY_SECRET=your_access_key_secret
+    - OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
+    - OSS_BUCKET_NAME=your-bucket
+    - OSS_REGION=cn-hangzhou
     - MAX_FILE_SIZE_MB=50
 ```
 

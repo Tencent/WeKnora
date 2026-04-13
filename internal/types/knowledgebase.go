@@ -152,7 +152,7 @@ func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 // StorageProviderConfig stores the KB-level storage provider selection.
 // Credentials are managed at the tenant level (StorageEngineConfig).
 type StorageProviderConfig struct {
-	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos"
+	Provider string `yaml:"provider" json:"provider"` // "local", "minio", "cos", "tos", "s3", "oss"
 }
 
 func (c StorageProviderConfig) Value() (driver.Value, error) {
@@ -266,7 +266,7 @@ func InferStorageFromFilePath(filePath string) string {
 // e.g. "minio://bucket/key" → "minio", "local://tenant/file.pdf" → "local"
 // Returns "" if the path does not use a known provider scheme.
 func ParseProviderScheme(filePath string) string {
-	for _, provider := range []string{"local", "minio", "cos", "tos", "s3"} {
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "oss"} {
 		if strings.HasPrefix(filePath, provider+"://") {
 			return provider
 		}

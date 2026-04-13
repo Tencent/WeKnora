@@ -372,6 +372,17 @@ func (h *SystemHandler) isTOSConfigured(c *gin.Context) bool {
 	return h.isTOSEnvAvailable()
 }
 
+// isOSSConfigured checks whether OSS connection info is available from tenant config.
+func (h *SystemHandler) isOSSConfigured(c *gin.Context) bool {
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OSS != nil {
+			ossConf := tenant.StorageEngineConfig.OSS
+			return ossConf.Endpoint != "" && ossConf.Region != "" && ossConf.AccessKey != "" && ossConf.SecretKey != "" && ossConf.BucketName != ""
+		}
+	}
+	return false
+}
+
 // isTOSEnvAvailable checks whether TOS env vars are set.
 func (h *SystemHandler) isTOSEnvAvailable() bool {
 	return os.Getenv("TOS_ENDPOINT") != "" &&
@@ -418,11 +429,13 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	minioEnvAvailable := h.isMinioEnvAvailable()
 	cosConfigured := h.isCOSConfigured(c)
 	tosConfigured := h.isTOSConfigured(c)
+	ossConfigured := h.isOSSConfigured(c)
 	engines := []StorageEngineStatusItem{
 		{Name: "local", Available: true, Description: "本地文件系统存储，仅适合单机部署"},
 		{Name: "minio", Available: minioConfigured || minioEnvAvailable, Description: "S3 兼容的自托管对象存储，适合内网和私有云部署"},
 		{Name: "cos", Available: cosConfigured, Description: "腾讯云对象存储服务，适合公有云部署，支持 CDN 加速"},
 		{Name: "tos", Available: tosConfigured, Description: "火山引擎对象存储服务，适合公有云部署"},
+		{Name: "oss", Available: ossConfigured, Description: "阿里云对象存储服务，适合公有云部署，支持 S3 兼容协议"},
 	}
 	c.JSON(200, gin.H{
 		"code": 0,
@@ -616,6 +629,9 @@ func hasGetObjectAction(action interface{}) bool {
 // cosFieldPattern validates COS region and bucket name format to prevent URL injection.
 var cosFieldPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
 
+// ossFieldPattern validates OSS region and bucket name format to prevent URL injection.
+var ossFieldPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$`)
+
 // sanitizeStorageCheckError converts a raw storage connectivity error into a safe
 // user-facing message that does not leak internal network details (hostnames, IPs, ports).
 func sanitizeStorageCheckError(err error) string {
@@ -703,11 +719,12 @@ func isBlockedStorageEndpoint(endpoint string) (bool, string) {
 
 // StorageCheckRequest is the body for POST /system/storage-engine-check.
 type StorageCheckRequest struct {
-	Provider string                   `json:"provider"` // "minio", "cos", "tos", or "s3"
+	Provider string                   `json:"provider"` // "minio", "cos", "tos", "s3", "oss"
 	MinIO    *types.MinIOEngineConfig `json:"minio,omitempty"`
 	COS      *types.COSEngineConfig   `json:"cos,omitempty"`
 	TOS      *types.TOSEngineConfig   `json:"tos,omitempty"`
 	S3       *types.S3EngineConfig    `json:"s3,omitempty"`
+	OSS      *types.OSSEngineConfig   `json:"oss,omitempty"`
 }
 
 // StorageCheckResponse is the response for a single-engine connectivity check.
@@ -744,6 +761,8 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 		h.checkTOS(c, ctx, req.TOS)
 	case "s3":
 		h.checkS3(c, ctx, req.S3)
+	case "oss":
+		h.checkOSS(c, ctx, req.OSS)
 	default:
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: "本地存储无需检测"}})
 	}
@@ -933,5 +952,54 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: sanitizeStorageCheckError(err)}})
 		return
 	}
+	c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: fmt.Sprintf("连接成功，Bucket「%s」已确认存在", cfg.BucketName)}})
+}
+
+func (h *SystemHandler) checkOSS(c *gin.Context, ctx context.Context, cfg *types.OSSEngineConfig) {
+	if cfg == nil {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 OSS 配置"}})
+		return
+	}
+
+	endpoint, accessKey, secretKey := cfg.Endpoint, cfg.AccessKey, cfg.SecretKey
+	if endpoint == "" || accessKey == "" || secretKey == "" || cfg.BucketName == "" {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Endpoint、Access Key、Secret Key、Bucket Name 不能为空"}})
+		return
+	}
+
+	// Strip URL scheme before SSRF check — OSS endpoint may include http:// or https://
+	ssrfEndpoint := strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
+	if blocked, reason := isBlockedStorageEndpoint(ssrfEndpoint); blocked {
+		logger.Warnf(ctx, "Storage check: OSS endpoint blocked by SSRF protection", "endpoint", endpoint)
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
+		return
+	}
+	if !ossFieldPattern.MatchString(cfg.Region) {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Region 格式不正确，仅允许字母、数字、点、连字符"}})
+		return
+	}
+	if !ossFieldPattern.MatchString(cfg.BucketName) {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "Bucket 名称格式不正确，仅允许字母、数字、点、连字符"}})
+		return
+	}
+
+	err := file.CheckOssConnectivity(ctx, endpoint, cfg.Region, accessKey, secretKey, cfg.BucketName)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "AccessDenied") {
+			logger.Errorf(ctx, "Storage check: OSS auth failed", "endpoint", endpoint, "bucket", cfg.BucketName)
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
+			return
+		}
+		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "NoSuchBucket") {
+			logger.Errorf(ctx, "Storage check: OSS bucket not found", "bucket", cfg.BucketName)
+			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在", cfg.BucketName)}})
+			return
+		}
+		logger.Errorf(ctx, "Storage check: OSS connectivity failed", "endpoint", endpoint, "bucket", cfg.BucketName, "error", err)
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("OSS 连通性检测失败: %s", sanitizeStorageCheckError(err))}})
+		return
+	}
+
 	c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: fmt.Sprintf("连接成功，Bucket「%s」已确认存在", cfg.BucketName)}})
 }

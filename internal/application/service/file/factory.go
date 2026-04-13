@@ -101,6 +101,30 @@ func NewFileServiceFromStorageConfig(
 		svc, err := NewS3FileService(sec.S3.Endpoint, sec.S3.AccessKey, sec.S3.SecretKey, sec.S3.BucketName, sec.S3.Region, pathPrefix)
 		return svc, p, err
 
+	case "oss":
+		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" || sec.OSS.SecretKey == "" || sec.OSS.BucketName == "" {
+			return nil, p, fmt.Errorf("incomplete oss config")
+		}
+		pathPrefix := strings.TrimSpace(sec.OSS.PathPrefix)
+		if pathPrefix == "" {
+			pathPrefix = "weknora/"
+		}
+		var svc interfaces.FileService
+		var err error
+		if sec.OSS.UseTempBucket && sec.OSS.TempBucketName != "" {
+			svc, err = NewOssFileServiceWithTempBucket(
+				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
+				sec.OSS.BucketName, pathPrefix,
+				sec.OSS.TempBucketName, sec.OSS.TempRegion,
+			)
+		} else {
+			svc, err = NewOssFileService(
+				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
+				sec.OSS.BucketName, pathPrefix,
+			)
+		}
+		return svc, p, err
+
 	default:
 		return nil, p, fmt.Errorf("unsupported provider %q", p)
 	}

@@ -645,6 +645,28 @@ func initFileService(cfg *config.Config) (interfaces.FileService, error) {
 			os.Getenv("S3_REGION"),
 			pathPrefix,
 		)
+	case "oss":
+		if os.Getenv("OSS_ENDPOINT") == "" ||
+			os.Getenv("OSS_REGION") == "" ||
+			os.Getenv("OSS_ACCESS_KEY") == "" ||
+			os.Getenv("OSS_SECRET_KEY") == "" ||
+			os.Getenv("OSS_BUCKET_NAME") == "" {
+			return nil, fmt.Errorf("missing OSS configuration")
+		}
+		pathPrefix := os.Getenv("OSS_PATH_PREFIX")
+		if pathPrefix == "" {
+			pathPrefix = "weknora/"
+		}
+		return file.NewOssFileServiceWithTempBucket(
+			os.Getenv("OSS_ENDPOINT"),
+			os.Getenv("OSS_REGION"),
+			os.Getenv("OSS_ACCESS_KEY"),
+			os.Getenv("OSS_SECRET_KEY"),
+			os.Getenv("OSS_BUCKET_NAME"),
+			pathPrefix,
+			os.Getenv("OSS_TEMP_BUCKET_NAME"),
+			os.Getenv("OSS_TEMP_REGION"),
+		)
 	case "local":
 		baseDir := os.Getenv("LOCAL_STORAGE_BASE_DIR")
 		if baseDir == "" {

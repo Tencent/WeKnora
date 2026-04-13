@@ -183,7 +183,7 @@ export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse 
 // ---- 存储引擎配置（租户级，供文档/图片存储与 docreader 使用） ----
 
 export interface StorageEngineConfig {
-  default_provider: string // "local" | "minio" | "cos" | "tos" | "s3"
+  default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss"
   local?: { path_prefix: string }
   minio?: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string }
   cos?: {
@@ -209,6 +209,17 @@ export interface StorageEngineConfig {
     secret_key: string
     bucket_name: string
     path_prefix: string
+  }
+  oss?: {
+    endpoint: string
+    region: string
+    access_key: string
+    secret_key: string
+    bucket_name: string
+    path_prefix: string
+    use_temp_bucket: boolean
+    temp_bucket_name: string
+    temp_region: string
   }
 }
 
@@ -236,11 +247,12 @@ export function getStorageEngineStatus(): Promise<{ data: GetStorageEngineStatus
 }
 
 export interface StorageCheckRequest {
-  provider: string // "minio" | "cos" | "tos" | "s3"
+  provider: string // "minio" | "cos" | "tos" | "s3" | "oss"
   minio?: StorageEngineConfig['minio']
   cos?: StorageEngineConfig['cos']
   tos?: StorageEngineConfig['tos']
   s3?: StorageEngineConfig['s3']
+  oss?: StorageEngineConfig['oss']
 }
 
 export interface StorageCheckResponse {

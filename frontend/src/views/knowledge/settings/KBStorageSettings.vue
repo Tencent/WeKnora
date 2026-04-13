@@ -114,6 +114,13 @@ const engineOptions = computed(() => {
       available: statusMap.s3,
       disabled: statusMap.s3 === false,
     },
+    {
+      value: 'oss',
+      label: t('kbSettings.storage.engineOss'),
+      desc: t('kbSettings.storage.engineOssDesc'),
+      available: statusMap.oss,
+      disabled: statusMap.oss === false,
+    },
   ]
 })
 

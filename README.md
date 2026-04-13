@@ -181,7 +181,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | LLMs | OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | Embeddings | Ollama / BGE / GTE / OpenAI-compatible APIs |
 | Vector DBs | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
-| Object Storage | Local / MinIO / AWS S3 / Volcengine TOS |
+| Object Storage | Local / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS |
 | IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost |
 | Web Search | DuckDuckGo / Bing / Google / Tavily |
 

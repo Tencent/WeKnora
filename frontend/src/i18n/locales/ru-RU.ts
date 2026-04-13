@@ -640,6 +640,7 @@ export default {
       engineLocal: 'Локальное',
       engineCos: 'Tencent Cloud COS',
       engineTos: 'Volcengine TOS',
+      engineOss: 'Alibaba Cloud OSS',
       engineS3: 'AWS S3',
       localTitle: 'Локальное хранилище',
       localDesc: 'Хранение файлов в локальной файловой системе сервера. Подходит только для однонодового развёртывания.',
@@ -673,6 +674,10 @@ export default {
       s3Desc: 'AWS S3 и совместимые сервисы объектного хранилища для публичного облака.',
       s3AccessKeyPlaceholder: 'AWS Access Key',
       s3SecretKeyPlaceholder: 'AWS Secret Key',
+      ossTitle: 'Alibaba Cloud OSS',
+      ossDesc: 'Объектное хранилище Alibaba Cloud (OSS), подходит для публичного облака.',
+      ossAccessKeyPlaceholder: 'Alibaba Cloud Access Key',
+      ossSecretKeyPlaceholder: 'Alibaba Cloud Secret Key',
       console: 'Консоль',
       docs: 'Документация',
       testConnection: 'Тест подключения',
@@ -683,7 +688,8 @@ export default {
       unknownError: 'Неизвестная ошибка',
       requestFailed: 'Ошибка запроса',
       cos: 'Tencent Cloud COS',
-      tos: 'Volcengine TOS'
+      tos: 'Volcengine TOS',
+      oss: 'Alibaba Cloud OSS',
     }
   },
   webSearchSettings: {
@@ -2787,6 +2793,8 @@ export default {
       engineTosDesc: 'Объектное хранилище Volcengine, для публичного облака',
       engineS3: 'AWS S3',
       engineS3Desc: 'AWS S3 и совместимые хранилища, для публичного облака',
+      engineOss: 'Alibaba Cloud OSS',
+      engineOssDesc: 'Объектное хранилище Alibaba Cloud, для публичного облака',
     },
     parser: {
       title: 'Парсер',

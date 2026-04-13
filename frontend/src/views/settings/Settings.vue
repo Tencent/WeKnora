@@ -201,6 +201,7 @@ const navItems = computed(() => [
       { key: 'cos', label: t('settings.storage.cos') },
       { key: 'tos', label: t('settings.storage.tos') },
       { key: 's3', label: 'AWS S3' },
+      { key: 'oss', label: t('settings.storage.oss') },
     ]
   },
   { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },

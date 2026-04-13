@@ -321,15 +321,16 @@ func (c *ParserEngineConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, and S3.
+// StorageEngineConfig holds tenant-level storage engine parameters for Local, MinIO, COS, TOS, S3, and OSS.
 // Knowledge bases select which provider to use; parameters are read from here.
 type StorageEngineConfig struct {
-	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3"
+	DefaultProvider string             `json:"default_provider"` // "local", "minio", "cos", "tos", "s3", "oss"
 	Local           *LocalEngineConfig `json:"local,omitempty"`
 	MinIO           *MinIOEngineConfig `json:"minio,omitempty"`
 	COS             *COSEngineConfig   `json:"cos,omitempty"`
 	TOS             *TOSEngineConfig   `json:"tos,omitempty"`
 	S3              *S3EngineConfig    `json:"s3,omitempty"`
+	OSS             *OSSEngineConfig   `json:"oss,omitempty"`
 }
 
 // LocalEngineConfig is for local file system storage (single-machine deployment only).
@@ -377,6 +378,19 @@ type S3EngineConfig struct {
 	SecretKey  string `json:"secret_key"`
 	BucketName string `json:"bucket_name"`
 	PathPrefix string `json:"path_prefix"`
+}
+
+// OSSEngineConfig is for Alibaba Cloud OSS (对象存储服务).
+type OSSEngineConfig struct {
+	Endpoint       string `json:"endpoint"`
+	Region         string `json:"region"`
+	AccessKey      string `json:"access_key"`
+	SecretKey      string `json:"secret_key"`
+	BucketName     string `json:"bucket_name"`
+	PathPrefix     string `json:"path_prefix"`
+	UseTempBucket  bool   `json:"use_temp_bucket"`
+	TempBucketName string `json:"temp_bucket_name"`
+	TempRegion     string `json:"temp_region"`
 }
 
 // Value implements the driver.Valuer interface for StorageEngineConfig

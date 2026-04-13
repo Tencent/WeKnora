@@ -458,7 +458,7 @@ curl --location 'http://localhost:8080/api/v1/agents/placeholders' \
 |------|------|--------|------|
 | `image_upload_enabled` | bool | false | 是否允许上传图片 |
 | `vlm_model_id` | string | - | 图片分析所用的 VLM 模型 ID |
-| `image_storage_provider` | string | - | 图片存储提供者：`local`/`minio`/`cos`/`tos`，为空使用全局默认 |
+| `image_storage_provider` | string | - | 图片存储提供者：`local`/`minio`/`cos`/`tos`/`oss`，为空使用全局默认 |
 
 ### FAQ 策略设置
 

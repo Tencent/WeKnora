@@ -191,7 +191,7 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 | LLM | OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
-| 오브젝트 스토리지 | 로컬 / MinIO / AWS S3 / Volcengine TOS |
+| 오브젝트 스토리지 | 로컬 / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS |
 | IM 통합 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost |
 | 웹 검색 | DuckDuckGo / Bing / Google / Tavily |
 

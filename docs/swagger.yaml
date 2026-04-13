@@ -429,7 +429,7 @@ definitions:
         type: integer
       image_storage_provider:
         description: |-
-          Storage provider for image uploads: "local", "minio", "cos", "tos"
+          Storage provider for image uploads: "local", "minio", "cos", "tos", "s3", "oss"
           Empty means use the global/tenant default provider.
         type: string
       image_upload_enabled:
@@ -2067,12 +2067,14 @@ definitions:
       cos:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig'
       default_provider:
-        description: '"local", "minio", "cos", "tos", "s3"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss"'
         type: string
       local:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.LocalEngineConfig'
       minio:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig'
+      oss:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig'
       s3:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig'
       tos:
@@ -2081,7 +2083,7 @@ definitions:
   github_com_Tencent_WeKnora_internal_types.StorageProviderConfig:
     properties:
       provider:
-        description: '"local", "minio", "cos", "tos"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss"'
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest:
@@ -2168,6 +2170,27 @@ definitions:
         type: string
       secret_key:
         type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.OSSEngineConfig:
+    properties:
+      access_key:
+        type: string
+      bucket_name:
+        type: string
+      endpoint:
+        type: string
+      path_prefix:
+        type: string
+      region:
+        type: string
+      secret_key:
+        type: string
+      temp_bucket_name:
+        type: string
+      temp_region:
+        type: string
+      use_temp_bucket:
+        type: boolean
     type: object
   github_com_Tencent_WeKnora_internal_types.Tenant:
     properties:
@@ -2671,8 +2694,10 @@ definitions:
       minio:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig'
       provider:
-        description: '"minio", "cos", "tos", or "s3"'
+        description: '"minio", "cos", "tos", "s3", or "oss"'
         type: string
+      oss:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig'
       s3:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig'
       tos:
@@ -2696,7 +2721,7 @@ definitions:
         description: short description for UI
         type: string
       name:
-        description: '"local", "minio", "cos", "tos"'
+        description: '"local", "minio", "cos", "tos", "s3", "oss"'
         type: string
     type: object
   internal_handler.TextRelationExtractionRequest:
