@@ -225,14 +225,11 @@ func (c *Connector) fetchFile(ctx context.Context, client *Client, fi FileInfo) 
 	}
 
 	if isParseableFile(fileName) {
-		// Parseable file: download content
+		// Parseable file: download content (will be uploaded to storage like CStore)
 		content, contentType, err := client.DownloadFile(ctx, fi.Path)
 		if err != nil {
 			return nil, fmt.Errorf("download %s: %w", fi.Path, err)
 		}
-
-		// Also try to get share URL for source reference
-		shareURL, _ := client.GetShareURL(ctx, fi.Path)
 
 		return &types.FetchedItem{
 			ExternalID:       fi.Path,
@@ -240,7 +237,6 @@ func (c *Connector) fetchFile(ctx context.Context, client *Client, fi FileInfo) 
 			Content:          content,
 			ContentType:      contentType,
 			FileName:         fileName,
-			URL:              shareURL,
 			UpdatedAt:        fi.LastModified,
 			SourceResourceID: parentDir,
 			Metadata:         baseMeta,
