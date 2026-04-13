@@ -137,10 +137,35 @@ func (c *Client) ListDirectory(ctx context.Context, dirPath string, depth string
 	return files, nil
 }
 
-// ListDirectoryRecursive lists all files under a directory recursively.
-// Uses PROPFIND with Depth: infinity.
+// ListDirectoryRecursive lists all files and directories under a path recursively.
+// Uses manual BFS with Depth:1 PROPFIND calls because Nutstore's WebDAV server
+// does not support Depth:infinity (it silently degrades to Depth:1).
 func (c *Client) ListDirectoryRecursive(ctx context.Context, dirPath string) ([]FileInfo, error) {
-	return c.ListDirectory(ctx, dirPath, "infinity")
+	var allFiles []FileInfo
+	queue := []string{dirPath}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		entries, err := c.ListDirectory(ctx, current, "1")
+		if err != nil {
+			return nil, fmt.Errorf("list %s: %w", current, err)
+		}
+
+		for _, entry := range entries {
+			allFiles = append(allFiles, entry)
+			if entry.IsDir {
+				childPath := entry.Path
+				if !strings.HasSuffix(childPath, "/") {
+					childPath += "/"
+				}
+				queue = append(queue, childPath)
+			}
+		}
+	}
+
+	return allFiles, nil
 }
 
 // parseResponse converts a PROPFIND XML response entry to FileInfo.
