@@ -51,9 +51,9 @@ func (c *Connector) Validate(ctx context.Context, config *types.DataSourceConfig
 	return nil
 }
 
-// ListResources lists all files and directories under the configured root path.
-// Does NOT filter by file_types - shows everything so the user can see the full
-// directory structure and select what to sync.
+// ListResources lists files and directories under the configured root path.
+// Uses Depth:1 (single level) to quickly return top-level items for the UI.
+// The full recursive traversal happens later during sync (FetchAll → expandResources).
 func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceConfig) ([]types.Resource, error) {
 	cfg, err := parseConfig(config.Credentials, config.Settings)
 	if err != nil {
@@ -61,7 +61,7 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 	}
 
 	client := NewClient(cfg)
-	files, err := client.ListDirectoryRecursive(ctx, cfg.RootPath)
+	files, err := client.ListDirectory(ctx, cfg.RootPath, "1")
 	if err != nil {
 		return nil, fmt.Errorf("list nutstore resources: %w", err)
 	}

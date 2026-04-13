@@ -268,9 +268,31 @@ func (c *Client) parseResponse(r response, basePath string) *FileInfo {
 	}
 }
 
-// DownloadFile downloads a file's content.
+// DownloadFile downloads a file's content with 503 retry.
 // Returns file bytes, content-type, and error.
 func (c *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, string, error) {
+	const maxRetries = 3
+	backoff := 2 * time.Second
+
+	for attempt := 0; ; attempt++ {
+		data, contentType, err := c.downloadFileOnce(ctx, filePath)
+		if err == nil {
+			return data, contentType, nil
+		}
+		if attempt >= maxRetries || !strings.Contains(err.Error(), "status 503") {
+			return nil, "", err
+		}
+		logger.Warnf(ctx, "DownloadFile %s returned 503 (rate limited), retrying in %v (attempt %d/%d)", filePath, backoff, attempt+1, maxRetries)
+		select {
+		case <-ctx.Done():
+			return nil, "", ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+}
+
+func (c *Client) downloadFileOnce(ctx context.Context, filePath string) ([]byte, string, error) {
 	resp, err := c.doRequest(ctx, "GET", c.davURL(filePath), nil, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("download %s: %w", filePath, err)
@@ -296,7 +318,30 @@ func (c *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, str
 // GetShareURL gets a share link for a file using the Nutstore enterprise API.
 // Endpoint: POST {baseURL}/nsdav/pubObject
 // This may not be available on public Nutstore (dav.jianguoyun.com).
+// Retries on 503 with exponential backoff.
 func (c *Client) GetShareURL(ctx context.Context, filePath string) (string, error) {
+	const maxRetries = 3
+	backoff := 2 * time.Second
+
+	for attempt := 0; ; attempt++ {
+		shareURL, err := c.getShareURLOnce(ctx, filePath)
+		if err == nil {
+			return shareURL, nil
+		}
+		if attempt >= maxRetries || !strings.Contains(err.Error(), "status 503") {
+			return "", err
+		}
+		logger.Warnf(ctx, "GetShareURL %s returned 503 (rate limited), retrying in %v (attempt %d/%d)", filePath, backoff, attempt+1, maxRetries)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+}
+
+func (c *Client) getShareURLOnce(ctx context.Context, filePath string) (string, error) {
 	// Preprocess path: handle special characters
 	cleanPath := strings.ReplaceAll(filePath, "%U00A0", " ")
 	cleanPath = strings.ReplaceAll(cleanPath, "\u00a0", " ")
@@ -318,6 +363,9 @@ func (c *Client) GetShareURL(ctx context.Context, filePath string) (string, erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return "", fmt.Errorf("get share URL for %s returned status 503", filePath)
+		}
 		// Share link API may not be available (public Nutstore)
 		logger.Warnf(ctx, "GetShareURL for %s returned status %d, share links may not be supported", filePath, resp.StatusCode)
 		return "", nil
