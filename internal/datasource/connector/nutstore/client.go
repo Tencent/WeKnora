@@ -13,7 +13,12 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"golang.org/x/time/rate"
 )
+
+// defaultRateLimit is the max requests per second to Nutstore WebDAV.
+// Nutstore enforces 18,000 requests per 30 minutes = 10/s; we use 8/s for safety margin.
+const defaultRateLimit = 8
 
 // Client is the WebDAV HTTP client for Nutstore.
 type Client struct {
@@ -21,7 +26,8 @@ type Client struct {
 	username string
 	password string
 	http     *http.Client
-	interval time.Duration // Request interval
+	interval time.Duration // Legacy per-request interval (use limiter instead)
+	limiter  *rate.Limiter // Token bucket rate limiter
 }
 
 // NewClient creates a new Nutstore WebDAV client.
@@ -33,6 +39,7 @@ func NewClient(cfg *Config) *Client {
 		password: cfg.Password,
 		http:     &http.Client{Timeout: 60 * time.Second},
 		interval: interval,
+		limiter:  rate.NewLimiter(rate.Limit(defaultRateLimit), defaultRateLimit),
 	}
 }
 
@@ -42,9 +49,14 @@ func (c *Client) davURL(p string) string {
 	return c.baseURL + "/dav" + p
 }
 
-// doRequest executes an HTTP request with Basic Auth and optional rate limiting.
+// doRequest executes an HTTP request with Basic Auth and rate limiting.
 func (c *Client) doRequest(ctx context.Context, method, url string, body io.Reader, headers map[string]string) (*http.Response, error) {
-	if c.interval > 0 {
+	// Token bucket rate limiting (replaces legacy interval-based sleep)
+	if c.limiter != nil {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limiter: %w", err)
+		}
+	} else if c.interval > 0 {
 		time.Sleep(c.interval)
 	}
 
@@ -137,9 +149,34 @@ func (c *Client) ListDirectory(ctx context.Context, dirPath string, depth string
 	return files, nil
 }
 
+// listDirectoryWithRetry wraps ListDirectory with retry on 503 (rate limit).
+// Uses exponential backoff: 2s, 4s, 8s (3 retries max).
+func (c *Client) listDirectoryWithRetry(ctx context.Context, dirPath, depth string) ([]FileInfo, error) {
+	const maxRetries = 3
+	backoff := 2 * time.Second
+
+	for attempt := 0; ; attempt++ {
+		files, err := c.ListDirectory(ctx, dirPath, depth)
+		if err == nil {
+			return files, nil
+		}
+		if attempt >= maxRetries || !strings.Contains(err.Error(), "status 503") {
+			return nil, err
+		}
+		logger.Warnf(ctx, "ListDirectory %s returned 503 (rate limited), retrying in %v (attempt %d/%d)", dirPath, backoff, attempt+1, maxRetries)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+	}
+}
+
 // ListDirectoryRecursive lists all files and directories under a path recursively.
 // Uses manual BFS with Depth:1 PROPFIND calls because Nutstore's WebDAV server
 // does not support Depth:infinity (it silently degrades to Depth:1).
+// Automatically retries on 503 (rate limit) with exponential backoff.
 func (c *Client) ListDirectoryRecursive(ctx context.Context, dirPath string) ([]FileInfo, error) {
 	var allFiles []FileInfo
 	queue := []string{dirPath}
@@ -154,7 +191,7 @@ func (c *Client) ListDirectoryRecursive(ctx context.Context, dirPath string) ([]
 			logger.Infof(ctx, "ListDirectoryRecursive: scanning %s (%d items found, %d dirs pending)", current, len(allFiles), len(queue))
 		}
 
-		entries, err := c.ListDirectory(ctx, current, "1")
+		entries, err := c.listDirectoryWithRetry(ctx, current, "1")
 		if err != nil {
 			return nil, fmt.Errorf("list %s: %w", current, err)
 		}
