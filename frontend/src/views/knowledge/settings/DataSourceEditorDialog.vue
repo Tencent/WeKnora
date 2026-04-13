@@ -6,7 +6,6 @@ import {
   createDataSource,
   updateDataSource,
   triggerSync,
-  validateConnection,
   validateCredentials,
   listResources,
   deleteDataSource,
@@ -279,15 +278,9 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-      await validateConnection(tempDsId.value)
-    } else {
-      await validateCredentials(form.value.type, form.value.config.credentials)
-    }
+    // Always use stateless validation (no DB writes) for both create and edit modes.
+    // Pass settings so enterprise endpoints (e.g. custom base_url) are validated correctly.
+    await validateCredentials(form.value.type, form.value.config.credentials, form.value.config.settings)
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {

@@ -69,8 +69,13 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 	resources := make([]types.Resource, 0, len(files))
 	for _, f := range files {
 		resType := "file"
+		externalID := f.Path
 		if f.IsDir {
 			resType = "folder"
+			// Ensure directory paths end with "/" so expandResources can identify them
+			if !strings.HasSuffix(externalID, "/") {
+				externalID += "/"
+			}
 		}
 
 		parentPath := path.Dir(f.Path)
@@ -84,7 +89,7 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 		}
 
 		resources = append(resources, types.Resource{
-			ExternalID: f.Path,
+			ExternalID: externalID,
 			Name:       f.Name,
 			Type:       resType,
 			ParentID:   parentPath,

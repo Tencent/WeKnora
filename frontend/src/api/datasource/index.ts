@@ -87,9 +87,9 @@ export function validateConnection(id: string) {
   return post(`/api/v1/datasource/${id}/validate`, {})
 }
 
-// Validate credentials without persisting (for "Test Connection" during creation)
-export function validateCredentials(type: string, credentials: Record<string, any>) {
-  return post('/api/v1/datasource/validate-credentials', { type, credentials })
+// Validate credentials without persisting (for "Test Connection" during creation/editing)
+export function validateCredentials(type: string, credentials: Record<string, any>, settings?: Record<string, any>) {
+  return post('/api/v1/datasource/validate-credentials', { type, credentials, settings })
 }
 
 export function listResources(id: string) {
