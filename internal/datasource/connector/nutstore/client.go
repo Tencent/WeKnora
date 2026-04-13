@@ -16,9 +16,13 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// defaultRateLimit is the max requests per second to Nutstore WebDAV.
-// Nutstore enforces 18,000 requests per 30 minutes = 10/s; we use 8/s for safety margin.
-const defaultRateLimit = 8
+// defaultRateLimit is the sustained requests per second to Nutstore WebDAV.
+// Nutstore enforces 18,000 requests per 30 minutes = 10/s sustained.
+const defaultRateLimit = 10
+
+// defaultBurst is the maximum burst size for short request spikes.
+// Allows fast directory traversal while staying within the 30-minute window.
+const defaultBurst = 50
 
 // Client is the WebDAV HTTP client for Nutstore.
 type Client struct {
@@ -39,7 +43,7 @@ func NewClient(cfg *Config) *Client {
 		password: cfg.Password,
 		http:     &http.Client{Timeout: 60 * time.Second},
 		interval: interval,
-		limiter:  rate.NewLimiter(rate.Limit(defaultRateLimit), defaultRateLimit),
+		limiter:  rate.NewLimiter(rate.Limit(defaultRateLimit), defaultBurst),
 	}
 }
 
