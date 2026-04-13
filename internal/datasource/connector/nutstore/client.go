@@ -170,6 +170,9 @@ func (c *Client) parseResponse(r response, basePath string) *FileInfo {
 
 	// Skip the directory itself (self-referencing entry)
 	cleanBase := strings.TrimRight(basePath, "/")
+	if cleanBase == "" {
+		cleanBase = "/"
+	}
 	if filePath == cleanBase || filePath+"/" == basePath {
 		// This is the directory itself, only skip if it's the queried directory
 		if isDir {
