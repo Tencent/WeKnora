@@ -150,6 +150,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental"},
 	},
+	types.ConnectorTypeNutstore: {
+		Type:         types.ConnectorTypeNutstore,
+		Name:         "Nutstore (坚果云)",
+		Description:  "Sync documents from Nutstore via WebDAV",
+		Priority:     8,
+		AuthType:     "password",
+		Capabilities: []string{"incremental"},
+	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,
 		Name:         "Web Crawler (Sitemap)",
