@@ -82,7 +82,7 @@ func (a *WSAdapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (
 	}
 
 	// Download the (encrypted) file content
-	reader, fileName, err := downloadFromURL(ctx, msg.FileKey, fileName)
+	reader, fileName, err := downloadFromURL(ctx, msg.FileKey, fileName, a.client.extraAllowedHost)
 	if err != nil {
 		return nil, "", err
 	}

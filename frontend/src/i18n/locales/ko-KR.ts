@@ -3376,6 +3376,8 @@ export default {
         "켜면 봇 답변이 채널의 새 최상위 게시물로 올라갑니다. 끄면(기본) 스레드 답변이며 메인 화면에는 「N개 답변」만 보입니다.",
       modeHint: "WebSocket 방식이 설정이 더 간편하여 권장됩니다",
       consoleTip: "자격 증명 정보를 가져오세요",
+      wecomWSEndpointHint: "선택 사항. 프라이빗 WeCom 배포 시 사용자 정의 WebSocket 주소를 입력하세요. 비워두면 기본 퍼블릭 클라우드 주소를 사용합니다. 내부 네트워크 주소의 경우 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.",
+      wecomAPIBaseURLHint: "선택 사항. 프라이빗 WeCom 배포 시 사용자 정의 API 기본 URL을 입력하세요. 비워두면 기본 퍼블릭 클라우드 주소를 사용합니다. 내부 네트워크 주소의 경우 SSRF_WHITELIST 환경 변수에 호스트명을 추가하세요.",
       fileKnowledgeBase: "파일 저장 지식 베이스",
       fileKnowledgeBasePlaceholder: "지식 베이스 선택 (선택 사항)",
       fileKnowledgeBaseHint: "설정 시 사용자가 보낸 파일이 자동으로 해당 지식 베이스에 저장됩니다",

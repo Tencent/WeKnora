@@ -174,6 +174,11 @@
               <label class="form-label">Bot Secret</label>
               <t-input v-model="formData.credentials.bot_secret" type="password" placeholder="Bot Secret" />
             </div>
+            <div class="form-item">
+              <label class="form-label">WebSocket Endpoint</label>
+              <t-input v-model="formData.credentials.ws_endpoint" placeholder="wss://openws.work.weixin.qq.com" />
+              <p class="form-hint">{{ $t('agentEditor.im.wecomWSEndpointHint') }}</p>
+            </div>
           </template>
           <template v-else>
             <div class="form-item">
@@ -195,6 +200,11 @@
             <div class="form-item">
               <label class="form-label">Corp Agent ID</label>
               <t-input-number v-model="formData.credentials.corp_agent_id" placeholder="Corp Agent ID" style="width: 100%;" />
+            </div>
+            <div class="form-item">
+              <label class="form-label">API Base URL</label>
+              <t-input v-model="formData.credentials.api_base_url" placeholder="https://qyapi.weixin.qq.com" />
+              <p class="form-hint">{{ $t('agentEditor.im.wecomAPIBaseURLHint') }}</p>
             </div>
           </template>
         </template>

@@ -85,7 +85,10 @@ func TestLongConnClient_StripAtMention(t *testing.T) {
 	})
 
 	t.Run("NewLongConnClient with bot name", func(t *testing.T) {
-		c := NewLongConnClient("id", "secret", "My Bot", nil)
+		c, err := NewLongConnClient("id", "secret", "", "My Bot", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		got := c.stripAtMention("@My Bot /help")
 		if got != "/help" {

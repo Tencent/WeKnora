@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	wecomWSEndpoint = "wss://openws.work.weixin.qq.com"
+	defaultWSEndpoint = "wss://openws.work.weixin.qq.com"
 
 	cmdSubscribe     = "aibot_subscribe"
 	cmdPing          = "ping"
@@ -122,9 +122,11 @@ type MessageHandler func(ctx context.Context, msg *im.IncomingMessage) error
 
 // LongConnClient manages a WeCom intelligent bot WebSocket long connection.
 type LongConnClient struct {
-	botID   string
-	secret  string
-	handler MessageHandler
+	botID            string
+	secret           string
+	endpoint         string
+	extraAllowedHost string // hostname from custom endpoint for SSRF allowlist
+	handler          MessageHandler
 
 	conn   *ws.Conn
 	mu     sync.Mutex
@@ -143,17 +145,27 @@ type LongConnClient struct {
 }
 
 // NewLongConnClient creates a WeCom long connection client.
+// wsEndpoint overrides the default WebSocket URL; empty uses the public cloud endpoint.
 // botName is the bot's display name for @mention stripping; empty to auto-detect.
-func NewLongConnClient(botID, secret, botName string, handler MessageHandler) *LongConnClient {
+func NewLongConnClient(botID, secret, wsEndpoint, botName string, handler MessageHandler) (*LongConnClient, error) {
+	if wsEndpoint == "" {
+		wsEndpoint = defaultWSEndpoint
+	}
+	wsEndpoint = strings.TrimRight(wsEndpoint, "/")
+	if err := validateEndpointURL(wsEndpoint, defaultWSEndpoint, "wss"); err != nil {
+		return nil, fmt.Errorf("invalid ws_endpoint: %w", err)
+	}
 	c := &LongConnClient{
-		botID:   botID,
-		secret:  secret,
-		handler: handler,
+		botID:            botID,
+		secret:           secret,
+		endpoint:         wsEndpoint,
+		extraAllowedHost: extraHostFromEndpoint(wsEndpoint, defaultWSEndpoint),
+		handler:          handler,
 	}
 	if botName != "" {
 		c.botDisplayName.Store(botName)
 	}
-	return c
+	return c, nil
 }
 
 // Start connects and runs the long connection loop. It reconnects automatically on failure.
@@ -345,7 +357,7 @@ func (c *LongConnClient) sendStreamFrame(incoming *im.IncomingMessage, streamID,
 }
 
 func (c *LongConnClient) connectAndRun(ctx context.Context) error {
-	conn, _, err := ws.DefaultDialer.DialContext(ctx, wecomWSEndpoint, nil)
+	conn, _, err := ws.DefaultDialer.DialContext(ctx, c.endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
