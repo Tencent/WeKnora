@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/textproto"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,16 @@ const (
 	// This prevents API rate-limiting while keeping perceived latency low.
 	streamFlushInterval = 300 * time.Millisecond
 )
+
+// imCitationTagRe matches inline citation tags produced by the agent pipeline.
+// These tags are rendered as interactive UI in the web frontend but are meaningless
+// in IM platforms, so they must be stripped before sending.
+var imCitationTagRe = regexp.MustCompile(`<(?:kb|web)\b[^>]*/?>`)
+
+// stripIMCitationTags removes <kb .../> and <web .../> inline citation tags from s.
+func stripIMCitationTags(s string) string {
+	return imCitationTagRe.ReplaceAllString(s, "")
+}
 
 const (
 	// wsLeaderTTL is the TTL for the Redis key used for WebSocket leader election.
@@ -1650,7 +1661,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		bufMu.Unlock()
 
 		if chunk != "" {
-			if err := streamer.SendStreamChunk(ctx, msg, streamID, chunk); err != nil {
+			if err := streamer.SendStreamChunk(ctx, msg, streamID, stripIMCitationTags(chunk)); err != nil {
 				logger.Warnf(ctx, "[IM] SendStreamChunk failed: %v", err)
 			}
 		}
@@ -1858,14 +1869,16 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		answer = "抱歉，我暂时无法回答这个问题。"
 	}
 
-	// Update assistant message with the final answer content
+	// Update assistant message with the full answer (including citation tags for web rendering).
 	assistantMsg.Content = answer
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(ctx, assistantMsg); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
 	}
 
-	return answer, nil
+	// Strip citation tags before returning to the IM adapter — IM platforms cannot
+	// render <kb .../> / <web .../> and would display them as raw text.
+	return stripIMCitationTags(answer), nil
 }
 
 // ── CRUD operations for IM channels ──
