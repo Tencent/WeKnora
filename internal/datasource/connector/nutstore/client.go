@@ -144,9 +144,15 @@ func (c *Client) ListDirectoryRecursive(ctx context.Context, dirPath string) ([]
 	var allFiles []FileInfo
 	queue := []string{dirPath}
 
+	dirsScanned := 0
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
+		dirsScanned++
+
+		if dirsScanned%100 == 1 {
+			logger.Infof(ctx, "ListDirectoryRecursive: scanning %s (%d items found, %d dirs pending)", current, len(allFiles), len(queue))
+		}
 
 		entries, err := c.ListDirectory(ctx, current, "1")
 		if err != nil {
