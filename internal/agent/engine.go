@@ -366,7 +366,7 @@ func (e *AgentEngine) executeLoop(
 		}
 
 		// 3. Act: Execute tool calls
-		e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
+		e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, messages)
 
 		// 4. Observe: Add tool results to messages and write to context
 		state.RoundSteps = append(state.RoundSteps, step)
