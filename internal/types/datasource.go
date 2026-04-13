@@ -23,6 +23,7 @@ const (
 	ConnectorTypeSlack       = "slack"
 	ConnectorTypeIMAP        = "imap"
 	ConnectorTypeRSS         = "rss"
+	ConnectorTypeNutstore    = "nutstore"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"

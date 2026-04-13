@@ -43,6 +43,9 @@ const (
 	ParseStatusFailed = "failed"
 	// ParseStatusDeleting indicates the knowledge is being deleted (used to prevent async task conflicts)
 	ParseStatusDeleting = "deleting"
+	// ParseStatusSkipped indicates the file type is not supported for parsing,
+	// only metadata is recorded (e.g., video, CAD files)
+	ParseStatusSkipped = "skipped"
 )
 
 // Summary status constants for async summary generation
@@ -110,6 +113,14 @@ type Knowledge struct {
 	StorageSize int64 `json:"storage_size"`
 	// Metadata of the knowledge
 	Metadata JSON `json:"metadata"           gorm:"type:json"`
+	// SourcePath records the document's full path in the source system.
+	// Unified Unix-style path starting with "/".
+	// Examples: "/product-docs/spec/D27.pdf" (Nutstore), "" (manual upload)
+	SourcePath string `json:"source_path" gorm:"type:varchar(1000);index"`
+	// SourceUpdatedAt records the document's last modification time in the source system.
+	// Filled by Connector from external system's mtime/editTime.
+	// Semantically different from UpdatedAt (WeKnora internal update time).
+	SourceUpdatedAt *time.Time `json:"source_updated_at" gorm:"index"`
 	// Last FAQ import result (for FAQ type knowledge only)
 	LastFAQImportResult JSON `json:"last_faq_import_result" gorm:"type:json"`
 	// Creation time of the knowledge
