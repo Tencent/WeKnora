@@ -52,6 +52,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	nutstoreConnector "github.com/Tencent/WeKnora/internal/datasource/connector/nutstore"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -1394,6 +1395,9 @@ func initConnectorRegistry() *datasource.ConnectorRegistry {
 
 	// Register Notion connector
 	_ = registry.Register(notionConnector.NewConnector())
+
+	// Register Nutstore connector
+	_ = registry.Register(nutstoreConnector.NewConnector())
 
 	// Future connectors will be registered here:
 	// _ = registry.Register(confluenceConnector.NewConnector())
