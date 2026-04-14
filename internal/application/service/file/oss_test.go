@@ -163,7 +163,7 @@ func TestCheckOssConnectivity_InvalidEndpoint(t *testing.T) {
 	}
 }
 
-func TestOssBucketExists_NonExistent(t *testing.T) {
+func TestOssEnsureBucket_NonExistent(t *testing.T) {
 	client, err := newOSSClient(
 		"https://oss-cn-hangzhou.aliyuncs.com",
 		"cn-hangzhou",
@@ -174,19 +174,14 @@ func TestOssBucketExists_NonExistent(t *testing.T) {
 		t.Fatalf("newOSSClient() error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Bucket that definitely doesn't exist - should return false, not error
-	// (auth may fail first, but we verify the function doesn't crash)
-	exists, err := ossBucketExists(ctx, client, "this-bucket-definitely-does-not-exist-12345")
-	// We don't assert on the result because it depends on network/auth,
-	// but the function should not panic or hang.
-	_ = exists
-	_ = err
+	// Bucket that definitely doesn't exist - should return error
+	err = ossEnsureBucket(client, "this-bucket-definitely-does-not-exist-12345")
+	if err == nil {
+		t.Error("ossEnsureBucket with non-existent bucket should return an error")
+	}
 }
 
-func TestOssCreateBucket(t *testing.T) {
+func TestOssEnsureBucket_CreateFails(t *testing.T) {
 	client, err := newOSSClient(
 		"https://oss-cn-hangzhou.aliyuncs.com",
 		"cn-hangzhou",
@@ -197,12 +192,9 @@ func TestOssCreateBucket(t *testing.T) {
 		t.Fatalf("newOSSClient() error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	// Should fail with invalid credentials
-	err = ossCreateBucket(ctx, client, "test-bucket")
+	err = ossEnsureBucket(client, "test-bucket")
 	if err == nil {
-		t.Error("ossCreateBucket with invalid credentials should return an error")
+		t.Error("ossEnsureBucket with invalid credentials should return an error")
 	}
 }
