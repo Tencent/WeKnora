@@ -6,13 +6,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/asr"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/video"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
@@ -24,17 +29,42 @@ import (
 )
 
 const (
-	vlmFramePrompt = "Analyze this video frame and provide a detailed description in Chinese. Requirements:\n" +
-		"1. Describe visible objects, people, and their actions\n" +
-		"2. Describe the scene and environment\n" +
-		"3. Extract and describe any text on the screen\n" +
-		"4. Note any notable events or changes\n" +
-		"5. Be concise but comprehensive"
-	vlmSummaryPrompt = "Summarize the following video frame descriptions into a coherent video summary in Chinese. Requirements:\n" +
-		"1. The descriptions are ordered chronologically by timestamp\n" +
-		"2. Focus on the main storyline and key events\n" +
-		"3. Maintain the temporal flow of the video\n" +
-		"4. Be concise but comprehensive"
+	vlmBatchPromptTemplate = `Analyze this sequence of {{count}} video frames and provide a detailed description in {{language}}.
+
+{{previous_batch_instruction}}
+
+<Requirements>
+1. The images are provided in chronological order.
+2. Describe visible objects, people, and their actions.
+3. Describe the scene and environment.
+4. Extract and describe any text on the screen.
+5. Note any notable events or changes across these frames.
+6. Be concise but comprehensive, keeping the word count under 150 words.
+7. The output must be in {{language}}.
+</Requirements>`
+
+	vlmFirstBatchInstruction = "<PreviousContext>\nNone. These are the first frames of the video. Describe them completely.\n</PreviousContext>"
+	vlmNextBatchInstruction  = "<PreviousContext>\n{{previous_description}}\n</PreviousContext>\n\nThese are the subsequent frames. Focus ONLY on what has changed or what is new compared to the previous context description provided above. If there are no significant changes, just state 'No significant changes'."
+
+	vlmSummarySystemPromptTemplate = `Please summarize the provided video frame descriptions into a coherent video summary in {{language}}.
+
+<Requirements>
+1. The descriptions are ordered chronologically by timestamp. Please maintain this temporal flow.
+2. Focus on the main storyline, key events, and the interactions between people and objects.
+3. Identify and include any important text or dialogue that appears on screen.
+4. Provide a clear, structured summary that captures the essence of the video.
+5. Be concise but comprehensive, avoiding redundant descriptions of the same scene.
+6. Keep the summary under 1000 words.
+7. The output must be in {{language}}.
+</Requirements>`
+
+	vlmSummaryUserPromptTemplate = `Here are the video frame descriptions:
+
+<Input>
+{{descriptions}}
+</Input>
+
+Please provide the summary based on the requirements and input.`
 )
 
 // VideoMultimodalService handles video:multimodal asynq tasks.
@@ -100,93 +130,268 @@ func (s *VideoMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
-	var frames []*video.Frame
 	var extractor video.Extractor
-	if payload.EnableVLM {
-		var extErr error
+	var extErr error
+	if payload.EnableVLM || payload.EnableASR {
 		extractor, extErr = video.NewExtractor(nil)
 		if extErr != nil {
-			logger.Warnf(ctx, "[VideoMultimodal] FFmpeg not found or not executable, frame extraction disabled: %v", extErr)
-			logger.Warnf(ctx, "[VideoMultimodal] Note: Please install FFmpeg to enable VLM frame analysis")
-			frames = []*video.Frame{}
-		} else {
-			options := video.DefaultExtractOptions()
-			if payload.MaxFrames > 0 {
-				options.MaxFrames = payload.MaxFrames
-			}
-			var extractErr error
-			frames, extractErr = extractor.ExtractFrames(ctx, videoBytes, options)
-			if extractErr != nil {
-				logger.Warnf(ctx, "[VideoMultimodal] Frame extraction failed: %v", extractErr)
-				frames = []*video.Frame{}
-			}
+			logger.Warnf(ctx, "[VideoMultimodal] FFmpeg not found or not executable: %v", extErr)
 		}
-	} else {
-		logger.Infof(ctx, "[VideoMultimodal] VLM disabled, skipping frame extraction")
-		frames = []*video.Frame{}
 	}
 
-	frameDescriptions := make([]string, 0, len(frames))
+	var wg sync.WaitGroup
+	type FrameAnalysis struct {
+		StartTimestamp float64
+		EndTimestamp   float64
+		Description    string
+	}
+	var frameAnalyses []FrameAnalysis
+	var asrSegments []asr.Segment
+	var mu sync.Mutex // Mutex to protect concurrent access if needed
+
+	lang := payload.Language
+	if lang == "" {
+		lang = "zh-CN"
+	}
+	batchPrompt := strings.ReplaceAll(vlmBatchPromptTemplate, "{{language}}", lang)
 
 	if payload.EnableVLM {
-		vlmMdl, vlmErr := s.resolveVLM(ctx, payload.KnowledgeBaseID)
-		if vlmErr != nil {
-			logger.Warnf(ctx, "[VideoMultimodal] Failed to resolve VLM: %v", vlmErr)
-		} else {
-			for i, frame := range frames {
-				desc, descErr := vlmMdl.Predict(ctx, frame.ImageData, vlmFramePrompt)
-				if descErr != nil {
-					logger.Warnf(ctx, "[VideoMultimodal] VLM analysis failed for frame %d at %.2fs: %v",
-						i, frame.Timestamp, descErr)
-					continue
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			var frames []*video.Frame
+			if extractor == nil {
+				logger.Warnf(ctx, "[VideoMultimodal] FFmpeg not found or not executable, frame extraction disabled")
+				logger.Warnf(ctx, "[VideoMultimodal] Note: Please install FFmpeg to enable VLM frame analysis")
+			} else {
+				options := video.DefaultExtractOptions()
+				if payload.MaxFrames > 0 {
+					options.MaxFrames = payload.MaxFrames
 				}
-				frameDesc := fmt.Sprintf("[%.2fs] %s", frame.Timestamp, desc)
-				frameDescriptions = append(frameDescriptions, frameDesc)
-				logger.Infof(ctx, "[VideoMultimodal] Frame %d analyzed at %.2fs, desc len=%d",
-					i, frame.Timestamp, len(desc))
+				var extractErr error
+				frames, extractErr = extractor.ExtractFrames(ctx, videoBytes, options)
+				if extractErr != nil {
+					logger.Warnf(ctx, "[VideoMultimodal] Frame extraction failed: %v", extractErr)
+					frames = []*video.Frame{}
+				} else {
+					logger.Debugf(ctx, "[VideoMultimodal] Successfully extracted %d frames from video", len(frames))
+				}
 			}
-		}
+
+			if len(frames) == 0 {
+				return
+			}
+
+			vlmMdl, vlmErr := s.resolveVLM(ctx, payload.KnowledgeBaseID)
+			if vlmErr != nil {
+				logger.Warnf(ctx, "[VideoMultimodal] Failed to resolve VLM: %v", vlmErr)
+			} else {
+				// Initialize the slice within the goroutine before appending
+				localAnalyses := make([]FrameAnalysis, 0)
+				var previousDescription string
+
+				// Batch size configuration (number of frames per API call)
+				batchSize := 3
+				for i := 0; i < len(frames); i += batchSize {
+					end := i + batchSize
+					if end > len(frames) {
+						end = len(frames)
+					}
+					batchFrames := frames[i:end]
+
+					var batchImages [][]byte
+					for _, f := range batchFrames {
+						batchImages = append(batchImages, f.ImageData)
+					}
+
+					startTs := batchFrames[0].Timestamp
+					endTs := batchFrames[len(batchFrames)-1].Timestamp
+
+					logger.Debugf(ctx, "[VideoMultimodal] Starting VLM analysis for frames %d-%d/%d (%.2fs - %.2fs)", i+1, end, len(frames), startTs, endTs)
+
+					currentPrompt := strings.ReplaceAll(batchPrompt, "{{count}}", fmt.Sprintf("%d", len(batchFrames)))
+					if i == 0 {
+						currentPrompt = strings.ReplaceAll(currentPrompt, "{{previous_batch_instruction}}", vlmFirstBatchInstruction)
+					} else {
+						nextInstruction := strings.ReplaceAll(vlmNextBatchInstruction, "{{previous_description}}", previousDescription)
+						currentPrompt = strings.ReplaceAll(currentPrompt, "{{previous_batch_instruction}}", nextInstruction)
+					}
+
+					desc, descErr := vlmMdl.Predict(ctx, batchImages, currentPrompt)
+					if descErr != nil {
+						logger.Warnf(ctx, "[VideoMultimodal] VLM analysis failed for frames %d-%d at %.2fs - %.2fs: %v",
+							i+1, end, startTs, endTs, descErr)
+						continue
+					}
+
+					// Update previous description for the next iteration if there are changes
+					if !strings.Contains(strings.ToLower(desc), "no significant changes") {
+						previousDescription = desc
+					}
+
+					localAnalyses = append(localAnalyses, FrameAnalysis{
+						StartTimestamp: startTs,
+						EndTimestamp:   endTs,
+						Description:    desc,
+					})
+					logger.Infof(ctx, "[VideoMultimodal] Frames %d-%d/%d analyzed (%.2fs - %.2fs), desc len=%d",
+						i+1, end, len(frames), startTs, endTs, len(desc))
+				}
+				mu.Lock()
+				frameAnalyses = localAnalyses
+				mu.Unlock()
+			}
+		}()
 	}
 
-	var asrText string
 	if payload.EnableASR {
-		asrText, err = s.transcribeAudio(ctx, videoBytes, payload.KnowledgeBaseID)
-		if err != nil {
-			logger.Warnf(ctx, "[VideoMultimodal] ASR transcription failed: %v", err)
-		} else if asrText != "" {
-			logger.Infof(ctx, "[VideoMultimodal] ASR transcription completed, len=%d", len(asrText))
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			audioBytes := videoBytes
+			fileName := "video.mp4"
+			if extractor != nil {
+				extractedAudio, err := extractor.ExtractAudio(ctx, videoBytes)
+				if err != nil {
+					logger.Warnf(ctx, "[VideoMultimodal] Audio extraction failed, falling back to original video: %v", err)
+				} else if len(extractedAudio) == 0 {
+					logger.Infof(ctx, "[VideoMultimodal] No audio stream found in video, skipping ASR transcription")
+					return
+				} else {
+					audioBytes = extractedAudio
+					fileName = "audio.mp3"
+					logger.Debugf(ctx, "[VideoMultimodal] Extracted audio track for ASR, size: %d bytes", len(audioBytes))
+				}
+			}
+
+			asrRes, asrErr := s.transcribeAudio(ctx, audioBytes, payload.KnowledgeBaseID, fileName)
+			if asrErr != nil {
+				logger.Warnf(ctx, "[VideoMultimodal] ASR transcription failed: kb=%s file=%s audioBytes=%d err=%v",
+					payload.KnowledgeBaseID, fileName, len(audioBytes), asrErr)
+			} else if asrRes == nil {
+				logger.Warnf(ctx, "[VideoMultimodal] ASR returned nil result without error: kb=%s file=%s audioBytes=%d",
+					payload.KnowledgeBaseID, fileName, len(audioBytes))
+			} else {
+				asrSegments = asrRes.Segments
+				nSeg := len(asrRes.Segments)
+				nRunes := utf8.RuneCountInString(asrRes.Text)
+				var spanStart, spanEnd float64
+				if nSeg > 0 {
+					spanStart = asrRes.Segments[0].Start
+					spanEnd = asrRes.Segments[0].End
+					for _, seg := range asrRes.Segments[1:] {
+						if seg.Start < spanStart {
+							spanStart = seg.Start
+						}
+						if seg.End > spanEnd {
+							spanEnd = seg.End
+						}
+					}
+				}
+				const previewRunes = 200
+				preview := strings.TrimSpace(asrRes.Text)
+				if utf8.RuneCountInString(preview) > previewRunes {
+					preview = string([]rune(preview)[:previewRunes]) + "..."
+				}
+				logger.Infof(ctx, "[VideoMultimodal] ASR transcription completed: kb=%s file=%s audioBytes=%d textRunes=%d segments=%d timeline=%.2fs-%.2fs preview=%q",
+					payload.KnowledgeBaseID, fileName, len(audioBytes), nRunes, nSeg, spanStart, spanEnd, preview)
+			}
+		}()
 	}
+
+	logger.Debugf(ctx, "[VideoMultimodal] Waiting for VLM and ASR tasks to complete...")
+	wg.Wait()
+	logger.Debugf(ctx, "[VideoMultimodal] VLM and ASR tasks completed")
 
 	var videoSummary string
-	if len(frameDescriptions) > 0 && payload.EnableVLM {
-		vlmMdl, _ := s.resolveVLM(ctx, payload.KnowledgeBaseID)
-		if vlmMdl != nil {
-			combinedInput := strings.Join(frameDescriptions, "\n")
-			summary, sumErr := vlmMdl.Predict(ctx, []byte(combinedInput), vlmSummaryPrompt)
-			if sumErr != nil {
-				logger.Warnf(ctx, "[VideoMultimodal] Video summarization failed: %v", sumErr)
+	var combinedInput string
+	var kb *types.KnowledgeBase
+	if (len(frameAnalyses) > 0 || len(asrSegments) > 0) && (payload.EnableVLM || payload.EnableASR) {
+		var err error
+		kb, err = s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+
+		type TimelineEvent struct {
+			Start float64
+			End   float64
+			Text  string
+			Type  string
+		}
+		var events []TimelineEvent
+		for _, f := range frameAnalyses {
+			events = append(events, TimelineEvent{Start: f.StartTimestamp, End: f.EndTimestamp, Text: f.Description, Type: "frame"})
+		}
+		for _, seg := range asrSegments {
+			events = append(events, TimelineEvent{Start: seg.Start, End: seg.End, Text: seg.Text, Type: "audio"})
+		}
+		sort.Slice(events, func(i, j int) bool {
+			return events[i].Start < events[j].Start
+		})
+
+		var combinedBuilder strings.Builder
+		for _, ev := range events {
+			if ev.Type == "frame" {
+				if ev.Start == ev.End {
+					combinedBuilder.WriteString(fmt.Sprintf("[%.2fs] Visual: %s\n", ev.Start, ev.Text))
+				} else {
+					combinedBuilder.WriteString(fmt.Sprintf("[%.2fs - %.2fs] Visual: %s\n", ev.Start, ev.End, ev.Text))
+				}
+			} else {
+				combinedBuilder.WriteString(fmt.Sprintf("[%.2fs - %.2fs] Audio: %s\n", ev.Start, ev.End, ev.Text))
+			}
+		}
+		combinedInput = combinedBuilder.String()
+
+		if err != nil || kb == nil {
+			logger.Warnf(ctx, "[VideoMultimodal] Failed to get KB for summary: %v", err)
+			videoSummary = combinedInput
+		} else {
+			chatMdl, err := s.modelService.GetChatModel(ctx, kb.SummaryModelID)
+			if err != nil || chatMdl == nil {
+				logger.Warnf(ctx, "[VideoMultimodal] Failed to get chat model for summary (modelID=%s): %v", kb.SummaryModelID, err)
 				videoSummary = combinedInput
 			} else {
-				videoSummary = summary
+				// Limit combinedInput to avoid context length overflow.
+				// Using ~32000 runes to be safe for typical models.
+				if utf8.RuneCountInString(combinedInput) > 32000 {
+					runes := []rune(combinedInput)
+					combinedInput = string(runes[:32000]) + "\n...[truncated due to length]..."
+				}
+
+				systemPrompt := strings.ReplaceAll(vlmSummarySystemPromptTemplate, "{{language}}", lang)
+				userPrompt := strings.ReplaceAll(vlmSummaryUserPromptTemplate, "{{descriptions}}", combinedInput)
+
+				logger.Debugf(ctx, "[VideoMultimodal] Generating video summary with model %s, input length: %d chars", kb.SummaryModelID, len(combinedInput))
+				resp, sumErr := chatMdl.Chat(ctx, []chat.Message{
+					{Role: "system", Content: systemPrompt},
+					{Role: "user", Content: userPrompt},
+				}, nil)
+
+				if sumErr != nil || resp == nil {
+					logger.Warnf(ctx, "[VideoMultimodal] Video summarization failed: %v", sumErr)
+					videoSummary = combinedInput
+				} else {
+					videoSummary = resp.Content
+				}
 			}
-		} else {
-			videoSummary = strings.Join(frameDescriptions, "\n")
+		}
+	}
+
+	if kb == nil {
+		var err error
+		kb, err = s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+		if err != nil {
+			logger.Warnf(ctx, "[VideoMultimodal] Failed to get KB for video chunking: %v", err)
 		}
 	}
 
 	videoInfo := types.VideoInfo{
-		URL:               payload.VideoURL,
-		FrameCount:        len(frameDescriptions),
-		HasVLMAnalysis:    len(frameDescriptions) > 0,
-		HasASR:            asrText != "",
-		VideoSummary:      videoSummary,
-		ASRText:           asrText,
-		FrameDescriptions: frameDescriptions,
+		URL: payload.VideoURL,
 	}
 	videoInfoJSON, _ := json.Marshal([]types.VideoInfo{videoInfo})
 
-	newChunks := s.buildVideoChunks(payload, frameDescriptions, videoSummary, asrText, string(videoInfoJSON))
+	newChunks := s.buildVideoChunks(payload, combinedInput, videoSummary, string(videoInfoJSON), kb)
 
 	if len(newChunks) == 0 {
 		// Even if VLM/ASR both failed, mark knowledge as completed
@@ -204,9 +409,6 @@ func (s *VideoMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 
 	// Index chunks so they can be retrieved
 	s.indexChunks(ctx, payload, newChunks)
-
-	// Update the parent text chunk's VideoInfo (mirrors old docreader behaviour)
-	s.updateParentChunkVideoInfo(ctx, payload, videoInfo)
 
 	// For standalone video files, use summary as the knowledge description
 	// and mark the knowledge as completed (it was kept in "processing" until now).
@@ -267,78 +469,115 @@ func downloadVideoFromURL(videoURL string) ([]byte, error) {
 	return secutils.DownloadBytes(videoURL)
 }
 
-// transcribeAudio extracts and transcribes audio from a video using ASR.
-func (s *VideoMultimodalService) transcribeAudio(ctx context.Context, videoBytes []byte, kbID string) (string, error) {
+// transcribeAudio transcribes audio from a video using ASR.
+func (s *VideoMultimodalService) transcribeAudio(ctx context.Context, audioBytes []byte, kbID string, fileName string) (*asr.TranscriptionResult, error) {
 	asrMdl, err := s.resolveASR(ctx, kbID)
 	if err != nil {
-		return "", fmt.Errorf("resolve ASR: %w", err)
+		return nil, fmt.Errorf("resolve ASR: %w", err)
 	}
-	return asrMdl.Transcribe(ctx, videoBytes, "video.mp4")
+	return asrMdl.Transcribe(ctx, audioBytes, fileName)
 }
 
 // buildVideoChunks creates child chunks for video multimodal analysis results:
-//   - Frame descriptions (one chunk per frame)
-//   - Video summary (single chunk)
-//   - ASR transcription (single chunk)
+//   - Video summary (split into multiple chunks if too long)
+//   - Timeline combined input (split into multiple chunks if too long)
 func (s *VideoMultimodalService) buildVideoChunks(
 	payload types.VideoMultimodalPayload,
-	frameDescriptions []string,
+	combinedInput string,
 	videoSummary string,
-	asrText string,
 	videoInfoJSON string,
+	kb *types.KnowledgeBase,
 ) []*types.Chunk {
 	var newChunks []*types.Chunk
 
-	for _, desc := range frameDescriptions {
-		chunk := &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        payload.TenantID,
-			KnowledgeID:     payload.KnowledgeID,
-			KnowledgeBaseID: payload.KnowledgeBaseID,
-			Content:         desc,
-			ChunkType:       types.ChunkTypeVideoFrame,
-			ParentChunkID:   payload.ChunkID,
-			IsEnabled:       true,
-			Flags:           types.ChunkFlagRecommended,
-			VideoInfo:       videoInfoJSON,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
+	var parentContentBuilder strings.Builder
+	if videoSummary != "" {
+		parentContentBuilder.WriteString("视频摘要：\n")
+		parentContentBuilder.WriteString(videoSummary)
+		parentContentBuilder.WriteString("\n\n")
+	}
+	if combinedInput != "" {
+		parentContentBuilder.WriteString("详细时间轴解析：\n")
+		parentContentBuilder.WriteString(combinedInput)
+	}
+	parentContent := strings.TrimSpace(parentContentBuilder.String())
+	if parentContent == "" {
+		parentContent = "该视频未解析出有效内容"
+	}
+
+	// Construct a Parent Chunk representing the entire video
+	parentChunkID := uuid.New().String()
+	newChunks = append(newChunks, &types.Chunk{
+		ID:              parentChunkID,
+		TenantID:        payload.TenantID,
+		KnowledgeID:     payload.KnowledgeID,
+		KnowledgeBaseID: payload.KnowledgeBaseID,
+		Content:         parentContent,
+		ChunkType:       types.ChunkTypeParentText,
+		ParentChunkID:   payload.ChunkID, // Link back to the original text chunk if extracted from a document
+		IsEnabled:       true,
+		Flags:           types.ChunkFlagRecommended,
+		VideoInfo:       videoInfoJSON,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	})
+
+	var chunkCfg chunker.SplitterConfig
+	if kb != nil {
+		baseCfg := buildSplitterConfig(kb)
+		if kb.ChunkingConfig.EnableParentChild {
+			// If parent-child is globally enabled, these chunks act as child chunks
+			// for the newly created video parent chunk.
+			_, childCfg := buildParentChildConfigs(kb.ChunkingConfig, baseCfg)
+			chunkCfg = childCfg
+		} else {
+			chunkCfg = baseCfg
 		}
-		newChunks = append(newChunks, chunk)
+	} else {
+		chunkCfg = chunker.SplitterConfig{
+			ChunkSize:    512,
+			ChunkOverlap: 64,
+			Separators:   []string{"\n\n", "\n", "。"},
+		}
+	}
+
+	if combinedInput != "" {
+		inputChunks := chunker.SplitText(combinedInput, chunkCfg)
+		for _, sc := range inputChunks {
+			newChunks = append(newChunks, &types.Chunk{
+				ID:              uuid.New().String(),
+				TenantID:        payload.TenantID,
+				KnowledgeID:     payload.KnowledgeID,
+				KnowledgeBaseID: payload.KnowledgeBaseID,
+				Content:         sc.Content,
+				ChunkType:       types.ChunkTypeText,
+				ParentChunkID:   parentChunkID,
+				IsEnabled:       true,
+				Flags:           types.ChunkFlagRecommended,
+				VideoInfo:       videoInfoJSON,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+			})
+		}
 	}
 
 	if videoSummary != "" {
-		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        payload.TenantID,
-			KnowledgeID:     payload.KnowledgeID,
-			KnowledgeBaseID: payload.KnowledgeBaseID,
-			Content:         videoSummary,
-			ChunkType:       types.ChunkTypeVideoCaption,
-			ParentChunkID:   payload.ChunkID,
-			IsEnabled:       true,
-			Flags:           types.ChunkFlagRecommended,
-			VideoInfo:       videoInfoJSON,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-		})
-	}
-
-	if asrText != "" {
-		newChunks = append(newChunks, &types.Chunk{
-			ID:              uuid.New().String(),
-			TenantID:        payload.TenantID,
-			KnowledgeID:     payload.KnowledgeID,
-			KnowledgeBaseID: payload.KnowledgeBaseID,
-			Content:         asrText,
-			ChunkType:       types.ChunkTypeVideoASR,
-			ParentChunkID:   payload.ChunkID,
-			IsEnabled:       true,
-			Flags:           types.ChunkFlagRecommended,
-			VideoInfo:       videoInfoJSON,
-			CreatedAt:       time.Now(),
-			UpdatedAt:       time.Now(),
-		})
+		summaryChunks := chunker.SplitText(videoSummary, chunkCfg)
+		for _, sc := range summaryChunks {
+			newChunks = append(newChunks, &types.Chunk{
+				ID:              uuid.New().String(),
+				TenantID:        payload.TenantID,
+				KnowledgeID:     payload.KnowledgeID,
+				KnowledgeBaseID: payload.KnowledgeBaseID,
+				Content:         sc.Content,
+				ChunkType:       types.ChunkTypeText,
+				IsEnabled:       true,
+				Flags:           types.ChunkFlagRecommended,
+				VideoInfo:       videoInfoJSON,
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+			})
+		}
 	}
 
 	return newChunks
@@ -433,51 +672,6 @@ func (s *VideoMultimodalService) indexChunks(ctx context.Context, payload types.
 	}
 
 	logger.Infof(ctx, "[VideoMultimodal] Indexed %d video chunks for video %s", len(chunks), payload.VideoURL)
-}
-
-// updateParentChunkVideoInfo updates the parent text chunk's VideoInfo field,
-// replicating the behaviour of the old docreader flow where the parent chunk
-// carried the full video metadata (URL, frame descriptions, summary, ASR).
-func (s *VideoMultimodalService) updateParentChunkVideoInfo(
-	ctx context.Context,
-	payload types.VideoMultimodalPayload,
-	videoInfo types.VideoInfo,
-) {
-	if payload.ChunkID == "" {
-		return
-	}
-
-	chunk, err := s.chunkService.GetChunkByIDOnly(ctx, payload.ChunkID)
-	if err != nil {
-		logger.Warnf(ctx, "[VideoMultimodal] Failed to get parent chunk %s: %v", payload.ChunkID, err)
-		return
-	}
-
-	var existingInfos []types.VideoInfo
-	if chunk.VideoInfo != "" {
-		_ = json.Unmarshal([]byte(chunk.VideoInfo), &existingInfos)
-	}
-
-	found := false
-	for i, info := range existingInfos {
-		if info.URL == videoInfo.URL {
-			existingInfos[i] = videoInfo
-			found = true
-			break
-		}
-	}
-	if !found {
-		existingInfos = append(existingInfos, videoInfo)
-	}
-
-	videoInfoJSON, _ := json.Marshal(existingInfos)
-	chunk.VideoInfo = string(videoInfoJSON)
-	chunk.UpdatedAt = time.Now()
-	if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-		logger.Warnf(ctx, "[VideoMultimodal] Failed to update parent chunk %s VideoInfo: %v", chunk.ID, err)
-	} else {
-		logger.Infof(ctx, "[VideoMultimodal] Updated parent chunk %s VideoInfo for video", chunk.ID)
-	}
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,

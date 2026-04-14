@@ -29,22 +29,33 @@ func NewOllamaVLM(config *Config, ollamaService *ollama.OllamaService) (*OllamaV
 }
 
 // Predict sends an image with a text prompt to the Ollama vision model.
-func (v *OllamaVLM) Predict(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
 	streamFlag := false
+	var images []ollamaapi.ImageData
+	for _, imgBytes := range imgBytesList {
+		if len(imgBytes) > 0 {
+			images = append(images, imgBytes)
+		}
+	}
+	
 	chatReq := &ollamaapi.ChatRequest{
 		Model: v.modelName,
 		Messages: []ollamaapi.Message{
 			{
 				Role:    "user",
 				Content: prompt,
-				Images:  []ollamaapi.ImageData{imgBytes},
+				Images:  images,
 			},
 		},
 		Stream:  &streamFlag,
 		Options: map[string]interface{}{"temperature": 0.1},
 	}
 
-	logger.Infof(ctx, "[VLM] Calling Ollama API, model=%s, imageSize=%d", v.modelName, len(imgBytes))
+	totalImageSize := 0
+	for _, img := range imgBytesList {
+		totalImageSize += len(img)
+	}
+	logger.Infof(ctx, "[VLM] Calling Ollama API, model=%s, numImages=%d, totalImageSize=%d", v.modelName, len(images), totalImageSize)
 
 	var result string
 	err := v.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {

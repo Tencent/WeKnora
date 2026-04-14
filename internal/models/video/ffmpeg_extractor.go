@@ -247,6 +247,50 @@ func (e *FFMpegExtractor) readExtractedFrames(ctx context.Context, frameDir stri
 	return frames, nil
 }
 
+// ExtractAudio extracts the audio track from a video using FFmpeg.
+func (e *FFMpegExtractor) ExtractAudio(ctx context.Context, videoBytes []byte) ([]byte, error) {
+	tempVideoPath, err := e.writeTempVideo(videoBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tempVideoPath)
+
+	tempAudioFile, err := os.CreateTemp(e.tempDir, "audio-output-*.mp3")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp audio file: %w", err)
+	}
+	tempAudioPath := tempAudioFile.Name()
+	tempAudioFile.Close()
+	defer os.Remove(tempAudioPath)
+
+	cmd := exec.CommandContext(ctx, e.ffmpegPath,
+		"-i", tempVideoPath,
+		"-vn",
+		"-c:a", "libmp3lame",
+		"-q:a", "2",
+		"-y",
+		tempAudioPath,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(stderr.String(), "Output file does not contain any stream") {
+			logger.Infof(ctx, "[VideoFFMpeg] Video does not contain an audio stream")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ffmpeg audio extraction failed: %w, stderr: %s", err, stderr.String())
+	}
+
+	audioBytes, err := os.ReadFile(tempAudioPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read extracted audio: %w", err)
+	}
+
+	logger.Infof(ctx, "[VideoFFMpeg] Extracted audio, size: %d bytes", len(audioBytes))
+	return audioBytes, nil
+}
+
 // GetVideoInfo returns basic information about a video.
 func (e *FFMpegExtractor) GetVideoInfo(ctx context.Context, videoBytes []byte) (map[string]interface{}, error) {
 	tempVideoPath, err := e.writeTempVideo(videoBytes)

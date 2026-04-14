@@ -209,10 +209,11 @@ func (p *AttachmentProcessor) processAudioFile(
 	}
 
 	logger.Infof(ctx, "starting audio transcription: fileName=%s, size=%d", fileName, len(data))
-	transcript, err := asrInstance.Transcribe(ctx, data, fileName)
+	res, err := asrInstance.Transcribe(ctx, data, fileName)
 	if err != nil {
 		return fmt.Errorf("audio transcription failed: %w", err)
 	}
+	transcript := res.Text
 
 	p.applyLineTruncation(ctx, transcript, attachment)
 	logger.Infof(ctx, "audio transcription done: textLen=%d", len(transcript))

@@ -2037,7 +2037,7 @@ export default {
       faq: "FAQ 설정",
       graph: "지식 그래프",
       multimodal: "이미지 처리",
-      asr: "오디오 처리",
+      asr: "오디오·영상",
       share: "공유관리",
       storage: "스토리지 엔진",
       datasource: "데이터 소스",
@@ -2256,12 +2256,13 @@ export default {
       description: "이미지 콘텐츠 이해 기능을 설정하여 이미지 등 비텍스트 콘텐츠의 파싱 및 검색을 지원합니다",
     },
     asr: {
-      title: "오디오 처리 설정",
-      description: "음성 인식 기능을 설정하여 오디오 파일(mp3, wav, m4a, flac, ogg)을 업로드하고 자동으로 텍스트로 전사합니다",
-      label: "음성 인식 활성화",
-      desc: "활성화하면 오디오 파일을 지식베이스에 업로드하고 자동으로 텍스트로 전사할 수 있습니다",
+      title: "오디오·영상 음성 인식",
+      description:
+        "ASR(음성-텍스트)을 설정합니다. 활성화 시 오디오 또는 영상을 업로드할 수 있으며, 오디오는 그대로 전사하고 영상은 음성 트랙을 추출해 텍스트로 전사합니다(mp3, wav, m4a, flac, ogg, mp4, mov 등).",
+      label: "오디오·영상 음성 인식 사용",
+      desc: "활성화하면 오디오 또는 영상을 지식베이스에 업로드할 수 있으며, 음성이 텍스트로 전사되어 파싱·검색에 사용됩니다",
       modelLabel: "ASR 모델",
-      modelDescription: "오디오 전사를 위한 음성 인식 모델 (예: OpenAI Whisper)",
+      modelDescription: "오디오·영상의 음성을 텍스트로 전사하는 모델 (예: OpenAI Whisper)",
       modelPlaceholder: "ASR 모델을 선택해주세요",
     },
     advanced: {
@@ -3234,7 +3235,7 @@ export default {
       fileTypeText: '일반 텍스트',
       fileTypeJson: 'JSON 파일',
       fileTypeImage: '이미지',
-      fileTypeAudio: '오디오 파일',
+      fileTypeAudiovisual: '오디오·영상',
       engines: {
         builtin: {
           name: '내장',

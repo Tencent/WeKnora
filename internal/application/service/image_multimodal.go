@@ -133,7 +133,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if payload.EnableOCR {
-		ocrText, ocrErr := vlmModel.Predict(ctx, imgBytes, vlmOCRPrompt)
+		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmOCRPrompt)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 		} else {
@@ -147,7 +147,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if payload.EnableCaption {
-		caption, capErr := vlmModel.Predict(ctx, imgBytes, vlmCaptionPrompt)
+		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
 		if capErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		} else if caption != "" {

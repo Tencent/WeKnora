@@ -202,7 +202,7 @@
                   </div>
                 </div>
 
-                <!-- 音频处理（ASR）设置 -->
+                <!-- 音视频语音识别（ASR）设置 -->
                 <div v-if="!isFAQ" v-show="currentSection === 'asr'" class="section">
                   <div v-if="formData" class="kb-multimodal-settings">
                     <div class="section-header">

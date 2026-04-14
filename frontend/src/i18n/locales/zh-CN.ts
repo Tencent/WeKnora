@@ -2023,7 +2023,7 @@ export default {
       faq: "FAQ 设置",
       graph: "知识图谱",
       multimodal: "图像处理",
-      asr: "音频处理",
+      asr: "音视频",
       datasource: "数据源",
       share: "共享管理",
     },
@@ -2228,12 +2228,12 @@ export default {
       description: "配置图像内容理解能力，启用后支持图片等非文本内容的解析和检索",
     },
     asr: {
-      title: "音频处理配置",
-      description: "配置语音识别功能，启用后支持上传音频文件（mp3、wav、m4a、flac、ogg）并自动转录为文本",
-      label: "启用语音识别",
-      desc: "启用后可以上传音频文件到知识库，系统将自动转录为文本进行处理",
+      title: "音视频语音识别",
+      description: "配置语音识别（ASR），启用后支持上传音频及视频文件；音频将整段转写，视频将提取音轨并转写为文本（常见格式：mp3、wav、m4a、flac、ogg、mp4、mov 等）",
+      label: "启用音视频语音识别",
+      desc: "启用后可上传音频或视频到知识库，系统自动转写音轨/语音为文本并参与解析与检索",
       modelLabel: "ASR 模型",
-      modelDescription: "用于语音转文本的语音识别模型（如 OpenAI Whisper）",
+      modelDescription: "用于音频与视频中语音转文本的识别模型（如 OpenAI Whisper）",
       modelPlaceholder: "请选择 ASR 模型",
     },
     advanced: {
@@ -3177,7 +3177,7 @@ export default {
       fileTypeText: "纯文本",
       fileTypeJson: "JSON 文件",
       fileTypeImage: "图片",
-      fileTypeAudio: "音频文件",
+      fileTypeAudiovisual: "音视频",
       engines: {
         builtin: {
           name: "内置",

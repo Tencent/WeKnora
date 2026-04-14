@@ -38,7 +38,7 @@ type SplitterConfig struct {
 func DefaultConfig() SplitterConfig {
 	return SplitterConfig{
 		ChunkSize:    512,
-		ChunkOverlap: 128,
+		ChunkOverlap: 64,
 		Separators:   []string{"\n\n", "\n", "。"},
 	}
 }

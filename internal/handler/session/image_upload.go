@@ -83,7 +83,7 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 			continue
 		}
 		prompt := buildImageAnalysisPrompt(userQuery)
-		analysis, analysisErr := vlmModel.Predict(ctx, imgBytes, prompt)
+		analysis, analysisErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if analysisErr != nil {
 			logger.Warnf(ctx, "VLM analysis failed for image %d: %v", i, analysisErr)
 		} else {

@@ -64,37 +64,49 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 }
 
 // Predict sends an image with a text prompt to the OpenAI-compatible API.
-func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
-	mimeType := detectImageMIME(imgBytes)
-	b64 := base64.StdEncoding.EncodeToString(imgBytes)
-	dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
+	var parts []openai.ChatMessagePart
+	
+	// Add text prompt first
+	parts = append(parts, openai.ChatMessagePart{
+		Type: openai.ChatMessagePartTypeText,
+		Text: prompt,
+	})
+
+	// Add images
+	for _, imgBytes := range imgBytesList {
+		if len(imgBytes) > 0 {
+			mimeType := detectImageMIME(imgBytes)
+			b64 := base64.StdEncoding.EncodeToString(imgBytes)
+			dataURI := fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+			parts = append(parts, openai.ChatMessagePart{
+				Type: openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{
+					URL:    dataURI,
+					Detail: openai.ImageURLDetailAuto,
+				},
+			})
+		}
+	}
 
 	req := openai.ChatCompletionRequest{
 		Model: v.modelName,
 		Messages: []openai.ChatCompletionMessage{
 			{
-				Role: openai.ChatMessageRoleUser,
-				MultiContent: []openai.ChatMessagePart{
-					{
-						Type: openai.ChatMessagePartTypeImageURL,
-						ImageURL: &openai.ChatMessageImageURL{
-							URL:    dataURI,
-							Detail: openai.ImageURLDetailAuto,
-						},
-					},
-					{
-						Type: openai.ChatMessagePartTypeText,
-						Text: prompt,
-					},
-				},
+				Role:         openai.ChatMessageRoleUser,
+				MultiContent: parts,
 			},
 		},
 		MaxTokens:   defaultMaxToks,
 		Temperature: defaultTemp,
 	}
 
-	logger.Infof(ctx, "[VLM] Calling OpenAI-compatible API, model=%s, baseURL=%s, imageSize=%d",
-		v.modelName, v.baseURL, len(imgBytes))
+	totalImageSize := 0
+	for _, img := range imgBytesList {
+		totalImageSize += len(img)
+	}
+	logger.Infof(ctx, "[VLM] Calling OpenAI-compatible API, model=%s, baseURL=%s, numImages=%d, totalImageSize=%d",
+		v.modelName, v.baseURL, len(imgBytesList), totalImageSize)
 
 	resp, err := v.client.CreateChatCompletion(ctx, req)
 	if err != nil {

@@ -1893,7 +1893,11 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		return
 	}
 
-	text, err := asrInstance.Transcribe(ctx, assets.ASRTestWAV, "asr_test.wav")
+	res, err := asrInstance.Transcribe(ctx, assets.ASRTestWAV, "asr_test.wav")
+	var text string
+	if res != nil {
+		text = res.Text
+	}
 	available := true
 	message := "ASR连接成功"
 

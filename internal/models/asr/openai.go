@@ -3,6 +3,7 @@ package asr
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -44,9 +45,9 @@ func NewOpenAIASR(config *Config) (*OpenAIASR, error) {
 }
 
 // Transcribe sends audio bytes to the OpenAI-compatible audio transcriptions API.
-func (s *OpenAIASR) Transcribe(ctx context.Context, audioBytes []byte, fileName string) (string, error) {
+func (s *OpenAIASR) Transcribe(ctx context.Context, audioBytes []byte, fileName string) (*TranscriptionResult, error) {
 	if len(audioBytes) == 0 {
-		return "", fmt.Errorf("audio bytes are empty")
+		return nil, fmt.Errorf("audio bytes are empty")
 	}
 
 	// Ensure fileName has an extension for proper MIME type detection
@@ -61,7 +62,7 @@ func (s *OpenAIASR) Transcribe(ctx context.Context, audioBytes []byte, fileName 
 		Model:    s.modelName,
 		FilePath: fileName,
 		Reader:   bytes.NewReader(audioBytes),
-		Format:   openai.AudioResponseFormatJSON,
+		Format:   openai.AudioResponseFormatVerboseJSON,
 	}
 
 	if s.language != "" {
@@ -70,12 +71,31 @@ func (s *OpenAIASR) Transcribe(ctx context.Context, audioBytes []byte, fileName 
 
 	resp, err := s.client.CreateTranscription(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("ASR transcription request failed: %w", err)
+		return nil, fmt.Errorf("ASR transcription request failed: %w", err)
 	}
+
+	jsonData, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("marshal transcription response: %w", err)
+	}
+	logger.Debugf(ctx, "[ASR] Transcription response: %s", string(jsonData))
 
 	text := strings.TrimSpace(resp.Text)
 	logger.Infof(ctx, "[ASR] Transcription completed, text length=%d", len(text))
-	return text, nil
+
+	var segments []Segment
+	for _, s := range resp.Segments {
+		segments = append(segments, Segment{
+			Start: s.Start,
+			End:   s.End,
+			Text:  strings.TrimSpace(s.Text),
+		})
+	}
+
+	return &TranscriptionResult{
+		Text:     text,
+		Segments: segments,
+	}, nil
 }
 
 func (s *OpenAIASR) GetModelName() string { return s.modelName }

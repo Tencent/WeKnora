@@ -160,6 +160,9 @@ const fileTypeGroups = computed(() => {
   const jsonExts = ['json'].filter(e => ft.has(e))
   const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp'].filter(e => ft.has(e))
   const audioExts = ['mp3', 'wav', 'm4a', 'flac', 'ogg'].filter(e => ft.has(e))
+  const videoExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'].filter(e => ft.has(e))
+  const mediaExtSet = new Set<string>([...audioExts, ...videoExts])
+  const audiovisualExts = [...mediaExtSet]
 
   if (pdfExts.length) groups.push({ key: 'pdf', label: t('kbSettings.parser.fileTypePdf'), icon: 'file-pdf', extensions: pdfExts })
   if (officeExts.length) groups.push({ key: 'office', label: t('kbSettings.parser.fileTypeWord'), icon: 'file-word', extensions: officeExts })
@@ -170,7 +173,14 @@ const fileTypeGroups = computed(() => {
   if (txtExts.length) groups.push({ key: 'text', label: t('kbSettings.parser.fileTypeText'), icon: 'file', extensions: txtExts })
   if (jsonExts.length) groups.push({ key: 'json', label: t('kbSettings.parser.fileTypeJson'), icon: 'file-code', extensions: jsonExts })
   if (imageExts.length) groups.push({ key: 'image', label: t('kbSettings.parser.fileTypeImage'), icon: 'image', extensions: imageExts })
-  if (audioExts.length) groups.push({ key: 'audio', label: t('kbSettings.parser.fileTypeAudio'), icon: 'sound', extensions: audioExts })
+  if (audiovisualExts.length) {
+    groups.push({
+      key: 'audiovisual',
+      label: t('kbSettings.parser.fileTypeAudiovisual'),
+      icon: 'sound',
+      extensions: audiovisualExts,
+    })
+  }
 
   return groups
 })

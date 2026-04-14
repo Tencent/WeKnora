@@ -1030,16 +1030,53 @@ const handleDocumentUpload = async (event: Event) => {
     return;
   }
 
+  const vlmEnabled = kbInfo.value?.vlm_config?.enabled || false;
+  const asrEnabled = kbInfo.value?.asr_config?.enabled || false;
   const dynamicTypes = supportedFileTypes.value.size > 0 ? supportedFileTypes.value : undefined
   const validFiles: File[] = [];
   let skippedCount = 0;
+  let imageFilteredCount = 0;
+  let videoFilteredCount = 0;
+  let audioFilteredCount = 0;
+
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
+    const fileExt = file.name.substring(file.name.lastIndexOf('.') + 1).toLowerCase();
+    const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    const videoTypes = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv'];
+    const audioTypes = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
+
+    if (!vlmEnabled) {
+      if (imageTypes.includes(fileExt)) {
+        imageFilteredCount++;
+        continue;
+      }
+      if (videoTypes.includes(fileExt)) {
+        videoFilteredCount++;
+        continue;
+      }
+    }
+
+    if (!asrEnabled && audioTypes.includes(fileExt)) {
+      audioFilteredCount++;
+      continue;
+    }
+
     if (!kbFileTypeVerification(file, files.length > 1, dynamicTypes)) {
       validFiles.push(file);
     } else {
       skippedCount++;
     }
+  }
+
+  if (imageFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }));
+  }
+  if (videoFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.videosFilteredNoVLM', { count: videoFilteredCount }));
+  }
+  if (audioFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.audiosFilteredNoASR', { count: audioFilteredCount }));
   }
 
   if (validFiles.length === 0) {
@@ -1174,6 +1211,16 @@ const handleFolderUpload = async (event: Event) => {
     if (!kbFileTypeVerification(file, true, dynamicTypes)) {
       validFiles.push(file);
     }
+  }
+
+  if (imageFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.imagesFilteredNoVLM', { count: imageFilteredCount }));
+  }
+  if (videoFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.videosFilteredNoVLM', { count: videoFilteredCount }));
+  }
+  if (audioFilteredCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.audiosFilteredNoASR', { count: audioFilteredCount }));
   }
 
   if (validFiles.length === 0) {

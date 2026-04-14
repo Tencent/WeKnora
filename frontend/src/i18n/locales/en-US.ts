@@ -1516,7 +1516,7 @@ export default {
       faq: 'FAQ Settings',
       graph: 'Knowledge Graph',
       multimodal: 'Image Processing',
-      asr: 'Audio Processing',
+      asr: 'Audio & Video',
       datasource: 'Data Sources',
       share: 'Sharing'
     },
@@ -1724,12 +1724,13 @@ export default {
       description: 'Configure image content understanding for parsing and retrieving non-text content like images',
     },
     asr: {
-      title: 'Audio Processing Configuration',
-      description: 'Configure speech recognition to upload audio files (mp3, wav, m4a, flac, ogg) and automatically transcribe to text',
-      label: 'Enable Speech Recognition',
-      desc: 'When enabled, audio files can be uploaded to the knowledge base and automatically transcribed to text',
+      title: 'Audio & Video Speech Recognition',
+      description:
+        'Configure ASR (speech-to-text). When enabled, you can upload audio files or videos; audio is transcribed directly, and video audio tracks are extracted and transcribed (e.g. mp3, wav, m4a, flac, ogg, mp4, mov, …).',
+      label: 'Enable audio & video speech recognition',
+      desc: 'When enabled, audio or video can be uploaded to the knowledge base; speech is transcribed to text for parsing and retrieval.',
       modelLabel: 'ASR Model',
-      modelDescription: 'Speech-to-text model for audio transcription (e.g. OpenAI Whisper)',
+      modelDescription: 'Speech-to-text model for audio and video soundtracks (e.g. OpenAI Whisper)',
       modelPlaceholder: 'Select an ASR model',
     },
     advanced: {
@@ -3179,7 +3180,7 @@ export default {
       fileTypeText: 'Plain Text',
       fileTypeJson: 'JSON Files',
       fileTypeImage: 'Images',
-      fileTypeAudio: 'Audio Files',
+      fileTypeAudiovisual: 'Audio & Video',
       engines: {
         builtin: {
           name: 'Built-in',

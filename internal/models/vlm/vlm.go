@@ -11,8 +11,8 @@ import (
 
 // VLM defines the interface for Vision Language Model operations.
 type VLM interface {
-	// Predict sends an image with a text prompt to the VLM and returns the generated text.
-	Predict(ctx context.Context, imgBytes []byte, prompt string) (string, error)
+	// Predict sends one or more images with a text prompt to the VLM and returns the generated text.
+	Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error)
 
 	GetModelName() string
 	GetModelID() string

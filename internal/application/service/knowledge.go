@@ -1490,6 +1490,25 @@ type ProcessChunksOptions struct {
 	ParentChunks []types.ParsedParentChunk
 }
 
+// buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
+func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
+	chunkCfg := chunker.SplitterConfig{
+		ChunkSize:    kb.ChunkingConfig.ChunkSize,
+		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
+		Separators:   kb.ChunkingConfig.Separators,
+	}
+	if chunkCfg.ChunkSize <= 0 {
+		chunkCfg.ChunkSize = 512
+	}
+	if chunkCfg.ChunkOverlap <= 0 {
+		chunkCfg.ChunkOverlap = 50
+	}
+	if len(chunkCfg.Separators) == 0 {
+		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+	return chunkCfg
+}
+
 // buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
 // The base config (already validated with defaults) is used for separators.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
@@ -7089,20 +7108,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	}
 
 	// Manual content is markdown - chunk directly with Go chunker
-	chunkCfg := chunker.SplitterConfig{
-		ChunkSize:    kb.ChunkingConfig.ChunkSize,
-		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
-		Separators:   kb.ChunkingConfig.Separators,
-	}
-	if chunkCfg.ChunkSize <= 0 {
-		chunkCfg.ChunkSize = 512
-	}
-	if chunkCfg.ChunkOverlap <= 0 {
-		chunkCfg.ChunkOverlap = 50
-	}
-	if len(chunkCfg.Separators) == 0 {
-		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
-	}
+	chunkCfg := buildSplitterConfig(kb)
 
 	var parsed []types.ParsedChunk
 	opts := ProcessChunksOptions{
@@ -7847,7 +7853,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return nil
 		}
 
-		transcribedText, err := asrModel.Transcribe(ctx, convertResult.AudioData, knowledge.FileName)
+		transcriptionResult, err := asrModel.Transcribe(ctx, convertResult.AudioData, knowledge.FileName)
 		if err != nil {
 			logger.Errorf(ctx, "[ASR] Transcription failed: %v", err)
 			if isLastRetry {
@@ -7857,6 +7863,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 				s.repo.UpdateKnowledge(ctx, knowledge)
 			}
 			return fmt.Errorf("audio transcription failed: %w", err)
+		}
+
+		var transcribedText string
+		if transcriptionResult != nil {
+			transcribedText = transcriptionResult.Text
 		}
 
 		if transcribedText == "" {
@@ -7902,20 +7913,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// Step 3: Split into chunks using Go chunker
-	chunkCfg := chunker.SplitterConfig{
-		ChunkSize:    kb.ChunkingConfig.ChunkSize,
-		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
-		Separators:   kb.ChunkingConfig.Separators,
-	}
-	if chunkCfg.ChunkSize <= 0 {
-		chunkCfg.ChunkSize = 512
-	}
-	if chunkCfg.ChunkOverlap <= 0 {
-		chunkCfg.ChunkOverlap = 50
-	}
-	if len(chunkCfg.Separators) == 0 {
-		chunkCfg.Separators = []string{"\n\n", "\n", "。"}
-	}
+	chunkCfg := buildSplitterConfig(kb)
 
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,

@@ -15,6 +15,9 @@ type Extractor interface {
 	// for each frame's image data. This is useful for streaming processing.
 	ExtractFramesToReaders(ctx context.Context, videoBytes []byte, options *ExtractOptions) ([]io.Reader, error)
 
+	// ExtractAudio extracts the audio track from a video file and returns it as bytes.
+	ExtractAudio(ctx context.Context, videoBytes []byte) ([]byte, error)
+
 	// GetVideoInfo retrieves basic information about a video file.
 	// It returns a map containing duration, width, height, etc.
 	GetVideoInfo(ctx context.Context, videoBytes []byte) (map[string]interface{}, error)
