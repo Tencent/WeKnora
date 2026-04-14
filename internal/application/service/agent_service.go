@@ -110,7 +110,7 @@ func (s *agentService) CreateAgentEngine(
 
 	// 4. Resolve system prompt template
 	systemPromptTemplate := ""
-	if config.UseCustomSystemPrompt {
+	if config.UseCustomSystemPrompt || config.SystemPrompt != "" {
 		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
 	}
 
