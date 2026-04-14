@@ -131,16 +131,22 @@ export interface InitializeWeKnoraCloudRequest {
   app_secret: string
 }
 
-export interface InitializeWeKnoraCloudResult {
-  models: Array<{
-    name: string
-    type: string
-    action: 'created' | 'updated'
-  }>
-}
-
-export function initializeWeKnoraCloud(data: InitializeWeKnoraCloudRequest): Promise<InitializeWeKnoraCloudResult> {
-  return post('/api/v1/models/weknoracloud/initialize', data) as Promise<InitializeWeKnoraCloudResult>
+// 仅保存 WeKnoraCloud 凭证，不自动创建模型
+export function saveWeKnoraCloudCredentials(data: InitializeWeKnoraCloudRequest): Promise<{ success: boolean; message: string }> {
+  return new Promise((resolve, reject) => {
+    post('/api/v1/weknoracloud/credentials', data)
+      .then((response: any) => {
+        if (response.success) {
+          resolve(response)
+        } else {
+          reject(new Error(response.message || response.error || '凭证保存失败'))
+        }
+      })
+      .catch((error: any) => {
+        console.error('Failed to save WeKnoraCloud credentials:', error)
+        reject(error)
+      })
+  })
 }
 
 export interface WeKnoraCloudStatusResult {

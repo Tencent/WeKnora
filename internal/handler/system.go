@@ -1038,7 +1038,7 @@ func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) 
 		if creds == nil {
 			return nil
 		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(addr, creds.AppID, creds.APIKey)
+		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.APIKey)
 		if err != nil {
 			return nil
 		}

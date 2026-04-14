@@ -3,20 +3,18 @@ package docparser
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/docreader/proto"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/resolver"
 )
-
-var logger = log.New(os.Stdout, "[DocParser] ", log.LstdFlags|log.Lmicroseconds)
 
 func getMaxMessageSize() int {
 	if sizeStr := os.Getenv("MAX_FILE_SIZE_MB"); sizeStr != "" {
@@ -46,7 +44,6 @@ func NewGRPCDocumentReader(addr string) (*GRPCDocumentReader, error) {
 }
 
 func (p *GRPCDocumentReader) connect(addr string) error {
-	logger.Printf("INFO: Connecting to docreader at %s", addr)
 
 	maxMsgSize := getMaxMessageSize()
 	opts := []grpc.DialOption{
@@ -64,7 +61,7 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to docreader: %w", err)
 	}
-	logger.Printf("INFO: Connected to docreader in %v", time.Since(start))
+	logger.Infof(context.Background(), "Connected to docreader in %v", time.Since(start))
 
 	p.conn = conn
 	p.client = proto.NewDocReaderClient(conn)

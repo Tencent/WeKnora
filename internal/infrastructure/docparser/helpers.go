@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // stringOr returns val (trimmed) if non-empty, otherwise fallback.
@@ -56,7 +58,7 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		logger.Printf("DEBUG: [%s] %s = {object with %d keys: %s}", label, prefix, len(v), strings.Join(keys, ", "))
+		logger.Infof(context.Background(), "[%s] %s = {object with %d keys: %s}", label, prefix, len(v), strings.Join(keys, ", "))
 		for _, key := range keys {
 			val := v[key]
 			path := prefix + "." + key
@@ -64,36 +66,36 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 			case map[string]interface{}:
 				logResponseStructure(label, inner, path)
 			case []interface{}:
-				logger.Printf("DEBUG: [%s] %s = [array with %d items]", label, path, len(inner))
+				logger.Infof(context.Background(), "[%s] %s = [array with %d items]", label, path, len(inner))
 				if len(inner) > 0 {
-					logger.Printf("DEBUG: [%s] %s[0] type=%T", label, path, inner[0])
+					logger.Infof(context.Background(), "[%s] %s[0] type=%T", label, path, inner[0])
 					if len(inner) <= 3 {
 						for i, item := range inner {
 							logResponseStructure(label, item, fmt.Sprintf("%s[%d]", path, i))
 						}
 					} else {
 						logResponseStructure(label, inner[0], path+"[0]")
-						logger.Printf("DEBUG: [%s] ... and %d more items in %s", label, len(inner)-1, path)
+						logger.Infof(context.Background(), "[%s] ... and %d more items in %s", label, len(inner)-1, path)
 					}
 				}
 			case string:
 				if len(inner) > 200 {
-					logger.Printf("DEBUG: [%s] %s = string(%d chars): %.200s...", label, path, len(inner), inner)
+					logger.Infof(context.Background(), "[%s] %s = string(%d chars): %.200s...", label, path, len(inner), inner)
 				} else {
-					logger.Printf("DEBUG: [%s] %s = %q", label, path, inner)
+					logger.Infof(context.Background(), "[%s] %s = %q", label, path, inner)
 				}
 			case float64:
-				logger.Printf("DEBUG: [%s] %s = %v (number)", label, path, inner)
+				logger.Infof(context.Background(), "[%s] %s = %v (number)", label, path, inner)
 			case bool:
-				logger.Printf("DEBUG: [%s] %s = %v (bool)", label, path, inner)
+				logger.Infof(context.Background(), "[%s] %s = %v (bool)", label, path, inner)
 			case nil:
-				logger.Printf("DEBUG: [%s] %s = null", label, path)
+				logger.Infof(context.Background(), "[%s] %s = null", label, path)
 			default:
-				logger.Printf("DEBUG: [%s] %s = %v (%T)", label, path, val, val)
+				logger.Infof(context.Background(), "[%s] %s = %v (%T)", label, path, val, val)
 			}
 		}
 	case []interface{}:
-		logger.Printf("DEBUG: [%s] %s = [array with %d items]", label, prefix, len(v))
+		logger.Infof(context.Background(), "[%s] %s = [array with %d items]", label, prefix, len(v))
 		if len(v) > 0 {
 			if len(v) <= 3 {
 				for i, item := range v {
@@ -101,10 +103,10 @@ func logResponseStructure(label string, obj interface{}, prefix string) {
 				}
 			} else {
 				logResponseStructure(label, v[0], prefix+"[0]")
-				logger.Printf("DEBUG: [%s] ... and %d more items in %s", label, len(v)-1, prefix)
+				logger.Infof(context.Background(), "[%s] ... and %d more items in %s", label, len(v)-1, prefix)
 			}
 		}
 	default:
-		logger.Printf("DEBUG: [%s] %s = %v (%T)", label, prefix, v, v)
+		logger.Infof(context.Background(), "[%s] %s = %v (%T)", label, prefix, v, v)
 	}
 }

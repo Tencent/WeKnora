@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -73,7 +74,7 @@ func NewHTTPDocumentReader(baseURL string) (*HTTPDocumentReader, error) {
 		},
 	}
 	if p.baseURL != "" {
-		logger.Printf("INFO: HTTP docreader base URL: %s", p.baseURL)
+		logger.Infof(context.Background(), "INFO: HTTP docreader base URL: %s", p.baseURL)
 	}
 	return p, nil
 }
@@ -88,7 +89,7 @@ func (p *HTTPDocumentReader) Reconnect(addr string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.baseURL = strings.TrimSuffix(addr, "/")
-	logger.Printf("INFO: HTTP docreader base URL set to %s", p.baseURL)
+	logger.Infof(context.Background(), "INFO: HTTP docreader base URL set to %s", p.baseURL)
 	return nil
 }
 

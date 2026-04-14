@@ -3,7 +3,6 @@ package docparser
 import (
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -87,13 +86,13 @@ type weKnoraCloudEngine struct{}
 func (e *weKnoraCloudEngine) Name() string        { return WeKnoraCloudEngineName }
 func (e *weKnoraCloudEngine) Description() string { return "WeKnoraCloud document reader" }
 func (e *weKnoraCloudEngine) FileTypes(_ bool) []string {
-	return weKnoraCloudSupportedFileTypes()
+	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "pptx", "ppt"}
 }
 func (e *weKnoraCloudEngine) CheckAvailable(docreaderConnected bool, overrides map[string]string) (bool, string) {
-	if docreaderConnected && isWeKnoraCloudDocReaderAddr(overrides["docreader_addr"]) {
+	if overrides["docreader_app_id"] != "" {
 		return true, ""
 	}
-	return false, "WeKnoraCloud document reader is not initialized"
+	return false, "WeKnora Cloud credentials not configured. Go to Settings → WeKnora Cloud to set up."
 }
 
 // ---------------------------------------------------------------------------
@@ -191,8 +190,4 @@ func ListAllEngines(docreaderConnected bool, overrides map[string]string, remote
 	}
 
 	return result
-}
-
-func isWeKnoraCloudDocReaderAddr(addr string) bool {
-	return strings.TrimSuffix(strings.TrimSpace(addr), "/") == strings.TrimRight(provider.WeKnoraCloudBaseURL, "/")+"/api/v1/doc/reader"
 }

@@ -312,7 +312,6 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	}
 
 	c.logRequest(ctx, req, false)
-
 	resp, err := c.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		if isMultimodalNotSupportedError(err) {
@@ -342,13 +341,15 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	logger.Infof(ctx, "[LLM Request] model=%s, raw HTTP request:\n%s", c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
+	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, raw HTTP request:\n%s",
+		endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
+
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -365,6 +366,14 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	} else {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
+
+	// print headers
+	headers, err := json.Marshal(httpReq.Header)
+	if err != nil {
+		return nil, fmt.Errorf("marshal headers: %w", err)
+	}
+	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, headers: %s",
+		endpoint, c.modelName, string(headers))
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {

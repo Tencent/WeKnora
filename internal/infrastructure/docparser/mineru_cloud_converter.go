@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
@@ -61,7 +62,7 @@ func (c *MinerUCloudReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		return &types.ReadResult{Error: "no file content provided"}, nil
 	}
 
-	logger.Printf("INFO: [MinerUCloud] Parsing file=%s size=%d via %s", req.FileName, len(content), c.baseURL)
+	logger.Infof(context.Background(), "[MinerUCloud] Parsing file=%s size=%d via %s", req.FileName, len(content), c.baseURL)
 
 	ext := filepath.Ext(req.FileName)
 	if ext == "" && req.FileType != "" {
@@ -158,7 +159,7 @@ func (c *MinerUCloudReader) applyUploadURLs(ctx context.Context, fileName, ext s
 		return "", "", fmt.Errorf("API returned no file_urls")
 	}
 
-	logger.Printf("INFO: [MinerUCloud] batch apply ok: batch_id=%s, urls=%d", result.Data.BatchID, len(result.Data.FileURLs))
+	logger.Infof(context.Background(), "[MinerUCloud] batch apply ok: batch_id=%s, urls=%d", result.Data.BatchID, len(result.Data.FileURLs))
 	return result.Data.BatchID, result.Data.FileURLs[0], nil
 }
 
@@ -178,7 +179,7 @@ func (c *MinerUCloudReader) uploadFile(ctx context.Context, uploadURL string, co
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("PUT upload status %d", resp.StatusCode)
 	}
-	logger.Printf("INFO: [MinerUCloud] file uploaded, status=%d", resp.StatusCode)
+	logger.Infof(context.Background(), "[MinerUCloud] file uploaded, status=%d", resp.StatusCode)
 	return nil
 }
 
@@ -218,14 +219,14 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 
 		items, err := c.fetchBatchStatus(ctx, batchID, headers)
 		if err != nil {
-			logger.Printf("WARN: [MinerUCloud] poll #%d failed: %v", pollCount, err)
+			logger.Errorf(context.Background(), "[MinerUCloud] poll #%d failed: %v", pollCount, err)
 			sleepCtx(ctx, defaultPollInterval)
 			continue
 		}
 
 		if len(items) == 0 {
 			if pollCount <= 3 || pollCount%10 == 0 {
-				logger.Printf("INFO: [MinerUCloud] poll #%d: extract_result empty, retrying", pollCount)
+				logger.Infof(context.Background(), "[MinerUCloud] poll #%d: extract_result empty, retrying", pollCount)
 			}
 			sleepCtx(ctx, defaultPollInterval)
 			continue
@@ -235,7 +236,7 @@ func (c *MinerUCloudReader) pollBatchResult(ctx context.Context, batchID string)
 		state := strings.ToLower(item.State)
 
 		if pollCount == 1 || pollCount%10 == 0 || state == "done" || state == "failed" {
-			logger.Printf("INFO: [MinerUCloud] poll #%d: file=%s state=%s pages=%d/%d",
+			logger.Infof(context.Background(), "[MinerUCloud] poll #%d: file=%s state=%s pages=%d/%d",
 				pollCount, item.FileName, state, item.Progress.ExtractedPages, item.Progress.TotalPages)
 		}
 
@@ -290,9 +291,9 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 	// Dump the raw extract_result JSON for debugging
 	rawExtract := string(pollResp.Data.ExtractResult)
 	if len(rawExtract) > 4000 {
-		logger.Printf("DEBUG: [MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
+		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result (truncated to 4000 chars): %s ...", rawExtract[:4000])
 	} else {
-		logger.Printf("DEBUG: [MinerUCloud] Raw extract_result: %s", rawExtract)
+		logger.Infof(context.Background(), "[MinerUCloud] Raw extract_result: %s", rawExtract)
 	}
 
 	// Pretty-print the structure to reveal all available fields
@@ -323,7 +324,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractResultItem) (string, []types.ImageRef, error) {
 	text := firstNonEmpty(item.Markdown, item.Content, item.Text)
 	if text != "" {
-		logger.Printf("INFO: [MinerUCloud] parsed (inline), length=%d", len(text))
+		logger.Infof(context.Background(), "[MinerUCloud] parsed (inline), length=%d", len(text))
 		return text, nil, nil
 	}
 
@@ -336,7 +337,7 @@ func (c *MinerUCloudReader) extractDoneResult(_ context.Context, item *extractRe
 		return "", nil, fmt.Errorf("extract zip: %w", err)
 	}
 
-	logger.Printf("INFO: [MinerUCloud] parsed (zip), markdown=%d chars, images=%d", len(md), len(imageRefs))
+	logger.Infof(context.Background(), "[MinerUCloud] parsed (zip), markdown=%d chars, images=%d", len(md), len(imageRefs))
 	return md, imageRefs, nil
 }
 
@@ -410,13 +411,13 @@ func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, error) {
 
 		resolved := resolveInZip(imgPath, mdDir, entries)
 		if resolved == nil {
-			logger.Printf("WARN: [MinerUCloud] image not found in zip: %s", imgPath)
+			logger.Errorf(context.Background(), "[MinerUCloud] image not found in zip: %s", imgPath)
 			continue
 		}
 
 		imgData, err := readZipEntryBytes(resolved)
 		if err != nil {
-			logger.Printf("WARN: [MinerUCloud] failed to read zip image %s: %v", imgPath, err)
+			logger.Errorf(context.Background(), "[MinerUCloud] failed to read zip image %s: %v", imgPath, err)
 			continue
 		}
 

@@ -19,16 +19,18 @@ func (p *WeKnoraCloudProvider) Info() ProviderInfo {
 	return ProviderInfo{
 		Name:        ProviderWeKnoraCloud,
 		DisplayName: "WeKnoraCloud",
-		Description: "WeKnoraCloud 平台，提供 Chat / Embedding / Rerank 模型，使用 APPID + API Key 签名认证",
+		Description: "WeKnora云服务，模型：chat, embedding, rerank, vlm",
 		DefaultURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: WeKnoraCloudBaseURL,
 			types.ModelTypeEmbedding:   WeKnoraCloudBaseURL,
 			types.ModelTypeRerank:      WeKnoraCloudBaseURL,
+			types.ModelTypeVLLM:        WeKnoraCloudBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,
 			types.ModelTypeEmbedding,
 			types.ModelTypeRerank,
+			types.ModelTypeVLLM,
 		},
 		RequiresAuth: true,
 	}

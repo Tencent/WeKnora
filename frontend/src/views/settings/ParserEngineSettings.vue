@@ -93,6 +93,34 @@
             </p>
           </div>
 
+          <!-- weknoracloud: 凭证状态 -->
+          <template v-if="engine.Name === 'weknoracloud'">
+            <div v-if="wkcState === 'configured'" class="wkc-status wkc-status--ok">
+              <t-icon name="check-circle" style="font-size: 15px; color: var(--td-success-color); flex-shrink: 0;" />
+              <span>WeKnoraCloud 凭证已配置</span>
+            </div>
+            <div v-else-if="wkcState === 'loading'" class="wkc-status">
+              <t-loading size="small" />
+              <span>检查凭证状态...</span>
+            </div>
+            <div v-else class="wkc-status wkc-status--warn">
+              <t-icon name="error-circle" style="font-size: 15px; color: #f97316; flex-shrink: 0;" />
+              <div style="flex: 1;">
+                <span v-if="wkcState === 'expired'">凭证已失效，请重新配置。</span>
+                <span v-else>尚未配置凭证。</span>
+                <div style="margin-top: 6px;">
+                  <t-button
+                    variant="text"
+                    size="small"
+                    theme="primary"
+                    @click="goToWkcSettings"
+                    style="padding: 0; height: auto;"
+                  >前往设置中配置</t-button>
+                </div>
+              </div>
+            </div>
+          </template>
+
           <div v-if="engine.FileTypes && engine.FileTypes.length" class="file-types">
             <t-tag
               v-for="ft in engine.FileTypes"
@@ -190,8 +218,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useUIStore } from '@/stores/ui'
 import {
   getParserEngines,
   getParserEngineConfig,
@@ -200,13 +229,16 @@ import {
   type ParserEngineInfo,
   type ParserEngineConfig,
 } from '@/api/system'
+import { getWeKnoraCloudStatus } from '@/api/model'
 
 const { t } = useI18n()
+const uiStore = useUIStore()
 
 const CONFIGURABLE_ENGINES = new Set(['mineru', 'mineru_cloud'])
 
 /** 各解析引擎的项目/官方文档地址 */
 const ENGINE_DOC_LINKS: Record<string, string> = {
+  weknoracloud: 'https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html',
   markitdown: 'https://github.com/microsoft/markitdown',
   mineru: 'https://github.com/opendatalab/MinerU',
   mineru_cloud: 'https://mineru.net/apiManage/docs',
@@ -249,10 +281,11 @@ const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'buil
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
 const ENGINE_ORDER: Record<string, number> = {
   builtin: 0,
-  simple: 1,
-  markitdown: 2,
-  mineru: 3,
-  mineru_cloud: 4,
+  weknoracloud: 1,
+  simple: 2,
+  markitdown: 3,
+  mineru: 4,
+  mineru_cloud: 5,
 }
 
 const sortedEngines = computed(() => {
@@ -277,12 +310,16 @@ function engineDocLabel(_name: string): string {
 }
 
 function getEngineDisplayName(engineName: string): string {
+  // WeKnoraCloud 特殊处理
+  if (engineName === 'weknoracloud') return 'WeKnora Cloud'
   const key = `kbSettings.parser.engines.${engineName}.name`
   const translated = t(key)
   return translated !== key ? translated : engineName
 }
 
 function getEngineDisplayDesc(engineName: string, fallback: string): string {
+  // WeKnoraCloud 特殊处理
+  if (engineName === 'weknoracloud') return '使用 WeKnora Cloud 进行文档解析，需先在「设置 → WeKnora Cloud」中配置凭证'
   const key = `kbSettings.parser.engines.${engineName}.desc`
   const translated = t(key)
   return translated !== key ? translated : fallback
@@ -331,7 +368,7 @@ async function loadConfig() {
 async function loadAll() {
   loading.value = true
   error.value = ''
-  await Promise.all([loadEngines(), loadConfig()])
+  await Promise.all([loadEngines(), loadConfig(), checkWkcStatus()])
   loading.value = false
 }
 
@@ -387,6 +424,33 @@ async function onSave() {
   } finally {
     saving.value = false
   }
+}
+
+// ---- WeKnoraCloud 凭证状态 ----
+const wkcState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
+
+async function checkWkcStatus() {
+  wkcState.value = 'loading'
+  try {
+    const status = await getWeKnoraCloudStatus()
+    if (status.needs_reinit) {
+      wkcState.value = 'expired'
+    } else if (status.has_models) {
+      wkcState.value = 'configured'
+    } else {
+      wkcState.value = 'unconfigured'
+    }
+  } catch {
+    wkcState.value = 'unconfigured'
+  }
+}
+
+async function goToWkcSettings() {
+  if (uiStore.showSettingsModal) {
+    uiStore.closeSettings()
+    await nextTick()
+  }
+  uiStore.openSettings('weknoracloud')
 }
 
 onMounted(loadAll)
@@ -595,5 +659,30 @@ onMounted(loadAll)
 
 .tag-with-tooltip {
   cursor: help;
+}
+
+// ---- WeKnoraCloud 凭证状态 ----
+.wkc-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  margin-bottom: 12px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  &--ok {
+    background: var(--td-success-color-light);
+    border: 1px solid var(--td-success-color-focus);
+    color: var(--td-success-color);
+  }
+
+  &--warn {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-left: 3px solid #f97316;
+  }
 }
 </style>

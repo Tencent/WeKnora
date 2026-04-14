@@ -1508,15 +1508,28 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("Base URL 未通过安全校验: %v", err)))
 		return
 	}
+	tenantInfo, ok := types.TenantInfoFromContext(ctx)
+	if !ok {
+		logger.Error(ctx, "Tenant info not found")
+		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		return
+	}
+	var appID, appSecret string
+	if tenantInfo.ParserEngineConfig != nil {
+		appID = tenantInfo.ParserEngineConfig.DocreaderAppID
+		appSecret = tenantInfo.ParserEngineConfig.DocreaderAPIKey
+	}
 
 	// 创建模型配置进行测试
 	modelConfig := &types.Model{
 		Name:   req.ModelName,
 		Source: "remote",
 		Parameters: types.ModelParameters{
-			BaseURL:  req.BaseURL,
-			APIKey:   req.APIKey,
-			Provider: req.Provider,
+			BaseURL:   req.BaseURL,
+			APIKey:    req.APIKey,
+			Provider:  req.Provider,
+			AppID:     appID,
+			AppSecret: appSecret,
 		},
 		Type: "llm", // 默认类型，实际检查时不区分具体类型
 	}
@@ -1592,6 +1605,17 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 			return
 		}
 	}
+	tenantInfo, ok := types.TenantInfoFromContext(ctx)
+	if !ok {
+		logger.Error(ctx, "Tenant info not found")
+		c.Error(errors.NewBadRequestError("租户信息未找到"))
+		return
+	}
+	var appID, appSecret string
+	if tenantInfo.ParserEngineConfig != nil {
+		appID = tenantInfo.ParserEngineConfig.DocreaderAppID
+		appSecret = tenantInfo.ParserEngineConfig.DocreaderAPIKey
+	}
 
 	// 构造 embedder 配置
 	cfg := embedding.Config{
@@ -1603,6 +1627,8 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		Dimensions:           req.Dimension,
 		ModelID:              "",
 		Provider:             req.Provider,
+		AppID:                appID,
+		AppSecret:            appSecret,
 	}
 
 	emb, err := embedding.NewEmbedder(cfg, h.pooler, h.ollamaService)
@@ -1647,6 +1673,8 @@ func (h *InitializationHandler) checkRemoteModelConnection(ctx context.Context,
 		APIKey:    model.Parameters.APIKey,
 		ModelID:   model.Name,
 		Provider:  model.Parameters.Provider,
+		AppID:     model.Parameters.AppID,
+		AppSecret: model.Parameters.AppSecret,
 	}
 
 	// 创建聊天实例
@@ -1706,6 +1734,18 @@ func (h *InitializationHandler) checkRerankModelConnection(ctx context.Context,
 		ModelName: modelName,
 		Source:    types.ModelSourceRemote, // 默认值，实际会根据URL判断
 	}
+	tenantInfo, ok := types.TenantInfoFromContext(ctx)
+	if !ok {
+		logger.Error(ctx, "Tenant info not found")
+		return false, "租户信息未找到"
+	}
+	var appID, appSecret string
+	if tenantInfo.ParserEngineConfig != nil {
+		appID = tenantInfo.ParserEngineConfig.DocreaderAppID
+		appSecret = tenantInfo.ParserEngineConfig.DocreaderAPIKey
+	}
+	config.AppID = appID
+	config.AppSecret = appSecret
 
 	// 创建Reranker实例
 	reranker, err := rerank.NewReranker(config)

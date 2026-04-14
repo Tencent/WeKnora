@@ -16,6 +16,7 @@ import (
 	"time"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -56,7 +57,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 		return &types.ReadResult{Error: "no file content provided"}, nil
 	}
 
-	logger.Printf("INFO: [MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
+	logger.Infof(context.Background(), "[MinerU] Parsing file=%s size=%d via %s", req.FileName, len(content), c.endpoint)
 
 	mdContent, imagesB64, err := c.callFileParse(ctx, content)
 	if err != nil {
@@ -71,7 +72,7 @@ func (c *MinerUReader) Read(ctx context.Context, req *types.ReadRequest) (*types
 
 	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
 
-	logger.Printf("INFO: [MinerU] Parsed successfully, markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
+	logger.Infof(context.Background(), "[MinerU] Parsed successfully, markdown=%d chars, images=%d", len(mdContent), len(imageRefs))
 
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
@@ -158,9 +159,9 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	// Dump raw response for debugging (truncate if too large)
 	rawStr := string(respBody)
 	if len(rawStr) > 4000 {
-		logger.Printf("DEBUG: [MinerU] Raw response (truncated to 4000 chars): %s ...", rawStr[:4000])
+		logger.Infof(context.Background(), "[MinerU] Raw response (truncated to 4000 chars): %s ...", rawStr[:4000])
 	} else {
-		logger.Printf("DEBUG: [MinerU] Raw response: %s", rawStr)
+		logger.Infof(context.Background(), "[MinerU] Raw response: %s", rawStr)
 	}
 
 	// Also pretty-print the top-level structure (without large base64 blobs)
@@ -179,15 +180,15 @@ func (c *MinerUReader) callFileParse(ctx context.Context, content []byte) (strin
 	// - some variants:            results.files.*
 	// Prefer document when available, then fallback to files.
 	if result.Results.Document.MDContent != "" || len(result.Results.Document.Images) > 0 {
-		logger.Printf("DEBUG: [MinerU] Using response path: results.document")
+		logger.Infof(context.Background(), "[MinerU] Using response path: results.document")
 		return result.Results.Document.MDContent, result.Results.Document.Images, nil
 	}
 	if result.Results.Files.MDContent != "" || len(result.Results.Files.Images) > 0 {
-		logger.Printf("DEBUG: [MinerU] Using response path: results.files")
+		logger.Infof(context.Background(), "[MinerU] Using response path: results.files")
 		return result.Results.Files.MDContent, result.Results.Files.Images, nil
 	}
 
-	logger.Printf("WARN: [MinerU] Response has no markdown/images under results.document or results.files")
+	logger.Errorf(context.Background(), "[MinerU] Response has no markdown/images under results.document or results.files")
 	return "", nil, nil
 }
 
@@ -209,7 +210,7 @@ func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]stri
 			ext = m[1]
 			decoded, err := base64.StdEncoding.DecodeString(m[2])
 			if err != nil {
-				logger.Printf("WARN: [MinerU] Failed to decode base64 image %s: %v", ipath, err)
+				logger.Errorf(context.Background(), "[MinerU] Failed to decode base64 image %s: %v", ipath, err)
 				continue
 			}
 			imgBytes = decoded
@@ -217,7 +218,7 @@ func (c *MinerUReader) processImages(mdContent string, imagesB64 map[string]stri
 			// raw base64 without data URI prefix
 			decoded, err := base64.StdEncoding.DecodeString(b64Str)
 			if err != nil {
-				logger.Printf("WARN: [MinerU] Failed to decode raw base64 image %s: %v", ipath, err)
+				logger.Errorf(context.Background(), "[MinerU] Failed to decode raw base64 image %s: %v", ipath, err)
 				continue
 			}
 			imgBytes = decoded
@@ -271,7 +272,7 @@ func PingMinerU(endpoint string) (bool, string) {
 func htmlToMarkdown(content string) string {
 	md, err := htmltomd.ConvertString(content)
 	if err != nil {
-		logger.Printf("WARN: [MinerU] html-to-markdown conversion failed, using raw content: %v", err)
+		logger.Errorf(context.Background(), "[MinerU] html-to-markdown conversion failed, using raw content: %v", err)
 		return content
 	}
 	return md

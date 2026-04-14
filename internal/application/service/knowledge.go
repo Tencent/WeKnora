@@ -7999,6 +7999,8 @@ func (s *knowledgeService) convert(
 
 	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, overrides)
 	if reader == nil {
+		logger.Errorf(ctx, "[convert] no doc reader for kb=%s knowledge=%s fileType=%s engine=%q isURL=%v",
+			kb.ID, knowledge.ID, fileType, parserEngine, isURL)
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = "Document parsing service is not configured. Please use text/paragraph import or set DOCREADER_ADDR."
 		knowledge.UpdatedAt = time.Now()
@@ -8034,6 +8036,8 @@ func (s *knowledgeService) convert(
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
 	if result.Error != "" {
+		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
+			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
@@ -8050,16 +8054,14 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 	case docparser.SimpleEngineName:
 		return &docparser.SimpleFormatReader{}
 	case docparser.WeKnoraCloudEngineName:
-		addr := strings.TrimSpace(overrides["docreader_addr"])
-		if !IsWeKnoraCloudDocReaderAddr(addr) {
-			return nil
-		}
 		creds := s.tenantService.GetDocreaderCredentials(ctx)
 		if creds == nil {
+			logger.Warnf(ctx, "[resolveDocReader] WeKnoraCloud: no tenant docreader credentials (fileType=%s)", fileType)
 			return nil
 		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(addr, creds.AppID, creds.APIKey)
+		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.APIKey)
 		if err != nil {
+			logger.Errorf(ctx, "[resolveDocReader] WeKnoraCloud reader init failed: %v", err)
 			return nil
 		}
 		return reader

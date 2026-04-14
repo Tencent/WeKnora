@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// WeKnoraCloudHandler 处理 WeKnoraCloud 初始化请求
+// WeKnoraCloudHandler 处理 WeKnoraCloud 凭证管理
 type WeKnoraCloudHandler struct {
 	svc interfaces.WeKnoraCloudService
 }
@@ -17,26 +17,26 @@ func NewWeKnoraCloudHandler(svc interfaces.WeKnoraCloudService) *WeKnoraCloudHan
 	return &WeKnoraCloudHandler{svc: svc}
 }
 
-type initializeWeKnoraCloudRequest struct {
+type weKnoraCloudCredentialsRequest struct {
 	AppID     string `json:"app_id"     binding:"required"`
 	AppSecret string `json:"app_secret" binding:"required"`
 }
 
-// Initialize POST /api/v1/models/weknoracloud/initialize
-func (h *WeKnoraCloudHandler) Initialize(c *gin.Context) {
-	var req initializeWeKnoraCloudRequest
+// SaveCredentials POST /api/v1/weknoracloud/credentials
+// 仅保存 APPID/APPSECRET 凭证到租户配置，不自动创建模型
+func (h *WeKnoraCloudHandler) SaveCredentials(c *gin.Context) {
+	var req weKnoraCloudCredentialsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	result, err := h.svc.Initialize(c.Request.Context(), req.AppID, req.AppSecret)
-	if err != nil {
+	if err := h.svc.SaveCredentials(c.Request.Context(), req.AppID, req.AppSecret); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "凭证保存成功"})
 }
 
 // Status GET /api/v1/models/weknoracloud/status

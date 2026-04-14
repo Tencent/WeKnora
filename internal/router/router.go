@@ -810,6 +810,6 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 
 // RegisterWeKnoraCloudRoutes 注册 WeKnoraCloud 初始化路由
 func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler) {
-	r.POST("/models/weknoracloud/initialize", handler.Initialize)
+	r.POST("/weknoracloud/credentials", handler.SaveCredentials)
 	r.GET("/models/weknoracloud/status", handler.Status)
 }

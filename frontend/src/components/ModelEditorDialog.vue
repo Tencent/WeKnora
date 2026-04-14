@@ -144,27 +144,76 @@
             </t-select>
           </div>
 
+          <!-- WeKnoraCloud 提示信息 -->
+          <template v-if="formData.provider === 'weknoracloud'">
+            <!-- 凭证已配置 -->
+            <div v-if="wkcCredentialState === 'configured'" class="weknoracloud-hint weknoracloud-hint--ok">
+              <t-icon name="check-circle-filled" style="font-size: 16px; color: var(--td-success-color); flex-shrink: 0;" />
+              <div>
+                WeKnoraCloud 凭证已配置。
+                支持的模型可参考
+                <a
+                  href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="weknoracloud-hint-link"
+                >接口文档</a>。
+              </div>
+            </div>
+
+            <!-- 未配置 / 失效 -->
+            <div v-else-if="wkcCredentialState !== 'loading'" class="weknoracloud-hint weknoracloud-hint--warn">
+              <t-icon name="error-circle-filled" style="font-size: 16px; color: #f97316; flex-shrink: 0;" />
+              <div style="flex: 1;">
+                <template v-if="wkcCredentialState === 'expired'">
+                  WeKnoraCloud 凭证已失效，请重新配置。
+                </template>
+                <template v-else>
+                  尚未配置 WeKnoraCloud 凭证，请先填写 APPID 和 APPSECRET。
+                </template>
+                <div style="margin-top: 8px;">
+                  <t-button
+                    variant="text"
+                    size="small"
+                    theme="primary"
+                    @click="goToWeKnoraCloudSettings"
+                    style="padding: 0; height: auto;"
+                  >
+                    前往设置中配置
+                  </t-button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 加载中 -->
+            <div v-else class="weknoracloud-hint">
+              <t-icon name="loading" class="spinning" style="font-size: 16px; color: var(--td-text-color-placeholder); flex-shrink: 0;" />
+              <span>正在检查凭证状态...</span>
+            </div>
+          </template>
+
           <!-- 模型名称 -->
           <div class="form-item">
             <label class="form-label required">{{ $t('model.modelName') }}</label>
-            <t-input 
-              v-model="formData.modelName" 
+            <t-input
+              v-model="formData.modelName"
               :placeholder="getModelNamePlaceholder()"
+              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
             />
           </div>
 
-          <div class="form-item">
+          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
-            <t-input 
-              v-model="formData.baseUrl" 
+            <t-input
+              v-model="formData.baseUrl"
               :placeholder="getBaseUrlPlaceholder()"
             />
           </div>
 
-          <div class="form-item">
+          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label">{{ $t('model.editor.apiKeyOptional') }}</label>
-            <t-input 
-              v-model="formData.apiKey" 
+            <t-input
+              v-model="formData.apiKey"
               type="password"
               :placeholder="$t('model.editor.apiKeyPlaceholder')"
             />
@@ -178,7 +227,7 @@
                 variant="outline" 
                 @click="checkRemoteAPI"
                 :loading="checking"
-                :disabled="!formData.modelName || !formData.baseUrl"
+                :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')"
               >
                 <template #icon>
                   <t-icon 
@@ -248,7 +297,7 @@
             <t-button theme="default" variant="outline" @click="handleCancel">
               {{ $t('common.cancel') }}
             </t-button>
-            <t-button theme="primary" @click="handleConfirm" :loading="saving">
+            <t-button theme="primary" @click="handleConfirm" :loading="saving" :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'">
               {{ $t('common.save') }}
             </t-button>
           </div>
@@ -262,6 +311,7 @@
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
+import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 
@@ -483,6 +533,34 @@ let downloadInterval: any = null
 const ollamaServiceStatus = ref<boolean | null>(null)
 const checkingOllamaStatus = ref(false)
 
+// WeKnoraCloud 凭证状态
+const wkcCredentialState = ref<'loading' | 'unconfigured' | 'configured' | 'expired'>('loading')
+
+const checkWkcCredentialStatus = async () => {
+  wkcCredentialState.value = 'loading'
+  try {
+    const status = await getWeKnoraCloudStatus()
+    if (status.needs_reinit) {
+      wkcCredentialState.value = 'expired'
+    } else if (status.has_models) {
+      wkcCredentialState.value = 'configured'
+    } else {
+      wkcCredentialState.value = 'unconfigured'
+    }
+  } catch {
+    wkcCredentialState.value = 'unconfigured'
+  }
+}
+
+const goToWeKnoraCloudSettings = async () => {
+  emit('update:visible', false)
+  if (uiStore.showSettingsModal) {
+    uiStore.closeSettings()
+    await nextTick()
+  }
+  uiStore.openSettings('weknoracloud')
+}
+
 const formData = ref<ModelFormData>({
   id: '',
   name: '',
@@ -625,6 +703,11 @@ watch(() => props.visible, (val) => {
     if (props.modelType === 'rerank') {
       formData.value.source = 'remote'
     }
+
+    // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
+    if (formData.value.provider === 'weknoracloud') {
+      checkWkcCredentialStatus()
+    }
   } else {
     // 恢复背景滚动
     document.body.style.overflow = ''
@@ -669,6 +752,10 @@ const handleProviderChange = (value: string) => {
     remoteChecked.value = false
     remoteAvailable.value = false
     remoteMessage.value = ''
+  }
+  // WeKnoraCloud: 检查凭证状态
+  if (value === 'weknoracloud') {
+    checkWkcCredentialStatus()
   }
 }
 
@@ -803,7 +890,7 @@ const checkOllamaDimension = async () => {
 
 // 检查 Remote API 连接（根据模型类型调用不同的接口）
 const checkRemoteAPI = async () => {
-  if (!formData.value.modelName || !formData.value.baseUrl) {
+  if (!formData.value.modelName || (!formData.value.baseUrl && formData.value.provider !== 'weknoracloud')) {
     MessagePlugin.warning(t('model.editor.fillModelAndUrl'))
     return
   }
@@ -918,8 +1005,8 @@ const handleConfirm = async () => {
       return
     }
     
-    // 如果是 remote 类型，必须填写 baseUrl
-    if (formData.value.source === 'remote') {
+    // 如果是 remote 类型且非 WeKnoraCloud，必须填写 baseUrl
+    if (formData.value.source === 'remote' && formData.value.provider !== 'weknoracloud') {
       if (!formData.value.baseUrl || !formData.value.baseUrl.trim()) {
         MessagePlugin.warning(t('model.editor.remoteBaseUrlRequired'))
         return
@@ -1410,6 +1497,39 @@ const handleOverlayMouseUp = () => {
 
     &.unavailable {
       color: var(--td-error-color);
+    }
+  }
+}
+
+// WeKnoraCloud 提示信息
+.weknoracloud-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+
+  &--ok {
+    background: var(--td-success-color-light);
+    border: 1px solid var(--td-success-color-focus);
+  }
+
+  &--warn {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-left: 3px solid #f97316;
+  }
+
+  .weknoracloud-hint-link {
+    color: var(--td-brand-color);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
     }
   }
 }
