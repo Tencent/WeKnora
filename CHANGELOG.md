@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-04-14
+
+### 🚀 New Features
+- **NEW**: WeKnora Cloud — WeKnora Cloud service integration providing hosted LLM models and document parsing capabilities, with credential management, status checks, and UI feedback
+- **NEW**: Chrome Extension — browser extension support with menu entry and quick access integration for seamless knowledge capture from web pages
+- **NEW**: WeChat IM Integration — WeChat channel adapter with QR code login and long-polling message support
+- **NEW**: ClawHub Skill — ClawHub Skill integration with dedicated menu entry, enabling agent skill marketplace access and one-click skill installation
+- **NEW**: Attachment Processing — file attachment support in chat pipeline with enhanced error handling, content formatting, and image/attachment metadata injection in queries
+- **NEW**: Azure OpenAI Provider — full Azure OpenAI support for chat, VLM, and embedding models with deployment name preservation, configurable dimensions parameter, provider registration with metadata, URL auto-detection, and frontend provider integration with i18n
+- **NEW**: Alibaba Cloud OSS Storage — object storage support via S3-compatible mode with configuration UI, connectivity test, status reporting, OSS TypeScript types, docreader OssStorage class, factory and container registration, and multi-language i18n (Korean, Russian)
+- **NEW**: Notion Connector — Notion data source integration with API client, type definitions, Connector interface, markdown renderer, and dependency injection registration
+- **NEW**: Baidu Web Search Provider — added Baidu as a web search provider option (#907)
+- **NEW**: Ollama Web Search Provider — added Ollama as a web search provider option (#907)
+- **NEW**: VectorStore Management — VectorStore entity, repository, database migrations, service layer with connection testing, and full CRUD API endpoints with Swagger documentation
+
+### ⚡ Improvements
+- Data source resource selector upgraded to tree view with parent-child indentation and cascading check/uncheck
+- Customizable LLM call timeout for agents with docker-compose environment mapping
+- Enhanced document summary with expandable/collapsible functionality and overflow detection for improved user interaction
+- Improved chat UI with hover effects, database schema updates for chat history and retrieval configurations
+- Enhanced chat pipeline query handling with image and attachment metadata
+- Support custom endpoints for private WeCom deployments in IM channels
+- Integrated Lumberjack for log file management with rotation and compression
+- New document analysis prompt template and enhanced rewrite template descriptions
+- Integrated ChatBot provider and docreader for unified chat service
+
+### 🐛 Bug Fixes
+- Fixed hardcoded TruncatePromptTokens in BatchEmbed causing unintended embedding truncation
+- Fixed `<kb>` and `<web>` citation tags not being stripped before sending to IM platforms, causing raw tags in user-visible messages
+- Fixed tool name duplication in streaming tool calls
+- Fixed MINIO_ENDPOINT not configurable via environment variable
+- Fixed Azure OpenAI dimensions support not gated properly for non-supporting models
+- Fixed Azure OpenAI ModelMapperFunc overriding deployment names instead of preserving them as-is
+- Fixed Azure OpenAI connection test not passing provider, causing incorrect endpoint usage
+- Fixed 400 errors incorrectly treated as connection failures in model connectivity check (parameter mismatch is not a connectivity issue)
+- Fixed Dockerfile build error with duplicate libsqlite3-0 and ffmpeg installation
+- Fixed OSS S3-compatible API signature mismatch by disabling automatic checksum calculation and adjusting path-style settings
+- Fixed missing closing brace in checkOSS function
+- Fixed neo4j driver compatibility with Go 1.24 on Windows: reverted to v6 with -p=1 compiler workaround
+
+### 🔧 Refactoring
+- Replaced CryptoService with lightweight utils AES helpers, simplifying encryption logic across the codebase
+- Optimized OSS storage initialization, URL formatting, and security handling for improved S3 compatibility
+- Enhanced WeKnora Cloud internationalization and UI feedback for credential management operations
+
+### 📚 Documentation
+- Added VectorStore CRUD API endpoint documentation with Swagger annotations
+- Added Alibaba Cloud OSS support documentation and API descriptions
+
 ## [0.3.6] - 2026-04-03
 
 ### 🚀 New Features

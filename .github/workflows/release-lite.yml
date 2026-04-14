@@ -1,9 +1,9 @@
 name: Release Lite Binaries
 
 on:
-  push:
-    tags:
-      - "v*"
+  # push:
+  #   tags:
+  #     - "v*"
   workflow_dispatch:
     inputs:
       tag:

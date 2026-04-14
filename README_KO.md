@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.3.6-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.4.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -51,6 +51,20 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 **웹사이트:** https://weknora.weixin.qq.com
 
 ## ✨ 최신 업데이트
+
+**v0.4.0 하이라이트:**
+
+- **WeKnora Cloud**: 호스팅 LLM 모델 및 문서 파싱 서비스 통합, 자격 증명 관리 및 상태 확인
+- **Chrome 확장 프로그램**: 브라우저 확장으로 웹페이지 지식 캡처
+- **ClawHub Skill**: ClawHub Skill 마켓플레이스 통합으로 원클릭 스킬 설치
+- **WeChat IM 통합**: WeChat 채널 어댑터. QR 코드 로그인 및 롱폴링 메시지 지원
+- **첨부파일 처리**: 채팅 파이프라인에서 파일 첨부 지원, 콘텐츠 포맷팅 및 이미지/첨부 메타데이터 주입
+- **Azure OpenAI 프로바이더**: Azure OpenAI의 Chat, VLM, Embedding 모델을 완전 지원. 배포 이름 보존 및 dimensions 파라미터 설정 지원
+- **Alibaba Cloud OSS 스토리지**: S3 호환 모드를 통한 알리바바 클라우드 OSS 오브젝트 스토리지 지원. 설정 UI, 연결 테스트, 다국어 i18n 제공
+- **Notion 커넥터**: Notion 데이터 소스 통합. API 클라이언트, Markdown 렌더러, Connector 인터페이스 구현
+- **Baidu & Ollama 웹 검색**: Baidu 및 Ollama를 웹 검색 프로바이더로 추가
+- **VectorStore 관리**: 완전한 VectorStore CRUD 기능. 엔티티, 리포지토리, 서비스 레이어, 연결 테스트, API 엔드포인트
+- **주요 버그 수정**: Azure OpenAI 엔드포인트 처리, Embedding 잘림, IM 인용 태그 제거, neo4j Go 1.24 Windows 호환성, OSS 서명 문제 수정
 
 **v0.3.6 하이라이트:**
 

@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.3.6-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -51,6 +51,20 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 **Website:** https://weknora.weixin.qq.com
 
 ## ✨ Latest Updates
+
+**v0.4.0 Highlights:**
+
+- **WeKnora Cloud**: Hosted LLM models and document parsing service integration with credential management and status checks
+- **Chrome Extension**: Browser extension for web page knowledge capture
+- **ClawHub Skill**: ClawHub Skill marketplace integration for one-click agent skill installation
+- **WeChat IM Integration**: WeChat channel adapter with QR code login and long-polling message support
+- **Attachment Processing**: File attachment support in chat pipeline with content formatting and metadata injection
+- **Azure OpenAI Provider**: Full Azure OpenAI support for chat, VLM, and embedding models with deployment name preservation and dimensions parameter
+- **Alibaba Cloud OSS Storage**: Object storage support via S3-compatible mode with configuration UI, connectivity test, and multi-language i18n
+- **Notion Connector**: Notion data source integration with API client, markdown renderer, and Connector interface
+- **Baidu & Ollama Web Search**: Added Baidu and Ollama as web search providers
+- **VectorStore Management**: Full VectorStore CRUD with entity, repository, service layer, connection testing, and API endpoints
+- **Bug Fixes**: Fixed Azure OpenAI endpoint handling, embedding truncation, IM citation tag stripping, neo4j Go 1.24 Windows compatibility, and OSS signature issues
 
 **v0.3.6 Highlights:**
 
