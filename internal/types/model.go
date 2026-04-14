@@ -104,18 +104,25 @@ type Model struct {
 }
 
 // Value implements the driver.Valuer interface, used to convert ModelParameters to database value.
-// Encrypts APIKey before persisting to database (value receiver = no memory pollution).
+// Encrypts APIKey and AppSecret before persisting to database (value receiver = no memory pollution).
 func (c ModelParameters) Value() (driver.Value, error) {
-	if key := utils.GetAESKey(); key != nil && c.APIKey != "" {
-		if encrypted, err := utils.EncryptAESGCM(c.APIKey, key); err == nil {
-			c.APIKey = encrypted
+	if key := utils.GetAESKey(); key != nil {
+		if c.APIKey != "" {
+			if encrypted, err := utils.EncryptAESGCM(c.APIKey, key); err == nil {
+				c.APIKey = encrypted
+			}
+		}
+		if c.AppSecret != "" {
+			if encrypted, err := utils.EncryptAESGCM(c.AppSecret, key); err == nil {
+				c.AppSecret = encrypted
+			}
 		}
 	}
 	return json.Marshal(c)
 }
 
 // Scan implements the sql.Scanner interface, used to convert database value to ModelParameters.
-// Decrypts APIKey after loading from database; legacy plaintext is returned as-is.
+// Decrypts APIKey and AppSecret after loading from database; legacy plaintext is returned as-is.
 func (c *ModelParameters) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -127,9 +134,16 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	if err := json.Unmarshal(b, c); err != nil {
 		return err
 	}
-	if key := utils.GetAESKey(); key != nil && c.APIKey != "" {
-		if decrypted, err := utils.DecryptAESGCM(c.APIKey, key); err == nil {
-			c.APIKey = decrypted
+	if key := utils.GetAESKey(); key != nil {
+		if c.APIKey != "" {
+			if decrypted, err := utils.DecryptAESGCM(c.APIKey, key); err == nil {
+				c.APIKey = decrypted
+			}
+		}
+		if c.AppSecret != "" {
+			if decrypted, err := utils.DecryptAESGCM(c.AppSecret, key); err == nil {
+				c.AppSecret = decrypted
+			}
 		}
 	}
 	return nil
