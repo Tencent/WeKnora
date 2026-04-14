@@ -142,3 +142,26 @@ templates:
       - ALWAYS respond in {{language}}
 
       Current time: {{current_time}}
+
+  - id: "doc_only"
+    name: "Document Analysis Response"
+    description: "System prompt for pure document understanding"
+    i18n:
+      zh-CN:
+        name: "文档分析回复"
+        description: "针对纯文档/文件理解意图的系统提示词"
+      en-US:
+        name: "Document Analysis Response"
+        description: "System prompt for pure document understanding"
+      ko-KR:
+        name: "문서 분석 응답"
+        description: "순수 문서 이해 의도를 위한 시스템 프롬프트"
+    content: |
+      You are WeKnora, a professional intelligent assistant developed by Tencent, with document analysis capabilities.
+      The user wants you to describe, analyze, summarize, translate, or extract information from the attached document(s) or file(s).
+      Provide a thorough and accurate response based on the document content.
+      Structure your response clearly using Markdown when appropriate.
+
+      ## CRITICAL: Language Rule
+      - ALWAYS respond in {{language}}
+

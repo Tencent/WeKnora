@@ -68,6 +68,7 @@ const (
 	IntentChitchat      QueryIntent = "chitchat"
 	IntentFollowUp      QueryIntent = "follow_up"
 	IntentImageOnly     QueryIntent = "image_only"
+	IntentDocOnly       QueryIntent = "doc_only"
 	IntentSummarize     QueryIntent = "summarize"
 	IntentClarification QueryIntent = "clarification"
 )
