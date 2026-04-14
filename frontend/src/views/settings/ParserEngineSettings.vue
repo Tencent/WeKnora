@@ -97,17 +97,17 @@
           <template v-if="engine.Name === 'weknoracloud'">
             <div v-if="wkcState === 'configured'" class="wkc-status wkc-status--ok">
               <t-icon name="check-circle" style="font-size: 15px; color: var(--td-success-color); flex-shrink: 0;" />
-              <span>WeKnoraCloud 凭证已配置</span>
+              <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
             </div>
             <div v-else-if="wkcState === 'loading'" class="wkc-status">
               <t-loading size="small" />
-              <span>检查凭证状态...</span>
+              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
             </div>
             <div v-else class="wkc-status wkc-status--warn">
               <t-icon name="error-circle" style="font-size: 15px; color: #f97316; flex-shrink: 0;" />
               <div style="flex: 1;">
-                <span v-if="wkcState === 'expired'">凭证已失效，请重新配置。</span>
-                <span v-else>尚未配置凭证。</span>
+                <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
+                <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
                 <div style="margin-top: 6px;">
                   <t-button
                     variant="text"
@@ -115,7 +115,7 @@
                     theme="primary"
                     @click="goToWkcSettings"
                     style="padding: 0; height: auto;"
-                  >前往设置中配置</t-button>
+                  >{{ $t('settings.weknoraCloud.goToSettings') }}</t-button>
                 </div>
               </div>
             </div>
@@ -310,16 +310,12 @@ function engineDocLabel(_name: string): string {
 }
 
 function getEngineDisplayName(engineName: string): string {
-  // WeKnoraCloud 特殊处理
-  if (engineName === 'weknoracloud') return 'WeKnora Cloud'
   const key = `kbSettings.parser.engines.${engineName}.name`
   const translated = t(key)
   return translated !== key ? translated : engineName
 }
 
 function getEngineDisplayDesc(engineName: string, fallback: string): string {
-  // WeKnoraCloud 特殊处理
-  if (engineName === 'weknoracloud') return '使用 WeKnora Cloud 进行文档解析，需先在「设置 → WeKnora Cloud」中配置凭证'
   const key = `kbSettings.parser.engines.${engineName}.desc`
   const translated = t(key)
   return translated !== key ? translated : fallback

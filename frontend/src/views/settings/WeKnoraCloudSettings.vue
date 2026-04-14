@@ -1,10 +1,8 @@
 <template>
   <div class="weknoracloud-settings">
     <div class="section-header">
-      <h2>WeKnora Cloud</h2>
-      <p class="section-description">
-        配置 WeKnora Cloud 的 APPID 和 APPSECRET 凭证。配置完成后，可在模型管理中添加模型时选择 WeKnoraCloud 作为厂商。
-      </p>
+      <h2>{{ $t('settings.weknoraCloud.title') }}</h2>
+      <p class="section-description">{{ $t('settings.weknoraCloud.description') }}</p>
       <a
         class="doc-link"
         href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
@@ -12,30 +10,29 @@
         rel="noopener noreferrer"
       >
         <t-icon name="link" style="font-size: 14px;" />
-        查看文档
+        {{ $t('settings.weknoraCloud.viewDocs') }}
       </a>
     </div>
 
-    <!-- 状态区域 -->
     <!-- 未配置 -->
     <div v-if="credentialState === 'unconfigured'" class="credential-status unconfigured">
       <t-icon name="info-circle" style="font-size: 16px; flex-shrink: 0;" />
-      <span>尚未配置凭证，请填写 APPID 和 APPSECRET</span>
+      <span>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
     </div>
 
     <!-- 凭证失效 -->
     <div v-else-if="credentialState === 'expired'" class="credential-warning">
       <t-icon name="error-circle" style="font-size: 16px; color: #f97316; flex-shrink: 0; margin-top: 1px;" />
       <div class="warning-text">
-        <strong>WeKnora Cloud凭证已失效</strong><br />
-        {{ reinitReason || '服务重启后加密密钥已变更，已保存的凭证无法解密。请重新填写凭证。' }}
+        <strong>{{ $t('settings.weknoraCloud.expired') }}</strong><br />
+        {{ reinitReason || $t('settings.weknoraCloud.expiredDefault') }}
       </div>
     </div>
 
     <!-- 已配置正常 -->
     <div v-else-if="credentialState === 'configured'" class="credential-status success">
       <t-icon name="check-circle" style="font-size: 16px; color: var(--td-success-color); flex-shrink: 0;" />
-      <span class="status-text">凭证已配置，状态正常</span>
+      <span class="status-text">{{ $t('settings.weknoraCloud.configured') }}</span>
       <t-button
         v-if="!formExpanded"
         variant="text"
@@ -43,21 +40,21 @@
         theme="primary"
         @click="formExpanded = true"
       >
-        重新配置
+        {{ $t('settings.weknoraCloud.reconfigure') }}
       </t-button>
     </div>
 
-    <!-- 配置表单（折叠控制） -->
+    <!-- 配置表单 -->
     <div v-if="formExpanded" class="settings-group">
       <div class="setting-row">
         <div class="setting-info">
-          <label class="setting-label">APPID</label>
-          <p class="setting-desc">WeKnora Cloud的应用 ID</p>
+          <label class="setting-label">{{ $t('settings.weknoraCloud.appIdLabel') }}</label>
+          <p class="setting-desc">{{ $t('settings.weknoraCloud.appIdDesc') }}</p>
         </div>
         <div class="setting-control">
           <t-input
             v-model="form.appId"
-            placeholder="请输入 APPID"
+            :placeholder="$t('settings.weknoraCloud.appIdPlaceholder')"
             autocomplete="off"
             style="width: 280px;"
           />
@@ -66,14 +63,14 @@
 
       <div class="setting-row">
         <div class="setting-info">
-          <label class="setting-label">APPSECRET</label>
-          <p class="setting-desc">WeKnora Cloud的应用密钥</p>
+          <label class="setting-label">{{ $t('settings.weknoraCloud.appSecretLabel') }}</label>
+          <p class="setting-desc">{{ $t('settings.weknoraCloud.appSecretDesc') }}</p>
         </div>
         <div class="setting-control">
           <t-input
             v-model="form.appSecret"
             type="password"
-            placeholder="请输入 APPSECRET"
+            :placeholder="$t('settings.weknoraCloud.appSecretPlaceholder')"
             autocomplete="new-password"
             style="width: 280px;"
           />
@@ -82,7 +79,7 @@
 
       <div class="setting-row action-row">
         <div class="setting-info">
-          <p class="setting-desc">保存后将验证服务可达性并加密存储凭证</p>
+          <p class="setting-desc">{{ $t('settings.weknoraCloud.saveHint') }}</p>
         </div>
         <div class="setting-control">
           <t-button
@@ -91,7 +88,7 @@
             :disabled="!form.appId || !form.appSecret"
             @click="handleSave"
           >
-            保存凭证
+            {{ $t('settings.weknoraCloud.saveBtn') }}
           </t-button>
         </div>
       </div>
@@ -99,13 +96,8 @@
 
     <!-- 使用说明 -->
     <div class="usage-hint">
-      <p class="hint-title">使用说明</p>
-      <p class="hint-text">
-        1. 在此页面填写并保存 APPID 和 APPSECRET<br />
-        2. 前往「模型管理」添加模型，选择 Remote API 来源<br />
-        3. 在厂商下拉中选择「WeKnoraCloud」<br />
-        4. 填写模型名称后保存即可（Base URL 和认证信息会自动配置）
-      </p>
+      <p class="hint-title">{{ $t('settings.weknoraCloud.usageTitle') }}</p>
+      <p class="hint-text" v-html="$t('settings.weknoraCloud.usageSteps').replace(/\n/g, '<br />')" />
     </div>
   </div>
 </template>
@@ -113,7 +105,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useI18n } from 'vue-i18n'
 import { saveWeKnoraCloudCredentials, getWeKnoraCloudStatus } from '@/api/model'
+
+const { t } = useI18n()
 
 const form = ref({ appId: '', appSecret: '' })
 const saving = ref(false)
@@ -122,7 +117,6 @@ const reinitReason = ref('')
 const hasCredentials = ref(false)
 const formExpanded = ref(true)
 
-// 三态：unconfigured / configured / expired
 const credentialState = computed(() => {
   if (needsReinit.value) return 'expired'
   if (hasCredentials.value) return 'configured'
@@ -131,7 +125,7 @@ const credentialState = computed(() => {
 
 const handleSave = async () => {
   if (!form.value.appId || !form.value.appSecret) {
-    MessagePlugin.warning('请填写 APPID 和 APPSECRET')
+    MessagePlugin.warning(t('settings.weknoraCloud.fillRequired'))
     return
   }
   saving.value = true
@@ -140,7 +134,7 @@ const handleSave = async () => {
       app_id: form.value.appId,
       app_secret: form.value.appSecret,
     })
-    MessagePlugin.success('凭证保存成功')
+    MessagePlugin.success(t('settings.weknoraCloud.saveSuccess'))
     form.value.appId = ''
     form.value.appSecret = ''
     needsReinit.value = false
@@ -148,7 +142,7 @@ const handleSave = async () => {
     hasCredentials.value = true
     formExpanded.value = false
   } catch (err: any) {
-    MessagePlugin.error(err?.message || '凭证保存失败')
+    MessagePlugin.error(err?.message || t('settings.weknoraCloud.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -160,12 +154,11 @@ const checkStatus = async () => {
     needsReinit.value = status.needs_reinit
     reinitReason.value = status.reason || ''
     hasCredentials.value = status.has_models && !status.needs_reinit
-    // 已配置且未失效时默认收起表单
     if (hasCredentials.value) {
       formExpanded.value = false
     }
   } catch {
-    // 静默失败
+    // silent
   }
 }
 

@@ -93,14 +93,12 @@ import { storeToRefs } from 'pinia'
 const { t } = useI18n()
 
 function getEngineDisplayName(engineName: string): string {
-  if (engineName === 'weknoracloud') return 'WeKnora Cloud'
   const key = `kbSettings.parser.engines.${engineName}.name`
   const translated = t(key)
   return translated !== key ? translated : engineName
 }
 
 function getEngineDisplayDesc(engineName: string, fallback: string): string {
-  if (engineName === 'weknoracloud') return '使用 WeKnora Cloud 进行文档解析'
   const key = `kbSettings.parser.engines.${engineName}.desc`
   const translated = t(key)
   return translated !== key ? translated : fallback

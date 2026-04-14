@@ -150,14 +150,13 @@
             <div v-if="wkcCredentialState === 'configured'" class="weknoracloud-hint weknoracloud-hint--ok">
               <t-icon name="check-circle-filled" style="font-size: 16px; color: var(--td-success-color); flex-shrink: 0;" />
               <div>
-                WeKnoraCloud 凭证已配置。
-                支持的模型可参考
+                {{ $t('settings.weknoraCloud.modelHintConfigured') }}
                 <a
                   href="https://developers.weixin.qq.com/doc/aispeech/knowledge/atomic_capability/atomic_interface.html"
                   target="_blank"
                   rel="noopener noreferrer"
                   class="weknoracloud-hint-link"
-                >接口文档</a>。
+                >{{ $t('settings.weknoraCloud.modelHintDocsLink') }}</a>
               </div>
             </div>
 
@@ -166,10 +165,10 @@
               <t-icon name="error-circle-filled" style="font-size: 16px; color: #f97316; flex-shrink: 0;" />
               <div style="flex: 1;">
                 <template v-if="wkcCredentialState === 'expired'">
-                  WeKnoraCloud 凭证已失效，请重新配置。
+                  {{ $t('settings.weknoraCloud.credentialExpired') }}
                 </template>
                 <template v-else>
-                  尚未配置 WeKnoraCloud 凭证，请先填写 APPID 和 APPSECRET。
+                  {{ $t('settings.weknoraCloud.credentialUnconfigured') }}
                 </template>
                 <div style="margin-top: 8px;">
                   <t-button
@@ -179,7 +178,7 @@
                     @click="goToWeKnoraCloudSettings"
                     style="padding: 0; height: auto;"
                   >
-                    前往设置中配置
+                    {{ $t('settings.weknoraCloud.goToSettings') }}
                   </t-button>
                 </div>
               </div>
@@ -188,7 +187,7 @@
             <!-- 加载中 -->
             <div v-else class="weknoracloud-hint">
               <t-icon name="loading" class="spinning" style="font-size: 16px; color: var(--td-text-color-placeholder); flex-shrink: 0;" />
-              <span>正在检查凭证状态...</span>
+              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
             </div>
           </template>
 
