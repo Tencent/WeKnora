@@ -85,7 +85,7 @@ export default {
     noValidFilesSelected: 'Все выбранные файлы не поддерживаются',
     hiddenFilesFiltered: 'Отфильтровано {count} скрытых файлов',
     imagesFilteredNoVLM: 'Отфильтровано {count} изображений (VLM не включен)',
-    videosFilteredNoVLM: 'Отфильтровано {count} видеофайлов (VLM не включен)',
+    videosFilteredNoVLM: 'Пропущено {count} видеофайлов (загрузка видео не поддерживается)',
     audiosFilteredNoASR: 'Отфильтровано {count} аудиофайлов (ASR не включен)',
     invalidFilesFiltered: 'Отфильтровано {count} неподдерживаемых файлов',
     unsupportedFileType: 'Неподдерживаемый тип файла',
@@ -95,7 +95,7 @@ export default {
     andMoreFiles: '...и ещё {count} файлов',
     duplicateFilesSkipped: 'Пропущено {count} повторяющихся файлов',
     uploadFile: 'Загрузить файл',
-    uploadFileDesc: 'Поддерживает PDF, Word, TXT, изображения, видео, аудио и т.д.',
+    uploadFileDesc: 'Поддерживает PDF, Word, TXT, изображения, аудио и т.д.',
     importURL: 'Импорт из URL',
     importURLDesc: 'Импорт по ссылке URL',
     importURLTitle: 'Импорт из URL',
@@ -1717,7 +1717,7 @@ export default {
       faq: 'FAQ настройки',
       graph: 'Граф знаний',
       multimodal: 'Обработка изображений',
-      asr: 'Аудио и видео',
+      asr: 'Аудио',
       storage: 'Storage Engine',
       datasource: 'Источники данных',
       share: 'Sharing'
@@ -1916,13 +1916,13 @@ export default {
       description: 'Настройте понимание изображений для парсинга и поиска нетекстового контента',
     },
     asr: {
-      title: 'Распознавание речи для аудио и видео',
+      title: 'Распознавание речи для аудио',
       description:
-        'Настройте ASR (речь → текст). При включении можно загружать аудио или видео: аудио транскрибируется целиком, из видео извлекается дорожка и транскрибируется (mp3, wav, m4a, flac, ogg, mp4, mov и др.).',
-      label: 'Включить распознавание для аудио и видео',
-      desc: 'При включении в базу можно загружать аудио или видео; речь транскрибируется в текст для парсинга и поиска',
+        'Настройте ASR (речь → текст). При включении можно загружать аудиофайлы и транскрибировать их в текст (mp3, wav, m4a, flac, ogg и др.). Загрузка видео не поддерживается.',
+      label: 'Включить распознавание речи для аудио',
+      desc: 'При включении в базу можно загружать аудио; речь транскрибируется в текст для парсинга и поиска',
       modelLabel: 'Модель ASR',
-      modelDescription: 'Модель распознавания речи для транскрибации аудио и звуковых дорожек видео (например, OpenAI Whisper)',
+      modelDescription: 'Модель распознавания речи для транскрибации аудио (например, OpenAI Whisper)',
       modelPlaceholder: 'Выберите модель ASR',
     },
     advanced: {
@@ -1936,7 +1936,7 @@ export default {
       },
       multimodal: {
         label: 'Мультимодальная функция',
-        description: 'Включите понимание мультимедийного контента, такого как изображения и видео',
+        description: 'Включите понимание мультимедийного контента, такого как изображения',
         vllmLabel: 'VLLM модель для зрения',
         vllmDescription: 'Визуально-языковая модель, необходимая для мультимодального понимания',
         vllmPlaceholder: 'Выберите VLLM модель (обязательно)',
@@ -2850,7 +2850,7 @@ export default {
       fileTypeText: 'Текстовые файлы',
       fileTypeJson: 'Файлы JSON',
       fileTypeImage: 'Изображения',
-      fileTypeAudiovisual: 'Аудио и видео',
+      fileTypeAudiovisual: 'Аудио',
       engines: {
         builtin: {
           name: 'Встроенный',

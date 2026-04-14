@@ -102,7 +102,7 @@ export default {
     noValidFilesSelected: "선택한 파일 모두 지원되지 않음",
     hiddenFilesFiltered: "{count}개 숨김 파일 필터링됨",
     imagesFilteredNoVLM: "{count}개 이미지 파일 필터링됨(VLM 미활성화)",
-    videosFilteredNoVLM: "{count}개 동영상 파일 필터링됨(VLM 미활성화)",
+    videosFilteredNoVLM: "{count}개의 동영상 파일을 건너됨 (동영상 업로드 미지원)",
     audiosFilteredNoASR: "{count}개 오디오 파일 필터링됨(ASR 미활성화)",
     invalidFilesFiltered: "{count}개 지원되지 않는 파일 필터링됨",
     unsupportedFileType: "지원되지 않는 파일 형식",
@@ -112,7 +112,7 @@ export default {
     andMoreFiles: "...외 {count}개 파일",
     duplicateFilesSkipped: "{count}개 중복 파일 무시됨",
     uploadFile: "파일 업로드",
-    uploadFileDesc: "PDF, Word, TXT, 이미지, 동영상, 오디오 등 지원",
+    uploadFileDesc: "PDF, Word, TXT, 이미지, 오디오 등 지원",
     importURL: "웹페이지 가져오기",
     addDocument: "문서 추가",
     importURLDesc: "URL 링크로 가져오기",
@@ -2037,7 +2037,7 @@ export default {
       faq: "FAQ 설정",
       graph: "지식 그래프",
       multimodal: "이미지 처리",
-      asr: "오디오·영상",
+      asr: "오디오",
       share: "공유관리",
       storage: "스토리지 엔진",
       datasource: "데이터 소스",
@@ -2256,13 +2256,13 @@ export default {
       description: "이미지 콘텐츠 이해 기능을 설정하여 이미지 등 비텍스트 콘텐츠의 파싱 및 검색을 지원합니다",
     },
     asr: {
-      title: "오디오·영상 음성 인식",
+      title: "오디오 음성 인식",
       description:
-        "ASR(음성-텍스트)을 설정합니다. 활성화 시 오디오 또는 영상을 업로드할 수 있으며, 오디오는 그대로 전사하고 영상은 음성 트랙을 추출해 텍스트로 전사합니다(mp3, wav, m4a, flac, ogg, mp4, mov 등).",
-      label: "오디오·영상 음성 인식 사용",
-      desc: "활성화하면 오디오 또는 영상을 지식베이스에 업로드할 수 있으며, 음성이 텍스트로 전사되어 파싱·검색에 사용됩니다",
+        "ASR(음성-텍스트)을 설정합니다. 활성화 시 오디오 파일을 업로드해 텍스트로 전사할 수 있습니다(mp3, wav, m4a, flac, ogg 등). 동영상 업로드는 지원하지 않습니다.",
+      label: "오디오 음성 인식 사용",
+      desc: "활성화하면 오디오를 지식베이스에 업로드할 수 있으며, 음성이 텍스트로 전사되어 파싱·검색에 사용됩니다",
       modelLabel: "ASR 모델",
-      modelDescription: "오디오·영상의 음성을 텍스트로 전사하는 모델 (예: OpenAI Whisper)",
+      modelDescription: "오디오의 음성을 텍스트로 전사하는 모델 (예: OpenAI Whisper)",
       modelPlaceholder: "ASR 모델을 선택해주세요",
     },
     advanced: {
@@ -2277,7 +2277,7 @@ export default {
       },
       multimodal: {
         label: "멀티모달 기능",
-        description: "이미지, 비디오 등 멀티모달 콘텐츠 이해 기능 활성화",
+        description: "이미지 등 멀티모달 콘텐츠 이해 기능 활성화",
         vllmLabel: "VLLM 비전 모델",
         vllmDescription: "멀티모달 이해를 위한 비전 언어 모델 (필수)",
         vllmPlaceholder: "VLLM 모델을 선택해주세요 (필수)",
@@ -3235,7 +3235,7 @@ export default {
       fileTypeText: '일반 텍스트',
       fileTypeJson: 'JSON 파일',
       fileTypeImage: '이미지',
-      fileTypeAudiovisual: '오디오·영상',
+      fileTypeAudiovisual: '오디오',
       engines: {
         builtin: {
           name: '내장',

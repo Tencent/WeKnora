@@ -203,6 +203,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 
 	logger.Infof(ctx, "Knowledge base ID: %s, file: %s", kbID, fileName)
 
+	if IsVideoType(getFileType(fileName)) {
+		logger.Error(ctx, "Video file upload is not supported")
+		return nil, werrors.NewBadRequestError("暂不支持上传视频文件")
+	}
+
 	// Get knowledge base configuration
 	logger.Info(ctx, "Getting knowledge base configuration")
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
@@ -1482,8 +1487,6 @@ type ProcessChunksOptions struct {
 	QuestionCount            int
 	EnableMultimodel         bool
 	StoredImages             []docparser.StoredImage
-	IsVideo                  bool   // true when knowledge is a standalone video file
-	VideoFilePath            string // storage path to video file (provider:// URL)
 	// ParentChunks holds parent chunk data when parent-child chunking is enabled.
 	// When set, the chunks passed to processChunks are child chunks, and each
 	// child's ParentIndex references an entry in this slice.
@@ -1889,14 +1892,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Skip summary/question generation for image-type and video-type knowledge — the text chunk
-	// is just a markdown reference, so LLM summary would be useless.
-	// The multimodal task will provide a caption/summary as the description instead.
+	// is just a markdown reference (or placeholder), so LLM summary would be useless.
+	// For images, the multimodal task provides a caption/summary as the description instead.
 	isImage := IsImageType(knowledge.FileType)
 	isVideo := IsVideoType(knowledge.FileType)
-	pendingMultimodal := (isImage && options.EnableMultimodel && len(options.StoredImages) > 0) ||
-		(isVideo && options.EnableMultimodel && options.IsVideo && options.VideoFilePath != "")
+	pendingMultimodal := isImage && options.EnableMultimodel && len(options.StoredImages) > 0
 
-	// For image/video files with pending multimodal processing, keep "processing" status
+	// For image files with pending multimodal processing, keep "processing" status
 	// so the frontend waits until the description is ready before showing "completed".
 	if pendingMultimodal {
 		knowledge.ParseStatus = types.ParseStatusProcessing
@@ -1940,11 +1942,6 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
 		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks)
-	}
-
-	// Enqueue multimodal tasks for videos (async, non-blocking)
-	if options.EnableMultimodel && options.IsVideo && options.VideoFilePath != "" {
-		s.enqueueVideoMultimodalTasks(ctx, knowledge, kb, options.VideoFilePath, chunks)
 	}
 
 	// Update tenant's storage usage
@@ -3033,8 +3030,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 func isValidFileType(filename string) bool {
 	switch strings.ToLower(getFileType(filename)) {
 	case "pdf", "txt", "docx", "doc", "md", "markdown", "png", "jpg", "jpeg", "gif", "csv", "xlsx", "xls", "pptx", "ppt", "json",
-		"mp3", "wav", "m4a", "flac", "ogg",
-		"mp4", "mov", "avi", "mkv", "webm", "wmv", "flv":
+		"mp3", "wav", "m4a", "flac", "ogg":
 		return true
 	default:
 		return false
@@ -7706,6 +7702,17 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		return nil
 	}
 
+	// 视频文件不再支持入库解析
+	if payload.FilePath != "" && IsVideoType(payload.FileType) {
+		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
+			Errorf("processDocument video not supported")
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "暂不支持视频文件"
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		return nil
+	}
+
 	// New pipeline: convert -> store images -> chunk -> vectorize -> multimodal tasks
 	var convertResult *types.ReadResult
 	var chunks []types.ParsedChunk
@@ -7920,8 +7927,6 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		QuestionCount:            payload.QuestionCount,
 		EnableMultimodel:         payload.EnableMultimodel,
 		StoredImages:             storedImages,
-		IsVideo:                  convertResult != nil && convertResult.IsVideo,
-		VideoFilePath:            payload.FilePath,
 	}
 
 	if kb.ChunkingConfig.EnableParentChild {
@@ -8147,50 +8152,6 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		} else {
 			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
 		}
-	}
-}
-
-// enqueueVideoMultimodalTasks enqueues asynq tasks for multimodal video processing.
-func (s *knowledgeService) enqueueVideoMultimodalTasks(
-	ctx context.Context,
-	knowledge *types.Knowledge,
-	kb *types.KnowledgeBase,
-	videoFilePath string,
-	chunks []types.ParsedChunk,
-) {
-	if s.task == nil || videoFilePath == "" {
-		return
-	}
-
-	// Get the first chunk's ID as the parent chunk
-	chunkID := ""
-	if len(chunks) > 0 {
-		chunkID = chunks[0].ChunkID
-	}
-
-	lang, _ := types.LanguageFromContext(ctx)
-	payload := types.VideoMultimodalPayload{
-		TenantID:        knowledge.TenantID,
-		KnowledgeID:     knowledge.ID,
-		KnowledgeBaseID: kb.ID,
-		ChunkID:         chunkID,
-		VideoURL:        videoFilePath,
-		EnableVLM:       true,
-		EnableASR:       true,
-		Language:        lang,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to marshal video multimodal payload: %v", err)
-		return
-	}
-
-	task := asynq.NewTask(types.TypeVideoMultimodal, payloadBytes)
-	if _, err := s.task.Enqueue(task); err != nil {
-		logger.Warnf(ctx, "Failed to enqueue video multimodal task for %s: %v", videoFilePath, err)
-	} else {
-		logger.Infof(ctx, "Enqueued video:multimodal task for %s", videoFilePath)
 	}
 }
 

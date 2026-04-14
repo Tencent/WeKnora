@@ -103,7 +103,7 @@ export default {
     noValidFilesSelected: 'All selected files are unsupported',
     hiddenFilesFiltered: 'Filtered {count} hidden files',
     imagesFilteredNoVLM: 'Filtered {count} image files (VLM not enabled)',
-    videosFilteredNoVLM: 'Filtered {count} video files (VLM not enabled)',
+    videosFilteredNoVLM: 'Skipped {count} video file(s) (video upload is not supported)',
     audiosFilteredNoASR: 'Filtered {count} audio files (ASR not enabled)',
     invalidFilesFiltered: 'Filtered {count} unsupported files',
     unsupportedFileType: 'Unsupported file type',
@@ -113,7 +113,7 @@ export default {
     andMoreFiles: '...and {count} more files',
     duplicateFilesSkipped: '{count} duplicate files skipped',
     uploadFile: 'Upload File',
-    uploadFileDesc: 'Supports PDF, Word, TXT, images, videos, audio, etc.',
+    uploadFileDesc: 'Supports PDF, Word, TXT, images, audio, etc.',
     importURL: 'Import from URL',
     addDocument: 'Add Document',
     importURLDesc: 'Import via URL link',
@@ -1516,7 +1516,7 @@ export default {
       faq: 'FAQ Settings',
       graph: 'Knowledge Graph',
       multimodal: 'Image Processing',
-      asr: 'Audio & Video',
+      asr: 'Audio',
       datasource: 'Data Sources',
       share: 'Sharing'
     },
@@ -1724,13 +1724,13 @@ export default {
       description: 'Configure image content understanding for parsing and retrieving non-text content like images',
     },
     asr: {
-      title: 'Audio & Video Speech Recognition',
+      title: 'Audio Speech Recognition',
       description:
-        'Configure ASR (speech-to-text). When enabled, you can upload audio files or videos; audio is transcribed directly, and video audio tracks are extracted and transcribed (e.g. mp3, wav, m4a, flac, ogg, mp4, mov, …).',
-      label: 'Enable audio & video speech recognition',
-      desc: 'When enabled, audio or video can be uploaded to the knowledge base; speech is transcribed to text for parsing and retrieval.',
+        'Configure ASR (speech-to-text). When enabled, you can upload audio files and transcribe them to text (e.g. mp3, wav, m4a, flac, ogg). Video upload is not supported.',
+      label: 'Enable audio speech recognition',
+      desc: 'When enabled, audio can be uploaded to the knowledge base; speech is transcribed to text for parsing and retrieval.',
       modelLabel: 'ASR Model',
-      modelDescription: 'Speech-to-text model for audio and video soundtracks (e.g. OpenAI Whisper)',
+      modelDescription: 'Speech-to-text model for audio (e.g. OpenAI Whisper)',
       modelPlaceholder: 'Select an ASR model',
     },
     advanced: {
@@ -1744,7 +1744,7 @@ export default {
       },
       multimodal: {
         label: 'Multimodal Feature',
-        description: 'Enable understanding of multimodal content such as images and videos',
+        description: 'Enable understanding of multimodal content such as images',
         vllmLabel: 'VLLM Vision Model',
         vllmDescription: 'Vision-language model required for multimodal understanding',
         vllmPlaceholder: 'Select a VLLM model (required)',
@@ -3180,7 +3180,7 @@ export default {
       fileTypeText: 'Plain Text',
       fileTypeJson: 'JSON Files',
       fileTypeImage: 'Images',
-      fileTypeAudiovisual: 'Audio & Video',
+      fileTypeAudiovisual: 'Audio',
       engines: {
         builtin: {
           name: 'Built-in',

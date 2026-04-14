@@ -13,7 +13,6 @@ const (
 	TypeKnowledgeMove       = "knowledge:move"        // 知识移动任务
 	TypeDataTableSummary    = "datatable:summary"     // 表格摘要任务
 	TypeImageMultimodal     = "image:multimodal"      // 图片多模态处理任务（OCR + VLM Caption）
-	TypeVideoMultimodal     = "video:multimodal"      // 视频多模态处理任务（抽帧 + VLM + ASR）
 	TypeManualProcess       = "manual:process"        // 手工知识更新任务（cleanup + 重新索引）
 	TypeDataSourceSync      = "datasource:sync"       // 数据源同步任务
 )
@@ -154,20 +153,6 @@ type ImageMultimodalPayload struct {
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"` // Request locale for {{language}} in prompt templates
-}
-
-// VideoMultimodalPayload represents the video multimodal processing task payload.
-type VideoMultimodalPayload struct {
-	TenantID        uint64 `json:"tenant_id"`
-	KnowledgeID     string `json:"knowledge_id"`
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	ChunkID         string `json:"chunk_id"`             // parent text chunk
-	VideoURL        string `json:"video_url"`            // provider:// URL (e.g. local://..., minio://...)
-	VideoLocalPath  string `json:"video_local_path"`     // deprecated: kept for backward compat with in-flight tasks
-	EnableVLM       bool   `json:"enable_vlm"`           // enable VLM frame analysis
-	EnableASR       bool   `json:"enable_asr"`           // enable ASR audio transcription
-	Language        string `json:"language,omitempty"`   // Request locale for {{language}} in prompt templates
-	MaxFrames       int    `json:"max_frames,omitempty"` // optional: max frames to extract, 0 = no limit
 }
 
 // KBCloneTaskStatus represents the status of a knowledge base clone task

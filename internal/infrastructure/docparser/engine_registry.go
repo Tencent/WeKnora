@@ -43,7 +43,7 @@ func (e *builtinEngine) Description() string {
 	return "DocReader built-in parser engine"
 }
 func (e *builtinEngine) FileTypes(_ bool) []string {
-	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"}
+	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
 }
 func (e *builtinEngine) CheckAvailable(docreaderConnected bool, _ map[string]string) (bool, string) {
 	if docreaderConnected {
@@ -71,7 +71,7 @@ func (e *simpleEngine) Description() string {
 	return "Simple format & image parsing (no external service required)"
 }
 func (e *simpleEngine) FileTypes(_ bool) []string {
-	return []string{"md", "markdown", "txt", "csv", "json", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "wmv", "flv"}
+	return []string{"md", "markdown", "txt", "csv", "json", "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp", "mp3", "wav", "m4a", "flac", "ogg"}
 }
 func (e *simpleEngine) CheckAvailable(_ bool, _ map[string]string) (bool, string) {
 	return true, ""
