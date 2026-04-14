@@ -88,26 +88,30 @@ func (attachments MessageAttachments) BuildPrompt() string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("\n\n## 用户上传的附件\n\n")
+	sb.WriteString("\n\n<attachments>\n")
 
 	for i, att := range attachments {
-		sb.WriteString(fmt.Sprintf("### 附件 %d: %s\n\n", i+1, att.FileName))
-		sb.WriteString(fmt.Sprintf("- **文件类型**: %s\n", att.FileType))
-		sb.WriteString(fmt.Sprintf("- **文件大小**: %.2f KB\n\n", float64(att.FileSize)/1024))
+		sb.WriteString(fmt.Sprintf("<attachment index=\"%d\" name=\"%s\">\n", i+1, att.FileName))
+		sb.WriteString("<metadata>\n")
+		sb.WriteString(fmt.Sprintf("<type>%s</type>\n", att.FileType))
+		sb.WriteString(fmt.Sprintf("<size_kb>%.2f</size_kb>\n", float64(att.FileSize)/1024))
+		sb.WriteString("</metadata>\n")
 
 		if att.Content != "" {
-			sb.WriteString("**文件内容**:\n\n")
+			sb.WriteString("<content>\n")
 			sb.WriteString(att.Content)
-			sb.WriteString("\n\n")
+			sb.WriteString("\n</content>\n")
 
 			if att.IsTruncated {
-				sb.WriteString(fmt.Sprintf("*注意: 此文件共有 %d 行，已截取前 500 行显示。*\n\n",
+				sb.WriteString(fmt.Sprintf("<note>This file has a total of %d lines, truncated to show only the first 500 lines.</note>\n",
 					att.LineCount))
 			}
 		} else {
-			sb.WriteString("*此文件内容提取失败或不支持。*\n\n")
+			sb.WriteString("<note>File content extraction failed or is unsupported.</note>\n")
 		}
+		sb.WriteString("</attachment>\n")
 	}
+	sb.WriteString("</attachments>\n\n")
 
 	return sb.String()
 }
