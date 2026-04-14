@@ -98,18 +98,22 @@ func (p *AttachmentProcessor) ProcessAttachment(
 	if p.isTextFile(ext) {
 		if err := p.processTextFile(ctx, data, attachment); err != nil {
 			logger.Warnf(ctx, "text file processing failed: %v", err)
+			attachment.Content = fmt.Sprintf("<error><message>Failed to process text file</message><details>%v</details></error>", err)
 		}
 	} else if docparser.IsAudioFormat(ext) {
 		if err := p.processAudioFile(ctx, data, baseName, attachment, asrModelID); err != nil {
 			logger.Warnf(ctx, "audio transcription failed: %v, keeping placeholder", err)
+			attachment.Content = fmt.Sprintf("<error><message>Failed to transcribe audio file</message><details>%v</details></error>", err)
 		}
 	} else if docparser.IsSimpleFormat(ext) {
 		if err := p.processWithDocParser(ctx, data, baseName, ext, attachment, tenantID); err != nil {
 			logger.Warnf(ctx, "SimpleFormatReader failed: %v", err)
+			attachment.Content = fmt.Sprintf("<error><message>Failed to parse document</message><details>%v</details></error>", err)
 		}
 	} else {
 		if err := p.processWithDocumentReader(ctx, data, baseName, ext, attachment, tenantID); err != nil {
 			logger.Warnf(ctx, "DocumentReader failed: %v, keeping metadata only", err)
+			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
 	}
 
@@ -194,7 +198,7 @@ func (p *AttachmentProcessor) processAudioFile(
 	asrModelID string,
 ) error {
 	if asrModelID == "" || p.modelService == nil {
-		attachment.Content = fmt.Sprintf("[audio file: %s]", fileName)
+		attachment.Content = fmt.Sprintf("<audio_file name=\"%s\" transcription=\"unsupported\" />", fileName)
 		logger.Infof(ctx, "no ASR model configured, keeping audio placeholder")
 		return nil
 	}
