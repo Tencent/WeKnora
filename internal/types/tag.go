@@ -1,6 +1,10 @@
 package types
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // KnowledgeTag represents a tag (category) under a specific knowledge base.
 // Tags are scoped by knowledge base (and tenant) and are used to categorize
@@ -24,6 +28,23 @@ type KnowledgeTag struct {
 	CreatedAt time.Time `json:"created_at"`
 	// Last updated time
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BeforeCreate ensures SeqID is populated for databases that don't support
+// autoIncrement on non-primary-key columns (e.g. SQLite).
+func (t *KnowledgeTag) BeforeCreate(tx *gorm.DB) error {
+	if t.SeqID == 0 {
+		var maxSeqID *int64
+		tx.Unscoped().Model(&KnowledgeTag{}).
+			Select("MAX(seq_id)").
+			Scan(&maxSeqID)
+		if maxSeqID != nil {
+			t.SeqID = *maxSeqID + 1
+		} else {
+			t.SeqID = 1
+		}
+	}
+	return nil
 }
 
 // KnowledgeTagWithStats represents tag information along with usage statistics.

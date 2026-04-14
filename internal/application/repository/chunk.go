@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -27,6 +28,11 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+	}
+	// Pre-assign SeqIDs for SQLite compatibility (autoIncrement on non-PK columns
+	// doesn't work in SQLite). This is a no-op if all chunks already have SeqIDs.
+	if err := types.AssignChunkSeqIDs(r.db.WithContext(ctx), chunks); err != nil {
+		return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
 	}
 	// Use Select("*") to ensure all fields including zero values (IsEnabled=false, Flags=0)
 	// are inserted, bypassing GORM's default value behavior for zero values
@@ -379,7 +385,7 @@ func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chun
 				tag_id = CASE %s END,
 				flags = CASE %s END,
 				status = CASE %s END,
-				updated_at = NOW()
+				updated_at = datetime('now')
 			WHERE id IN (%s)
 		`,
 			strings.Join(contentCases, " "),
@@ -783,14 +789,18 @@ func (r *chunkRepository) UpdateChunkFlagsBatch(
 		inPlaceholders[i] = "?"
 	}
 
+	nowFunc := "NOW()"
+	if r.db.Dialector.Name() == "sqlite" {
+		nowFunc = "datetime('now')"
+	}
 	sql := fmt.Sprintf(`
-	UPDATE chunks 
+	UPDATE chunks
     SET flags = (flags | (%s)) & ~(%s),
-        updated_at = NOW()
-    WHERE tenant_id = ? 
+        updated_at = %s
+    WHERE tenant_id = ?
       AND knowledge_base_id = ?
       AND id IN (%s)
-`, setExpr, clearExpr, strings.Join(inPlaceholders, ","))
+`, setExpr, clearExpr, nowFunc, strings.Join(inPlaceholders, ","))
 
 	args = append(args, tenantID, kbID)
 	for _, id := range allIDs {
@@ -842,7 +852,7 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 
 	// Build update query
 	updates := map[string]interface{}{
-		"updated_at": "NOW()",
+		"updated_at": time.Now(),
 	}
 
 	if isEnabled != nil {

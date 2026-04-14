@@ -78,6 +78,10 @@ type knowledgeService struct {
 	redisClient    *redis.Client
 	kbShareService interfaces.KBShareService
 	imageResolver  *docparser.ImageResolver
+
+	// In-memory fallbacks for Lite mode (no Redis)
+	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
+	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo
 }
 
 const (
@@ -214,6 +218,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
 		return nil, err
+	}
+
+	// FAQ knowledge bases should not accept file uploads — use the FAQ import API instead
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
 	}
 
 	if err := checkStorageEngineConfigured(ctx, kb); err != nil {
@@ -6350,6 +6359,12 @@ type runningFAQImportInfo struct {
 // getRunningFAQImportInfo checks if there's a running FAQ import task for the given KB
 // Returns the task info if found, nil otherwise
 func (s *knowledgeService) getRunningFAQImportInfo(ctx context.Context, kbID string) (*runningFAQImportInfo, error) {
+	if s.redisClient == nil {
+		if v, ok := s.memFAQRunningImport.Load(kbID); ok {
+			return v.(*runningFAQImportInfo), nil
+		}
+		return nil, nil
+	}
 	key := getFAQImportRunningKey(kbID)
 	data, err := s.redisClient.Get(ctx, key).Result()
 	if err != nil {
@@ -6383,6 +6398,10 @@ func (s *knowledgeService) getRunningFAQImportTaskID(ctx context.Context, kbID s
 
 // setRunningFAQImportInfo sets the running task info for a KB
 func (s *knowledgeService) setRunningFAQImportInfo(ctx context.Context, kbID string, info *runningFAQImportInfo) error {
+	if s.redisClient == nil {
+		s.memFAQRunningImport.Store(kbID, info)
+		return nil
+	}
 	key := getFAQImportRunningKey(kbID)
 	data, err := json.Marshal(info)
 	if err != nil {
@@ -6393,6 +6412,10 @@ func (s *knowledgeService) setRunningFAQImportInfo(ctx context.Context, kbID str
 
 // clearRunningFAQImportTaskID clears the running task ID for a KB
 func (s *knowledgeService) clearRunningFAQImportTaskID(ctx context.Context, kbID string) error {
+	if s.redisClient == nil {
+		s.memFAQRunningImport.Delete(kbID)
+		return nil
+	}
 	key := getFAQImportRunningKey(kbID)
 	return s.redisClient.Del(ctx, key).Err()
 }
@@ -8490,6 +8513,11 @@ func getFAQImportRunningKey(kbID string) string {
 
 // saveFAQImportProgress saves the FAQ import progress to Redis
 func (s *knowledgeService) saveFAQImportProgress(ctx context.Context, progress *types.FAQImportProgress) error {
+	if s.redisClient == nil {
+		progress.UpdatedAt = time.Now().Unix()
+		s.memFAQProgress.Store(progress.TaskID, progress)
+		return nil
+	}
 	key := getFAQImportProgressKey(progress.TaskID)
 	progress.UpdatedAt = time.Now().Unix()
 	data, err := json.Marshal(progress)
@@ -8501,6 +8529,12 @@ func (s *knowledgeService) saveFAQImportProgress(ctx context.Context, progress *
 
 // GetFAQImportProgress retrieves the progress of an FAQ import task
 func (s *knowledgeService) GetFAQImportProgress(ctx context.Context, taskID string) (*types.FAQImportProgress, error) {
+	if s.redisClient == nil {
+		if v, ok := s.memFAQProgress.Load(taskID); ok {
+			return v.(*types.FAQImportProgress), nil
+		}
+		return nil, werrors.NewNotFoundError("FAQ import task not found")
+	}
 	key := getFAQImportProgressKey(taskID)
 	data, err := s.redisClient.Get(ctx, key).Bytes()
 	if err != nil {
