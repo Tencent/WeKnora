@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 
+	"slices"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	"slices"
 )
 
 // classifyRetrievalResults separates retrieval results by retriever type (vector vs keyword).
@@ -32,6 +33,12 @@ func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*typ
 	if len(keywordResults) == 0 {
 		// Vector-only: keep original embedding scores (important for FAQ)
 		result := deduplicateByScore(vectorResults)
+		logger.Infof(ctx, "Result count after deduplication: %d", len(result))
+		return result
+	}
+	if len(vectorResults) == 0 {
+		// Keyword-only: keep original scores (important for FAQ)
+		result := deduplicateByScore(keywordResults)
 		logger.Infof(ctx, "Result count after deduplication: %d", len(result))
 		return result
 	}

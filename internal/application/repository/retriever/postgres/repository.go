@@ -193,10 +193,13 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			Values: common.ToInterfaceSlice(params.TagIDs),
 		})
 	}
+	
+	// Use ParadeDB's ||| operator for matching any token
 	conds = append(conds, clause.Expr{
-		SQL:  "id @@@ paradedb.match(field => 'content', value => ?, distance => 1)",
+		SQL:  "content ||| ?",
 		Vars: []interface{}{params.Query},
 	})
+	
 	// Filter by is_enabled = true or NULL (NULL means enabled for historical data)
 	conds = append(conds, clause.Expr{
 		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
