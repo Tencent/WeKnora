@@ -203,7 +203,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 		logger.Infof(ctx, "[Tool][WebSearch] Applying RAG compression")
 		compressed, kbID, newSeen, newIDs, err := t.webSearchService.CompressWithRAG(
-			ctx, t.sessionID, tempKBID, questions, webResults, &searchConfig,
+			ctx, t.sessionID, tempKBID, questions, webResults, tenant.WebSearchConfig,
 			t.knowledgeBaseService, t.knowledgeService, seen, ids,
 		)
 		if err != nil {
