@@ -48,7 +48,6 @@ WeKnora offers two Q&A modes — **Quick Q&A** and **Intelligent Reasoning**. Qu
 
 The framework supports auto-syncing knowledge from Feishu (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty.
 
-**Website:** https://weknora.weixin.qq.com
 
 ## ✨ Latest Updates
 
@@ -56,8 +55,8 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 
 - **[Knowledge Assistant](https://weknora.weixin.qq.com/platform)**: Cloud-hosted knowledge assistant service for quick onboarding without local deployment
 - **WeKnora Cloud**: WeKnora Cloud provider with hosted LLM models and document parsing service, credential management and status checks
-- **Chrome Extension**: Browser extension for web page knowledge capture
-- **ClawHub Skill**: ClawHub Skill marketplace integration for one-click agent skill installation
+- **[Chrome Extension](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)**: Browser extension for web page knowledge capture
+- **[ClawHub Skill](https://clawhub.ai/lyingbug/weknora)**: ClawHub Skill marketplace integration for one-click agent skill installation
 - **WeChat IM Integration**: WeChat channel adapter with QR code login and long-polling message support
 - **Attachment Processing**: File attachment support in chat pipeline with content formatting and metadata injection
 - **Azure OpenAI Provider**: Full Azure OpenAI support for chat, VLM, and embedding models with deployment name preservation and dimensions parameter
@@ -66,6 +65,9 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 - **Baidu & Ollama Web Search**: Added Baidu and Ollama as web search providers
 - **VectorStore Management**: Full VectorStore CRUD with entity, repository, service layer, connection testing, and API endpoints
 - **Bug Fixes**: Fixed Azure OpenAI endpoint handling, embedding truncation, IM citation tag stripping, neo4j Go 1.24 Windows compatibility, and OSS signature issues
+
+<details>
+<summary><b>Earlier Releases</b></summary>
 
 **v0.3.6 Highlights:**
 
@@ -92,8 +94,6 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 - **Channel Tracking**: Knowledge entries and messages record source channel (web/api/im/browser_extension) for traceability
 - **Bug Fixes**: Fixed agent empty response when no knowledge base is configured, UTF-8 truncation in summaries for Chinese/emoji documents, API key encryption loss on tenant settings update, vLLM streaming reasoning content propagation, and rerank empty passage errors
 
-<details>
-<summary><b>Earlier Releases</b></summary>
 
 **v0.3.4 Highlights:**
 
@@ -213,7 +213,6 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 
 [**WeKnora Chrome Extension**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) lets you capture web content directly into your WeKnora knowledge base. Select text, images, or entire pages in the browser and save them as knowledge entries with one click — no copy-paste or file upload needed.
 
-👉 Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)
 
 ## 🦞 ClawHub Skill
 
@@ -228,87 +227,45 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 
 ### 🛠 Prerequisites
 
-Make sure the following tools are installed on your system:
+- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
+- [Git](https://git-scm.com/)
 
-* [Docker](https://www.docker.com/)
-* [Docker Compose](https://docs.docker.com/compose/)
-* [Git](https://git-scm.com/)
-
-### 📦 Installation
-
-#### ① Clone the repository
+### 📦 Installation & Launch
 
 ```bash
-# Clone the main repository
 git clone https://github.com/Tencent/WeKnora.git
 cd WeKnora
+cp .env.example .env   # Edit .env as needed, see comments in the file
+docker compose up -d   # Start core services
 ```
 
-#### ② Configure environment variables
+Once started, visit **http://localhost** to get started.
 
-```bash
-# Copy example env file
-cp .env.example .env
+> To use a local Ollama model, run `ollama serve > /dev/null 2>&1 &` first.
 
-# Edit .env and set required values
-# All variables are documented in the .env.example comments
-```
+### 🔧 Optional Services (Docker Compose Profiles)
 
-#### ③ Start the core services
+Add `--profile` flags to enable additional components. Multiple profiles can be combined:
 
-#### Start Ollama separately (Optional)
+| Profile | Description | Command |
+|---------|-------------|---------|
+| _(default)_ | Core services | `docker compose up -d` |
+| `full` | All features | `docker compose --profile full up -d` |
+| `neo4j` | Knowledge Graph (Neo4j) | `docker compose --profile neo4j up -d` |
+| `minio` | Object Storage (MinIO) | `docker compose --profile minio up -d` |
+| `jaeger` | Tracing (Jaeger) | `docker compose --profile jaeger up -d` |
 
-If you configured a local Ollama model in `.env`, start the Ollama service separately:
+Combine profiles: `docker compose --profile neo4j --profile minio up -d`
 
-```bash
-ollama serve > /dev/null 2>&1 &
-```
+Stop services: `docker compose down`
 
-#### Activate different combinations of features
+### 🌐 Service URLs
 
-- Minimum core services
-```bash
-docker compose up -d
-```
-
-- All features enabled
-```bash
-docker compose --profile full up -d
-```
-
-- Tracing logs required
-```bash
-docker compose --profile jaeger up -d
-```
-
-- Neo4j knowledge graph required
-```bash
-docker compose --profile neo4j up -d
-```
-
-- Minio file storage service required
-```bash
-docker compose --profile minio up -d
-```
-
-- Multiple options combination
-```bash
-docker compose --profile neo4j --profile minio up -d
-```
-
-#### ④ Stop the services
-
-```bash
-docker compose down
-```
-
-### 🌐 Access Services
-
-Once started, services will be available at:
-
-* Web UI: `http://localhost`
-* Backend API: `http://localhost:8080`
-* Jaeger Tracing: `http://localhost:16686`
+| Service | URL |
+|---------|-----|
+| Web UI | `http://localhost` |
+| Backend API | `http://localhost:8080` |
+| Jaeger Tracing | `http://localhost:16686` |
 
 ## 📱 Interface Showcase
 
@@ -392,42 +349,11 @@ WeKnora/
 
 ## 🤝 Contributing
 
-We welcome community contributions! For suggestions, bugs, or feature requests, please submit an [Issue](https://github.com/Tencent/WeKnora/issues) or directly create a Pull Request.
+Welcome to submit [Issues](https://github.com/Tencent/WeKnora/issues) or Pull Requests.
 
-### 🎯 How to Contribute
+**Process:** Fork → Create branch → Commit changes → Open PR
 
-- 🐛 **Bug Fixes**: Discover and fix system defects
-- ✨ **New Features**: Propose and implement new capabilities
-- 📚 **Documentation**: Improve project documentation
-- 🧪 **Test Cases**: Write unit and integration tests
-- 🎨 **UI/UX Enhancements**: Improve user interface and experience
-
-### 📋 Contribution Process
-
-1. **Fork the project** to your GitHub account
-2. **Create a feature branch** `git checkout -b feature/amazing-feature`
-3. **Commit changes** `git commit -m 'Add amazing feature'`
-4. **Push branch** `git push origin feature/amazing-feature`
-5. **Create a Pull Request** with detailed description of changes
-
-### 🎨 Code Standards
-
-- Follow [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
-- Format code using `gofmt`
-- Add necessary unit tests
-- Update relevant documentation
-
-### 📝 Commit Guidelines
-
-Use [Conventional Commits](https://www.conventionalcommits.org/) standard:
-
-```
-feat: Add document batch upload functionality
-fix: Resolve vector retrieval precision issue
-docs: Update API documentation
-test: Add retrieval engine test cases
-refactor: Restructure document parsing module
-```
+**Standards:** Format code with `gofmt`, follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:` / `fix:` / `docs:` / `test:` / `refactor:`)
 
 ## 🔒 Security Notice
 
