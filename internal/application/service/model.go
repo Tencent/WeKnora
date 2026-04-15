@@ -510,6 +510,8 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		}
 	}
 
+	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
+
 	vlmModel, err := vlm.NewVLM(&vlm.Config{
 		ModelID:       model.ID,
 		APIKey:        model.Parameters.APIKey,
@@ -519,6 +521,8 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		InterfaceType: ifType,
 		Provider:      model.Parameters.Provider,
 		Extra:         stringMapToAnyMap(model.Parameters.ExtraConfig),
+		AppID:         appID,
+		AppSecret:     appSecret,
 	}, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{

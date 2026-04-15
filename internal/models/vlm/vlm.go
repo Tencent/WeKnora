@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -28,6 +29,8 @@ type Config struct {
 	InterfaceType string // "ollama" or "openai" (default)
 	Provider      string
 	Extra         map[string]any
+	AppID         string
+	AppSecret     string
 }
 
 // NewVLM creates a VLM instance based on the provided configuration.
@@ -37,6 +40,15 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	if ifType == "ollama" || config.Source == types.ModelSourceLocal {
 		return NewOllamaVLM(config, ollamaService)
 	}
+
+	providerName := provider.ProviderName(config.Provider)
+	if providerName == "" {
+		providerName = provider.DetectProvider(config.BaseURL)
+	}
+	if providerName == provider.ProviderWeKnoraCloud {
+		return NewWeKnoraCloudVLM(config)
+	}
+
 	return NewRemoteAPIVLM(config)
 }
 
