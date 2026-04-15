@@ -54,7 +54,8 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 
 **v0.4.0 하이라이트:**
 
-- **WeKnora Cloud**: 호스팅 LLM 모델 및 문서 파싱 서비스 통합, 자격 증명 관리 및 상태 확인
+- **[지식 어시스턴트](https://weknora.weixin.qq.com/platform)**: 클라우드 호스팅 지식 어시스턴트 서비스, 로컬 배포 없이 빠르게 시작 가능
+- **WeKnora Cloud**: WeKnora Cloud 프로바이더 통합, LLM 모델 및 문서 파싱 서비스, 자격 증명 관리 및 상태 확인
 - **Chrome 확장 프로그램**: 브라우저 확장으로 웹페이지 지식 캡처
 - **ClawHub Skill**: ClawHub Skill 마켓플레이스 통합으로 원클릭 스킬 설치
 - **WeChat IM 통합**: WeChat 채널 어댑터. QR 코드 로그인 및 롱폴링 메시지 지원
@@ -193,7 +194,7 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 | 기능 | 상세 |
 |------|------|
 | 지식베이스 타입 | FAQ / 문서, 폴더 임포트·URL 임포트·태그 관리·온라인 입력 |
-| 데이터 소스 임포트 | Feishu 지식베이스 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
+| 데이터 소스 임포트 | Feishu / Notion 지식베이스 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
 | 문서 포맷 | PDF / Word / Txt / Markdown / HTML / 이미지 / CSV / Excel / PPT / JSON |
 | 검색 전략 | BM25 희소 / Dense 밀집 / GraphRAG 그래프 강화 / 부모-자식 청킹 / 다차원 인덱싱 |
 | E2E 테스트 | 전체 파이프라인 시각화, 리콜 적중률·BLEU / ROUGE 지표 평가 |
@@ -202,12 +203,12 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 
 | 기능 | 상세 |
 |------|------|
-| LLM | OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
+| LLM | OpenAI / Azure OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
 | 오브젝트 스토리지 | 로컬 / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS |
-| IM 통합 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost |
-| 웹 검색 | DuckDuckGo / Bing / Google / Tavily |
+| IM 통합 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
+| 웹 검색 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
 
 **🛡️ 플랫폼**
 
@@ -216,7 +217,22 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 | 배포 | 로컬 / Docker / Kubernetes (Helm), 프라이빗/오프라인 배포 지원 |
 | UI | Web UI / RESTful API / Chrome Extension |
 | 작업 관리 | MQ 비동기 작업, 버전 업그레이드 시 자동 DB 마이그레이션 |
-| 모델 관리 | 중앙 설정, 지식베이스별 모델 선택, 멀티테넌트 내장 모델 공유 |
+| 모델 관리 | 중앙 설정, 지식베이스별 모델 선택, 멀티테넌트 내장 모델 공유, WeKnora Cloud 호스팅 모델 및 문서 파싱 |
+
+## 🧩 Chrome 확장 프로그램
+
+[**WeKnora Chrome 확장 프로그램**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)을 사용하면 브라우저에서 웹 콘텐츠를 WeKnora 지식베이스에 직접 캡처할 수 있습니다. 텍스트, 이미지 또는 전체 페이지를 선택하고 원클릭으로 지식 항목으로 저장 — 복사/붙여넣기나 파일 업로드 불필요.
+
+👉 [Chrome 웹 스토어](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)에서 설치
+
+## 🦞 ClawHub Skill
+
+[**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora)은 ClawHub 플랫폼에 게시된 WeKnora 스킬입니다. 설치 후 WeKnora REST API를 통해 문서 업로드(파일 / URL / Markdown), 하이브리드 검색(벡터 + 키워드), 지식 항목 관리가 가능합니다.
+
+- **문서 임포트** — 에이전트를 통한 파일 업로드, 웹페이지 임포트, Markdown 지식 작성
+- **하이브리드 검색** — 단일 또는 다중 지식베이스에서 벡터 + 키워드 통합 검색
+- **지식 관리** — 프로그래밍 방식으로 지식 항목 조회, 편집, 삭제
+
 
 ## 🚀 시작하기
 

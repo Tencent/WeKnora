@@ -5,10 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [0.4.0] - 2026-04-14
 
 ### 🚀 New Features
-- **NEW**: WeKnora Cloud — WeKnora Cloud service integration providing hosted LLM models and document parsing capabilities, with credential management, status checks, and UI feedback
+- **NEW**: Cloud Knowledge Assistant — [WeKnora Platform](https://weknora.weixin.qq.com/platform), a cloud-hosted knowledge assistant service for quick onboarding without local deployment
+- **NEW**: WeKnora Cloud — WeKnora Cloud provider integration, providing hosted LLM models and document parsing capabilities, with credential management, status checks, and UI feedback
 - **NEW**: Chrome Extension — browser extension support with menu entry and quick access integration for seamless knowledge capture from web pages
 - **NEW**: WeChat IM Integration — WeChat channel adapter with QR code login and long-polling message support
-- **NEW**: ClawHub Skill — ClawHub Skill integration with dedicated menu entry, enabling agent skill marketplace access and one-click skill installation
+- **NEW**: ClawHub Skill — WeKnora Skill published on ClawHub platform, enabling document import, hybrid search, and knowledge management via the WeKnora REST API
 - **NEW**: Attachment Processing — file attachment support in chat pipeline with enhanced error handling, content formatting, and image/attachment metadata injection in queries
 - **NEW**: Azure OpenAI Provider — full Azure OpenAI support for chat, VLM, and embedding models with deployment name preservation, configurable dimensions parameter, provider registration with metadata, URL auto-detection, and frontend provider integration with i18n
 - **NEW**: Alibaba Cloud OSS Storage — object storage support via S3-compatible mode with configuration UI, connectivity test, status reporting, OSS TypeScript types, docreader OssStorage class, factory and container registration, and multi-language i18n (Korean, Russian)

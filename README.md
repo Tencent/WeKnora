@@ -54,7 +54,8 @@ The framework supports auto-syncing knowledge from Feishu (more data sources com
 
 **v0.4.0 Highlights:**
 
-- **WeKnora Cloud**: Hosted LLM models and document parsing service integration with credential management and status checks
+- **[Knowledge Assistant](https://weknora.weixin.qq.com/platform)**: Cloud-hosted knowledge assistant service for quick onboarding without local deployment
+- **WeKnora Cloud**: WeKnora Cloud provider with hosted LLM models and document parsing service, credential management and status checks
 - **Chrome Extension**: Browser extension for web page knowledge capture
 - **ClawHub Skill**: ClawHub Skill marketplace integration for one-click agent skill installation
 - **WeChat IM Integration**: WeChat channel adapter with QR code login and long-polling message support
@@ -183,7 +184,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Capability | Details |
 |------------|---------|
 | Knowledge Base Types | FAQ / Document with folder import, URL import, tag management, and online entry |
-| Data Source Import | Auto-sync from Feishu (more data sources coming soon); incremental and full sync |
+| Data Source Import | Auto-sync from Feishu / Notion (more data sources coming soon); incremental and full sync |
 | Document Formats | PDF / Word / Txt / Markdown / HTML / Images / CSV / Excel / PPT / JSON |
 | Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / multi-dimensional indexing |
 | E2E Testing | Full-pipeline visualization with recall hit rate, BLEU / ROUGE metric evaluation |
@@ -192,12 +193,12 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 
 | Capability | Details |
 |------------|---------|
-| LLMs | OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
+| LLMs | OpenAI / Azure OpenAI / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Ollama |
 | Embeddings | Ollama / BGE / GTE / OpenAI-compatible APIs |
 | Vector DBs | PostgreSQL (pgvector) / Elasticsearch / Milvus / Weaviate / Qdrant |
 | Object Storage | Local / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS |
-| IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost |
-| Web Search | DuckDuckGo / Bing / Google / Tavily |
+| IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
+| Web Search | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
 
 **🛡️ Platform**
 
@@ -206,7 +207,22 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
 | UI | Web UI / RESTful API / Chrome Extension |
 | Task Management | MQ async tasks, automatic database migration on version upgrade |
-| Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing |
+| Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing, WeKnora Cloud hosted models and parsing |
+
+## 🧩 Chrome Extension
+
+[**WeKnora Chrome Extension**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) lets you capture web content directly into your WeKnora knowledge base. Select text, images, or entire pages in the browser and save them as knowledge entries with one click — no copy-paste or file upload needed.
+
+👉 Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd)
+
+## 🦞 ClawHub Skill
+
+[**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) is a WeKnora skill published on the ClawHub platform. Once installed, it enables document import (file / URL / Markdown), hybrid search (vector + keyword) across knowledge bases, and knowledge entry management — all through the WeKnora REST API.
+
+- **Document Import** — Upload files, import web pages, or write Markdown knowledge via the agent
+- **Hybrid Search** — Search within or across knowledge bases with vector + keyword retrieval
+- **Knowledge Management** — List, browse, edit, and delete knowledge entries programmatically
+
 
 ## 🚀 Getting Started
 
