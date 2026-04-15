@@ -150,6 +150,8 @@ type CustomAgentConfig struct {
 	// WebSearchProviderID references a specific WebSearchProviderEntity.
 	// If empty, the tenant's default provider (is_default=true) is used.
 	WebSearchProviderID string `yaml:"web_search_provider_id" json:"web_search_provider_id,omitempty"`
+	// WebSearchProxyURL overrides provider parameters.proxy_url for this agent when non-empty.
+	WebSearchProxyURL string `yaml:"web_search_proxy_url" json:"web_search_proxy_url,omitempty"`
 	// Whether to auto-fetch full page content for reranked web search results
 	WebFetchEnabled bool `yaml:"web_fetch_enabled" json:"web_fetch_enabled"`
 	// Max number of pages to fetch after rerank (default: 3)

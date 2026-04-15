@@ -26,6 +26,7 @@ type AgentConfig struct {
 	WebSearchEnabled        bool          `json:"web_search_enabled"`                   // Whether web search tool is enabled
 	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
+	WebSearchProxyURL       string        `json:"web_search_proxy_url,omitempty"`       // Overrides provider parameters.proxy_url when non-empty
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
 	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)

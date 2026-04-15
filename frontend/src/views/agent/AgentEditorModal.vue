@@ -969,6 +969,22 @@
                       </div>
                     </div>
 
+                    <!-- 智能体专用网络搜索代理（可选） -->
+                    <div v-if="formData.config.web_search_enabled" class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agent.editor.webSearchProxyUrl') }}</label>
+                        <p class="desc">{{ $t('agentEditor.desc.webSearchProxyUrl') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input
+                          v-model="formData.config.web_search_proxy_url"
+                          :placeholder="$t('agent.editor.webSearchProxyUrlPlaceholder')"
+                          clearable
+                          style="width: 100%; max-width: 420px;"
+                        />
+                      </div>
+                    </div>
+
                     <!-- 网络搜索最大结果数 -->
                     <div v-if="formData.config.web_search_enabled" class="setting-row">
                       <div class="setting-info">
@@ -1538,6 +1554,7 @@ const defaultFormData = {
     // 网络搜索设置
     web_search_enabled: false,
     web_search_max_results: 5,
+    web_search_proxy_url: '',
     // 多轮对话设置
     multi_turn_enabled: false,
     history_turns: 5,

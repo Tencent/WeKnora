@@ -54,8 +54,9 @@ func NewBingProvider(params types.WebSearchProviderParameters) (interfaces.WebSe
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Bing provider")
 	}
-	client := &http.Client{
-		Timeout: defaultBingTimeout,
+	client, err := NewSearchHTTPClient(defaultBingTimeout, params.ProxyURL)
+	if err != nil {
+		return nil, err
 	}
 	return &BingProvider{
 		client:  client,

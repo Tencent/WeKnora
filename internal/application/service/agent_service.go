@@ -405,6 +405,7 @@ func (s *agentService) registerTools(
 				sessionID,
 				config.WebSearchMaxResults,
 				config.WebSearchProviderID,
+				config.WebSearchProxyURL,
 			)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 

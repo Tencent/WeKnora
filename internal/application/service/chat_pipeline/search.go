@@ -643,6 +643,10 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 		webConfig.MaxResults = chatManage.WebSearchMaxResults
 	}
 
+	if pu := chatManage.WebSearchProxyURL; pu != "" {
+		webConfig.ProxyURL = pu
+	}
+
 	pipelineInfo(ctx, "Search", "web_request", map[string]interface{}{
 		"tenant_id":   chatManage.TenantID,
 		"provider_id": providerID,

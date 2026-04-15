@@ -56,6 +56,7 @@ type PipelineRequest struct {
 	WebFetchEnabled     bool   `json:"-"` // Auto-fetch full page content for web search results after rerank
 	WebFetchTopN        int    `json:"-"` // Max pages to fetch (default 3)
 	Language            string `json:"-"`
+	WebSearchProxyURL   string `json:"-"`
 }
 
 // QueryIntent represents the classified intent of a user query.
@@ -194,6 +195,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			WebSearchEnabled:         c.WebSearchEnabled,
 			WebSearchProviderID:      c.WebSearchProviderID,
 			WebSearchMaxResults:      c.WebSearchMaxResults,
+			WebSearchProxyURL:        c.WebSearchProxyURL,
 			WebFetchEnabled:          c.WebFetchEnabled,
 			WebFetchTopN:             c.WebFetchTopN,
 			Language:                 c.Language,
