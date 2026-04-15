@@ -22,6 +22,7 @@ type WebSearchConfig struct {
 	EmbeddingDimension int    `json:"embedding_dimension,omitempty"` // 嵌入维度（用于RAG压缩）
 	RerankModelID      string `json:"rerank_model_id,omitempty"`     // 重排模型ID（用于RAG压缩）
 	DocumentFragments  int    `json:"document_fragments,omitempty"`  // 文档片段数量（用于RAG压缩）
+	ProxyURL           string `json:"proxy_url,omitempty"`           // Optional proxy for outbound search HTTP requests (e.g. from agent override). Merged at call time; not required for tenant-stored config.
 }
 
 // Value implements driver.Valuer interface for WebSearchConfig

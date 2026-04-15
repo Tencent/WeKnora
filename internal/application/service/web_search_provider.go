@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -60,6 +62,12 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 		}
 	}
 
+	if provider.Provider != "" {
+		if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+			return err
+		}
+	}
+
 	logger.Infof(ctx, "Updating web search provider: tenant=%d, id=%s", provider.TenantID, provider.ID)
 	return s.repo.Update(ctx, provider)
 }
@@ -113,6 +121,24 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		}
 	case types.WebSearchProviderTypeDuckDuckGo:
 		// No API key required
+	}
+	if err := validateOptionalProxyURL(params.ProxyURL); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateOptionalProxyURL(proxyURL string) error {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return nil
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return fmt.Errorf("invalid proxy_url: %w", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("invalid proxy_url: scheme and host are required")
 	}
 	return nil
 }

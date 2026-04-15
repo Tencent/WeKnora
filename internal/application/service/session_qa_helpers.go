@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -198,6 +199,12 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	if cm.FAQPriorityEnabled {
 		logger.Infof(ctx, "FAQ priority enabled: threshold=%.2f, boost=%.2f",
 			cm.FAQDirectAnswerThreshold, cm.FAQScoreBoost)
+	}
+
+	// Per-agent outbound proxy for web search (overrides provider parameters.proxy_url)
+	if pu := strings.TrimSpace(customAgent.Config.WebSearchProxyURL); pu != "" {
+		cm.WebSearchProxyURL = pu
+		logger.Infof(ctx, "Using custom agent web_search_proxy_url for this session")
 	}
 }
 

@@ -3,6 +3,7 @@ package web_search
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
@@ -29,8 +30,13 @@ func NewGoogleProvider(params types.WebSearchProviderParameters) (interfaces.Web
 		return nil, fmt.Errorf("engine ID is required for Google provider")
 	}
 
+	httpClient, err := NewSearchHTTPClient(30*time.Second, params.ProxyURL)
+	if err != nil {
+		return nil, err
+	}
 	clientOpts := []option.ClientOption{
 		option.WithAPIKey(params.APIKey),
+		option.WithHTTPClient(httpClient),
 	}
 	srv, err := customsearch.NewService(context.Background(), clientOpts...)
 	if err != nil {

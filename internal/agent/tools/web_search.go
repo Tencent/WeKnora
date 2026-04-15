@@ -83,6 +83,7 @@ type WebSearchTool struct {
 	sessionID             string
 	maxResults            int
 	providerID            string // WebSearchProviderEntity ID (resolved from agent config or tenant default)
+	webSearchProxyURL     string // Overrides provider parameters.proxy_url when non-empty
 }
 
 // NewWebSearchTool creates a new web search tool
@@ -94,6 +95,7 @@ func NewWebSearchTool(
 	sessionID string,
 	maxResults int,
 	providerID string,
+	webSearchProxyURL string,
 ) *WebSearchTool {
 	tool := webSearchTool
 	tool.description = fmt.Sprintf(tool.description, maxResults, maxResults)
@@ -107,6 +109,7 @@ func NewWebSearchTool(
 		sessionID:             sessionID,
 		maxResults:            maxResults,
 		providerID:            providerID,
+		webSearchProxyURL:     webSearchProxyURL,
 	}
 }
 
@@ -167,6 +170,9 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// Create a copy of web search config with maxResults from agent config
 	searchConfig := *tenant.WebSearchConfig
 	searchConfig.MaxResults = t.maxResults
+	if pu := strings.TrimSpace(t.webSearchProxyURL); pu != "" {
+		searchConfig.ProxyURL = pu
+	}
 
 	// Perform web search
 	logger.Infof(
