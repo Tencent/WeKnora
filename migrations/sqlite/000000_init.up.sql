@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tenants (
     web_search_config TEXT DEFAULT NULL,
     parser_engine_config TEXT DEFAULT NULL,
     storage_engine_config TEXT DEFAULT NULL,
+    credentials TEXT DEFAULT NULL,
     chat_history_config TEXT,
     retrieval_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

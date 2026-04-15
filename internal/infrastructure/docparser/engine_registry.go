@@ -89,7 +89,7 @@ func (e *weKnoraCloudEngine) FileTypes(_ bool) []string {
 	return []string{"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "pptx", "ppt"}
 }
 func (e *weKnoraCloudEngine) CheckAvailable(docreaderConnected bool, overrides map[string]string) (bool, string) {
-	if overrides["docreader_app_id"] != "" {
+	if overrides["weknoracloud_app_id"] != "" {
 		return true, ""
 	}
 	return false, "WeKnora Cloud credentials not configured. Go to Settings → WeKnora Cloud to set up."

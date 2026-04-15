@@ -8057,12 +8057,12 @@ func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileTyp
 	case docparser.SimpleEngineName:
 		return &docparser.SimpleFormatReader{}
 	case docparser.WeKnoraCloudEngineName:
-		creds := s.tenantService.GetDocreaderCredentials(ctx)
+		creds := s.tenantService.GetWeKnoraCloudCredentials(ctx)
 		if creds == nil {
-			logger.Warnf(ctx, "[resolveDocReader] WeKnoraCloud: no tenant docreader credentials (fileType=%s)", fileType)
+			logger.Warnf(ctx, "[resolveDocReader] WeKnoraCloud: no tenant credentials (fileType=%s)", fileType)
 			return nil
 		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.APIKey)
+		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.AppSecret)
 		if err != nil {
 			logger.Errorf(ctx, "[resolveDocReader] WeKnoraCloud reader init failed: %v", err)
 			return nil

@@ -6,8 +6,3 @@ type WeKnoraCloudStatusResult struct {
 	NeedsReinit bool   `json:"needs_reinit"`     // 是否需要重新初始化（凭证损坏）
 	Reason      string `json:"reason,omitempty"` // 需要重新初始化的原因
 }
-
-type DocreaderCredentials struct {
-	AppID  string
-	APIKey string
-}

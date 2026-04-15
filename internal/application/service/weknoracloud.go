@@ -46,15 +46,8 @@ func (s *weKnoraCloudService) SaveCredentials(ctx context.Context, appID, appSec
 		return fmt.Errorf("credential verification failed: %w", err)
 	}
 
-	encryptedSecret := appSecret
-	if key := utils.GetAESKey(); key != nil {
-		if encrypted, err := utils.EncryptAESGCM(appSecret, key); err == nil {
-			encryptedSecret = encrypted
-		}
-	}
-
 	tenantID := types.MustTenantIDFromContext(ctx)
-	return s.updateTenantCredentials(ctx, tenantID, appID, encryptedSecret)
+	return s.updateTenantCredentials(ctx, tenantID, appID, appSecret)
 }
 
 // verifyCredentials 向 WeKnoraCloud /api/v1/health 发送带签名头的 GET。
@@ -105,30 +98,26 @@ func (s *weKnoraCloudService) CheckStatus(ctx context.Context) (*types.WeKnoraCl
 		return &types.WeKnoraCloudStatusResult{HasModels: false, NeedsReinit: false}, nil
 	}
 
-	// Check if tenant has WeKnoraCloud credentials in parser config
-	if tenant.ParserEngineConfig == nil || tenant.ParserEngineConfig.DocreaderAppID == "" || tenant.ParserEngineConfig.DocreaderAPIKey == "" {
-		return &types.WeKnoraCloudStatusResult{
-			HasModels:   false,
-			NeedsReinit: false,
-		}, nil
+	creds := tenant.Credentials.GetWeKnoraCloud()
+	if creds == nil {
+		return &types.WeKnoraCloudStatusResult{HasModels: false, NeedsReinit: false}, nil
 	}
 
-	// Try to decrypt the API key
-	if key := utils.GetAESKey(); key != nil {
-		if _, err := utils.DecryptAESGCM(tenant.ParserEngineConfig.DocreaderAPIKey, key); err != nil {
-			return &types.WeKnoraCloudStatusResult{
-				HasModels:   true,
-				NeedsReinit: true,
-				Reason:      "WeKnoraCloud 凭证解密失败（服务重启后加密密钥已变更），请重新填写 APPID 和 APPSECRET",
-			}, nil
-		}
+	// CredentialsConfig.Scan already attempts decryption.
+	// If the AES key has rotated, Scan silently keeps the enc:v1:... blob.
+	if strings.HasPrefix(creds.AppSecret, utils.EncPrefix) {
+		return &types.WeKnoraCloudStatusResult{
+			HasModels:   true,
+			NeedsReinit: true,
+			Reason:      "WeKnoraCloud 凭证解密失败（服务重启后加密密钥已变更），请重新填写 APPID 和 APPSECRET",
+		}, nil
 	}
 
 	return &types.WeKnoraCloudStatusResult{HasModels: true, NeedsReinit: false}, nil
 }
 
-// updateTenantCredentials 更新租户的 WeKnoraCloud 凭证和 DocReader 地址
-func (s *weKnoraCloudService) updateTenantCredentials(ctx context.Context, tenantID uint64, appID, encryptedSecret string) error {
+// updateTenantCredentials 更新租户的 WeKnoraCloud 凭证
+func (s *weKnoraCloudService) updateTenantCredentials(ctx context.Context, tenantID uint64, appID, appSecret string) error {
 	if s.tenantRepo == nil {
 		return fmt.Errorf("tenant repository is required")
 	}
@@ -137,10 +126,12 @@ func (s *weKnoraCloudService) updateTenantCredentials(ctx context.Context, tenan
 	if err != nil {
 		return err
 	}
-	if tenant.ParserEngineConfig == nil {
-		tenant.ParserEngineConfig = &types.ParserEngineConfig{}
+	if tenant.Credentials == nil {
+		tenant.Credentials = &types.CredentialsConfig{}
 	}
-	tenant.ParserEngineConfig.DocreaderAppID = appID
-	tenant.ParserEngineConfig.DocreaderAPIKey = encryptedSecret
+	tenant.Credentials.WeKnoraCloud = &types.WeKnoraCloudCredentials{
+		AppID:     appID,
+		AppSecret: appSecret,
+	}
 	return s.tenantRepo.UpdateTenant(ctx, tenant)
 }

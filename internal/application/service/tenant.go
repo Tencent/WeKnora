@@ -343,42 +343,24 @@ func (s *tenantService) GetTenantByIDForUser(ctx context.Context, tenantID uint6
 	return tenant, nil
 }
 
-func (s *tenantService) GetDocreaderCredentials(ctx context.Context) *types.DocreaderCredentials {
-	// Try to get tenant info directly first
+func (s *tenantService) GetWeKnoraCloudCredentials(ctx context.Context) *types.WeKnoraCloudCredentials {
+	// Try to get tenant info from context first (already loaded by middleware).
+	// CredentialsConfig.Scan handles decryption, so credentials are ready to use.
 	if tenant, ok := types.TenantInfoFromContext(ctx); ok {
-		if tenant.ParserEngineConfig != nil {
-			appID := strings.TrimSpace(tenant.ParserEngineConfig.DocreaderAppID)
-			if appID == "" || tenant.ParserEngineConfig.DocreaderAPIKey == "" {
-				return nil
-			}
-			if key := utils.GetAESKey(); key != nil {
-				if encrypted, err := utils.DecryptAESGCM(tenant.ParserEngineConfig.DocreaderAPIKey, key); err == nil {
-					return &types.DocreaderCredentials{AppID: appID, APIKey: encrypted}
-				}
-			}
-			return &types.DocreaderCredentials{AppID: appID, APIKey: tenant.ParserEngineConfig.DocreaderAPIKey}
+		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+			return creds
 		}
 	}
 
-	// If no tenant info in context, try to get tenant ID and load tenant
+	// Fallback: load tenant from repo by tenantID
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok {
 		return nil
 	}
 
-	// Load tenant from repo if we only have tenantID
 	tenant, err := s.repo.GetTenantByID(ctx, tenantID)
-	if err == nil && tenant != nil && tenant.ParserEngineConfig != nil {
-		appID := strings.TrimSpace(tenant.ParserEngineConfig.DocreaderAppID)
-		if appID != "" && tenant.ParserEngineConfig.DocreaderAPIKey != "" {
-			if key := utils.GetAESKey(); key != nil {
-				if encrypted, err := utils.DecryptAESGCM(tenant.ParserEngineConfig.DocreaderAPIKey, key); err == nil {
-					return &types.DocreaderCredentials{AppID: appID, APIKey: encrypted}
-				}
-			}
-			return &types.DocreaderCredentials{AppID: appID, APIKey: tenant.ParserEngineConfig.DocreaderAPIKey}
-		}
+	if err != nil || tenant == nil {
+		return nil
 	}
-
-	return nil
+	return tenant.Credentials.GetWeKnoraCloud()
 }

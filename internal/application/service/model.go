@@ -71,7 +71,7 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 	if s.tenantService == nil {
 		return
 	}
-	creds := s.tenantService.GetDocreaderCredentials(ctx)
+	creds := s.tenantService.GetWeKnoraCloudCredentials(ctx)
 	if creds == nil {
 		return
 	}
@@ -79,7 +79,7 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 		appID = creds.AppID
 	}
 	if appSecret == "" {
-		appSecret = creds.APIKey
+		appSecret = creds.AppSecret
 	}
 	return
 }

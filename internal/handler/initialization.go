@@ -1515,9 +1515,9 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		return
 	}
 	var appID, appSecret string
-	if tenantInfo.ParserEngineConfig != nil {
-		appID = tenantInfo.ParserEngineConfig.DocreaderAppID
-		appSecret = tenantInfo.ParserEngineConfig.DocreaderAPIKey
+	if creds := tenantInfo.Credentials.GetWeKnoraCloud(); creds != nil {
+		appID = creds.AppID
+		appSecret = creds.AppSecret
 	}
 
 	// 创建模型配置进行测试
@@ -1612,9 +1612,9 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		return
 	}
 	var appID, appSecret string
-	if tenantInfo.ParserEngineConfig != nil {
-		appID = tenantInfo.ParserEngineConfig.DocreaderAppID
-		appSecret = tenantInfo.ParserEngineConfig.DocreaderAPIKey
+	if creds := tenantInfo.Credentials.GetWeKnoraCloud(); creds != nil {
+		appID = creds.AppID
+		appSecret = creds.AppSecret
 	}
 
 	// 构造 embedder 配置
@@ -1740,9 +1740,9 @@ func (h *InitializationHandler) checkRerankModelConnection(ctx context.Context,
 		return false, "租户信息未找到"
 	}
 	var appID, appSecret string
-	if tenantInfo.ParserEngineConfig != nil {
-		appID = tenantInfo.ParserEngineConfig.DocreaderAppID
-		appSecret = tenantInfo.ParserEngineConfig.DocreaderAPIKey
+	if creds := tenantInfo.Credentials.GetWeKnoraCloud(); creds != nil {
+		appID = creds.AppID
+		appSecret = creds.AppSecret
 	}
 	config.AppID = appID
 	config.AppSecret = appSecret

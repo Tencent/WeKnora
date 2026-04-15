@@ -142,8 +142,16 @@ func (h *SystemHandler) getDocReaderConnInfo() (addr, transport string) {
 func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	var overrides map[string]string
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-			overrides = tenant.ParserEngineConfig.ToOverridesMap()
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			if tenant.ParserEngineConfig != nil {
+				overrides = tenant.ParserEngineConfig.ToOverridesMap()
+			}
+			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+				if overrides == nil {
+					overrides = make(map[string]string)
+				}
+				overrides["weknoracloud_app_id"] = creds.AppID
+			}
 		}
 	}
 
@@ -196,8 +204,16 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 
 	var overrides map[string]string
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-			overrides = tenant.ParserEngineConfig.ToOverridesMap()
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			if tenant.ParserEngineConfig != nil {
+				overrides = tenant.ParserEngineConfig.ToOverridesMap()
+			}
+			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+				if overrides == nil {
+					overrides = make(map[string]string)
+				}
+				overrides["weknoracloud_app_id"] = creds.AppID
+			}
 		}
 	}
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
@@ -223,6 +239,16 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		return
 	}
 	overrides := body.ToOverridesMap()
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil {
+			if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {
+				if overrides == nil {
+					overrides = make(map[string]string)
+				}
+				overrides["weknoracloud_app_id"] = creds.AppID
+			}
+		}
+	}
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
@@ -1034,11 +1060,11 @@ func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) 
 	}
 
 	if service.IsWeKnoraCloudDocReaderAddr(addr) {
-		creds := h.tenantSvc.GetDocreaderCredentials(ctx)
+		creds := h.tenantSvc.GetWeKnoraCloudCredentials(ctx)
 		if creds == nil {
 			return nil
 		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.APIKey)
+		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.AppSecret)
 		if err != nil {
 			return nil
 		}
