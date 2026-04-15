@@ -455,6 +455,8 @@ export default {
       webSearch: 'Web Search',
       webSearchProvider: 'Search Engine',
       webSearchProviderPlaceholder: 'Use default search engine',
+      webSearchProxyUrl: 'Web Search Proxy',
+      webSearchProxyUrlPlaceholder: 'Optional, e.g. https://host:port',
       webSearchMaxResults: 'Max Search Results',
       webFetchEnabled: 'Auto-Fetch Page Content',
       webFetchTopN: 'Pages to Fetch',
@@ -3325,6 +3327,8 @@ export default {
       kbScope: 'Select the scope of knowledge bases accessible to the agent',
       webSearch: 'When enabled, the agent can search the internet for information',
       webSearchProvider: 'Specify a search engine for this agent. Leave empty to use the default.',
+      webSearchProxyUrl:
+        'Applies only to this agent and overrides the proxy in search engine settings; leave empty to use the provider\'s configured proxy',
       webSearchMaxResults: 'Maximum number of results returned per search',
       webFetchEnabled: 'After reranking, auto-fetch full page content from top web results for better answers',
       webFetchTopN: 'Maximum number of web pages to fetch after reranking',

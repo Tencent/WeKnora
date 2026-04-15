@@ -1246,6 +1246,8 @@ export default {
       suggestedPrompts: "추천 질문",
       mode: "작동 모드",
       webSearch: "웹 검색",
+      webSearchProxyUrl: "웹 검색 프록시",
+      webSearchProxyUrlPlaceholder: "선택 사항, 예: https://host:port",
       webSearchMaxResults: "최대 검색 결과 수",
       knowledgeBases: "관련 지식베이스",
       allKnowledgeBases: "모든 지식베이스",
@@ -3379,6 +3381,8 @@ export default {
       maxIterations: 'Agent가 작업 수행 시 최대 추론 단계 수',
       kbScope: '에이전트가 접근할 수 있는 지식베이스 범위를 선택하세요',
       webSearch: '활성화하면 에이전트가 인터넷에서 정보를 검색할 수 있습니다',
+      webSearchProxyUrl:
+        '이 에이전트에만 적용되며 검색 엔진 설정의 프록시를 덮어씁니다. 비우면 제공자에 구성된 프록시를 사용합니다',
       webSearchMaxResults: '검색당 반환되는 최대 결과 수',
       retrievalSection: '지식베이스 검색 및 순위 매개변수 설정',
       queryExpansion: '쿼리 용어를 자동으로 확장하여 재현율 향상',
