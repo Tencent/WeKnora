@@ -205,7 +205,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
     settingsFields: [
       { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://dav.jianguoyun.com', defaultValue: 'https://dav.jianguoyun.com' },
-      { key: 'root_path', labelKey: 'datasource.field.rootPath', placeholder: '/我的文档' },
+      { key: 'root_path', labelKey: 'datasource.field.rootPath', placeholder: '我的文档' },
     ],
   },
 ])
