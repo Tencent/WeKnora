@@ -189,6 +189,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(service.NewWebSearchService))
 	must(container.Provide(service.NewWebSearchProviderService))
+	must(container.Provide(NewEngineFactory))
+	// StoreRegistry: same instance as RetrieveEngineRegistry, exposed as StoreRegistry interface.
+	// NewRetrieveEngineRegistry always returns *retriever.RetrieveEngineRegistry which implements both.
+	must(container.Provide(func(r interfaces.RetrieveEngineRegistry) (interfaces.StoreRegistry, error) {
+		sr, ok := r.(*retriever.RetrieveEngineRegistry)
+		if !ok {
+			return nil, fmt.Errorf("registry does not implement StoreRegistry")
+		}
+		return sr, nil
+	}))
 	must(container.Provide(service.NewVectorStoreService))
 
 	// Agent service layer (requires event bus, web search service)
@@ -890,7 +900,41 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			}
 		}
 	}
+	// ─── DB store registration (byStoreID) ───
+	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
+		loadDBStoresIntoRegistry(storeReg, db, cfg)
+	}
+
 	return registry, nil
+}
+
+// loadDBStoresIntoRegistry loads VectorStore records from DB and registers them
+// in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
+func loadDBStoresIntoRegistry(storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config) {
+	ctx := context.Background()
+	log := logger.GetLogger(ctx)
+
+	var stores []types.VectorStore
+	// GORM soft delete automatically adds "deleted_at IS NULL" condition
+	if err := db.Find(&stores).Error; err != nil {
+		log.Warnf("Failed to load vector stores from DB: %v", err)
+		return
+	}
+
+	if len(stores) == 0 {
+		return
+	}
+
+	log.Infof("Loading %d vector store(s) from database", len(stores))
+	for _, store := range stores {
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg)
+		if err != nil {
+			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
+			continue
+		}
+		storeRegistry.RegisterWithStoreID(store.ID, svc)
+		log.Infof("Registered DB vector store: id=%s, name=%s, engine=%s", store.ID, store.Name, store.EngineType)
+	}
 }
 
 // initAntsPool initializes the goroutine pool

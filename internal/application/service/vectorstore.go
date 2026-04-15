@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -13,14 +14,22 @@ import (
 
 // vectorStoreService implements interfaces.VectorStoreService
 type vectorStoreService struct {
-	repo interfaces.VectorStoreRepository
+	repo          interfaces.VectorStoreRepository
+	storeRegistry interfaces.StoreRegistry  // for dynamic registry updates on CRUD
+	factory       interfaces.EngineFactory  // creates engine services from VectorStore config
 }
 
 // NewVectorStoreService creates a new vector store service
 func NewVectorStoreService(
 	repo interfaces.VectorStoreRepository,
+	storeRegistry interfaces.StoreRegistry,
+	factory interfaces.EngineFactory,
 ) interfaces.VectorStoreService {
-	return &vectorStoreService{repo: repo}
+	return &vectorStoreService{
+		repo:          repo,
+		storeRegistry: storeRegistry,
+		factory:       factory,
+	}
 }
 
 // CreateStore validates and creates a new vector store.
@@ -60,10 +69,20 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 	// 5. Persist
 	logger.Infof(ctx, "Creating vector store: tenant=%d, name=%s, engine=%s",
 		store.TenantID, secutils.SanitizeForLog(store.Name), store.EngineType)
-	return s.repo.Create(ctx, store)
+	if err := s.repo.Create(ctx, store); err != nil {
+		return err
+	}
+
+	// 6. Register in registry (best-effort; failure doesn't roll back DB).
+	// The store is already persisted, and will be loaded on next app restart (self-healing).
+	s.registerInRegistry(ctx, store)
+
+	return nil
 }
 
 // UpdateStore updates an existing vector store (name only).
+// NOTE: If connection_config or index_config become mutable in the future,
+// registry re-registration must be added here (unregister old + register new).
 func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.VectorStore) error {
 	if store.TenantID == 0 {
 		return errors.NewValidationError("tenant_id is required")
@@ -79,8 +98,17 @@ func (s *vectorStoreService) UpdateStore(ctx context.Context, store *types.Vecto
 // DeleteStore deletes a vector store by tenant + id.
 // Phase 2: KB binding check will be added here.
 func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, id string) error {
-	logger.Infof(ctx, "Deleting vector store: tenant=%d, id=%s", tenantID, id)
-	return s.repo.Delete(ctx, tenantID, id)
+	if err := s.repo.Delete(ctx, tenantID, id); err != nil {
+		return err
+	}
+
+	// Unregister from registry (idempotent)
+	if s.storeRegistry != nil {
+		s.storeRegistry.UnregisterByStoreID(id)
+	}
+
+	logger.Infof(ctx, "Deleted vector store: tenant=%d, id=%s", tenantID, id)
+	return nil
 }
 
 // SaveDetectedVersion updates the connection_config.version for a stored vector store.
@@ -89,6 +117,28 @@ func (s *vectorStoreService) SaveDetectedVersion(ctx context.Context, store *typ
 	updated := *store
 	updated.ConnectionConfig.Version = version
 	return s.repo.UpdateConnectionConfig(ctx, &updated)
+}
+
+// registerInRegistry creates an engine service and registers it in the registry.
+// Logs and skips on failure — the store is already persisted in DB,
+// and will be loaded on next app restart (self-healing).
+func (s *vectorStoreService) registerInRegistry(ctx context.Context, store *types.VectorStore) {
+	if s.storeRegistry == nil || s.factory == nil {
+		return
+	}
+
+	// Use a short timeout for engine creation to avoid blocking on unreachable hosts
+	// (e.g., gRPC dial to Qdrant/Milvus). The store is already persisted in DB,
+	// so it will be loaded on next app restart if this times out.
+	factoryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	svc, err := s.factory(factoryCtx, *store)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to create engine for store %s, will be available after restart: %v", store.ID, err)
+		return
+	}
+	s.storeRegistry.RegisterWithStoreID(store.ID, svc)
 }
 
 // validateConnectionConfig validates required fields per engine type.

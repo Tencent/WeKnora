@@ -6,6 +6,23 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// StoreRegistry provides VectorStore-based engine registration/lookup.
+// Separated from RetrieveEngineRegistry to avoid changing the existing interface
+// used by 6 services (17 call sites). Phase 2 may merge into RetrieveEngineRegistry.
+type StoreRegistry interface {
+	// RegisterWithStoreID registers an engine service by VectorStore ID.
+	// Upsert semantics: existing entry is overwritten silently.
+	RegisterWithStoreID(storeID string, svc RetrieveEngineService)
+	// GetByStoreID retrieves an engine service by VectorStore ID.
+	GetByStoreID(storeID string) (RetrieveEngineService, error)
+	// UnregisterByStoreID removes an engine service by VectorStore ID (idempotent).
+	UnregisterByStoreID(storeID string)
+}
+
+// EngineFactory creates a RetrieveEngineService from a VectorStore's config.
+// Defined as a function type to avoid circular imports between container and service packages.
+type EngineFactory func(ctx context.Context, store types.VectorStore) (RetrieveEngineService, error)
+
 // VectorStoreService defines the service interface for vector store management.
 // Tenant isolation is enforced by the handler layer (getOwnedStore pattern).
 type VectorStoreService interface {
