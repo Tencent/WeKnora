@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -57,6 +58,12 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	if provider.IsDefault {
 		if err := s.repo.ClearDefault(ctx, provider.TenantID, provider.ID); err != nil {
 			logger.Warnf(ctx, "Failed to clear default providers: %v", err)
+		}
+	}
+
+	if provider.Provider != "" {
+		if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+			return err
 		}
 	}
 
@@ -114,5 +121,12 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 	case types.WebSearchProviderTypeDuckDuckGo:
 		// No API key required
 	}
+	if err := validateOptionalProxyURL(params.ProxyURL); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateOptionalProxyURL(proxyURL string) error {
+	return infra_web_search.ValidateProxyURL(proxyURL)
 }

@@ -10,6 +10,7 @@ export interface WebSearchProviderEntity {
   parameters: {
     api_key?: string
     engine_id?: string
+    proxy_url?: string
     extra_config?: Record<string, string>
   }
   is_default?: boolean
@@ -23,6 +24,7 @@ export interface WebSearchProviderTypeInfo {
   name: string
   requires_api_key: boolean
   requires_engine_id?: boolean
+  supports_proxy?: boolean
   description?: string
   docs_url?: string
 }

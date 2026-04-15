@@ -99,6 +99,16 @@
             </t-form-item>
           </template>
 
+          <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')" name="parameters.proxy_url">
+            <t-input
+              v-model="providerForm.parameters.proxy_url"
+              :placeholder="t('webSearchSettings.proxyUrlPlaceholder')"
+            />
+            <template #help>
+              <span class="switch-help">{{ t('webSearchSettings.proxyUrlHelp') }}</span>
+            </template>
+          </t-form-item>
+
           <div class="form-divider"></div>
 
           <t-form-item :label="t('webSearchSettings.setAsDefault')" name="is_default">
@@ -164,7 +174,7 @@ const providerForm = ref<{
   name: string
   provider: string
   description: string
-  parameters: { api_key?: string; engine_id?: string }
+  parameters: { api_key?: string; engine_id?: string; proxy_url?: string }
   is_default: boolean
 }>({
   name: '',
@@ -228,6 +238,7 @@ const editProvider = (entity: WebSearchProviderEntity) => {
     parameters: {
       api_key: '',
       engine_id: entity.parameters?.engine_id || '',
+      proxy_url: entity.parameters?.proxy_url || '',
     },
     is_default: entity.is_default || false,
   }
