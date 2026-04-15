@@ -5,6 +5,15 @@ import { autoSetup } from '@/api/auth'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
+const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
+
+function shouldTryAutoSetup() {
+  return localStorage.getItem(AUTO_SETUP_FAILED_KEY) !== 'true'
+}
+
+function markAutoSetupFailed() {
+  localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
+}
 
 function isLiteEdition(authStore: ReturnType<typeof useAuthStore>) {
   return authStore.isLiteMode || localStorage.getItem('weknora_lite_mode') === 'true'
@@ -188,8 +197,7 @@ router.beforeEach(async (to, from, next) => {
   // 检查用户认证状态
   if (to.meta.requiresAuth !== false) {
     if (!authStore.isLoggedIn) {
-      // Lite 版：尝试自动初始化（仅一次），成功则跳过登录页
-      if (!autoSetupAttempted) {
+      if (!autoSetupAttempted && shouldTryAutoSetup()) {
         autoSetupAttempted = true
         try {
           const response = await autoSetup()
@@ -198,9 +206,11 @@ router.beforeEach(async (to, from, next) => {
             authStore.setLiteMode(true)
             next(to.fullPath)
             return
+          } else {
+            markAutoSetupFailed()
           }
         } catch {
-          // auto-setup 不可用（非 lite 版本），走正常登录流程
+          markAutoSetupFailed()
         }
       }
       next('/login')
