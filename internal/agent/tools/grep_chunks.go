@@ -374,7 +374,7 @@ func (t *GrepChunksTool) searchChunks(
 	return results, int64(len(results)), nil
 }
 
-// formatOutput formats the search results for display (grep-style output)
+// formatOutput formats the search results as XML
 func (t *GrepChunksTool) formatOutput(
 	ctx context.Context,
 	results []knowledgeAggregation,
@@ -382,46 +382,37 @@ func (t *GrepChunksTool) formatOutput(
 	patterns []string,
 	countOnly bool,
 ) string {
-	var output strings.Builder
+	var b strings.Builder
 
-	// If count_only mode, just return the count
 	if countOnly {
-		output.WriteString(fmt.Sprintf("%d\n", totalCount))
-		return output.String()
+		b.WriteString(fmt.Sprintf("<grep_results count=\"%d\" />\n", totalCount))
+		return b.String()
 	}
 
-	// Show search info
-	if len(patterns) == 1 {
-		output.WriteString(fmt.Sprintf("Pattern: '%s' (case-insensitive)\n", patterns[0]))
-	} else {
-		output.WriteString(fmt.Sprintf("Patterns (%d): %v (case-insensitive, OR logic)\n", len(patterns), patterns))
+	b.WriteString(fmt.Sprintf("<grep_results match_count=\"%d\">\n", len(results)))
+	for _, p := range patterns {
+		b.WriteString(fmt.Sprintf("<pattern>%s</pattern>\n", p))
 	}
-	output.WriteString(fmt.Sprintf("Matches: %d knowledge item(s)\n\n", len(results)))
 
 	if len(results) == 0 {
-		output.WriteString("No matches found.\n")
-		return output.String()
+		b.WriteString("</grep_results>")
+		return b.String()
 	}
 
-	for idx, result := range results {
-		var patternSummaries []string
+	for _, result := range results {
+		b.WriteString(fmt.Sprintf("<match knowledge_id=\"%s\" title=\"%s\" chunk_hits=\"%d\" chunk_total=\"%d\">\n",
+			result.KnowledgeID, result.KnowledgeTitle, result.ChunkHitCount, result.TotalChunkCount))
 		for _, pattern := range patterns {
 			count := result.PatternCounts[pattern]
-			patternSummaries = append(patternSummaries, fmt.Sprintf("%s=%d", pattern, count))
+			if count > 0 {
+				b.WriteString(fmt.Sprintf("<pattern_hit pattern=\"%s\" count=\"%d\" />\n", pattern, count))
+			}
 		}
-
-		output.WriteString(
-			fmt.Sprintf("%d) knowledge_id=%s | title=%s | chunk_hits=%d | chunk_total=%d | pattern_hits=[%s]\n",
-				idx+1,
-				result.KnowledgeID,
-				result.KnowledgeTitle,
-				result.ChunkHitCount,
-				result.TotalChunkCount,
-				strings.Join(patternSummaries, ", "),
-			),
-		)
+		b.WriteString("</match>\n")
 	}
-	return output.String()
+
+	b.WriteString("</grep_results>")
+	return b.String()
 }
 
 type knowledgeAggregation struct {

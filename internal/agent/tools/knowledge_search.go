@@ -395,6 +395,21 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
+	// Enrich image info for search results (lazy-loaded from child image chunks)
+	if t.chunkService != nil && len(deduplicatedResults) > 0 {
+		byTenant := make(map[uint64][]*types.SearchResult)
+		for _, r := range deduplicatedResults {
+			tid := t.searchTargets.GetTenantIDForKB(r.KnowledgeBaseID)
+			if tid == 0 {
+				continue
+			}
+			byTenant[tid] = append(byTenant[tid], r.SearchResult)
+		}
+		for tid, batch := range byTenant {
+			searchutil.EnrichSearchResultsImageInfo(ctx, t.chunkService.GetRepository(), tid, batch)
+		}
+	}
+
 	// Build output
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Formatting output with %d final results", len(deduplicatedResults))
 	result, err := t.formatOutput(ctx, deduplicatedResults, kbIDs, queries)
@@ -1065,144 +1080,106 @@ func (t *KnowledgeSearchTool) formatOutput(
 		}, nil
 	}
 
-	// Build output header
-	output := "=== Search Results ===\n"
-	output += fmt.Sprintf("Found %d relevant results", len(results))
-	output += "\n\n"
-
 	// Count results by KB
 	kbCounts := make(map[string]int)
 	for _, r := range results {
 		kbCounts[r.KnowledgeID]++
 	}
 
-	output += "Knowledge Base Coverage:\n"
-	for kbID, count := range kbCounts {
-		output += fmt.Sprintf("  - %s: %d results\n", kbID, count)
-	}
-	output += "\n=== Detailed Results ===\n\n"
+	// Format individual results as XML
+	var ob strings.Builder
+	ob.WriteString(fmt.Sprintf("<search_results count=\"%d\">\n", len(results)))
 
-	// Format individual results
 	formattedResults := make([]map[string]interface{}, 0, len(results))
-	currentKB := ""
 
 	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 
-	// Track chunks per knowledge for statistics
-	knowledgeChunkMap := make(map[string]map[int]bool) // knowledge_id -> set of chunk_index
-	knowledgeTotalMap := make(map[string]int64)        // knowledge_id -> total chunks
-	knowledgeTitleMap := make(map[string]string)       // knowledge_id -> title
+	knowledgeChunkMap := make(map[string]map[int]bool)
+	knowledgeTotalMap := make(map[string]int64)
+	knowledgeTitleMap := make(map[string]string)
 
 	for i, result := range results {
 		var faqMeta *types.FAQChunkMetadata
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
 			meta, err := t.getFAQMetadata(ctx, result.ID, faqMetadataCache)
 			if err != nil {
-				logger.Warnf(
-					ctx,
-					"[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v",
-					result.ID,
-					err,
-				)
+				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v", result.ID, err)
 			} else {
 				faqMeta = meta
 			}
 		}
 
-		// Track chunk indices per knowledge
 		if knowledgeChunkMap[result.KnowledgeID] == nil {
 			knowledgeChunkMap[result.KnowledgeID] = make(map[int]bool)
 		}
 		knowledgeChunkMap[result.KnowledgeID][result.ChunkIndex] = true
 		knowledgeTitleMap[result.KnowledgeID] = result.KnowledgeTitle
 
-		// Group by knowledge base
-		if result.KnowledgeID != currentKB {
-			currentKB = result.KnowledgeID
-			if i > 0 {
-				output += "\n"
-			}
-			output += fmt.Sprintf("[Source Document: %s]\n", result.KnowledgeTitle)
-
-			// Get total chunk count for this knowledge (cache it)
-			// Use KB's tenant_id from searchTargets to support cross-tenant shared KB
-			if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
-				// Get tenant_id from searchTargets using the KB ID from the result
-				effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
-				if effectiveTenantID == 0 {
-					logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
+		// Cache total chunk count per knowledge
+		if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
+			effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
+			if effectiveTenantID == 0 {
+				logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
+				knowledgeTotalMap[result.KnowledgeID] = 0
+			} else {
+				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
+					effectiveTenantID, result.KnowledgeID,
+					&types.Pagination{Page: 1, PageSize: 1},
+					[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
+				)
+				if err != nil {
+					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
 					knowledgeTotalMap[result.KnowledgeID] = 0
 				} else {
-					_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-						effectiveTenantID, result.KnowledgeID,
-						&types.Pagination{Page: 1, PageSize: 1},
-						[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
-					)
-					if err != nil {
-						logger.Warnf(
-							ctx,
-							"[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v",
-							result.KnowledgeID,
-							err,
-						)
-						knowledgeTotalMap[result.KnowledgeID] = 0
-					} else {
-						knowledgeTotalMap[result.KnowledgeID] = total
-					}
+					knowledgeTotalMap[result.KnowledgeID] = total
 				}
 			}
 		}
 
-		// relevanceLevel := GetRelevanceLevel(result.Score)
-		output += fmt.Sprintf("\nResult #%d:\n", i+1)
-		output += fmt.Sprintf(
-			"  [chunk_id: %s][chunk_index: %d]\nContent: %s\n",
-			result.ID,
-			result.ChunkIndex,
-			result.Content,
-		)
+		ob.WriteString(fmt.Sprintf("<result id=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" source=\"%s\">\n",
+			i+1, result.ID, result.ChunkIndex, result.KnowledgeID, result.KnowledgeTitle))
+		ob.WriteString(fmt.Sprintf("<content>%s</content>\n", result.Content))
 
-		// 解析并输出关联的图片信息
 		if result.ImageInfo != "" {
 			var imageInfos []types.ImageInfo
 			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
-				output += fmt.Sprintf("  Related Images (%d):\n", len(imageInfos))
-				for imgIdx, img := range imageInfos {
-					output += fmt.Sprintf("    Image %d:\n", imgIdx+1)
-					if img.URL != "" {
-						output += fmt.Sprintf("      URL: %s\n", img.URL)
-					}
+				for _, img := range imageInfos {
+					ob.WriteString(fmt.Sprintf("<image url=\"%s\">\n", img.URL))
 					if img.Caption != "" {
-						output += fmt.Sprintf("      Caption: %s\n", img.Caption)
+						ob.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", img.Caption))
 					}
 					if img.OCRText != "" {
-						output += fmt.Sprintf("      OCR Text: %s\n", img.OCRText)
+						ob.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", img.OCRText))
 					}
+					ob.WriteString("</image>\n")
 				}
 			}
 		}
 
 		if faqMeta != nil {
+			ob.WriteString("<faq>\n")
 			if faqMeta.StandardQuestion != "" {
-				output += fmt.Sprintf("  FAQ Standard Question: %s\n", faqMeta.StandardQuestion)
+				ob.WriteString(fmt.Sprintf("<question>%s</question>\n", faqMeta.StandardQuestion))
 			}
 			if len(faqMeta.SimilarQuestions) > 0 {
-				output += fmt.Sprintf("  FAQ Similar Questions: %s\n", strings.Join(faqMeta.SimilarQuestions, "; "))
-			}
-			if len(faqMeta.Answers) > 0 {
-				output += "  FAQ Answers:\n"
-				for ansIdx, ans := range faqMeta.Answers {
-					output += fmt.Sprintf("    Answer Choice %d: %s\n", ansIdx+1, ans)
+				for _, sq := range faqMeta.SimilarQuestions {
+					ob.WriteString(fmt.Sprintf("<similar_question>%s</similar_question>\n", sq))
 				}
 			}
+			if len(faqMeta.Answers) > 0 {
+				for _, ans := range faqMeta.Answers {
+					ob.WriteString(fmt.Sprintf("<answer>%s</answer>\n", ans))
+				}
+			}
+			ob.WriteString("</faq>\n")
 		}
 
+		ob.WriteString("</result>\n")
+
 		formattedResults = append(formattedResults, map[string]interface{}{
-			"result_index": i + 1,
-			"chunk_id":     result.ID,
-			"content":      result.Content,
-			// "score":        result.Score,
-			// "relevance_level":     relevanceLevel,
+			"result_index":        i + 1,
+			"chunk_id":            result.ID,
+			"content":             result.Content,
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_title":     result.KnowledgeTitle,
 			"match_type":          result.MatchType,
@@ -1213,11 +1190,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 
 		last := formattedResults[len(formattedResults)-1]
 
-		// 添加图片信息到结构化数据
 		if result.ImageInfo != "" {
 			var imageInfos []types.ImageInfo
 			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
-				// 构建简化的图片信息列表
 				imageList := make([]map[string]string, 0, len(imageInfos))
 				for _, img := range imageInfos {
 					imgData := make(map[string]string)
@@ -1253,36 +1228,23 @@ func (t *KnowledgeSearchTool) formatOutput(
 		}
 	}
 
-	// Add statistics and recommendations for each knowledge
-	output += "\n=== Retrieval Statistics ===\n\n"
+	// Retrieval statistics
+	ob.WriteString("<retrieval_statistics>\n")
 	for knowledgeID, retrievedChunks := range knowledgeChunkMap {
 		totalChunks := knowledgeTotalMap[knowledgeID]
 		retrievedCount := len(retrievedChunks)
 		title := knowledgeTitleMap[knowledgeID]
-
 		if totalChunks > 0 {
-			percentage := float64(retrievedCount) / float64(totalChunks) * 100
 			remaining := totalChunks - int64(retrievedCount)
-
-			output += fmt.Sprintf("Document: %s (%s)\n", title, knowledgeID)
-			output += fmt.Sprintf("  Total Chunks: %d\n", totalChunks)
-			output += fmt.Sprintf("  Retrieved: %d (%.1f%%)\n", retrievedCount, percentage)
-			output += fmt.Sprintf("  Remaining: %d\n", remaining)
-
+			percentage := float64(retrievedCount) / float64(totalChunks) * 100
+			ob.WriteString(fmt.Sprintf("<document_stat knowledge_id=\"%s\" title=\"%s\" total_chunks=\"%d\" retrieved=\"%d\" remaining=\"%d\" coverage=\"%.1f%%\" />\n",
+				knowledgeID, title, totalChunks, retrievedCount, remaining, percentage))
 		}
 	}
+	ob.WriteString("</retrieval_statistics>\n")
+	ob.WriteString("</search_results>")
 
-	// // Add usage guidance
-	// output += "\n\n=== Usage Guidelines ===\n"
-	// output += "- High relevance (>=0.8): directly usable for answering\n"
-	// output += "- Medium relevance (0.6-0.8): use as supplementary reference\n"
-	// output += "- Low relevance (<0.6): use with caution, may not be accurate\n"
-	// if totalBeforeFilter > len(results) {
-	// 	output += "- Results below threshold have been automatically filtered\n"
-	// }
-	// output += "- Full content is already included in search results above\n"
-	// output += "- Results are deduplicated across knowledge bases and sorted by relevance\n"
-	// output += "- Use list_knowledge_chunks to expand context if needed\n"
+	output := ob.String()
 
 	data := map[string]interface{}{
 		"knowledge_base_ids": kbsToSearch,

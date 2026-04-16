@@ -105,79 +105,74 @@ func AvailablePlaceholders() []PlaceholderDefinition {
 	return result
 }
 
-// formatKnowledgeBaseList formats knowledge base information for the prompt
+// formatKnowledgeBaseList formats knowledge base information as XML for the prompt
 func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	if len(kbInfos) == 0 {
-		return "None"
+		return "<knowledge_bases />"
 	}
 
-	var builder strings.Builder
-	builder.WriteString("\nThe following knowledge bases have been selected by the user for this conversation. ")
-	builder.WriteString("You should search within these knowledge bases to find relevant information.\n\n")
-	for i, kb := range kbInfos {
-		// Display knowledge base name and ID
-		builder.WriteString(fmt.Sprintf("%d. **%s** (knowledge_base_id: `%s`)\n", i+1, kb.Name, kb.ID))
-
-		// Display knowledge base type
+	var b strings.Builder
+	b.WriteString("<knowledge_bases>\n")
+	for _, kb := range kbInfos {
 		kbType := kb.Type
 		if kbType == "" {
-			kbType = "document" // Default type
+			kbType = "document"
 		}
-		builder.WriteString(fmt.Sprintf("   - Type: %s\n", kbType))
-
+		b.WriteString(fmt.Sprintf("<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\">\n",
+			kb.ID, kb.Name, kbType, kb.DocCount))
 		if kb.Description != "" {
-			builder.WriteString(fmt.Sprintf("   - Description: %s\n", kb.Description))
+			b.WriteString(fmt.Sprintf("<description>%s</description>\n", kb.Description))
 		}
-		builder.WriteString(fmt.Sprintf("   - Document count: %d\n", kb.DocCount))
 
-		// Display recent documents if available
-		// For FAQ type knowledge bases, adjust the display format
 		if len(kb.RecentDocs) > 0 {
 			if kbType == "faq" {
-				// FAQ knowledge base: show Q&A pairs in a more compact format
-				builder.WriteString("   - Recent FAQ entries:\n\n")
-				builder.WriteString("     | # | Question  | Answers | Chunk ID | Knowledge ID | Created At |\n")
-				builder.WriteString("     |---|-------------------|---------|----------|--------------|------------|\n")
+				b.WriteString("<faq_entries>\n")
 				for j, doc := range kb.RecentDocs {
-					if j >= 10 { // Limit to 10 documents
+					if j >= 10 {
 						break
 					}
 					question := doc.FAQStandardQuestion
 					if question == "" {
 						question = doc.FileName
 					}
-					answers := "-"
+					b.WriteString(fmt.Sprintf("<faq chunk_id=\"%s\" knowledge_id=\"%s\" created_at=\"%s\">\n",
+						doc.ChunkID, doc.KnowledgeID, doc.CreatedAt))
+					b.WriteString(fmt.Sprintf("<question>%s</question>\n", question))
 					if len(doc.FAQAnswers) > 0 {
-						answers = strings.Join(doc.FAQAnswers, " | ")
+						for _, ans := range doc.FAQAnswers {
+							b.WriteString(fmt.Sprintf("<answer>%s</answer>\n", ans))
+						}
 					}
-					builder.WriteString(fmt.Sprintf("     | %d | %s | %s | `%s` | `%s` | %s |\n",
-						j+1, question, answers, doc.ChunkID, doc.KnowledgeID, doc.CreatedAt))
+					b.WriteString("</faq>\n")
 				}
+				b.WriteString("</faq_entries>\n")
 			} else {
-				// Document knowledge base: show documents in standard format
-				builder.WriteString("   - Recently added documents:\n\n")
-				builder.WriteString("     | # | Document Name | Type | Created At | Knowledge ID | File Size | Summary |\n")
-				builder.WriteString("     |---|---------------|------|------------|--------------|----------|---------|\n")
+				b.WriteString("<recent_documents>\n")
 				for j, doc := range kb.RecentDocs {
-					if j >= 10 { // Limit to 10 documents
+					if j >= 10 {
 						break
 					}
 					docName := doc.Title
 					if docName == "" {
 						docName = doc.FileName
 					}
-					// Format file size
 					fileSize := formatFileSize(doc.FileSize)
-					summary := formatDocSummary(doc.Description, 120)
-					builder.WriteString(fmt.Sprintf("     | %d | %s | %s | %s | `%s` | %s | %s |\n",
-						j+1, docName, doc.Type, doc.CreatedAt, doc.KnowledgeID, fileSize, summary))
+					b.WriteString(fmt.Sprintf("<document knowledge_id=\"%s\" type=\"%s\" file_size=\"%s\" created_at=\"%s\">\n",
+						doc.KnowledgeID, doc.Type, fileSize, doc.CreatedAt))
+					b.WriteString(fmt.Sprintf("<name>%s</name>\n", docName))
+					if doc.Description != "" {
+						summary := formatDocSummary(doc.Description, 120)
+						b.WriteString(fmt.Sprintf("<summary>%s</summary>\n", summary))
+					}
+					b.WriteString("</document>\n")
 				}
+				b.WriteString("</recent_documents>\n")
 			}
-			builder.WriteString("\n")
 		}
-		builder.WriteString("\n")
+		b.WriteString("</knowledge_base>\n")
 	}
-	return builder.String()
+	b.WriteString("</knowledge_bases>")
+	return b.String()
 }
 
 // renderPromptPlaceholders renders placeholders in the prompt template
