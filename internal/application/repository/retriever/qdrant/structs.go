@@ -9,6 +9,8 @@ import (
 type qdrantRepository struct {
 	client             *qdrant.Client
 	collectionBaseName string
+	shardNumber        int // 0 = use Qdrant server default
+	replicationFactor  int // 0 = use Qdrant server default
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
 }

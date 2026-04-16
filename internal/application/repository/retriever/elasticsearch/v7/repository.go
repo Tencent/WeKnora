@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	elasticsearchRetriever "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch"
@@ -29,22 +28,31 @@ type elasticsearchRepository struct {
 	client           *elasticsearch.Client
 	index            string
 	useKeywordSuffix bool // Whether to append .keyword suffix to ID field names in queries
+	numberOfShards   int  // Shard count for index creation (0 = ES default)
+	numberOfReplicas int  // Replica count for index creation (-1 = unset, use ES default)
 }
 
+// NewElasticsearchEngineRepository creates and initializes a new Elasticsearch v7 repository.
+// indexCfg is optional — pass nil to use env var / default values (env path).
 func NewElasticsearchEngineRepository(client *elasticsearch.Client,
 	config *config.Config,
+	indexCfg *typesLocal.IndexConfig,
 ) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[ElasticsearchV7] Initializing Elasticsearch v7 retriever engine repository")
 
-	indexName := os.Getenv("ELASTICSEARCH_INDEX")
-	if indexName == "" {
-		log.Warn("[ElasticsearchV7] ELASTICSEARCH_INDEX environment variable not set, using default index name")
-		indexName = "xwrag_default"
-	}
+	indexName := typesLocal.ResolveIndexName(indexCfg, "ELASTICSEARCH_INDEX", "xwrag_default")
 
 	log.Infof("[ElasticsearchV7] Using index: %s", indexName)
-	res := &elasticsearchRepository{client: client, index: indexName}
+	res := &elasticsearchRepository{
+		client:           client,
+		index:            indexName,
+		numberOfShards:   indexCfg.GetNumberOfShards(0),
+		numberOfReplicas: indexCfg.GetNumberOfReplicas(-1),
+	}
+	if err := res.createIndexIfNotExists(context.Background()); err != nil {
+		log.Errorf("[ElasticsearchV7] Failed to create index: %v", err)
+	}
 	res.detectFieldTypes(context.Background())
 	return res
 }
@@ -116,6 +124,63 @@ func (e *elasticsearchRepository) detectFieldTypes(ctx context.Context) {
 		e.useKeywordSuffix = true
 		log.Infof("[ElasticsearchV7] Detected %s type for ID fields, querying with .keyword suffix", fieldType)
 	}
+}
+
+// createIndexIfNotExists checks if the specified index exists and creates it if not.
+// Uses esapi low-level client since v7 SDK does not have typed API.
+func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) error {
+	log := logger.GetLogger(ctx)
+	log.Debugf("[ElasticsearchV7] Checking if index exists: %s", e.index)
+
+	res, err := e.client.Indices.Exists([]string{e.index}, e.client.Indices.Exists.WithContext(ctx))
+	if err != nil {
+		return fmt.Errorf("check index existence: %w", err)
+	}
+	defer res.Body.Close()
+
+	if !res.IsError() {
+		log.Debugf("[ElasticsearchV7] Index already exists: %s", e.index)
+		return nil
+	}
+
+	// Build settings body with optional shards/replicas
+	var body string
+	if e.numberOfShards > 0 || e.numberOfReplicas >= 0 {
+		settings := make(map[string]interface{})
+		if e.numberOfShards > 0 {
+			settings["number_of_shards"] = e.numberOfShards
+		}
+		if e.numberOfReplicas >= 0 {
+			settings["number_of_replicas"] = e.numberOfReplicas
+		}
+		bodyBytes, err := json.Marshal(map[string]interface{}{"settings": settings})
+		if err != nil {
+			return fmt.Errorf("marshal index settings: %w", err)
+		}
+		body = string(bodyBytes)
+	}
+
+	log.Infof("[ElasticsearchV7] Creating index: %s", e.index)
+	var opts []func(*esapi.IndicesCreateRequest)
+	opts = append(opts, e.client.Indices.Create.WithContext(ctx))
+	if body != "" {
+		opts = append(opts, e.client.Indices.Create.WithBody(strings.NewReader(body)))
+	}
+
+	createRes, err := e.client.Indices.Create(e.index, opts...)
+	if err != nil {
+		return fmt.Errorf("create index: %w", err)
+	}
+	defer createRes.Body.Close()
+
+	if createRes.IsError() {
+		// Log detailed response server-side; return generic message to avoid leaking cluster info
+		log.Errorf("[ElasticsearchV7] Create index response: %s", createRes.String())
+		return fmt.Errorf("failed to create index %s", e.index)
+	}
+
+	log.Infof("[ElasticsearchV7] Index created successfully: %s", e.index)
+	return nil
 }
 
 func (e *elasticsearchRepository) EngineType() typesLocal.RetrieverEngineType {

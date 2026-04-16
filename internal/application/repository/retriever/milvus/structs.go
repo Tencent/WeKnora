@@ -12,6 +12,8 @@ type milvusRepository struct {
 	client             *client.Client
 	collectionBaseName string
 	metricType         entity.MetricType
+	shardsNum          int // 0 = use Milvus default (1)
+	replicaNumber      int // 0 = use Milvus default (1); set at LoadCollection time
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
 }

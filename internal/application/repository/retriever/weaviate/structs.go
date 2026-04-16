@@ -9,6 +9,8 @@ import (
 type weaviateRepository struct {
 	client             *weaviate.Client
 	collectionBaseName string
+	replicationFactor  int // 0 = use Weaviate server default
+	desiredShardCount  int // 0 = use Weaviate server default
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
 }

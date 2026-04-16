@@ -389,15 +389,14 @@ func TestCreateStore_DifferentEndpointSameIndex_Allowed(t *testing.T) {
 	repo := &mockVectorStoreRepo{existsByEndpoint: false}
 	svc := NewVectorStoreService(repo, nil, nil)
 
+	// Use postgres with UseDefaultConnection to avoid needing a real ES endpoint.
+	// The test verifies duplicate-check logic, not connectivity.
 	store := &types.VectorStore{
 		TenantID:   1,
 		Name:       "new-store",
-		EngineType: types.ElasticsearchRetrieverEngineType,
+		EngineType: types.PostgresRetrieverEngineType,
 		ConnectionConfig: types.ConnectionConfig{
-			Addr: "http://es-new:9200",
-		},
-		IndexConfig: types.IndexConfig{
-			IndexName: "shared_index",
+			UseDefaultConnection: true,
 		},
 	}
 

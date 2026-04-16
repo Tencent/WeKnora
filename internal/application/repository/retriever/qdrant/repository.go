@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -30,20 +29,19 @@ const (
 	fieldIsEnabled        = "is_enabled"
 )
 
-// NewQdrantRetrieveEngineRepository creates and initializes a new Qdrant repository
-func NewQdrantRetrieveEngineRepository(client *qdrant.Client) interfaces.RetrieveEngineRepository {
+// NewQdrantRetrieveEngineRepository creates and initializes a new Qdrant repository.
+// indexCfg is optional — pass nil to use env var / default values (env path).
+func NewQdrantRetrieveEngineRepository(client *qdrant.Client, indexCfg *types.IndexConfig) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[Qdrant] Initializing Qdrant retriever engine repository")
 
-	collectionBaseName := os.Getenv(envQdrantCollection)
-	if collectionBaseName == "" {
-		log.Warn("[Qdrant] QDRANT_COLLECTION environment variable not set, using default collection name")
-		collectionBaseName = defaultCollectionName
-	}
+	collectionBaseName := types.ResolveCollectionName(indexCfg, envQdrantCollection, defaultCollectionName)
 
 	res := &qdrantRepository{
 		client:             client,
 		collectionBaseName: collectionBaseName,
+		shardNumber:        indexCfg.GetShardNumber(0),
+		replicationFactor:  indexCfg.GetReplicationFactor(0),
 	}
 
 	log.Info("[Qdrant] Successfully initialized repository")
@@ -82,6 +80,8 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 				Size:     uint64(dimension),
 				Distance: qdrant.Distance_Cosine,
 			}),
+			ShardNumber:       types.OptionalUint32(q.shardNumber),
+			ReplicationFactor: types.OptionalUint32(q.replicationFactor),
 		})
 		if err != nil {
 			log.Errorf("[Qdrant] Failed to create collection: %v", err)

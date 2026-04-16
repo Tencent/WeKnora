@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	elasticsearchRetriever "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch"
@@ -24,25 +23,28 @@ type elasticsearchRepository struct {
 	client           *elasticsearch.TypedClient // Elasticsearch client instance
 	index            string                     // Name of the Elasticsearch index to use
 	useKeywordSuffix bool                       // Whether to append .keyword suffix to ID field names in queries
+	numberOfShards   int                        // Shard count for index creation (0 = ES default)
+	numberOfReplicas int                        // Replica count for index creation (-1 = unset, use ES default)
 }
 
-// NewElasticsearchEngineRepository creates and initializes a new Elasticsearch v8 repository
-// It sets up the index and returns a repository instance ready for use
+// NewElasticsearchEngineRepository creates and initializes a new Elasticsearch v8 repository.
+// indexCfg is optional — pass nil to use env var / default values (env path).
 func NewElasticsearchEngineRepository(client *elasticsearch.TypedClient,
 	config *config.Config,
+	indexCfg *typesLocal.IndexConfig,
 ) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[Elasticsearch] Initializing Elasticsearch v8 retriever engine repository")
 
-	// Get index name from environment variable or use default
-	indexName := os.Getenv("ELASTICSEARCH_INDEX")
-	if indexName == "" {
-		log.Warn("[Elasticsearch] ELASTICSEARCH_INDEX environment variable not set, using default index name")
-		indexName = "xwrag_default"
-	}
+	indexName := typesLocal.ResolveIndexName(indexCfg, "ELASTICSEARCH_INDEX", "xwrag_default")
 
 	// Create repository instance and ensure index exists
-	res := &elasticsearchRepository{client: client, index: indexName}
+	res := &elasticsearchRepository{
+		client:           client,
+		index:            indexName,
+		numberOfShards:   indexCfg.GetNumberOfShards(0),
+		numberOfReplicas: indexCfg.GetNumberOfReplicas(-1),
+	}
 	if err := res.createIndexIfNotExists(context.Background()); err != nil {
 		log.Errorf("[Elasticsearch] Failed to create index: %v", err)
 	} else {
@@ -355,9 +357,20 @@ func (e *elasticsearchRepository) createIndexIfNotExists(ctx context.Context) er
 		return nil
 	}
 
-	// Create index if it doesn't exist
+	// Create index if it doesn't exist, with optional shards/replicas settings
 	log.Infof("[Elasticsearch] Creating index: %s", e.index)
-	_, err = e.client.Indices.Create(e.index).Do(ctx)
+	createReq := e.client.Indices.Create(e.index)
+	if e.numberOfShards > 0 || e.numberOfReplicas >= 0 {
+		settings := &types.IndexSettings{}
+		if e.numberOfShards > 0 {
+			settings.NumberOfShards = fmt.Sprintf("%d", e.numberOfShards)
+		}
+		if e.numberOfReplicas >= 0 {
+			settings.NumberOfReplicas = fmt.Sprintf("%d", e.numberOfReplicas)
+		}
+		createReq = createReq.Settings(settings)
+	}
+	_, err = createReq.Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to create index: %v", err)
 		return err

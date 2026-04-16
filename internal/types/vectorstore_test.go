@@ -622,7 +622,7 @@ func TestIndexConfig_GetIndexNameOrDefault(t *testing.T) {
 			name:       "weaviate default",
 			config:     IndexConfig{},
 			engineType: WeaviateRetrieverEngineType,
-			expected:   "WeKnora",
+			expected:   "Weknora_embeddings",
 		},
 		// Postgres (no index config)
 		{
@@ -644,4 +644,302 @@ func TestIndexConfig_GetIndexNameOrDefault(t *testing.T) {
 			assert.Equal(t, tt.expected, tt.config.GetIndexNameOrDefault(tt.engineType))
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// IndexConfig — getter helpers
+// ---------------------------------------------------------------------------
+
+func TestIndexConfig_GetterHelpers(t *testing.T) {
+	t.Run("nil receiver returns default", func(t *testing.T) {
+		var ic *IndexConfig
+		assert.Equal(t, 5, ic.GetNumberOfShards(5))
+		assert.Equal(t, -1, ic.GetNumberOfReplicas(-1))
+		assert.Equal(t, 0, ic.GetShardNumber(0))
+		assert.Equal(t, 0, ic.GetReplicationFactor(0))
+		assert.Equal(t, 1, ic.GetShardsNum(1))
+		assert.Equal(t, 0, ic.GetReplicaNumber(0))
+		assert.Equal(t, 0, ic.GetDesiredShardCount(0))
+	})
+
+	t.Run("zero value returns default", func(t *testing.T) {
+		ic := &IndexConfig{}
+		assert.Equal(t, 5, ic.GetNumberOfShards(5))
+		assert.Equal(t, -1, ic.GetNumberOfReplicas(-1))
+		assert.Equal(t, 0, ic.GetShardNumber(0))
+		assert.Equal(t, 0, ic.GetReplicationFactor(0))
+		assert.Equal(t, 1, ic.GetShardsNum(1))
+		assert.Equal(t, 0, ic.GetReplicaNumber(0))
+		assert.Equal(t, 0, ic.GetDesiredShardCount(0))
+	})
+
+	t.Run("positive value overrides default", func(t *testing.T) {
+		ic := &IndexConfig{
+			NumberOfShards:    3,
+			NumberOfReplicas:  2,
+			ShardNumber:       4,
+			ReplicationFactor: 3,
+			ShardsNum:         5,
+			ReplicaNumber:     2,
+			DesiredShardCount: 3,
+		}
+		assert.Equal(t, 3, ic.GetNumberOfShards(1))
+		assert.Equal(t, 2, ic.GetNumberOfReplicas(-1))
+		assert.Equal(t, 4, ic.GetShardNumber(0))
+		assert.Equal(t, 3, ic.GetReplicationFactor(0))
+		assert.Equal(t, 5, ic.GetShardsNum(1))
+		assert.Equal(t, 2, ic.GetReplicaNumber(0))
+		assert.Equal(t, 3, ic.GetDesiredShardCount(0))
+	})
+
+	t.Run("negative value returns default (treated as unset)", func(t *testing.T) {
+		ic := &IndexConfig{
+			NumberOfShards:    -1,
+			NumberOfReplicas:  -1,
+			ShardNumber:       -5,
+			ReplicationFactor: -1,
+			ShardsNum:         -1,
+			ReplicaNumber:     -1,
+			DesiredShardCount: -1,
+		}
+		assert.Equal(t, 1, ic.GetNumberOfShards(1))
+		assert.Equal(t, -1, ic.GetNumberOfReplicas(-1))
+		assert.Equal(t, 0, ic.GetShardNumber(0))
+		assert.Equal(t, 0, ic.GetReplicationFactor(0))
+		assert.Equal(t, 1, ic.GetShardsNum(1))
+		assert.Equal(t, 0, ic.GetReplicaNumber(0))
+		assert.Equal(t, 0, ic.GetDesiredShardCount(0))
+	})
+}
+
+// ---------------------------------------------------------------------------
+// IndexConfig — resolve helpers
+// ---------------------------------------------------------------------------
+
+func TestResolveIndexName(t *testing.T) {
+	t.Run("nil IndexConfig falls back to env var", func(t *testing.T) {
+		t.Setenv("ELASTICSEARCH_INDEX", "env_index")
+		assert.Equal(t, "env_index", ResolveIndexName(nil, "ELASTICSEARCH_INDEX", "default"))
+	})
+
+	t.Run("nil IndexConfig falls back to default when env empty", func(t *testing.T) {
+		t.Setenv("ELASTICSEARCH_INDEX", "")
+		assert.Equal(t, "xwrag_default", ResolveIndexName(nil, "ELASTICSEARCH_INDEX", "xwrag_default"))
+	})
+
+	t.Run("IndexConfig value takes precedence over env var", func(t *testing.T) {
+		t.Setenv("ELASTICSEARCH_INDEX", "env_index")
+		ic := &IndexConfig{IndexName: "custom_index"}
+		assert.Equal(t, "custom_index", ResolveIndexName(ic, "ELASTICSEARCH_INDEX", "default"))
+	})
+
+	t.Run("empty IndexConfig.IndexName falls back to env var", func(t *testing.T) {
+		t.Setenv("ELASTICSEARCH_INDEX", "env_index")
+		ic := &IndexConfig{}
+		assert.Equal(t, "env_index", ResolveIndexName(ic, "ELASTICSEARCH_INDEX", "default"))
+	})
+}
+
+func TestResolveCollectionName(t *testing.T) {
+	t.Run("nil IndexConfig falls back to env var", func(t *testing.T) {
+		t.Setenv("QDRANT_COLLECTION", "env_collection")
+		assert.Equal(t, "env_collection", ResolveCollectionName(nil, "QDRANT_COLLECTION", "default"))
+	})
+
+	t.Run("CollectionPrefix takes precedence over CollectionName", func(t *testing.T) {
+		ic := &IndexConfig{CollectionPrefix: "prefix_name", CollectionName: "full_name"}
+		assert.Equal(t, "prefix_name", ResolveCollectionName(ic, "QDRANT_COLLECTION", "default"))
+	})
+
+	t.Run("CollectionName used when CollectionPrefix empty", func(t *testing.T) {
+		ic := &IndexConfig{CollectionName: "full_name"}
+		assert.Equal(t, "full_name", ResolveCollectionName(ic, "MILVUS_COLLECTION", "default"))
+	})
+
+	t.Run("empty IndexConfig falls back to default", func(t *testing.T) {
+		t.Setenv("QDRANT_COLLECTION", "")
+		ic := &IndexConfig{}
+		assert.Equal(t, "weknora_embeddings", ResolveCollectionName(ic, "QDRANT_COLLECTION", "weknora_embeddings"))
+	})
+}
+
+// ---------------------------------------------------------------------------
+// OptionalUint32
+// ---------------------------------------------------------------------------
+
+func TestOptionalUint32(t *testing.T) {
+	t.Run("zero returns nil", func(t *testing.T) {
+		assert.Nil(t, OptionalUint32(0))
+	})
+
+	t.Run("negative returns nil", func(t *testing.T) {
+		assert.Nil(t, OptionalUint32(-1))
+		assert.Nil(t, OptionalUint32(-100))
+	})
+
+	t.Run("positive returns pointer to uint32", func(t *testing.T) {
+		result := OptionalUint32(3)
+		require.NotNil(t, result)
+		assert.Equal(t, uint32(3), *result)
+	})
+
+	t.Run("large positive value", func(t *testing.T) {
+		result := OptionalUint32(64)
+		require.NotNil(t, result)
+		assert.Equal(t, uint32(64), *result)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// ValidateIndexConfig
+// ---------------------------------------------------------------------------
+
+func TestValidateIndexConfig(t *testing.T) {
+	t.Run("empty config is valid", func(t *testing.T) {
+		assert.NoError(t, ValidateIndexConfig(IndexConfig{}))
+	})
+
+	t.Run("valid config with all fields", func(t *testing.T) {
+		ic := IndexConfig{
+			IndexName:         "my_index",
+			NumberOfShards:    3,
+			NumberOfReplicas:  1,
+			CollectionPrefix:  "my_collection",
+			ShardNumber:       4,
+			ReplicationFactor: 2,
+			ShardsNum:         2,
+			ReplicaNumber:     3,
+			DesiredShardCount: 2,
+		}
+		assert.NoError(t, ValidateIndexConfig(ic))
+	})
+
+	// --- Name validation ---
+	t.Run("index_name with special chars rejected", func(t *testing.T) {
+		ic := IndexConfig{IndexName: "my index*"}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "index_name")
+	})
+
+	t.Run("index_name starting with number rejected", func(t *testing.T) {
+		ic := IndexConfig{IndexName: "123abc"}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+	})
+
+	t.Run("collection_prefix with slash rejected", func(t *testing.T) {
+		ic := IndexConfig{CollectionPrefix: "path/to/collection"}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "collection_prefix")
+	})
+
+	t.Run("collection_name with dot rejected", func(t *testing.T) {
+		ic := IndexConfig{CollectionName: "my.collection"}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "collection_name")
+	})
+
+	t.Run("valid names with underscore and hyphen", func(t *testing.T) {
+		ic := IndexConfig{
+			IndexName:        "my_index-v2",
+			CollectionPrefix: "Weknora_embeddings",
+			CollectionName:   "custom-collection-name",
+		}
+		assert.NoError(t, ValidateIndexConfig(ic))
+	})
+
+	// --- Numeric bounds ---
+	t.Run("number_of_shards exceeds max", func(t *testing.T) {
+		ic := IndexConfig{NumberOfShards: 100}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "number_of_shards")
+	})
+
+	t.Run("negative number_of_shards rejected", func(t *testing.T) {
+		ic := IndexConfig{NumberOfShards: -1}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "number_of_shards")
+	})
+
+	t.Run("replication_factor exceeds max", func(t *testing.T) {
+		ic := IndexConfig{ReplicationFactor: 50}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "replication_factor")
+	})
+
+	t.Run("shard_number at max boundary is valid", func(t *testing.T) {
+		ic := IndexConfig{ShardNumber: 64}
+		assert.NoError(t, ValidateIndexConfig(ic))
+	})
+
+	t.Run("replication_factor at max boundary is valid", func(t *testing.T) {
+		ic := IndexConfig{ReplicationFactor: 10}
+		assert.NoError(t, ValidateIndexConfig(ic))
+	})
+
+	t.Run("shards_num exceeds max", func(t *testing.T) {
+		ic := IndexConfig{ShardsNum: 999}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "shards_num")
+	})
+
+	t.Run("replica_number exceeds max", func(t *testing.T) {
+		ic := IndexConfig{ReplicaNumber: 50}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "replica_number")
+	})
+
+	t.Run("desired_shard_count exceeds max", func(t *testing.T) {
+		ic := IndexConfig{DesiredShardCount: 100}
+		err := ValidateIndexConfig(ic)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "desired_shard_count")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// IndexConfig — scalability fields round-trip
+// ---------------------------------------------------------------------------
+
+func TestIndexConfig_ScalabilityFieldsRoundTrip(t *testing.T) {
+	t.Run("scalability fields serialize and deserialize", func(t *testing.T) {
+		original := IndexConfig{
+			IndexName:         "my_index",
+			NumberOfShards:    3,
+			NumberOfReplicas:  1,
+			CollectionPrefix:  "my_prefix",
+			ShardNumber:       4,
+			ReplicationFactor: 2,
+			ShardsNum:         5,
+			ReplicaNumber:     3,
+			DesiredShardCount: 2,
+		}
+		raw, err := original.Value()
+		require.NoError(t, err)
+
+		var scanned IndexConfig
+		require.NoError(t, scanned.Scan(raw.([]byte)))
+		assert.Equal(t, original, scanned)
+	})
+
+	t.Run("scalability fields omitted when zero", func(t *testing.T) {
+		raw, err := IndexConfig{IndexName: "test"}.Value()
+		require.NoError(t, err)
+
+		var parsed map[string]interface{}
+		require.NoError(t, json.Unmarshal(raw.([]byte), &parsed))
+		assert.NotContains(t, parsed, "shard_number")
+		assert.NotContains(t, parsed, "replication_factor")
+		assert.NotContains(t, parsed, "shards_num")
+		assert.NotContains(t, parsed, "replica_number")
+		assert.NotContains(t, parsed, "desired_shard_count")
+	})
 }

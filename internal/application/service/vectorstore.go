@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
@@ -44,6 +45,11 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		return err
 	}
 
+	// 2.5. Index config validation (bounds, name characters)
+	if err := types.ValidateIndexConfig(store.IndexConfig); err != nil {
+		return err
+	}
+
 	// 3. Duplicate check — DB stores
 	endpoint := store.ConnectionConfig.GetEndpoint()
 	indexName := store.IndexConfig.GetIndexNameOrDefault(store.EngineType)
@@ -66,7 +72,19 @@ func (s *vectorStoreService) CreateStore(ctx context.Context, store *types.Vecto
 		}
 	}
 
-	// 5. Persist
+	// 5. Auto-detect server version via connection test.
+	// This is required for engines where the version determines the SDK (e.g., ES v7 vs v8).
+	// Without it, the wrong SDK may be used causing protocol errors (406, etc.).
+	version, err := s.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
+	if err != nil {
+		return errors.NewBadRequestError(
+			fmt.Sprintf("connection test failed: %s. Ensure the server is reachable before saving.", err.Error()))
+	}
+	if version != "" {
+		store.ConnectionConfig.Version = version
+	}
+
+	// 6. Persist
 	logger.Infof(ctx, "Creating vector store: tenant=%d, name=%s, engine=%s",
 		store.TenantID, secutils.SanitizeForLog(store.Name), store.EngineType)
 	if err := s.repo.Create(ctx, store); err != nil {

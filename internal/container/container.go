@@ -771,7 +771,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create elasticsearch_v8 client failed: %v", err)
 		} else {
-			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg)
+			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
@@ -793,7 +793,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create elasticsearch_v7 client failed: %v", err)
 		} else {
-			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg)
+			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
@@ -841,7 +841,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create qdrant client failed: %v", err)
 		} else {
-			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client)
+			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					qdrantRepository, types.QdrantRetrieverEngineType,
@@ -884,7 +884,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create weaviate client failed: %v", err)
 		} else {
-			weaviateRepository := weaviateRepo.NewWeaviateRetrieveEngineRepository(weaviateClient)
+			weaviateRepository := weaviateRepo.NewWeaviateRetrieveEngineRepository(weaviateClient, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					weaviateRepository, types.WeaviateRetrieverEngineType,
@@ -921,7 +921,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create milvus client failed: %v", err)
 		} else {
-			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli)
+			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					milvusRepository, types.MilvusRetrieverEngineType,

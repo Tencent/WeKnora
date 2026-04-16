@@ -84,9 +84,9 @@ func createElasticsearchEngine(store types.VectorStore, cfg *config.Config) (int
 	// Version is auto-detected by PR2's TestConnection and saved to connection_config.
 	// Empty version defaults to v8 (latest SDK).
 	if isESv7(cc.Version) {
-		return createElasticsearchV7Engine(cc, cfg)
+		return createElasticsearchV7Engine(store, cfg)
 	}
-	return createElasticsearchV8Engine(cc, cfg)
+	return createElasticsearchV8Engine(store, cfg)
 }
 
 // isESv7 checks if the detected ES version is 7.x.
@@ -94,7 +94,8 @@ func isESv7(version string) bool {
 	return strings.HasPrefix(version, "7.")
 }
 
-func createElasticsearchV8Engine(cc types.ConnectionConfig, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchV8Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
 	client, err := elasticsearch.NewTypedClient(elasticsearch.Config{
 		Addresses: []string{cc.Addr},
 		Username:  cc.Username,
@@ -103,11 +104,12 @@ func createElasticsearchV8Engine(cc types.ConnectionConfig, cfg *config.Config) 
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch v8 client: %w", err)
 	}
-	repo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg)
+	repo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
 }
 
-func createElasticsearchV7Engine(cc types.ConnectionConfig, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+func createElasticsearchV7Engine(store types.VectorStore, cfg *config.Config) (interfaces.RetrieveEngineService, error) {
+	cc := store.ConnectionConfig
 	client, err := esv7.NewClient(esv7.Config{
 		Addresses: []string{cc.Addr},
 		Username:  cc.Username,
@@ -116,7 +118,7 @@ func createElasticsearchV7Engine(cc types.ConnectionConfig, cfg *config.Config) 
 	if err != nil {
 		return nil, fmt.Errorf("create elasticsearch v7 client: %w", err)
 	}
-	repo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg)
+	repo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.ElasticsearchRetrieverEngineType), nil
 }
 
@@ -136,7 +138,7 @@ func createQdrantEngine(store types.VectorStore) (interfaces.RetrieveEngineServi
 	if err != nil {
 		return nil, fmt.Errorf("create qdrant client: %w", err)
 	}
-	repo := qdrantRepo.NewQdrantRetrieveEngineRepository(client)
+	repo := qdrantRepo.NewQdrantRetrieveEngineRepository(client, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.QdrantRetrieverEngineType), nil
 }
 
@@ -164,7 +166,7 @@ func createMilvusEngine(ctx context.Context, store types.VectorStore) (interface
 	if err != nil {
 		return nil, fmt.Errorf("create milvus client: %w", err)
 	}
-	repo := milvusRepo.NewMilvusRetrieveEngineRepository(client)
+	repo := milvusRepo.NewMilvusRetrieveEngineRepository(client, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.MilvusRetrieverEngineType), nil
 }
 
@@ -200,6 +202,6 @@ func createWeaviateEngine(store types.VectorStore) (interfaces.RetrieveEngineSer
 	if err != nil {
 		return nil, fmt.Errorf("create weaviate client: %w", err)
 	}
-	repo := weaviateRepo.NewWeaviateRetrieveEngineRepository(client)
+	repo := weaviateRepo.NewWeaviateRetrieveEngineRepository(client, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.WeaviateRetrieverEngineType), nil
 }
