@@ -484,78 +484,64 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 	return []VectorStoreTypeInfo{
 		{
 			Type:        "elasticsearch",
-			DisplayName: "Elasticsearch (Keywords + Vector)",
+			DisplayName: "Elasticsearch",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "Elasticsearch URL (e.g., http://localhost:9200)"},
-				{Name: "username", Type: "string", Required: false},
-				{Name: "password", Type: "string", Required: false, Sensitive: true},
+				{Name: "addr", Type: "string", Required: true, Description: "URL", Default: "http://localhost:9200"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "elastic"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "index_name", Type: "string", Required: false, Default: "xwrag_default"},
-				{Name: "number_of_shards", Type: "number", Required: false},
-				{Name: "number_of_replicas", Type: "number", Required: false},
+				{Name: "index_name", Type: "string", Required: false, Description: "Index Name", Default: "weknora"},
+				{Name: "number_of_shards", Type: "number", Required: false, Description: "Shards", Default: 4},
+				{Name: "number_of_replicas", Type: "number", Required: false, Description: "Replicas", Default: 1},
 			},
 		},
-		{
-			Type:        "postgres",
-			DisplayName: "PostgreSQL (Keywords + Vector)",
-			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "use_default_connection", Type: "boolean", Required: false, Default: true,
-					Description: "Use the application's default database connection"},
-				{Name: "addr", Type: "string", Required: false,
-					Description: "PostgreSQL connection string (required if use_default_connection is false)"},
-				{Name: "username", Type: "string", Required: false},
-				{Name: "password", Type: "string", Required: false, Sensitive: true},
-			},
-		},
+		// PostgreSQL and SQLite are excluded from the type list because they only support
+		// the app's default DB connection (UseDefaultConnection=true). They appear as
+		// env stores when configured via RETRIEVE_DRIVER but cannot be added as DB stores.
 		{
 			Type:        "qdrant",
-			DisplayName: "Qdrant (Keywords + Vector)",
+			DisplayName: "Qdrant",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "host", Type: "string", Required: true, Description: "Qdrant host"},
-				{Name: "port", Type: "number", Required: false, Default: 6334},
-				{Name: "api_key", Type: "string", Required: false, Sensitive: true},
-				{Name: "use_tls", Type: "boolean", Required: false, Default: false},
+				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "localhost"},
+				{Name: "port", Type: "number", Required: false, Description: "Port", Default: 6334},
+				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
+				{Name: "use_tls", Type: "boolean", Required: false, Description: "Use TLS", Default: false},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Default: "weknora_embeddings", Description: "Collection Prefix"},
-				{Name: "shard_number", Type: "number", Required: false, Default: 1, Description: "Shard Number"},
-				{Name: "replication_factor", Type: "number", Required: false, Default: 1, Description: "Replication Factor"},
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "weknora_embeddings"},
+				{Name: "shard_number", Type: "number", Required: false, Description: "Shard Number", Default: 1},
+				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
 			},
 		},
 		{
 			Type:        "milvus",
-			DisplayName: "Milvus (Keywords + Vector)",
+			DisplayName: "Milvus",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "Milvus address (e.g., localhost:19530)"},
-				{Name: "username", Type: "string", Required: false},
-				{Name: "password", Type: "string", Required: false, Sensitive: true},
+				{Name: "addr", Type: "string", Required: true, Description: "Address", Default: "localhost:19530"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "root"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_name", Type: "string", Required: false, Default: "weknora_embeddings", Description: "Collection Name"},
-				{Name: "shards_num", Type: "number", Required: false, Default: 1, Description: "Shards (write parallelism)"},
-				{Name: "replica_number", Type: "number", Required: false, Default: 1, Description: "In-memory Replicas (read HA)"},
+				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
+				{Name: "shards_num", Type: "number", Required: false, Description: "Shards (write parallelism)", Default: 1},
+				{Name: "replica_number", Type: "number", Required: false, Description: "In-memory Replicas (read HA)", Default: 1},
 			},
 		},
 		{
 			Type:        "weaviate",
-			DisplayName: "Weaviate (Keywords + Vector)",
+			DisplayName: "Weaviate",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "host", Type: "string", Required: true, Description: "Weaviate host (e.g., weaviate:8080)"},
-				{Name: "grpc_address", Type: "string", Required: false, Default: "weaviate:50051"},
-				{Name: "scheme", Type: "string", Required: false, Default: "http"},
-				{Name: "api_key", Type: "string", Required: false, Sensitive: true},
+				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "weaviate:8080"},
+				{Name: "grpc_address", Type: "string", Required: false, Description: "gRPC Address", Default: "weaviate:50051"},
+				{Name: "scheme", Type: "string", Required: false, Description: "Scheme", Default: "http"},
+				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Default: "Weknora_embeddings", Description: "Collection Prefix"},
-				{Name: "desired_shard_count", Type: "number", Required: false, Default: 1, Description: "Shard Count"},
-				{Name: "replication_factor", Type: "number", Required: false, Default: 1, Description: "Replication Factor"},
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "Weknora_embeddings"},
+				{Name: "desired_shard_count", Type: "number", Required: false, Description: "Shard Count", Default: 1},
+				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
 			},
-		},
-		{
-			Type:        "sqlite",
-			DisplayName: "SQLite (Keywords + Vector)",
-			ConnectionFields: []VectorStoreFieldInfo{},
 		},
 	}
 }
@@ -611,7 +597,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "postgres":
 		return &VectorStore{
 			ID:         "__env_postgres__",
-			Name:       "postgres (env)",
+			Name:       "PostgreSQL",
 			EngineType: PostgresRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				UseDefaultConnection: true,
@@ -620,13 +606,13 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "sqlite":
 		return &VectorStore{
 			ID:         "__env_sqlite__",
-			Name:       "sqlite (env)",
+			Name:       "SQLite",
 			EngineType: SQLiteRetrieverEngineType,
 		}
 	case "elasticsearch_v8":
 		return &VectorStore{
 			ID:         "__env_elasticsearch_v8__",
-			Name:       "elasticsearch v8 (env)",
+			Name:       "Elasticsearch v8",
 			EngineType: ElasticsearchRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Addr:     envLookup("ELASTICSEARCH_ADDR"),
@@ -640,7 +626,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "elasticsearch_v7":
 		return &VectorStore{
 			ID:         "__env_elasticsearch_v7__",
-			Name:       "elasticsearch v7 (env)",
+			Name:       "Elasticsearch v7",
 			EngineType: ElasticsearchRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Addr:     envLookup("ELASTICSEARCH_ADDR"),
@@ -654,7 +640,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "qdrant":
 		return &VectorStore{
 			ID:         "__env_qdrant__",
-			Name:       "qdrant (env)",
+			Name:       "Qdrant",
 			EngineType: QdrantRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Host:   envLookup("QDRANT_HOST"),
@@ -664,7 +650,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "milvus":
 		return &VectorStore{
 			ID:         "__env_milvus__",
-			Name:       "milvus (env)",
+			Name:       "Milvus",
 			EngineType: MilvusRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Addr:     envLookup("MILVUS_ADDRESS"),
@@ -675,7 +661,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "weaviate":
 		return &VectorStore{
 			ID:         "__env_weaviate__",
-			Name:       "weaviate (env)",
+			Name:       "Weaviate",
 			EngineType: WeaviateRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Host:        envLookup("WEAVIATE_HOST"),

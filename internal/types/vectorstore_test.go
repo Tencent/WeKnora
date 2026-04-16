@@ -63,7 +63,7 @@ func TestBuildEnvVectorStores(t *testing.T) {
 		stores := BuildEnvVectorStores("postgres", lookup)
 		require.Len(t, stores, 1)
 		assert.Equal(t, "__env_postgres__", stores[0].ID)
-		assert.Equal(t, "postgres (env)", stores[0].Name)
+		assert.Equal(t, "PostgreSQL", stores[0].Name)
 		assert.Equal(t, PostgresRetrieverEngineType, stores[0].EngineType)
 		assert.True(t, stores[0].ConnectionConfig.UseDefaultConnection)
 	})
@@ -198,8 +198,8 @@ func TestNewVectorStoreResponse(t *testing.T) {
 func TestGetVectorStoreTypes(t *testing.T) {
 	types := GetVectorStoreTypes()
 
-	t.Run("returns 6 engine types", func(t *testing.T) {
-		assert.Len(t, types, 6)
+	t.Run("returns 4 engine types (excludes postgres and sqlite)", func(t *testing.T) {
+		assert.Len(t, types, 4)
 	})
 
 	t.Run("type names match engine constants", func(t *testing.T) {
@@ -208,11 +208,11 @@ func TestGetVectorStoreTypes(t *testing.T) {
 			typeNames[i] = typ.Type
 		}
 		assert.Contains(t, typeNames, "elasticsearch")
-		assert.Contains(t, typeNames, "postgres")
 		assert.Contains(t, typeNames, "qdrant")
 		assert.Contains(t, typeNames, "milvus")
 		assert.Contains(t, typeNames, "weaviate")
-		assert.Contains(t, typeNames, "sqlite")
+		assert.NotContains(t, typeNames, "postgres")
+		assert.NotContains(t, typeNames, "sqlite")
 	})
 
 	t.Run("elasticsearch has connection and index fields", func(t *testing.T) {
@@ -237,15 +237,10 @@ func TestGetVectorStoreTypes(t *testing.T) {
 		assert.True(t, passwordField.Sensitive)
 	})
 
-	t.Run("sqlite has no connection fields", func(t *testing.T) {
-		var sqliteType VectorStoreTypeInfo
+	t.Run("display names have no parenthetical suffix", func(t *testing.T) {
 		for _, typ := range types {
-			if typ.Type == "sqlite" {
-				sqliteType = typ
-				break
-			}
+			assert.NotContains(t, typ.DisplayName, "(", "display_name should not contain parenthetical suffix: %s", typ.DisplayName)
 		}
-		assert.Empty(t, sqliteType.ConnectionFields)
 	})
 }
 
