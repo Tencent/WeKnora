@@ -401,13 +401,10 @@ func (c *Connector) runStreamPipeline(
 	go func() {
 		defer close(changedCh)
 		for fi := range fileInfoCh {
-			// Filter: allow if file is under a full-directory resource,
+			// Filter: allow if file is under any full-directory resource,
 			// or explicitly listed as a single-file resource
-			if allowedFiles != nil {
-				parentDir := path.Dir(fi.Path) + "/"
-				if !allowedFiles[fi.Path] && !fullDirs[parentDir] {
-					continue
-				}
+			if !isFileAllowed(fi.Path, allowedFiles, fullDirs) {
+				continue
 			}
 
 			mu.Lock()
@@ -656,6 +653,24 @@ func (c *Connector) expandDirectories(ctx context.Context, client *Client, resou
 		fullDirs["/"] = true
 	}
 	return dirs, allowedFiles, fullDirs, nil
+}
+
+// isFileAllowed checks whether a file path passes the resource selection filter.
+// Returns true if: (a) no filter is active (allowedFiles is nil), or
+// (b) the file is explicitly in allowedFiles, or (c) the file is under any fullDir.
+func isFileAllowed(filePath string, allowedFiles map[string]bool, fullDirs map[string]bool) bool {
+	if allowedFiles == nil {
+		return true
+	}
+	if allowedFiles[filePath] {
+		return true
+	}
+	for fd := range fullDirs {
+		if strings.HasPrefix(filePath, fd) {
+			return true
+		}
+	}
+	return false
 }
 
 // compareMetadata compares current files against a previous snapshot.
