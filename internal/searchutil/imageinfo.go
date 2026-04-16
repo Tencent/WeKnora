@@ -3,10 +3,16 @@ package searchutil
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// MarkdownImageRegex matches Markdown image links: ![alt](url)
+var MarkdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 
 // CollectImageInfoByChunkIDs collects merged image_info JSON for each given
 // chunk ID by querying child chunks (image_ocr / image_caption). It supports
@@ -153,4 +159,182 @@ func EnrichSearchResultsImageInfo(
 			r.ImageInfo = merged
 		}
 	}
+}
+
+// MergeImageInfoJSON combines per-chunk image_info JSON strings (from
+// CollectImageInfoByChunkIDs) into a single JSON array, deduplicating by URL.
+func MergeImageInfoJSON(perChunk map[string]string) string {
+	if len(perChunk) == 0 {
+		return ""
+	}
+	seen := make(map[string]bool)
+	var all []types.ImageInfo
+	for _, raw := range perChunk {
+		var infos []types.ImageInfo
+		if err := json.Unmarshal([]byte(raw), &infos); err != nil {
+			continue
+		}
+		for _, info := range infos {
+			key := info.URL
+			if key == "" {
+				key = info.OriginalURL
+			}
+			if key != "" && !seen[key] {
+				seen[key] = true
+				all = append(all, info)
+			}
+		}
+	}
+	if len(all) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(all)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// EnrichContentWithImageInfo embeds image info as XML tags into text content.
+// Inline Markdown image links get wrapped in <image> with <image_caption> / <image_ocr>;
+// images not found in content are appended as <image> blocks.
+func EnrichContentWithImageInfo(content string, imageInfoJSON string) string {
+	var imageInfos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
+		return content
+	}
+	if len(imageInfos) == 0 {
+		return content
+	}
+
+	imageInfoMap := make(map[string]*types.ImageInfo)
+	for i := range imageInfos {
+		if imageInfos[i].URL != "" {
+			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
+		}
+		if imageInfos[i].OriginalURL != "" {
+			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
+		}
+	}
+
+	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	processedURLs := make(map[string]bool)
+
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		imgURL := match[2]
+		processedURLs[imgURL] = true
+
+		imgInfo, found := imageInfoMap[imgURL]
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
+		b.WriteString(fmt.Sprintf("<image_original>%s</image_original>\n", match[0]))
+		if found && imgInfo != nil {
+			b.WriteString(BuildImageInfoXML(imgInfo))
+		}
+		b.WriteString("</image>")
+		content = strings.Replace(content, match[0], b.String(), 1)
+	}
+
+	var extras []string
+	for _, imgInfo := range imageInfos {
+		if processedURLs[imgInfo.URL] || processedURLs[imgInfo.OriginalURL] {
+			continue
+		}
+		url := imgInfo.URL
+		if url == "" {
+			url = imgInfo.OriginalURL
+		}
+		if block := BuildImageInfoXMLWithURL(url, &imgInfo); block != "" {
+			extras = append(extras, block)
+		}
+	}
+	if len(extras) > 0 {
+		if content != "" {
+			content += "\n"
+		}
+		content += strings.Join(extras, "\n")
+	}
+	return content
+}
+
+// BuildImageInfoXML returns XML-tagged caption / ocr for one image.
+func BuildImageInfoXML(img *types.ImageInfo) string {
+	var b strings.Builder
+	if img.Caption != "" {
+		b.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", img.Caption))
+	}
+	if img.OCRText != "" {
+		b.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", img.OCRText))
+	}
+	return b.String()
+}
+
+// BuildImageInfoXMLWithURL wraps image info in an <image> element carrying the URL.
+func BuildImageInfoXMLWithURL(url string, img *types.ImageInfo) string {
+	inner := BuildImageInfoXML(img)
+	if inner == "" {
+		return ""
+	}
+	return fmt.Sprintf("<image url=\"%s\">\n%s</image>", url, inner)
+}
+
+// EnrichContentCaptionOnly is like EnrichContentWithImageInfo but only
+// includes image captions (no OCR text). Original content (including Markdown
+// image links) is preserved. Useful for summary generation where OCR would
+// add too much noise.
+func EnrichContentCaptionOnly(content string, imageInfoJSON string) string {
+	var imageInfos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
+		return content
+	}
+	if len(imageInfos) == 0 {
+		return content
+	}
+
+	imageInfoMap := make(map[string]*types.ImageInfo)
+	for i := range imageInfos {
+		if imageInfos[i].URL != "" {
+			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
+		}
+		if imageInfos[i].OriginalURL != "" {
+			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
+		}
+	}
+
+	matches := MarkdownImageRegex.FindAllStringSubmatch(content, -1)
+	processedURLs := make(map[string]bool)
+
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		imgURL := match[2]
+		processedURLs[imgURL] = true
+
+		imgInfo, found := imageInfoMap[imgURL]
+		if found && imgInfo != nil && imgInfo.Caption != "" {
+			replacement := match[0] + "\n" + fmt.Sprintf("<image_caption>%s</image_caption>", imgInfo.Caption)
+			content = strings.Replace(content, match[0], replacement, 1)
+		}
+	}
+
+	var extras []string
+	for _, imgInfo := range imageInfos {
+		if processedURLs[imgInfo.URL] || processedURLs[imgInfo.OriginalURL] {
+			continue
+		}
+		if imgInfo.Caption != "" {
+			extras = append(extras, fmt.Sprintf("<image_caption>%s</image_caption>", imgInfo.Caption))
+		}
+	}
+	if len(extras) > 0 {
+		if content != "" {
+			content += "\n"
+		}
+		content += strings.Join(extras, "\n")
+	}
+	return content
 }

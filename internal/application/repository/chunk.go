@@ -962,7 +962,7 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	}
 	var chunks []*types.Chunk
 	query := r.db.WithContext(ctx).
-		Select("id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
+		Select("id, knowledge_id, knowledge_base_id, chunk_type, metadata, flags, updated_at").
 		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ? AND flags & ? != 0",
 			tenantID, types.ChunkTypeFAQ, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true, int(types.ChunkFlagRecommended))
 	if len(knowledgeIDs) > 0 {
@@ -971,8 +971,14 @@ func (r *chunkRepository) ListRecommendedFAQChunks(
 	} else {
 		query = query.Where("knowledge_base_id IN ?", kbIDs)
 	}
+
+	orderClause := "RANDOM()"
+	if r.db.Dialector.Name() == "mysql" {
+		orderClause = "RAND()"
+	}
+
 	if err := query.
-		Order("updated_at DESC").
+		Order(orderClause).
 		Limit(limit).
 		Find(&chunks).Error; err != nil {
 		return nil, err
@@ -999,7 +1005,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	var chunks []*types.Chunk
 
 	baseQuery := r.db.WithContext(ctx).
-		Select("id, knowledge_base_id, chunk_type, metadata, updated_at").
+		Select("id, knowledge_id, knowledge_base_id, chunk_type, metadata, updated_at").
 		Where("tenant_id = ? AND chunk_type = ? AND status IN ? AND is_enabled = ?",
 			tenantID, types.ChunkTypeText, []int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true)
 
@@ -1012,12 +1018,17 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 		baseQuery = baseQuery.Where("knowledge_base_id IN ?", kbIDs)
 	}
 
+	orderClause := "RANDOM()"
+	if r.db.Dialector.Name() == "mysql" {
+		orderClause = "RAND()"
+	}
+
 	// Query chunks that have non-empty generated_questions in metadata
 	switch r.db.Name() {
 	case "postgres":
 		if err := baseQuery.
 			Where("metadata IS NOT NULL AND metadata::text != '{}' AND jsonb_array_length(COALESCE(metadata->'generated_questions', '[]'::jsonb)) > 0").
-			Order("updated_at DESC").
+			Order(orderClause).
 			Limit(limit).
 			Find(&chunks).Error; err != nil {
 			return nil, err
@@ -1025,7 +1036,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	case "mysql":
 		if err := baseQuery.
 			Where("metadata IS NOT NULL AND JSON_LENGTH(JSON_EXTRACT(metadata, '$.generated_questions')) > 0").
-			Order("updated_at DESC").
+			Order(orderClause).
 			Limit(limit).
 			Find(&chunks).Error; err != nil {
 			return nil, err
@@ -1033,7 +1044,7 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	default: // sqlite
 		if err := baseQuery.
 			Where("metadata IS NOT NULL AND json_array_length(json_extract(metadata, '$.generated_questions')) > 0").
-			Order("updated_at DESC").
+			Order(orderClause).
 			Limit(limit).
 			Find(&chunks).Error; err != nil {
 			return nil, err

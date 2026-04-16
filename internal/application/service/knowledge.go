@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -30,6 +29,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1943,7 +1943,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 }
 
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.
-const defaultMaxInputChars = 16384
+const defaultMaxInputChars = 1024 * 24
 
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
@@ -1960,52 +1960,36 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		maxInputChars = s.config.Conversation.Summary.MaxInputChars
 	}
 
-	// concat chunk contents
-	chunkContents := ""
-	allImageInfos := make([]*types.ImageInfo, 0)
-
-	// then, sort chunks by StartAt
+	// Sort chunks by StartAt for proper concatenation
 	sortedChunks := make([]*types.Chunk, len(chunks))
 	copy(sortedChunks, chunks)
 	sort.Slice(sortedChunks, func(i, j int) bool {
 		return sortedChunks[i].StartAt < sortedChunks[j].StartAt
 	})
 
-	// concat ALL chunk contents (no early truncation) and collect image infos
+	// Concatenate original chunk contents by StartAt offset to reconstruct the
+	// document, then enrich with image info in a second pass. Enrichment must
+	// happen AFTER concatenation because StartAt is based on original document
+	// offsets — enriched (longer) content would break the positioning.
+	chunkContents := ""
 	for _, chunk := range sortedChunks {
-		// Ensure we don't slice beyond the current content length
 		runes := []rune(chunkContents)
 		if chunk.StartAt <= len(runes) {
 			chunkContents = string(runes[:chunk.StartAt]) + chunk.Content
 		} else {
-			// If StartAt is beyond current content, just append
 			chunkContents = chunkContents + chunk.Content
 		}
-		if chunk.ImageInfo != "" {
-			var images []*types.ImageInfo
-			if err := json.Unmarshal([]byte(chunk.ImageInfo), &images); err == nil {
-				allImageInfos = append(allImageInfos, images...)
-			}
-		}
 	}
-	// remove markdown image syntax
-	re := regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`)
-	chunkContents = re.ReplaceAllString(chunkContents, "")
-	// collect all image infos
-	if len(allImageInfos) > 0 {
-		// add image infos to chunk contents
-		var imageAnnotations string
-		for _, img := range allImageInfos {
-			if img.Caption != "" {
-				imageAnnotations += fmt.Sprintf("\n[Image Description: %s]", img.Caption)
-			}
-			if img.OCRText != "" {
-				imageAnnotations += fmt.Sprintf("\n[Image OCR Text: %s]", img.OCRText)
-			}
-		}
 
-		// concat chunk contents and image annotations
-		chunkContents = chunkContents + imageAnnotations
+	// Collect image_info from image_ocr/image_caption children and enrich
+	chunkIDs := make([]string, len(sortedChunks))
+	for i, c := range sortedChunks {
+		chunkIDs[i] = c.ID
+	}
+	imageInfoMap := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, knowledge.TenantID, chunkIDs)
+	mergedImageInfo := searchutil.MergeImageInfoJSON(imageInfoMap)
+	if mergedImageInfo != "" {
+		chunkContents = searchutil.EnrichContentCaptionOnly(chunkContents, mergedImageInfo)
 	}
 
 	// Apply length limit: sample long content to fit within maxInputChars
@@ -2106,63 +2090,6 @@ func sampleLongContent(content string, maxChars int) string {
 	middle := string(runes[midStart:midEnd])
 
 	return head + omitMarker + middle + omitMarker + tail
-}
-
-// enqueueQuestionGenerationTask enqueues an async task for question generation
-func (s *knowledgeService) enqueueQuestionGenerationTask(ctx context.Context,
-	kbID, knowledgeID string, questionCount int,
-) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	lang, _ := types.LanguageFromContext(ctx)
-	payload := types.QuestionGenerationPayload{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		KnowledgeID:     knowledgeID,
-		QuestionCount:   questionCount,
-		Language:        lang,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal question generation payload: %v", err)
-		return
-	}
-
-	task := asynq.NewTask(types.TypeQuestionGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to enqueue question generation task: %v", err)
-		return
-	}
-	logger.Infof(ctx, "Enqueued question generation task: %s for knowledge: %s", info.ID, knowledgeID)
-}
-
-// enqueueSummaryGenerationTask enqueues an async task for summary generation
-func (s *knowledgeService) enqueueSummaryGenerationTask(ctx context.Context,
-	kbID, knowledgeID string,
-) {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	lang, _ := types.LanguageFromContext(ctx)
-	payload := types.SummaryGenerationPayload{
-		TenantID:        tenantID,
-		KnowledgeBaseID: kbID,
-		KnowledgeID:     knowledgeID,
-		Language:        lang,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal summary generation payload: %v", err)
-		return
-	}
-
-	task := asynq.NewTask(types.TypeSummaryGeneration, payloadBytes, asynq.Queue("low"), asynq.MaxRetry(3))
-	info, err := s.task.Enqueue(task)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to enqueue summary generation task: %v", err)
-		return
-	}
-	logger.Infof(ctx, "Enqueued summary generation task: %s for knowledge: %s", info.ID, knowledgeID)
 }
 
 // ProcessSummaryGeneration handles async summary generation task
@@ -2452,27 +2379,40 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 		questionCount = 10
 	}
 
+	// Collect image info for all text chunks so question generation can
+	// see caption / OCR text instead of bare image links.
+	textChunkIDs := make([]string, len(textChunks))
+	for i, c := range textChunks {
+		textChunkIDs[i] = c.ID
+	}
+	imageInfoMap := searchutil.CollectImageInfoByChunkIDs(ctx, s.chunkRepo, payload.TenantID, textChunkIDs)
+
+	enrichContent := func(chunk *types.Chunk) string {
+		if info, ok := imageInfoMap[chunk.ID]; ok && info != "" {
+			return searchutil.EnrichContentWithImageInfo(chunk.Content, info)
+		}
+		return chunk.Content
+	}
+
 	// Generate questions for each chunk with context
 	var indexInfoList []*types.IndexInfo
 	for i, chunk := range textChunks {
 		// Build context from adjacent chunks
 		var prevContent, nextContent string
 		if i > 0 {
-			prevContent = textChunks[i-1].Content
-			// Limit context size
+			prevContent = enrichContent(textChunks[i-1])
 			if len(prevContent) > 500 {
 				prevContent = prevContent[len(prevContent)-500:]
 			}
 		}
 		if i < len(textChunks)-1 {
-			nextContent = textChunks[i+1].Content
-			// Limit context size
+			nextContent = enrichContent(textChunks[i+1])
 			if len(nextContent) > 500 {
 				nextContent = nextContent[:500]
 			}
 		}
 
-		questions, err := s.generateQuestionsWithContext(ctx, chatModel, chunk.Content, prevContent, nextContent, knowledge.Title, questionCount)
+		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent, knowledge.Title, questionCount)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
 			continue

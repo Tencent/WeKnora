@@ -2,11 +2,10 @@ package chatpipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -303,104 +302,7 @@ func getEnrichedPassageForChat(ctx context.Context, result *types.SearchResult) 
 	return enrichContentWithImageInfo(ctx, result.Content, result.ImageInfo)
 }
 
-// 正则表达式用于匹配Markdown图片链接
-var markdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
-
-// enrichContentWithImageInfo 将图片信息以 XML 标签的形式嵌入文本内容。
-// 对于内容中已有的 Markdown 图片链接，在其后附加 <image_caption> / <image_ocr>；
-// 对于未出现在内容中的图片，以 <image> 块追加到末尾。
-func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJSON string) string {
-	var imageInfos []types.ImageInfo
-	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
-		pipelineWarn(ctx, "IntoChatMessage", "image_parse_error", map[string]interface{}{
-			"error": err.Error(),
-		})
-		return content
-	}
-	if len(imageInfos) == 0 {
-		return content
-	}
-
-	imageInfoMap := make(map[string]*types.ImageInfo)
-	for i := range imageInfos {
-		if imageInfos[i].URL != "" {
-			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
-		}
-		if imageInfos[i].OriginalURL != "" {
-			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
-		}
-	}
-
-	matches := markdownImageRegex.FindAllStringSubmatch(content, -1)
-	processedURLs := make(map[string]bool)
-
-	pipelineInfo(ctx, "IntoChatMessage", "image_markdown_links", map[string]interface{}{
-		"match_count": len(matches),
-	})
-
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-		imgURL := match[2]
-		processedURLs[imgURL] = true
-
-		imgInfo, found := imageInfoMap[imgURL]
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
-		b.WriteString(fmt.Sprintf("<image_original>%s</image_original>\n", match[0]))
-		if found && imgInfo != nil {
-			b.WriteString(buildImageInfoXML(imgInfo))
-		}
-		b.WriteString("</image>")
-		content = strings.Replace(content, match[0], b.String(), 1)
-	}
-
-	// Append image info not found as inline Markdown links
-	var extras []string
-	for _, imgInfo := range imageInfos {
-		if processedURLs[imgInfo.URL] || processedURLs[imgInfo.OriginalURL] {
-			continue
-		}
-		url := imgInfo.URL
-		if url == "" {
-			url = imgInfo.OriginalURL
-		}
-		if block := buildImageInfoXMLWithURL(url, &imgInfo); block != "" {
-			extras = append(extras, block)
-		}
-	}
-	if len(extras) > 0 {
-		if content != "" {
-			content += "\n"
-		}
-		content += strings.Join(extras, "\n")
-	}
-
-	pipelineInfo(ctx, "IntoChatMessage", "image_enrich_summary", map[string]interface{}{
-		"markdown_images": len(matches),
-		"additional_imgs": len(extras),
-	})
-	return content
-}
-
-// buildImageInfoXML returns XML-tagged caption / ocr for one image.
-func buildImageInfoXML(img *types.ImageInfo) string {
-	var b strings.Builder
-	if img.Caption != "" {
-		b.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", img.Caption))
-	}
-	if img.OCRText != "" {
-		b.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", img.OCRText))
-	}
-	return b.String()
-}
-
-// buildImageInfoXMLWithURL wraps image info in an <image> element carrying the URL.
-func buildImageInfoXMLWithURL(url string, img *types.ImageInfo) string {
-	inner := buildImageInfoXML(img)
-	if inner == "" {
-		return ""
-	}
-	return fmt.Sprintf("<image url=\"%s\">\n%s</image>", url, inner)
+// enrichContentWithImageInfo delegates to the shared searchutil implementation.
+func enrichContentWithImageInfo(_ context.Context, content string, imageInfoJSON string) string {
+	return searchutil.EnrichContentWithImageInfo(content, imageInfoJSON)
 }

@@ -321,9 +321,13 @@ func (p *PluginQueryUnderstand) buildPrompts(chatManage *types.ChatManage, histo
 	queryContent := chatManage.Query
 	if len(chatManage.Images) > 0 {
 		queryContent += fmt.Sprintf("\n\n<images_uploaded count=\"%d\" />", len(chatManage.Images))
+	} else {
+		queryContent += "\n\n<no_image_attached />"
 	}
 	if len(chatManage.Attachments) > 0 {
 		queryContent += chatManage.Attachments.BuildPrompt()
+	} else {
+		queryContent += "\n<no_document_attached />"
 	}
 
 	vals := types.PlaceholderValues{

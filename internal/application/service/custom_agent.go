@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-	"sort"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -503,22 +503,19 @@ func (s *customAgentService) GetSuggestedQuestions(
 		return s.truncateQuestions(result, limit), nil
 	}
 
-	// 3. Collect all candidate chunks from both FAQ and Document KBs,
-	//    then sort by updated_at uniformly (not FAQ-first).
-	type candidate struct {
-		question  types.SuggestedQuestion
-		updatedAt time.Time
-	}
-	var candidates []candidate
+	// 3. Collect candidate chunks from both FAQ and Document KBs,
+	//    grouped by knowledge_id for diversity.
+	//    knowledgeID -> list of questions
+	buckets := make(map[string][]types.SuggestedQuestion)
 
 	// Determine query scope
 	queryKBIDs := effectiveKBIDs
 	queryKnowledgeIDs := knowledgeIDs
 
-	// Fetch more than needed from each source, we'll merge-sort and truncate
-	fetchLimit := remaining * 2
-	if fetchLimit < 10 {
-		fetchLimit = 10
+	// Fetch a large pool so DB-level random sampling covers multiple documents.
+	fetchLimit := remaining * 5
+	if fetchLimit < 20 {
+		fetchLimit = 20
 	}
 
 	// Collect FAQ recommended chunks
@@ -537,13 +534,10 @@ func (s *customAgentService) GetSuggestedQuestions(
 				continue
 			}
 			seen[meta.StandardQuestion] = true
-			candidates = append(candidates, candidate{
-				question: types.SuggestedQuestion{
-					Question:        meta.StandardQuestion,
-					Source:          "faq",
-					KnowledgeBaseID: chunk.KnowledgeBaseID,
-				},
-				updatedAt: chunk.UpdatedAt,
+			buckets[chunk.KnowledgeID] = append(buckets[chunk.KnowledgeID], types.SuggestedQuestion{
+				Question:        meta.StandardQuestion,
+				Source:          "faq",
+				KnowledgeBaseID: chunk.KnowledgeBaseID,
 			})
 		}
 	}
@@ -565,28 +559,45 @@ func (s *customAgentService) GetSuggestedQuestions(
 				continue
 			}
 			seen[q] = true
-			candidates = append(candidates, candidate{
-				question: types.SuggestedQuestion{
-					Question:        q,
-					Source:          "document",
-					KnowledgeBaseID: chunk.KnowledgeBaseID,
-				},
-				updatedAt: chunk.UpdatedAt,
+			buckets[chunk.KnowledgeID] = append(buckets[chunk.KnowledgeID], types.SuggestedQuestion{
+				Question:        q,
+				Source:          "document",
+				KnowledgeBaseID: chunk.KnowledgeBaseID,
 			})
 		}
 	}
 
-	// 4. Sort all candidates by updated_at descending (newest first)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].updatedAt.After(candidates[j].updatedAt)
+	// 4. Shuffle within each bucket, then round-robin across buckets
+	//    to ensure diversity across different documents.
+	bucketKeys := make([]string, 0, len(buckets))
+	for k, qs := range buckets {
+		bucketKeys = append(bucketKeys, k)
+		rand.Shuffle(len(qs), func(i, j int) { qs[i], qs[j] = qs[j], qs[i] })
+		buckets[k] = qs
+	}
+	rand.Shuffle(len(bucketKeys), func(i, j int) {
+		bucketKeys[i], bucketKeys[j] = bucketKeys[j], bucketKeys[i]
 	})
 
-	// 5. Pick top N
-	for _, c := range candidates {
-		if len(result) >= limit {
+	// Round-robin pick one question from each document in turn.
+	offsets := make(map[string]int, len(bucketKeys))
+	for len(result) < limit {
+		picked := false
+		for _, key := range bucketKeys {
+			if len(result) >= limit {
+				break
+			}
+			qs := buckets[key]
+			idx := offsets[key]
+			if idx < len(qs) {
+				result = append(result, qs[idx])
+				offsets[key] = idx + 1
+				picked = true
+			}
+		}
+		if !picked {
 			break
 		}
-		result = append(result, c.question)
 	}
 
 	return s.truncateQuestions(result, limit), nil
