@@ -1,23 +1,34 @@
 package nutstore
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // Connector implements the datasource.Connector interface for Nutstore WebDAV.
-type Connector struct{}
+type Connector struct {
+	syncConfig datasource.SyncConfig
+}
 
 // NewConnector creates a new Nutstore connector.
 func NewConnector() *Connector {
-	return &Connector{}
+	return &Connector{
+		syncConfig: datasource.LoadSyncConfig(),
+	}
 }
 
 // Type returns the connector type identifier.
@@ -299,4 +310,412 @@ func matchesFileTypes(filename string, fileTypes []string) bool {
 		}
 	}
 	return false
+}
+
+// FetchStream performs a full streaming sync.
+func (c *Connector) FetchStream(ctx context.Context, config *types.DataSourceConfig) (datasource.FetchStream, error) {
+	return c.fetchStream(ctx, config, nil)
+}
+
+// FetchStreamIncremental performs an incremental streaming sync.
+func (c *Connector) FetchStreamIncremental(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (datasource.FetchStream, error) {
+	return c.fetchStream(ctx, config, cursor)
+}
+
+const defaultFileInfoChCap = 100
+
+func (c *Connector) fetchStream(ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor) (datasource.FetchStream, error) {
+	client, err := newClientFromConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("create client: %w", err)
+	}
+
+	var prevSnapshot *NutstoreSnapshot
+	if cursor != nil && cursor.ConnectorCursor != nil {
+		prevSnapshot = loadSnapshot(cursor)
+	}
+
+	resourceIDs := config.ResourceIDs
+	if len(resourceIDs) == 0 {
+		cfg, _ := parseConfig(config.Credentials, config.Settings)
+		if cfg != nil && cfg.RootPath != "" {
+			resourceIDs = []string{cfg.RootPath}
+		} else {
+			resourceIDs = []string{"/"}
+		}
+	}
+
+	dirs, allowedFiles, fullDirs, err := c.expandDirectories(ctx, client, resourceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("expand directories: %w", err)
+	}
+
+	stream := datasource.NewAsyncFetchStream(c.syncConfig.DownloadWorkers)
+	go c.runStreamPipeline(ctx, client, stream, dirs, prevSnapshot, allowedFiles, fullDirs)
+	return stream, nil
+}
+
+func (c *Connector) runStreamPipeline(
+	ctx context.Context,
+	client *Client,
+	stream *datasource.AsyncFetchStream,
+	dirs []string,
+	prevSnapshot *NutstoreSnapshot,
+	allowedFiles map[string]bool,
+	fullDirs map[string]bool,
+) {
+	// Stage 1: List all files via streaming BFS
+	fileInfoCh := make(chan FileInfo, defaultFileInfoChCap)
+	listErrCh := make(chan error, 1)
+
+	go func() {
+		defer close(fileInfoCh)
+		defer close(listErrCh)
+		for _, dir := range dirs {
+			subCh := make(chan FileInfo, defaultFileInfoChCap)
+			subErrCh := make(chan error, 1)
+			go client.ListDirectoryRecursiveStream(ctx, dir, subCh, subErrCh)
+			for fi := range subCh {
+				select {
+				case fileInfoCh <- fi:
+				case <-ctx.Done():
+					listErrCh <- ctx.Err()
+					return
+				}
+			}
+			if err := <-subErrCh; err != nil {
+				listErrCh <- err
+				return
+			}
+		}
+		listErrCh <- nil
+	}()
+
+	// Stage 2: Metadata compare + download workers
+	seen := make(map[string]bool)
+	changedCh := make(chan FileInfo, c.syncConfig.DownloadWorkers)
+	newSnapshot := &NutstoreSnapshot{Files: make(map[string]FileMetadata)}
+	var mu sync.Mutex
+
+	// Metadata filter goroutine
+	go func() {
+		defer close(changedCh)
+		for fi := range fileInfoCh {
+			// Filter: allow if file is under a full-directory resource,
+			// or explicitly listed as a single-file resource
+			if allowedFiles != nil {
+				parentDir := path.Dir(fi.Path) + "/"
+				if !allowedFiles[fi.Path] && !fullDirs[parentDir] {
+					continue
+				}
+			}
+
+			mu.Lock()
+			seen[fi.Path] = true
+			newSnapshot.Files[fi.Path] = FileMetadata{
+				ModifiedAt: fi.LastModified,
+				Size:       fi.Size,
+				ETag:       fi.ETag,
+			}
+			mu.Unlock()
+
+			isChanged := true
+			if prevSnapshot != nil {
+				pm, exists := prevSnapshot.Files[fi.Path]
+				if exists && fi.Size == pm.Size && fi.LastModified.Equal(pm.ModifiedAt) {
+					isChanged = false
+				}
+			}
+
+			if !isChanged {
+				continue
+			}
+
+			if !isParseableFile(fi.Name) {
+				// Get share URL for unparseable files (best-effort)
+				shareURL, _ := client.GetShareURL(ctx, fi.Path)
+				stream.Send(datasource.StreamFetchedItem{
+					Action:           datasource.ActionMetadata,
+					Title:            nameWithoutExt(fi.Name),
+					FileName:         fi.Name,
+					ExternalID:       fi.Path,
+					Size:             fi.Size,
+					ModifiedAt:       fi.LastModified,
+					SourceURL:        shareURL,
+					SourceResourceID: findResourceID(fi.Path, dirs),
+					Metadata:         map[string]string{"source_path": fi.Path, "channel": "nutstore"},
+				})
+				continue
+			}
+
+			select {
+			case changedCh <- fi:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Download workers
+	var wg sync.WaitGroup
+	for i := 0; i < c.syncConfig.DownloadWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for fi := range changedCh {
+				item := c.downloadAndWrap(ctx, client, fi, dirs)
+				if !stream.Send(item) {
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Wait for listing to finish
+	listErr := <-listErrCh
+
+	// Stage 3: Delete detection
+	if listErr == nil && prevSnapshot != nil {
+		mu.Lock()
+		seenCopy := make(map[string]bool, len(seen))
+		for k, v := range seen {
+			seenCopy[k] = v
+		}
+		mu.Unlock()
+
+		deleted := detectDeleted(prevSnapshot, seenCopy)
+		for _, p := range deleted {
+			stream.Send(datasource.StreamFetchedItem{
+				Action:     datasource.ActionDelete,
+				ExternalID: p,
+				FileName:   filepath.Base(p),
+				Metadata:   map[string]string{"source_path": p},
+			})
+		}
+	}
+
+	// Build cursor
+	var finalCursor *types.SyncCursor
+	if listErr == nil {
+		finalCursor = &types.SyncCursor{
+			LastSyncTime:    time.Now(),
+			ConnectorCursor: map[string]interface{}{"nutstore_snapshot": newSnapshot},
+		}
+	}
+
+	stream.Finish(finalCursor, listErr)
+}
+
+// downloadAndWrap downloads a file and wraps it as a StreamFetchedItem.
+// Files with known size > threshold are downloaded directly to temp files
+// without buffering in memory. Smaller files are read into memory.
+func (c *Connector) downloadAndWrap(ctx context.Context, client *Client, fi FileInfo, dirs []string) datasource.StreamFetchedItem {
+	baseMeta := map[string]string{"source_path": fi.Path, "channel": "nutstore"}
+	baseItem := func(action datasource.SyncAction, err error) datasource.StreamFetchedItem {
+		return datasource.StreamFetchedItem{
+			Action: action, ExternalID: fi.Path, FileName: fi.Name, Err: err, Metadata: baseMeta,
+		}
+	}
+
+	// Large file path: stream directly to temp file, never hold full content in memory
+	if fi.Size > c.syncConfig.LargeFileThreshold {
+		if err := os.MkdirAll(c.syncConfig.TempDir, 0o700); err != nil {
+			return baseItem(datasource.ActionError, fmt.Errorf("create temp dir: %w", err))
+		}
+		tmpFile, err := os.CreateTemp(c.syncConfig.TempDir, "sync-*")
+		if err != nil {
+			return baseItem(datasource.ActionError, fmt.Errorf("create temp file: %w", err))
+		}
+		_, err = client.DownloadFileToWriter(ctx, fi.Path, tmpFile)
+		if err != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			return baseItem(datasource.ActionError, fmt.Errorf("download %s: %w", fi.Path, err))
+		}
+		// Get actual size from file
+		stat, _ := tmpFile.Stat()
+		actualSize := fi.Size
+		if stat != nil {
+			actualSize = stat.Size()
+		}
+		if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			return baseItem(datasource.ActionError, fmt.Errorf("seek temp file: %w", err))
+		}
+		return datasource.StreamFetchedItem{
+			Action:           datasource.ActionUpsert,
+			Title:            nameWithoutExt(fi.Name),
+			FileName:         fi.Name,
+			ExternalID:       fi.Path,
+			Size:             actualSize,
+			ModifiedAt:       fi.LastModified,
+			SourceResourceID: findResourceID(fi.Path, dirs),
+			Metadata:         baseMeta,
+			Body:             &tempFileReadCloser{File: tmpFile},
+		}
+	}
+
+	// Small file path: download into memory
+	data, _, err := client.DownloadFile(ctx, fi.Path)
+	if err != nil {
+		return baseItem(datasource.ActionError, fmt.Errorf("download %s: %w", fi.Path, err))
+	}
+
+	return datasource.StreamFetchedItem{
+		Action:           datasource.ActionUpsert,
+		Title:            nameWithoutExt(fi.Name),
+		FileName:         fi.Name,
+		ExternalID:       fi.Path,
+		Size:             int64(len(data)),
+		ModifiedAt:       fi.LastModified,
+		SourceResourceID: findResourceID(fi.Path, dirs),
+		Metadata:         baseMeta,
+		Body:             io.NopCloser(bytes.NewReader(data)),
+	}
+}
+
+// tempFileReadCloser wraps an os.File and removes it on Close.
+type tempFileReadCloser struct {
+	*os.File
+}
+
+func (t *tempFileReadCloser) Close() error {
+	name := t.File.Name()
+	err := t.File.Close()
+	os.Remove(name)
+	return err
+}
+
+// newClientFromConfig creates a Client from DataSourceConfig.
+func newClientFromConfig(config *types.DataSourceConfig) (*Client, error) {
+	cfg, err := parseConfig(config.Credentials, config.Settings)
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(cfg), nil
+}
+
+// expandDirectories resolves resource IDs to directory paths for streaming.
+// Returns deduplicated directories to scan and an optional set of allowed file paths.
+// When allowedFiles is non-nil, only files in this set OR under full-directory resources
+// are processed. A directory resource means "sync everything under it" (no filter);
+// a single-file resource means "only sync that specific file from its parent dir".
+func (c *Connector) expandDirectories(ctx context.Context, client *Client, resourceIDs []string) (dirs []string, allowedFiles map[string]bool, fullDirs map[string]bool, err error) {
+	dirSet := make(map[string]bool)    // dedup dirs
+	fullDirs = make(map[string]bool)   // dirs selected as full-directory resources
+	var singleFiles []string           // individual file paths
+
+	for _, resID := range resourceIDs {
+		if strings.HasSuffix(resID, "/") || resID == "/" {
+			if !dirSet[resID] {
+				dirSet[resID] = true
+				dirs = append(dirs, resID)
+			}
+			fullDirs[resID] = true
+		} else {
+			infos, err := client.ListDirectory(ctx, resID, "0")
+			if err != nil {
+				logger.Warnf(ctx, "failed to check %s: %v", resID, err)
+				continue
+			}
+			for _, info := range infos {
+				if info.IsDir {
+					p := info.Path
+					if !strings.HasSuffix(p, "/") {
+						p += "/"
+					}
+					if !dirSet[p] {
+						dirSet[p] = true
+						dirs = append(dirs, p)
+					}
+					fullDirs[p] = true
+				} else {
+					parentDir := path.Dir(info.Path) + "/"
+					if !dirSet[parentDir] {
+						dirSet[parentDir] = true
+						dirs = append(dirs, parentDir)
+					}
+					singleFiles = append(singleFiles, info.Path)
+				}
+			}
+		}
+	}
+
+	// Only build allowedFiles if there are single-file selections
+	if len(singleFiles) > 0 {
+		allowedFiles = make(map[string]bool, len(singleFiles))
+		for _, f := range singleFiles {
+			allowedFiles[f] = true
+		}
+	}
+
+	if len(dirs) == 0 {
+		dirs = []string{"/"}
+		fullDirs["/"] = true
+	}
+	return dirs, allowedFiles, fullDirs, nil
+}
+
+// compareMetadata compares current files against a previous snapshot.
+func compareMetadata(prev *NutstoreSnapshot, current []FileInfo) (changed []FileInfo, seen map[string]bool) {
+	seen = make(map[string]bool, len(current))
+	for _, f := range current {
+		seen[f.Path] = true
+		if prev == nil {
+			changed = append(changed, f)
+			continue
+		}
+		pm, exists := prev.Files[f.Path]
+		if !exists {
+			changed = append(changed, f)
+			continue
+		}
+		if f.Size != pm.Size || !f.LastModified.Equal(pm.ModifiedAt) {
+			changed = append(changed, f)
+		}
+	}
+	return changed, seen
+}
+
+// detectDeleted returns paths that were in the previous snapshot but not in seen.
+func detectDeleted(prev *NutstoreSnapshot, seen map[string]bool) []string {
+	if prev == nil {
+		return nil
+	}
+	var deleted []string
+	for p := range prev.Files {
+		if !seen[p] {
+			deleted = append(deleted, p)
+		}
+	}
+	return deleted
+}
+
+// findResourceID finds which resource directory a file path belongs to.
+func findResourceID(filePath string, dirs []string) string {
+	for _, d := range dirs {
+		if strings.HasPrefix(filePath, d) {
+			return d
+		}
+	}
+	return ""
+}
+
+// loadSnapshot extracts NutstoreSnapshot from a SyncCursor.
+func loadSnapshot(cursor *types.SyncCursor) *NutstoreSnapshot {
+	raw, ok := cursor.ConnectorCursor["nutstore_snapshot"]
+	if !ok {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var snap NutstoreSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return nil
+	}
+	return &snap
 }
