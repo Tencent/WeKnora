@@ -89,10 +89,9 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 			}
 		}
 
-		parentPath := path.Dir(f.Path)
-		if parentPath == "." {
-			parentPath = "/"
-		}
+		// Top-level items (direct children of RootPath) have no parent in the UI tree.
+		// The frontend identifies root nodes by empty parent_id.
+		parentPath := ""
 
 		metadata := map[string]interface{}{
 			"size":         strconv.FormatInt(f.Size, 10),
@@ -100,12 +99,13 @@ func (c *Connector) ListResources(ctx context.Context, config *types.DataSourceC
 		}
 
 		resources = append(resources, types.Resource{
-			ExternalID: externalID,
-			Name:       f.Name,
-			Type:       resType,
-			ParentID:   parentPath,
-			ModifiedAt: f.LastModified,
-			Metadata:   metadata,
+			ExternalID:  externalID,
+			Name:        f.Name,
+			Type:        resType,
+			ParentID:    parentPath,
+			HasChildren: false, // No lazy-loading; selecting a folder syncs all its contents
+			ModifiedAt:  f.LastModified,
+			Metadata:    metadata,
 		})
 	}
 

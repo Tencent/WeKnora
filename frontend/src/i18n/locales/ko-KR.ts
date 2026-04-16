@@ -3626,6 +3626,12 @@ export default {
       resources: "리소스 선택",
       strategy: "동기화 전략",
     },
+    resourceType: {
+      wikiSpace: "위키 스페이스",
+      docCategory: "문서 분류",
+      folder: "폴더",
+      file: "파일",
+    },
     syncHistory: "동기화 이력",
     refreshLogs: "로그 새로고침",
     noLogs: "동기화 기록이 없습니다",

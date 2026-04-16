@@ -3532,6 +3532,12 @@ export default {
       resources: 'Ресурсы',
       strategy: 'Стратегия',
     },
+    resourceType: {
+      wikiSpace: 'Вики-пространство',
+      docCategory: 'Категория документов',
+      folder: 'Папка',
+      file: 'Файл',
+    },
     syncHistory: 'История синхронизации',
     refreshLogs: 'Обновить журнал',
     noLogs: 'Нет записей синхронизации',
