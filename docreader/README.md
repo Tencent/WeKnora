@@ -229,7 +229,7 @@ DocReader 服务配置了健康检查：
 
 ```yaml
 healthcheck:
-  test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+  test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
   interval: 30s
   timeout: 10s
   retries: 3

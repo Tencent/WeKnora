@@ -171,7 +171,7 @@ services:
       - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-}
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 30s
       timeout: 10s
       retries: 3
