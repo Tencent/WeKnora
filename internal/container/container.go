@@ -516,8 +516,39 @@ func resolveStorageProviderPending(db *gorm.DB) {
 		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
 	}
 
+	// Sync PostgreSQL sequences with actual MAX values to prevent duplicate key
+	// errors. The old code assigned seq_id via SELECT MAX()+1 in application
+	// code, which could push values past the DB sequence counter.
+	syncSequences(db)
+
 	// Reset any pending tasks left over from previous aborted runs (Lite App mode)
 	resetPendingTasks(db)
+}
+
+// syncSequences ensures PostgreSQL sequences for auto-increment columns (seq_id)
+// are at least as high as the current MAX value in each table. This is needed
+// because older code assigned seq_id via application-level MAX()+1, which could
+// advance values past the DB sequence counter and cause duplicate key errors.
+func syncSequences(db *gorm.DB) {
+	if db.Dialector.Name() != "postgres" {
+		return
+	}
+	pairs := [][2]string{
+		{"chunks", "chunks_seq_id_seq"},
+		{"knowledge_tags", "knowledge_tags_seq_id_seq"},
+	}
+	for _, p := range pairs {
+		table, seq := p[0], p[1]
+		sql := fmt.Sprintf(
+			`SELECT setval('%s', GREATEST(nextval('%s'), (SELECT COALESCE(MAX(seq_id), 0) FROM %s)))`,
+			seq, seq, table,
+		)
+		if err := db.Exec(sql).Error; err != nil {
+			logger.Warnf(context.Background(), "Failed to sync sequence %s: %v", seq, err)
+		} else {
+			logger.Infof(context.Background(), "Synced sequence %s with table %s", seq, table)
+		}
+	}
 }
 
 // resetPendingTasks resets the state of any knowledge items or sync logs stuck in processing

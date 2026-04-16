@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -54,6 +55,14 @@ type Config struct {
 
 // NewEmbedder creates an embedder based on the configuration
 func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
+	e, err := newEmbedder(config, pooler, ollamaService)
+	if err != nil || !logger.LLMDebugEnabled() {
+		return e, err
+	}
+	return &debugEmbedder{inner: e}, nil
+}
+
+func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
 	var embedder Embedder
 	var err error
 	switch strings.ToLower(string(config.Source)) {

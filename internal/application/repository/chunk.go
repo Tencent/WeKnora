@@ -29,14 +29,23 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
 	}
-	// Pre-assign SeqIDs for SQLite compatibility (autoIncrement on non-PK columns
-	// doesn't work in SQLite). This is a no-op if all chunks already have SeqIDs.
-	if err := types.AssignChunkSeqIDs(r.db.WithContext(ctx), chunks); err != nil {
-		return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+
+	db := r.db.WithContext(ctx)
+
+	// SQLite doesn't support autoIncrement on non-PK columns,
+	// so we must pre-assign SeqIDs manually (safe: single connection).
+	// PostgreSQL / MySQL use DB sequences — skip to avoid duplicate key
+	// races under concurrent inserts.
+	if db.Dialector.Name() == "sqlite" {
+		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
+			return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+		}
 	}
-	// Use Select("*") to ensure all fields including zero values (IsEnabled=false, Flags=0)
-	// are inserted, bypassing GORM's default value behavior for zero values
-	return r.db.WithContext(ctx).Select("*").CreateInBatches(chunks, 100).Error
+
+	// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
+	// explicitly inserted, bypassing GORM's default value behavior.
+	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
+	return db.Select("*").CreateInBatches(chunks, 100).Error
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID

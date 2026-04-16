@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -35,6 +36,14 @@ type Config struct {
 
 // NewVLM creates a VLM instance based on the provided configuration.
 func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
+	v, err := newVLM(config, ollamaService)
+	if err != nil || !logger.LLMDebugEnabled() {
+		return v, err
+	}
+	return &debugVLM{inner: v}, nil
+}
+
+func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	ifType := strings.ToLower(config.InterfaceType)
 
 	if ifType == "ollama" || config.Source == types.ModelSourceLocal {

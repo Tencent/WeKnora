@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -161,10 +162,13 @@ func (p *PluginSearchEntity) OnEvent(ctx context.Context,
 	for _, knowledge := range knowledges {
 		knowledgeMap[knowledge.ID] = knowledge
 	}
+	var entityResults []*types.SearchResult
 	for _, chunk := range chunks {
 		searchResult := chunk2SearchResult(chunk, knowledgeMap[chunk.KnowledgeID])
-		chatManage.SearchResult = append(chatManage.SearchResult, searchResult)
+		entityResults = append(entityResults, searchResult)
 	}
+	searchutil.EnrichSearchResultsImageInfo(ctx, p.chunkRepo, types.MustTenantIDFromContext(ctx), entityResults)
+	chatManage.SearchResult = append(chatManage.SearchResult, entityResults...)
 	// remove duplicate results
 	chatManage.SearchResult = removeDuplicateResults(chatManage.SearchResult)
 	if len(chatManage.SearchResult) == 0 {

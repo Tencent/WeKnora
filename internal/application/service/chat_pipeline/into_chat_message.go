@@ -133,37 +133,32 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 
 	// Build contexts string based on FAQ priority strategy
 	if chatManage.FAQPriorityEnabled && len(faqResults) > 0 {
-		// Build structured context with FAQ prioritization
-		contextsBuilder.WriteString("### Source 1: FAQ Knowledge Base\n")
-		contextsBuilder.WriteString("[High Confidence - Prioritize these results]\n")
+		contextsBuilder.WriteString("<source type=\"faq\" priority=\"high\">\n")
 		for i, result := range faqResults {
 			passage := getEnrichedPassageForChat(ctx, result)
 			if hasHighConfidenceFAQ && i == 0 {
-				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] Exact Match: %s\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\" match=\"exact\">%s</context>\n", i+1, passage))
 			} else {
-				contextsBuilder.WriteString(fmt.Sprintf("[FAQ-%d] %s\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"FAQ-%d\">%s</context>\n", i+1, passage))
 			}
 		}
+		contextsBuilder.WriteString("</source>\n")
 
 		if len(docResults) > 0 {
-			contextsBuilder.WriteString("\n### Source 2: Reference Documents\n")
-			contextsBuilder.WriteString("[Supplementary - Use only when FAQ cannot answer the question]\n")
+			contextsBuilder.WriteString("<source type=\"document\" priority=\"supplementary\">\n")
 			for i, result := range docResults {
 				passage := getEnrichedPassageForChat(ctx, result)
-				contextsBuilder.WriteString(fmt.Sprintf("[DOC-%d] %s\n", i+1, passage))
+				contextsBuilder.WriteString(fmt.Sprintf("<context id=\"DOC-%d\">%s</context>\n", i+1, passage))
 			}
+			contextsBuilder.WriteString("</source>")
 		}
 	} else {
-		// Original behavior: simple numbered list
-		passages := make([]string, len(chatManage.MergeResult))
 		for i, result := range chatManage.MergeResult {
-			passages[i] = getEnrichedPassageForChat(ctx, result)
-		}
-		for i, passage := range passages {
+			passage := getEnrichedPassageForChat(ctx, result)
 			if i > 0 {
-				contextsBuilder.WriteString("\n\n")
+				contextsBuilder.WriteString("\n")
 			}
-			contextsBuilder.WriteString(fmt.Sprintf("[%d] %s", i+1, passage))
+			contextsBuilder.WriteString(fmt.Sprintf("<context id=\"%d\">%s</context>", i+1, passage))
 		}
 	}
 
@@ -279,15 +274,16 @@ func buildDocumentHeader(results []*types.SearchResult) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("### Referenced Documents\n")
-	for i, d := range docs {
-		// if d.description != "" {
-		// 	b.WriteString(fmt.Sprintf("%d. %s — %s\n", i+1, d.title, d.description))
-		// } else {
-		// 	b.WriteString(fmt.Sprintf("%d. %s\n", i+1, d.title))
-		// }
-		b.WriteString(fmt.Sprintf("%d. %s\n", i+1, d.title))
+	b.WriteString("<documents>\n")
+	for _, d := range docs {
+		b.WriteString("<document>\n")
+		b.WriteString(fmt.Sprintf("<title>%s</title>\n", d.title))
+		if d.description != "" {
+			b.WriteString(fmt.Sprintf("<description>%s</description>\n", d.description))
+		}
+		b.WriteString("</document>\n")
 	}
+	b.WriteString("</documents>")
 	return b.String()
 }
 
@@ -310,105 +306,101 @@ func getEnrichedPassageForChat(ctx context.Context, result *types.SearchResult) 
 // 正则表达式用于匹配Markdown图片链接
 var markdownImageRegex = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
 
-// enrichContentWithImageInfo 将图片信息与文本内容合并
+// enrichContentWithImageInfo 将图片信息以 XML 标签的形式嵌入文本内容。
+// 对于内容中已有的 Markdown 图片链接，在其后附加 <image_caption> / <image_ocr>；
+// 对于未出现在内容中的图片，以 <image> 块追加到末尾。
 func enrichContentWithImageInfo(ctx context.Context, content string, imageInfoJSON string) string {
-	// 解析ImageInfo
 	var imageInfos []types.ImageInfo
-	err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos)
-	if err != nil {
+	if err := json.Unmarshal([]byte(imageInfoJSON), &imageInfos); err != nil {
 		pipelineWarn(ctx, "IntoChatMessage", "image_parse_error", map[string]interface{}{
 			"error": err.Error(),
 		})
 		return content
 	}
-
 	if len(imageInfos) == 0 {
 		return content
 	}
 
-	// 创建图片URL到信息的映射
 	imageInfoMap := make(map[string]*types.ImageInfo)
 	for i := range imageInfos {
 		if imageInfos[i].URL != "" {
 			imageInfoMap[imageInfos[i].URL] = &imageInfos[i]
 		}
-		// 同时检查原始URL
 		if imageInfos[i].OriginalURL != "" {
 			imageInfoMap[imageInfos[i].OriginalURL] = &imageInfos[i]
 		}
 	}
 
-	// 查找内容中的所有Markdown图片链接
 	matches := markdownImageRegex.FindAllStringSubmatch(content, -1)
-
-	// 用于存储已处理的图片URL
 	processedURLs := make(map[string]bool)
 
 	pipelineInfo(ctx, "IntoChatMessage", "image_markdown_links", map[string]interface{}{
 		"match_count": len(matches),
 	})
 
-	// 替换每个图片链接，添加描述和OCR文本
 	for _, match := range matches {
 		if len(match) < 3 {
 			continue
 		}
-
-		// 提取图片URL，忽略alt文本
 		imgURL := match[2]
-
-		// 标记该URL已处理
 		processedURLs[imgURL] = true
 
-		// 查找匹配的图片信息
 		imgInfo, found := imageInfoMap[imgURL]
-
-		// 如果找到匹配的图片信息，添加描述和OCR文本
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("<image url=\"%s\">\n", imgURL))
+		b.WriteString(fmt.Sprintf("<image_original>%s</image_original>\n", match[0]))
 		if found && imgInfo != nil {
-			replacement := match[0] + "\n"
-			if imgInfo.Caption != "" {
-				replacement += fmt.Sprintf("Image Caption: %s\n", imgInfo.Caption)
-			}
-			if imgInfo.OCRText != "" {
-				replacement += fmt.Sprintf("Image Text: %s\n", imgInfo.OCRText)
-			}
-			content = strings.Replace(content, match[0], replacement, 1)
+			b.WriteString(buildImageInfoXML(imgInfo))
 		}
+		b.WriteString("</image>")
+		content = strings.Replace(content, match[0], b.String(), 1)
 	}
 
-	// 处理未在内容中找到但存在于ImageInfo中的图片
-	var additionalImageTexts []string
+	// Append image info not found as inline Markdown links
+	var extras []string
 	for _, imgInfo := range imageInfos {
-		// 如果图片URL已经处理过，跳过
 		if processedURLs[imgInfo.URL] || processedURLs[imgInfo.OriginalURL] {
 			continue
 		}
-
-		var imgTexts []string
-		if imgInfo.Caption != "" {
-			imgTexts = append(imgTexts, fmt.Sprintf("Image %s caption: %s", imgInfo.URL, imgInfo.Caption))
+		url := imgInfo.URL
+		if url == "" {
+			url = imgInfo.OriginalURL
 		}
-		if imgInfo.OCRText != "" {
-			imgTexts = append(imgTexts, fmt.Sprintf("Image %s text: %s", imgInfo.URL, imgInfo.OCRText))
-		}
-
-		if len(imgTexts) > 0 {
-			additionalImageTexts = append(additionalImageTexts, imgTexts...)
+		if block := buildImageInfoXMLWithURL(url, &imgInfo); block != "" {
+			extras = append(extras, block)
 		}
 	}
-
-	// 如果有额外的图片信息，添加到内容末尾
-	if len(additionalImageTexts) > 0 {
+	if len(extras) > 0 {
 		if content != "" {
-			content += "\n\n"
+			content += "\n"
 		}
-		content += "Additional Image Info:\n" + strings.Join(additionalImageTexts, "\n")
+		content += strings.Join(extras, "\n")
 	}
 
 	pipelineInfo(ctx, "IntoChatMessage", "image_enrich_summary", map[string]interface{}{
 		"markdown_images": len(matches),
-		"additional_imgs": len(additionalImageTexts),
+		"additional_imgs": len(extras),
 	})
-
 	return content
+}
+
+// buildImageInfoXML returns XML-tagged caption / ocr for one image.
+func buildImageInfoXML(img *types.ImageInfo) string {
+	var b strings.Builder
+	if img.Caption != "" {
+		b.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", img.Caption))
+	}
+	if img.OCRText != "" {
+		b.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", img.OCRText))
+	}
+	return b.String()
+}
+
+// buildImageInfoXMLWithURL wraps image info in an <image> element carrying the URL.
+func buildImageInfoXMLWithURL(url string, img *types.ImageInfo) string {
+	inner := buildImageInfoXML(img)
+	if inner == "" {
+		return ""
+	}
+	return fmt.Sprintf("<image url=\"%s\">\n%s</image>", url, inner)
 }

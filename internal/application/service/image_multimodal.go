@@ -172,13 +172,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	if payload.EnableCaption {
-		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
-		if capErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		} else if caption != "" {
-			imageInfo.Caption = caption
-		}
+	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, vlmCaptionPrompt)
+	if capErr != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
+	} else if caption != "" {
+		imageInfo.Caption = caption
 	}
 
 	// Build child chunks for OCR and caption results
@@ -220,8 +218,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	}
 
 	if len(newChunks) == 0 {
-		// Even if OCR/caption both failed, mark knowledge as completed
-		s.finalizeImageKnowledge(ctx, payload, "")
 		s.checkAndFinalizeAllImages(ctx, payload)
 		return nil
 	}
@@ -238,13 +234,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// Index chunks so they can be retrieved
 	s.indexChunks(ctx, payload, newChunks)
 
-	// Update the parent text chunk's ImageInfo (mirrors old docreader behaviour)
-	s.updateParentChunkImageInfo(ctx, payload, imageInfo)
-
-	// For standalone image files, use caption as the knowledge description
-	// and mark the knowledge as completed (it was kept in "processing" until now).
-	s.finalizeImageKnowledge(ctx, payload, imageInfo.Caption)
-
 	// Enqueue question generation for the caption/OCR content if KB has it enabled.
 	// During initial processChunks, question generation is skipped for image-type
 	// knowledge because the text chunk is just a markdown reference. Now that we
@@ -254,36 +243,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	s.checkAndFinalizeAllImages(ctx, payload)
 
 	return nil
-}
-
-// finalizeImageKnowledge updates the knowledge after multimodal processing:
-//   - For standalone image files: sets Description from caption and marks ParseStatus as completed
-//     (processChunks kept it in "processing" to wait for multimodal results).
-//   - For images extracted from PDFs: no-op (description comes from summary generation).
-func (s *ImageMultimodalService) finalizeImageKnowledge(ctx context.Context, payload types.ImageMultimodalPayload, caption string) {
-	knowledge, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, payload.KnowledgeID)
-	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to get knowledge %s: %v", payload.KnowledgeID, err)
-		return
-	}
-	if knowledge == nil {
-		return
-	}
-	if !IsImageType(knowledge.FileType) {
-		return
-	}
-
-	if caption != "" {
-		knowledge.Description = caption
-	}
-	knowledge.ParseStatus = types.ParseStatusCompleted
-	knowledge.UpdatedAt = time.Now()
-	if err := s.knowledgeRepo.UpdateKnowledge(ctx, knowledge); err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to finalize knowledge: %v", err)
-	} else {
-		logger.Infof(ctx, "[ImageMultimodal] Finalized image knowledge %s (status=completed, description=%d chars)",
-			payload.KnowledgeID, len(knowledge.Description))
-	}
 }
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
@@ -346,47 +305,6 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 	}
 
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
-}
-
-// updateParentChunkImageInfo updates the parent text chunk's ImageInfo field,
-// replicating the behaviour of the old docreader flow where the parent chunk
-// carried the full image metadata (URL, OCR, caption).
-func (s *ImageMultimodalService) updateParentChunkImageInfo(ctx context.Context, payload types.ImageMultimodalPayload, imageInfo types.ImageInfo) {
-	if payload.ChunkID == "" {
-		return
-	}
-
-	chunk, err := s.chunkService.GetChunkByIDOnly(ctx, payload.ChunkID)
-	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to get parent chunk %s: %v", payload.ChunkID, err)
-		return
-	}
-
-	var existingInfos []types.ImageInfo
-	if chunk.ImageInfo != "" {
-		_ = json.Unmarshal([]byte(chunk.ImageInfo), &existingInfos)
-	}
-
-	found := false
-	for i, info := range existingInfos {
-		if info.URL == imageInfo.URL {
-			existingInfos[i] = imageInfo
-			found = true
-			break
-		}
-	}
-	if !found {
-		existingInfos = append(existingInfos, imageInfo)
-	}
-
-	imageInfoJSON, _ := json.Marshal(existingInfos)
-	chunk.ImageInfo = string(imageInfoJSON)
-	chunk.UpdatedAt = time.Now()
-	if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to update parent chunk %s ImageInfo: %v", chunk.ID, err)
-	} else {
-		logger.Infof(ctx, "[ImageMultimodal] Updated parent chunk %s ImageInfo for image %s", chunk.ID, payload.ImageURL)
-	}
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
@@ -464,7 +382,6 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 		logger.Infof(ctx, "[ImageMultimodal] All images processed for knowledge %s. Finalizing...", payload.KnowledgeID)
 		s.redisClient.Del(ctx, redisKey)
 
-		// Enqueue the post process task to handle all downstream tasks (summary, question generation, etc)
 		s.enqueueKnowledgePostProcessTask(ctx, payload)
 	}
 }

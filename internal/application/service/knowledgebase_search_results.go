@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -59,12 +60,32 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 				for _, chunk := range additionalChunks {
 					chunkMap[chunk.ID] = chunk
 				}
+				// Second round: only needed when image chunks are among primary
+				// results (image → text resolved above, now text → parent_text).
+				// For normal text-only results this is a no-op.
+				if s.hasImageChunks(allChunks) {
+					parentIDs := s.collectParentChunkIDs(additionalChunks, index)
+					if len(parentIDs) > 0 {
+						logger.Infof(ctx, "Fetching %d second-level parent chunks", len(parentIDs))
+						parentChunks, err := s.listChunksByIDWithShared(ctx, tenantID, parentIDs)
+						if err != nil {
+							logger.Warnf(ctx, "Failed to fetch second-level parent chunks: %v", err)
+						} else {
+							for _, chunk := range parentChunks {
+								chunkMap[chunk.ID] = chunk
+							}
+						}
+					}
+				}
 			}
 		}
 	}
 
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
+
+	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
+
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
 }
@@ -151,6 +172,36 @@ func (s *knowledgeBaseService) collectEnrichmentChunkIDs(
 	return additionalIDs
 }
 
+// collectParentChunkIDs returns unprocessed parent IDs from the given chunks.
+// Unlike collectEnrichmentChunkIDs, this only resolves parent links without
+// expanding nearby or related chunks, making it suitable for second-round
+// parent chain resolution (e.g., text → parent_text after image → text).
+func (s *knowledgeBaseService) collectParentChunkIDs(
+	chunks []*types.Chunk,
+	idx *chunkIndex,
+) []string {
+	var ids []string
+	for _, chunk := range chunks {
+		if chunk.ParentChunkID != "" && !idx.processedIDs[chunk.ParentChunkID] {
+			ids = append(ids, chunk.ParentChunkID)
+			idx.processedIDs[chunk.ParentChunkID] = true
+			idx.scores[chunk.ParentChunkID] = idx.scores[chunk.ID]
+			idx.matchTypes[chunk.ParentChunkID] = types.MatchTypeParentChunk
+		}
+	}
+	return ids
+}
+
+// hasImageChunks returns true if any chunk is an image_ocr or image_caption type.
+func (s *knowledgeBaseService) hasImageChunks(chunks []*types.Chunk) bool {
+	for _, c := range chunks {
+		if c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
+			return true
+		}
+	}
+	return false
+}
+
 // assembleSearchResults builds the final []*types.SearchResult from chunk data and knowledge data.
 // Primary results (from input chunks) are added first in order, then enrichment results.
 func (s *knowledgeBaseService) assembleSearchResults(
@@ -174,7 +225,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 			logger.Debugf(ctx, "Chunk not found in chunkMap: %s", inputChunk.ChunkID)
 			continue
 		}
-		if !s.isValidTextChunk(chunk) {
+		if !s.isSearchableChunk(chunk) {
 			invalidChunkCnt++
 			if len(invalidChunkSamples) < maxInvalidChunkLog {
 				invalidChunkSamples = append(invalidChunkSamples, chunk.ID+":"+chunk.ChunkType)
@@ -197,7 +248,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 	}
 	if invalidChunkCnt > 0 {
 		logger.Debugf(ctx,
-			"Skip non-text chunks in search results: total=%d sampled=%d samples=%v",
+			"Skip non-searchable chunks in search results: total=%d sampled=%d samples=%v",
 			invalidChunkCnt, len(invalidChunkSamples), invalidChunkSamples,
 		)
 	}
@@ -205,7 +256,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 	// Second pass: Add enrichment chunks (parent, nearby, relation)
 	if !skipEnrichment {
 		for chunkID, chunk := range chunkMap {
-			if addedChunkIDs[chunkID] || !s.isValidTextChunk(chunk) {
+			if addedChunkIDs[chunkID] || !s.isSearchableChunk(chunk) {
 				continue
 			}
 
@@ -280,11 +331,12 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 	}
 }
 
-// isValidTextChunk checks if a chunk is a valid text chunk.
-func (s *knowledgeBaseService) isValidTextChunk(chunk *types.Chunk) bool {
+// isSearchableChunk checks if a chunk type should be included in search results.
+func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
 	return slices.Contains([]types.ChunkType{
 		types.ChunkTypeText, types.ChunkTypeSummary,
 		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,
 		types.ChunkTypeFAQ,
+		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption,
 	}, chunk.ChunkType)
 }

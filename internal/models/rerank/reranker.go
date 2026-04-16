@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -91,6 +92,14 @@ type RerankerConfig struct {
 
 // NewReranker creates a reranker based on the configuration
 func NewReranker(config *RerankerConfig) (Reranker, error) {
+	r, err := newReranker(config)
+	if err != nil || !logger.LLMDebugEnabled() {
+		return r, err
+	}
+	return &debugReranker{inner: r}, nil
+}
+
+func newReranker(config *RerankerConfig) (Reranker, error) {
 	// Use provider field if set, otherwise detect from URL using provider registry
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {

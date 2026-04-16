@@ -107,14 +107,17 @@ type ChatConfig struct {
 
 // NewChat 创建聊天实例
 func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, error) {
+	var c Chat
+	var err error
 	switch strings.ToLower(string(config.Source)) {
 	case string(types.ModelSourceLocal):
-		return NewOllamaChat(config, ollamaService)
+		c, err = NewOllamaChat(config, ollamaService)
 	case string(types.ModelSourceRemote):
-		return NewRemoteChat(config)
+		c, err = NewRemoteChat(config)
 	default:
 		return nil, fmt.Errorf("unsupported chat model source: %s", config.Source)
 	}
+	return wrapChatDebug(c, err)
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例

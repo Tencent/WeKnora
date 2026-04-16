@@ -570,11 +570,12 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
 				}
+				toolCalls := state.buildOrderedToolCalls()
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      "",
 					Done:         true,
-					ToolCalls:    state.buildOrderedToolCalls(),
+					ToolCalls:    toolCalls,
 					Usage:        state.usage,
 					FinishReason: state.lastFinishReason,
 				}
@@ -614,16 +615,16 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 		event, err := reader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
-				// 部分模型不发送 [DONE] 标记，直接关闭连接，视为正常结束
 				if state.usage != nil {
 					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
 				}
+				toolCalls := state.buildOrderedToolCalls()
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      "",
 					Done:         true,
-					ToolCalls:    state.buildOrderedToolCalls(),
+					ToolCalls:    toolCalls,
 					Usage:        state.usage,
 				}
 			} else {
@@ -646,11 +647,12 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 				logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 					c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
 			}
+			toolCalls := state.buildOrderedToolCalls()
 			streamChan <- types.StreamResponse{
 				ResponseType: types.ResponseTypeAnswer,
 				Content:      "",
 				Done:         true,
-				ToolCalls:    state.buildOrderedToolCalls(),
+				ToolCalls:    toolCalls,
 				Usage:        state.usage,
 			}
 			return
