@@ -114,8 +114,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// Use 5x over-retrieval to ensure sufficient candidates for RRF fusion and reranking.
 	// Scale proportionally when searching multiple KBs to maintain per-KB recall quality.
 	matchCount := max(params.MatchCount*5, 50) * len(searchKBIDs)
-	if matchCount > 1000 {
-		matchCount = 1000
+	if matchCount > 500 {
+		matchCount = 500
 	}
 
 	// Build retrieval parameters for vector and keyword engines
