@@ -3737,4 +3737,11 @@ export default {
     syncResultDeleted: "-{n}",
     moreActions: "更多",
   },
+  secret: {
+    storedPlaceholder: "•••••••• (输入新值以替换)",
+    clearHint: "删除此凭据",
+    confirmClearTitle: "确认删除凭据",
+    confirmClearBody:
+      "此操作将永久删除已保存的凭据，依赖它的集成将停止工作。是否继续？",
+  },
 };

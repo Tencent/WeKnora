@@ -71,6 +71,52 @@ type ModelParameters struct {
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key
+
+	// Write-only flags: set to true in Update requests to explicitly remove
+	// the corresponding credential. Never persisted (gorm:"-"), never
+	// returned in responses (omitempty + zero value).
+	ClearAPIKey    bool `yaml:"-" json:"clear_api_key,omitempty"    gorm:"-"`
+	ClearAppSecret bool `yaml:"-" json:"clear_app_secret,omitempty" gorm:"-"`
+}
+
+// RedactSensitiveData replaces secret values (APIKey, AppSecret) in
+// ModelParameters with RedactedSecretPlaceholder when set. Empty values stay
+// empty so the frontend can distinguish "set (hidden)" from "not set".
+// Mutates the receiver in place.
+func (m *Model) RedactSensitiveData() {
+	if m.Parameters.APIKey != "" {
+		m.Parameters.APIKey = RedactedSecretPlaceholder
+	}
+	if m.Parameters.AppSecret != "" {
+		m.Parameters.AppSecret = RedactedSecretPlaceholder
+	}
+}
+
+// MergeUpdate applies write-only secret merge semantics for Update requests:
+//
+//   - ClearAPIKey / ClearAppSecret take precedence — when true, the
+//     corresponding field becomes empty
+//   - Otherwise APIKey and AppSecret use PreserveIfRedacted: empty or the
+//     redacted placeholder preserves the existing value, any other value
+//     replaces
+//   - Non-secret fields flow from incoming directly
+//   - Write-only clear flags are cleared on the merged result so they never
+//     leak to storage
+func (p ModelParameters) MergeUpdate(existing ModelParameters) ModelParameters {
+	merged := p
+	if p.ClearAPIKey {
+		merged.APIKey = ""
+	} else {
+		merged.APIKey = PreserveIfRedacted(p.APIKey, existing.APIKey)
+	}
+	if p.ClearAppSecret {
+		merged.AppSecret = ""
+	} else {
+		merged.AppSecret = PreserveIfRedacted(p.AppSecret, existing.AppSecret)
+	}
+	merged.ClearAPIKey = false
+	merged.ClearAppSecret = false
+	return merged
 }
 
 // Model represents the AI model

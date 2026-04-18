@@ -167,8 +167,8 @@ func TestNewVectorStoreResponse(t *testing.T) {
 
 	t.Run("masks sensitive fields", func(t *testing.T) {
 		resp := NewVectorStoreResponse(store, "user", false)
-		assert.Equal(t, "***", resp.ConnectionConfig.Password)
-		assert.Equal(t, "***", resp.ConnectionConfig.APIKey)
+		assert.Equal(t, RedactedSecretPlaceholder, resp.ConnectionConfig.Password)
+		assert.Equal(t, RedactedSecretPlaceholder, resp.ConnectionConfig.APIKey)
 		assert.Equal(t, "http://es:9200", resp.ConnectionConfig.Addr) // non-sensitive preserved
 	})
 
@@ -503,8 +503,8 @@ func TestConnectionConfig_MaskSensitiveFields(t *testing.T) {
 			APIKey:   "sk-api-key",
 		}
 		masked := c.MaskSensitiveFields()
-		assert.Equal(t, "***", masked.Password)
-		assert.Equal(t, "***", masked.APIKey)
+		assert.Equal(t, RedactedSecretPlaceholder, masked.Password)
+		assert.Equal(t, RedactedSecretPlaceholder, masked.APIKey)
 		assert.Equal(t, "http://es:9200", masked.Addr)
 		assert.Equal(t, "elastic", masked.Username)
 	})

@@ -69,6 +69,9 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 		return
 	}
 
+	// Redact before echoing so the Create response honors the same
+	// "secrets never leave the server" invariant as List/Get/Update.
+	service.RedactSensitiveData()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    service,
@@ -265,6 +268,29 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		}
 		if token, ok := authConfig["token"].(string); ok {
 			service.AuthConfig.Token = token
+		}
+		// Write-only clear flags — must be explicitly pulled off the map
+		// since this handler intentionally uses a manual map-to-struct
+		// projection to support partial updates (see "Use map to handle
+		// partial updates" comment above). A struct-based bind would have
+		// picked these up automatically.
+		if clearAPIKey, ok := authConfig["clear_api_key"].(bool); ok {
+			service.AuthConfig.ClearAPIKey = clearAPIKey
+		}
+		if clearToken, ok := authConfig["clear_token"].(bool); ok {
+			service.AuthConfig.ClearToken = clearToken
+		}
+		// CustomHeaders — nil preserves, non-nil replaces (see
+		// MCPAuthConfig.MergeUpdate). Only copy when the key is present so
+		// the preserve-on-nil branch is reachable.
+		if customHeaders, ok := authConfig["custom_headers"].(map[string]interface{}); ok {
+			headers := make(map[string]string, len(customHeaders))
+			for k, v := range customHeaders {
+				if s, ok := v.(string); ok {
+					headers[k] = s
+				}
+			}
+			service.AuthConfig.CustomHeaders = headers
 		}
 	}
 	if advancedConfig, ok := updateData["advanced_config"].(map[string]interface{}); ok {

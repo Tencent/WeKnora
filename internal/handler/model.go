@@ -30,34 +30,54 @@ func NewModelHandler(service interfaces.ModelService) *ModelHandler {
 	return &ModelHandler{service: service}
 }
 
-// hideSensitiveInfo hides sensitive information (APIKey, BaseURL) for builtin models
-// Returns a copy of the model with sensitive fields cleared if it's a builtin model
+// hideSensitiveInfo prepares a Model for inclusion in a response body.
+//
+// For builtin models, APIKey and BaseURL are stripped entirely and only the
+// non-credential fields (embedding dimensions, parameter size) survive on a
+// fresh copy — builtin models are shared across tenants and must never leak
+// their underlying provider configuration.
+//
+// For tenant-owned models the sensitive fields (APIKey, AppSecret) are
+// replaced by the shared RedactedSecretPlaceholder via RedactSensitiveData,
+// on a copy so the in-memory representation stays usable by subsequent
+// code paths. Empty values stay empty so the frontend can render "set vs
+// not set" without guesswork.
 func hideSensitiveInfo(model *types.Model) *types.Model {
-	if !model.IsBuiltin {
-		return model
+	if model.IsBuiltin {
+		return &types.Model{
+			ID:          model.ID,
+			TenantID:    model.TenantID,
+			Name:        model.Name,
+			Type:        model.Type,
+			Source:      model.Source,
+			Description: model.Description,
+			Parameters: types.ModelParameters{
+				// Hide APIKey and BaseURL for builtin models.
+				BaseURL: "",
+				APIKey:  "",
+				// Preserve non-credential fields so the frontend can still
+				// render correct capability metadata (vision support, Ollama
+				// parameter size, interface type, provider identifier, and
+				// any embedding dimensions). These were previously zeroed
+				// out, which caused builtin chat cards to look like their
+				// multimodal / provider metadata was unset.
+				EmbeddingParameters: model.Parameters.EmbeddingParameters,
+				ParameterSize:       model.Parameters.ParameterSize,
+				InterfaceType:       model.Parameters.InterfaceType,
+				Provider:            model.Parameters.Provider,
+				ExtraConfig:         model.Parameters.ExtraConfig,
+				SupportsVision:      model.Parameters.SupportsVision,
+			},
+			IsBuiltin: model.IsBuiltin,
+			Status:    model.Status,
+			CreatedAt: model.CreatedAt,
+			UpdatedAt: model.UpdatedAt,
+		}
 	}
-
-	// Create a copy with sensitive information hidden
-	return &types.Model{
-		ID:          model.ID,
-		TenantID:    model.TenantID,
-		Name:        model.Name,
-		Type:        model.Type,
-		Source:      model.Source,
-		Description: model.Description,
-		Parameters: types.ModelParameters{
-			// Hide APIKey and BaseURL for builtin models
-			BaseURL: "",
-			APIKey:  "",
-			// Keep other parameters like embedding dimensions
-			EmbeddingParameters: model.Parameters.EmbeddingParameters,
-			ParameterSize:       model.Parameters.ParameterSize,
-		},
-		IsBuiltin: model.IsBuiltin,
-		Status:    model.Status,
-		CreatedAt: model.CreatedAt,
-		UpdatedAt: model.UpdatedAt,
-	}
+	// Tenant-owned model: redact secrets on a copy, preserving everything else.
+	cp := *model
+	cp.RedactSensitiveData()
+	return &cp
 }
 
 // CreateModelRequest defines the structure for model creation requests
@@ -310,12 +330,22 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 			return
 		}
 	}
-	// Preserve backend-managed fields not sent by frontend
-	req.Parameters.ParameterSize = model.Parameters.ParameterSize
-	if req.Parameters.ExtraConfig == nil {
-		req.Parameters.ExtraConfig = model.Parameters.ExtraConfig
+	// Apply write-only secret merge semantics before overwriting the stored
+	// parameters: empty or redacted APIKey/AppSecret preserves the stored
+	// value, the respective ClearXxx flag wipes it, any other value replaces.
+	merged := req.Parameters.MergeUpdate(model.Parameters)
+	// Preserve backend-managed fields not sent by frontend.
+	merged.ParameterSize = model.Parameters.ParameterSize
+	if merged.ExtraConfig == nil {
+		merged.ExtraConfig = model.Parameters.ExtraConfig
 	}
-	model.Parameters = req.Parameters
+	if req.Parameters.ClearAPIKey {
+		logger.Infof(ctx, "Model API key cleared by user: id=%s", id)
+	}
+	if req.Parameters.ClearAppSecret {
+		logger.Infof(ctx, "Model app_secret cleared by user: id=%s", id)
+	}
+	model.Parameters = merged
 
 	model.Source = req.Source
 	model.Type = req.Type

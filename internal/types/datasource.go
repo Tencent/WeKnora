@@ -194,7 +194,15 @@ func (s *SyncLog) BeforeCreate(tx *gorm.DB) error {
 }
 
 // DataSourceConfig represents the unencrypted configuration structure
-// Each connector type will have its own specific fields
+// Each connector type will have its own specific fields.
+//
+// ClearCredentials is a write-only flag used in Update requests to
+// explicitly remove the stored credential map. Because credentials are
+// per-connector atomic sets (e.g. an OAuth token pair, a GitHub PAT, a
+// Confluence API token), individual-field removal is intentionally not
+// supported — revoking one field in isolation would leave the connector in
+// a broken half-configured state. The flag is never persisted to storage
+// and never surfaces in responses (omitempty + zero value).
 type DataSourceConfig struct {
 	// Common fields applicable to most connectors
 	Type string `json:"type"`
@@ -207,6 +215,90 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+
+	// Write-only flag — request-only, never persisted or returned.
+	ClearCredentials bool `json:"clear_credentials,omitempty"`
+}
+
+// Redacted returns a copy of the config with every string value in
+// Credentials replaced by RedactedSecretPlaceholder so it can be returned to
+// the client without exposing stored secrets. Empty string values stay empty
+// so the frontend can still distinguish "set (hidden)" from "not set" per
+// key. Non-string credential values (rare but possible for numeric IDs or
+// structured settings) pass through unchanged.
+//
+// Named "Redacted" rather than "RedactSensitiveData" because it returns a
+// copy instead of mutating in place, matching the naming convention of
+// ConnectionConfig.MaskSensitiveFields in types/vectorstore.go.
+func (d DataSourceConfig) Redacted() DataSourceConfig {
+	cp := d
+	// ClearCredentials is a request-only signal; never echo it in responses.
+	cp.ClearCredentials = false
+	if d.Credentials == nil {
+		return cp
+	}
+	redacted := make(map[string]interface{}, len(d.Credentials))
+	for k, v := range d.Credentials {
+		if s, ok := v.(string); ok && s != "" {
+			redacted[k] = RedactedSecretPlaceholder
+		} else {
+			redacted[k] = v
+		}
+	}
+	cp.Credentials = redacted
+	return cp
+}
+
+// MergeUpdate applies write-only secret merge semantics for Update requests.
+//
+//   - ClearCredentials=true → wipe the entire credentials map
+//   - Otherwise, each string credential key is merged individually using
+//     PreserveIfRedacted: empty or the redacted placeholder preserves the
+//     existing value, any other value replaces. Non-string credential
+//     values from incoming always overwrite (they aren't redacted either).
+//   - Non-secret fields (Type, ResourceIDs, Settings) flow from incoming
+//     directly.
+//   - The write-only ClearCredentials flag is cleared on the merged result.
+func (d DataSourceConfig) MergeUpdate(existing DataSourceConfig) DataSourceConfig {
+	merged := d
+	merged.ClearCredentials = false
+	if d.ClearCredentials {
+		merged.Credentials = nil
+		return merged
+	}
+
+	mergedCreds := make(map[string]interface{}, len(existing.Credentials)+len(d.Credentials))
+	for k, v := range existing.Credentials {
+		mergedCreds[k] = v
+	}
+	for k, v := range d.Credentials {
+		if s, ok := v.(string); ok {
+			if IsRedactedOrEmpty(s) {
+				continue // preserve existing value for this key
+			}
+		}
+		mergedCreds[k] = v
+	}
+	merged.Credentials = mergedCreds
+	return merged
+}
+
+// RedactSensitiveData parses the Config jsonb, redacts string values in the
+// Credentials map, and writes the result back. No-op when Config is empty or
+// fails to parse (the caller continues to return the DataSource with
+// whatever Config representation it has — better than dropping the response).
+func (d *DataSource) RedactSensitiveData() {
+	if len(d.Config) == 0 {
+		return
+	}
+	parsed, err := d.ParseConfig()
+	if err != nil || parsed == nil {
+		return
+	}
+	redacted := parsed.Redacted()
+	if blob, err := redacted.ToJSON(); err == nil {
+		d.Config = blob
+	}
 }
 
 // Resource represents a syncable resource (document, folder, space) from external system
