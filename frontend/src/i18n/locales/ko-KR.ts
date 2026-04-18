@@ -4339,4 +4339,11 @@ export default {
       createdAt: "생성 시각",
     },
   },
+  secret: {
+    storedPlaceholder: "•••••••• (새 값을 입력하면 교체됩니다)",
+    clearHint: "이 credential 제거",
+    confirmClearTitle: "credential 제거 확인",
+    confirmClearBody:
+      "저장된 credential이 영구 삭제되며, 이를 사용하는 통합이 중단됩니다. 계속할까요?",
+  },
 };

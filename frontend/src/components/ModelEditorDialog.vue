@@ -208,8 +208,16 @@
             <t-input
               v-model="formData.apiKey"
               type="password"
-              :placeholder="$t('model.editor.apiKeyPlaceholder')"
+              :disabled="formData.clearApiKey"
+              :placeholder="apiKeyPlaceholder"
             />
+            <t-checkbox
+              v-if="isEdit && formData.hasExistingApiKey"
+              v-model="formData.clearApiKey"
+              class="clear-credential"
+            >
+              {{ t('secret.clearHint') }}
+            </t-checkbox>
           </div>
 
           <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
@@ -328,7 +336,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed, onUnmounted, nextTick } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels, downloadOllamaModel, getDownloadProgress, checkOllamaStatus, listModelProviders, type OllamaModelInfo, type ModelProviderOption } from '@/api/initialization'
 import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
@@ -348,6 +356,12 @@ interface ModelFormData {
   modelName: string
   baseUrl?: string
   apiKey?: string
+  // True when the server returned '***' for parameters.api_key, meaning a
+  // key is currently stored server-side. Drives the "Set / Not set" badge.
+  hasExistingApiKey?: boolean
+  // Write-only flag set by the user to explicitly remove the stored key on
+  // save. Reset to false on every dialog open.
+  clearApiKey?: boolean
   dimension?: number
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
@@ -534,6 +548,17 @@ const dialogVisible = computed({
 })
 
 const isEdit = computed(() => !!props.modelData)
+
+// Placeholder hint for the API key field. On edit with a stored key, swap
+// in the shared "bullets + Enter new value to replace" placeholder so the
+// input itself carries the "something is there" signal. Otherwise fall back
+// to the generic creation-mode placeholder.
+const apiKeyPlaceholder = computed(() => {
+  if (isEdit.value && formData.value.hasExistingApiKey) {
+    return t('secret.storedPlaceholder')
+  }
+  return t('model.editor.apiKeyPlaceholder')
+})
 
 const formRef = ref()
 const saving = ref(false)
@@ -741,8 +766,14 @@ watch(() => props.visible, (val) => {
 
     if (props.modelData) {
       // 编辑：始终用最新的 modelData 覆盖
+      // Always reset apiKey / clearApiKey on every dialog open so the
+      // invariant "non-empty apiKey means the user typed it" holds.
+      // hasExistingApiKey flows through unchanged so the badge keeps showing
+      // "Set" when the server said '***'.
       formData.value = {
         ...props.modelData,
+        apiKey: '',
+        clearApiKey: false,
         customHeaders: Array.isArray(props.modelData.customHeaders)
           ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
           : []
@@ -777,6 +808,8 @@ const resetForm = () => {
     modelName: '',
     baseUrl: '',
     apiKey: '',
+    hasExistingApiKey: false,
+    clearApiKey: false,
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取
     interfaceType: undefined,
     isDefault: false,
@@ -1113,13 +1146,30 @@ const handleConfirm = async () => {
     
     // 执行表单验证
     await formRef.value?.validate()
+
+    // Confirm irrevocable credential removal before emitting.
+    if (formData.value.clearApiKey) {
+      const ok = await new Promise<boolean>((resolve) => {
+        const d = DialogPlugin.confirm({
+          header: t('secret.confirmClearTitle'),
+          body: t('secret.confirmClearBody'),
+          confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+          cancelBtn: t('common.cancel'),
+          onConfirm: () => { d.hide(); resolve(true) },
+          onCancel: () => { d.hide(); resolve(false) },
+          onClose: () => { d.hide(); resolve(false) },
+        })
+      })
+      if (!ok) return
+    }
+
     saving.value = true
-    
+
     // 如果是新增且没有 id，生成一个
     if (!formData.value.id) {
       formData.value.id = generateId()
     }
-    
+
     emit('confirm', { ...formData.value })
     dialogVisible.value = false
     // 保存成功后重置草稿，下次打开新增模型时是空白
@@ -1652,6 +1702,18 @@ const handleCancel = () => {
       display: inline-flex !important;
       align-items: center !important;
     }
+  }
+}
+
+// Destructive-action checkbox for "Remove this credential". Styled to match
+// the pattern used in McpServiceDialog so the two dialogs read identically.
+.clear-credential {
+  display: inline-flex;
+  margin-top: 8px;
+
+  :deep(.t-checkbox__label) {
+    color: var(--td-error-color);
+    font-size: 13px;
   }
 }
 </style>

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -53,7 +55,12 @@ func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types
 	return nil
 }
 
-// GetMCPServiceByID retrieves an MCP service by ID
+// GetMCPServiceByID retrieves an MCP service by ID.
+//
+// Sensitive fields are redacted before the service is returned so that the
+// single-resource GET behaves consistently with the list endpoint. Builtin
+// services still route through HideSensitiveInfo which clears additional
+// fields (URL, Headers, EnvVars, StdioConfig) on top of the redaction.
 func (s *mcpServiceService) GetMCPServiceByID(
 	ctx context.Context,
 	tenantID uint64,
@@ -69,6 +76,10 @@ func (s *mcpServiceService) GetMCPServiceByID(
 		return nil, fmt.Errorf("MCP service not found")
 	}
 
+	if service.IsBuiltin {
+		return service.HideSensitiveInfo(), nil
+	}
+	service.RedactSensitiveData()
 	return service, nil
 }
 
@@ -80,12 +91,14 @@ func (s *mcpServiceService) ListMCPServices(ctx context.Context, tenantID uint64
 		return nil, fmt.Errorf("failed to list MCP services: %w", err)
 	}
 
-	// Mask sensitive data for list view
+	// Redact sensitive data before returning so secrets never leave the server.
+	// Builtin services go through HideSensitiveInfo which clears additional
+	// fields (URL, headers, env_vars, stdio_config) beyond redaction.
 	for i, service := range services {
 		if service.IsBuiltin {
 			services[i] = service.HideSensitiveInfo()
 		} else {
-			service.MaskSensitiveData()
+			service.RedactSensitiveData()
 		}
 	}
 
@@ -141,6 +154,57 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	// Store old enabled state BEFORE any updates
 	oldEnabled := existing.Enabled
 
+	// Snapshot pre-merge values of fields that drive configChanged. We need
+	// this because the in-place merge below reassigns pointer fields such as
+	// existing.URL = service.URL, after which any post-merge comparison
+	// between service.URL and existing.URL would trivially match.
+	preURL := ""
+	preURLSet := existing.URL != nil
+	if preURLSet {
+		preURL = *existing.URL
+	}
+	var preStdioCommand string
+	var preStdioArgs []string
+	preStdioSet := existing.StdioConfig != nil
+	if preStdioSet {
+		preStdioCommand = existing.StdioConfig.Command
+		preStdioArgs = append([]string(nil), existing.StdioConfig.Args...)
+	}
+	preTransportType := existing.TransportType
+	preAuthSet := existing.AuthConfig != nil
+	var preAuthAPIKey, preAuthToken string
+	var preAuthHeaders map[string]string
+	if preAuthSet {
+		preAuthAPIKey = existing.AuthConfig.APIKey
+		preAuthToken = existing.AuthConfig.Token
+		// Copy the map so subsequent mutations via merged.CustomHeaders don't
+		// alias into the snapshot.
+		if existing.AuthConfig.CustomHeaders != nil {
+			preAuthHeaders = make(map[string]string, len(existing.AuthConfig.CustomHeaders))
+			maps.Copy(preAuthHeaders, existing.AuthConfig.CustomHeaders)
+		}
+	}
+
+	// AuthConfig merge is applied unconditionally (both partial and full
+	// updates), so a request body like {"clear_token": true} by itself is
+	// honored instead of being silently dropped when Name is empty.
+	// Audit-log explicit clear operations before the merge absorbs the flag.
+	if service.AuthConfig != nil {
+		if service.AuthConfig.ClearAPIKey {
+			logger.GetLogger(ctx).Infof(
+				"MCP auth cleared by user: id=%s field=api_key",
+				secutils.SanitizeForLog(service.ID),
+			)
+		}
+		if service.AuthConfig.ClearToken {
+			logger.GetLogger(ctx).Infof(
+				"MCP auth cleared by user: id=%s field=token",
+				secutils.SanitizeForLog(service.ID),
+			)
+		}
+		existing.AuthConfig = service.AuthConfig.MergeUpdate(existing.AuthConfig)
+	}
+
 	// Merge updates: only update fields that are provided (non-zero or explicitly set)
 	// This ensures that false values for enabled field are properly updated
 	// Handler ensures that service.Enabled is only set if "enabled" key exists in the request
@@ -148,7 +212,7 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 	// or if we're updating other fields (indicating full update)
 	// For enabled field, we'll update it if this is a partial update (only enabled) or if it's explicitly set
 	if service.Name == "" {
-		// Partial update - only update enabled field
+		// Partial update - only update enabled field (AuthConfig already merged above).
 		existing.Enabled = service.Enabled
 	} else {
 		// Full update - update all fields including enabled
@@ -172,9 +236,6 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		if service.Headers != nil {
 			existing.Headers = service.Headers
 		}
-		if service.AuthConfig != nil {
-			existing.AuthConfig = service.AuthConfig
-		}
 		if service.AdvancedConfig != nil {
 			existing.AdvancedConfig = service.AdvancedConfig
 		}
@@ -188,25 +249,39 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 		return fmt.Errorf("failed to update MCP service: %w", err)
 	}
 
-	// Check if critical configuration changed (URL/StdioConfig, transport type, or auth config)
+	// Check if critical configuration changed (URL / StdioConfig / transport
+	// type / auth config). Comparisons MUST be against the pre-merge
+	// snapshots captured above — after the in-place merge, service.URL and
+	// existing.URL point to the same memory, making any post-merge compare
+	// vacuously equal. Saving the dialog without touching these fields must
+	// not recycle the live MCP client connection (that's the NELO-1299
+	// regression we're preventing).
 	configChanged := false
-	if service.URL != nil && existing.URL != nil && *service.URL != *existing.URL {
+	currURLSet := existing.URL != nil
+	switch {
+	case currURLSet != preURLSet:
 		configChanged = true
-	} else if (service.URL != nil) != (existing.URL != nil) {
-		configChanged = true
-	}
-	if service.StdioConfig != nil && existing.StdioConfig != nil {
-		if service.StdioConfig.Command != existing.StdioConfig.Command ||
-			!equalStringSlices(service.StdioConfig.Args, existing.StdioConfig.Args) {
-			configChanged = true
-		}
-	} else if (service.StdioConfig != nil) != (existing.StdioConfig != nil) {
+	case currURLSet && *existing.URL != preURL:
 		configChanged = true
 	}
-	if service.TransportType != "" && service.TransportType != existing.TransportType {
+	currStdioSet := existing.StdioConfig != nil
+	switch {
+	case currStdioSet != preStdioSet:
+		configChanged = true
+	case currStdioSet && (existing.StdioConfig.Command != preStdioCommand ||
+		!slices.Equal(existing.StdioConfig.Args, preStdioArgs)):
 		configChanged = true
 	}
-	if service.AuthConfig != nil {
+	if existing.TransportType != preTransportType {
+		configChanged = true
+	}
+	currAuthSet := existing.AuthConfig != nil
+	switch {
+	case currAuthSet != preAuthSet:
+		configChanged = true
+	case currAuthSet && (existing.AuthConfig.APIKey != preAuthAPIKey ||
+		existing.AuthConfig.Token != preAuthToken ||
+		!maps.Equal(existing.AuthConfig.CustomHeaders, preAuthHeaders)):
 		configChanged = true
 	}
 	name := secutils.SanitizeForLog(existing.Name)
@@ -393,15 +468,3 @@ func (s *mcpServiceService) GetMCPServiceResources(
 	return resources, nil
 }
 
-// equalStringSlices compares two string slices for equality
-func equalStringSlices(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}

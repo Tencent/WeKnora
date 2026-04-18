@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/textproto"
+	"reflect"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -15,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/hibiken/asynq"
 )
 
@@ -153,8 +155,55 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 		return nil, datasource.ErrDataSourceInvalid
 	}
 
-	// Validate new configuration if changed
-	if ds.Type != existing.Type || string(ds.Config) != string(existing.Config) {
+	// Apply write-only secret merge semantics to the Config jsonb:
+	// empty / redacted credential strings preserve existing values,
+	// ClearCredentials wipes the whole map, other values replace. This
+	// blocks the NELO-1299-style round-trip bug where a frontend that
+	// echoed back the redacted placeholder would overwrite real secrets.
+	//
+	// We also remember the parsed configs for the post-merge "changed?"
+	// comparison — a raw-bytes compare against ds.Config is unreliable
+	// because Go map iteration order makes the re-serialized JSON's key
+	// ordering nondeterministic, causing string(merged) != string(existing)
+	// to spuriously trip every time.
+	var mergedCfg, existingParsedCfg *types.DataSourceConfig
+	if len(ds.Config) > 0 {
+		incomingCfg, parseIncErr := ds.ParseConfig()
+		existingCfg, parseExErr := existing.ParseConfig()
+		if parseIncErr == nil && parseExErr == nil && incomingCfg != nil {
+			baseExisting := types.DataSourceConfig{}
+			if existingCfg != nil {
+				baseExisting = *existingCfg
+			}
+			if incomingCfg.ClearCredentials {
+				logger.Infof(ctx, "DataSource credentials cleared by user: id=%s",
+					secutils.SanitizeForLog(ds.ID))
+			}
+			merged := incomingCfg.MergeUpdate(baseExisting)
+			if blob, err := merged.ToJSON(); err == nil {
+				ds.Config = blob
+			}
+			mergedCfg = &merged
+			existingParsedCfg = existingCfg
+		}
+	}
+
+	// Validate new configuration if changed. Compare parsed structures to
+	// avoid re-running (potentially expensive) OAuth / live-connection
+	// validators on every update that only re-orders JSON keys.
+	//
+	// Skip validation entirely when the user is explicitly revoking
+	// credentials (ClearCredentials=true). Live validators (e.g. Notion's
+	// /me API) require a working secret by definition; trying to validate
+	// after a wipe would always fail and leave the row un-cleared, defeating
+	// the whole point of the "Remove all credentials" affordance.
+	configActuallyChanged := true
+	if mergedCfg != nil && existingParsedCfg != nil {
+		configActuallyChanged = !reflect.DeepEqual(*mergedCfg, *existingParsedCfg)
+	}
+	clearingCredentials := mergedCfg != nil && !mergedCfg.HasCredentials() &&
+		existingParsedCfg != nil && existingParsedCfg.HasCredentials()
+	if !clearingCredentials && (ds.Type != existing.Type || configActuallyChanged) {
 		if err := s.validateDataSourceConfig(ctx, ds); err != nil {
 			return nil, err
 		}

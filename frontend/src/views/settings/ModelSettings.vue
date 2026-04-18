@@ -138,6 +138,13 @@ const backendTypeToModelType: Record<string, ModelType> = {
 }
 
 // 将后端模型格式转换为旧的前端格式（附带 _modelType 便于渲染）
+// NOTE: apiKey is intentionally NEVER pre-filled from the server response.
+// The server returns '***' as a redacted placeholder when a key is stored,
+// and '' when it is not. We expose this as hasExistingApiKey so the editor
+// dialog can render a "Set / Not set" badge, while the apiKey field starts
+// blank — this preserves the invariant "non-empty formData.apiKey means the
+// user typed something" that the save path relies on to decide preserve /
+// replace / clear.
 function convertToLegacyFormat(model: ModelConfig) {
   return {
     id: model.id!,
@@ -145,7 +152,8 @@ function convertToLegacyFormat(model: ModelConfig) {
     source: model.source,
     modelName: model.name,
     baseUrl: model.parameters.base_url || '',
-    apiKey: model.parameters.api_key || '',
+    apiKey: '',
+    hasExistingApiKey: model.parameters.api_key === '***',
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false,
@@ -283,6 +291,20 @@ const handleModelSave = async (modelData: any) => {
       }
     }
 
+    // 将前端格式转换为后端格式.
+    // Three-state api_key semantics (write-only secrets pattern):
+    //   - clearApiKey set                → send { clear_api_key: true }
+    //   - user typed a value             → send { api_key: "..." }
+    //   - empty (default on edit)        → omit api_key → server preserves
+    //   - empty on create                → omit api_key → no stored secret
+    const trimmedApiKey = (modelData.apiKey ?? '').trim()
+    const apiKeyFields: { api_key?: string; clear_api_key?: boolean } =
+      modelData.clearApiKey
+        ? { clear_api_key: true }
+        : trimmedApiKey
+          ? { api_key: trimmedApiKey }
+          : {}
+
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
       type: getModelType(currentModelType.value),
@@ -290,7 +312,7 @@ const handleModelSave = async (modelData: any) => {
       description: '',
       parameters: {
         base_url: modelData.baseUrl?.trim() || '',
-        api_key: modelData.apiKey?.trim() || '',
+        ...apiKeyFields,
         provider: modelData.provider || '',
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {

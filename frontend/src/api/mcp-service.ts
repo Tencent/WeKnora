@@ -13,6 +13,10 @@ export interface MCPService {
     api_key?: string
     token?: string
     custom_headers?: Record<string, string>
+    // Write-only flags — set to true in Update requests to explicitly remove
+    // the corresponding credential. The server never returns these fields.
+    clear_api_key?: boolean
+    clear_token?: boolean
   }
   advanced_config?: {
     timeout?: number
