@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -178,7 +179,7 @@ func Auth(
 				return
 			}
 
-			if t == nil || t.APIKey != apiKey {
+			if t == nil || subtle.ConstantTimeCompare([]byte(t.APIKey), []byte(apiKey)) != 1 {
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"error": "Unauthorized: invalid API key",
 				})
