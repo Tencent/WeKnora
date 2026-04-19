@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"golang.org/x/sync/errgroup"
 )
@@ -67,7 +68,7 @@ func formatToolHint(name string, args map[string]any) string {
 // When ParallelToolCalls is enabled and there are 2+ tool calls, they execute concurrently.
 func (e *AgentEngine) executeToolCalls(
 	ctx context.Context, response *types.ChatResponse,
-	step *types.AgentStep, iteration int, sessionID string,
+	step *types.AgentStep, iteration int, sessionID string, messages []chat.Message,
 ) {
 	if len(response.ToolCalls) == 0 {
 		return
@@ -79,12 +80,12 @@ func (e *AgentEngine) executeToolCalls(
 
 	// Use parallel execution when enabled and there are multiple tool calls
 	if e.config.ParallelToolCalls && n >= 2 {
-		e.executeToolCallsParallel(ctx, response, step, iteration, sessionID)
+		e.executeToolCallsParallel(ctx, response, step, iteration, sessionID, messages)
 		return
 	}
 
 	for i, tc := range response.ToolCalls {
-		e.executeSingleToolCall(ctx, tc, i, step, iteration, round, sessionID)
+		e.executeSingleToolCall(ctx, response.ToolCalls, tc, i, step, iteration, round, sessionID, messages)
 	}
 }
 
@@ -92,7 +93,7 @@ func (e *AgentEngine) executeToolCalls(
 // collecting results in original order.
 func (e *AgentEngine) executeToolCallsParallel(
 	ctx context.Context, response *types.ChatResponse,
-	step *types.AgentStep, iteration int, sessionID string,
+	step *types.AgentStep, iteration int, sessionID string, messages []chat.Message,
 ) {
 	round := iteration + 1
 	n := len(response.ToolCalls)
@@ -105,7 +106,7 @@ func (e *AgentEngine) executeToolCallsParallel(
 	for i, tc := range response.ToolCalls {
 		i, tc := i, tc // capture loop vars
 		g.Go(func() error {
-			toolCall := e.runToolCall(gCtx, tc, i, iteration, round, sessionID)
+			toolCall := e.runToolCall(gCtx, response.ToolCalls, tc, i, iteration, round, sessionID, messages)
 			mu.Lock()
 			results[i] = toolCall
 			mu.Unlock()
@@ -159,10 +160,10 @@ func (e *AgentEngine) executeToolCallsParallel(
 
 // executeSingleToolCall runs one tool call sequentially (original behavior).
 func (e *AgentEngine) executeSingleToolCall(
-	ctx context.Context, tc types.LLMToolCall, i int,
-	step *types.AgentStep, iteration, round int, sessionID string,
+	ctx context.Context, toolCalls []types.LLMToolCall, tc types.LLMToolCall, i int,
+	step *types.AgentStep, iteration, round int, sessionID string, messages []chat.Message,
 ) {
-	toolCall := e.runToolCall(ctx, tc, i, iteration, round, sessionID)
+	toolCall := e.runToolCall(ctx, toolCalls, tc, i, iteration, round, sessionID, messages)
 	step.ToolCalls = append(step.ToolCalls, toolCall)
 
 	result := toolCall.Result
@@ -205,8 +206,8 @@ func (e *AgentEngine) executeSingleToolCall(
 // runToolCall handles argument parsing, execution, logging, and pipeline events for a single tool call.
 // It returns the completed ToolCall struct. Safe to call from multiple goroutines.
 func (e *AgentEngine) runToolCall(
-	ctx context.Context, tc types.LLMToolCall, i int,
-	iteration, round int, sessionID string,
+	ctx context.Context, allToolCalls []types.LLMToolCall, tc types.LLMToolCall, i int,
+	iteration, round int, sessionID string, messages []chat.Message,
 ) types.ToolCall {
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
@@ -238,6 +239,29 @@ func (e *AgentEngine) runToolCall(
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
 
 	toolCallStartTime := time.Now()
+
+	if msgIdx, tcIdx, duplicated := FindDuplicateToolCallInMessages(messages, tc.Function.Name, tc.Function.Arguments); duplicated {
+		logger.Warnf(ctx, "%s Duplicate tool call found in history (messages[%d].tool_calls[%d])", toolTag, msgIdx, tcIdx)
+		duration := time.Since(toolCallStartTime).Milliseconds()
+		return types.ToolCall{
+			ID:       tc.ID,
+			Name:     tc.Function.Name,
+			Args:     args,
+			Result:   &types.ToolResult{Success: true, Output: BuildDuplicateToolCallWarningCN(tc.Function.Name, msgIdx, tcIdx)},
+			Duration: duration,
+		}
+	}
+	if prevIdx, duplicated := FindDuplicateToolCallInCurrentResponseBeforeIndex(allToolCalls, i); duplicated {
+		logger.Warnf(ctx, "%s Duplicate tool call found earlier in current response (tool_calls[%d])", toolTag, prevIdx)
+		duration := time.Since(toolCallStartTime).Milliseconds()
+		return types.ToolCall{
+			ID:       tc.ID,
+			Name:     tc.Function.Name,
+			Args:     args,
+			Result:   &types.ToolResult{Success: true, Output: BuildDuplicateToolCallWarningCN(tc.Function.Name, -1, prevIdx)},
+			Duration: duration,
+		}
+	}
 
 	// Emit tool hint for UI progress display
 	toolHint := formatToolHint(tc.Function.Name, args)
