@@ -3740,4 +3740,15 @@ export default {
     syncResultDeleted: '-{n}',
     moreActions: 'More',
   },
+  secret: {
+    // Placeholder shown inside a credential input when a value is currently
+    // stored server-side. The bullet run doubles as a visual "something is
+    // there" cue (matching how the password type renders dots); the
+    // parenthetical tells the user what typing will do.
+    storedPlaceholder: '•••••••• (Enter new value to replace)',
+    clearHint: 'Remove this credential',
+    confirmClearTitle: 'Confirm credential removal',
+    confirmClearBody:
+      'This permanently deletes the stored credential. Integrations using it will stop working. Continue?',
+  },
 }

@@ -108,6 +108,7 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 		return
 	}
 
+	provider.RedactSensitiveData()
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data":    provider,
@@ -131,6 +132,9 @@ func (h *WebSearchProviderHandler) ListProviders(c *gin.Context) {
 		return
 	}
 
+	for _, p := range providers {
+		p.RedactSensitiveData()
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    providers,
@@ -154,6 +158,7 @@ func (h *WebSearchProviderHandler) GetProvider(c *gin.Context) {
 		return
 	}
 
+	provider.RedactSensitiveData()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    provider,
@@ -185,14 +190,37 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 		return
 	}
 
+	// Merge incoming parameters into the existing ones using write-only
+	// secret semantics: empty / redacted APIKey preserves the stored value,
+	// ClearAPIKey explicitly wipes it, any other value replaces. Non-secret
+	// fields flow through from the request directly.
+	mergedParams := req.Parameters.MergeUpdate(existing.Parameters)
+	if req.Parameters.ClearAPIKey {
+		logger.Infof(ctx, "WebSearchProvider API key cleared by user: id=%s",
+			secutils.SanitizeForLog(id))
+	}
+
+	// Preserve existing values for top-level metadata fields when the
+	// request omits them (empty string from the JSON decoder). Without this,
+	// a partial update that only flips IsDefault would clobber Name and
+	// Description on the stored record.
+	mergedName := req.Name
+	if mergedName == "" {
+		mergedName = existing.Name
+	}
+	mergedDescription := req.Description
+	if mergedDescription == "" {
+		mergedDescription = existing.Description
+	}
+
 	// Build updated entity, keeping immutable fields from existing
 	provider := &types.WebSearchProviderEntity{
 		ID:          id,
 		TenantID:    tenantID,
-		Name:        secutils.SanitizeForLog(req.Name),
+		Name:        secutils.SanitizeForLog(mergedName),
 		Provider:    existing.Provider, // Provider type is immutable after creation
-		Description: secutils.SanitizeForLog(req.Description),
-		Parameters:  req.Parameters,
+		Description: secutils.SanitizeForLog(mergedDescription),
+		Parameters:  mergedParams,
 		IsDefault:   req.IsDefault,
 	}
 
@@ -205,6 +233,7 @@ func (h *WebSearchProviderHandler) UpdateProvider(c *gin.Context) {
 	// Re-fetch to get the full stored state
 	updated, _ := h.repo.GetByID(ctx, tenantID, id)
 	if updated != nil {
+		updated.RedactSensitiveData()
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": updated})
 	} else {
 		c.JSON(http.StatusOK, gin.H{"success": true})
@@ -297,8 +326,17 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// doTestSearch creates a temporary provider and runs a simple test query
+// doTestSearch creates a temporary provider and runs a simple test query.
+//
+// The provider would otherwise try to authenticate against the upstream API
+// with the redacted placeholder (which is guaranteed to fail with a
+// confusing error). Reject it up front with an actionable message so the
+// user knows they should type a real key or test against the saved config
+// via /test instead.
 func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerType string, params types.WebSearchProviderParameters) error {
+	if params.APIKey == types.RedactedSecretPlaceholder {
+		return fmt.Errorf("api_key looks like the redacted placeholder; enter your real key or call POST /api/v1/web-search-providers/{id}/test to exercise the saved credential")
+	}
 	logger.Infof(ctx, "[WebSearch][Test] testing provider type=%s", providerType)
 	searchProvider, err := h.registry.CreateProvider(providerType, params)
 	if err != nil {

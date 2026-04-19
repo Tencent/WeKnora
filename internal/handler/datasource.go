@@ -114,6 +114,7 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 		return
 	}
 
+	ds.RedactSensitiveData()
 	c.JSON(http.StatusCreated, ds)
 }
 
@@ -142,6 +143,7 @@ func (h *DataSourceHandler) GetDataSource(c *gin.Context) {
 		return
 	}
 
+	ds.RedactSensitiveData()
 	c.JSON(http.StatusOK, ds)
 }
 
@@ -178,6 +180,9 @@ func (h *DataSourceHandler) ListDataSources(c *gin.Context) {
 
 	if dataSources == nil {
 		dataSources = make([]*types.DataSource, 0)
+	}
+	for _, ds := range dataSources {
+		ds.RedactSensitiveData()
 	}
 	c.JSON(http.StatusOK, dataSources)
 }
@@ -224,6 +229,7 @@ func (h *DataSourceHandler) UpdateDataSource(c *gin.Context) {
 		return
 	}
 
+	ds.RedactSensitiveData()
 	c.JSON(http.StatusOK, ds)
 }
 

@@ -35,11 +35,19 @@ type MCPService struct {
 	UpdatedAt      string             `json:"updated_at"`
 }
 
-// MCPAuthConfig represents authentication configuration for MCP service
+// MCPAuthConfig represents authentication configuration for MCP service.
+//
+// ClearAPIKey and ClearToken are write-only flags used in Update requests to
+// explicitly remove a stored credential. The server never returns these
+// fields in responses.
 type MCPAuthConfig struct {
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+
+	// Write-only clear flags.
+	ClearAPIKey bool `json:"clear_api_key,omitempty"`
+	ClearToken  bool `json:"clear_token,omitempty"`
 }
 
 // MCPAdvancedConfig represents advanced configuration for MCP service

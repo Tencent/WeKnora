@@ -12,6 +12,9 @@ export interface WebSearchProviderEntity {
     engine_id?: string
     proxy_url?: string
     extra_config?: Record<string, string>
+    // Write-only flag — set to true in Update requests to explicitly remove
+    // the stored API key. The server never returns this field.
+    clear_api_key?: boolean
   }
   is_default?: boolean
   created_at?: string

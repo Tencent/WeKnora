@@ -65,6 +65,12 @@ func (e *WebSearchProviderEntity) BeforeCreate(tx *gorm.DB) (err error) {
 // API keys are encrypted at rest using AES-GCM.
 // BaseURL is intentionally NOT included — each provider type uses a hardcoded
 // official API endpoint to prevent SSRF attacks.
+//
+// ClearAPIKey is a write-only flag used in Update requests to explicitly
+// remove the stored API key. It is never persisted and never returned in
+// responses. Without this flag an empty APIKey in an Update request is
+// interpreted as "no change", so this is the only way to intentionally clear
+// a stored key without deleting the entire provider record.
 type WebSearchProviderParameters struct {
 	// API key for the search provider (encrypted in DB)
 	APIKey string `yaml:"api_key" json:"api_key,omitempty"`
@@ -75,6 +81,38 @@ type WebSearchProviderParameters struct {
 	ProxyURL string `yaml:"proxy_url" json:"proxy_url,omitempty"`
 	// Provider-specific extra configuration for future extensibility
 	ExtraConfig map[string]string `yaml:"extra_config" json:"extra_config,omitempty"`
+
+	// Write-only clear flag — never persisted, never returned.
+	ClearAPIKey bool `yaml:"-" json:"clear_api_key,omitempty" gorm:"-"`
+}
+
+// RedactSensitiveData replaces APIKey with RedactedSecretPlaceholder when a
+// value is set. Empty values stay empty so the frontend can distinguish
+// "set (hidden)" from "not set". Mutates the receiver in place.
+func (e *WebSearchProviderEntity) RedactSensitiveData() {
+	if e.Parameters.APIKey != "" {
+		e.Parameters.APIKey = RedactedSecretPlaceholder
+	}
+}
+
+// MergeUpdate applies write-only secret merge semantics for Update requests:
+//
+//   - ClearAPIKey takes precedence — when true, APIKey becomes empty
+//   - Otherwise APIKey uses PreserveIfRedacted: empty or the redacted
+//     placeholder preserves existing, any other value replaces
+//   - Non-secret fields (EngineID, ProxyURL, ExtraConfig) are replaced
+//     directly from incoming
+//   - The write-only ClearAPIKey flag is cleared on the merged result so it
+//     never leaks to storage
+func (p WebSearchProviderParameters) MergeUpdate(existing WebSearchProviderParameters) WebSearchProviderParameters {
+	merged := p
+	if p.ClearAPIKey {
+		merged.APIKey = ""
+	} else {
+		merged.APIKey = PreserveIfRedacted(p.APIKey, existing.APIKey)
+	}
+	merged.ClearAPIKey = false
+	return merged
 }
 
 // Value implements the driver.Valuer interface.

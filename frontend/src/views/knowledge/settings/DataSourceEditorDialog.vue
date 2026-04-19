@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   createDataSource,
@@ -27,6 +27,38 @@ const { t } = useI18n()
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
 const submitting = ref(false)
+
+// Fixed placeholder returned by the server for redacted credential strings.
+// Must match internal/types/secret.go → RedactedSecretPlaceholder.
+const REDACTED_PLACEHOLDER = '***'
+
+// Per-field: is this specific credential key stored server-side? Drives the
+// per-input placeholder swap to the "••••••• (Enter new value to replace)"
+// hint when the server marked it present.
+function hasFieldCredential(key: string): boolean {
+  return props.dataSource?.config?.credentials?.[key] === REDACTED_PLACEHOLDER
+}
+
+// Connector-level rollup: true when any credential key is stored. Used to
+// decide whether to render the "Remove all credentials" checkbox.
+const hasExistingCredentials = computed(() => {
+  const creds = props.dataSource?.config?.credentials
+  if (!creds) return false
+  return Object.values(creds).some(v => v === REDACTED_PLACEHOLDER)
+})
+
+// Placeholder for a given credential input: stored → shared hint,
+// otherwise the connector-specific default (e.g. "ntn_xxxx" for Notion).
+function credentialPlaceholder(field: { key: string; placeholder: string }): string {
+  return hasFieldCredential(field.key)
+    ? t('secret.storedPlaceholder')
+    : field.placeholder
+}
+
+// Explicit "remove all credentials" flag. Because credentials form an atomic
+// set per connector (e.g. an OAuth pair) we only support all-or-nothing
+// clearing, mirroring the backend DataSourceConfig.ClearCredentials contract.
+const clearCredentials = ref(false)
 
 // Form data
 const form = ref({
@@ -209,10 +241,22 @@ watch(visible, (v) => {
   selectedResourceIds.value = []
 
   if (isEdit.value && props.dataSource) {
+    // Reset clear intent on every open so an aborted deletion doesn't
+    // carry over to the next edit session.
+    clearCredentials.value = false
+    // Credentials are intentionally NOT pre-filled from the server response
+    // — even though the server returns '***' for stored secrets, the form
+    // holds an empty map. This keeps the "non-empty means user typed it"
+    // invariant that the save path relies on, and the badge reflects the
+    // stored state via hasExistingCredentials instead.
     form.value = {
       name: props.dataSource.name,
       type: props.dataSource.type,
-      config: props.dataSource.config || { credentials: {}, resource_ids: [], settings: {} },
+      config: {
+        credentials: {},
+        resource_ids: props.dataSource.config?.resource_ids || [],
+        settings: props.dataSource.config?.settings || {},
+      },
       sync_schedule: props.dataSource.sync_schedule,
       sync_mode: props.dataSource.sync_mode,
       conflict_strategy: props.dataSource.conflict_strategy,
@@ -221,6 +265,7 @@ watch(visible, (v) => {
     selectedResourceIds.value = form.value.config?.resource_ids || []
     tempDsId.value = props.dataSource.id
   } else {
+    clearCredentials.value = false
     form.value = {
       name: '',
       type: '',
@@ -399,8 +444,45 @@ function prevStep() {
   step.value--
 }
 
+// Prompt the user before irrevocable credential removal.
+function confirmClearIfNeeded(): Promise<boolean> {
+  if (!clearCredentials.value) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const d = DialogPlugin.confirm({
+      header: t('secret.confirmClearTitle'),
+      body: t('secret.confirmClearBody'),
+      confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => { d.hide(); resolve(true) },
+      onCancel: () => { d.hide(); resolve(false) },
+      onClose: () => { d.hide(); resolve(false) },
+    })
+  })
+}
+
+// Build the config payload for Create / Update requests. In edit mode this
+// applies write-only secret semantics:
+//   - clearCredentials checked → send clear_credentials: true (backend wipes)
+//   - user typed credential values → send them as-is
+//   - user left fields blank → send empty credentials map (backend preserves
+//     every existing credential key individually)
+function buildConfigPayload(): Record<string, unknown> {
+  const cfg: Record<string, unknown> = {
+    credentials: clearCredentials.value ? {} : { ...form.value.config.credentials },
+    resource_ids: form.value.config.resource_ids,
+    settings: form.value.config.settings,
+  }
+  if (clearCredentials.value) {
+    cfg.clear_credentials = true
+  }
+  return cfg
+}
+
 // --- Final submit ---
 async function handleSubmit() {
+  const ok = await confirmClearIfNeeded()
+  if (!ok) return
+
   form.value.config.resource_ids = selectedResourceIds.value
   submitting.value = true
   try {
@@ -409,12 +491,14 @@ async function handleSubmit() {
     if (tempDsId.value) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
+        config: buildConfigPayload(),
         knowledge_base_id: props.kbId,
         status: 'active',
       } as any)
     } else {
       const res = await createDataSource({
         ...form.value,
+        config: buildConfigPayload(),
         knowledge_base_id: props.kbId,
         status: 'active',
       } as any)
@@ -564,13 +648,28 @@ const stepTitles = computed(() => [
         <a :href="currentDef.docUrl" target="_blank" rel="noopener">{{ currentDef.docUrl }}</a>
       </div>
 
+      <!--
+        Credential fields. When the server returned '***' for a field the
+        per-input placeholder swaps to the shared "••••••• (Enter new value
+        to replace)" hint so the input carries the "something is stored"
+        signal without a separate badge. The "Remove all credentials"
+        checkbox below handles the destructive clear for the whole set
+        (DataSource credentials are per-connector atomic bundles).
+      -->
       <div v-for="field in currentDef?.fields || []" :key="field.key" class="form-item">
         <label class="form-label">{{ t(field.labelKey) }}</label>
         <t-input
           v-model="form.config.credentials[field.key]"
-          :placeholder="field.placeholder"
+          :disabled="clearCredentials"
+          :placeholder="credentialPlaceholder(field)"
           :type="field.secret ? 'password' : 'text'"
         />
+      </div>
+
+      <div v-if="isEdit && hasExistingCredentials" class="form-item">
+        <t-checkbox v-model="clearCredentials" class="clear-credential">
+          {{ t('secret.clearHint') }}
+        </t-checkbox>
       </div>
 
       <div class="form-actions">
@@ -871,6 +970,12 @@ const stepTitles = computed(() => [
 
 .form-item { margin-bottom: 16px; }
 .form-label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--td-text-color-primary); }
+
+/* Destructive-action checkbox — red label, matches the other 3 dialogs. */
+.clear-credential :deep(.t-checkbox__label) {
+  color: var(--td-error-color);
+  font-size: 13px;
+}
 .form-tip { font-size: 12px; color: var(--td-text-color-placeholder); margin: 4px 0 12px; }
 .form-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .test-ok { color: var(--td-success-color); font-size: 13px; display: flex; align-items: center; gap: 4px; }
