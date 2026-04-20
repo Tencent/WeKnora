@@ -39,7 +39,7 @@ func (p *PluginMerge) ActivationEvents() []types.EventType {
 //  5. Group by knowledge source + chunk type, merge overlapping ranges
 //  6. Populate FAQ answers
 //  7. Expand short contexts with neighboring chunks
-//  7.5. Re-merge overlapping ranges introduced by expansion
+//     7.5. Re-merge overlapping ranges introduced by expansion
 //  8. Final deduplication (ID + signature + partial content overlap)
 func (p *PluginMerge) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
@@ -91,6 +91,15 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	// Step 8: Final dedup — catches exact duplicates plus partial content overlaps
 	mergedChunks = p.dedup(ctx, "final_dedup", mergedChunks)
 	mergedChunks = removePartialOverlaps(ctx, mergedChunks)
+
+	// Step 9: Restore rerank order.
+	// groupAndMergeOverlapping uses a Go map internally (undefined iteration order)
+	// and ParallelMap for concurrent processing, both of which destroy the score-based
+	// ordering produced by the rerank stage. Re-sort by Score descending so that
+	// knowledge_references reflects the rerank model's ranking.
+	sort.Slice(mergedChunks, func(i, j int) bool {
+		return mergedChunks[i].Score > mergedChunks[j].Score
+	})
 
 	chatManage.MergeResult = mergedChunks
 	return next()

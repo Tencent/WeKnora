@@ -71,7 +71,9 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 	// Add embedding data if available in additionalParams
 	if additionalParams != nil && slices.Contains(slices.Collect(maps.Keys(additionalParams)), "embedding") {
 		if embeddingMap, ok := additionalParams["embedding"].(map[string][]float32); ok {
-			pgVector.Embedding = pgvector.NewHalfVector(embeddingMap[indexInfo.SourceID])
+			embed := embeddingMap[indexInfo.SourceID]
+			NormalizeL2(embed)
+			pgVector.Embedding = pgvector.NewHalfVector(embed)
 			pgVector.Dimension = len(pgVector.Embedding.Slice())
 		}
 	}

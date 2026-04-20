@@ -3,9 +3,12 @@ package embedding
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -34,12 +37,30 @@ type OpenAIEmbedRequest struct {
 	TruncatePromptTokens int      `json:"truncate_prompt_tokens,omitempty"`
 }
 
-// OpenAIEmbedResponse represents an OpenAI embedding response
+// OpenAIEmbedResponse represents an OpenAI embedding response.
+// Embedding is a base64-encoded little-endian float32 array when encoding_format="base64".
 type OpenAIEmbedResponse struct {
 	Data []struct {
-		Embedding []float32 `json:"embedding"`
-		Index     int       `json:"index"`
+		Embedding string `json:"embedding"` // base64-encoded float32 binary
+		Index     int    `json:"index"`
 	} `json:"data"`
+}
+
+// decodeBase64Embedding decodes a base64-encoded little-endian float32 array.
+func decodeBase64Embedding(encoded string) ([]float32, error) {
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+	if len(raw)%4 != 0 {
+		return nil, fmt.Errorf("invalid embedding byte length: %d", len(raw))
+	}
+	floats := make([]float32, len(raw)/4)
+	for i := range floats {
+		bits := binary.LittleEndian.Uint32(raw[i*4 : i*4+4])
+		floats[i] = math.Float32frombits(bits)
+	}
+	return floats, nil
 }
 
 // NewOpenAIEmbedder creates a new OpenAI embedder
@@ -137,10 +158,9 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Create request body
 	reqBody := OpenAIEmbedRequest{
-		Model:                e.modelName,
-		Input:                texts,
-		EncodingFormat:       "float",
-		TruncatePromptTokens: e.truncatePromptTokens,
+		Model:          e.modelName,
+		Input:          texts,
+		EncodingFormat: "base64",
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -214,7 +234,12 @@ func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 	// Extract embedding vectors
 	embeddings := make([][]float32, 0, len(response.Data))
 	for _, data := range response.Data {
-		embeddings = append(embeddings, data.Embedding)
+		vec, err := decodeBase64Embedding(data.Embedding)
+		if err != nil {
+			logger.GetLogger(ctx).Errorf("OpenAIEmbedder BatchEmbed decode embedding[%d] error: %v", data.Index, err)
+			return nil, fmt.Errorf("decode embedding: %w", err)
+		}
+		embeddings = append(embeddings, vec)
 	}
 
 	return embeddings, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/common"
@@ -269,7 +270,8 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		len(params.Embedding), params.TopK, params.Threshold)
 
 	dimension := len(params.Embedding)
-	queryVector := pgvector.NewHalfVector(params.Embedding)
+	NormalizeL2(params.Embedding)
+	queryVector := pgvector.NewVector(params.Embedding)
 
 	// Build WHERE conditions for filtering
 	whereParts := make([]string, 0)
@@ -381,14 +383,13 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 		FROM (
 			SELECT 
 				id, content, source_id, source_type, chunk_id, knowledge_id, knowledge_base_id, tag_id,
-				embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d) as distance
+				embedding::halfvec(%[1]d) <=> %[1]d as distance
 			FROM embeddings
 			%[2]s
-			ORDER BY embedding::halfvec(%[1]d) <=> $1::halfvec(%[1]d)
+			ORDER BY embedding::halfvec(%[1]d) <=> %[1]d
 			LIMIT $%[3]d
 		) AS candidates
 		WHERE distance <= $%[4]d
-		ORDER BY distance ASC
 		LIMIT $%[5]d
 	`, dimension, whereClause, subqueryLimitParam, thresholdParam, finalLimitParam)
 
@@ -696,4 +697,30 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")
 	return nil
+}
+
+// NormalizeL2 对 []float32 做 L2 归一化（原地修改）。
+// 中间计算用 float64 以减少累加误差，最后写回 float32。
+func NormalizeL2(v []float32) {
+	if len(v) == 0 {
+		return
+	}
+
+	// 用 float64 累加平方和，避免大量 float32 相加时的精度损失
+	var sumSq float64
+	for _, x := range v {
+		f := float64(x)
+		sumSq += f * f
+	}
+
+	if sumSq < 1e-4 {
+		return // 零向量，无法归一化，保持不变
+	}
+
+	norm := math.Sqrt(sumSq)
+	invNorm := 1.0 / norm // 乘倒数比逐个除法快，且只引入一次除法误差
+
+	for i, x := range v {
+		v[i] = float32(float64(x) * invNorm)
+	}
 }

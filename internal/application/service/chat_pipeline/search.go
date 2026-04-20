@@ -396,7 +396,7 @@ func (p *PluginSearch) searchByTargets(
 				"model_key":          modelKey,
 				"combined_kb_count":  len(fullKBIDs),
 				"individual_targets": len(knowledgeTargets),
-				"vector_len":         len(queryEmbedding),
+				// "vector_len":         len(queryEmbedding),
 			})
 
 			var innerWg sync.WaitGroup
@@ -408,12 +408,13 @@ func (p *PluginSearch) searchByTargets(
 					defer innerWg.Done()
 
 					params := types.SearchParams{
-						QueryText:             queryText,
-						QueryEmbedding:        queryEmbedding,
+						QueryText: queryText,
+						// QueryEmbedding:        queryEmbedding,
 						KnowledgeBaseIDs:      fullKBIDs,
 						VectorThreshold:       chatManage.VectorThreshold,
 						KeywordThreshold:      chatManage.KeywordThreshold,
 						MatchCount:            chatManage.EmbeddingTopK,
+						DisableKeywordsMatch:  true,
 						SkipContextEnrichment: true,
 					}
 					res, err := p.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], params)

@@ -83,7 +83,7 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 	reqBody := azureOpenAIEmbedRequest{
 		Model:          e.modelName,
 		Input:          texts,
-		EncodingFormat: "float",
+		EncodingFormat: "base64",
 	}
 	if e.supportsDimensionsParam() {
 		reqBody.Dimensions = e.dimensions
@@ -125,7 +125,12 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 
 	embeddings := make([][]float32, 0, len(response.Data))
 	for _, data := range response.Data {
-		embeddings = append(embeddings, data.Embedding)
+		vec, err := decodeBase64Embedding(data.Embedding)
+		if err != nil {
+			logger.GetLogger(ctx).Errorf("AzureOpenAIEmbedder BatchEmbed decode embedding[%d] error: %v", data.Index, err)
+			return nil, fmt.Errorf("decode embedding: %w", err)
+		}
+		embeddings = append(embeddings, vec)
 	}
 	return embeddings, nil
 }
