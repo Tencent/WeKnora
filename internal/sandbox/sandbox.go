@@ -62,6 +62,9 @@ type Manager interface {
 	// Execute runs a script using the configured sandbox
 	Execute(ctx context.Context, config *ExecuteConfig) (*ExecuteResult, error)
 
+	// ExecuteInWorkspace runs a script in a workspace
+	ExecuteInWorkspace(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error)
+
 	// Cleanup releases all sandbox resources
 	Cleanup(ctx context.Context) error
 
@@ -113,6 +116,87 @@ type ExecuteConfig struct {
 
 	// ScriptContent is the script content for validation (optional, will be read from file if not provided)
 	ScriptContent string
+
+	// OutputFiles specifies output files to collect (glob pattern)
+	// Scripts can write artifacts to the out/ directory, which will be automatically collected
+	// If empty, all files in the out/ directory will be collected by default
+	OutputFiles []string
+
+	// CollectOutputDir whether to automatically collect artifacts from the out/ directory
+	// Defaults to true, scripts can write results to the $OUTPUT_DIR environment variable
+	CollectOutputDir bool
+}
+
+// WorkspaceExecuteConfig workspace mode execution configuration
+type WorkspaceExecuteConfig struct {
+	// SkillName is the name of the skill to execute
+	SkillName string
+
+	// SkillSourceDir is the absolute path to the skill source directory
+	SkillSourceDir string
+
+	// Command is the command to execute (via bash -c)
+	// Command and Script are mutually exclusive, with Command taking precedence
+	Command string
+
+	// Script is the script file path (relative to skill directory)
+	// Used when Command is empty
+	Script string
+
+	// Args are the command-line arguments to pass to the script
+	Args []string
+
+	// Cwd is the working directory (relative to skill in workspace)
+	Cwd string
+
+	// Stdin is the standard input to pass to the script
+	Stdin string
+
+	// Env are additional environment variables
+	Env map[string]string
+
+	// Timeout is the maximum execution time
+	Timeout time.Duration
+
+	// OutputFiles specifies output files to collect (glob pattern)
+	OutputFiles []string
+
+	// WorkspaceRoot is the workspace root directory (empty uses system temp directory)
+	WorkspaceRoot string
+
+	// PersistWorkspace whether to keep the workspace (for debugging)
+	PersistWorkspace bool
+
+	// AllowNetwork whether to allow network access (Docker mode)
+	AllowNetwork bool
+
+	// MemoryLimit memory limit (Docker mode)
+	MemoryLimit int64
+
+	// CPULimit CPU limit (Docker mode)
+	CPULimit float64
+}
+
+// WorkspaceExecutor workspace mode executor interface
+type WorkspaceExecutor interface {
+	// ExecuteInWorkspace executes a command in an isolated workspace
+	ExecuteInWorkspace(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error)
+}
+
+// OutputFile means output file
+type OutputFile struct {
+	// Name is the relative path name (relative to out/ directory)
+	Name string `json:"name"`
+	// Content is the text content of the file (text files only)
+	Content string `json:"content,omitempty"`
+	// Data is the raw byte data (binary files)
+	Data []byte `json:"-"`
+	// MIMEType is the MIME type of the file
+	MIMEType string `json:"mime_type,omitempty"`
+	// SizeBytes is the file size
+	SizeBytes int64 `json:"size_bytes"`
+	// IsText indicates whether the file is a text file
+	IsText bool `json:"is_text"`
 }
 
 // ExecuteResult contains the result of script execution
@@ -134,6 +218,9 @@ type ExecuteResult struct {
 
 	// Error contains any execution error
 	Error string
+
+	// OutputFiles is the list of output files
+	OutputFiles []OutputFile `json:"output_files,omitempty"`
 }
 
 // IsSuccess returns true if the script executed successfully
@@ -194,9 +281,16 @@ func defaultAllowedCommands() []string {
 	return []string{
 		"python",
 		"python3",
+		"pip",
+		"pip3",
 		"node",
+		"npm",
+		"npx",
 		"bash",
 		"sh",
+		"ruby",
+		"perl",
+		"php",
 		"cat",
 		"echo",
 		"head",
@@ -212,6 +306,12 @@ func defaultAllowedCommands() []string {
 		"ls",
 		"pwd",
 		"date",
+		"mkdir",
+		"cp",
+		"mv",
+		"find",
+		"xargs",
+		"tee",
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -108,6 +109,57 @@ func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*E
 	}
 
 	return sandbox.Execute(ctx, config)
+}
+
+// ExecuteInWorkspace runs a script in a workspace using the configured sandbox
+func (m *DefaultManager) ExecuteInWorkspace(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error) {
+	m.mu.RLock()
+	sandbox := m.sandbox
+	m.mu.RUnlock()
+
+	if sandbox == nil {
+		return nil, ErrSandboxDisabled
+	}
+
+	if sandbox.Type() == SandboxTypeDisabled {
+		return nil, ErrSandboxDisabled
+	}
+
+	// executeInWorkspace
+	switch s := sandbox.(type) {
+	case *DockerSandbox:
+		return s.ExecuteInWorkspace(ctx, config)
+	case *LocalSandbox:
+		return s.ExecuteInWorkspace(ctx, config)
+	default:
+		log.Printf("[sandbox] workspace execution not supported for %T, falling back to legacy mode", sandbox)
+		return m.executeLegacyFallback(ctx, config)
+	}
+}
+
+// executeLegacyFallback executes a script in a workspace using the legacy mode
+func (m *DefaultManager) executeLegacyFallback(ctx context.Context, config *WorkspaceExecuteConfig) (*ExecuteResult, error) {
+	if config.Script == "" && config.Command == "" {
+		return nil, fmt.Errorf("either command or script must be specified")
+	}
+
+	scriptPath := config.Script
+	if !filepath.IsAbs(scriptPath) && config.SkillSourceDir != "" {
+		scriptPath = filepath.Join(config.SkillSourceDir, scriptPath)
+	}
+
+	legacyConfig := &ExecuteConfig{
+		Script:           scriptPath,
+		Args:             config.Args,
+		WorkDir:          config.SkillSourceDir,
+		Timeout:          config.Timeout,
+		Env:              config.Env,
+		Stdin:            config.Stdin,
+		OutputFiles:      config.OutputFiles,
+		CollectOutputDir: true,
+	}
+
+	return m.Execute(ctx, legacyConfig)
 }
 
 // validateExecution performs comprehensive security validation on the execution config

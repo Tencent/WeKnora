@@ -78,7 +78,13 @@
       v-else-if="displayType === 'wiki_write_page' || displayType === 'wiki_replace_text' || displayType === 'wiki_rename_page' || displayType === 'wiki_delete_page'"
       :data="toolData as WikiEditData"
     />
-    
+
+    <!-- Skill Output Display -->
+    <SkillOutput
+        v-else-if="displayType === 'skill_output'"
+        :data="toolData as SkillOutputData"
+    />
+
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -107,7 +113,8 @@ import type {
   WebSearchResultsData,
   WebFetchResultsData,
   GrepResultsData,
-  WikiEditData
+  WikiEditData,
+  SkillOutputData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -123,6 +130,7 @@ import WebSearchResults from './tool-results/WebSearchResults.vue';
 import WebFetchResults from './tool-results/WebFetchResults.vue';
 import GrepResults from './tool-results/GrepResults.vue';
 import WikiEditResult from './tool-results/WikiEditResult.vue';
+import SkillOutput from './tool-results/SkillOutput.vue';
 
 interface Props {
   displayType?: DisplayType;

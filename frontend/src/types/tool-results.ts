@@ -24,7 +24,8 @@ export type DisplayType =
     | 'wiki_write_page'
     | 'wiki_replace_text'
     | 'wiki_rename_page'
-    | 'wiki_delete_page';
+    | 'wiki_delete_page'
+    | 'skill_output';
 
 // Search result item
 export interface SearchResultItem {
@@ -261,6 +262,31 @@ export interface WikiDeletePageData {
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
+// Skill output file item
+export interface SkillOutputFileItem {
+    name: string;
+    mime_type: string;
+    size_bytes: number;
+    is_text: boolean;
+    content?: string;
+}
+
+// Skill output data
+export interface SkillOutputData {
+    display_type: 'skill_output';
+    skill_name: string;
+    command?: string;
+    script_path?: string;
+    args?: string[];
+    exit_code: number;
+    stdout?: string;
+    stderr?: string;
+    duration_ms?: number;
+    killed?: boolean;
+    output_files?: SkillOutputFileItem[];
+    artifact_session_id?: string;
+}
+
 // Union type for all tool result data
 export type ToolResultData =
     | SearchResultsData
@@ -278,7 +304,8 @@ export type ToolResultData =
     | WikiWritePageData
     | WikiReplaceTextData
     | WikiRenamePageData
-    | WikiDeletePageData;
+    | WikiDeletePageData
+    | SkillOutputData;
 
 // Action data (from index.vue)
 export interface ActionData {

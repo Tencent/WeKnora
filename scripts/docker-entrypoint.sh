@@ -26,6 +26,7 @@ done
 # missing built-in skills (without overwriting user-provided ones).
 BUILTIN_DIR="/app/skills/_builtin"
 PRELOADED_DIR="/app/skills/preloaded"
+INSTALLED_DIR="/app/skills/installed"
 
 if [ -d "$BUILTIN_DIR" ]; then
     mkdir -p "$PRELOADED_DIR"
@@ -38,6 +39,9 @@ if [ -d "$BUILTIN_DIR" ]; then
     done
     chown -R appuser:appuser "$PRELOADED_DIR"
 fi
+
+mkdir -p "$INSTALLED_DIR"
+chown -R appuser:appuser "$INSTALLED_DIR"
 
 # ─── Drop privileges and exec the main process ───
 exec gosu appuser "$@"
