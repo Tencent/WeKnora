@@ -314,13 +314,14 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
 	var req struct {
 		Type        string                 `json:"type" binding:"required"`
 		Credentials map[string]interface{} `json:"credentials" binding:"required"`
+		Settings    map[string]interface{} `json:"settings,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: type and credentials are required"})
 		return
 	}
 
-	if err := h.service.ValidateCredentials(ctx, req.Type, req.Credentials); err != nil {
+	if err := h.service.ValidateCredentials(ctx, req.Type, req.Credentials, req.Settings); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

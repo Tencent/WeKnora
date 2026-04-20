@@ -192,8 +192,8 @@ func TestOssEnsureBucket_CreateFails(t *testing.T) {
 		t.Fatalf("newOSSClient() error: %v", err)
 	}
 
-	// Should fail with invalid credentials
-	err = ossEnsureBucket(client, "test-bucket")
+	// Use a clearly unique bucket name so the code must take the create path.
+	err = ossEnsureBucket(client, "weknora-invalid-credential-create-fail-1234567890")
 	if err == nil {
 		t.Error("ossEnsureBucket with invalid credentials should return an error")
 	}

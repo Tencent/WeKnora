@@ -6,7 +6,6 @@ import {
   createDataSource,
   updateDataSource,
   triggerSync,
-  validateConnection,
   validateCredentials,
   listResources,
   deleteDataSource,
@@ -150,6 +149,7 @@ interface ConnectorDef {
   permissionPageUrl: string
   requiredPermissions: string[]
   fields: { key: string; labelKey: string; placeholder: string; secret?: boolean }[]
+  settingsFields?: { key: string; labelKey: string; placeholder: string; defaultValue?: string }[]
 }
 
 const connectorDefs = computed<ConnectorDef[]>(() => [
@@ -190,6 +190,22 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     requiredPermissions: [],
     fields: [
       { key: 'api_token', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
+    ],
+  },
+  {
+    type: 'nutstore',
+    available: true,
+    docUrl: 'https://help.jianguoyun.com/?p=2064',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'username', labelKey: 'datasource.field.username', placeholder: 'user@example.com' },
+      { key: 'password', labelKey: 'datasource.field.appPassword', placeholder: '', secret: true },
+    ],
+    settingsFields: [
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://dav.jianguoyun.com', defaultValue: 'https://dav.jianguoyun.com' },
+      { key: 'root_path', labelKey: 'datasource.field.rootPath', placeholder: '我的文档' },
     ],
   },
 ])
@@ -237,6 +253,14 @@ function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
+  // Initialize settings defaults for connectors that have settingsFields
+  if (def.settingsFields) {
+    for (const sf of def.settingsFields) {
+      if (sf.defaultValue && !form.value.config.settings[sf.key]) {
+        form.value.config.settings[sf.key] = sf.defaultValue
+      }
+    }
+  }
   step.value = 1
 }
 
@@ -254,15 +278,9 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-      await validateConnection(tempDsId.value)
-    } else {
-      await validateCredentials(form.value.type, form.value.config.credentials)
-    }
+    // Always use stateless validation (no DB writes) for both create and edit modes.
+    // Pass settings so enterprise endpoints (e.g. custom base_url) are validated correctly.
+    await validateCredentials(form.value.type, form.value.config.credentials, form.value.config.settings)
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
   } catch (e: any) {
@@ -458,6 +476,8 @@ async function handleClose() {
 const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
+  folder: 'datasource.resourceType.folder',
+  file: 'datasource.resourceType.file',
 }
 
 function resourceTypeLabel(type: string): string {
@@ -570,6 +590,15 @@ const stepTitles = computed(() => [
           v-model="form.config.credentials[field.key]"
           :placeholder="field.placeholder"
           :type="field.secret ? 'password' : 'text'"
+        />
+      </div>
+
+      <!-- Settings fields (e.g. base_url, root_path for Nutstore) -->
+      <div v-for="field in currentDef?.settingsFields || []" :key="field.key" class="form-item">
+        <label class="form-label">{{ t(field.labelKey) }}</label>
+        <t-input
+          v-model="form.config.settings[field.key]"
+          :placeholder="field.placeholder"
         />
       </div>
 

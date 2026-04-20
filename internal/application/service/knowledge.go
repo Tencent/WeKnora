@@ -470,7 +470,7 @@ func isFileURL(rawURL, fileName, fileType string) bool {
 }
 
 func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
-	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string, channel string,
+	kbID string, rawURL string, fileName string, fileType string, enableMultimodel *bool, title string, tagID string, channel string, metadata map[string]string,
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
@@ -557,6 +557,18 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		UpdatedAt:        time.Now(),
 		EmbeddingModelID: kb.EmbeddingModelID,
 		TagID:            tagID, // 设置分类ID，用于知识分类管理
+	}
+
+	// Extract source_path and source_updated_at from metadata if provided
+	if metadata != nil {
+		if sp, ok := metadata["source_path"]; ok && sp != "" {
+			knowledge.SourcePath = sp
+		}
+		if sua, ok := metadata["source_updated_at"]; ok && sua != "" {
+			if t, err := time.Parse(time.RFC3339, sua); err == nil {
+				knowledge.SourceUpdatedAt = &t
+			}
+		}
 	}
 
 	// Save knowledge record
