@@ -28,10 +28,10 @@ import (
 )
 
 const (
-	// qaTimeout is the maximum time to wait for the QA pipeline to complete.
-	qaTimeout = 120 * time.Second
-	// dedupTTL is how long processed message IDs are retained.
-	dedupTTL = 5 * time.Minute
+	// defaultQATimeout is the default maximum time to wait for the QA pipeline to complete.
+	defaultQATimeout = 120 * time.Second
+	// defaultDedupTTL is the default time processed message IDs are retained.
+	defaultDedupTTL = 5 * time.Minute
 	// dedupCleanupInterval is how often the dedup map is cleaned.
 	dedupCleanupInterval = 1 * time.Minute
 	// maxContentLength is the maximum allowed message content length.
@@ -159,7 +159,9 @@ type Service struct {
 	// instanceID uniquely identifies this service instance for leader election.
 	instanceID string
 
-	stopCh chan struct{}
+	stopCh    chan struct{}
+	qaTimeout time.Duration
+	dedupTTL  time.Duration
 }
 
 // makeUserKey builds the canonical key used to identify a user's request
@@ -322,8 +324,28 @@ func NewService(
 		stopCh:           make(chan struct{}),
 	}
 
+	// Initialize timeouts from config or fallback to defaults
+	s.qaTimeout = defaultQATimeout
+	s.dedupTTL = defaultDedupTTL
+	if appCfg != nil && appCfg.IM != nil {
+		if appCfg.IM.QATimeout > 0 {
+			s.qaTimeout = time.Duration(appCfg.IM.QATimeout) * time.Second
+		}
+		if appCfg.IM.DedupTTL > 0 {
+			s.dedupTTL = time.Duration(appCfg.IM.DedupTTL) * time.Second
+		} else if appCfg.IM.QATimeout > 0 {
+			// Ensure dedup is always longer than QA timeout (QA + 2 mins)
+			s.dedupTTL = s.qaTimeout + 2*time.Minute
+		}
+	}
+
+	queueTimeout := 60 * time.Second
+	if appCfg != nil && appCfg.IM != nil && appCfg.IM.QueueTimeout > 0 {
+		queueTimeout = time.Duration(appCfg.IM.QueueTimeout) * time.Second
+	}
+
 	// Initialize the QA worker pool and bounded queue.
-	s.qaQueue = newQAQueue(workers, maxQueue, maxPerUser, globalMaxWorkers, s.executeQARequest, redisClient)
+	s.qaQueue = newQAQueue(workers, maxQueue, maxPerUser, globalMaxWorkers, s.executeQARequest, redisClient, queueTimeout)
 	s.qaQueue.Start(s.stopCh)
 
 	// Start periodic cleanup loops.
@@ -374,7 +396,7 @@ func (s *Service) dedupCleanupLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			cutoff := time.Now().Add(-dedupTTL)
+			cutoff := time.Now().Add(-s.dedupTTL)
 			s.processedMsgs.Range(func(key, value interface{}) bool {
 				if t, ok := value.(time.Time); ok && t.Before(cutoff) {
 					s.processedMsgs.Delete(key)
@@ -646,7 +668,7 @@ func (s *Service) storeInflightMapping(ctx context.Context, userKey, sessionID, 
 		return
 	}
 	val := sessionID + ":" + messageID
-	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, qaTimeout+30*time.Second).Err(); err != nil {
+	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, s.qaTimeout+30*time.Second).Err(); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: %v", err)
 	}
 }
@@ -767,7 +789,7 @@ func (s *Service) GetChannelByIDAndTenant(channelID string, tenantID uint64) (*I
 func (s *Service) isDuplicate(ctx context.Context, messageID string) bool {
 	if s.redis != nil {
 		key := RedisKeyDedup + messageID
-		ok, err := s.redis.SetNX(ctx, key, "1", dedupTTL).Result()
+		ok, err := s.redis.SetNX(ctx, key, "1", s.dedupTTL).Result()
 		if err == nil {
 			return !ok // SetNX returns true when key was newly set (not a duplicate)
 		}
@@ -1451,7 +1473,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	}
 
 	// Prepare the QA pipeline
-	qaCtx, qaCancel := context.WithTimeout(ctx, qaTimeout)
+	qaCtx, qaCancel := context.WithTimeout(ctx, s.qaTimeout)
 	defer qaCancel()
 
 	eventBus := event.NewEventBus()
@@ -1749,7 +1771,7 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
 func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, userKey string, quote *QuotedMessage) (string, error) {
 	// Add timeout to prevent indefinite blocking
-	ctx, cancel := context.WithTimeout(ctx, qaTimeout)
+	ctx, cancel := context.WithTimeout(ctx, s.qaTimeout)
 	defer cancel()
 
 	eventBus := event.NewEventBus()
@@ -1866,7 +1888,7 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
 			logger.Warnf(ctx, "[IM] Failed to update timed-out assistant message: %v", updateErr)
 		}
-		return "", fmt.Errorf("QA timed out after %v", qaTimeout)
+		return "", fmt.Errorf("QA timed out after %v", s.qaTimeout)
 	}
 
 	answerMu.Lock()
