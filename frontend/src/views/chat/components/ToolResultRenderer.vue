@@ -73,6 +73,12 @@
       :data="toolData as GrepResultsData"
     />
     
+    <!-- Skill Output Display -->
+    <SkillOutput
+      v-else-if="displayType === 'skill_output'"
+      :data="toolData as SkillOutputData"
+    />
+    
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -100,7 +106,8 @@ import type {
   DatabaseQueryData,
   WebSearchResultsData,
   WebFetchResultsData,
-  GrepResultsData
+  GrepResultsData,
+  SkillOutputData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -115,6 +122,7 @@ import DatabaseQuery from './tool-results/DatabaseQuery.vue';
 import WebSearchResults from './tool-results/WebSearchResults.vue';
 import WebFetchResults from './tool-results/WebFetchResults.vue';
 import GrepResults from './tool-results/GrepResults.vue';
+import SkillOutput from './tool-results/SkillOutput.vue';
 
 interface Props {
   displayType?: DisplayType;

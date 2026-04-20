@@ -117,6 +117,10 @@
                     <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
                   </div>
 
+                  <div v-if="!event.pending && event.tool_name === 'execute_skill_script' && event.tool_data" class="search-results-summary-fixed skill-output-summary">
+                    <div class="results-summary-text" v-html="getSkillOutputSummary(event.tool_data)"></div>
+                  </div>
+
                   <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)" class="action-details">
                       <div v-if="event.display_type && event.tool_data" class="tool-result-wrapper">
                         <ToolResultRenderer
@@ -271,6 +275,10 @@
 
           <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data" class="search-results-summary-fixed grep-summary">
             <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
+          </div>
+
+          <div v-if="!event.pending && event.tool_name === 'execute_skill_script' && event.tool_data" class="search-results-summary-fixed skill-output-summary">
+            <div class="results-summary-text" v-html="getSkillOutputSummary(event.tool_data)"></div>
           </div>
 
           <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasResults(event)" class="action-details">
@@ -1660,6 +1668,31 @@ const getGrepResultsSummary = (toolData: any): string => {
   let summary = t('agentStream.search.foundMatches', { count: `<strong>${totalMatches}</strong>` });
   if (totalMatches > resultCount) {
     summary += t('agentStream.search.showingCount', { count: `<strong>${resultCount}</strong>` });
+  }
+  
+  return summary;
+};
+
+const getSkillOutputSummary = (toolData: any): string => {
+  if (!toolData) return '';
+  
+  const exitCode = toolData.exit_code;
+  const outputFiles = toolData.output_files || [];
+  const skillName = toolData.skill_name || '';
+  const killed = toolData.killed;
+  
+  let summary = '';
+  
+  if (killed) {
+    summary = `⚠️ <strong>${skillName}</strong> ${t('skillOutput.exitFailed', { code: exitCode })}（超时终止）`;
+  } else if (exitCode === 0) {
+    summary = `✅ <strong>${skillName}</strong> ${t('skillOutput.exitSuccess')}`;
+  } else {
+    summary = `❌ <strong>${skillName}</strong> ${t('skillOutput.exitFailed', { code: exitCode })}`;
+  }
+  
+  if (outputFiles.length > 0) {
+    summary += ` · 📦 ${t('skillOutput.outputFiles', { count: outputFiles.length })}`;
   }
   
   return summary;

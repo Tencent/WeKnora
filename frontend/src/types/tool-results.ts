@@ -20,7 +20,8 @@ export type DisplayType =
     | 'database_query'
     | 'web_search_results'
     | 'web_fetch_results'
-    | 'grep_results';
+    | 'grep_results'
+    | 'skill_output';
 
 // Search result item
 export interface SearchResultItem {
@@ -216,6 +217,31 @@ export interface GrepResultsData {
     max_results: number;
 }
 
+// Skill output file item
+export interface SkillOutputFileItem {
+    name: string;
+    mime_type: string;
+    size_bytes: number;
+    is_text: boolean;
+    content?: string;
+}
+
+// Skill output data
+export interface SkillOutputData {
+    display_type: 'skill_output';
+    skill_name: string;
+    command?: string;
+    script_path?: string;
+    args?: string[];
+    exit_code: number;
+    stdout?: string;
+    stderr?: string;
+    duration_ms?: number;
+    killed?: boolean;
+    output_files?: SkillOutputFileItem[];
+    artifact_session_id?: string;
+}
+
 // Union type for all tool result data
 export type ToolResultData =
     | SearchResultsData
@@ -229,7 +255,8 @@ export type ToolResultData =
     | DatabaseQueryData
     | WebSearchResultsData
     | WebFetchResultsData
-    | GrepResultsData;
+    | GrepResultsData
+    | SkillOutputData;
 
 // Action data (from index.vue)
 export interface ActionData {

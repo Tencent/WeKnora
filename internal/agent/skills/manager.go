@@ -172,7 +172,7 @@ func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]strin
 }
 
 // ExecuteScript executes a script from a skill in the sandbox
-func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string, stdin string) (*sandbox.ExecuteResult, error) {
+func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string, stdin string, outputFiles []string, collectOutput bool) (*sandbox.ExecuteResult, error) {
 	if !m.enabled {
 		return nil, fmt.Errorf("skills are not enabled")
 	}
@@ -204,14 +204,60 @@ func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath strin
 
 	// Prepare execution config
 	config := &sandbox.ExecuteConfig{
-		Script:  file.Path,
-		Args:    args,
-		WorkDir: basePath,
-		Stdin:   stdin,
+		Script:           file.Path,
+		Args:             args,
+		WorkDir:          basePath,
+		Stdin:            stdin,
+		OutputFiles:      outputFiles,
+		CollectOutputDir: collectOutput,
 	}
 
 	// Execute in sandbox
 	return m.sandboxMgr.Execute(ctx, config)
+}
+
+// ExecuteCommand executes a command from a skill in the sandbox
+func (m *Manager) ExecuteCommand(ctx context.Context, skillName string, command string, scriptPath string, args []string, stdin string, env map[string]string, outputFiles []string) (*sandbox.ExecuteResult, error) {
+	if !m.enabled {
+		return nil, fmt.Errorf("skills are not enabled")
+	}
+
+	if !m.isSkillAllowed(skillName) {
+		return nil, fmt.Errorf("skill not allowed: %s", skillName)
+	}
+
+	if m.sandboxMgr == nil {
+		return nil, fmt.Errorf("sandbox is not configured")
+	}
+
+	basePath, err := m.loader.GetSkillBasePath(skillName)
+	if err != nil {
+		return nil, err
+	}
+
+	if scriptPath != "" && command == "" {
+		file, err := m.loader.LoadSkillFile(skillName, scriptPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load script: %w", err)
+		}
+		if !file.IsScript {
+			return nil, fmt.Errorf("file is not an executable script: %s", scriptPath)
+		}
+	}
+
+	// execute in workspace
+	wsConfig := &sandbox.WorkspaceExecuteConfig{
+		SkillName:      skillName,
+		SkillSourceDir: basePath,
+		Command:        command,
+		Script:         scriptPath,
+		Args:           args,
+		Stdin:          stdin,
+		Env:            env,
+		OutputFiles:    outputFiles,
+	}
+
+	return m.sandboxMgr.ExecuteInWorkspace(ctx, wsConfig)
 }
 
 // GetSkillInfo returns detailed information about a skill
