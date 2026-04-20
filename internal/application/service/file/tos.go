@@ -166,11 +166,15 @@ func (s *tosFileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 	}
 	defer src.Close()
 
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = utils.GetContentTypeByExt(ext)
+	}
 	_, err = s.client.PutObjectV2(ctx, &tos.PutObjectV2Input{
 		PutObjectBasicInput: tos.PutObjectBasicInput{
 			Bucket:      s.bucketName,
 			Key:         objectName,
-			ContentType: file.Header.Get("Content-Type"),
+			ContentType: contentType,
 		},
 		Content: src,
 	})
@@ -210,7 +214,7 @@ func (s *tosFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		PutObjectBasicInput: tos.PutObjectBasicInput{
 			Bucket:      targetBucket,
 			Key:         objectName,
-			ContentType: "text/csv; charset=utf-8",
+			ContentType: utils.GetContentTypeByExt(ext),
 		},
 		Content: reader,
 	})

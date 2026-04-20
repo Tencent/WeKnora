@@ -177,7 +177,7 @@ func (s *minioFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 	// Upload bytes to MinIO
 	reader := bytes.NewReader(data)
 	_, err = s.client.PutObject(ctx, s.bucketName, objectName, reader, int64(len(data)), minio.PutObjectOptions{
-		ContentType: "text/csv; charset=utf-8",
+		ContentType: utils.GetContentTypeByExt(ext),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to upload bytes to MinIO: %w", err)
