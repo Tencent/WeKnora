@@ -129,6 +129,12 @@ const router = createRouter({
           component: () => import("../views/organization/OrganizationList.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
+        {
+          path: "skills",
+          name: "skillsHub",
+          component: () => import("../views/skills/SkillsHub.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
+        },
       ],
     },
     // Dev-only markdown rendering test page

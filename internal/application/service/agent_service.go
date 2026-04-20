@@ -59,6 +59,7 @@ type agentService struct {
 	webSearchStateService interfaces.WebSearchStateService
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
+	skillService          interfaces.SkillService
 }
 
 // NewAgentService creates a new agent service
@@ -78,6 +79,7 @@ func NewAgentService(
 	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
+	skillService interfaces.SkillService,
 ) interfaces.AgentService {
 	return &agentService{
 		cfg:                   cfg,
@@ -95,6 +97,7 @@ func NewAgentService(
 		webSearchStateService: webSearchStateService,
 		wikiPageService:       wikiPageService,
 		tenantService:         tenantService,
+		skillService:          skillService,
 	}
 }
 
@@ -326,9 +329,11 @@ func (s *agentService) initializeSkillsManager(
 	logger.Infof(ctx, "Registered read_skill tool")
 
 	if sandboxMode != "disabled" {
-		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager)
+		// use shared artifact service
+		artifactSvc := s.skillService.GetArtifactService()
+		executeSkillTool := tools.NewExecuteSkillScriptTool(skillsManager, artifactSvc)
 		toolRegistry.RegisterTool(executeSkillTool)
-		logger.Infof(ctx, "Registered execute_skill_script tool")
+		logger.Infof(ctx, "Registered execute_skill_script tool with shared artifact service")
 	}
 
 	return skillsManager, nil

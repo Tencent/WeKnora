@@ -49,7 +49,7 @@
                      :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                     <div class="menu_item-box">
                         <div class="menu_icon">
-                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
+                            <img class="icon" :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'search' ? searchIcon : item.icon == 'agent' ? agentIcon : item.icon == 'skill' ? skillIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)" alt="">
                         </div>
                         <template v-if="!uiStore.sidebarCollapsed">
                             <span class="menu_title" :title="item.title">{{ item.title }}</span>
@@ -245,6 +245,9 @@ const isInChatDetail = computed<boolean>(() => route.name === 'chat');
 // 是否在智能体列表页面
 const isInAgentList = computed<boolean>(() => route.name === 'agentList');
 
+// 是否在 Skills Hub 页面
+const isInSkillsHub = computed<boolean>(() => route.name === 'skillsHub');
+
 // 是否在组织列表页面
 const isInOrganizationList = computed<boolean>(() => route.name === 'organizationList');
 
@@ -261,6 +264,8 @@ const isMenuItemActive = (itemPath: string): boolean => {
             return currentRoute === 'knowledgeSearch';
         case 'agents':
             return currentRoute === 'agentList';
+        case 'skills':
+            return currentRoute === 'skillsHub';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -291,7 +296,7 @@ const getIconActiveState = (itemPath: string) => {
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => 
-        item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'organizations' || item.path === 'creatChat'
+        item.path === 'knowledge-bases' || item.path === 'knowledge-search' || item.path === 'agents' || item.path === 'skills' || item.path === 'organizations' || item.path === 'creatChat'
     );
 });
 
@@ -725,6 +730,7 @@ let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
+let skillIcon = ref('skill.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
   const getIcon = (path: string) => {
@@ -733,6 +739,7 @@ let pathPrefix = ref(route.name)
       const creatChatActiveState = getIconActiveState('creatChat');
       const settingsActiveState = getIconActiveState('settings');
       const agentsActiveState = route.name === 'agentList';
+      const skillsActiveState = route.name === 'skillsHub';
       const organizationsActiveState = route.name === 'organizationList';
       const knowledgeSearchActiveState = route.name === 'knowledgeSearch';
       
@@ -744,6 +751,9 @@ let pathPrefix = ref(route.name)
       
       // 智能体图标：只在智能体页面显示绿色
       agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
+      
+      // Skills 图标：只在 Skills Hub 页面显示绿色
+      skillIcon.value = skillsActiveState ? 'skill-green.svg' : 'skill.svg';
       
       // 组织图标：只在组织页面显示绿色
       organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';
@@ -771,6 +781,8 @@ const handleMenuClick = async (path: string) => {
         router.push('/platform/knowledge-search')
     } else if (path === 'agents') {
         router.push('/platform/agents')
+    } else if (path === 'skills') {
+        router.push('/platform/skills')
     } else if (path === 'organizations') {
         // 组织菜单项：跳转到组织列表
         router.push('/platform/organizations')
