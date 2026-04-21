@@ -52,6 +52,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -176,7 +177,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
 	must(container.Provide(service.NewImageMultimodalService, dig.Name("imageMultimodal")))
 	must(container.Provide(service.NewKnowledgePostProcessService, dig.Name("knowledgePostProcess")))
-
 
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMCPServiceService))
@@ -1472,9 +1472,11 @@ func initConnectorRegistry() *datasource.ConnectorRegistry {
 	// Register Notion connector
 	_ = registry.Register(notionConnector.NewConnector())
 
+	// Register Yuque connector
+	_ = registry.Register(yuqueConnector.NewConnector())
+
 	// Future connectors will be registered here:
 	// _ = registry.Register(confluenceConnector.NewConnector())
-	// _ = registry.Register(yuqueConnector.NewConnector())
 	// _ = registry.Register(githubConnector.NewConnector())
 
 	return registry

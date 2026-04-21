@@ -191,6 +191,16 @@ func GetLogger(c context.Context) *logrus.Entry {
 	return logrus.NewEntry(appLogger)
 }
 
+// SetOutput overrides the internal logger's output destination.
+// Intended for use in tests that need to capture and assert on log content
+// (e.g. verifying secrets are not written out). Restore the original writer
+// (usually os.Stdout) in a defer after the test.
+func SetOutput(w io.Writer) {
+	loggerMu.Lock()
+	defer loggerMu.Unlock()
+	appLogger.SetOutput(w)
+}
+
 // SetLogLevel 设置日志级别
 func SetLogLevel(level LogLevel) {
 	var logLevel logrus.Level
