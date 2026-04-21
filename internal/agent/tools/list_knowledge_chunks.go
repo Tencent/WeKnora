@@ -52,7 +52,7 @@ Full chunk content with chunk_id, chunk_index, and content text.`,
       "minimum": 0
     }
   },
-  "required": ["knowledge_id", "limit", "offset"]
+  "required": ["knowledge_id"]
 }`),
 }
 
