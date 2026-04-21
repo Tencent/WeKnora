@@ -341,6 +341,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { marked } from 'marked';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -378,7 +380,9 @@ const DOMPurifyConfig = {
     'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
     'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
     'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern',
-    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask'
+    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask',
+    // KaTeX MathML 支持的标签
+    'math', 'annotation', 'semantics', 'mo', 'mi', 'mn', 'msup', 'mrow', 'mfrac', 'msqrt', 'mroot', 'mstyle'
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
@@ -397,8 +401,11 @@ const DOMPurifyConfig = {
     'patternunits', 'patterntransform', 'clippathunits', 'maskunits',
     'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
     'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
-    'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
+    'display', 'pointer-events', 'cursor', 'data-emit', 'direction',
+    // KaTeX MathML 支持的属性
+    'mathvariant', 'encoding', 'aria-hidden'
   ],
+  USE_PROFILES: { html: true, svg: true, mathMl: true },
   // Allow provider:// URLs so they can be hydrated later.
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 };
@@ -586,6 +593,16 @@ const props = defineProps<{
 
 // Configure marked for security
 marked.use({});
+marked.use(markedKatex({ throwOnError: false }));
+
+const preprocessMathDelimiters = (rawText: string): string => {
+  if (!rawText || typeof rawText !== 'string') {
+    return '';
+  }
+  return rawText
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+};
 
 // Event stream
 const eventStream = computed(() => props.session?.agentEventStream || []);
@@ -1423,7 +1440,7 @@ const getTokens = (content: any) => {
   // Restore preserved tags
   sanitized = sanitized.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tagPlaceholders[Number(idx)]);
 
-  const processed = preprocessMarkdown(sanitized);
+  const processed = preprocessMarkdown(preprocessMathDelimiters(sanitized));
   return marked.lexer(processed);
 };
 
@@ -1449,7 +1466,7 @@ const renderMarkdown = (content: any): string => {
   if (!contentStr.trim()) return '';
 
   try {
-    const processed = preprocessMarkdown(contentStr);
+    const processed = preprocessMarkdown(preprocessMathDelimiters(contentStr));
     const html = marked.parse(processed, { renderer: agentRenderer }) as string;
     if (!html) return '';
 

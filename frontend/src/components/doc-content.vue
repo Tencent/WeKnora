@@ -1,6 +1,8 @@
 // @ts-nocheck
 <script setup lang="ts">
 import { marked } from "marked";
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 
 import hljs from "highlight.js";
 import "highlight.js/styles/github.css";
@@ -53,6 +55,16 @@ marked.use({
   breaks: true,      // 启用单行换行转 <br>
   gfm: true,         // 启用 GitHub Flavored Markdown
 });
+marked.use(markedKatex({ throwOnError: false }));
+
+const preprocessMathDelimiters = (rawText: string): string => {
+  if (!rawText || typeof rawText !== 'string') {
+    return '';
+  }
+  return rawText
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+};
 const renderer = new marked.Renderer();
 let page = 1;
 let loadingChunks = false;
@@ -427,12 +439,13 @@ const processMarkdown = (markdownText) => {
 
   // 保留表格单元格中的 <br>，不转成换行，避免打散表格；其他区域原样交给 marked 处理
 
-  // 安全预处理
-  const safeMarkdown = safeMarkdownToHTML(processedText);
+  // 先预处理数学定界符，再做安全预处理
+  const mathSafeText = preprocessMathDelimiters(processedText);
+  const safeMarkdown = safeMarkdownToHTML(mathSafeText);
 
   // 使用标记渲染
   marked.use({ renderer });
-  let html = marked.parse(safeMarkdown);
+  let html = marked.parse(safeMarkdown) as string;
 
   // 还原被转义的 <br>
   html = html.replace(/&lt;br\s*\/?&gt;/gi, '<br>');

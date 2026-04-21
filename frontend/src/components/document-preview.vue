@@ -5,6 +5,8 @@ import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { MessagePlugin } from 'tdesign-vue-next';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security';
 
@@ -103,6 +105,15 @@ function getHighlightLang(ft: string): string {
   const lower = ft?.toLowerCase() || '';
   return langMap[lower] || lower;
 }
+
+const preprocessMathDelimiters = (rawText: string): string => {
+  if (!rawText || typeof rawText !== 'string') {
+    return '';
+  }
+  return rawText
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+};
 
 async function renderDocx(blob: Blob) {
   const { renderAsync } = await import('docx-preview');
@@ -207,6 +218,7 @@ async function renderMarkdown(blob: Blob) {
     breaks: true,
     gfm: true,
   });
+  marked.use(markedKatex({ throwOnError: false }));
   const renderer = new marked.Renderer();
   renderer.code = function ({text, lang}) {
     // 空值校验：防止 text 为 undefined 或 null
@@ -224,8 +236,9 @@ async function renderMarkdown(blob: Blob) {
     return `<pre><code class="hljs">${highlighted}</code></pre>`;
   };
   marked.use({ renderer });
-  const safeText = safeMarkdownToHTML(text);
-  const rawHtml = marked.parse(safeText);
+  const mathSafeText = preprocessMathDelimiters(text);
+  const safeText = safeMarkdownToHTML(mathSafeText);
+  const rawHtml = marked.parse(safeText) as string;
   markdownHtml.value = sanitizeHTML(rawHtml);
 }
 

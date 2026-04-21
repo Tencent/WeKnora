@@ -62,6 +62,8 @@
 <script setup>
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
 import { marked } from 'marked';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
@@ -85,6 +87,17 @@ import {
 marked.use({
     breaks: true,  // 全局启用单个换行支持
 });
+
+marked.use(markedKatex({ throwOnError: false }));
+
+const preprocessMathDelimiters = (rawText) => {
+    if (!rawText || typeof rawText !== 'string') {
+        return '';
+    }
+    return rawText
+        .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+        .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+};
 
 ensureMermaidInitialized();
 
@@ -154,9 +167,10 @@ const markdownTokens = computed(() => {
     }
 
     const processed = replaceIncompleteImageWithPlaceholder(text);
+    const safeText = preprocessMathDelimiters(processed);
     
     // 首先对 Markdown 内容进行安全处理
-    const safeMarkdown = safeMarkdownToHTML(processed);
+    const safeMarkdown = safeMarkdownToHTML(safeText);
     
     // 使用 marked.lexer 分词
     return marked.lexer(safeMarkdown);
