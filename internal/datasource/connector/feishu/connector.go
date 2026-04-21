@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -357,20 +358,29 @@ func parseFeishuTimestamp(ts string) time.Time {
 	return time.Unix(sec, 0)
 }
 
-// sanitizeFileName removes characters that are invalid in filenames.
+// sanitizeFileName removes characters that are invalid in filenames and
+// truncates at a UTF-8 rune boundary. Raw byte truncation would split a
+// multi-byte codepoint (Chinese chars are 3 bytes) and produce invalid UTF-8
+// that downstream validation (utf8.ValidString) rejects.
 func sanitizeFileName(name string) string {
 	if name == "" {
 		return "untitled"
 	}
-	// Replace common invalid characters with underscore
 	replacer := strings.NewReplacer(
 		"/", "_", "\\", "_", ":", "_", "*", "_",
 		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
 	)
 	result := replacer.Replace(name)
-	// Limit length
-	if len(result) > 200 {
-		result = result[:200]
+	const maxBytes = 200
+	if len(result) > maxBytes {
+		result = result[:maxBytes]
+		for len(result) > 0 {
+			r, size := utf8.DecodeLastRuneInString(result)
+			if r != utf8.RuneError || size != 1 {
+				break
+			}
+			result = result[:len(result)-1]
+		}
 	}
 	return result
 }
