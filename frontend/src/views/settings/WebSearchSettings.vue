@@ -87,13 +87,28 @@
               </a>
             </div>
             
-            <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">
+            <!--
+              Credential field: when a value is currently stored the placeholder
+              swaps to the shared "bullets + Enter new value to replace" hint
+              so the input itself signals "something is there". The destructive
+              clear checkbox sits on its own row beneath.
+            -->
+            <div v-if="selectedProviderType?.requires_api_key" class="credential-field">
+              <label class="credential-label">{{ t('webSearchSettings.apiKeyLabel') }}</label>
               <t-input
                 v-model="providerForm.parameters.api_key"
                 type="password"
-                :placeholder="editingProvider ? t('webSearchSettings.apiKeyUnchanged') : t('webSearchSettings.apiKeyPlaceholder')"
+                :disabled="clearApiKey"
+                :placeholder="apiKeyPlaceholder"
               />
-            </t-form-item>
+              <t-checkbox
+                v-if="editingProvider && hasExistingApiKey"
+                v-model="clearApiKey"
+                class="clear-credential"
+              >
+                {{ t('secret.clearHint') }}
+              </t-checkbox>
+            </div>
             <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')" name="parameters.engine_id">
               <t-input v-model="providerForm.parameters.engine_id" :placeholder="t('webSearchSettings.engineIdLabel')" />
             </t-form-item>
@@ -145,7 +160,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import {
@@ -170,6 +185,14 @@ const testing = ref(false)
 const testingId = ref<string | null>(null)
 const saving = ref(false)
 
+// Fixed placeholder returned by the server for redacted secrets. Must match
+// internal/types/secret.go → RedactedSecretPlaceholder.
+const REDACTED_PLACEHOLDER = '***'
+
+// Explicit "remove stored api_key" flag. Reset on every dialog open and on
+// provider type change.
+const clearApiKey = ref(false)
+
 const providerForm = ref<{
   name: string
   provider: string
@@ -189,6 +212,23 @@ const selectedProviderType = computed(() => {
   return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
 })
 
+// "Is an API key currently stored?" is signaled by the server returning the
+// fixed REDACTED_PLACEHOLDER in the response. Drive the label badge from this.
+const hasExistingApiKey = computed(() => {
+  return editingProvider.value?.parameters?.api_key === REDACTED_PLACEHOLDER
+})
+
+// In edit mode with a stored key, swap the placeholder to the shared
+// "bullets + Enter new value to replace" hint. Otherwise fall back to the
+// provider-specific placeholder (creation) or the "leave blank to keep"
+// copy used when no key is stored yet.
+const apiKeyPlaceholder = computed(() => {
+  if (!editingProvider.value) return t('webSearchSettings.apiKeyPlaceholder')
+  return hasExistingApiKey.value
+    ? t('secret.storedPlaceholder')
+    : t('webSearchSettings.apiKeyUnchanged')
+})
+
 const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
   return !providerType.requires_api_key && !providerType.requires_engine_id
 }
@@ -196,6 +236,23 @@ const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
 // ===== Methods =====
 const onProviderTypeChange = () => {
   providerForm.value.parameters = {}
+  clearApiKey.value = false
+}
+
+// Prompt the user before irrevocable credential removal.
+const confirmClearIfNeeded = (): Promise<boolean> => {
+  if (!clearApiKey.value) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const d = DialogPlugin.confirm({
+      header: t('secret.confirmClearTitle'),
+      body: t('secret.confirmClearBody'),
+      confirmBtn: { content: t('common.confirm'), theme: 'danger' },
+      cancelBtn: t('common.cancel'),
+      onConfirm: () => { d.hide(); resolve(true) },
+      onCancel: () => { d.hide(); resolve(false) },
+      onClose: () => { d.hide(); resolve(false) },
+    })
+  })
 }
 
 const loadProviderEntities = async () => {
@@ -219,13 +276,14 @@ const loadProviderTypes = async () => {
 
 const openAddDialog = () => {
   editingProvider.value = null
-  providerForm.value = { 
-    name: '', 
-    provider: providerTypes.value[0]?.id || 'duckduckgo', 
-    description: '', 
-    parameters: {}, 
-    is_default: providerEntities.value.length === 0 
+  providerForm.value = {
+    name: '',
+    provider: providerTypes.value[0]?.id || 'duckduckgo',
+    description: '',
+    parameters: {},
+    is_default: providerEntities.value.length === 0
   }
+  clearApiKey.value = false
   showAddProviderDialog.value = true
 }
 
@@ -236,12 +294,15 @@ const editProvider = (entity: WebSearchProviderEntity) => {
     provider: entity.provider,
     description: entity.description || '',
     parameters: {
+      // Never pre-fill the api_key — even the redacted placeholder from the
+      // server is ignored so that "non-empty means user typed it" holds.
       api_key: '',
       engine_id: entity.parameters?.engine_id || '',
       proxy_url: entity.parameters?.proxy_url || '',
     },
     is_default: entity.is_default || false,
   }
+  clearApiKey.value = false
   showAddProviderDialog.value = true
 }
 
@@ -250,19 +311,33 @@ const saveProvider = async ({ validateResult, firstError }: any) => {
     MessagePlugin.warning(firstError || 'Please check the form fields')
     return
   }
-  
+
+  const proceed = await confirmClearIfNeeded()
+  if (!proceed) return
+
   saving.value = true
   try {
+    // Build the parameters payload using three-state semantics:
+    //   - clearApiKey → send clear_api_key: true, omit api_key
+    //   - user typed a value → send api_key
+    //   - empty + editing → omit api_key (server preserves)
+    //   - empty + creating → omit api_key (no secret to store yet)
+    const paramsOut: WebSearchProviderEntity['parameters'] = {
+      engine_id: providerForm.value.parameters.engine_id,
+      proxy_url: providerForm.value.parameters.proxy_url,
+    }
+    if (clearApiKey.value) {
+      paramsOut.clear_api_key = true
+    } else if (providerForm.value.parameters.api_key) {
+      paramsOut.api_key = providerForm.value.parameters.api_key
+    }
+
     const data: Partial<WebSearchProviderEntity> = {
       name: providerForm.value.name.trim() || selectedProviderType.value?.name || providerForm.value.provider,
       provider: providerForm.value.provider as any,
       description: providerForm.value.description,
-      parameters: { ...providerForm.value.parameters },
+      parameters: paramsOut,
       is_default: providerForm.value.is_default,
-    }
-    
-    if (editingProvider.value && !data.parameters!.api_key) {
-      delete data.parameters!.api_key
     }
 
     if (editingProvider.value) {
@@ -459,6 +534,31 @@ onMounted(async () => {
   height: 1px;
   background: var(--td-component-border);
   margin: 20px 0;
+}
+
+/**
+ * Credential field: stacks the label row, password input, and the optional
+ * "Remove this credential" checkbox vertically. Matches the pattern in
+ * McpServiceDialog and ModelEditorDialog so the whole UI reads consistently.
+ */
+.credential-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.credential-label {
+  display: block;
+  font-size: 14px;
+  color: var(--td-text-color-primary);
+}
+
+.clear-credential {
+  :deep(.t-checkbox__label) {
+    color: var(--td-error-color);
+    font-size: 13px;
+  }
 }
 
 .credentials-hint {

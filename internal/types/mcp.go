@@ -41,11 +41,60 @@ type MCPService struct {
 // MCPHeaders represents HTTP headers as a map
 type MCPHeaders map[string]string
 
-// MCPAuthConfig represents authentication configuration for MCP service
+// MCPAuthConfig represents authentication configuration for MCP service.
+//
+// ClearAPIKey and ClearToken are write-only flags used in Update requests to
+// explicitly remove a stored credential. They are not persisted (gorm:"-") and
+// never appear in responses (omitempty + zero value). Without these flags an
+// empty APIKey/Token submitted in an Update request is interpreted as "no
+// change", so this is the only way to intentionally clear a stored secret.
 type MCPAuthConfig struct {
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`
 	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+
+	// Write-only clear flags.
+	ClearAPIKey bool `json:"clear_api_key,omitempty" gorm:"-"`
+	ClearToken  bool `json:"clear_token,omitempty"   gorm:"-"`
+}
+
+// MergeUpdate applies write-only secret merge semantics for Update requests.
+// The receiver is the incoming request DTO; existing is the currently stored
+// value (may be nil for new services).
+//
+// Behavior:
+//   - ClearAPIKey / ClearToken take precedence — wipe the corresponding field.
+//   - Otherwise APIKey / Token use PreserveIfRedacted: empty or the redacted
+//     placeholder preserves existing, any other value replaces.
+//   - CustomHeaders: nil (absent in request) preserves existing; any non-nil
+//     value (including an empty map) replaces. Callers that want to clear
+//     headers explicitly should send {} rather than omitting the field.
+//   - Write-only clear flags are cleared on the merged result so they never
+//     leak to storage.
+func (c *MCPAuthConfig) MergeUpdate(existing *MCPAuthConfig) *MCPAuthConfig {
+	merged := &MCPAuthConfig{}
+	if existing != nil {
+		*merged = *existing
+		merged.ClearAPIKey = false
+		merged.ClearToken = false
+	}
+	if c == nil {
+		return merged
+	}
+	if c.ClearAPIKey {
+		merged.APIKey = ""
+	} else {
+		merged.APIKey = PreserveIfRedacted(c.APIKey, merged.APIKey)
+	}
+	if c.ClearToken {
+		merged.Token = ""
+	} else {
+		merged.Token = PreserveIfRedacted(c.Token, merged.Token)
+	}
+	if c.CustomHeaders != nil {
+		merged.CustomHeaders = c.CustomHeaders
+	}
+	return merged
 }
 
 // MCPAdvancedConfig represents advanced configuration for MCP service
@@ -206,15 +255,24 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 	}
 }
 
-// MaskSensitiveData masks sensitive information in the MCP service for display
-func (m *MCPService) MaskSensitiveData() {
-	if m.AuthConfig != nil {
-		if m.AuthConfig.APIKey != "" {
-			m.AuthConfig.APIKey = maskString(m.AuthConfig.APIKey)
-		}
-		if m.AuthConfig.Token != "" {
-			m.AuthConfig.Token = maskString(m.AuthConfig.Token)
-		}
+// RedactSensitiveData replaces secret values in the MCP service with
+// RedactedSecretPlaceholder while preserving the "set vs not set" distinction
+// (empty values stay empty). Mutates the receiver in place; callers that need
+// to retain the originals should pass a copy.
+//
+// This replaces the previous MaskSensitiveData implementation which returned
+// a "first4****last4" slice of the original secret, leaking 8 characters of
+// entropy per value. The new implementation returns a fixed placeholder with
+// no information about the underlying secret.
+func (m *MCPService) RedactSensitiveData() {
+	if m.AuthConfig == nil {
+		return
+	}
+	if m.AuthConfig.APIKey != "" {
+		m.AuthConfig.APIKey = RedactedSecretPlaceholder
+	}
+	if m.AuthConfig.Token != "" {
+		m.AuthConfig.Token = RedactedSecretPlaceholder
 	}
 }
 
@@ -233,10 +291,3 @@ func (m *MCPService) HideSensitiveInfo() *MCPService {
 	return &copy
 }
 
-// maskString masks a string, showing only first 4 and last 4 characters
-func maskString(s string) string {
-	if len(s) <= 8 {
-		return "****"
-	}
-	return s[:4] + "****" + s[len(s)-4:]
-}

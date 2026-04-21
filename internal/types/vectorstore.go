@@ -184,14 +184,16 @@ func (c ConnectionConfig) GetEndpoint() string {
 	return ""
 }
 
-// MaskSensitiveFields returns a copy with Password and APIKey masked.
+// MaskSensitiveFields returns a copy with Password and APIKey replaced by the
+// shared RedactedSecretPlaceholder. Empty values stay empty so the frontend
+// can distinguish "set (hidden)" from "not set" without an extra flag.
 func (c ConnectionConfig) MaskSensitiveFields() ConnectionConfig {
 	masked := c
 	if masked.Password != "" {
-		masked.Password = "***"
+		masked.Password = RedactedSecretPlaceholder
 	}
 	if masked.APIKey != "" {
-		masked.APIKey = "***"
+		masked.APIKey = RedactedSecretPlaceholder
 	}
 	return masked
 }

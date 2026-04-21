@@ -23,6 +23,12 @@ export interface ModelConfig {
     parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")
     extra_config?: Record<string, string>; // Provider-specific configuration
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    app_id?: string;
+    app_secret?: string;
+    // Write-only flags — set to true in Update requests to explicitly remove
+    // the corresponding credential. The server never returns these fields.
+    clear_api_key?: boolean;
+    clear_app_secret?: boolean;
   };
   is_default?: boolean;
   is_builtin?: boolean;
