@@ -3592,6 +3592,12 @@ export default {
       resources: 'Ресурсы',
       strategy: 'Стратегия',
     },
+    resourceType: {
+      wikiSpace: 'Вики-пространство',
+      docCategory: 'Категория документов',
+      folder: 'Папка',
+      file: 'Файл',
+    },
     syncHistory: 'История синхронизации',
     refreshLogs: 'Обновить журнал',
     noLogs: 'Нет записей синхронизации',
@@ -3613,6 +3619,7 @@ export default {
       yuque: 'Yuque (Юйцюэ)',
       github: 'GitHub',
       web_crawler: 'Веб-краулер',
+      nutstore: 'Nutstore (Цзяньгоюнь)',
     },
     connectorDesc: {
       feishu: 'Синхронизация документов, таблиц и файлов из Feishu Wiki',
@@ -3621,6 +3628,7 @@ export default {
       yuque: 'Синхронизация документов из баз знаний Yuque',
       github: 'Синхронизация документов и вики из репозиториев GitHub',
       web_crawler: 'Сканирование веб-сайтов через Sitemap',
+      nutstore: 'Синхронизация документов и файлов из Nutstore через WebDAV',
     },
     field: {
       appId: 'App ID',
@@ -3631,6 +3639,9 @@ export default {
       apiToken: 'API Token',
       personalToken: 'Personal Access Token',
       sitemapUrl: 'Sitemap URL',
+      username: 'Аккаунт (Email)',
+      appPassword: 'Пароль приложения',
+      rootPath: 'Путь к корневому каталогу',
     },
     comingSoon: 'Скоро',
     docHint: 'Получить учётные данные можно здесь:',

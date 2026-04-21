@@ -3686,6 +3686,12 @@ export default {
       resources: "리소스 선택",
       strategy: "동기화 전략",
     },
+    resourceType: {
+      wikiSpace: "위키 스페이스",
+      docCategory: "문서 분류",
+      folder: "폴더",
+      file: "파일",
+    },
     syncHistory: "동기화 이력",
     refreshLogs: "로그 새로고침",
     noLogs: "동기화 기록이 없습니다",
@@ -3707,6 +3713,7 @@ export default {
       yuque: "위큐 (Yuque)",
       github: "GitHub",
       web_crawler: "웹 크롤러",
+      nutstore: "지엔궈윈 (Nutstore)",
     },
     connectorDesc: {
       feishu: "페이슈 위키에서 문서, 스프레드시트, 파일 동기화",
@@ -3715,6 +3722,7 @@ export default {
       yuque: "위큐 지식베이스에서 문서 동기화",
       github: "GitHub 리포지토리에서 문서 및 위키 동기화",
       web_crawler: "사이트맵을 통해 웹사이트 크롤링",
+      nutstore: "WebDAV를 통해 Nutstore에서 문서 및 파일 동기화",
     },
     field: {
       appId: "App ID",
@@ -3725,6 +3733,9 @@ export default {
       apiToken: "API Token",
       personalToken: "Personal Access Token",
       sitemapUrl: "사이트맵 URL",
+      username: "계정 (이메일)",
+      appPassword: "앱 비밀번호",
+      rootPath: "루트 디렉토리 경로",
     },
     comingSoon: "곧 지원 예정",
     docHint: "다음에서 인증 정보를 받으세요:",

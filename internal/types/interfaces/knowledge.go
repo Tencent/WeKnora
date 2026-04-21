@@ -37,6 +37,7 @@ type KnowledgeService interface {
 		title string,
 		tagID string,
 		channel string,
+		metadata map[string]string,
 	) (*types.Knowledge, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
