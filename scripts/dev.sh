@@ -295,7 +295,7 @@ start_app() {
         log_warning "提示: 安装 Air 可以实现代码修改后自动重启"
         log_info "安装命令: go install github.com/air-verse/air@latest"
         LDFLAGS="$(./scripts/get_version.sh ldflags) -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"
-        go run -ldflags="$LDFLAGS" ./cmd/server/
+        go run -ldflags="$LDFLAGS" ./cmd/server
     fi
 }
 
