@@ -92,9 +92,9 @@
         </div>
         <t-slider
           v-model="localConfig.rerank_threshold"
-          :min="-10"
-          :max="10"
-          :step="0.1"
+          :min="0"
+          :max="1"
+          :step="0.01"
           @change="handleParamChange"
         />
       </div>
@@ -114,6 +114,11 @@ import {
 } from '@/api/retrieval'
 
 const { t } = useI18n()
+
+// Convert legacy logit threshold to probability range [0, 1] via sigmoid.
+const normalizeThreshold = (v: number): number => {
+  return 1 / (1 + Math.exp(-v))
+}
 
 const defaultConfig: RetrievalConfig = {
   embedding_top_k: 50,
@@ -138,7 +143,7 @@ const loadConfig = async () => {
         vector_threshold: cfg.vector_threshold || defaultConfig.vector_threshold,
         keyword_threshold: cfg.keyword_threshold || defaultConfig.keyword_threshold,
         rerank_top_k: cfg.rerank_top_k || defaultConfig.rerank_top_k,
-        rerank_threshold: cfg.rerank_threshold ?? defaultConfig.rerank_threshold,
+        rerank_threshold: normalizeThreshold(cfg.rerank_threshold ?? defaultConfig.rerank_threshold),
         rerank_model_id: cfg.rerank_model_id || '',
       })
       initialConfig = { ...localConfig }

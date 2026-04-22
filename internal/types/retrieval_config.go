@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"math"
 )
 
 // RetrievalConfig holds the global retrieval/search configuration for a tenant.
@@ -20,7 +21,8 @@ type RetrievalConfig struct {
 	KeywordThreshold float64 `json:"keyword_threshold"`
 	// RerankTopK is the maximum number of results after reranking (default: 10)
 	RerankTopK int `json:"rerank_top_k"`
-	// RerankThreshold is the minimum rerank score (-10 to 10, default: 0.2)
+	// RerankThreshold is the minimum rerank probability (0 to 1, default: 0.2).
+	// Values outside [0, 1] are treated as legacy logits and auto-converted via sigmoid.
 	RerankThreshold float64 `json:"rerank_threshold"`
 	// RerankModelID is the ID of the rerank model to use (required for search)
 	RerankModelID string `json:"rerank_model_id"`
@@ -59,11 +61,18 @@ func (c *RetrievalConfig) GetEffectiveRerankTopK() int {
 }
 
 // GetEffectiveRerankThreshold returns RerankThreshold with a fallback default.
+// If the stored value is outside [0, 1] (legacy logit range), it is auto-converted
+// via sigmoid to maintain backward compatibility.
 func (c *RetrievalConfig) GetEffectiveRerankThreshold() float64 {
 	if c == nil {
 		return 0.2
 	}
-	return c.RerankThreshold
+	v := c.RerankThreshold
+	if v >= 0 && v <= 1 {
+		return v
+	}
+	// Legacy logit value: convert to probability via sigmoid.
+	return 1.0 / (1.0 + math.Exp(-v))
 }
 
 // Value implements the driver.Valuer interface for database serialization

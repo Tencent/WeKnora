@@ -453,8 +453,8 @@ func ValidateConfig(cfg *Config) error {
 		if cfg.Conversation.VectorThreshold < 0 || cfg.Conversation.VectorThreshold > 1 {
 			errs = append(errs, "conversation.vector_threshold must be between 0 and 1")
 		}
-		if cfg.Conversation.RerankThreshold < -10 || cfg.Conversation.RerankThreshold > 10 {
-			errs = append(errs, "conversation.rerank_threshold must be between -10 and 10")
+		if cfg.Conversation.RerankThreshold < 0 || cfg.Conversation.RerankThreshold > 1 {
+			errs = append(errs, "conversation.rerank_threshold must be between 0 and 1")
 		}
 	}
 

@@ -11,13 +11,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 )
 
-// OpenAIReranker implements a reranking system based on OpenAI models
+// OpenAIReranker implements a reranking system based on OpenAI-compatible APIs.
+// It supports both probability-scoring models and logit-scoring models via the
+// ScoreFormat configuration.
 type OpenAIReranker struct {
-	modelName string       // Name of the model used for reranking
-	modelID   string       // Unique identifier of the model
-	apiKey    string       // API key for authentication
-	baseURL   string       // Base URL for API requests
-	client    *http.Client // HTTP client for making API requests
+	modelName    string       // Name of the model used for reranking
+	modelID      string       // Unique identifier of the model
+	apiKey       string       // API key for authentication
+	baseURL      string       // Base URL for API requests
+	client       *http.Client // HTTP client for making API requests
+	scoreFormat  ScoreFormat  // How to interpret RelevanceScore from the model
 }
 
 // RerankRequest represents a request to rerank documents based on relevance to a query
@@ -42,7 +45,12 @@ type UsageInfo struct {
 	TotalTokens int `json:"total_tokens"` // Total tokens consumed
 }
 
-// NewOpenAIReranker creates a new instance of OpenAI reranker with the provided configuration
+// NewOpenAIReranker creates a new instance of OpenAI reranker with the provided configuration.
+// The ScoreFormat from config controls how returned scores are interpreted:
+//   - ScoreFormatProbability: pass through as-is (model already returns [0,1])
+//   - ScoreFormatLogit: always apply sigmoid (model returns raw logits)
+//   - ScoreFormatAuto (default): runtime range detection (values in [0,1] pass through,
+//     values outside are sigmoid-converted). This is a safe fallback for unknown deployments.
 func NewOpenAIReranker(config *RerankerConfig) (*OpenAIReranker, error) {
 	apiKey := config.APIKey
 	baseURL := "https://api.openai.com/v1"
@@ -50,16 +58,23 @@ func NewOpenAIReranker(config *RerankerConfig) (*OpenAIReranker, error) {
 		baseURL = url
 	}
 
+	format := config.Format
+	if format == "" {
+		format = ScoreFormatAuto
+	}
+
 	return &OpenAIReranker{
-		modelName: config.ModelName,
-		modelID:   config.ModelID,
-		apiKey:    apiKey,
-		baseURL:   baseURL,
-		client:    &http.Client{},
+		modelName:   config.ModelName,
+		modelID:     config.ModelID,
+		apiKey:      apiKey,
+		baseURL:     baseURL,
+		client:      &http.Client{},
+		scoreFormat: format,
 	}, nil
 }
 
-// Rerank performs document reranking based on relevance to the query
+// Rerank performs document reranking based on relevance to the query.
+// Scores are normalized according to the configured ScoreFormat.
 func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error) {
 	// Build the request body
 	requestBody := &RerankRequest{
@@ -103,6 +118,12 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 	var response RerankResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	// Normalize scores according to the configured ScoreFormat.
+	// This ensures all downstream consumers receive probabilities in [0, 1].
+	for i := range response.Results {
+		response.Results[i].RelevanceScore = NormalizeByFormat(response.Results[i].RelevanceScore, r.scoreFormat)
 	}
 	return response.Results, nil
 }
