@@ -41,6 +41,7 @@ services:
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
+      - skills_data:/app/skills/installed
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -366,6 +367,7 @@ networks:
 volumes:
   postgres-data:
   data-files:
+  skills_data:
   docreader-tmp:
   jaeger_data:
   minio_data:

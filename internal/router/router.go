@@ -545,12 +545,25 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 	r.GET("/agents/:id/suggested-questions", agentHandler.GetSuggestedQuestions)
 }
 
-// RegisterSkillRoutes registers skill routes
+// RegisterSkillRoutes registers skill routes (Skills Hub + Artifacts)
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler) {
 	skills := r.Group("/skills")
 	{
-		// List all preloaded skills
+		// Skills Hub
 		skills.GET("", skillHandler.ListSkills)
+		skills.GET("/:name", skillHandler.GetSkillDetail)
+		skills.DELETE("/:name", skillHandler.UninstallSkill)
+		skills.POST("/install", skillHandler.InstallSkill)
+		skills.POST("/upload", skillHandler.UploadSkill)
+		skills.POST("/refresh", skillHandler.RefreshSkills)
+		skills.GET("/:name/export", skillHandler.ExportSkill)
+		skills.GET("/:name/files", skillHandler.ListSkillFiles)
+
+		// Artifacts
+		skills.GET("/artifacts", skillHandler.ListArtifacts)
+		skills.POST("/artifacts", skillHandler.SaveArtifact)
+		skills.GET("/artifacts/export", skillHandler.ExportArtifact)
+		skills.DELETE("/artifacts", skillHandler.DeleteArtifact)
 	}
 }
 
