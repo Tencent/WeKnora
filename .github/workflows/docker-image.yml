@@ -41,8 +41,8 @@ jobs:
           context: ./frontend
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui:cache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-ui:cache,mode=max
+          cache-from: type=gha,scope=build-ui
+          cache-to: type=gha,scope=build-ui,mode=max
 
   build-docreader:
     runs-on: ubuntu-latest
@@ -90,8 +90,8 @@ jobs:
           context: .
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-docreader:cache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-docreader:cache,mode=max
+          cache-from: type=gha,scope=build-docreader
+          cache-to: type=gha,scope=build-docreader,mode=max
 
   build-sandbox:
     runs-on: ubuntu-latest
@@ -123,8 +123,8 @@ jobs:
           context: .
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox:cache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox:cache,mode=max
+          cache-from: type=gha,scope=build-sandbox
+          cache-to: type=gha,scope=build-sandbox,mode=max
 
   build-app:
     strategy:
@@ -187,8 +187,8 @@ jobs:
             ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-app
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-app:cache-${{ env.PLATFORM_PAIR }}
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/weknora-app:cache-${{ env.PLATFORM_PAIR }},mode=max
+          cache-from: type=gha,scope=build-app-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=build-app-${{ env.PLATFORM_PAIR }},mode=max
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
