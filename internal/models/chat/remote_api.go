@@ -507,13 +507,18 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	logger.Infof(ctx, "[LLM Stream] model=%s", c.modelName)
-
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+	}
+
+	if prettyJSON, pErr := json.MarshalIndent(customReq, "", "  "); pErr == nil {
+		logger.Infof(ctx, "[LLM Stream Request] endpoint=%s, model=%s, stream=true, request:\n%s",
+			endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(prettyJSON)))
+	} else {
+		logger.Infof(ctx, "[LLM Stream] endpoint=%s, model=%s", endpoint, c.modelName)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
