@@ -18,6 +18,14 @@
 #   none_of:  KB must expose NONE of the listed capability names.
 # Capability names: vector, keyword, wiki, graph, faq.
 # An empty kb_filter (or kb_filter absent) means "any KB is allowed".
+#
+# NOTE: In the default "tool-driven" mode, the frontend DERIVES the any_of
+# predicate from `config.allowed_tools` via `deriveKbFilterFromTools` (see
+# `frontend/src/utils/tool-capabilities.ts`). You only need to write an
+# explicit `kb_filter` here when the preset requires a business rule that
+# can't be inferred from the tools alone (e.g. `none_of: [faq]` on
+# data-analysis). Keeping the map lean avoids the "two sources of truth"
+# drift that used to plague this file.
 
 agent_type_presets:
   # --------------------------------------------------------------------------
@@ -52,8 +60,7 @@ agent_type_presets:
       retain_retrieval_history: false
       faq_priority_enabled: true
       kb_selection_mode: "all"
-    kb_filter:
-      any_of: ["vector", "keyword", "faq"]
+    # kb_filter derived from allowed_tools: any_of = [vector, keyword]
 
   # --------------------------------------------------------------------------
   # Wiki Q&A — graph-navigated wiki answering.
@@ -85,8 +92,7 @@ agent_type_presets:
         - "final_answer"
       retain_retrieval_history: false
       kb_selection_mode: "all"
-    kb_filter:
-      all_of: ["wiki"]
+    # kb_filter derived from allowed_tools: any_of = [wiki]
 
   # --------------------------------------------------------------------------
   # Hybrid RAG + Wiki — single agent that orchestrates both indexes.
@@ -128,12 +134,11 @@ agent_type_presets:
     #  - KB has only chunks    → fallback to pure RAG (see prompt's "Fallback rules")
     #  - KB has only wiki      → fallback to wiki-only answering
     #  - FAQ KB                → allowed; knowledge_search still works on FAQ chunks
+    # kb_filter derived from allowed_tools: any_of = [vector, keyword, wiki].
     # We only require that the KB expose AT LEAST ONE retrievable surface so
     # the agent has SOMETHING to call. KBs with zero indexing (e.g. graph-only
     # or completely unindexed) are still excluded since no tool will return
     # anything useful.
-    kb_filter:
-      any_of: ["vector", "keyword", "wiki"]
 
   # --------------------------------------------------------------------------
   # Data Analysis — SQL / statistics over tabular files (CSV / Excel) in the KB.
@@ -172,11 +177,12 @@ agent_type_presets:
       kb_selection_mode: "all"
     # data_schema / data_analysis tools read ChunkTypeTableSummary /
     # ChunkTypeTableColumn chunks, which are produced by the normal RAG
-    # ingestion pipeline (vector / keyword indexing on). FAQ-type KBs don't
-    # ingest tabular data, and wiki-only KBs don't carry chunk-level table
-    # schemas, so both are incompatible.
+    # ingestion pipeline (vector / keyword indexing on). The any_of predicate
+    # is derived automatically from allowed_tools; we only need to add the
+    # FAQ exclusion here since it's a business rule the tool map can't express
+    # (FAQ KBs technically have vector/keyword chunks but they're Q&A pairs,
+    # not tabular data, so data_schema would produce garbage on them).
     kb_filter:
-      any_of: ["vector", "keyword"]
       none_of: ["faq"]
 
   # --------------------------------------------------------------------------

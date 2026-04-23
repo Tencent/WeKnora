@@ -1158,6 +1158,7 @@ export default {
     belongsToKb: "所属知识库：",
     belongsToOrg: "所属空间：",
     readOnlyFromAgent: "仅在此对话中只读，不显示在知识库列表中",
+    noCompatibleKbForAgent: "当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。",
   },
   agent: {
     taskLabel: "任务:",

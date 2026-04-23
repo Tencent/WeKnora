@@ -1363,6 +1363,7 @@ import {
   type PlaceholderDefinition,
   type AgentTypePreset,
   type AgentType,
+  type AgentTypeKBFilter,
   type KBCapabilities,
 } from '@/api/agent';
 import { listModels, type ModelConfig } from '@/api/model';
@@ -1379,6 +1380,12 @@ import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import IMChannelPanel from '@/components/IMChannelPanel.vue';
+import {
+  evaluateToolRequirement,
+  deriveKbFilterFromTools,
+  type RequirementMissKind,
+  type ScopeCapabilities,
+} from '@/utils/tool-capabilities';
 
 const uiStore = useUIStore();
 const authStore = useAuthStore();
@@ -1446,17 +1453,11 @@ const defaultRerankThreshold = ref(0.5);
 const defaultMaxCompletionTokens = ref(2048);
 const defaultTemperature = ref(0.7);
 
-// 知识库相关工具列表（RAG 向量检索工具，依赖 RAG 能力）
+// 知识库相关工具列表（用于 watch(hasKnowledgeBase) 从"无"变"有"时 seed 默认工具）
 const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'query_knowledge_graph', 'get_document_info', 'database_query'];
 
-// Wiki 读取类工具（依赖 Wiki 能力，阅读/搜索用途）
+// Wiki 读取类工具（用于 watch(agentMode) 切到 smart-reasoning 时 seed 默认工具）
 const wikiReadTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_flag_issue'];
-// Wiki 编辑类工具（修改 Wiki 内容，需谨慎授权）
-const wikiEditTools = ['wiki_write_page', 'wiki_replace_text', 'wiki_rename_page', 'wiki_delete_page'];
-// Wiki 巡检类工具
-const wikiIssueTools = ['wiki_read_issue', 'wiki_update_issue'];
-// 全部 Wiki 工具
-const allWikiTools = [...wikiReadTools, ...wikiEditTools, ...wikiIssueTools];
 
 // 初始化标志，防止初始化时触发 watch 自动添加工具
 const isInitializing = ref(false);
@@ -1470,39 +1471,38 @@ const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 // Skills 选择模式：all=全部, selected=指定, none=不使用
 const skillsSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 
-// 可用工具列表 (与后台 definitions.go 保持一致)
+// 可用工具列表（与后台 internal/agent/tools/definitions.go 保持一致）
 // group 决定 UI 分组：base / rag / wiki_read / wiki_edit / wiki_issue / data
-// requiresKB:   需要任意知识库配置才可用（配合 hasKnowledgeBase）
-// requiresRag:  需要作用域内存在启用了向量/关键词索引的知识库（配合 hasRagKnowledgeBase）
-// requiresWiki: 需要作用域内存在启用了 Wiki 索引的知识库（配合 hasWikiKnowledgeBase）
-// danger:       写类破坏性工具，UI 上给出显著提示
+// danger: 写类破坏性工具，UI 上给出显著提示
+// 工具的 KB 能力依赖关系统一在 `@/utils/tool-capabilities` 声明，
+// `availableTools` 通过 `evaluateToolRequirement` 读取，不在这里重复维护。
 const allTools = computed(() => [
   // 基础思考类
-  { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), requiresKB: false, requiresRag: false, requiresWiki: false, group: 'base' },
-  { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), requiresKB: false, requiresRag: false, requiresWiki: false, group: 'base' },
-  // 知识库语义/关键词检索（均需 RAG 能力）
-  { value: 'grep_chunks', label: t('agentEditor.tools.grepChunks'), description: t('agentEditor.tools.grepChunksDesc'), requiresKB: true, requiresRag: true, requiresWiki: false, group: 'rag' },
-  { value: 'knowledge_search', label: t('agentEditor.tools.knowledgeSearch'), description: t('agentEditor.tools.knowledgeSearchDesc'), requiresKB: true, requiresRag: true, requiresWiki: false, group: 'rag' },
-  { value: 'list_knowledge_chunks', label: t('agentEditor.tools.listChunks'), description: t('agentEditor.tools.listChunksDesc'), requiresKB: true, requiresRag: true, requiresWiki: false, group: 'rag' },
-  { value: 'query_knowledge_graph', label: t('agentEditor.tools.queryGraph'), description: t('agentEditor.tools.queryGraphDesc'), requiresKB: true, requiresRag: true, requiresWiki: false, group: 'rag' },
-  { value: 'get_document_info', label: t('agentEditor.tools.getDocInfo'), description: t('agentEditor.tools.getDocInfoDesc'), requiresKB: true, requiresRag: true, requiresWiki: false, group: 'rag' },
-  { value: 'database_query', label: t('agentEditor.tools.dbQuery'), description: t('agentEditor.tools.dbQueryDesc'), requiresKB: true, requiresRag: true, requiresWiki: false, group: 'rag' },
+  { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), group: 'base' },
+  { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), group: 'base' },
+  // 知识库语义/关键词检索
+  { value: 'grep_chunks', label: t('agentEditor.tools.grepChunks'), description: t('agentEditor.tools.grepChunksDesc'), group: 'rag' },
+  { value: 'knowledge_search', label: t('agentEditor.tools.knowledgeSearch'), description: t('agentEditor.tools.knowledgeSearchDesc'), group: 'rag' },
+  { value: 'list_knowledge_chunks', label: t('agentEditor.tools.listChunks'), description: t('agentEditor.tools.listChunksDesc'), group: 'rag' },
+  { value: 'query_knowledge_graph', label: t('agentEditor.tools.queryGraph'), description: t('agentEditor.tools.queryGraphDesc'), group: 'rag' },
+  { value: 'get_document_info', label: t('agentEditor.tools.getDocInfo'), description: t('agentEditor.tools.getDocInfoDesc'), group: 'rag' },
+  { value: 'database_query', label: t('agentEditor.tools.dbQuery'), description: t('agentEditor.tools.dbQueryDesc'), group: 'rag' },
   // Wiki 读取类（阅读、搜索、标记问题）
-  { value: 'wiki_search', label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_read' },
-  { value: 'wiki_read_page', label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_read' },
-  { value: 'wiki_read_source_doc', label: t('agentEditor.tools.wikiReadSourceDoc'), description: t('agentEditor.tools.wikiReadSourceDocDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_read' },
-  { value: 'wiki_flag_issue', label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_read' },
+  { value: 'wiki_search', label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc'), group: 'wiki_read' },
+  { value: 'wiki_read_page', label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc'), group: 'wiki_read' },
+  { value: 'wiki_read_source_doc', label: t('agentEditor.tools.wikiReadSourceDoc'), description: t('agentEditor.tools.wikiReadSourceDocDesc'), group: 'wiki_read' },
+  { value: 'wiki_flag_issue', label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc'), group: 'wiki_read' },
   // Wiki 编辑类（会直接修改 Wiki 内容）
-  { value: 'wiki_write_page', label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_edit', danger: true },
-  { value: 'wiki_replace_text', label: t('agentEditor.tools.wikiReplaceText'), description: t('agentEditor.tools.wikiReplaceTextDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_edit', danger: true },
-  { value: 'wiki_rename_page', label: t('agentEditor.tools.wikiRenamePage'), description: t('agentEditor.tools.wikiRenamePageDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_edit', danger: true },
-  { value: 'wiki_delete_page', label: t('agentEditor.tools.wikiDeletePage'), description: t('agentEditor.tools.wikiDeletePageDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_edit', danger: true },
+  { value: 'wiki_write_page', label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc'), group: 'wiki_edit', danger: true },
+  { value: 'wiki_replace_text', label: t('agentEditor.tools.wikiReplaceText'), description: t('agentEditor.tools.wikiReplaceTextDesc'), group: 'wiki_edit', danger: true },
+  { value: 'wiki_rename_page', label: t('agentEditor.tools.wikiRenamePage'), description: t('agentEditor.tools.wikiRenamePageDesc'), group: 'wiki_edit', danger: true },
+  { value: 'wiki_delete_page', label: t('agentEditor.tools.wikiDeletePage'), description: t('agentEditor.tools.wikiDeletePageDesc'), group: 'wiki_edit', danger: true },
   // Wiki 巡检类
-  { value: 'wiki_read_issue', label: t('agentEditor.tools.wikiReadIssue'), description: t('agentEditor.tools.wikiReadIssueDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_issue' },
-  { value: 'wiki_update_issue', label: t('agentEditor.tools.wikiUpdateIssue'), description: t('agentEditor.tools.wikiUpdateIssueDesc'), requiresKB: true, requiresRag: false, requiresWiki: true, group: 'wiki_issue' },
-  // 数据分析（不依赖检索类能力，只需要作用域里有 KB 存放数据文件）
-  { value: 'data_analysis', label: t('agentEditor.tools.dataAnalysis'), description: t('agentEditor.tools.dataAnalysisDesc'), requiresKB: true, requiresRag: false, requiresWiki: false, group: 'data' },
-  { value: 'data_schema', label: t('agentEditor.tools.dataSchema'), description: t('agentEditor.tools.dataSchemaDesc'), requiresKB: true, requiresRag: false, requiresWiki: false, group: 'data' },
+  { value: 'wiki_read_issue', label: t('agentEditor.tools.wikiReadIssue'), description: t('agentEditor.tools.wikiReadIssueDesc'), group: 'wiki_issue' },
+  { value: 'wiki_update_issue', label: t('agentEditor.tools.wikiUpdateIssue'), description: t('agentEditor.tools.wikiUpdateIssueDesc'), group: 'wiki_issue' },
+  // 数据分析
+  { value: 'data_analysis', label: t('agentEditor.tools.dataAnalysis'), description: t('agentEditor.tools.dataAnalysisDesc'), group: 'data' },
+  { value: 'data_schema', label: t('agentEditor.tools.dataSchema'), description: t('agentEditor.tools.dataSchemaDesc'), group: 'data' },
 ]);
 
 // 工具分组元信息
@@ -1560,27 +1560,52 @@ const hasFaqKnowledgeBase = computed(() => {
   return kbOptions.value.some(kb => selectedKbIds.includes(kb.value) && kb.type === 'faq');
 });
 
-const availableTools = computed(() => {
-  return allTools.value.map(tool => {
-    // 通用知识库依赖：未配置任何知识库时禁用，优先级最高
-    const needKbAndMissing = tool.requiresKB && !hasKnowledgeBase.value;
-    // Wiki 依赖：有 KB 但作用域内没有启用 Wiki 的 KB
-    const needWikiAndMissing = tool.requiresWiki && !hasWikiKnowledgeBase.value;
-    // RAG 依赖：有 KB 但作用域内没有启用向量/关键词索引的 KB
-    const needRagAndMissing = tool.requiresRag && !hasRagKnowledgeBase.value;
-    const disabled = needKbAndMissing || needWikiAndMissing || needRagAndMissing;
-    let disabledReason: string | undefined;
-    if (needKbAndMissing) {
-      disabledReason = t('agentEditor.tools.requiresKb');
-    } else if (needWikiAndMissing) {
-      disabledReason = t('agentEditor.tools.requiresWikiKb');
-    } else if (needRagAndMissing) {
-      disabledReason = t('agentEditor.tools.requiresRagKb');
+// 把"作用域内 KB 能力"聚合成一个 ScopeCapabilities 对象，交给
+// `evaluateToolRequirement` 统一判定；UI 上的所有可用性提示都应出自此处。
+const scopeCapabilities = computed<ScopeCapabilities>(() => {
+  const scope: ScopeCapabilities = { vector: false, keyword: false, wiki: false, graph: false, faq: false };
+  for (const kb of kbsInScope.value) {
+    const caps = kb.capabilities;
+    if (caps) {
+      if (caps.vector) scope.vector = true;
+      if (caps.keyword) scope.keyword = true;
+      if (caps.wiki) scope.wiki = true;
+      if (caps.graph) scope.graph = true;
+      if (caps.faq) scope.faq = true;
+    } else {
+      // 向后兼容：capabilities 尚未加载时，退回到 ragEnabled/wikiEnabled 推断
+      if (kb.ragEnabled) { scope.vector = true; scope.keyword = true; }
+      if (kb.wikiEnabled) scope.wiki = true;
+      if (kb.type === 'faq') scope.faq = true;
     }
+  }
+  return scope;
+});
+
+// 把 evaluateToolRequirement 返回的 missKind 映射到 i18n 文案。
+// 新增的 needsGraph / needsFaq 暂时复用 requiresRagKb 文案（"需要 RAG 知识库"），
+// 后续可按需增加独立的 i18n 键。
+const missKindToReason = (kind: RequirementMissKind): string | undefined => {
+  switch (kind) {
+    case 'needsKb':    return t('agentEditor.tools.requiresKb');
+    case 'needsWiki':  return t('agentEditor.tools.requiresWikiKb');
+    case 'needsRag':
+    case 'needsGraph':
+    case 'needsFaq':   return t('agentEditor.tools.requiresRagKb');
+    case 'none':
+    default:           return undefined;
+  }
+};
+
+const availableTools = computed(() => {
+  const scope = scopeCapabilities.value;
+  const hasAnyKb = hasKnowledgeBase.value;
+  return allTools.value.map(tool => {
+    const { ok, missKind } = evaluateToolRequirement(tool.value, scope, hasAnyKb);
     return {
       ...tool,
-      disabled,
-      disabledReason,
+      disabled: !ok,
+      disabledReason: ok ? undefined : missKindToReason(missKind),
     };
   });
 });
@@ -1908,9 +1933,35 @@ const presetKbMismatchReason = (preset: AgentTypePreset): string => {
   return t('agentEditor.agentType.kbMismatch.generic');
 };
 
+// 计算预设的"有效 KB 过滤器"：工具推导 + YAML 增量叠加。
+//
+// 设计原则：
+//   - 工具 → any_of（"KB 至少要能被其中一个工具用得上"）由
+//     `deriveKbFilterFromTools` 自动算出；
+//   - YAML 里的 `kb_filter` 只负责**工具推不出来**的业务规则（如
+//     data-analysis 的 `none_of: ["faq"]`），作为增量合并，而不是整体覆盖；
+//   - `all_of` / `none_of` 直接从 YAML 继承（工具不表达这类约束）。
+//
+// 这样 rag-qa / wiki-qa / hybrid 在 YAML 里彻底不写 `kb_filter`，
+// data-analysis 只需声明额外的 `none_of`，"工具→能力"的映射只在
+// `@/utils/tool-capabilities` 维护一份。
+const effectiveKbFilter = (preset: AgentTypePreset | null): AgentTypeKBFilter | null => {
+  if (!preset) return null;
+  const derived = deriveKbFilterFromTools(preset.config?.allowed_tools || []);
+  const yaml = preset.kb_filter;
+
+  // YAML 提供 any_of 时整体覆盖推导（给显式控制留口子）；否则用推导的
+  const anyOf = (yaml?.any_of && yaml.any_of.length > 0) ? yaml.any_of : (derived?.any_of ?? []);
+  const allOf = yaml?.all_of ?? [];
+  const noneOf = yaml?.none_of ?? [];
+  if (anyOf.length === 0 && allOf.length === 0 && noneOf.length === 0) return null;
+  return { any_of: anyOf, all_of: allOf, none_of: noneOf };
+};
+
 // 评估单个 KB 是否满足给定预设的 kb_filter
 const kbSatisfiesPresetFilter = (kb: { capabilities?: KBCapabilities; ragEnabled?: boolean; wikiEnabled?: boolean; type?: string }, preset: AgentTypePreset | null): { ok: boolean; reason: string } => {
-  if (!preset || !preset.kb_filter) return { ok: true, reason: '' };
+  const filter = effectiveKbFilter(preset);
+  if (!preset || !filter) return { ok: true, reason: '' };
   const caps = kb.capabilities || {
     vector: !!kb.ragEnabled,
     keyword: !!kb.ragEnabled,
@@ -1928,20 +1979,19 @@ const kbSatisfiesPresetFilter = (kb: { capabilities?: KBCapabilities; ragEnabled
       default: return false;
     }
   };
-  const f = preset.kb_filter;
   const reason = presetKbMismatchReason(preset);
-  if (f.all_of && f.all_of.length > 0) {
-    for (const n of f.all_of) {
+  if (filter.all_of && filter.all_of.length > 0) {
+    for (const n of filter.all_of) {
       if (!has(n)) return { ok: false, reason };
     }
   }
-  if (f.any_of && f.any_of.length > 0) {
-    if (!f.any_of.some(n => has(n))) {
+  if (filter.any_of && filter.any_of.length > 0) {
+    if (!filter.any_of.some(n => has(n))) {
       return { ok: false, reason };
     }
   }
-  if (f.none_of && f.none_of.length > 0) {
-    for (const n of f.none_of) {
+  if (filter.none_of && filter.none_of.length > 0) {
+    for (const n of filter.none_of) {
       if (has(n)) return { ok: false, reason };
     }
   }
@@ -2363,7 +2413,14 @@ watch(agentMode, (val, _oldVal) => {
   }
 });
 
-// 监听知识库配置变化，自动移除/添加 RAG 工具
+// 监听知识库启用状态变化：
+//   - 从"无"变"有"：自动补齐 RAG 基础工具，方便用户开箱即用（仅 seed 行为）；
+//   - 从"有"变"无"：**不再**自动擦工具，依赖不满足时由 `availableTools` 灰显
+//     + 运行时工具注册器过滤。`allowed_tools` 代表用户意图，只应在用户显式操作
+//     （切 agent_type / 切 agent_mode / 手勾工具）时变更。
+// 历史背景：旧版本在 KB 能力消失时会擦除 KB/Wiki 工具，导致用户切换
+// `kb_selection_mode` 到 "selected"、但尚未勾具体 KB 的过渡期里静默丢失工具，
+// 对默认工具全是 wiki_* 的内置"维基问答"智能体尤为致命。
 watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
   // 如果当前在检索策略页面但没有知识库能力了，切换到基础设置
   if (!hasKB && currentSection.value === 'retrieval') {
@@ -2374,25 +2431,10 @@ watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
   if (isInitializing.value || !isAgentMode.value) return;
 
   if (hasKB && !oldHasKB) {
-    // 从无知识库变为有知识库，自动添加知识库相关工具
+    // 从无知识库变为有知识库，seed 默认的 RAG 工具（仅补齐未勾的）
     const currentTools = formData.value.config.allowed_tools || [];
     const toolsToAdd = knowledgeBaseTools.filter((tool: string) => !currentTools.includes(tool));
     formData.value.config.allowed_tools = [...currentTools, ...toolsToAdd];
-  } else if (!hasKB && oldHasKB) {
-    // 从有知识库变为无知识库，移除所有 KB 依赖工具（含 Wiki）
-    formData.value.config.allowed_tools = formData.value.config.allowed_tools.filter(
-      (tool: string) => !knowledgeBaseTools.includes(tool) && !allWikiTools.includes(tool)
-    );
-  }
-});
-
-// 监听 Wiki 能力变化：当 Wiki 能力消失时移除已勾选的 Wiki 工具（避免"勾了但跑不起来"）
-watch(hasWikiKnowledgeBase, (hasWiki, oldHasWiki) => {
-  if (isInitializing.value || !isAgentMode.value) return;
-  if (!hasWiki && oldHasWiki) {
-    formData.value.config.allowed_tools = formData.value.config.allowed_tools.filter(
-      (tool: string) => !allWikiTools.includes(tool)
-    );
   }
 });
 

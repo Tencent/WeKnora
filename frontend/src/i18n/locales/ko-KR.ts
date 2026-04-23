@@ -1136,6 +1136,7 @@ export default {
     belongsToKb: "지식베이스: ",
     belongsToOrg: "스페이스: ",
     readOnlyFromAgent: "이 대화에서는 읽기 전용이며 지식베이스 목록에는 표시되지 않습니다.",
+    noCompatibleKbForAgent: "현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.",
   },
   agent: {
     taskLabel: "작업:",

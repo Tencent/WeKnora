@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -50,8 +52,23 @@ func (c *SearchCommand) Execute(ctx context.Context, cmdCtx *CommandContext, arg
 		case "all":
 			allKBs, err := c.kbService.ListKnowledgeBases(ctx)
 			if err == nil {
+				// Same tool-capability filter as the QA pipeline's
+				// resolveKnowledgeBasesFromAgent (`all` branch) so `/search`
+				// agrees with what the agent's tools can actually reach.
+				filter := tools.DeriveKBFilterFromTools(cmdCtx.CustomAgent.Config.AllowedTools)
+				skipped := 0
 				for _, kb := range allKBs {
+					if !filter.IsEmpty() &&
+						!tools.KBSatisfiesToolRequirements(kb.Capabilities(), cmdCtx.CustomAgent.Config.AllowedTools) {
+						skipped++
+						continue
+					}
 					kbIDs = append(kbIDs, kb.ID)
+				}
+				if skipped > 0 {
+					logger.Infof(ctx,
+						"/search(agent=%s, mode=all): tool-capability filter removed %d of %d KBs",
+						cmdCtx.CustomAgent.ID, skipped, len(allKBs))
 				}
 			}
 		case "none":

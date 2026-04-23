@@ -1289,6 +1289,7 @@ export default {
     kbCount: '{count} documents',
     belongsToKb: 'Knowledge base: ',
     belongsToOrg: 'Space: ',
+    noCompatibleKbForAgent: "This agent's tools don't match any knowledge base's capabilities in scope, so nothing can be referenced.",
   },
   file: {
     upload: 'Upload File',

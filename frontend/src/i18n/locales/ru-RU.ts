@@ -1252,7 +1252,8 @@ export default {
     kbCount: '{count} документов',
     belongsToKb: 'База знаний: ',
     belongsToOrg: 'Пространство: ',
-    readOnlyFromAgent: 'Только чтение (от агента)'
+    readOnlyFromAgent: 'Только чтение (от агента)',
+    noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
   },
   file: {
     upload: 'Загрузить файл',

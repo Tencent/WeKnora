@@ -19,6 +19,12 @@ import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-
 import { getConversationConfig, updateConversationConfig, type ConversationConfig } from '@/api/system';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
+import {
+  kbSatisfiesToolRequirements,
+  deriveKbFilterFromTools,
+  toolsConsumeFiles,
+  type ScopeCapabilities,
+} from '@/utils/tool-capabilities';
 
 const route = useRoute();
 const router = useRouter();
@@ -234,6 +240,54 @@ const agentSupportedFileTypes = computed(() => {
   return currentAgentConfig.value?.supported_file_types || [];
 });
 
+// 智能体配置的工具列表，驱动 @ 菜单的 KB 兼容性过滤
+const agentAllowedTools = computed<string[]>(() => {
+  if (!hasAgentConfig.value) return [];
+  return currentAgentConfig.value?.allowed_tools || [];
+});
+
+// 从 KB 对象里抽能力位，优先用 backend 显式的 capabilities 字段；否则回退到 indexing_strategy，
+// 最后拿 kb.type === 'faq' 兜底。shared / owned / agent-scope 三路的 KB 响应结构一致。
+const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
+  if (kb?.capabilities) {
+    return {
+      vector: !!kb.capabilities.vector,
+      keyword: !!kb.capabilities.keyword,
+      wiki: !!kb.capabilities.wiki,
+      graph: !!kb.capabilities.graph,
+      faq: !!kb.capabilities.faq,
+    };
+  }
+  const s = kb?.indexing_strategy;
+  return {
+    vector: s ? !!s.vector_enabled : false,
+    keyword: s ? !!s.keyword_enabled : false,
+    wiki: s ? !!s.wiki_enabled : false,
+    graph: s ? !!s.graph_enabled : false,
+    faq: kb?.type === 'faq',
+  };
+};
+
+// "all" 模式 + 智能体工具有 KB 依赖时的兼容性过滤；'selected'/'none' 不在这里二次过滤
+// （selected 由编辑器负责，none 已经空表）。
+const isKbCompatibleWithAgent = (kb: any): boolean => {
+  if (!hasAgentConfig.value) return true;
+  if (agentKBSelectionMode.value !== 'all') return true;
+  return kbSatisfiesToolRequirements(kbToScopeCaps(kb), agentAllowedTools.value);
+};
+
+// 仅在用户没输入搜索词、且是因智能体工具兼容性把列表清空的场景展示专用空态文案
+const mentionEmptyHint = computed(() => {
+  if (mentionQuery.value) return '';
+  if (!hasAgentConfig.value) return '';
+  if (agentKBSelectionMode.value !== 'all') return '';
+  // 列表为空 && 兼容性过滤器其实是有效的（否则"全部"不会被剔空）
+  if (mentionItems.value.length !== 0) return '';
+  const filter = deriveKbFilterFromTools(agentAllowedTools.value);
+  if (!filter) return '';
+  return t('mentionDetail.noCompatibleKbForAgent');
+});
+
 // 智能体是否启用了图片上传（多模态）
 const isImageUploadEnabledByAgent = computed(() => {
   if (!hasAgentConfig.value) return false;
@@ -258,6 +312,9 @@ const mentionStartPos = ref(0);
 const isComposing = ref(false);
 const isMentionTriggeredByButton = ref(false);
 const mentionHasMore = ref(false);
+// 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
+// 避免 append 请求把不兼容 KB 的文件漏进来。`null` 表示"不受限制"（非智能体场景）
+const mentionAllowedKbIds = ref<Set<string> | null>(null);
 const mentionLoading = ref(false);
 const mentionOffset = ref(0);
 const MENTION_PAGE_SIZE = 20;
@@ -835,13 +892,16 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
         const res: any = await listKnowledgeBases({ agent_id: agentId });
         const list = res?.data && Array.isArray(res.data) ? res.data : [];
         const orgLabel = sharedAgentOrgName.value || '';
+        // 保留 capabilities / indexing_strategy，后面过滤时要用
         availableKbs = list.map((kb: any) => ({
           id: kb.id,
           name: kb.name,
           type: kb.type || 'document',
           knowledge_count: kb.knowledge_count,
           chunk_count: kb.chunk_count,
-          org_name: orgLabel
+          org_name: orgLabel,
+          capabilities: kb.capabilities,
+          indexing_strategy: kb.indexing_strategy,
         }));
         sharedAgentKbList.value = list.map((kb: any) => ({
           id: kb.id,
@@ -867,7 +927,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           type: s.knowledge_base.type || 'document',
           knowledge_count: s.knowledge_base.knowledge_count,
           chunk_count: s.knowledge_base.chunk_count,
-          org_name: s.org_name || ''
+          org_name: s.org_name || '',
+          capabilities: s.knowledge_base.capabilities,
+          indexing_strategy: s.knowledge_base.indexing_strategy,
         }));
       const ownIds = new Set(availableKbs.map((kb: any) => kb.id));
       sharedKbsForMention.forEach((kb: any) => {
@@ -880,13 +942,31 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
 
     if (hasAgentConfig.value) {
       const kbMode = agentKBSelectionMode.value;
+      // 共享智能体路径：`availableKbs` 已经来自 `listKnowledgeBases({agent_id})`,
+      // 后端按 kb_selection_mode + allowed_tools 做过权威过滤；前端不再重复一遍。
+      // 本人智能体路径：走 own KBs + user-shared KBs 合并，后端拿不到 agent 上下文，
+      // 所以 'selected' 要收敛到配置集合，'all' 要按工具派生的能力过滤。
+      const isSharedAgent = !!(sourceTenantId && agentId);
       if (kbMode === 'none') {
         availableKbs = [];
-      } else if (kbMode === 'selected') {
-        const configuredKbIds = agentKnowledgeBases.value;
-        availableKbs = availableKbs.filter((kb: any) => configuredKbIds.includes(kb.id));
+      } else if (!isSharedAgent) {
+        if (kbMode === 'selected') {
+          // 'selected' 完全信任用户在编辑器里的勾选；编辑器已经用 kb_filter 灰显
+          // 不兼容项，这里不再二次过滤，避免越权擦除用户明确的选择。
+          const configuredKbIds = agentKnowledgeBases.value;
+          availableKbs = availableKbs.filter((kb: any) => configuredKbIds.includes(kb.id));
+        } else if (kbMode === 'all') {
+          // 'all' 的语义是"全部兼容的 KB"——按工具派生的能力集合过滤，
+          // 避免 wiki-qa 选"全部"后 @ 出来一堆 wiki 工具跑不动的 KB。
+          availableKbs = availableKbs.filter((kb: any) => isKbCompatibleWithAgent(kb));
+        }
       }
     }
+
+    // 非智能体场景不限制文件过滤；智能体场景按当前 availableKbs 的 ID 集合过滤文件
+    mentionAllowedKbIds.value = hasAgentConfig.value
+      ? new Set(availableKbs.map((kb: any) => String(kb.id)))
+      : null;
 
     const kbs = availableKbs.filter((kb: any) =>
       !q || (kb.name && kb.name.toLowerCase().includes(q.toLowerCase()))
@@ -902,9 +982,14 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   }
   
   // Fetch Files from API
-  // 如果智能体禁用了知识库，也不显示文件
+  // 仅当满足以下两点才加载文件：
+  //   1. 智能体确实会用到知识库（kb_selection_mode !== 'none'）；
+  //   2. 智能体启用的工具里至少有一个能消费 @ 的文件 ID
+  //      （比如 wiki-qa 全是 wiki_* 工具，用户 @ 的文件根本进不到任何工具里，就没必要展示）。
   let fileItems: any[] = [];
-  const shouldLoadFiles = !hasAgentConfig.value || agentKBSelectionMode.value !== 'none';
+  const kbModeAllowsFiles = !hasAgentConfig.value || agentKBSelectionMode.value !== 'none';
+  const toolsAllowFiles = !hasAgentConfig.value || toolsConsumeFiles(agentAllowedTools.value);
+  const shouldLoadFiles = kbModeAllowsFiles && toolsAllowFiles;
   
   if (shouldLoadFiles) {
     mentionLoading.value = true;
@@ -923,9 +1008,17 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       console.log('[Mention] searchKnowledge response:', res);
       if (res.data && Array.isArray(res.data)) {
         let files = res.data;
-        if (!sourceTenantId && hasAgentConfig.value && agentKBSelectionMode.value === 'selected') {
-          const configuredKbIds = agentKnowledgeBases.value;
-          files = files.filter((f: any) => configuredKbIds.includes(f.knowledge_base_id ?? f.kb_id));
+        // 按当前 @ 会话的兼容 KB 集合过滤：
+        //   - 非智能体场景：`mentionAllowedKbIds` 为 null，跳过；
+        //   - 智能体场景（含 shared agent）：'selected' 会把 ID 收敛到用户勾的 KB，
+        //     'all' 会收敛到"兼容"的 KB，'none' 根本走不到这里（shouldLoadFiles=false）。
+        //   这样分页 append 也能用同一份集合，不再只兜住 'selected' + 非共享的分支。
+        if (mentionAllowedKbIds.value) {
+          const allowed = mentionAllowedKbIds.value;
+          files = files.filter((f: any) => {
+            const kbId = f.knowledge_base_id ?? f.kb_id;
+            return kbId != null && allowed.has(String(kbId));
+          });
         }
         const sharedKbOrgMap: Record<string, string> = {};
         (orgStore.sharedKnowledgeBases || []).forEach((s: any) => {
@@ -1948,6 +2041,7 @@ defineExpose({
         :items="mentionItems"
         :hasMore="mentionHasMore"
         :loading="mentionLoading"
+        :emptyHint="mentionEmptyHint"
         v-model:activeIndex="mentionActiveIndex"
         @select="onMentionSelect"
         @loadMore="loadMoreMentionItems"
