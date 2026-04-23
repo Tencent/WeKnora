@@ -128,13 +128,32 @@ type ParserEngineRule struct {
 	Engine    string   `yaml:"engine"     json:"engine"`
 }
 
+// Chunking strategy identifiers. Empty string == ChunkingStrategyRecursive
+// for backward compatibility with existing knowledge bases.
+const (
+	// ChunkingStrategyRecursive is the default strategy: character-based recursive
+	// split by separators with protected pattern preservation.
+	ChunkingStrategyRecursive = "recursive"
+	// ChunkingStrategyMarkdown splits by Markdown heading hierarchy (ATX #/##/###),
+	// preserves semantic sections, and optionally injects heading breadcrumbs.
+	// Recommended for MinerU-produced markdown and other structure-rich documents.
+	ChunkingStrategyMarkdown = "markdown"
+	// ChunkingStrategyDrugInsert recognizes Chinese drug package insert template
+	// sections ("【适应症】", "【用法用量】" ...) and produces one chunk per section.
+	ChunkingStrategyDrugInsert = "drug_insert"
+)
+
 // ChunkingConfig represents the document splitting configuration
 type ChunkingConfig struct {
-	// Chunk size
+	// Strategy selects the chunking algorithm. Empty / "recursive" keeps the
+	// legacy behaviour. "markdown" / "drug_insert" enable structure-aware splits.
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	// Chunk size (legacy recursive strategy; used as child size / soft target for
+	// other strategies when ChildChunkSize is unset)
 	ChunkSize int `yaml:"chunk_size"    json:"chunk_size"`
 	// Chunk overlap
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
-	// Separators
+	// Separators used by the recursive splitter
 	Separators []string `yaml:"separators"    json:"separators"`
 	// EnableMultimodal (deprecated, kept for backward compatibility with old data)
 	EnableMultimodal bool `yaml:"enable_multimodal,omitempty" json:"enable_multimodal,omitempty"`
@@ -151,6 +170,32 @@ type ChunkingConfig struct {
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
+
+	// --- Markdown strategy options ---
+	// MaxHeadingDepth controls how deep the Markdown structure splitter will
+	// treat headings as parent boundaries (1..6). Default 3 (#, ##, ###).
+	MaxHeadingDepth int `yaml:"max_heading_depth,omitempty" json:"max_heading_depth,omitempty"`
+	// InjectBreadcrumbs prepends a "> a > b > c" heading path to every chunk
+	// so downstream retrieval and LLM calls see the semantic context.
+	InjectBreadcrumbs bool `yaml:"inject_breadcrumbs,omitempty" json:"inject_breadcrumbs,omitempty"`
+	// KeepListIntact marks ordered/unordered list blocks as atomic (not split).
+	KeepListIntact bool `yaml:"keep_list_intact,omitempty" json:"keep_list_intact,omitempty"`
+	// SoftMaxChars is the character soft cap per chunk; a section larger than
+	// this is further split by the recursive child splitter. Default 4000.
+	SoftMaxChars int `yaml:"soft_max_chars,omitempty" json:"soft_max_chars,omitempty"`
+	// ExtractMetadata stores heading_path / section / page info on each chunk.
+	ExtractMetadata bool `yaml:"extract_metadata,omitempty" json:"extract_metadata,omitempty"`
+}
+
+// ResolveStrategy returns the effective chunking strategy, applying
+// the default for empty values. Safe to call on zero-value configs.
+func (c ChunkingConfig) ResolveStrategy() string {
+	switch c.Strategy {
+	case ChunkingStrategyMarkdown, ChunkingStrategyDrugInsert:
+		return c.Strategy
+	default:
+		return ChunkingStrategyRecursive
+	}
 }
 
 // ResolveParserEngine returns the engine name for the given file type

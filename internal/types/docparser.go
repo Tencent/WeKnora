@@ -75,6 +75,11 @@ type ParsedChunk struct {
 	// >= 0 means this is a child chunk referencing the parent at this index
 	// in the ParentChunks slice of ProcessChunksOptions.
 	ParentIndex int
+
+	// Metadata carries structural hints from the chunker (heading_path,
+	// section_code, drug_name, page_start, ...). Persisted into
+	// chunks.metadata (JSON column) by processChunks when non-empty.
+	Metadata map[string]any
 }
 
 // ParsedParentChunk represents a parent chunk in the parent-child strategy.

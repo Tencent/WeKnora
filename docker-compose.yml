@@ -32,6 +32,7 @@ services:
       dockerfile: docker/Dockerfile.app
       args:
         - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
+        - GOPROXY_ARG=${GOPROXY_ARG:-}
     container_name: WeKnora-app
     ports:
       - "${APP_PORT:-8080}:8080"
@@ -199,6 +200,8 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
+    ports:
+      - "54320:5432"
     image: paradedb/paradedb:v0.22.2-pg17
     container_name: WeKnora-postgres
     environment:

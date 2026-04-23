@@ -1828,6 +1828,96 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return
 }
 
+// buildMarkdownConfig derives a MarkdownConfig from the KB's ChunkingConfig.
+// Starts from medical-friendly defaults (breadcrumbs on, list preservation on)
+// and layers in explicit per-KB overrides. Sub-splitting of oversize sections
+// reuses the base recursive config so chunk size stays predictable.
+func buildMarkdownConfig(cc types.ChunkingConfig, base chunker.SplitterConfig) chunker.MarkdownConfig {
+	mc := chunker.DefaultMarkdownConfig()
+	if cc.MaxHeadingDepth > 0 {
+		mc.MaxHeadingDepth = cc.MaxHeadingDepth
+	}
+	if cc.SoftMaxChars > 0 {
+		mc.SoftMaxChars = cc.SoftMaxChars
+	}
+	// For bool knobs we "upgrade": explicit true wins, explicit false leaves
+	// the medical-friendly default in place so that picking the markdown
+	// strategy already yields the behaviour users expect. A future "strict
+	// opt-out" knob can be introduced if needed — for now the escape hatch
+	// is switching the strategy back to recursive.
+	if cc.InjectBreadcrumbs {
+		mc.InjectBreadcrumbs = true
+	}
+	if cc.KeepListIntact {
+		mc.KeepListIntact = true
+	}
+	mc.ChildChunkSize = base.ChunkSize
+	mc.ChildChunkOverlap = base.ChunkOverlap
+	mc.Separators = base.Separators
+	return mc
+}
+
+// splitWithStrategy dispatches document chunking according to
+// kb.ChunkingConfig.ResolveStrategy(). Returns the flat (child) chunks plus,
+// for strategies that emit a two-level structure, the parent chunks.
+// Callers should assign ProcessChunksOptions.ParentChunks from the second
+// return value when it is non-nil.
+//
+// The markdown strategy ignores EnableParentChild for v1 — a future
+// "markdown parent-child" hybrid can be layered on without breaking callers.
+func splitWithStrategy(text string, cc types.ChunkingConfig, base chunker.SplitterConfig) ([]types.ParsedChunk, []types.ParsedParentChunk) {
+	switch cc.ResolveStrategy() {
+	case types.ChunkingStrategyMarkdown:
+		mc := buildMarkdownConfig(cc, base)
+		mdChunks := chunker.SplitMarkdown(text, mc)
+		parsed := make([]types.ParsedChunk, len(mdChunks))
+		for i, c := range mdChunks {
+			parsed[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				Metadata:    c.ToMetadata(),
+				ParentIndex: -1,
+			}
+		}
+		return parsed, nil
+
+	default: // recursive
+		if cc.EnableParentChild {
+			parentCfg, childCfg := buildParentChildConfigs(cc, base)
+			pcResult := chunker.SplitTextParentChild(text, parentCfg, childCfg)
+			parsed := make([]types.ParsedChunk, len(pcResult.Children))
+			for i, c := range pcResult.Children {
+				parsed[i] = types.ParsedChunk{
+					Content:     c.Content,
+					Seq:         c.Seq,
+					Start:       c.Start,
+					End:         c.End,
+					ParentIndex: c.ParentIndex,
+				}
+			}
+			parents := make([]types.ParsedParentChunk, len(pcResult.Parents))
+			for i, p := range pcResult.Parents {
+				parents[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
+			}
+			return parsed, parents
+		}
+		flat := chunker.SplitText(text, base)
+		parsed := make([]types.ParsedChunk, len(flat))
+		for i, c := range flat {
+			parsed[i] = types.ParsedChunk{
+				Content:     c.Content,
+				Seq:         c.Seq,
+				Start:       c.Start,
+				End:         c.End,
+				ParentIndex: -1,
+			}
+		}
+		return parsed, nil
+	}
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -2022,6 +2112,16 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			StartAt:         int(chunkData.Start),
 			EndAt:           int(chunkData.End),
 			ChunkType:       types.ChunkTypeText,
+		}
+
+		// Persist chunker-provided metadata (heading_path, section_code,
+		// category, ...) into the chunks.metadata JSON column so retrieval
+		// and UI layers can filter/weight/cite by structural context.
+		if metaJSON, err := types.MarshalChunkMetadata(chunkData.Metadata); err != nil {
+			logger.GetLogger(ctx).WithField("error", err).
+				Warnf("processChunks: failed to marshal chunk metadata, skipping")
+		} else if metaJSON != nil {
+			textChunk.Metadata = metaJSON
 		}
 
 		// Wire up ParentChunkID for child chunks
@@ -7441,35 +7541,14 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		}
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
-		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
-		pcResult := chunker.SplitTextParentChild(clean, parentCfg, childCfg)
-		parsed = make([]types.ParsedChunk, len(pcResult.Children))
-		for i, c := range pcResult.Children {
-			parsed[i] = types.ParsedChunk{
-				Content:     c.Content,
-				Seq:         c.Seq,
-				Start:       c.Start,
-				End:         c.End,
-				ParentIndex: c.ParentIndex,
-			}
-		}
-		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
-		for i, p := range pcResult.Parents {
-			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
-		}
+	// Desugar MinerU VLM's LaTeX-wrapped prose (e.g. "$22 \sim 26 \mathrm{~g}$"
+	// → "22 ~ 26 g") before chunking so the UI renders cleanly and embedding
+	// models are not poisoned by \mathrm-noise.
+	clean = chunker.SanitizeInlineLaTeX(clean)
+
+	parsed, parentChunks := splitWithStrategy(clean, kb.ChunkingConfig, chunkCfg)
+	if parentChunks != nil {
 		opts.ParentChunks = parentChunks
-	} else {
-		splitChunks := chunker.SplitText(clean, chunkCfg)
-		parsed = make([]types.ParsedChunk, len(splitChunks))
-		for i, c := range splitChunks {
-			parsed[i] = types.ParsedChunk{
-				Content: c.Content,
-				Seq:     c.Seq,
-				Start:   c.Start,
-				End:     c.End,
-			}
-		}
 	}
 
 	if doSync {
@@ -8253,38 +8332,19 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if kb.ChunkingConfig.EnableParentChild {
-		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
-		pcResult := chunker.SplitTextParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
-		chunks = make([]types.ParsedChunk, len(pcResult.Children))
-		for i, c := range pcResult.Children {
-			chunks[i] = types.ParsedChunk{
-				Content:     c.Content,
-				Seq:         c.Seq,
-				Start:       c.Start,
-				End:         c.End,
-				ParentIndex: c.ParentIndex,
-			}
-		}
-		parentChunks := make([]types.ParsedParentChunk, len(pcResult.Parents))
-		for i, p := range pcResult.Parents {
-			parentChunks[i] = types.ParsedParentChunk{Content: p.Content, Seq: p.Seq, Start: p.Start, End: p.End}
-		}
+	// Desugar MinerU VLM's LaTeX-wrapped prose before chunking. See the
+	// manual-ingest path for rationale.
+	convertResult.MarkdownContent = chunker.SanitizeInlineLaTeX(convertResult.MarkdownContent)
+
+	var parentChunks []types.ParsedParentChunk
+	chunks, parentChunks = splitWithStrategy(convertResult.MarkdownContent, kb.ChunkingConfig, chunkCfg)
+	if parentChunks != nil {
 		processOpts.ParentChunks = parentChunks
-		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
-			len(pcResult.Parents), len(pcResult.Children), knowledge.ID)
+		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s (strategy=%s)",
+			len(parentChunks), len(chunks), knowledge.ID, kb.ChunkingConfig.ResolveStrategy())
 	} else {
-		splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
-		chunks = make([]types.ParsedChunk, len(splitChunks))
-		for i, c := range splitChunks {
-			chunks[i] = types.ParsedChunk{
-				Content: c.Content,
-				Seq:     c.Seq,
-				Start:   c.Start,
-				End:     c.End,
-			}
-		}
-		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
+		logger.Infof(ctx, "Split document into %d chunks for knowledge %s (strategy=%s)",
+			len(chunks), knowledge.ID, kb.ChunkingConfig.ResolveStrategy())
 	}
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
