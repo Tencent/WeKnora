@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // OpenAIEmbedder implements text vectorization functionality using OpenAI API
@@ -23,6 +24,7 @@ type OpenAIEmbedder struct {
 	httpClient           *http.Client
 	timeout              time.Duration
 	maxRetries           int
+	customHeaders        map[string]string
 	EmbedderPooler
 }
 
@@ -79,6 +81,12 @@ func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 	}, nil
 }
 
+// SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+// 保留头（Authorization、Content-Type 等）会在发送时被自动跳过。
+func (e *OpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
+	e.customHeaders = headers
+}
+
 // Embed converts text to vector
 func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	for range 3 {
@@ -122,6 +130,7 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
+		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
 		resp, err = e.httpClient.Do(req)
 		if err == nil {

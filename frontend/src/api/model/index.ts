@@ -22,6 +22,9 @@ export interface ModelConfig {
     interface_type?: 'ollama' | 'openai'; // VLLM专用
     parameter_size?: string; // Ollama模型参数大小 (e.g., "7B", "13B", "70B")
     extra_config?: Record<string, string>; // Provider-specific configuration
+    // 自定义 HTTP 请求头（类似 Python OpenAI SDK 的 extra_headers），
+    // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
+    custom_headers?: Record<string, string>;
     supports_vision?: boolean; // Whether the model accepts image/multimodal input
   };
   is_default?: boolean;

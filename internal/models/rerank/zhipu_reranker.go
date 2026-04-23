@@ -9,15 +9,22 @@ import (
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // ZhipuReranker implements a reranking system based on Zhipu AI models
 type ZhipuReranker struct {
-	modelName string       // Name of the model used for reranking
-	modelID   string       // Unique identifier of the model
-	apiKey    string       // API key for authentication
-	baseURL   string       // Base URL for API requests
-	client    *http.Client // HTTP client for making API requests
+	modelName     string       // Name of the model used for reranking
+	modelID       string       // Unique identifier of the model
+	apiKey        string       // API key for authentication
+	baseURL       string       // Base URL for API requests
+	client        *http.Client // HTTP client for making API requests
+	customHeaders map[string]string
+}
+
+// SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+func (r *ZhipuReranker) SetCustomHeaders(headers map[string]string) {
+	r.customHeaders = headers
 }
 
 // ZhipuRerankRequest represents a request to rerank documents using Zhipu AI API
@@ -92,6 +99,7 @@ func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []st
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.apiKey))
+	secutils.ApplyCustomHeaders(req, r.customHeaders)
 
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.baseURL, query, documents))
 

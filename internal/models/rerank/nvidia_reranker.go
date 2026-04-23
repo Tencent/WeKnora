@@ -9,16 +9,23 @@ import (
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // NvidiaReranker implements a reranking system using Jina AI API
 // Jina API uses different parameters than standard OpenAI-compatible APIs
 type NvidiaReranker struct {
-	modelName string       // Name of the model used for reranking
-	modelID   string       // Unique identifier of the model
-	apiKey    string       // API key for authentication
-	baseURL   string       // Base URL for API requests
-	client    *http.Client // HTTP client for making API requests
+	modelName     string       // Name of the model used for reranking
+	modelID       string       // Unique identifier of the model
+	apiKey        string       // API key for authentication
+	baseURL       string       // Base URL for API requests
+	client        *http.Client // HTTP client for making API requests
+	customHeaders map[string]string
+}
+
+// SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+func (r *NvidiaReranker) SetCustomHeaders(headers map[string]string) {
+	r.customHeaders = headers
 }
 type NvidiaRerankDocument struct {
 	Text string `json:"text"`
@@ -88,6 +95,7 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", r.apiKey))
+	secutils.ApplyCustomHeaders(req, r.customHeaders)
 
 	// Log the curl equivalent for debugging (API key masked for security)
 	logger.GetLogger(ctx).Infof(

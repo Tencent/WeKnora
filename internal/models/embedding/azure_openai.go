@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // AzureOpenAIEmbedder implements text vectorization using Azure OpenAI API
@@ -24,7 +25,13 @@ type AzureOpenAIEmbedder struct {
 	apiVersion           string
 	httpClient           *http.Client
 	maxRetries           int
+	customHeaders        map[string]string
 	EmbedderPooler
+}
+
+// SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+func (e *AzureOpenAIEmbedder) SetCustomHeaders(headers map[string]string) {
+	e.customHeaders = headers
 }
 
 type azureOpenAIEmbedRequest struct {
@@ -157,6 +164,7 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("api-key", e.apiKey)
+		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
 		resp, err = e.httpClient.Do(req)
 		if err == nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -53,7 +54,14 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 			apiCfg.BaseURL = config.BaseURL
 		}
 	}
-	apiCfg.HTTPClient = &http.Client{Timeout: defaultTimeout}
+	httpClient := &http.Client{Timeout: defaultTimeout}
+
+	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
+	if len(config.CustomHeaders) > 0 {
+		apiCfg.HTTPClient = secutils.WrapHTTPClientWithHeaders(httpClient, config.CustomHeaders)
+	} else {
+		apiCfg.HTTPClient = httpClient
+	}
 
 	return &RemoteAPIVLM{
 		modelName: config.ModelName,

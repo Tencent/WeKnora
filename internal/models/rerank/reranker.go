@@ -86,8 +86,31 @@ type RerankerConfig struct {
 	ModelID     string
 	Provider    string // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
 	ExtraConfig map[string]string
-	AppID       string
-	AppSecret   string // 加密值，工厂函数调用方传入，使用前已解密
+	// CustomHeaders 允许在调用远程 API 时附加自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+	CustomHeaders map[string]string
+	AppID         string
+	AppSecret     string // 加密值，工厂函数调用方传入，使用前已解密
+}
+
+// ConfigFromModel 根据 types.Model 构造 RerankerConfig。
+// 生产路径（从 DB 拉起）和测试连接路径（临时表单）共享这份映射。
+// appID / appSecret 是已解密的 WeKnoraCloud 凭证，调用方负责传入。
+func ConfigFromModel(m *types.Model, appID, appSecret string) *RerankerConfig {
+	if m == nil {
+		return nil
+	}
+	return &RerankerConfig{
+		ModelID:       m.ID,
+		APIKey:        m.Parameters.APIKey,
+		BaseURL:       m.Parameters.BaseURL,
+		ModelName:     m.Name,
+		Source:        m.Source,
+		Provider:      m.Parameters.Provider,
+		ExtraConfig:   m.Parameters.ExtraConfig,
+		CustomHeaders: m.Parameters.CustomHeaders,
+		AppID:         appID,
+		AppSecret:     appSecret,
+	}
 }
 
 // NewReranker creates a reranker based on the configuration
@@ -99,6 +122,11 @@ func NewReranker(config *RerankerConfig) (Reranker, error) {
 	return &debugReranker{inner: r}, nil
 }
 
+// customHeaderSetter 表示支持注入自定义 HTTP header 的 reranker 实现。
+type customHeaderSetter interface {
+	SetCustomHeaders(map[string]string)
+}
+
 func newReranker(config *RerankerConfig) (Reranker, error) {
 	// Use provider field if set, otherwise detect from URL using provider registry
 	providerName := provider.ProviderName(config.Provider)
@@ -106,18 +134,29 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		providerName = provider.DetectProvider(config.BaseURL)
 	}
 
+	var (
+		reranker Reranker
+		err      error
+	)
 	switch providerName {
 	case provider.ProviderAliyun:
-		return NewAliyunReranker(config)
+		reranker, err = NewAliyunReranker(config)
 	case provider.ProviderZhipu:
-		return NewZhipuReranker(config)
+		reranker, err = NewZhipuReranker(config)
 	case provider.ProviderJina:
-		return NewJinaReranker(config)
+		reranker, err = NewJinaReranker(config)
 	case provider.ProviderNvidia:
-		return NewNvidiaReranker(config)
+		reranker, err = NewNvidiaReranker(config)
 	case provider.ProviderWeKnoraCloud:
-		return NewWeKnoraCloudReranker(config)
+		reranker, err = NewWeKnoraCloudReranker(config)
 	default:
-		return NewOpenAIReranker(config)
+		reranker, err = NewOpenAIReranker(config)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if setter, ok := reranker.(customHeaderSetter); ok {
+		setter.SetCustomHeaders(config.CustomHeaders)
+	}
+	return reranker, nil
 }

@@ -41,6 +41,8 @@ type RemoteAPIChat struct {
 	provider  provider.ProviderName
 	appID     string
 	appSecret string
+	// customHeaders 为用户在模型配置中指定的自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+	customHeaders map[string]string
 
 	// requestCustomizer 允许子类自定义请求
 	// 返回自定义请求体（如果为 nil 则使用标准请求）和是否需要使用原始 HTTP 请求
@@ -86,6 +88,17 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		}
 	}
 
+	// 如果指定了 CustomHeaders，则给 SDK 使用的 HTTPClient 挂一层 RoundTripper，
+	// 在每个请求上自动注入这些 header（raw HTTP 路径会在发送前单独处理）。
+	if len(chatConfig.CustomHeaders) > 0 {
+		if httpClient, ok := config.HTTPClient.(*http.Client); ok {
+			config.HTTPClient = secutils.WrapHTTPClientWithHeaders(httpClient, chatConfig.CustomHeaders)
+		} else {
+			// SDK 默认未显式设置时 HTTPClient 为 nil，此时构造一个新的注入了 header 的 client。
+			config.HTTPClient = secutils.WrapHTTPClientWithHeaders(nil, chatConfig.CustomHeaders)
+		}
+	}
+
 	modelName := chatConfig.ModelName
 	if chatConfig.ExtraConfig != nil {
 		if override := strings.TrimSpace(chatConfig.ExtraConfig["remote_model_name"]); override != "" {
@@ -102,14 +115,15 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	}
 
 	return &RemoteAPIChat{
-		modelName: modelName,
-		client:    openai.NewClientWithConfig(config),
-		modelID:   chatConfig.ModelID,
-		baseURL:   chatConfig.BaseURL,
-		apiKey:    apiKey,
-		provider:  providerName,
-		appID:     chatConfig.AppID,
-		appSecret: chatConfig.AppSecret,
+		modelName:     modelName,
+		client:        openai.NewClientWithConfig(config),
+		modelID:       chatConfig.ModelID,
+		baseURL:       chatConfig.BaseURL,
+		apiKey:        apiKey,
+		provider:      providerName,
+		appID:         chatConfig.AppID,
+		appSecret:     chatConfig.AppSecret,
+		customHeaders: chatConfig.CustomHeaders,
 	}, nil
 }
 
@@ -368,6 +382,9 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
+	// 注入用户自定义 header（保留头会在工具内部自动跳过）
+	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+
 	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s",
 		endpoint, c.modelName)
 
@@ -537,6 +554,9 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 	httpReq.Header.Set("Accept", "text/event-stream")
+
+	// 注入用户自定义 header（保留头会在工具内部自动跳过）
+	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {

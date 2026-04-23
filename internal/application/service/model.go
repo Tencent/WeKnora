@@ -298,20 +298,7 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	// Initialize the embedder with model configuration
-	embedder, err := embedding.NewEmbedder(embedding.Config{
-		Source:               model.Source,
-		BaseURL:              model.Parameters.BaseURL,
-		APIKey:               model.Parameters.APIKey,
-		ModelID:              model.ID,
-		ModelName:            model.Name,
-		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
-		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
-		Provider:             model.Parameters.Provider,
-		ExtraConfig:          model.Parameters.ExtraConfig,
-		AppID:                appID,
-		AppSecret:            appSecret,
-	}, s.pooler, s.ollamaService)
+	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -358,20 +345,7 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	// Initialize the embedder with model configuration
-	embedder, err := embedding.NewEmbedder(embedding.Config{
-		Source:               model.Source,
-		BaseURL:              model.Parameters.BaseURL,
-		APIKey:               model.Parameters.APIKey,
-		ModelID:              model.ID,
-		ModelName:            model.Name,
-		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
-		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
-		Provider:             model.Parameters.Provider,
-		ExtraConfig:          model.Parameters.ExtraConfig,
-		AppID:                appID,
-		AppSecret:            appSecret,
-	}, s.pooler, s.ollamaService)
+	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -401,18 +375,7 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	// Initialize the reranker with model configuration
-	reranker, err := rerank.NewReranker(&rerank.RerankerConfig{
-		ModelID:     model.ID,
-		APIKey:      model.Parameters.APIKey,
-		BaseURL:     model.Parameters.BaseURL,
-		ModelName:   model.Name,
-		Source:      model.Source,
-		Provider:    model.Parameters.Provider,
-		ExtraConfig: model.Parameters.ExtraConfig,
-		AppID:       appID,
-		AppSecret:   appSecret,
-	})
+	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -455,18 +418,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	// Initialize the chat model with model configuration
-	chatModel, err := chat.NewChat(&chat.ChatConfig{
-		ModelID:     model.ID,
-		APIKey:      model.Parameters.APIKey,
-		BaseURL:     model.Parameters.BaseURL,
-		ModelName:   model.Name,
-		Source:      model.Source,
-		Provider:    model.Parameters.Provider,
-		ExtraConfig: model.Parameters.ExtraConfig,
-		AppID:       appID,
-		AppSecret:   appSecret,
-	}, s.ollamaService)
+	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -501,29 +453,9 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	logger.Infof(ctx, "Getting VLM model: %s, source: %s", model.Name, model.Source)
 
-	ifType := model.Parameters.InterfaceType
-	if ifType == "" {
-		if model.Source == types.ModelSourceLocal {
-			ifType = "ollama"
-		} else {
-			ifType = "openai"
-		}
-	}
-
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	vlmModel, err := vlm.NewVLM(&vlm.Config{
-		ModelID:       model.ID,
-		APIKey:        model.Parameters.APIKey,
-		BaseURL:       model.Parameters.BaseURL,
-		ModelName:     model.Name,
-		Source:        model.Source,
-		InterfaceType: ifType,
-		Provider:      model.Parameters.Provider,
-		Extra:         stringMapToAnyMap(model.Parameters.ExtraConfig),
-		AppID:         appID,
-		AppSecret:     appSecret,
-	}, s.ollamaService)
+	vlmModel, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), s.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -561,13 +493,7 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 
 	logger.Infof(ctx, "Getting ASR model: %s, source: %s", model.Name, model.Source)
 
-	sttModel, err := asr.NewASR(&asr.Config{
-		ModelID:   model.ID,
-		APIKey:    model.Parameters.APIKey,
-		BaseURL:   model.Parameters.BaseURL,
-		ModelName: model.Name,
-		Source:    model.Source,
-	})
+	sttModel, err := asr.NewASR(asr.ConfigFromModel(model))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -577,15 +503,4 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	}
 
 	return sttModel, nil
-}
-
-func stringMapToAnyMap(m map[string]string) map[string]any {
-	if m == nil {
-		return nil
-	}
-	result := make(map[string]any, len(m))
-	for k, v := range m {
-		result[k] = v
-	}
-	return result
 }

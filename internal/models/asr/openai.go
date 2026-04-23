@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	openai "github.com/sashabaranov/go-openai"
 )
 
@@ -33,7 +34,14 @@ func NewOpenAIASR(config *Config) (*OpenAIASR, error) {
 	if config.BaseURL != "" {
 		apiCfg.BaseURL = config.BaseURL
 	}
-	apiCfg.HTTPClient = &http.Client{Timeout: asrDefaultTimeout}
+	httpClient := &http.Client{Timeout: asrDefaultTimeout}
+
+	// 注入用户自定义 HTTP header（类似 OpenAI Python SDK 的 extra_headers）
+	if len(config.CustomHeaders) > 0 {
+		apiCfg.HTTPClient = secutils.WrapHTTPClientWithHeaders(httpClient, config.CustomHeaders)
+	} else {
+		apiCfg.HTTPClient = httpClient
+	}
 
 	return &OpenAIASR{
 		modelName: config.ModelName,

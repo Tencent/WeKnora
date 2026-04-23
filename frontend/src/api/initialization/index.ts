@@ -250,13 +250,22 @@ export function getCurrentConfigByKB(kbId: string): Promise<InitializationConfig
     });
 }
 
+// 所有"测试连接"接口共用的通用可选参数。
+// customHeaders / extraConfig / interfaceType 对应后端 ModelTestRequest 里的同名字段，
+// 会被透传给真正的模型装配流程，保证测试连接与生产调用走完全相同的路径。
+interface BaseModelTestPayload {
+    customHeaders?: Record<string, string>;
+    extraConfig?: Record<string, string>;
+    interfaceType?: string;
+}
+
 // 检查远程API模型
 export function checkRemoteModel(modelConfig: {
     modelName: string;
     baseUrl: string;
     apiKey?: string;
     provider?: string;
-}): Promise<{
+} & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
 }> {
@@ -280,7 +289,7 @@ export function testEmbeddingModel(modelConfig: {
     apiKey?: string;
     dimension?: number;
     provider?: string;
-}): Promise<{ available: boolean; message?: string; dimension?: number }> {
+} & BaseModelTestPayload): Promise<{ available: boolean; message?: string; dimension?: number }> {
     return new Promise((resolve, reject) => {
         post('/api/v1/initialization/embedding/test', modelConfig)
             .then((response: any) => {
@@ -298,7 +307,8 @@ export function checkRerankModel(modelConfig: {
     modelName: string;
     baseUrl: string;
     apiKey?: string;
-}): Promise<{
+    provider?: string;
+} & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
 }> {
@@ -319,7 +329,8 @@ export function checkASRModel(modelConfig: {
     modelName: string;
     baseUrl: string;
     apiKey?: string;
-}): Promise<{
+    provider?: string;
+} & BaseModelTestPayload): Promise<{
     available: boolean;
     message?: string;
 }> {
