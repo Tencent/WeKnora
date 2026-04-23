@@ -73,6 +73,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	slackpkg "github.com/slack-go/slack"
@@ -100,6 +101,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
 	must(container.Provide(initTracer))
+	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
@@ -108,6 +110,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
 	must(container.Invoke(registerTracerCleanup))
+	must(container.Invoke(registerLangfuseCleanup))
 
 	// Register goroutine pool cleanup handler
 	must(container.Invoke(registerPoolCleanup))
@@ -327,6 +330,15 @@ func must(err error) {
 //   - Error if initialization fails
 func initTracer() (*tracing.Tracer, error) {
 	return tracing.InitTracer()
+}
+
+// initLangfuse initializes the Langfuse ingestion client.
+// Configuration is read from LANGFUSE_* environment variables (see
+// docs/langfuse.md). Returns a disabled manager if credentials are absent —
+// never an error — so deployments that don't use Langfuse are unaffected.
+func initLangfuse() (*langfuse.Manager, error) {
+	cfg := langfuse.LoadConfigFromEnv()
+	return langfuse.Init(cfg)
 }
 
 func initRedisClient() (*redis.Client, error) {
@@ -1021,6 +1033,20 @@ func registerTracerCleanup(tracer *tracing.Tracer, cleaner interfaces.ResourceCl
 	cleaner.RegisterWithName("Tracer", func() error {
 		// Create context for cleanup with longer timeout for tracer shutdown
 		return tracer.Cleanup(context.Background())
+	})
+}
+
+// registerLangfuseCleanup ensures buffered Langfuse events are flushed on
+// shutdown. A 5-second timeout matches other external-service cleanups and
+// balances data durability against a slow remote endpoint holding up exit.
+func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceCleaner) {
+	if mgr == nil {
+		return
+	}
+	cleaner.RegisterWithName("Langfuse", func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return mgr.Shutdown(ctx)
 	})
 }
 

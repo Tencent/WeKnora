@@ -23,6 +23,10 @@ const (
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
+	// LangfuseTraceContextKey carries the active Langfuse *Trace across the
+	// request lifecycle. Defined here (not inside the langfuse package) so
+	// that logger.CloneContext can preserve it without importing langfuse.
+	LangfuseTraceContextKey ContextKey = "LangfuseTrace"
 )
 
 // String returns the string representation of the context key

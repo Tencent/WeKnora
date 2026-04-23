@@ -72,6 +72,21 @@ services:
       - OTEL_METRICS_EXPORTER=none
       - OTEL_LOGS_EXPORTER=none
       - OTEL_PROPAGATORS=tracecontext,baggage
+      # ========== Langfuse (optional observability) ==========
+      # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
+      # See docs/Langfuse集成.md for the full list of tuning knobs.
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_RELEASE=${LANGFUSE_RELEASE:-}
+      - LANGFUSE_ENVIRONMENT=${LANGFUSE_ENVIRONMENT:-}
+      - LANGFUSE_FLUSH_AT=${LANGFUSE_FLUSH_AT:-}
+      - LANGFUSE_FLUSH_INTERVAL=${LANGFUSE_FLUSH_INTERVAL:-}
+      - LANGFUSE_QUEUE_SIZE=${LANGFUSE_QUEUE_SIZE:-}
+      - LANGFUSE_REQUEST_TIMEOUT=${LANGFUSE_REQUEST_TIMEOUT:-}
+      - LANGFUSE_SAMPLE_RATE=${LANGFUSE_SAMPLE_RATE:-}
+      - LANGFUSE_DEBUG=${LANGFUSE_DEBUG:-}
       - RETRIEVE_DRIVER=${RETRIEVE_DRIVER:-}
       - ELASTICSEARCH_ADDR=${ELASTICSEARCH_ADDR:-}
       - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-}
@@ -359,6 +374,225 @@ services:
       - dex
       - full
 
+  # ---------------------------------------------------------------------------
+  # Langfuse 自建可观测栈 (opt-in via `--profile langfuse`)
+  #
+  # 为了最小化资源占用，Langfuse 会复用 WeKnora 已有的 postgres 和 redis：
+  #   - postgres：在 WeKnora-postgres 中创建独立的 "langfuse" 数据库
+  #   - redis  ：复用 WeKnora-redis 的 DB 1（WeKnora 自己用 DB 0）
+  # 需要新增的只有 Langfuse 应用自身 + ClickHouse（OLAP）+ 专用 MinIO（事件/媒体 S3）。
+  #
+  # 启用方式：
+  #   docker compose --profile langfuse up -d
+  # 启用后：
+  #   1. Langfuse UI: http://localhost:3000 （首次访问注册管理员并在 Settings → API Keys 生成 key）
+  #   2. 在 .env 里把 LANGFUSE_HOST 改成 http://langfuse-web:3000（容器间通信）
+  #      并填入刚生成的 LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+  #   3. 重启 app 容器：docker compose up -d app
+  # 相关默认密码已写成占位符，生产部署务必用 openssl rand 重新生成！
+  # ---------------------------------------------------------------------------
+
+  # 一次性初始化脚本：在已有的 WeKnora-postgres 里创建 langfuse 数据库（幂等，数据库已存在则跳过）
+  # 复用 WeKnora-postgres 的 ParadeDB 镜像，避免多拉一个 postgres 镜像
+  langfuse-db-init:
+    image: paradedb/paradedb:v0.22.2-pg17
+    container_name: WeKnora-langfuse-db-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+    # ${LANGFUSE_DB_NAME:-langfuse} / ${DB_USER} 由 compose 解析成字面量后再传给 shell；
+    # 脚本中需要 shell 自己展开的变量（无）一律用 $$ 转义。
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "[langfuse-db-init] ensuring database '${LANGFUSE_DB_NAME:-langfuse}' exists in WeKnora-postgres..."
+        # 先刷新现有库的 collation（镜像 ICU 2.36 与宿主 2.41 不匹配时必须做），否则 CREATE DATABASE 会失败
+        psql -h postgres -U ${DB_USER} -d postgres -v ON_ERROR_STOP=0 -c "ALTER DATABASE template1 REFRESH COLLATION VERSION;" >/dev/null 2>&1 || true
+        psql -h postgres -U ${DB_USER} -d postgres -v ON_ERROR_STOP=0 -c "ALTER DATABASE postgres REFRESH COLLATION VERSION;" >/dev/null 2>&1 || true
+        # 幂等创建：已存在则跳过；不存在则从 template0 克隆（template0 永远不会有 collation 漂移）
+        if psql -h postgres -U ${DB_USER} -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${LANGFUSE_DB_NAME:-langfuse}'" | grep -q 1; then
+          echo "[langfuse-db-init] database '${LANGFUSE_DB_NAME:-langfuse}' already exists, skipping."
+        else
+          psql -h postgres -U ${DB_USER} -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${LANGFUSE_DB_NAME:-langfuse}\" TEMPLATE template0;"
+          echo "[langfuse-db-init] database '${LANGFUSE_DB_NAME:-langfuse}' created."
+        fi
+        echo "[langfuse-db-init] done."
+    networks:
+      - WeKnora-network
+    restart: "no"
+    profiles:
+      - langfuse
+      - full
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: WeKnora-langfuse-clickhouse
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - WeKnora-network
+    profiles:
+      - langfuse
+      - full
+
+  langfuse-minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: WeKnora-langfuse-minio
+    restart: unless-stopped
+    entrypoint: sh
+    # 启动前创建 `langfuse` 桶，Langfuse 开箱即用
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${LANGFUSE_MINIO_USER:-langfuseminio}
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-langfuseminiosecret}
+    ports:
+      # 9100：S3 API（浏览器上传媒体时会直连此端口，必须对外暴露）
+      - "${LANGFUSE_MINIO_S3_PORT:-9100}:9000"
+      # 9101：MinIO 控制台（可选，方便排障）
+      - "${LANGFUSE_MINIO_CONSOLE_PORT:-9101}:9001"
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    networks:
+      - WeKnora-network
+    profiles:
+      - langfuse
+      - full
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: WeKnora-langfuse-worker
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      # 复用 WeKnora 已有的 postgres/redis，需要先完成 langfuse 数据库的创建
+      langfuse-db-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    # 用 wrapper entrypoint：在容器启动时把 DB_PASSWORD / REDIS_PASSWORD 做 URL 编码，
+    # 避免 DB_PASSWORD 含 '@' / '#' 等字符导致 Prisma 无法解析 DATABASE_URL (P1013)。
+    # Langfuse 镜像基于 Node.js，直接用 node 的 encodeURIComponent，不引外部依赖。
+    # 注意：compose 覆盖 entrypoint 会清空镜像默认 CMD，因此在 wrapper 末尾写死 exec 的原始命令。
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        _enc() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$$1"; }
+        DU=$$(_enc "$$_LF_DB_USER")
+        DP=$$(_enc "$$_LF_DB_PASSWORD")
+        RP=$$(_enc "$$_LF_REDIS_PASSWORD")
+        export DATABASE_URL="postgresql://$$DU:$$DP@postgres:5432/$$_LF_DB_NAME"
+        export REDIS_CONNECTION_STRING="redis://:$$RP@redis:6379/$$_LF_REDIS_DB"
+        unset _LF_DB_USER _LF_DB_PASSWORD _LF_REDIS_PASSWORD
+        exec dumb-init -- ./worker/entrypoint.sh node worker/dist/index.js
+    environment: &langfuse-env
+      # 原始凭证（未 URL 编码），由 entrypoint wrapper 读取并组装成 DATABASE_URL / REDIS_CONNECTION_STRING
+      _LF_DB_USER: ${DB_USER}
+      _LF_DB_PASSWORD: ${DB_PASSWORD}
+      _LF_DB_NAME: ${LANGFUSE_DB_NAME:-langfuse}
+      _LF_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      _LF_REDIS_DB: ${LANGFUSE_REDIS_DB:-1}
+      # SALT / ENCRYPTION_KEY 生产环境务必重新生成：
+      #   SALT: openssl rand -base64 32
+      #   ENCRYPTION_KEY: openssl rand -hex 32
+      SALT: ${LANGFUSE_SALT:-weknora-langfuse-dev-salt-change-me}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      NEXTAUTH_URL: ${LANGFUSE_NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-weknora-langfuse-dev-nextauth-secret-change-me}
+      TELEMETRY_ENABLED: ${LANGFUSE_TELEMETRY_ENABLED:-false}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-langfuseminio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-langfuseminiosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-langfuseminio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-langfuseminiosecret}
+      # 媒体上传用的外部 endpoint（浏览器直连），默认指向宿主机映射的 9100 端口
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9100}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+    networks:
+      - WeKnora-network
+    profiles:
+      - langfuse
+      - full
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: WeKnora-langfuse-web
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    ports:
+      - "${LANGFUSE_WEB_PORT:-3000}:3000"
+    # 同样走 wrapper entrypoint，末尾写死 web 的原始启动命令（见镜像 Dockerfile 的 CMD）
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        _enc() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$$1"; }
+        DU=$$(_enc "$$_LF_DB_USER")
+        DP=$$(_enc "$$_LF_DB_PASSWORD")
+        RP=$$(_enc "$$_LF_REDIS_PASSWORD")
+        export DATABASE_URL="postgresql://$$DU:$$DP@postgres:5432/$$_LF_DB_NAME"
+        export REDIS_CONNECTION_STRING="redis://:$$RP@redis:6379/$$_LF_REDIS_DB"
+        unset _LF_DB_USER _LF_DB_PASSWORD _LF_REDIS_PASSWORD
+        if [ -n "$$NEXT_PUBLIC_LANGFUSE_CLOUD_REGION" ]; then
+          exec dumb-init -- ./web/entrypoint.sh node --import dd-trace/initialize.mjs ./web/server.js --keepAliveTimeout 110000
+        else
+          exec dumb-init -- ./web/entrypoint.sh node ./web/server.js --keepAliveTimeout 110000
+        fi
+    environment:
+      <<: *langfuse-env
+      # 可选：首次启动时自动创建组织、项目和管理员（填了就不用在 UI 上手动注册）
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    networks:
+      - WeKnora-network
+    profiles:
+      - langfuse
+      - full
+
 networks:
   WeKnora-network:
     driver: bridge
@@ -373,3 +607,6 @@ volumes:
   qdrant_data:
   milvus_data:
   weaviate_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:

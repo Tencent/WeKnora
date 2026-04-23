@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -81,10 +82,16 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) Config {
 // NewEmbedder creates an embedder based on the configuration
 func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {
 	e, err := newEmbedder(config, pooler, ollamaService)
-	if err != nil || !logger.LLMDebugEnabled() {
+	if err != nil {
 		return e, err
 	}
-	return &debugEmbedder{inner: e}, nil
+	if logger.LLMDebugEnabled() {
+		e = &debugEmbedder{inner: e}
+	}
+	if langfuse.GetManager().Enabled() {
+		e = &langfuseEmbedder{inner: e}
+	}
+	return e, nil
 }
 
 func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.OllamaService) (Embedder, error) {

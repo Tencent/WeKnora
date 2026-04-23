@@ -116,10 +116,13 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *RerankerConfig {
 // NewReranker creates a reranker based on the configuration
 func NewReranker(config *RerankerConfig) (Reranker, error) {
 	r, err := newReranker(config)
-	if err != nil || !logger.LLMDebugEnabled() {
+	if err != nil {
 		return r, err
 	}
-	return &debugReranker{inner: r}, nil
+	if logger.LLMDebugEnabled() {
+		r = &debugReranker{inner: r}
+	}
+	return wrapRerankerLangfuse(r, nil)
 }
 
 // customHeaderSetter 表示支持注入自定义 HTTP header 的 reranker 实现。

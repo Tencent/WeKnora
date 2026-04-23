@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
@@ -121,6 +122,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 
 	// 添加OpenTelemetry追踪中间件
 	// r.Use(middleware.TracingMiddleware())
+
+	// Langfuse observability — only active when LANGFUSE_* env vars are set.
+	// The middleware is registered unconditionally; when disabled it's a no-op.
+	r.Use(langfuse.GinMiddleware())
 
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")

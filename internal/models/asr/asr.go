@@ -60,5 +60,6 @@ func ConfigFromModel(m *types.Model) *Config {
 // NewASR creates an ASR instance based on the provided configuration.
 // All ASR vendors use the OpenAI-compatible /v1/audio/transcriptions API.
 func NewASR(config *Config) (ASR, error) {
-	return NewOpenAIASR(config)
+	a, err := NewOpenAIASR(config)
+	return wrapASRLangfuse(a, err)
 }

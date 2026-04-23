@@ -81,10 +81,13 @@ func stringMapToAnyMap(in map[string]string) map[string]any {
 // NewVLM creates a VLM instance based on the provided configuration.
 func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 	v, err := newVLM(config, ollamaService)
-	if err != nil || !logger.LLMDebugEnabled() {
+	if err != nil {
 		return v, err
 	}
-	return &debugVLM{inner: v}, nil
+	if logger.LLMDebugEnabled() {
+		v = &debugVLM{inner: v}
+	}
+	return wrapVLMLangfuse(v, nil)
 }
 
 func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
