@@ -26,6 +26,9 @@ type PipelineRequest struct {
 
 	// Chat model parameters
 	ChatModelID      string           `json:"chat_model_id"`
+	// QueryUnderstandModelID is the model used for query rewriting / intent classification.
+	// Falls back to ChatModelID when empty.
+	QueryUnderstandModelID string           `json:"query_understand_model_id,omitempty"`
 	SummaryConfig    SummaryConfig    `json:"summary_config"`
 	FallbackStrategy FallbackStrategy `json:"fallback_strategy"`
 	FallbackResponse string           `json:"fallback_response"`

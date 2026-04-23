@@ -9,24 +9,33 @@ server:
 conversation:
   max_rounds: 5
   keyword_threshold: 0.3
-  embedding_top_k: 30
+  embedding_top_k: 10
   vector_threshold: 0.2
   rerank_threshold: 0.3
-  rerank_top_k: 30
+  rerank_top_k: 5
   fallback_strategy: "model"
   fallback_response: "Sorry, I am unable to answer this question."
   fallback_prompt_id: "default_fallback_prompt"  # from prompt_templates/fallback.yaml (mode: "model")
   enable_rewrite: true
   enable_query_expansion: true
   enable_rerank: true
+  # query_understand_model_id: ""  # Optional: dedicated model for query rewriting & intent classification.
+  #                                 # When unset, falls back to the knowledge base's chat model.
+  #
+  query_understand_model:         # Optional: inline model config (takes priority over query_understand_model_id).
+    base_url: "http://172.20.72.25:60001/v1"
+    api_key: "EMPTY"
+    model_name: "Qwen3-1.7B"
+    provider: ""                  # Optional, auto-detected from base_url when empty
   rewrite_prompt_id: "default_rewrite"  # from prompt_templates/rewrite.yaml (content + user fields)
   generate_summary_prompt_id: "default_summary"  # from prompt_templates/generate_summary.yaml
   generate_session_title_prompt_id: "default_session_title"  # from prompt_templates/generate_session_title.yaml
   summary:
-    max_input_chars: 16384
+    max_input_chars: 4096
     repeat_penalty: 1.0
     temperature: 0.3
-    max_completion_tokens: 2048
+    max_completion_tokens: 512
+    thinking: true
     no_match_prefix: |-
       <think>
       </think>

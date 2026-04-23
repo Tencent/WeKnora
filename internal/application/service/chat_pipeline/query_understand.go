@@ -20,9 +20,13 @@ import (
 // It uses conversation history and an LLM to optimise the user's original query
 // and determine the downstream pipeline behaviour.
 type PluginQueryUnderstand struct {
-	modelService   interfaces.ModelService
-	messageService interfaces.MessageService
-	config         *config.Config
+	modelService            interfaces.ModelService
+	messageService          interfaces.MessageService
+	config                  *config.Config
+	// queryUnderstandModel is a pre-built chat instance for query understanding,
+	// constructed from config.yaml inline model config. When non-nil it takes
+	// priority over QueryUnderstandModelID and the KB chat model.
+	queryUnderstandModel    chat.Chat
 }
 
 var rewriteImageSepPattern = regexp.MustCompile(`(?s)^(.*?)\s*\n?---\n(.*)$`)
@@ -44,6 +48,42 @@ func NewPluginQueryUnderstand(eventManager *EventManager,
 		messageService: messageService,
 		config:         config,
 	}
+
+	// If an inline model is configured in config.yaml, build it once at startup.
+	if cfg := config.Conversation.QueryUnderstandModel; cfg != nil && cfg.BaseURL != "" && cfg.ModelName != "" {
+		pipelineInfo(context.Background(), "QueryUnderstand", "building_inline_model", map[string]interface{}{
+			"base_url":   cfg.BaseURL,
+			"model_name": cfg.ModelName,
+			"provider":   cfg.Provider,
+		})
+		m, err := chat.NewRemoteChat(&chat.ChatConfig{
+			Source:    types.ModelSourceRemote,
+			BaseURL:   cfg.BaseURL,
+			APIKey:    cfg.APIKey,
+			ModelName: cfg.ModelName,
+			ModelID:   "query_understand_inline",
+			Provider:  cfg.Provider,
+		})
+		if err == nil {
+			res.queryUnderstandModel = m
+			pipelineInfo(context.Background(), "QueryUnderstand", "inline_model_built", map[string]interface{}{
+				"model_name": m.GetModelName(),
+				"base_url":   cfg.BaseURL,
+			})
+		} else {
+			pipelineError(context.Background(), "QueryUnderstand", "inline_model_build_failed", map[string]interface{}{
+				"error":      err.Error(),
+				"base_url":   cfg.BaseURL,
+				"model_name": cfg.ModelName,
+				"hint":       "if base_url uses an internal hostname (e.g. host.docker.internal), add it to SSRF_WHITELIST env var",
+			})
+		}
+	} else {
+		pipelineInfo(context.Background(), "QueryUnderstand", "no_inline_model_config", map[string]interface{}{
+			"config": config.Conversation.QueryUnderstandModel,
+		})
+	}
+
 	eventManager.Register(res)
 	return res
 }
@@ -266,6 +306,15 @@ func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *typ
 // selectModel picks the model for query understanding. When images are present
 // it prefers a vision-capable model. Returns (model, useImages).
 func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *types.ChatManage, hasImages bool) (chat.Chat, bool) {
+	pipelineInfo(ctx, "QueryUnderstand", "select_model_start", map[string]interface{}{
+		"session_id":                 chatManage.SessionID,
+		"has_inline_model":           p.queryUnderstandModel != nil,
+		"inline_model_name":          func() string { if p.queryUnderstandModel != nil { return p.queryUnderstandModel.GetModelName() }; return "" }(),
+		"query_understand_model_id":  chatManage.QueryUnderstandModelID,
+		"chat_model_id":              chatManage.ChatModelID,
+		"has_images":                 hasImages,
+	})
+
 	if hasImages {
 		if chatManage.ChatModelSupportsVision {
 			m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
@@ -293,15 +342,45 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 		})
 	}
 
-	m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	// Priority 1: inline model built from config.yaml (base_url + api_key + model_name)
+	if p.queryUnderstandModel != nil {
+		pipelineInfo(ctx, "QueryUnderstand", "using_inline_model", map[string]interface{}{
+			"session_id": chatManage.SessionID,
+			"model_name": p.queryUnderstandModel.GetModelName(),
+		})
+		return p.queryUnderstandModel, false
+	}
+
+	// Priority 2: dedicated model ID configured in config.yaml / agent override
+	modelID := chatManage.QueryUnderstandModelID
+	if modelID == "" {
+		pipelineInfo(ctx, "QueryUnderstand", "fallback_to_chat_model", map[string]interface{}{
+			"session_id":   chatManage.SessionID,
+			"chat_model_id": chatManage.ChatModelID,
+			"reason":       "query_understand_model_id not set and inline model unavailable",
+		})
+		modelID = chatManage.ChatModelID
+	} else {
+		pipelineInfo(ctx, "QueryUnderstand", "using_dedicated_model", map[string]interface{}{
+			"session_id":                chatManage.SessionID,
+			"query_understand_model_id": modelID,
+		})
+	}
+
+	m, err := p.modelService.GetChatModel(ctx, modelID)
 	if err != nil {
 		pipelineError(ctx, "QueryUnderstand", "get_model", map[string]interface{}{
-			"session_id":    chatManage.SessionID,
-			"chat_model_id": chatManage.ChatModelID,
-			"error":         err.Error(),
+			"session_id": chatManage.SessionID,
+			"model_id":   modelID,
+			"error":      err.Error(),
 		})
 		return nil, false
 	}
+	pipelineInfo(ctx, "QueryUnderstand", "model_resolved", map[string]interface{}{
+		"session_id": chatManage.SessionID,
+		"model_id":   modelID,
+		"model_name": m.GetModelName(),
+	})
 	return m, false
 }
 

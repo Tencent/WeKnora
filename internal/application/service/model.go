@@ -414,7 +414,8 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		return nil, ErrModelNotFound
 	}
 
-	logger.Infof(ctx, "Getting chat model: %s, source: %s", model.Name, model.Source)
+	logger.Infof(ctx, "Getting chat model: %s, source: %s, provider: %s, base_url: %s",
+		model.Name, model.Source, model.Parameters.Provider, model.Parameters.BaseURL)
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 

@@ -132,8 +132,8 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 		logger.Infof(ctx, "Using custom agent's max_completion_tokens: %d", customAgent.Config.MaxCompletionTokens)
 	}
 	// Agent-level thinking setting takes full control (no global fallback)
-	cm.SummaryConfig.Thinking = customAgent.Config.Thinking
 	if customAgent.Config.Thinking != nil {
+		cm.SummaryConfig.Thinking = customAgent.Config.Thinking
 		logger.Infof(ctx, "Using custom agent's thinking: %v", *customAgent.Config.Thinking)
 	}
 

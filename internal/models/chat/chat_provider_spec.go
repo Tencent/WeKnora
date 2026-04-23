@@ -2,7 +2,9 @@ package chat
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"runtime"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -223,6 +225,27 @@ func genericRequestCustomizer(
 	if opts != nil && opts.Thinking != nil {
 		thinking = *opts.Thinking
 	}
+	logger.Infof(context.Background(), "[generic] model=%s thinking_opt=%v enable_thinking=%v caller=%s",
+		req.Model,
+		func() string {
+			if opts == nil || opts.Thinking == nil {
+				return "nil"
+			}
+			return fmt.Sprintf("%v", *opts.Thinking)
+		}(),
+		thinking,
+		func() string {
+			_, file, line, ok := runtime.Caller(2)
+			if !ok {
+				return "unknown"
+			}
+			parts := strings.Split(file, "/")
+			if len(parts) > 2 {
+				return fmt.Sprintf("%s:%d", strings.Join(parts[len(parts)-2:], "/"), line)
+			}
+			return fmt.Sprintf("%s:%d", file, line)
+		}(),
+	)
 	req.ChatTemplateKwargs = map[string]interface{}{
 		"enable_thinking": thinking,
 	}

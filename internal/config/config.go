@@ -74,6 +74,15 @@ type DocReaderConfig struct {
 	Transport string `yaml:"transport" json:"transport"`
 }
 
+// InlineModelConfig holds the connection details for a model configured directly
+// in config.yaml, bypassing the database model registry.
+type InlineModelConfig struct {
+	BaseURL   string `yaml:"base_url"   json:"base_url"`
+	APIKey    string `yaml:"api_key"    json:"api_key"`
+	ModelName string `yaml:"model_name" json:"model_name"`
+	Provider  string `yaml:"provider"   json:"provider"` // optional, auto-detected from base_url when empty
+}
+
 type VectorDatabaseConfig struct {
 	Driver string `yaml:"driver" json:"driver"`
 }
@@ -91,7 +100,14 @@ type ConversationConfig struct {
 	EnableRewrite        bool           `yaml:"enable_rewrite"                   json:"enable_rewrite"`
 	EnableQueryExpansion bool           `yaml:"enable_query_expansion"           json:"enable_query_expansion"`
 	EnableRerank         bool           `yaml:"enable_rerank"                    json:"enable_rerank"`
-	Summary              *SummaryConfig `yaml:"summary"                          json:"summary"`
+	// QueryUnderstandModel configures a dedicated model for query rewriting and intent
+	// classification. When set, it takes priority over QueryUnderstandModelID and
+	// the knowledge base's chat model. Leave empty to fall back to the chat model.
+	QueryUnderstandModel   *InlineModelConfig `yaml:"query_understand_model"           json:"query_understand_model,omitempty"`
+	// QueryUnderstandModelID is the model used for query rewriting and intent classification.
+	// When empty, falls back to the knowledge base's chat model (ChatModelID).
+	QueryUnderstandModelID string         `yaml:"query_understand_model_id"        json:"query_understand_model_id"`
+	Summary                *SummaryConfig `yaml:"summary"                          json:"summary"`
 
 	// Prompt template ID fields — resolved to text by backfillConversationDefaults
 	FallbackPromptID             string `yaml:"fallback_prompt_id"                json:"fallback_prompt_id"`
@@ -382,8 +398,37 @@ func LoadConfig() (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg, func(dc *mapstructure.DecoderConfig) {
 		dc.TagName = "yaml"
+		dc.WeaklyTypedInput = true
 	}); err != nil {
 		return nil, fmt.Errorf("unable to decode config into struct: %w", err)
+	}
+
+	// viper/mapstructure cannot handle *bool fields correctly; re-parse them
+	// directly from the raw YAML to ensure pointer values are set.
+	var rawCfg struct {
+		Conversation *struct {
+			Summary *struct {
+				Thinking *bool `yaml:"thinking"`
+			} `yaml:"summary"`
+		} `yaml:"conversation"`
+	}
+	if err := yaml.Unmarshal([]byte(result), &rawCfg); err == nil {
+		if rawCfg.Conversation != nil && rawCfg.Conversation.Summary != nil {
+			if rawCfg.Conversation.Summary.Thinking != nil && cfg.Conversation != nil && cfg.Conversation.Summary != nil {
+				cfg.Conversation.Summary.Thinking = rawCfg.Conversation.Summary.Thinking
+				fmt.Printf("DEBUG: summary.thinking patched from raw YAML: %v\n", *rawCfg.Conversation.Summary.Thinking)
+			} else {
+				fmt.Printf("DEBUG: summary.thinking raw=%v cfg_conv=%v cfg_summary=%v\n",
+					rawCfg.Conversation.Summary.Thinking,
+					cfg.Conversation != nil,
+					cfg.Conversation != nil && cfg.Conversation.Summary != nil,
+				)
+			}
+		} else {
+			fmt.Printf("DEBUG: raw yaml conversation or summary is nil\n")
+		}
+	} else {
+		fmt.Printf("DEBUG: raw yaml unmarshal error: %v\n", err)
 	}
 	fmt.Printf("Using configuration file: %s\n", viper.ConfigFileUsed())
 
