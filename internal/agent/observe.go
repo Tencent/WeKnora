@@ -16,6 +16,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// finalAnswerParseFallback is the user-visible message surfaced when the LLM
+// calls final_answer with arguments we cannot recover into an answer string
+// (even after RepairJSON + regex fallback). Terminating the loop with this
+// message prevents the agent from re-entering and emitting duplicate answers
+// on every subsequent round — the behavior reported in issue #1008.
+const finalAnswerParseFallback = "Sorry, the model's final answer could not be parsed due to malformed output. Please try again or rephrase your question."
+
 // manageContextWindow consolidates or compresses messages if approaching the token limit.
 // currentTokens is the caller's best estimate of the current context size (using
 // API-reported Usage when available, falling back to BPE estimation).
@@ -156,42 +163,87 @@ func (e *AgentEngine) analyzeResponse(
 		}
 	}
 
-	// Case 2: final_answer tool call present
+	// Case 2: final_answer tool call present.
+	//
+	// final_answer is always a terminal signal: regardless of whether we can
+	// parse its arguments, we must end the ReAct loop here. Otherwise the LLM
+	// will see the tool result in the next round, re-invoke final_answer with
+	// near-identical content, and surface duplicate answers to the user (see
+	// issue #1008). Parse with three levels of tolerance:
+	//
+	//   1. strict json.Unmarshal
+	//   2. RepairJSON + Unmarshal
+	//   3. regex best-effort extraction of the "answer" field
+	//
+	// If all three fail, terminate with a user-visible fallback message.
 	if len(response.ToolCalls) > 0 {
 		for _, tc := range response.ToolCalls {
-			if tc.Function.Name == agenttools.ToolFinalAnswer {
-				var faArgs struct {
-					Answer string `json:"answer"`
-				}
-				if err := json.Unmarshal([]byte(tc.Function.Arguments), &faArgs); err != nil {
-					logger.Warnf(ctx, "[Agent][Round-%d] Failed to parse final_answer args: %v",
-						iteration+1, err)
-				} else {
-					logger.Infof(ctx, "[Agent][Round-%d] final_answer tool: answer=%d chars, duration=%dms",
-						iteration+1, len(faArgs.Answer), time.Since(roundStart).Milliseconds())
+			if tc.Function.Name != agenttools.ToolFinalAnswer {
+				continue
+			}
 
-					e.eventBus.Emit(ctx, event.Event{
-						ID:        generateEventID("answer-done"),
-						Type:      event.EventAgentFinalAnswer,
-						SessionID: sessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: "",
-							Done:    true,
-						},
-					})
-					common.PipelineInfo(ctx, "Agent", "final_answer_tool", map[string]interface{}{
-						"iteration":  iteration,
-						"round":      iteration + 1,
-						"answer_len": len(faArgs.Answer),
-					})
+			rawArgs := tc.Function.Arguments
+			answer, ok := agenttools.ParseFinalAnswerArgs(rawArgs)
+			recovered := false
+			if !ok {
+				// Could not recover any answer text — fall back to a generic
+				// message so the user doesn't see a blank response.
+				logger.Warnf(ctx, "[Agent][Round-%d] Failed to parse final_answer args (args=%q) — "+
+					"terminating loop with fallback message",
+					iteration+1, rawArgs)
+				answer = finalAnswerParseFallback
+			} else {
+				recovered = true
+				logger.Infof(ctx, "[Agent][Round-%d] final_answer tool: answer=%d chars, duration=%dms",
+					iteration+1, len(answer), time.Since(roundStart).Milliseconds())
+			}
 
-					return responseVerdict{
-						isDone:      true,
-						finalAnswer: faArgs.Answer,
-						step:        step,
-					}
-				}
-				break
+			// Always emit the final answer content and Done=true marker to the
+			// event bus. When strict parsing succeeded earlier in this turn,
+			// streamThinkingToEventBus already streamed the answer chunks, so
+			// we only need the Done marker in that common case. When we fell
+			// back to the generic message, however, the UI has not yet seen
+			// any answer content — emit both Content and Done to make the
+			// fallback visible to the user.
+			answerID := generateEventID("answer-done")
+			if !recovered {
+				e.eventBus.Emit(ctx, event.Event{
+					ID:        answerID,
+					Type:      event.EventAgentFinalAnswer,
+					SessionID: sessionID,
+					Data: event.AgentFinalAnswerData{
+						Content: answer,
+						Done:    false,
+					},
+				})
+			}
+			e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: "",
+					Done:    true,
+				},
+			})
+
+			pipelineFields := map[string]interface{}{
+				"iteration":  iteration,
+				"round":      iteration + 1,
+				"answer_len": len(answer),
+				"recovered":  recovered,
+			}
+			if recovered {
+				common.PipelineInfo(ctx, "Agent", "final_answer_tool", pipelineFields)
+			} else {
+				pipelineFields["raw_args"] = rawArgs
+				common.PipelineWarn(ctx, "Agent", "final_answer_tool_parse_failed", pipelineFields)
+			}
+
+			return responseVerdict{
+				isDone:      true,
+				finalAnswer: answer,
+				step:        step,
 			}
 		}
 	}
