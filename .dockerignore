@@ -69,7 +69,5 @@ configure-ollama.sh
 fix-docker.sh
 /scripts/scale_dev_jobs.sh
 
-# 文档(不影响构建)
-docs/
-*.md
-!README.md
+# 注意:不要排除 docs/ —— 里面的 docs.go / swagger.json 是 Go 代码依赖的 swagger 包
+# 注意:不要用 *.md 通配排除 —— skills/preloaded/**/SKILL.md 会被打进镜像给 agent 用
