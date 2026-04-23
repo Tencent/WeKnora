@@ -2869,7 +2869,11 @@ export default {
       setDefaultFailed: "设置默认模型失败",
       builtinCannotEdit: "内置模型不能编辑",
       builtinCannotDelete: "内置模型不能删除",
+      builtinCannotCopy: "内置模型不能复制",
+      copied: "模型已复制",
+      copyFailed: "复制模型失败",
     },
+    copySuffix: " 副本",
     builtinModels: {
       title: "内置模型",
       description: "内置模型对所有租户可见，敏感信息会被隐藏，且不可编辑或删除。",

@@ -2871,7 +2871,11 @@ export default {
       setDefaultFailed: 'Failed to set default model',
       builtinCannotEdit: 'Built-in models cannot be edited',
       builtinCannotDelete: 'Built-in models cannot be deleted',
+      builtinCannotCopy: 'Built-in models cannot be copied',
+      copied: 'Model copied',
+      copyFailed: 'Failed to copy model',
     },
+    copySuffix: ' Copy',
     builtinModels: {
       title: 'Built-in Models',
       description: 'Built-in models are visible to all tenants. Sensitive information is hidden, and they cannot be edited or deleted.',

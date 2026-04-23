@@ -2866,7 +2866,11 @@ export default {
       setDefaultFailed: "기본 모델 설정 실패",
       builtinCannotEdit: "기본 제공 모델은 편집할 수 없습니다",
       builtinCannotDelete: "기본 제공 모델은 삭제할 수 없습니다",
+      builtinCannotCopy: "기본 제공 모델은 복사할 수 없습니다",
+      copied: "모델이 복사되었습니다",
+      copyFailed: "모델 복사에 실패했습니다",
     },
+    copySuffix: " 사본",
     builtinModels: {
       title: "기본 제공 모델",
       description: "기본 제공 모델은 모든 테넌트에게 표시됩니다. 민감한 정보는 숨겨지며, 편집하거나 삭제할 수 없습니다.",

@@ -520,6 +520,12 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr',
     value: `edit-${type}-${model.id}`
   })
 
+  // 复制选项
+  options.push({
+    content: t('common.copy'),
+    value: `copy-${type}-${model.id}`
+  })
+
   // 删除选项
   options.push({
     content: t('common.delete'),
@@ -536,11 +542,55 @@ const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 
   
   if (value.indexOf('edit-') === 0) {
     editModel(type, model)
+  } else if (value.indexOf('copy-') === 0) {
+    copyModel(type, model.id)
   } else if (value.indexOf('delete-') === 0) {
     // 使用确认对话框进行确认
     if (confirm(t('modelSettings.confirmDelete'))) {
       deleteModel(type, model.id)
     }
+  }
+}
+
+// 生成不重复的复制名称：原名 + 复制后缀（若已存在则追加序号）
+const generateCopyName = (originalName: string): string => {
+  const suffix = t('modelSettings.copySuffix')
+  const existingNames = new Set(allModels.value.map(m => m.name))
+  let candidate = `${originalName}${suffix}`
+  let counter = 2
+  while (existingNames.has(candidate)) {
+    candidate = `${originalName}${suffix} ${counter}`
+    counter += 1
+  }
+  return candidate
+}
+
+// 复制模型
+const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
+  const source = allModels.value.find(m => m.id === modelId)
+  if (!source) {
+    return
+  }
+  if (source.is_builtin) {
+    MessagePlugin.warning(t('modelSettings.toasts.builtinCannotCopy'))
+    return
+  }
+
+  try {
+    const newModel: ModelConfig = {
+      name: generateCopyName(source.name),
+      type: source.type,
+      source: source.source,
+      description: source.description || '',
+      parameters: JSON.parse(JSON.stringify(source.parameters || {}))
+    }
+
+    await createModel(newModel)
+    MessagePlugin.success(t('modelSettings.toasts.copied'))
+    await loadModels()
+  } catch (error: any) {
+    console.error('复制模型失败:', error)
+    MessagePlugin.error(error.message || t('modelSettings.toasts.copyFailed'))
   }
 }
 
