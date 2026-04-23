@@ -433,8 +433,8 @@
           <div class="setting-control slider-with-value">
             <t-slider
               v-model="localRerankThreshold"
-              :min="-10"
-              :max="10"
+              :min="0"
+              :max="1"
               :step="0.01"
               style="width: 240px;"
               @change="handleRerankThresholdChange"
@@ -720,9 +720,13 @@ const localFallbackStrategy = ref<'fixed' | 'model'>('fixed')
 const localFallbackResponse = ref('')
 const localFallbackPrompt = ref('')
 const localRewritePromptSystem = ref('')
-const localRewritePromptUser = ref('')
 const localSummaryModelId = ref('')
 const localConversationRerankModelId = ref('')
+
+// Convert legacy logit threshold to probability range [0, 1] via sigmoid.
+const normalizeThreshold = (v: number): number => {
+  return 1 / (1 + Math.exp(-v))
+}
 
 const syncConversationLocals = () => {
   const cfg = conversationConfig.value
@@ -740,7 +744,7 @@ const syncConversationLocals = () => {
   localKeywordThreshold.value = cfg.keyword_threshold ?? 0.3
   localVectorThreshold.value = cfg.vector_threshold ?? 0.5
   localRerankTopK.value = cfg.rerank_top_k ?? 5
-  localRerankThreshold.value = cfg.rerank_threshold ?? 0.5
+  localRerankThreshold.value = normalizeThreshold(cfg.rerank_threshold ?? 0.5)
   localEnableRewrite.value = cfg.enable_rewrite ?? true
   localEnableQueryExpansion.value = cfg.enable_query_expansion ?? true
   localFallbackStrategy.value = (cfg.fallback_strategy as 'fixed' | 'model') || 'fixed'

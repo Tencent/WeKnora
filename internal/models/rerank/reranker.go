@@ -4,10 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// ScoreFormat indicates the semantic type of RelevanceScore returned by a reranker.
+// This is used to decide whether normalization (sigmoid) is needed.
+type ScoreFormat string
+
+const (
+	// ScoreFormatProbability means the model already returns scores in [0, 1].
+	// No normalization is applied.
+	ScoreFormatProbability ScoreFormat = "probability"
+	// ScoreFormatLogit means the model returns raw logits (-inf, +inf).
+	// Scores are always converted via sigmoid.
+	ScoreFormatLogit ScoreFormat = "logit"
+	// ScoreFormatAuto uses runtime range detection:
+	// values already in [0, 1] are passed through; values outside are sigmoid-converted.
+	// This is a fallback for unknown/generic deployments.
+	ScoreFormatAuto ScoreFormat = "auto"
 )
 
 // Reranker defines the interface for document reranking
@@ -87,10 +105,40 @@ type RerankerConfig struct {
 	Provider    string // Provider identifier: openai, aliyun, zhipu, siliconflow, jina, generic
 	ExtraConfig map[string]string
 	AppID       string
-	AppSecret   string // 加密值，工厂函数调用方传入，使用前已解密
+	AppSecret   string      // 加密值，工厂函数调用方传入，使用前已解密
+	Format      ScoreFormat // Score format: probability, logit, auto
 }
 
-// NewReranker creates a reranker based on the configuration
+// Sigmoid converts a logit to a probability in (0, 1).
+func Sigmoid(score float64) float64 {
+	return 1.0 / (1.0 + math.Exp(-score))
+}
+
+// AutoNormalizeScore uses runtime range detection:
+// values already in [0, 1] are passed through; values outside are sigmoid-converted.
+// NOTE: This can misclassify logits that happen to fall inside [0, 1].
+// Prefer explicit ScoreFormat configuration when the model type is known.
+func AutoNormalizeScore(score float64) float64 {
+	if score >= 0 && score <= 1 {
+		return score
+	}
+	return Sigmoid(score)
+}
+
+// NormalizeByFormat normalizes a score according to the specified ScoreFormat.
+func NormalizeByFormat(score float64, format ScoreFormat) float64 {
+	switch format {
+	case ScoreFormatLogit:
+		return Sigmoid(score)
+	case ScoreFormatProbability:
+		return score
+	default: // ScoreFormatAuto and any unknown value
+		return AutoNormalizeScore(score)
+	}
+}
+
+// NewReranker creates a reranker based on the configuration.
+// It also sets a default ScoreFormat per provider when config.Format is empty.
 func NewReranker(config *RerankerConfig) (Reranker, error) {
 	r, err := newReranker(config)
 	if err != nil || !logger.LLMDebugEnabled() {
@@ -104,6 +152,18 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {
 		providerName = provider.DetectProvider(config.BaseURL)
+	}
+
+	// Set default ScoreFormat per provider when not explicitly configured
+	if config.Format == "" {
+		switch providerName {
+		case provider.ProviderNvidia:
+			config.Format = ScoreFormatLogit // Nvidia reranking API returns raw logits
+		case provider.ProviderAliyun, provider.ProviderZhipu, provider.ProviderJina:
+			config.Format = ScoreFormatProbability // Known to return probabilities in [0, 1]
+		default:
+			config.Format = ScoreFormatAuto // Generic / OpenAI-compatible: unknown, use auto-detect
+		}
 	}
 
 	switch providerName {

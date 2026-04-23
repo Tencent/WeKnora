@@ -1202,7 +1202,7 @@
                       </div>
                       <div class="setting-control">
                         <div class="slider-wrapper">
-                          <t-slider v-model="formData.config.rerank_threshold" :min="-10" :max="10" :step="0.01" />
+                          <t-slider v-model="formData.config.rerank_threshold" :min="0" :max="1" :step="0.01" />
                           <span class="slider-value">{{ formData.config.rerank_threshold?.toFixed(1) }}</span>
                         </div>
                       </div>
@@ -2602,7 +2602,8 @@ const loadDependencies = async () => {
       defaultRerankTopK.value = conversationConfig.data.rerank_top_k;
     }
     if (conversationConfig.data?.rerank_threshold !== undefined) {
-      defaultRerankThreshold.value = conversationConfig.data.rerank_threshold;
+      const v = conversationConfig.data.rerank_threshold;
+      defaultRerankThreshold.value =  1 / (1 + Math.exp(-v));
     }
     if (conversationConfig.data?.max_completion_tokens) {
       defaultMaxCompletionTokens.value = conversationConfig.data.max_completion_tokens;

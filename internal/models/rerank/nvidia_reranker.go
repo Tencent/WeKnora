@@ -118,10 +118,12 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 	}
 	ret := make([]RankResult, len(response.Results))
 	for i, result := range response.Results {
+		// Nvidia reranking API returns raw logits, not probabilities.
+		// Always apply sigmoid regardless of the numeric range.
 		ret[i] = RankResult{
 			Index:          result.Index,
 			Document:       DocumentInfo{Text: documents[result.Index]},
-			RelevanceScore: result.RelevanceScore,
+			RelevanceScore: Sigmoid(result.RelevanceScore),
 		}
 	}
 	return ret, nil

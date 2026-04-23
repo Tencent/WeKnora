@@ -401,8 +401,7 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
-	// Initialize the reranker with model configuration
-	reranker, err := rerank.NewReranker(&rerank.RerankerConfig{
+	cfg := &rerank.RerankerConfig{
 		ModelID:     model.ID,
 		APIKey:      model.Parameters.APIKey,
 		BaseURL:     model.Parameters.BaseURL,
@@ -412,7 +411,15 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 		ExtraConfig: model.Parameters.ExtraConfig,
 		AppID:       appID,
 		AppSecret:   appSecret,
-	})
+	}
+	if model.Parameters.ExtraConfig != nil {
+		if format, ok := model.Parameters.ExtraConfig["rerank_score_format"]; ok && format != "" {
+			cfg.Format = rerank.ScoreFormat(format)
+		}
+	}
+	// Initialize the reranker with model configuration
+	reranker, err := rerank.NewReranker(cfg)
+
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
