@@ -68,7 +68,10 @@ func (c *Client) CreatePost(ctx context.Context, channelID, rootID, message stri
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read mattermost create post response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if resp.StatusCode == http.StatusForbidden {
 			return "", fmt.Errorf("mattermost create post: 403 forbidden — add the bot user to this Mattermost channel (Channel menu → Members → Add); body=%s", truncateForErr(respBody))
@@ -104,7 +107,10 @@ func (c *Client) GetPost(ctx context.Context, postID string) (rootID string, err
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read mattermost get post response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("mattermost get post: status=%d body=%s", resp.StatusCode, truncateForErr(respBody))
 	}
@@ -139,7 +145,10 @@ func (c *Client) PatchPostMessage(ctx context.Context, postID, message string) e
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read mattermost patch post response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("mattermost patch post: status=%d body=%s", resp.StatusCode, truncateForErr(respBody))
 	}
@@ -169,7 +178,10 @@ func (c *Client) GetFileInfo(ctx context.Context, fileID string) (*FileInfo, err
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read mattermost file info response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("mattermost file info: status=%d body=%s", resp.StatusCode, truncateForErr(respBody))
 	}
@@ -196,8 +208,11 @@ func (c *Client) GetFileReader(ctx context.Context, fileID string) (io.ReadClose
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read mattermost get file error response (status=%d): %w", resp.StatusCode, readErr)
+		}
 		return nil, fmt.Errorf("mattermost get file: status=%d body=%s", resp.StatusCode, truncateForErr(body))
 	}
 	return resp.Body, nil
