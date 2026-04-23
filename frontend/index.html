@@ -57,6 +57,12 @@
 })();
 </script>
 <script src="/config.js"></script>
+<!--
+  离线部署兼容：提前本地加载 tdesign-icons SVG sprite，避免 tdesign-vue-next 的
+  <t-icon> 运行时向 https://tdesign.gtimg.com 发起请求（见 issue #867 / #897）。
+  升级 tdesign-icons-vue-next 时需同步更新 public/tdesign-icons/<version>/fonts/index.js。
+-->
+<script src="/tdesign-icons/0.4.1/fonts/index.js"></script>
 <div id="app"></div>
 <script>
 (function(){
