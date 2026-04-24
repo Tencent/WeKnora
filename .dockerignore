@@ -63,9 +63,9 @@ test/data/mswag.txt
 
 # 大的归档/压缩包
 packages/protoc-*.zip
-!packages/protoc-3.19.4-linux-x86_64.zip
-!packages/protoc-3.19.4-linux-aarch_64.zip
-!packages/protoc-3.19.4-linux-arm.zip
+!packages/protoc-*-linux-x86_64.zip
+!packages/protoc-*-linux-aarch_64.zip
+!packages/protoc-*-linux-arm.zip
 
 # 本地测试脚本
 configure-ollama.sh
