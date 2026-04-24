@@ -27,7 +27,7 @@ builtin_agents:
       system_prompt_id: "default_kb"
       context_template_id: "default_context"
       temperature: 0.7
-      max_completion_tokens: 2048
+      max_completion_tokens: 16384
       web_search_enabled: true
       web_search_max_results: 5
       multi_turn_enabled: true
@@ -70,7 +70,7 @@ builtin_agents:
       agent_type: "rag-qa"
       system_prompt: ""
       temperature: 0.7
-      max_completion_tokens: 2048
+      max_completion_tokens: 16384
       max_iterations: 50
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
