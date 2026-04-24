@@ -166,8 +166,26 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	}
 
 	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
-	disabledOwnIDs, _ := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID.(uint64))
+	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
+	if !exists {
+		logger.Error(ctx, "Tenant ID not found in context")
+		c.Error(errors.NewUnauthorizedError("Missing tenant context"))
+		return
+	}
+	tenantID, ok := tenantIDVal.(uint64)
+	if !ok {
+		logger.Errorf(ctx, "Tenant ID has unexpected type %T in context", tenantIDVal)
+		c.Error(errors.NewInternalServerError("Invalid tenant context type"))
+		return
+	}
+	disabledOwnIDs, err := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		c.Error(errors.NewInternalServerError("Failed to list disabled agent IDs: " + err.Error()))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":                true,
