@@ -16,9 +16,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// langfuseQueryPreview caps the query length we ship as the agent.execute
+// span input — long quoted-context queries can be many KB of prose.
+const langfuseQueryPreview = 2000
 
 // AgentEngine is the core engine for running ReAct agents
 type AgentEngine struct {
@@ -170,6 +175,41 @@ func (e *AgentEngine) Execute(
 		"context_msgs": len(llmContext),
 	})
 
+	// Open a top-level Langfuse span so the agent run — including every
+	// round's LLM call and every tool execution — groups under a single
+	// node in the Langfuse UI instead of being flat children of the HTTP
+	// trace. No-op when Langfuse is disabled.
+	imgCount := 0
+	if len(imageURLs) > 0 {
+		imgCount = len(imageURLs[0])
+	}
+	kbIDs := make([]string, 0, len(e.knowledgeBasesInfo))
+	for _, kb := range e.knowledgeBasesInfo {
+		if kb != nil {
+			kbIDs = append(kbIDs, kb.ID)
+		}
+	}
+	spanCtx, agentSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "agent.execute",
+		Input: map[string]interface{}{
+			"query":        truncateRunes(query, langfuseQueryPreview),
+			"query_len":    len(query),
+			"context_msgs": len(llmContext),
+			"image_count":  imgCount,
+		},
+		Metadata: map[string]interface{}{
+			"session_id":          sessionID,
+			"message_id":          messageID,
+			"max_iterations":      e.config.MaxIterations,
+			"parallel_tool_calls": e.config.ParallelToolCalls,
+			"web_search":          e.config.WebSearchEnabled,
+			"multi_turn":          e.config.MultiTurnEnabled,
+			"knowledge_base_ids":  kbIDs,
+			"allowed_tools":       e.config.AllowedTools,
+		},
+	})
+	ctx = spanCtx
+
 	// Initialize state
 	state := &types.AgentState{
 		RoundSteps:    []types.AgentStep{},
@@ -241,6 +281,7 @@ func (e *AgentEngine) Execute(
 				SessionID: sessionID,
 			},
 		})
+		finishAgentSpan(agentSpan, state, err)
 		return nil, err
 	}
 
@@ -252,7 +293,49 @@ func (e *AgentEngine) Execute(
 		"steps":      len(state.RoundSteps),
 		"complete":   state.IsComplete,
 	})
+	finishAgentSpan(agentSpan, state, nil)
 	return state, nil
+}
+
+// finishAgentSpan records the final outcome of an agent execution onto the
+// top-level Langfuse span. Extracted so the same payload is used for both
+// success and error return paths in Execute().
+func finishAgentSpan(span *langfuse.Span, state *types.AgentState, err error) {
+	if span == nil {
+		return
+	}
+	totalToolCalls := 0
+	for _, step := range state.RoundSteps {
+		totalToolCalls += len(step.ToolCalls)
+	}
+	output := map[string]interface{}{
+		"rounds":           state.CurrentRound,
+		"steps":            len(state.RoundSteps),
+		"tool_calls":       totalToolCalls,
+		"complete":         state.IsComplete,
+		"final_answer_len": len(state.FinalAnswer),
+		"final_answer":     truncateRunes(state.FinalAnswer, langfuseQueryPreview),
+	}
+	span.Finish(output, map[string]interface{}{
+		"rounds":     state.CurrentRound,
+		"steps":      len(state.RoundSteps),
+		"tool_calls": totalToolCalls,
+		"complete":   state.IsComplete,
+	}, err)
+}
+
+// truncateRunes caps s to n runes and appends "…" when truncated. Identical
+// in spirit to the helper in act.go, but kept locally so both files stay
+// independent and the truncation budget can diverge if needed.
+func truncateRunes(s string, n int) string {
+	if n <= 0 || s == "" {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // executeLoop executes the main ReAct loop
@@ -273,6 +356,7 @@ func (e *AgentEngine) executeLoop(
 	emptyRetries := 0
 	consecutiveSameContent := 0
 	lastResponseContent := ""
+loop:
 	for state.CurrentRound < e.config.MaxIterations {
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
@@ -290,119 +374,23 @@ func (e *AgentEngine) executeLoop(
 		default:
 		}
 
-		roundStart := time.Now()
-
-		// Context window management: estimate current token count using
-		// the API-reported usage from the previous round plus a BPE delta
-		// for newly appended messages (assistant reply + tool results).
-		currentTokens := e.estimateCurrentTokens(messages)
-		beforeLen := len(messages)
-		messages = e.manageContextWindow(ctx, messages, state.CurrentRound+1, currentTokens)
-		if len(messages) < beforeLen {
-			currentTokens = e.tokenEstimator.EstimateMessages(messages)
+		// Each iteration runs inside an "agent.round.<N>" Langfuse span.
+		// We execute the body in a closure so `defer span.Finish()` fires at
+		// every exit path (break/continue/next) without having to sprinkle
+		// manual finish calls throughout the many branches below.
+		outcome, iterErr := e.runReActIteration(ctx, state, &messages, tools,
+			sessionID, query, &emptyRetries, &consecutiveSameContent, &lastResponseContent)
+		if iterErr != nil {
+			return state, iterErr
 		}
-
-		logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools, est_tokens=%d",
-			state.CurrentRound+1, e.config.MaxIterations, len(messages), len(tools), currentTokens)
-		common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
-			"iteration":      state.CurrentRound,
-			"round":          state.CurrentRound + 1,
-			"message_count":  len(messages),
-			"pending_tools":  len(tools),
-			"max_iterations": e.config.MaxIterations,
-		})
-
-		// 1. Think: Call LLM with function calling (includes retry + graceful degradation)
-		e.lastSentMsgCount = len(messages)
-		response, err := e.callLLMWithRetry(ctx, messages, tools, state, query, state.CurrentRound, sessionID)
-		if err != nil {
-			return state, err
+		switch outcome {
+		case iterOutcomeContinue:
+			continue loop
+		case iterOutcomeBreak:
+			break loop
+		case iterOutcomeNext:
+			state.CurrentRound++
 		}
-		if response == nil {
-			break
-		}
-		if response.Usage.TotalTokens > 0 {
-			e.lastUsage = response.Usage
-			logger.Debugf(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d",
-				state.CurrentRound+1, response.Usage.PromptTokens,
-				response.Usage.CompletionTokens, response.Usage.TotalTokens)
-		}
-
-		// Detect stuck loops: if the LLM keeps returning the same content
-		// without tool calls (e.g., an unhandled finish reason), break early.
-		if len(response.ToolCalls) == 0 && response.Content != "" {
-			if response.Content == lastResponseContent {
-				consecutiveSameContent++
-			} else {
-				consecutiveSameContent = 0
-			}
-			lastResponseContent = response.Content
-			if consecutiveSameContent >= maxRepeatedResponseRounds {
-				logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
-					state.CurrentRound+1, consecutiveSameContent+1, response.FinishReason)
-				state.FinalAnswer = response.Content
-				state.IsComplete = true
-				break
-			}
-		} else {
-			consecutiveSameContent = 0
-			lastResponseContent = ""
-		}
-
-		// Create agent step
-		step := types.AgentStep{
-			Iteration: state.CurrentRound,
-			Thought:   response.Content,
-			ToolCalls: make([]types.ToolCall, 0),
-			Timestamp: time.Now(),
-		}
-
-		// 2. Analyze: Check for stop conditions (natural stop or final_answer tool)
-		verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
-		if verdict.isDone {
-			// Guard against empty content: when the LLM stops naturally with no
-			// content and no tool calls (e.g., thinking-only loop without KB),
-			// retry with a nudge message instead of accepting an empty answer.
-			if verdict.emptyContent {
-				emptyRetries++
-				if emptyRetries <= maxEmptyResponseRetries {
-					logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
-						state.CurrentRound+1, emptyRetries, maxEmptyResponseRetries)
-					messages = append(messages, chat.Message{
-						Role:    "user",
-						Content: "Please provide your answer by calling the final_answer tool.",
-					})
-					continue
-				}
-				// Retries exhausted — use fallback message rather than empty answer
-				logger.Warnf(ctx, "[Agent][Round-%d] Empty content after %d retries - using fallback",
-					state.CurrentRound+1, maxEmptyResponseRetries)
-				state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
-				state.IsComplete = true
-				state.RoundSteps = append(state.RoundSteps, verdict.step)
-				break
-			}
-			state.FinalAnswer = verdict.finalAnswer
-			state.IsComplete = true
-			state.RoundSteps = append(state.RoundSteps, verdict.step)
-			break
-		}
-
-		// 3. Act: Execute tool calls
-		e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
-
-		// 4. Observe: Add tool results to messages and write to context
-		state.RoundSteps = append(state.RoundSteps, step)
-		messages = e.appendToolResults(ctx, messages, step)
-		common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
-			"iteration":   state.CurrentRound,
-			"round":       state.CurrentRound + 1,
-			"tool_calls":  len(step.ToolCalls),
-			"thought_len": len(step.Thought),
-		})
-
-		// 5. Advance to next round
-		state.CurrentRound++
 	}
 
 	// If loop finished without final answer, generate one
@@ -414,6 +402,218 @@ func (e *AgentEngine) executeLoop(
 	e.emitCompletionEvent(ctx, state, sessionID, messageID, startTime)
 
 	return state, nil
+}
+
+// iterOutcome directs executeLoop's control flow after one ReAct iteration.
+// Using a sentinel (rather than bare return values from runReActIteration)
+// keeps the loop's break/continue/next branches explicit in one place.
+type iterOutcome int
+
+const (
+	// iterOutcomeNext advances state.CurrentRound and loops again.
+	iterOutcomeNext iterOutcome = iota
+	// iterOutcomeContinue re-runs the loop without advancing the round
+	// counter. Used by the empty-content retry path.
+	iterOutcomeContinue
+	// iterOutcomeBreak exits the loop (final answer, stuck loop, or end).
+	iterOutcomeBreak
+)
+
+// runReActIteration executes one ReAct step: think → analyze → act → observe.
+// Extracted from executeLoop so the whole iteration body can live inside a
+// single `defer span.Finish()` scope — otherwise we'd need to sprinkle
+// manual finish calls across every break/continue/return branch.
+//
+// The mutable loop state (messages, empty-retry counter, stuck-loop detector)
+// is passed by pointer so iterations share progress.
+func (e *AgentEngine) runReActIteration(
+	parentCtx context.Context,
+	state *types.AgentState,
+	messagesPtr *[]chat.Message,
+	tools []chat.Tool,
+	sessionID, query string,
+	emptyRetries, consecutiveSameContent *int,
+	lastResponseContent *string,
+) (outcome iterOutcome, retErr error) {
+	roundStart := time.Now()
+	round := state.CurrentRound + 1
+
+	// Open the round-level Langfuse span. Any chat/tool calls made inside
+	// this iteration will attach under it via ctx, giving the UI a clean
+	// trace → agent.execute → agent.round.N → (chat + tools) structure.
+	ctx, roundSpan := langfuse.GetManager().StartSpan(parentCtx, langfuse.SpanOptions{
+		Name: fmt.Sprintf("agent.round.%d", round),
+		Input: map[string]interface{}{
+			"round":          round,
+			"message_count":  len(*messagesPtr),
+			"max_iterations": e.config.MaxIterations,
+		},
+		Metadata: map[string]interface{}{
+			"iteration":  state.CurrentRound,
+			"round":      round,
+			"session_id": sessionID,
+		},
+	})
+
+	var (
+		response      *types.ChatResponse
+		toolCallCount int
+	)
+	defer func() {
+		if roundSpan == nil {
+			return
+		}
+		out := map[string]interface{}{
+			"round":      round,
+			"outcome":    outcome.String(),
+			"tool_calls": toolCallCount,
+		}
+		if response != nil {
+			out["has_tool_calls"] = len(response.ToolCalls) > 0
+			out["finish_reason"] = response.FinishReason
+			out["content_len"] = len(response.Content)
+			if response.Usage.TotalTokens > 0 {
+				out["prompt_tokens"] = response.Usage.PromptTokens
+				out["completion_tokens"] = response.Usage.CompletionTokens
+				out["total_tokens"] = response.Usage.TotalTokens
+			}
+		}
+		out["duration_ms"] = time.Since(roundStart).Milliseconds()
+		roundSpan.Finish(out, map[string]interface{}{
+			"round":       round,
+			"tool_calls":  toolCallCount,
+			"outcome":     outcome.String(),
+			"duration_ms": time.Since(roundStart).Milliseconds(),
+		}, retErr)
+	}()
+
+	// Context window management: estimate current token count using
+	// the API-reported usage from the previous round plus a BPE delta
+	// for newly appended messages (assistant reply + tool results).
+	currentTokens := e.estimateCurrentTokens(*messagesPtr)
+	beforeLen := len(*messagesPtr)
+	*messagesPtr = e.manageContextWindow(ctx, *messagesPtr, round, currentTokens)
+	if len(*messagesPtr) < beforeLen {
+		currentTokens = e.tokenEstimator.EstimateMessages(*messagesPtr)
+	}
+
+	logger.Infof(ctx, "[Agent][Round-%d/%d] Starting: %d messages, %d tools, est_tokens=%d",
+		round, e.config.MaxIterations, len(*messagesPtr), len(tools), currentTokens)
+	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
+		"iteration":      state.CurrentRound,
+		"round":          round,
+		"message_count":  len(*messagesPtr),
+		"pending_tools":  len(tools),
+		"max_iterations": e.config.MaxIterations,
+	})
+
+	// 1. Think: Call LLM with function calling (includes retry + graceful degradation)
+	e.lastSentMsgCount = len(*messagesPtr)
+	resp, err := e.callLLMWithRetry(ctx, *messagesPtr, tools, state, query, state.CurrentRound, sessionID)
+	if err != nil {
+		retErr = err
+		return iterOutcomeNext, err
+	}
+	if resp == nil {
+		return iterOutcomeBreak, nil
+	}
+	response = resp
+	if response.Usage.TotalTokens > 0 {
+		e.lastUsage = response.Usage
+		logger.Debugf(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d",
+			round, response.Usage.PromptTokens,
+			response.Usage.CompletionTokens, response.Usage.TotalTokens)
+	}
+
+	// Detect stuck loops: if the LLM keeps returning the same content
+	// without tool calls (e.g., an unhandled finish reason), break early.
+	if len(response.ToolCalls) == 0 && response.Content != "" {
+		if response.Content == *lastResponseContent {
+			*consecutiveSameContent++
+		} else {
+			*consecutiveSameContent = 0
+		}
+		*lastResponseContent = response.Content
+		if *consecutiveSameContent >= maxRepeatedResponseRounds {
+			logger.Warnf(ctx, "[Agent][Round-%d] Detected stuck loop: same content repeated %d times (finish=%s), stopping",
+				round, *consecutiveSameContent+1, response.FinishReason)
+			state.FinalAnswer = response.Content
+			state.IsComplete = true
+			return iterOutcomeBreak, nil
+		}
+	} else {
+		*consecutiveSameContent = 0
+		*lastResponseContent = ""
+	}
+
+	// Create agent step
+	step := types.AgentStep{
+		Iteration: state.CurrentRound,
+		Thought:   response.Content,
+		ToolCalls: make([]types.ToolCall, 0),
+		Timestamp: time.Now(),
+	}
+
+	// 2. Analyze: Check for stop conditions (natural stop or final_answer tool)
+	verdict := e.analyzeResponse(ctx, response, step, state.CurrentRound, sessionID, roundStart)
+	if verdict.isDone {
+		// Guard against empty content: when the LLM stops naturally with no
+		// content and no tool calls (e.g., thinking-only loop without KB),
+		// retry with a nudge message instead of accepting an empty answer.
+		if verdict.emptyContent {
+			*emptyRetries++
+			if *emptyRetries <= maxEmptyResponseRetries {
+				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
+					round, *emptyRetries, maxEmptyResponseRetries)
+				*messagesPtr = append(*messagesPtr, chat.Message{
+					Role:    "user",
+					Content: "Please provide your answer by calling the final_answer tool.",
+				})
+				return iterOutcomeContinue, nil
+			}
+			// Retries exhausted — use fallback message rather than empty answer
+			logger.Warnf(ctx, "[Agent][Round-%d] Empty content after %d retries - using fallback",
+				round, maxEmptyResponseRetries)
+			state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
+			state.IsComplete = true
+			state.RoundSteps = append(state.RoundSteps, verdict.step)
+			return iterOutcomeBreak, nil
+		}
+		state.FinalAnswer = verdict.finalAnswer
+		state.IsComplete = true
+		state.RoundSteps = append(state.RoundSteps, verdict.step)
+		return iterOutcomeBreak, nil
+	}
+
+	// 3. Act: Execute tool calls
+	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID)
+	toolCallCount = len(step.ToolCalls)
+
+	// 4. Observe: Add tool results to messages and write to context
+	state.RoundSteps = append(state.RoundSteps, step)
+	*messagesPtr = e.appendToolResults(ctx, *messagesPtr, step)
+	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
+		"iteration":   state.CurrentRound,
+		"round":       round,
+		"tool_calls":  toolCallCount,
+		"thought_len": len(step.Thought),
+	})
+
+	return iterOutcomeNext, nil
+}
+
+// String returns a stable label for Langfuse output payloads.
+func (o iterOutcome) String() string {
+	switch o {
+	case iterOutcomeNext:
+		return "next"
+	case iterOutcomeContinue:
+		return "continue"
+	case iterOutcomeBreak:
+		return "break"
+	default:
+		return "unknown"
+	}
 }
 
 // ---------------------------------------------------------------------------
