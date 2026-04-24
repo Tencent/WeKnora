@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y \
 # 检查是否存在本地protoc安装包，如果存在则离线安装，否则在线安装
 ARG TARGETARCH
 COPY packages/ /app/packages/
+RUN ls -lah /app/packages/
 # 兼容 BuildKit 和传统构建：如果 TARGETARCH 为空，使用 uname 检测
 RUN if [ -z "$TARGETARCH" ]; then \
         case $(uname -m) in \
