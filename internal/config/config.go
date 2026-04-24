@@ -64,6 +64,15 @@ type IMConfig struct {
 	// RateLimitMax is the maximum number of requests allowed per window per user.
 	// Default: 10.
 	RateLimitMax int `yaml:"rate_limit_max" json:"rate_limit_max"`
+	// QATimeout is the maximum time for the entire QA pipeline to complete in seconds.
+	// Default: 120.
+	QATimeout int `yaml:"qa_timeout" json:"qa_timeout"`
+	// QueueTimeout is how long a request can wait in the queue in seconds.
+	// Default: 60.
+	QueueTimeout int `yaml:"queue_timeout" json:"queue_timeout"`
+	// DedupTTL is how long processed message IDs are retained in seconds.
+	// Default: 300 (5 minutes).
+	DedupTTL int `yaml:"dedup_ttl" json:"dedup_ttl"`
 }
 
 // DocReaderConfig configures the document parser client (gRPC or HTTP).
@@ -429,6 +438,7 @@ func LoadConfig() (*Config, error) {
 	// Validate configuration values
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
+	applyIMEnvOverrides(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -567,6 +577,34 @@ func applyAgentEnvOverrides(cfg *Config) {
 			// Handle case where user just provides a number like "300"
 			cfg.Agent.LLMCallTimeout = int(sec.Seconds())
 		}
+	}
+}
+
+func applyIMEnvOverrides(cfg *Config) {
+	if cfg.IM == nil {
+		cfg.IM = &IMConfig{}
+	}
+	// Parse duration helper for optional "s" suffix or just plain numbers
+	parseDur := func(env string) int {
+		if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+			if timeout, err := time.ParseDuration(value); err == nil {
+				return int(timeout.Seconds())
+			}
+			if sec, err := time.ParseDuration(value + "s"); err == nil {
+				return int(sec.Seconds())
+			}
+		}
+		return 0
+	}
+
+	if val := parseDur("WEKNORA_IM_QA_TIMEOUT"); val > 0 {
+		cfg.IM.QATimeout = val
+	}
+	if val := parseDur("WEKNORA_IM_QUEUE_TIMEOUT"); val > 0 {
+		cfg.IM.QueueTimeout = val
+	}
+	if val := parseDur("WEKNORA_IM_DEDUP_TTL"); val > 0 {
+		cfg.IM.DedupTTL = val
 	}
 }
 
