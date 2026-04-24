@@ -43,7 +43,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		return nil, nil, err
 	}
 
-	const defaultMaxTokens = 8192
+	const defaultMaxTokens = 32768
 
 	maxTokens := chatManage.SummaryConfig.MaxTokens
 	maxCompletionTokens := chatManage.SummaryConfig.MaxCompletionTokens
