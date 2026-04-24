@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -419,6 +420,7 @@ func (s *ImageMultimodalService) enqueueKnowledgePostProcessTask(ctx context.Con
 		KnowledgeBaseID: payload.KnowledgeBaseID,
 		Language:        payload.Language,
 	}
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to marshal post process payload: %v", err)

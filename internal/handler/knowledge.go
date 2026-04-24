@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -686,6 +687,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		TenantID:     effectiveTenantID,
 		KnowledgeIDs: knowledgeIDs,
 	}
+	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal knowledge list delete payload: %v", err)
@@ -1559,6 +1561,7 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		TargetKBID:   req.TargetKBID,
 		Mode:         req.Mode,
 	}
+	langfuse.InjectTracing(ctx, &payload)
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

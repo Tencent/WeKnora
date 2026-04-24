@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -384,6 +385,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		KnowledgeBaseID:  id,
 		EffectiveEngines: tenantInfo.GetEffectiveEngines(),
 	}
+	langfuse.InjectTracing(ctx, &payload)
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

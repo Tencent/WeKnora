@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -142,6 +143,7 @@ func (s *KnowledgePostProcessService) enqueueSummaryGenerationTask(ctx context.C
 		KnowledgeID:     payload.KnowledgeID,
 		Language:        payload.Language,
 	}
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal summary generation payload: %v", err)
@@ -180,6 +182,7 @@ func (s *KnowledgePostProcessService) enqueueQuestionGenerationIfEnabled(ctx con
 		QuestionCount:   questionCount,
 		Language:        payload.Language,
 	}
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Warnf(ctx, "[KnowledgePostProcess] Failed to marshal question generation payload: %v", err)

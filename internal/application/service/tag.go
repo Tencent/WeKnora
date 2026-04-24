@@ -10,6 +10,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -282,6 +283,7 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 			TenantID:     tenantID,
 			KnowledgeIDs: knowledgeIDs,
 		}
+		langfuse.InjectTracing(ctx, &payload)
 		payloadBytes, err := json.Marshal(payload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal knowledge list delete payload: %v", err)
@@ -351,6 +353,7 @@ func (s *knowledgeTagService) enqueueIndexDeleteTask(ctx context.Context,
 		ChunkIDs:         chunkIDs,
 		EffectiveEngines: effectiveEngines,
 	}
+	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal index delete payload: %v", err)

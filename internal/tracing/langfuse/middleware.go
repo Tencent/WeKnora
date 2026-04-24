@@ -57,14 +57,32 @@ func GinMiddleware() gin.HandlerFunc {
 	}
 }
 
-// shouldTrace restricts tracing to chat / search / agent / evaluation
-// endpoints where LLMs run. Everything else (auth, list, config, static…)
-// is skipped to keep the Langfuse dashboard signal-to-noise high.
+// shouldTrace restricts tracing to endpoints where LLM work (or the asynq
+// jobs that will run LLM work) originates. Everything else — auth, list,
+// config fetches, static assets, health checks — is skipped to keep the
+// Langfuse dashboard's signal-to-noise ratio high.
+//
+// The list below is grouped by purpose:
+//   - online inference: knowledge-chat / agent-chat / knowledge-search /
+//     generate_title are the existing chat/retrieval surface.
+//   - ingestion: POST on knowledge-bases/:id/knowledge (file / url / manual)
+//     and reparse / move / copy all kick off asynq jobs that later run
+//     embedding/VLM/chat calls. Tracing the HTTP side means the Langfuse UI
+//     shows a parent trace whose children are the worker spans.
+//   - batch ops: FAQ import + knowledge batch delete also enqueue jobs.
+//   - model/setup diagnostics: initialization endpoints exercise live
+//     models; evaluation runs arbitrary chat pipelines.
+//   - wiki: auto-fix kicks off wiki ingest, which calls embedding.
+//
+// Read-only listing / GET endpoints are deliberately excluded; they never
+// trigger LLM work and would only add noise.
 func shouldTrace(c *gin.Context) bool {
 	path := c.FullPath()
 	if path == "" {
 		return false
 	}
+	method := c.Request.Method
+	// Online inference
 	switch {
 	case strings.HasPrefix(path, "/api/v1/knowledge-chat"),
 		strings.HasPrefix(path, "/api/v1/agent-chat"),
@@ -72,8 +90,44 @@ func shouldTrace(c *gin.Context) bool {
 		strings.HasPrefix(path, "/api/v1/sessions") && strings.Contains(path, "generate_title"),
 		strings.HasPrefix(path, "/api/v1/initialization/remote/check"),
 		strings.HasPrefix(path, "/api/v1/initialization/embedding/test"),
+		strings.HasPrefix(path, "/api/v1/initialization/rerank/check"),
+		strings.HasPrefix(path, "/api/v1/initialization/asr/check"),
+		strings.HasPrefix(path, "/api/v1/initialization/multimodal/test"),
+		strings.HasPrefix(path, "/api/v1/initialization/extract/"),
 		strings.HasPrefix(path, "/api/v1/evaluation"):
 		return true
+	}
+	// Ingestion (all POST/PUT that enqueue LLM-backed async work)
+	if method == "POST" || method == "PUT" {
+		switch {
+		// Per-knowledge-base ingestion surface.
+		case strings.Contains(path, "/knowledge-bases/") && strings.Contains(path, "/knowledge/"):
+			return true
+		// Knowledge-level mutations that trigger re-processing.
+		case strings.HasPrefix(path, "/api/v1/knowledge/") &&
+			(strings.HasSuffix(path, "/reparse") ||
+				strings.HasSuffix(path, "/move") ||
+				strings.Contains(path, "/manual/")):
+			return true
+		// Knowledge base copy (clones an entire KB, fanning out documents).
+		case path == "/api/v1/knowledge-bases/copy":
+			return true
+		// FAQ bulk import.
+		case strings.Contains(path, "/faq/entries") ||
+			strings.Contains(path, "/faq/entry") ||
+			strings.Contains(path, "/faq/import"):
+			return true
+		// Wiki auto-fix enqueues wiki ingest.
+		case strings.Contains(path, "/wiki/auto-fix") ||
+			strings.Contains(path, "/wiki/rebuild-links"):
+			return true
+		// Chunk-level mutations that rerun embeddings on update.
+		case strings.HasPrefix(path, "/api/v1/chunks/") && method == "PUT":
+			return true
+		// Manual data source sync triggers asynq sync.
+		case strings.Contains(path, "/datasource/") && strings.HasSuffix(path, "/sync"):
+			return true
+		}
 	}
 	return false
 }

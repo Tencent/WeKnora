@@ -31,6 +31,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -429,6 +430,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		Language:                 lang,
 	}
 
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal document process task payload: %v", err)
@@ -603,6 +605,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 		Language:                 lang,
 	}
 
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal URL process task payload: %v", err)
@@ -825,6 +828,7 @@ func (s *knowledgeService) createKnowledgeFromFileURL(
 		Language:                 lang,
 	}
 
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal file URL process task payload: %v", err)
@@ -1043,6 +1047,7 @@ func (s *knowledgeService) createKnowledgeFromPassageInternal(ctx context.Contex
 			Language:                 lang,
 		}
 
+		langfuse.InjectTracing(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal passage process task payload: %v", err)
@@ -2206,12 +2211,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	} else {
 		// If there are no multimodal tasks, enqueue the post process task immediately
 		lang, _ := types.LanguageFromContext(ctx)
-		payloadBytes, err := json.Marshal(types.KnowledgePostProcessPayload{
+		postProcessPayload := types.KnowledgePostProcessPayload{
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
 			Language:        lang,
-		})
+		}
+		langfuse.InjectTracing(ctx, &postProcessPayload)
+		payloadBytes, err := json.Marshal(postProcessPayload)
 		if err == nil {
 			task := asynq.NewTask(types.TypeKnowledgePostProcess, payloadBytes, asynq.Queue("default"), asynq.MaxRetry(3))
 			if _, err := s.task.Enqueue(task); err != nil {
@@ -3076,6 +3083,7 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 		Content:         content,
 		NeedCleanup:     needCleanup,
 	}
+	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal manual process payload: %w", err)
@@ -3202,6 +3210,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			Language:                 lang,
 		}
 
+		langfuse.InjectTracing(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal reparse task payload: %v", err)
@@ -3254,6 +3263,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			Language:                 lang,
 		}
 
+		langfuse.InjectTracing(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal file URL reparse task payload: %v", err)
@@ -3299,6 +3309,7 @@ func (s *knowledgeService) ReparseKnowledge(ctx context.Context, knowledgeID str
 			Language:                 lang,
 		}
 
+		langfuse.InjectTracing(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to marshal URL reparse task payload: %v", err)
@@ -4077,6 +4088,7 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		taskPayload.Entries = payload.Entries
 	}
 
+	langfuse.InjectTracing(ctx, &taskPayload)
 	payloadBytes, err := json.Marshal(taskPayload)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to marshal FAQ import task payload: %v", err)
@@ -8461,6 +8473,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			ImageSourceType: metadata["image_source_type"],
 		}
 
+		langfuse.InjectTracing(ctx, &payload)
 		payloadBytes, err := json.Marshal(payload)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to marshal image multimodal payload: %v", err)
@@ -9676,6 +9689,7 @@ func (s *knowledgeService) moveKnowledgeReparse(
 			Language:                 lang,
 		}
 
+		langfuse.InjectTracing(ctx, &taskPayload)
 		payloadBytes, err := json.Marshal(taskPayload)
 		if err != nil {
 			return fmt.Errorf("failed to marshal document process payload: %w", err)

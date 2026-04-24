@@ -314,6 +314,8 @@ type SyncResult struct {
 
 // DataSourceSyncPayload represents the asynq task payload for data source sync
 type DataSourceSyncPayload struct {
+	TracingContext
+
 	// Data source ID to sync
 	DataSourceID string `json:"data_source_id"`
 

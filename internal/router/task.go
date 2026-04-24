@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -99,6 +100,14 @@ func NewAsynqServer() *asynq.Server {
 func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Create a new mux and register all handlers
 	mux := asynq.NewServeMux()
+
+	// Install Langfuse middleware BEFORE handler registration so every task
+	// type is automatically wrapped. When Langfuse is disabled the middleware
+	// is a pass-through; when enabled it resumes the upstream HTTP trace (if
+	// the payload carries one) or opens a standalone trace, then wraps the
+	// handler execution in a SPAN so all child generations (embedding / VLM /
+	// chat / rerank / ASR) nest correctly in the Langfuse UI.
+	mux.Use(langfuse.AsynqMiddleware())
 
 	// Register extract handlers - router will dispatch to appropriate handler
 	mux.HandleFunc(types.TypeChunkExtract, params.ChunkExtractor.Handle)

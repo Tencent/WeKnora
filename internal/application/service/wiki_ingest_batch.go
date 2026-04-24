@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -29,6 +30,7 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 
 	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up", count, payload.KnowledgeBaseID)
 
+	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, _ := json.Marshal(payload)
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),

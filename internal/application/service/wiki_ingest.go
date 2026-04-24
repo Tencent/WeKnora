@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -92,6 +93,7 @@ func WikiDeletedTombstoneKey(kbID, knowledgeID string) string {
 // The actual document IDs are stored in a Redis list (wiki:pending:{kbID}).
 // KnowledgeID is only used as fallback in Lite mode (no Redis).
 type WikiIngestPayload struct {
+	types.TracingContext
 	TenantID        uint64 `json:"tenant_id"`
 	KnowledgeBaseID string `json:"knowledge_base_id"`
 	Language        string `json:"language,omitempty"`
@@ -101,6 +103,7 @@ type WikiIngestPayload struct {
 
 // WikiRetractPayload is the asynq task payload for wiki content retraction
 type WikiRetractPayload struct {
+	types.TracingContext
 	TenantID        uint64   `json:"tenant_id"`
 	KnowledgeBaseID string   `json:"knowledge_base_id"`
 	KnowledgeID     string   `json:"knowledge_id"`
@@ -208,6 +211,7 @@ func EnqueueWikiIngest(ctx context.Context, task interfaces.TaskEnqueuer, redisC
 		}}
 	}
 
+	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, _ := json.Marshal(payload)
 
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
@@ -248,6 +252,7 @@ func EnqueueWikiRetract(ctx context.Context, task interfaces.TaskEnqueuer, redis
 		ingestPayload.LiteOps = []WikiPendingOp{op}
 	}
 
+	langfuse.InjectTracing(ctx, &ingestPayload)
 	payloadBytes, _ := json.Marshal(ingestPayload)
 	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
 		asynq.Queue("low"),

@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -655,6 +656,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		SourceID: req.SourceID,
 		TargetID: req.TargetID,
 	}
+	langfuse.InjectTracing(ctx, &payload)
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

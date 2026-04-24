@@ -16,13 +16,27 @@ type Trace struct {
 
 // Generation represents a single model invocation (LLM / embedding / VLM).
 type Generation struct {
-	ID        string
-	TraceID   string
-	manager   *Manager
-	sampled   bool
-	startTime time.Time
-	model     string
-	name      string
+	ID                  string
+	TraceID             string
+	ParentObservationID string
+	manager             *Manager
+	sampled             bool
+	startTime           time.Time
+	model               string
+	name                string
+}
+
+// Span represents a logical unit of work that isn't itself an LLM call — for
+// example an asynq task execution, a pipeline stage, or a document-processing
+// step. Generations and nested spans attach to it via parentObservationId.
+type Span struct {
+	ID                  string
+	TraceID             string
+	ParentObservationID string
+	manager             *Manager
+	sampled             bool
+	startTime           time.Time
+	name                string
 }
 
 // TraceOptions configures a new trace.
@@ -44,6 +58,13 @@ type GenerationOptions struct {
 	Input           interface{}
 	Metadata        map[string]interface{}
 	ModelParameters map[string]interface{}
+}
+
+// SpanOptions configures a new SPAN observation.
+type SpanOptions struct {
+	Name     string
+	Input    interface{}
+	Metadata map[string]interface{}
 }
 
 // StartTrace opens a new trace, stores its ID in the returned ctx, and returns
@@ -110,8 +131,109 @@ func (t *Trace) Finish(output interface{}, metadata map[string]interface{}) {
 	})
 }
 
+// ResumeTrace reconstructs a *Trace handle from an upstream-provided trace id
+// (and optional parent observation id), without emitting a new trace-create
+// event. Used by the asynq middleware to graft async work onto the HTTP-level
+// trace that originated it: the HTTP layer already issued trace-create, and
+// the worker only needs to add child observations.
+//
+// When traceID is empty the returned *Trace is nil, signalling the caller
+// should fall back to StartTrace if it wants a standalone root.
+func (m *Manager) ResumeTrace(ctx context.Context, traceID, parentObservationID string) (context.Context, *Trace) {
+	if m == nil || !m.cfg.Enabled || traceID == "" {
+		return ctx, nil
+	}
+	t := &Trace{ID: traceID, manager: m, sampled: true}
+	ctx = withTrace(ctx, t)
+	if parentObservationID != "" {
+		ctx = withParentObservation(ctx, parentObservationID)
+	}
+	return ctx, t
+}
+
+// StartSpan opens a SPAN observation under the trace (and optional parent
+// observation) carried by ctx. When no trace is present, a shallow trace is
+// auto-created, mirroring StartGeneration's behaviour. Returns a ctx whose
+// parentObservationId is set to this span's id, so any nested span or
+// generation will properly attach as a child.
+func (m *Manager) StartSpan(ctx context.Context, opts SpanOptions) (context.Context, *Span) {
+	if m == nil || !m.cfg.Enabled {
+		return ctx, &Span{}
+	}
+	trace, ok := traceFromCtx(ctx)
+	if !ok || trace == nil {
+		newCtx, t := m.StartTrace(ctx, TraceOptions{Name: opts.Name})
+		ctx = newCtx
+		trace = t
+	}
+	if !trace.sampled {
+		return ctx, &Span{}
+	}
+	parent, _ := parentObservationFromCtx(ctx)
+	now := time.Now()
+	s := &Span{
+		ID:                  newID(),
+		TraceID:             trace.ID,
+		ParentObservationID: parent,
+		manager:             m,
+		sampled:             true,
+		startTime:           now,
+		name:                opts.Name,
+	}
+	body := observationBody{
+		ID:                  s.ID,
+		TraceID:             s.TraceID,
+		ParentObservationID: parent,
+		Type:                "SPAN",
+		Name:                opts.Name,
+		StartTime:           isoTime(now),
+		Input:               opts.Input,
+		Metadata:            opts.Metadata,
+	}
+	m.enqueue(ingestionEvent{
+		ID:        newID(),
+		Timestamp: isoTime(now),
+		Type:      "span-create",
+		Body:      body,
+	})
+	ctx = withParentObservation(ctx, s.ID)
+	return ctx, s
+}
+
+// Finish updates a span with its final output, extra metadata and any error.
+// A non-nil err marks the span as ERROR level in Langfuse.
+func (s *Span) Finish(output interface{}, metadata map[string]interface{}, err error) {
+	if s == nil || s.manager == nil || !s.sampled {
+		return
+	}
+	level := "DEFAULT"
+	var statusMsg string
+	if err != nil {
+		level = "ERROR"
+		statusMsg = err.Error()
+	}
+	body := observationBody{
+		ID:            s.ID,
+		TraceID:       s.TraceID,
+		Type:          "SPAN",
+		EndTime:       isoTime(time.Now()),
+		Output:        output,
+		Metadata:      metadata,
+		Level:         level,
+		StatusMessage: statusMsg,
+	}
+	s.manager.enqueue(ingestionEvent{
+		ID:        newID(),
+		Timestamp: isoTime(time.Now()),
+		Type:      "span-update",
+		Body:      body,
+	})
+}
+
 // StartGeneration opens a generation observation under the trace carried by
-// ctx (or a newly auto-created trace if none is present).
+// ctx (or a newly auto-created trace if none is present). If a parent span
+// is present on ctx, the generation attaches under it via parentObservationId
+// so the Langfuse tree shows: trace → span → generation.
 func (m *Manager) StartGeneration(ctx context.Context, opts GenerationOptions) (context.Context, *Generation) {
 	if m == nil || !m.cfg.Enabled {
 		return ctx, &Generation{}
@@ -128,26 +250,29 @@ func (m *Manager) StartGeneration(ctx context.Context, opts GenerationOptions) (
 	if !trace.sampled {
 		return ctx, &Generation{}
 	}
+	parent, _ := parentObservationFromCtx(ctx)
 	now := time.Now()
 	g := &Generation{
-		ID:        newID(),
-		TraceID:   trace.ID,
-		manager:   m,
-		sampled:   true,
-		startTime: now,
-		model:     opts.Model,
-		name:      opts.Name,
+		ID:                  newID(),
+		TraceID:             trace.ID,
+		ParentObservationID: parent,
+		manager:             m,
+		sampled:             true,
+		startTime:           now,
+		model:               opts.Model,
+		name:                opts.Name,
 	}
 	body := observationBody{
-		ID:              g.ID,
-		TraceID:         g.TraceID,
-		Type:            "GENERATION",
-		Name:            opts.Name,
-		StartTime:       isoTime(now),
-		Input:           opts.Input,
-		Metadata:        opts.Metadata,
-		Model:           opts.Model,
-		ModelParameters: opts.ModelParameters,
+		ID:                  g.ID,
+		TraceID:             g.TraceID,
+		ParentObservationID: parent,
+		Type:                "GENERATION",
+		Name:                opts.Name,
+		StartTime:           isoTime(now),
+		Input:               opts.Input,
+		Metadata:            opts.Metadata,
+		Model:               opts.Model,
+		ModelParameters:     opts.ModelParameters,
 	}
 	m.enqueue(ingestionEvent{
 		ID:        newID(),

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -168,6 +169,7 @@ func (s *Scheduler) triggerSync(dataSourceID string, tenantID uint64) {
 		SyncLogID:    syncLog.ID,
 		ForceFull:    false,
 	}
+	langfuse.InjectTracing(ctx, payload)
 	payloadJSON, _ := json.Marshal(payload)
 	task := asynq.NewTask(types.TypeDataSourceSync, payloadJSON)
 
