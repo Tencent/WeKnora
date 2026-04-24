@@ -14,9 +14,21 @@ import (
 )
 
 var dataAnalysisTool = BaseTool{
-	name:        ToolDataAnalysis,
-	description: "Use this tool when the knowledge is CSV or Excel files. It loads the data into memory and executes SQL for data analysis. If the user's question requires data statistics, convert the question into SQL and execute it.",
-	schema:      utils.GenerateSchema[DataAnalysisInput](),
+	name: ToolDataAnalysis,
+	description: "Use this tool when the knowledge is CSV or Excel files. It loads the data into memory and executes SQL for data analysis. " +
+		"For Excel files with multiple sheets, every sheet is loaded into the same table and the source sheet name is exposed as a '__sheet_name' column so you can filter/aggregate per sheet. " +
+		"If the user's question requires data statistics, convert the question into SQL and execute it.",
+	schema: utils.GenerateSchema[DataAnalysisInput](),
+}
+
+// excelSheetNameColumn is the name of the synthetic column that identifies
+// which Excel sheet a row came from when multiple sheets are unioned together.
+const excelSheetNameColumn = "__sheet_name"
+
+// sqlSingleQuoteEscape escapes single quotes in a string so it can be safely
+// embedded inside a single-quoted SQL literal.
+func sqlSingleQuoteEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 type DataAnalysisInput struct {
@@ -300,7 +312,14 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 	return t.LoadFromTable(ctx, tableName)
 }
 
-// LoadFromExcel loads data from an Excel file into a DuckDB table and returns the table schema
+// LoadFromExcel loads data from an Excel file into a DuckDB table and returns the table schema.
+//
+// Multi-sheet workbooks are fully supported: every sheet in the workbook is
+// loaded and the rows from all sheets are unioned (UNION ALL BY NAME) into a
+// single table. A synthetic '__sheet_name' column is added so downstream SQL
+// can filter / aggregate per sheet. If sheet enumeration fails for any
+// reason, we fall back to reading just the first sheet (original behavior).
+//
 // Parameters:
 //   - ctx: context for cancellation and timeout
 //   - filename: path to the Excel file
@@ -310,27 +329,107 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 //   - *TableSchema: schema information of the created table
 //   - error: any error that occurred during the operation
 //
-// Note: This function requires the spatial extension to be installed in DuckDB
+// Note: requires the DuckDB 'excel' extension (for read_xlsx) and the
+// 'spatial' extension (for st_read_meta used to enumerate sheets).
 func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
-	// Record the created table for cleanup. If already exists, skip creation
+	// Record the created table for cleanup. If already exists, skip creation.
 	if t.recordCreatedTable(tableName) {
-		// Try to read Excel file using st_read (from spatial extension)
-		// If spatial extension doesn't support Excel, we'll need to convert to CSV first
-		createTableSQL := fmt.Sprintf("CREATE TABLE \"%s\" AS SELECT * FROM st_read('%s')", tableName, filename)
-
-		_, err := t.db.ExecContext(ctx, createTableSQL)
-		if err != nil {
-			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel: %v", err)
-			return nil, fmt.Errorf("failed to create table from Excel file. Consider converting to CSV first: %w", err)
+		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
+		if enumErr != nil {
+			logger.Warnf(ctx,
+				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
+				filename, t.sessionID, enumErr,
+			)
 		}
 
-		logger.Infof(ctx, "[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s", tableName, t.sessionID)
+		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
+
+		if _, err := t.db.ExecContext(ctx, createTableSQL); err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to create table from Excel (sheets=%v): %v", sheetNames, err)
+			return nil, fmt.Errorf("failed to create table from Excel file (sheets=%v): %w", sheetNames, err)
+		}
+
+		logger.Infof(ctx,
+			"[Tool][DataAnalysis] Successfully created table '%s' from Excel file in session %s (sheets=%v)",
+			tableName, t.sessionID, sheetNames,
+		)
 	}
 
 	// Get and return the table schema
 	return t.LoadFromTable(ctx, tableName)
+}
+
+// listExcelSheets returns the names of every sheet (layer) inside the given
+// Excel workbook by querying DuckDB's spatial st_read_meta table function.
+// The returned slice preserves the on-disk order of sheets.
+func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
+	metaSQL := fmt.Sprintf("SELECT layer_name FROM st_read_meta('%s')", sqlSingleQuoteEscape(filename))
+
+	rows, err := t.db.QueryContext(ctx, metaSQL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query sheet metadata: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan sheet name: %w", err)
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating sheet metadata rows: %w", err)
+	}
+	return names, nil
+}
+
+// buildExcelCreateTableSQL assembles the CREATE TABLE statement used by
+// LoadFromExcel. Exposed at package level (lower-case) to make it trivially
+// testable without a live DuckDB connection.
+func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) string {
+	escFile := sqlSingleQuoteEscape(filename)
+
+	// No sheet info (enumeration failed or empty): read the first sheet only.
+	if len(sheetNames) == 0 {
+		return fmt.Sprintf(
+			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s')",
+			tableName, escFile,
+		)
+	}
+
+	// Single sheet: keep it simple but still tag the source for consistency
+	// with the multi-sheet path.
+	if len(sheetNames) == 1 {
+		escSheet := sqlSingleQuoteEscape(sheetNames[0])
+		return fmt.Sprintf(
+			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s')",
+			tableName, escSheet, excelSheetNameColumn, escFile, escSheet,
+		)
+	}
+
+	// Multiple sheets: UNION ALL BY NAME tolerates schema differences
+	// between sheets (missing columns become NULL, conflicting types are
+	// widened).
+	parts := make([]string, 0, len(sheetNames))
+	for _, sheet := range sheetNames {
+		escSheet := sqlSingleQuoteEscape(sheet)
+		parts = append(parts, fmt.Sprintf(
+			"SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s')",
+			escSheet, excelSheetNameColumn, escFile, escSheet,
+		))
+	}
+	return fmt.Sprintf(
+		"CREATE TABLE \"%s\" AS %s",
+		tableName,
+		strings.Join(parts, "\nUNION ALL BY NAME\n"),
+	)
 }
 
 // LoadFromKnowledge loads data from a Knowledge entity into a DuckDB table and returns the table schema
