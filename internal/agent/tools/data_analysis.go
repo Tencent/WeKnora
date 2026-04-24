@@ -364,8 +364,15 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 // listExcelSheets returns the names of every sheet (layer) inside the given
 // Excel workbook by querying DuckDB's spatial st_read_meta table function.
 // The returned slice preserves the on-disk order of sheets.
+//
+// st_read_meta returns a single row whose `layers` column is a LIST of
+// STRUCTs (one per layer / sheet). We UNNEST that list and project the
+// struct's `name` field to get a flat list of sheet names.
 func (t *DataAnalysisTool) listExcelSheets(ctx context.Context, filename string) ([]string, error) {
-	metaSQL := fmt.Sprintf("SELECT layer_name FROM st_read_meta('%s')", sqlSingleQuoteEscape(filename))
+	metaSQL := fmt.Sprintf(
+		"SELECT UNNEST(layers).name FROM st_read_meta('%s')",
+		sqlSingleQuoteEscape(filename),
+	)
 
 	rows, err := t.db.QueryContext(ctx, metaSQL)
 	if err != nil {
