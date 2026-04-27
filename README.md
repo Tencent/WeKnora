@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -44,12 +44,26 @@
 
 [**WeKnora**](https://weknora.weixin.qq.com) is an LLM-powered intelligent knowledge management and Q&A framework built for enterprise-grade document understanding and semantic retrieval.
 
-WeKnora offers two Q&A modes — **Quick Q&A** and **Intelligent Reasoning**. Quick Q&A uses a **RAG (Retrieval-Augmented Generation)** pipeline to rapidly retrieve relevant chunks and generate answers, ideal for everyday knowledge queries. Intelligent Reasoning is powered by a **ReACT Agent** engine that employs a **progressive strategy** to autonomously orchestrate knowledge retrieval, MCP tools, and web search, iteratively reasoning and reflecting to arrive at a final conclusion — suited for multi-source synthesis and complex tasks. Custom agents are also supported, allowing flexible configuration of dedicated knowledge bases, tool sets, and system prompts. Choose the right mode for the task, balancing response speed with reasoning depth.
+WeKnora offers two Q&A modes — **Quick Q&A** and **Intelligent Reasoning**, alongside an autonomous **Wiki Mode**. Quick Q&A uses a **RAG (Retrieval-Augmented Generation)** pipeline to rapidly retrieve relevant chunks and generate answers, ideal for everyday knowledge queries. Intelligent Reasoning is powered by a **ReACT Agent** engine that employs a **progressive strategy** to autonomously orchestrate knowledge retrieval, MCP tools, and web search, iteratively reasoning and reflecting to arrive at a final conclusion — suited for multi-source synthesis and complex tasks. The new **Wiki Mode** allows agents to autonomously generate and maintain a structured, interlinked markdown knowledge base from raw documents. Custom agents are also supported, allowing flexible configuration of dedicated knowledge bases, tool sets, and system prompts. Choose the right mode for the task, balancing response speed with reasoning depth.
 
-The framework supports auto-syncing knowledge from Feishu (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty.
+The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty. WeKnora also integrates with **Langfuse** for comprehensive observability into agent reasoning, token usage, and pipeline tracing.
 
 
 ## ✨ Latest Updates
+
+**v0.5.0 Highlights:**
+
+- **Wiki Mode**: A brand-new agent-driven Wiki knowledge system that automatically distills raw documents into interlinked markdown pages. It ships with a dedicated WikiBrowser and an interactive knowledge graph that visualizes references and relationships between pages, helping teams grow a structured, continuously evolving knowledge base from their own materials.
+- **Observability**: Integrated Langfuse for agent ReAct loop, LLM token tracking, tool calls, and asynq pipeline tracing, providing deep visibility into agent reasoning and system performance.
+- **Customizable Indexing Strategy**: Users can now independently configure and toggle Vector Search, Keyword Search (Hybrid), Wiki, and Knowledge Graph indexing per knowledge base.
+- **Vector Store UI & Per-KB Binding**: Full frontend management for Vector Stores with connectivity testing, plus the ability to bind distinct vector databases to specific knowledge bases.
+- **Yuque Connector**: Yuque data source integration with API client, full and incremental fetch, enabling seamless synchronization of Yuque documents.
+- **Agent Capabilities**: Added `json_repair` tool for automatic JSON fixing, preloaded `OpenMAIC Classroom` skill, and DuckDB multi-sheet Excel data analysis.
+- **Frontend & Debugging**: Added copy action for model cards in settings, and enhanced LLM request debugging and logging across all model providers.
+- **Bug Fixes**: Fixed DuckDB access issues by materializing knowledge files to temp path, removed rerank model requirement for wiki-only agents, and whitelisted offline protoc zip packages in dockerignore.
+
+<details>
+<summary><b>Earlier Releases</b></summary>
 
 **v0.4.0 Highlights:**
 
@@ -175,6 +189,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 |------------|---------|
 | Intelligent Reasoning | ReACT progressive multi-step reasoning, autonomously orchestrating knowledge retrieval, MCP tools, and web search; custom agent support |
 | Quick Q&A | RAG-based Q&A over knowledge bases for fast and accurate answers |
+| Wiki Mode | Agent-driven auto-generation of structured, interlinked markdown Wiki pages from raw documents |
 | Tool Calling | Built-in tools, MCP tools, web search |
 | Conversation Strategy | Online Prompt editing, retrieval threshold tuning, multi-turn context awareness |
 | Suggested Questions | Auto-generated question suggestions based on knowledge base content |
@@ -183,8 +198,8 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 
 | Capability | Details |
 |------------|---------|
-| Knowledge Base Types | FAQ / Document with folder import, URL import, tag management, and online entry |
-| Data Source Import | Auto-sync from Feishu / Notion (more data sources coming soon); incremental and full sync |
+| Knowledge Base Types | FAQ / Document / Wiki with folder import, URL import, tag management, and online entry |
+| Data Source Import | Auto-sync from Feishu / Notion / Yuque (more data sources coming soon); incremental and full sync |
 | Document Formats | PDF / Word / Txt / Markdown / HTML / Images / CSV / Excel / PPT / JSON |
 | Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / multi-dimensional indexing |
 | E2E Testing | Full-pipeline visualization with recall hit rate, BLEU / ROUGE metric evaluation |
@@ -206,6 +221,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 |------------|---------|
 | Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
 | UI | Web UI / RESTful API / Chrome Extension |
+| Observability | Integrated Langfuse for ReAct loops, token tracking, tool calls, and pipeline tracing |
 | Task Management | MQ async tasks, automatic database migration on version upgrade |
 | Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing, WeKnora Cloud hosted models and parsing |
 
@@ -276,7 +292,11 @@ Stop services: `docker compose down`
   <tr>
     <td colspan="2"><b>Agent Mode Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process"></td>
   </tr>
-    <tr>
+  <tr>
+    <td><b>Wiki Browser</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki Browser"></td>
+    <td><b>Wiki Knowledge Graph</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki Knowledge Graph"></td>
+  </tr>
+  <tr>
     <td><b>Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management"></td>
     <td><b>Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings"></td>
   </tr>

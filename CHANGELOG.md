@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-04-27
+
+### 🚀 New Features
+- **NEW**: Wiki Mode — a brand-new agent-driven Wiki knowledge system that automatically distills raw documents into interlinked markdown pages. It ships with a dedicated WikiBrowser, an interactive knowledge graph visualizing references and relationships between pages, and specialized agent tools, empowering teams to grow a structured, continuously evolving knowledge base from their own materials.
+- **NEW**: Observability — integrated Langfuse for agent ReAct loop, LLM token tracking, tool calls, and asynq pipeline tracing, providing deep visibility into agent reasoning, tool execution, and system performance.
+- **NEW**: Customizable Indexing Strategy — users can now independently toggle Vector Search, Keyword Search, Wiki, and Knowledge Graph indexing on a per-knowledge-base level.
+- **NEW**: Vector Store UI & Per-KB Binding — full frontend management interface for Vector Stores, allowing users to configure connections, test connectivity, and assign specific vector stores to different knowledge bases.
+- **NEW**: Yuque Connector — Yuque data source integration with API client, full and incremental fetch, and resource mapping, enabling seamless synchronization of Yuque documents into the knowledge base.
+- **NEW**: Built-in Agent Skills — added a preloaded `OpenMAIC Classroom` agent skill.
+- **NEW**: Agent Tools — added `json_repair` tool for agents to automatically fix and parse malformed JSON outputs.
+- **NEW**: Frontend — added copy action for model cards in settings.
+- **NEW**: Agent — added support to load all sheets from Excel files for DuckDB data analysis.
+
+### ⚡ Improvements
+- **IMPROVED**: Agent — improved tenant context handling and error reporting.
+- **IMPROVED**: Agent — updated synthesis and issue flagging instructions in system prompt.
+- **IMPROVED**: Debugging — enhanced LLM request logging and debug output (`llm_debug`) across all model providers.
+
+### 🐛 Bug Fixes
+- **FIXED**: Agent — materialized knowledge files to temp path for DuckDB to fix access issues
+- **FIXED**: Agent — removed rerank model requirement for wiki-only agents
+- **FIXED**: Docreader — whitelisted offline protoc zip packages in dockerignore
+- **FIXED**: System — changed hardcoded version to `*` comparison for new Linux version compatibility
+- **FIXED**: Setup — added output if offline protoc install package already exists
+
 ## [0.4.0] - 2026-04-14
 
 ### 🚀 New Features
@@ -897,6 +922,8 @@ All notable changes to this project will be documented in this file.
 - Docker Compose for quick startup and service orchestration.
 - MCP server support for integrating with MCP-compatible clients.
 
+[0.5.0]: https://github.com/Tencent/WeKnora/tree/v0.5.0
+[0.4.0]: https://github.com/Tencent/WeKnora/tree/v0.4.0
 [0.3.6]: https://github.com/Tencent/WeKnora/tree/v0.3.6
 [0.3.5]: https://github.com/Tencent/WeKnora/tree/v0.3.5
 [0.3.4]: https://github.com/Tencent/WeKnora/tree/v0.3.4
