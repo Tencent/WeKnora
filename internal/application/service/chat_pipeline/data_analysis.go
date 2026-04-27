@@ -17,27 +17,33 @@ import (
 )
 
 type PluginDataAnalysis struct {
-	modelService     interfaces.ModelService
-	knowledgeService interfaces.KnowledgeService
-	fileService      interfaces.FileService
-	chunkRepo        interfaces.ChunkRepository
-	db               *sql.DB
+	modelService         interfaces.ModelService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	fileService          interfaces.FileService
+	chunkRepo            interfaces.ChunkRepository
+	tenantService        interfaces.TenantService
+	db                   *sql.DB
 }
 
 func NewPluginDataAnalysis(
 	eventManager *EventManager,
 	modelService interfaces.ModelService,
+	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
 	fileService interfaces.FileService,
 	chunkRepo interfaces.ChunkRepository,
+	tenantService interfaces.TenantService,
 	db *sql.DB,
 ) *PluginDataAnalysis {
 	p := &PluginDataAnalysis{
-		modelService:     modelService,
-		knowledgeService: knowledgeService,
-		fileService:      fileService,
-		chunkRepo:        chunkRepo,
-		db:               db,
+		modelService:         modelService,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		fileService:          fileService,
+		chunkRepo:            chunkRepo,
+		tenantService:        tenantService,
+		db:                   db,
 	}
 	eventManager.Register(p)
 	return p
@@ -83,7 +89,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Initialize DataAnalysisTool
-	tool := tools.NewDataAnalysisTool(p.knowledgeService, p.fileService, p.db, chatManage.SessionID)
+	tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID)
 	defer tool.Cleanup(ctx)
 
 	// Load data into DuckDB
@@ -136,11 +142,11 @@ Return your response in the specified JSON format.`, chatManage.Query, knowledge
 	// 5. Store result
 	// Create a new SearchResult for the analysis output
 	analysisResult := &types.SearchResult{
-		ID:                "analysis_" + knowledge.ID,
-		Content:           toolResult.Output,
-		Score:             1.0,
-		MatchType:         types.MatchTypeDataAnalysis,
-		KnowledgeID:       knowledge.ID,
+		ID:                   "analysis_" + knowledge.ID,
+		Content:              toolResult.Output,
+		Score:                1.0,
+		MatchType:            types.MatchTypeDataAnalysis,
+		KnowledgeID:          knowledge.ID,
 		KnowledgeTitle:       knowledge.Title,
 		KnowledgeFilename:    knowledge.FileName,
 		KnowledgeDescription: knowledge.Description,
