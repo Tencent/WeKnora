@@ -1127,7 +1127,13 @@ func initNeo4jClient() (neo4j.Driver, error) {
 }
 
 func NewDuckDB() (*sql.DB, error) {
-	sqlDB, err := sql.Open("duckdb", ":memory:")
+	dbPath := strings.TrimSpace(os.Getenv("DUCKDB_PATH"))
+	if dbPath == "" {
+		dbPath = ":memory:"
+	}
+	logger.Infof(context.Background(), "[DuckDB] Opening database: %s", dbPath)
+
+	sqlDB, err := sql.Open("duckdb", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
@@ -1143,6 +1149,19 @@ func NewDuckDB() (*sql.DB, error) {
 		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
 			logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
 		}
+	}
+
+	// Optional: start DuckDB local UI for debugging.
+	// Enable with DUCKDB_UI_ENABLE=1/true/yes/on.
+	uiEnable := strings.ToLower(strings.TrimSpace(os.Getenv("DUCKDB_UI_ENABLE")))
+	if uiEnable == "1" || uiEnable == "true" || uiEnable == "yes" || uiEnable == "on" {
+		go func() {
+			if _, err := sqlDB.ExecContext(context.Background(), "CALL start_ui();"); err != nil {
+				logger.Warnf(context.Background(), "[DuckDB] Failed to start UI: %v", err)
+				return
+			}
+			logger.Infof(context.Background(), "[DuckDB] UI started")
+		}()
 	}
 
 	return sqlDB, nil
