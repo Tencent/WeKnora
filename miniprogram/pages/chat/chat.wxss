@@ -5,6 +5,6 @@
 .answer {
   white-space: pre-wrap;
   line-height: 1.7;
-  color: #102a43;
+  color: #1a1a1a;
   font-size: 28rpx;
 }

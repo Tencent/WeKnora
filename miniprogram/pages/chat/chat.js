@@ -34,7 +34,8 @@ Page({
     this.setData({ answer: "", rawResponse: "", loading: true });
     try {
       const sessionId = await this.ensureSession();
-      const response = await knowledgeChat(sessionId, this.data.query.trim());
+      const settings = getSettings();
+      const response = await knowledgeChat(sessionId, this.data.query.trim(), settings.selectedKnowledgeBaseId);
       const rawResponse = typeof response === "string" ? response : JSON.stringify(response);
       const answer = collectAnswerFromSSE(rawResponse);
       this.setData({

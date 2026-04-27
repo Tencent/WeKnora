@@ -55,10 +55,15 @@ function createSession(knowledgeBaseId) {
   });
 }
 
-function knowledgeChat(sessionId, query) {
+function knowledgeChat(sessionId, query, knowledgeBaseId) {
+  const data = { query };
+  if (knowledgeBaseId) {
+    data.knowledge_base_ids = [knowledgeBaseId];
+  }
+
   return request(`/api/v1/knowledge-chat/${sessionId}`, {
     method: "POST",
-    data: { query }
+    data
   });
 }
 
