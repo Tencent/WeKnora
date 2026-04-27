@@ -295,7 +295,7 @@ docker compose up -d   # 코어 서비스 시작
 | `full` | 전체 기능 | `docker compose --profile full up -d` |
 | `neo4j` | 지식 그래프 (Neo4j) | `docker compose --profile neo4j up -d` |
 | `minio` | 오브젝트 스토리지 (MinIO) | `docker compose --profile minio up -d` |
-| `jaeger` | 트레이싱 (Jaeger) | `docker compose --profile jaeger up -d` |
+| `langfuse` | 트레이싱 (Langfuse) | `docker compose --profile langfuse up -d` |
 
 조합 예시: `docker compose --profile neo4j --profile minio up -d`
 
@@ -307,7 +307,7 @@ docker compose up -d   # 코어 서비스 시작
 |--------|-----|
 | Web UI | `http://localhost` |
 | 백엔드 API | `http://localhost:8080` |
-| Jaeger 트레이싱 | `http://localhost:16686` |
+| Langfuse 트레이싱 | `http://localhost:3000` |
 
 ## 문서 지식 그래프
 

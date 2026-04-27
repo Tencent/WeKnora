@@ -284,7 +284,7 @@ docker compose up -d   # 启动核心服务
 | `full` | 全部功能 | `docker compose --profile full up -d` |
 | `neo4j` | 知识图谱 (Neo4j) | `docker compose --profile neo4j up -d` |
 | `minio` | 对象存储 (MinIO) | `docker compose --profile minio up -d` |
-| `jaeger` | 链路追踪 (Jaeger) | `docker compose --profile jaeger up -d` |
+| `langfuse` | 链路追踪 (Langfuse) | `docker compose --profile langfuse up -d` |
 
 组合示例：`docker compose --profile neo4j --profile minio up -d`
 
@@ -296,7 +296,7 @@ docker compose up -d   # 启动核心服务
 |------|------|
 | Web UI | `http://localhost` |
 | 后端 API | `http://localhost:8080` |
-| 链路追踪 (Jaeger) | `http://localhost:16686` |
+| 链路追踪 (Langfuse) | `http://localhost:3000` |
 
 ## 文档知识图谱
 
