@@ -6,13 +6,13 @@
   ],
   "window": {
     "navigationBarTitleText": "WeKnora",
-    "navigationBarBackgroundColor": "#102a43",
+    "navigationBarBackgroundColor": "#0d3b2a",
     "navigationBarTextStyle": "white",
-    "backgroundColor": "#f4f7fb"
+    "backgroundColor": "#f3f3f3"
   },
   "tabBar": {
-    "color": "#667085",
-    "selectedColor": "#1264a3",
+    "color": "#8b8b8b",
+    "selectedColor": "#07c05f",
     "backgroundColor": "#ffffff",
     "borderStyle": "white",
     "list": [

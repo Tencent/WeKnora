@@ -5,11 +5,28 @@
   </view>
 
   <view class="card section">
+    <view wx:if="{{needsSettings}}" class="notice">
+      Configure the WeKnora API base URL and API key before loading knowledge bases.
+      <button bindtap="openSettings" class="secondary">Open Settings</button>
+    </view>
+
     <view class="field">
       <text class="label">Knowledge Base</text>
-      <picker range="{{knowledgeBases}}" range-key="name" value="{{selectedIndex}}" bindchange="onKnowledgeBaseChange">
+      <picker range="{{knowledgeBaseNames}}" value="{{selectedIndex}}" bindchange="onKnowledgeBaseChange">
         <view class="picker-value">{{selectedKnowledgeBaseName || "Tap to select"}}</view>
       </picker>
+      <view wx:if="{{statusMessage}}" class="status-message">{{statusMessage}}</view>
+      <view wx:if="{{knowledgeBaseNames.length}}" class="knowledge-list">
+        <view
+          wx:for="{{knowledgeBaseNames}}"
+          wx:key="*this"
+          data-index="{{index}}"
+          bindtap="onKnowledgeBaseTap"
+          class="knowledge-item {{index == selectedIndex ? 'active' : ''}}"
+        >
+          {{item}}
+        </view>
+      </view>
     </view>
 
     <button bindtap="loadKnowledgeBases" loading="{{loading}}">Refresh knowledge bases</button>
