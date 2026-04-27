@@ -171,6 +171,25 @@
 </details>
 
 
+## 📱 功能展示
+
+<table>
+  <tr>
+    <td colspan="2" align="center"><b>💬 智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📖 Wiki 浏览器</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki 浏览器" width="100%"></td>
+    <td width="50%" align="center"><b>🕸️ Wiki 知识图谱</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 知识图谱" width="100%"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><b>🤖 Agent 模式 · 工具调用过程</b><br/><img src="./docs/images/agent-qa.png" alt="Agent 模式工具调用过程" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📚 知识库管理</b><br/><img src="./docs/images/knowledgebases.png" alt="知识库管理" width="100%"></td>
+    <td width="50%" align="center"><b>⚙️ 对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置" width="100%"></td>
+  </tr>
+</table>
+
 ## 🏗️ 架构设计
 
 ![weknora-architecture.png](./docs/images/architecture.png)
@@ -278,27 +297,6 @@ docker compose up -d   # 启动核心服务
 | Web UI | `http://localhost` |
 | 后端 API | `http://localhost:8080` |
 | 链路追踪 (Jaeger) | `http://localhost:16686` |
-
-## 📱 功能展示
-
-<table>
-  <tr>
-    <td colspan="2"><b>智能问答对话</b><br/><img src="./docs/images/qa.png" alt="智能问答对话"></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>Agent模式工具调用过程</b><br/><img src="./docs/images/agent-qa.png" alt="Agent模式工具调用过程"></td>
-  </tr>
-  <tr>
-    <td><b>Wiki 浏览器</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki 浏览器"></td>
-    <td><b>Wiki 知识图谱</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 知识图谱"></td>
-  </tr>
-  <tr>
-    <td><b>知识库管理</b><br/><img src="./docs/images/knowledgebases.png" alt="知识库管理"></td>
-    <td><b>对话设置</b><br/><img src="./docs/images/settings.png" alt="对话设置"></td>
-  </tr>
-</table>
-
-
 
 ## 文档知识图谱
 

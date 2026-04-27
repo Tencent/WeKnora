@@ -172,6 +172,25 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 </details>
 
 
+## 📱 機能デモ
+
+<table>
+  <tr>
+    <td colspan="2" align="center"><b>💬 インテリジェント Q&A 対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェント Q&A 対話" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📖 Wiki ブラウザ</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki ブラウザ" width="100%"></td>
+    <td width="50%" align="center"><b>🕸️ Wiki ナレッジグラフ</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki ナレッジグラフ" width="100%"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><b>🤖 Agent モード · ツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agent モードツール呼び出しプロセス" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📚 ナレッジベース管理</b><br/><img src="./docs/images/knowledgebases.png" alt="ナレッジベース管理" width="100%"></td>
+    <td width="50%" align="center"><b>⚙️ 対話設定</b><br/><img src="./docs/images/settings.png" alt="対話設定" width="100%"></td>
+  </tr>
+</table>
+
 ## 🏗️ アーキテクチャ設計
 
 ![weknora-architecture.png](./docs/images/architecture.png)
@@ -279,25 +298,6 @@ docker compose up -d   # コアサービスを起動
 | Web UI | `http://localhost` |
 | バックエンド API | `http://localhost:8080` |
 | Jaeger トレーシング | `http://localhost:16686` |
-
-## 📱 機能デモ
-
-<table>
-  <tr>
-    <td colspan="2"><b>インテリジェントQ&A対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェントQ&A対話"></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>Agentモードツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agentモードツール呼び出しプロセス"></td>
-  </tr>
-  <tr>
-    <td><b>Wikiブラウザ</b><br/><img src="./docs/images/wiki-browser.png" alt="Wikiブラウザ"></td>
-    <td><b>Wikiナレッジグラフ</b><br/><img src="./docs/images/wiki-graph.png" alt="Wikiナレッジグラフ"></td>
-  </tr>
-  <tr>
-    <td><b>ナレッジベース管理</b><br/><img src="./docs/images/knowledgebases.png" alt="ナレッジベース管理"></td>
-    <td><b>対話設定</b><br/><img src="./docs/images/settings.png" alt="対話設定"></td>
-  </tr>
-</table>
 
 ## 文書ナレッジグラフ
 
