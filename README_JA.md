@@ -79,8 +79,6 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 - **VectorStore 管理**：完全な VectorStore CRUD 機能。エンティティ、リポジトリ、サービスレイヤー、接続テスト、API エンドポイント
 - **重要なバグ修正**：Azure OpenAI エンドポイント処理、Embedding 切り詰め、IM 引用タグのストリップ、neo4j Go 1.24 Windows 互換性、OSS 署名問題を修正
 
-<details>
-<summary><b>過去のリリース</b></summary>
 
 **v0.3.6 バージョンのハイライト:**
 
@@ -183,7 +181,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 ## 🧩 機能概要
 
-**🤖 インテリジェント対話**
+**インテリジェント対話**
 
 | 機能 | 詳細 |
 |------|------|
@@ -194,7 +192,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | 対話戦略 | オンライン Prompt 編集、検索閾値チューニング、マルチターン文脈認識 |
 | 推奨質問 | ナレッジベースの内容に基づく質問の自動生成 |
 
-**📚 ナレッジ管理**
+**ナレッジ管理**
 
 | 機能 | 詳細 |
 |------|------|
@@ -204,7 +202,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | 検索戦略 | BM25 疎検索 / Dense 密検索 / GraphRAG グラフ強化 / 親子チャンキング / 多次元インデックス |
 | E2E テスト | 検索+生成の全パイプライン可視化、リコール的中率・BLEU / ROUGE 指標評価 |
 
-**🔌 連携と拡張**
+**連携と拡張**
 
 | 機能 | 詳細 |
 |------|------|
@@ -215,7 +213,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 | IM 統合 | WeChat Work / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
 | Web 検索 | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
 
-**🛡️ プラットフォーム**
+**プラットフォーム**
 
 | 機能 | 詳細 |
 |------|------|

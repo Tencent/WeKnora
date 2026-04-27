@@ -80,8 +80,6 @@ The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (mo
 - **VectorStore Management**: Full VectorStore CRUD with entity, repository, service layer, connection testing, and API endpoints
 - **Bug Fixes**: Fixed Azure OpenAI endpoint handling, embedding truncation, IM citation tag stripping, neo4j Go 1.24 Windows compatibility, and OSS signature issues
 
-<details>
-<summary><b>Earlier Releases</b></summary>
 
 **v0.3.6 Highlights:**
 
@@ -183,7 +181,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 
 ## 🧩 Feature Overview
 
-**🤖 Intelligent Conversation**
+** Intelligent Conversation**
 
 | Capability | Details |
 |------------|---------|
@@ -194,7 +192,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Conversation Strategy | Online Prompt editing, retrieval threshold tuning, multi-turn context awareness |
 | Suggested Questions | Auto-generated question suggestions based on knowledge base content |
 
-**📚 Knowledge Management**
+** Knowledge Management**
 
 | Capability | Details |
 |------------|---------|
@@ -204,7 +202,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Retrieval Strategies | BM25 sparse / Dense retrieval / GraphRAG / parent-child chunking / multi-dimensional indexing |
 | E2E Testing | Full-pipeline visualization with recall hit rate, BLEU / ROUGE metric evaluation |
 
-**🔌 Integrations & Extensions**
+** Integrations & Extensions**
 
 | Capability | Details |
 |------------|---------|
@@ -215,7 +213,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | IM Channels | WeCom / Feishu / Slack / Telegram / DingTalk / Mattermost / WeChat |
 | Web Search | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama |
 
-**🛡️ Platform**
+** Platform**
 
 | Capability | Details |
 |------------|---------|
