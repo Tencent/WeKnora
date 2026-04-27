@@ -7,7 +7,7 @@ import (
 
 func TestBuildExcelCreateTableSQL_NoSheets(t *testing.T) {
 	got := buildExcelCreateTableSQL("tbl", "/tmp/data.xlsx", nil)
-	want := `CREATE TABLE "tbl" AS SELECT * FROM read_xlsx('/tmp/data.xlsx')`
+	want := `CREATE TABLE "tbl" AS SELECT * FROM read_xlsx('/tmp/data.xlsx', header=true, all_varchar=true)`
 	if got != want {
 		t.Fatalf("mismatch.\n got: %s\nwant: %s", got, want)
 	}
@@ -17,7 +17,7 @@ func TestBuildExcelCreateTableSQL_SingleSheetTagsSource(t *testing.T) {
 	got := buildExcelCreateTableSQL("tbl", "/tmp/data.xlsx", []string{"Sheet1"})
 
 	// Must use read_xlsx (excel extension) with explicit sheet param.
-	if !strings.Contains(got, "FROM read_xlsx('/tmp/data.xlsx', sheet = 'Sheet1')") {
+	if !strings.Contains(got, "FROM read_xlsx('/tmp/data.xlsx', sheet = 'Sheet1', header=true, all_varchar=true)") {
 		t.Fatalf("expected read_xlsx with sheet param, got: %s", got)
 	}
 	// Must tag the source sheet name via the synthetic column so downstream
@@ -33,7 +33,7 @@ func TestBuildExcelCreateTableSQL_MultiSheetUsesUnionAllByName(t *testing.T) {
 	// Each sheet must appear as a SELECT reading that specific sheet, and
 	// the __sheet_name column must carry its name for per-sheet filtering.
 	for _, sheet := range []string{"Sheet1", "Sheet2", "报表"} {
-		needleRead := "FROM read_xlsx('/tmp/data.xlsx', sheet = '" + sheet + "')"
+		needleRead := "FROM read_xlsx('/tmp/data.xlsx', sheet = '" + sheet + "', header=true, all_varchar=true)"
 		needleTag := "'" + sheet + "' AS " + excelSheetNameColumn
 		if !strings.Contains(got, needleRead) {
 			t.Fatalf("missing read_xlsx for sheet %q in:\n%s", sheet, got)

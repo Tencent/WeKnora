@@ -8,6 +8,7 @@ import (
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -32,6 +33,73 @@ const excelSheetNameColumn = "__sheet_name"
 // embedded inside a single-quoted SQL literal.
 func sqlSingleQuoteEscape(s string) string {
 	return strings.ReplaceAll(s, "'", "''")
+}
+
+func normalizeIdentifierForMatch(s string) string {
+	normalized := strings.ToLower(strings.TrimSpace(s))
+	normalized = strings.ReplaceAll(normalized, " ", "")
+	normalized = strings.ReplaceAll(normalized, "\u3000", "")
+	return normalized
+}
+
+func reconcileSQLColumnsWithSchema(sqlText string, schema *TableSchema) (string, []string) {
+	if schema == nil || len(schema.Columns) == 0 {
+		return sqlText, nil
+	}
+
+	normalizedToCanonical := make(map[string]string, len(schema.Columns))
+	for _, col := range schema.Columns {
+		key := normalizeIdentifierForMatch(col.Name)
+		if key == "" {
+			continue
+		}
+		if _, exists := normalizedToCanonical[key]; !exists {
+			normalizedToCanonical[key] = col.Name
+		}
+	}
+
+	quotedIdentifierPattern := regexp.MustCompile(`"([^"]+)"`)
+	fixes := make([]string, 0)
+	rewritten := quotedIdentifierPattern.ReplaceAllStringFunc(sqlText, func(token string) string {
+		name := strings.Trim(token, "\"")
+		canonical, ok := normalizedToCanonical[normalizeIdentifierForMatch(name)]
+		if !ok || canonical == name {
+			return token
+		}
+		fixes = append(fixes, fmt.Sprintf("%q -> %q", name, canonical))
+		return fmt.Sprintf(`"%s"`, canonical)
+	})
+
+	return rewritten, fixes
+}
+
+func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
+	if sqlErr == nil || schema == nil {
+		return ""
+	}
+	msg := sqlErr.Error()
+	if !strings.Contains(msg, `Referenced column "`) || !strings.Contains(msg, `not found`) {
+		return ""
+	}
+
+	matches := regexp.MustCompile(`Referenced column "([^"]+)" not found`).FindStringSubmatch(msg)
+	if len(matches) < 2 {
+		return ""
+	}
+
+	missing := matches[1]
+	normalizedMissing := normalizeIdentifierForMatch(missing)
+	if normalizedMissing == "" {
+		return ""
+	}
+
+	for _, col := range schema.Columns {
+		if normalizeIdentifierForMatch(col.Name) == normalizedMissing {
+			return fmt.Sprintf("Column %q does not exist. Did you mean %q? Please use the exact column name from schema.", missing, col.Name)
+		}
+	}
+
+	return ""
 }
 
 type DataAnalysisInput struct {
@@ -127,6 +195,10 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	// Replace knowledge ID with table name
 	input.Sql = strings.ReplaceAll(input.Sql, input.KnowledgeID, schema.TableName)
+	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.Sql, schema); len(fixes) > 0 {
+		logger.Infof(ctx, "[Tool][DataAnalysis] Auto-rewrote SQL identifiers for session %s: %v", t.sessionID, fixes)
+		input.Sql = rewrittenSQL
+	}
 
 	// Check if this is a read-only query
 	normalizedSQL := strings.TrimSpace(strings.ToLower(input.Sql))
@@ -164,6 +236,12 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 	// Execute single query and get results
 	results, err := t.executeSingleQuery(ctx, input.Sql)
 	if err != nil {
+		if suggestion := buildMissingColumnSuggestion(err, schema); suggestion != "" {
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("Query execution failed: %v. %s", err, suggestion),
+			}, err
+		}
 		return &types.ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("Query execution failed: %v", err),
@@ -305,8 +383,13 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 	// Record the created table for cleanup. If already exists, skip creation
 	if t.recordCreatedTable(tableName) {
 		// Create table from CSV using DuckDB's read_csv_auto function
+		// with explicit header detection and VARCHAR coercion to align with
+		// Excel loading behavior.
 		// Table will be created in the session schema
-		createTableSQL := fmt.Sprintf("CREATE TABLE \"%s\" AS SELECT * FROM read_csv_auto('%s')", tableName, filename)
+		createTableSQL := fmt.Sprintf(
+			"CREATE TABLE \"%s\" AS SELECT * FROM read_csv_auto('%s', header=true, all_varchar=true)",
+			tableName, sqlSingleQuoteEscape(filename),
+		)
 
 		_, err := t.db.ExecContext(ctx, createTableSQL)
 		if err != nil {
@@ -415,7 +498,7 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 	// No sheet info (enumeration failed or empty): read the first sheet only.
 	if len(sheetNames) == 0 {
 		return fmt.Sprintf(
-			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s')",
+			"CREATE TABLE \"%s\" AS SELECT * FROM read_xlsx('%s', header=true, all_varchar=true)",
 			tableName, escFile,
 		)
 	}
@@ -425,7 +508,7 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 	if len(sheetNames) == 1 {
 		escSheet := sqlSingleQuoteEscape(sheetNames[0])
 		return fmt.Sprintf(
-			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s')",
+			"CREATE TABLE \"%s\" AS SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
 			tableName, escSheet, excelSheetNameColumn, escFile, escSheet,
 		)
 	}
@@ -437,7 +520,7 @@ func buildExcelCreateTableSQL(tableName, filename string, sheetNames []string) s
 	for _, sheet := range sheetNames {
 		escSheet := sqlSingleQuoteEscape(sheet)
 		parts = append(parts, fmt.Sprintf(
-			"SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s')",
+			"SELECT *, '%s' AS %s FROM read_xlsx('%s', sheet = '%s', header=true, all_varchar=true)",
 			escSheet, excelSheetNameColumn, escFile, escSheet,
 		))
 	}
