@@ -53,3 +53,6 @@ Claude.md
 # 本地测试脚本
 configure-ollama.sh
 fix-docker.sh
+
+# WeChat Mini Program local/private configuration
+miniprogram/project.private.config.json
