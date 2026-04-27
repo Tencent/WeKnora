@@ -285,7 +285,7 @@ docker compose up -d   # コアサービスを起動
 | `full` | 全機能 | `docker compose --profile full up -d` |
 | `neo4j` | ナレッジグラフ (Neo4j) | `docker compose --profile neo4j up -d` |
 | `minio` | オブジェクトストレージ (MinIO) | `docker compose --profile minio up -d` |
-| `jaeger` | トレーシング (Jaeger) | `docker compose --profile jaeger up -d` |
+| `langfuse` | トレーシング (Langfuse) | `docker compose --profile langfuse up -d` |
 
 組み合わせ例：`docker compose --profile neo4j --profile minio up -d`
 
@@ -297,7 +297,7 @@ docker compose up -d   # コアサービスを起動
 |---------|-----|
 | Web UI | `http://localhost` |
 | バックエンド API | `http://localhost:8080` |
-| Jaeger トレーシング | `http://localhost:16686` |
+| Langfuse トレーシング | `http://localhost:3000` |
 
 ## 文書ナレッジグラフ
 

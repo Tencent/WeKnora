@@ -286,7 +286,7 @@ Add `--profile` flags to enable additional components. Multiple profiles can be 
 | `full` | All features | `docker compose --profile full up -d` |
 | `neo4j` | Knowledge Graph (Neo4j) | `docker compose --profile neo4j up -d` |
 | `minio` | Object Storage (MinIO) | `docker compose --profile minio up -d` |
-| `jaeger` | Tracing (Jaeger) | `docker compose --profile jaeger up -d` |
+| `langfuse` | Tracing (Langfuse) | `docker compose --profile langfuse up -d` |
 
 Combine profiles: `docker compose --profile neo4j --profile minio up -d`
 
@@ -298,7 +298,7 @@ Stop services: `docker compose down`
 |---------|-----|
 | Web UI | `http://localhost` |
 | Backend API | `http://localhost:8080` |
-| Jaeger Tracing | `http://localhost:16686` |
+| Langfuse Tracing | `http://localhost:3000` |
 
 ## MCP Server
 
