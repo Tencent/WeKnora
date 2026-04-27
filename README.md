@@ -173,6 +173,25 @@ The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (mo
 </details>
 
 
+## 📱 Interface Showcase
+
+<table>
+  <tr>
+    <td colspan="2" align="center"><b>💬 Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📖 Wiki Browser</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki Browser" width="100%"></td>
+    <td width="50%" align="center"><b>🕸️ Wiki Knowledge Graph</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki Knowledge Graph" width="100%"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><b>🤖 Agent Mode · Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📚 Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management" width="100%"></td>
+    <td width="50%" align="center"><b>⚙️ Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings" width="100%"></td>
+  </tr>
+</table>
+
 ## 🏗️ Architecture
 
 ![weknora-architecture.png](./docs/images/architecture.png)
@@ -280,26 +299,6 @@ Stop services: `docker compose down`
 | Web UI | `http://localhost` |
 | Backend API | `http://localhost:8080` |
 | Jaeger Tracing | `http://localhost:16686` |
-
-## 📱 Interface Showcase
-
-<table>
-  <tr>
-    <td colspan="2"><b>Intelligent Q&A Conversation</b><br/><img src="./docs/images/qa.png" alt="Intelligent Q&A Conversation"></td>
-  </tr>
-  <tr>
-    <td colspan="2"><b>Agent Mode Tool Call Process</b><br/><img src="./docs/images/agent-qa.png" alt="Agent Mode Tool Call Process"></td>
-  </tr>
-  <tr>
-    <td><b>Wiki Browser</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki Browser"></td>
-    <td><b>Wiki Knowledge Graph</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki Knowledge Graph"></td>
-  </tr>
-  <tr>
-    <td><b>Knowledge Base Management</b><br/><img src="./docs/images/knowledgebases.png" alt="Knowledge Base Management"></td>
-    <td><b>Conversation Settings</b><br/><img src="./docs/images/settings.png" alt="Conversation Settings"></td>
-  </tr>
-</table>
-
 
 ## MCP Server
 
