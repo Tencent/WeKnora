@@ -51,7 +51,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -83,7 +83,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.CreateAgentRequest"
+                            "$ref": "#/definitions/internal_handler.CreateAgentRequest"
                         }
                     }
                 ],
@@ -98,7 +98,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -128,6 +128,38 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "占位符定义",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/agents/type-presets": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于编辑器自动填充系统提示词、工具和 KB 兼容性",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "智能体"
+                ],
+                "summary": "获取智能体类型预设列表",
+                "responses": {
+                    "200": {
+                        "description": "预设列表",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -177,13 +209,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -222,7 +254,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.UpdateAgentRequest"
+                            "$ref": "#/definitions/internal_handler.UpdateAgentRequest"
                         }
                     }
                 ],
@@ -237,13 +269,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "无法修改内置智能体",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -288,19 +320,19 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "无法删除内置智能体",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -347,13 +379,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -418,13 +450,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -455,7 +487,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/types.DataSource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                             }
                         }
                     },
@@ -489,7 +521,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     }
                 ],
@@ -497,7 +529,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     },
                     "400": {
@@ -535,7 +567,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.SyncLog"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                         }
                     },
                     "404": {
@@ -566,7 +598,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/datasource.ConnectorMetadata"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata"
                             }
                         }
                     }
@@ -642,7 +674,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     },
                     "404": {
@@ -682,7 +714,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     }
                 ],
@@ -690,7 +722,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     },
                     "400": {
@@ -772,7 +804,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/types.SyncLog"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                             }
                         }
                     },
@@ -851,7 +883,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/types.Resource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Resource"
                             }
                         }
                     },
@@ -925,7 +957,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.SyncLog"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                         }
                     },
                     "400": {
@@ -978,6 +1010,681 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/knowledgebase/{kb_id}/wiki/auto-fix": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Automatically fix fixable wiki issues (broken links, etc.)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Auto-fix wiki issues",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/graph": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns the wiki link graph data for visualization",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Get wiki link graph",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphData"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/index": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns the wiki index page (creates default if not exists)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Get wiki index page",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/issues": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "List issues flagged on wiki pages with optional filtering",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "List wiki page issues",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by page slug",
+                        "name": "slug",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (pending, ignored, resolved)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageIssue"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/issues/{issue_id}/status": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Update the status of a flagged wiki page issue",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Update wiki page issue status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Issue ID",
+                        "name": "issue_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New status {'status': 'ignored'}",
+                        "name": "status",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/lint": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Perform a comprehensive health check on the wiki",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Run wiki lint",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintReport"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/log": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns the wiki operation log page (creates default if not exists)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Get wiki operation log",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/pages": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "List wiki pages with optional filtering and pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "List wiki pages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by page type",
+                        "name": "page_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Full-text search",
+                        "name": "query",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort field",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort order (asc/desc)",
+                        "name": "sort_order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Create a new wiki page in the knowledge base",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Create a wiki page",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Wiki page data",
+                        "name": "page",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/pages/{slug}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Retrieve a wiki page by its slug",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Get a wiki page by slug",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Update an existing wiki page by slug",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Update a wiki page",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated wiki page data",
+                        "name": "page",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Soft-delete a wiki page by slug",
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Delete a wiki page",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/rebuild-links": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Re-parse all pages and rebuild bidirectional link references",
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Rebuild wiki links",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/search": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Full-text search over wiki pages",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Search wiki pages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Search query",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max results (default 10)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/knowledgebase/{kb_id}/wiki/stats": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns aggregate statistics about the wiki",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Get wiki statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/auto-setup": {
             "post": {
                 "description": "Lite 版专用：首次启动时自动创建默认用户和租户并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程",
@@ -995,13 +1702,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.LoginResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
                         }
                     },
                     "403": {
                         "description": "非 Lite 版本",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1055,7 +1762,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1081,7 +1788,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.LoginRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginRequest"
                         }
                     }
                 ],
@@ -1089,13 +1796,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.LoginResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
                         }
                     },
                     "401": {
                         "description": "认证失败",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1130,7 +1837,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1165,7 +1872,7 @@ const docTemplate = `{
                     "401": {
                         "description": "未授权",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1228,7 +1935,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.OIDCConfigResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OIDCConfigResponse"
                         }
                     }
                 }
@@ -1260,19 +1967,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.OIDCAuthURLResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OIDCAuthURLResponse"
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "OIDC未启用",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1318,7 +2025,7 @@ const docTemplate = `{
                     "401": {
                         "description": "令牌无效",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1344,7 +2051,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.RegisterRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RegisterRequest"
                         }
                     }
                 ],
@@ -1352,19 +2059,19 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/types.RegisterResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RegisterResponse"
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "注册功能已禁用",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1399,7 +2106,7 @@ const docTemplate = `{
                     "401": {
                         "description": "令牌无效",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1446,13 +2153,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1513,13 +2220,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1580,7 +2287,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1625,7 +2332,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1673,7 +2380,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.UpdateChunkRequest"
+                            "$ref": "#/definitions/internal_handler.UpdateChunkRequest"
                         }
                     }
                 ],
@@ -1688,13 +2395,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1746,13 +2453,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1799,7 +2506,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1831,7 +2538,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.EvaluationRequest"
+                            "$ref": "#/definitions/internal_handler.EvaluationRequest"
                         }
                     }
                 ],
@@ -1846,7 +2553,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1893,7 +2600,7 @@ const docTemplate = `{
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1927,7 +2634,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.TextRelationExtractionRequest"
+                            "$ref": "#/definitions/internal_handler.TextRelationExtractionRequest"
                         }
                     }
                 ],
@@ -1942,7 +2649,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2000,7 +2707,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.FabriTextRequest"
+                            "$ref": "#/definitions/internal_handler.FabriTextRequest"
                         }
                     }
                 ],
@@ -2015,7 +2722,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2071,7 +2778,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2118,7 +2825,7 @@ const docTemplate = `{
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2157,7 +2864,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.KBModelConfigRequest"
+                            "$ref": "#/definitions/internal_handler.KBModelConfigRequest"
                         }
                     }
                 ],
@@ -2172,13 +2879,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2227,7 +2934,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2276,7 +2983,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2310,7 +3017,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.RemoteModelCheckRequest"
+                            "$ref": "#/definitions/internal_handler.RemoteModelCheckRequest"
                         }
                     }
                 ],
@@ -2325,7 +3032,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2374,7 +3081,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2454,7 +3161,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2533,7 +3240,7 @@ const docTemplate = `{
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2571,7 +3278,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2628,7 +3335,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2682,7 +3389,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2752,7 +3459,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2784,7 +3491,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.KnowledgeBase"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBase"
                         }
                     }
                 ],
@@ -2799,7 +3506,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2833,7 +3540,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.CopyKnowledgeBaseRequest"
+                            "$ref": "#/definitions/internal_handler.CopyKnowledgeBaseRequest"
                         }
                     }
                 ],
@@ -2848,7 +3555,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2895,7 +3602,7 @@ const docTemplate = `{
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2948,13 +3655,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2993,7 +3700,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.UpdateKnowledgeBaseRequest"
+                            "$ref": "#/definitions/internal_handler.UpdateKnowledgeBaseRequest"
                         }
                     }
                 ],
@@ -3008,7 +3715,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3053,7 +3760,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3136,7 +3843,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3175,7 +3882,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.FAQBatchUpsertPayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQBatchUpsertPayload"
                         }
                     }
                 ],
@@ -3190,7 +3897,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3252,7 +3959,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3298,7 +4005,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3339,7 +4046,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.FAQEntryFieldsBatchUpdate"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsBatchUpdate"
                         }
                     }
                 ],
@@ -3354,7 +4061,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3410,7 +4117,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3464,13 +4171,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "条目不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3516,7 +4223,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.FAQEntryPayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload"
                         }
                     }
                 ],
@@ -3531,7 +4238,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3579,7 +4286,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.addSimilarQuestionsRequest"
+                            "$ref": "#/definitions/internal_handler.addSimilarQuestionsRequest"
                         }
                     }
                 ],
@@ -3594,13 +4301,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "条目不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3641,7 +4348,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.FAQEntryPayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload"
                         }
                     }
                 ],
@@ -3656,7 +4363,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3697,7 +4404,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.updateLastFAQImportResultDisplayStatusRequest"
+                            "$ref": "#/definitions/internal_handler.updateLastFAQImportResultDisplayStatusRequest"
                         }
                     }
                 ],
@@ -3712,13 +4419,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在或无导入记录",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3759,7 +4466,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.FAQSearchRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQSearchRequest"
                         }
                     }
                 ],
@@ -3774,7 +4481,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3815,7 +4522,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.SearchParams"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
                     }
                 ],
@@ -3830,7 +4537,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3907,7 +4614,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3952,13 +4659,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4030,7 +4737,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
@@ -4078,7 +4785,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.ManualKnowledgePayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload"
                         }
                     }
                 ],
@@ -4093,7 +4800,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4169,7 +4876,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
@@ -4223,7 +4930,7 @@ const docTemplate = `{
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4257,7 +4964,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.ListSharesResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListSharesResponse"
                         }
                     }
                 }
@@ -4293,7 +5000,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.ShareKnowledgeBaseRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest"
                         }
                     }
                 ],
@@ -4353,7 +5060,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.UpdateSharePermissionRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateSharePermissionRequest"
                         }
                     }
                 ],
@@ -4476,7 +5183,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4541,7 +5248,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4604,7 +5311,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4661,7 +5368,7 @@ const docTemplate = `{
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "$ref": "#/definitions/handler.DeleteTagRequest"
+                            "$ref": "#/definitions/internal_handler.DeleteTagRequest"
                         }
                     }
                 ],
@@ -4676,7 +5383,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4739,7 +5446,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4807,7 +5514,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4848,7 +5555,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.ManualKnowledgePayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload"
                         }
                     }
                 ],
@@ -4863,7 +5570,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4933,7 +5640,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4982,7 +5689,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5029,13 +5736,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5074,7 +5781,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.Knowledge"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
                         }
                     }
                 ],
@@ -5089,7 +5796,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5134,7 +5841,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5180,7 +5887,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5229,7 +5936,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5276,13 +5983,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5320,7 +6027,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5352,7 +6059,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.MCPService"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPService"
                         }
                     }
                 ],
@@ -5367,7 +6074,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5414,7 +6121,7 @@ const docTemplate = `{
                     "404": {
                         "description": "服务不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5468,7 +6175,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5513,7 +6220,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5560,7 +6267,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5607,7 +6314,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5654,7 +6361,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5720,7 +6427,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.SearchMessagesRequest"
+                            "$ref": "#/definitions/internal_handler.SearchMessagesRequest"
                         }
                     }
                 ],
@@ -5735,7 +6442,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5795,7 +6502,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5849,7 +6556,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5887,7 +6594,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5919,7 +6626,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.CreateModelRequest"
+                            "$ref": "#/definitions/internal_handler.CreateModelRequest"
                         }
                     }
                 ],
@@ -5934,7 +6641,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6021,7 +6728,7 @@ const docTemplate = `{
                     "404": {
                         "description": "模型不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6060,7 +6767,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.UpdateModelRequest"
+                            "$ref": "#/definitions/internal_handler.UpdateModelRequest"
                         }
                     }
                 ],
@@ -6075,7 +6782,7 @@ const docTemplate = `{
                     "404": {
                         "description": "模型不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6120,7 +6827,7 @@ const docTemplate = `{
                     "404": {
                         "description": "模型不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6145,7 +6852,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.ListOrganizationsResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListOrganizationsResponse"
                         }
                     }
                 }
@@ -6174,7 +6881,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.CreateOrganizationRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest"
                         }
                     }
                 ],
@@ -6220,7 +6927,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.JoinOrganizationRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JoinOrganizationRequest"
                         }
                     }
                 ],
@@ -6266,7 +6973,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.JoinByOrganizationIDRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest"
                         }
                     }
                 ],
@@ -6312,7 +7019,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.SubmitJoinRequestRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest"
                         }
                     }
                 ],
@@ -6486,7 +7193,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.UpdateOrganizationRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateOrganizationRequest"
                         }
                     }
                 ],
@@ -6575,7 +7282,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.InviteMemberRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.InviteMemberRequest"
                         }
                     }
                 ],
@@ -6723,7 +7430,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.ReviewJoinRequestRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ReviewJoinRequestRequest"
                         }
                     }
                 ],
@@ -6810,7 +7517,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.ListMembersResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListMembersResponse"
                         }
                     }
                 }
@@ -6855,7 +7562,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.UpdateMemberRoleRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest"
                         }
                     }
                 ],
@@ -6951,7 +7658,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.RequestRoleUpgradeRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RequestRoleUpgradeRequest"
                         }
                     }
                 ],
@@ -7125,7 +7832,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/types.ListSharesResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListSharesResponse"
                         }
                     }
                 }
@@ -7177,7 +7884,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7209,7 +7916,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.CreateSessionRequest"
+                            "$ref": "#/definitions/internal_handler_session.CreateSessionRequest"
                         }
                     }
                 ],
@@ -7224,7 +7931,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7258,7 +7965,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.batchDeleteRequest"
+                            "$ref": "#/definitions/internal_handler_session.batchDeleteRequest"
                         }
                     }
                 ],
@@ -7273,7 +7980,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7307,7 +8014,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.SearchKnowledgeRequest"
+                            "$ref": "#/definitions/internal_handler_session.SearchKnowledgeRequest"
                         }
                     }
                 ],
@@ -7322,7 +8029,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7369,7 +8076,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7408,7 +8115,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.Session"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Session"
                         }
                     }
                 ],
@@ -7423,7 +8130,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7468,7 +8175,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7515,13 +8222,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7562,7 +8269,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.CreateKnowledgeQARequest"
+                            "$ref": "#/definitions/internal_handler_session.CreateKnowledgeQARequest"
                         }
                     }
                 ],
@@ -7577,7 +8284,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7631,7 +8338,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话或消息不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7672,7 +8379,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.CreateKnowledgeQARequest"
+                            "$ref": "#/definitions/internal_handler_session.CreateKnowledgeQARequest"
                         }
                     }
                 ],
@@ -7687,7 +8394,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7728,7 +8435,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.StopSessionRequest"
+                            "$ref": "#/definitions/internal_handler_session.StopSessionRequest"
                         }
                     }
                 ],
@@ -7743,7 +8450,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话或消息不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7784,7 +8491,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler_session.GenerateTitleRequest"
+                            "$ref": "#/definitions/internal_handler_session.GenerateTitleRequest"
                         }
                     }
                 ],
@@ -7799,7 +8506,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7863,7 +8570,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7916,7 +8623,7 @@ const docTemplate = `{
                     "200": {
                         "description": "系统信息",
                         "schema": {
-                            "$ref": "#/definitions/handler.GetSystemInfoResponse"
+                            "$ref": "#/definitions/internal_handler.GetSystemInfoResponse"
                         }
                     }
                 }
@@ -7992,7 +8699,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.StorageCheckRequest"
+                            "$ref": "#/definitions/internal_handler.StorageCheckRequest"
                         }
                     }
                 ],
@@ -8000,7 +8707,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handler.StorageCheckResponse"
+                            "$ref": "#/definitions/internal_handler.StorageCheckResponse"
                         }
                     }
                 }
@@ -8020,7 +8727,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handler.GetStorageEngineStatusResponse"
+                            "$ref": "#/definitions/internal_handler.GetStorageEngineStatusResponse"
                         }
                     }
                 }
@@ -8055,7 +8762,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8084,7 +8791,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.Tenant"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                         }
                     }
                 ],
@@ -8099,7 +8806,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8134,7 +8841,7 @@ const docTemplate = `{
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8172,7 +8879,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8210,7 +8917,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8248,7 +8955,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8286,7 +8993,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8333,7 +9040,7 @@ const docTemplate = `{
                     "400": {
                         "description": "不支持的键",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8387,7 +9094,7 @@ const docTemplate = `{
                     "400": {
                         "description": "不支持的键",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8453,7 +9160,7 @@ const docTemplate = `{
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8500,13 +9207,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "租户不存在",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8542,7 +9249,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/types.Tenant"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                         }
                     }
                 ],
@@ -8557,7 +9264,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8599,7 +9306,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8667,7 +9374,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.CreateStoreRequest"
+                            "$ref": "#/definitions/internal_handler.CreateStoreRequest"
                         }
                     }
                 ],
@@ -8682,7 +9389,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request or validation error",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -8695,7 +9402,7 @@ const docTemplate = `{
                     "409": {
                         "description": "Duplicate endpoint and index",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8729,7 +9436,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.TestStoreRequest"
+                            "$ref": "#/definitions/internal_handler.TestStoreRequest"
                         }
                     }
                 ],
@@ -8744,7 +9451,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -8863,7 +9570,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.UpdateStoreRequest"
+                            "$ref": "#/definitions/internal_handler.UpdateStoreRequest"
                         }
                     }
                 ],
@@ -9010,7 +9717,87 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "datasource.ConnectorMetadata": {
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintIssue": {
+            "type": "object",
+            "properties": {
+                "auto_fixable": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "page_slug": {
+                    "type": "string"
+                },
+                "severity": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueSeverity"
+                },
+                "target_slug": {
+                    "description": "TargetSlug identifies the other page involved in the issue (e.g. the\nbroken link target, or the entity slug for a missing cross-ref). It is\nthe structured field used by AutoFix instead of parsing Description.",
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueType"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueSeverity": {
+            "type": "string",
+            "enum": [
+                "info",
+                "warning",
+                "error"
+            ],
+            "x-enum-varnames": [
+                "SeverityInfo",
+                "SeverityWarning",
+                "SeverityError"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueType": {
+            "type": "string",
+            "enum": [
+                "orphan_page",
+                "broken_link",
+                "stale_ref",
+                "missing_cross_ref",
+                "empty_content",
+                "duplicate_slug"
+            ],
+            "x-enum-varnames": [
+                "LintIssueOrphanPage",
+                "LintIssueBrokenLink",
+                "LintIssueStaleRef",
+                "LintIssueMissingCrossRef",
+                "LintIssueEmptyContent",
+                "LintIssueDuplicateSlug"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintReport": {
+            "type": "object",
+            "properties": {
+                "health_score": {
+                    "description": "0-100",
+                    "type": "integer"
+                },
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintIssue"
+                    }
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "stats": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats"
+                },
+                "summary": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata": {
             "type": "object",
             "properties": {
                 "auth_type": {
@@ -9042,11 +9829,11 @@ const docTemplate = `{
                 }
             }
         },
-        "errors.AppError": {
+        "github_com_Tencent_WeKnora_internal_errors.AppError": {
             "type": "object",
             "properties": {
                 "code": {
-                    "$ref": "#/definitions/errors.ErrorCode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.ErrorCode"
                 },
                 "details": {},
                 "message": {
@@ -9054,7 +9841,7 @@ const docTemplate = `{
                 }
             }
         },
-        "errors.ErrorCode": {
+        "github_com_Tencent_WeKnora_internal_errors.ErrorCode": {
             "type": "integer",
             "enum": [
                 1000,
@@ -9101,799 +9888,7 @@ const docTemplate = `{
                 "ErrAgentInvalidTemperature"
             ]
         },
-        "github_com_Tencent_WeKnora_internal_errors.AppError": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "$ref": "#/definitions/errors.ErrorCode"
-                },
-                "details": {},
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "gorm.DeletedAt": {
-            "type": "object",
-            "properties": {
-                "time": {
-                    "type": "string"
-                },
-                "valid": {
-                    "description": "Valid is true if Time is not NULL",
-                    "type": "boolean"
-                }
-            }
-        },
-        "handler.CopyKnowledgeBaseRequest": {
-            "type": "object",
-            "required": [
-                "source_id"
-            ],
-            "properties": {
-                "source_id": {
-                    "type": "string"
-                },
-                "target_id": {
-                    "type": "string"
-                },
-                "task_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.CreateAgentRequest": {
-            "type": "object",
-            "required": [
-                "name"
-            ],
-            "properties": {
-                "avatar": {
-                    "type": "string"
-                },
-                "config": {
-                    "$ref": "#/definitions/types.CustomAgentConfig"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.CreateModelRequest": {
-            "type": "object",
-            "required": [
-                "name",
-                "parameters",
-                "source",
-                "type"
-            ],
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "parameters": {
-                    "$ref": "#/definitions/types.ModelParameters"
-                },
-                "source": {
-                    "$ref": "#/definitions/types.ModelSource"
-                },
-                "type": {
-                    "$ref": "#/definitions/types.ModelType"
-                }
-            }
-        },
-        "handler.CreateStoreRequest": {
-            "type": "object",
-            "required": [
-                "connection_config",
-                "engine_type",
-                "name"
-            ],
-            "properties": {
-                "connection_config": {
-                    "$ref": "#/definitions/types.ConnectionConfig"
-                },
-                "engine_type": {
-                    "$ref": "#/definitions/types.RetrieverEngineType"
-                },
-                "index_config": {
-                    "$ref": "#/definitions/types.IndexConfig"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.DeleteTagRequest": {
-            "type": "object",
-            "properties": {
-                "exclude_ids": {
-                    "description": "Chunk seq_ids to exclude from deletion",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                }
-            }
-        },
-        "handler.EvaluationRequest": {
-            "type": "object",
-            "properties": {
-                "chat_id": {
-                    "description": "ID of chat model to use",
-                    "type": "string"
-                },
-                "dataset_id": {
-                    "description": "ID of dataset to evaluate",
-                    "type": "string"
-                },
-                "knowledge_base_id": {
-                    "description": "ID of knowledge base to use",
-                    "type": "string"
-                },
-                "rerank_id": {
-                    "description": "ID of rerank model to use",
-                    "type": "string"
-                }
-            }
-        },
-        "handler.FabriTextRequest": {
-            "type": "object",
-            "required": [
-                "model_id"
-            ],
-            "properties": {
-                "model_id": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "handler.GetStorageEngineStatusResponse": {
-            "type": "object",
-            "properties": {
-                "engines": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handler.StorageEngineStatusItem"
-                    }
-                },
-                "minio_env_available": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "handler.GetSystemInfoResponse": {
-            "type": "object",
-            "properties": {
-                "build_time": {
-                    "type": "string"
-                },
-                "commit_id": {
-                    "type": "string"
-                },
-                "db_version": {
-                    "type": "string"
-                },
-                "edition": {
-                    "type": "string"
-                },
-                "go_version": {
-                    "type": "string"
-                },
-                "graph_database_engine": {
-                    "type": "string"
-                },
-                "keyword_index_engine": {
-                    "type": "string"
-                },
-                "minio_enabled": {
-                    "type": "boolean"
-                },
-                "vector_store_engine": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.KBModelConfigRequest": {
-            "type": "object",
-            "required": [
-                "embeddingModelId",
-                "llmModelId"
-            ],
-            "properties": {
-                "asr_config": {
-                    "$ref": "#/definitions/types.ASRConfig"
-                },
-                "documentSplitting": {
-                    "description": "文档分块配置",
-                    "type": "object",
-                    "properties": {
-                        "childChunkSize": {
-                            "type": "integer"
-                        },
-                        "chunkOverlap": {
-                            "type": "integer"
-                        },
-                        "chunkSize": {
-                            "type": "integer"
-                        },
-                        "enableParentChild": {
-                            "type": "boolean"
-                        },
-                        "parentChunkSize": {
-                            "type": "integer"
-                        },
-                        "parserEngineRules": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/types.ParserEngineRule"
-                            }
-                        },
-                        "separators": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                },
-                "embeddingModelId": {
-                    "type": "string"
-                },
-                "llmModelId": {
-                    "type": "string"
-                },
-                "multimodal": {
-                    "description": "多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）",
-                    "type": "object",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        }
-                    }
-                },
-                "nodeExtract": {
-                    "description": "知识图谱配置",
-                    "type": "object",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        },
-                        "nodes": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/types.GraphNode"
-                            }
-                        },
-                        "relations": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/types.GraphRelation"
-                            }
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        },
-                        "text": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "questionGeneration": {
-                    "description": "问题生成配置",
-                    "type": "object",
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        },
-                        "questionCount": {
-                            "type": "integer"
-                        }
-                    }
-                },
-                "storageProvider": {
-                    "description": "存储引擎选择（\"local\" | \"minio\" | \"cos\"），影响文档上传与文档内图片存储，参数从全局设置读取",
-                    "type": "string"
-                },
-                "vlm_config": {
-                    "$ref": "#/definitions/types.VLMConfig"
-                }
-            }
-        },
-        "handler.RemoteModelCheckRequest": {
-            "type": "object",
-            "required": [
-                "baseUrl",
-                "modelName"
-            ],
-            "properties": {
-                "apiKey": {
-                    "type": "string"
-                },
-                "baseUrl": {
-                    "type": "string"
-                },
-                "modelName": {
-                    "type": "string"
-                },
-                "provider": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.SearchMessagesRequest": {
-            "type": "object",
-            "required": [
-                "query"
-            ],
-            "properties": {
-                "limit": {
-                    "description": "Maximum number of results to return (default: 20)",
-                    "type": "integer"
-                },
-                "mode": {
-                    "description": "Search mode: \"keyword\", \"vector\", \"hybrid\" (default: \"hybrid\")",
-                    "type": "string"
-                },
-                "query": {
-                    "description": "Query text for search",
-                    "type": "string"
-                },
-                "session_ids": {
-                    "description": "Filter by specific session IDs (optional)",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "handler.StorageCheckRequest": {
-            "type": "object",
-            "properties": {
-                "cos": {
-                    "$ref": "#/definitions/types.COSEngineConfig"
-                },
-                "minio": {
-                    "$ref": "#/definitions/types.MinIOEngineConfig"
-                },
-                "oss": {
-                    "$ref": "#/definitions/types.OSSEngineConfig"
-                },
-                "provider": {
-                    "description": "\"minio\", \"cos\", \"tos\", \"s3\", \"oss\"",
-                    "type": "string"
-                },
-                "s3": {
-                    "$ref": "#/definitions/types.S3EngineConfig"
-                },
-                "tos": {
-                    "$ref": "#/definitions/types.TOSEngineConfig"
-                }
-            }
-        },
-        "handler.StorageCheckResponse": {
-            "type": "object",
-            "properties": {
-                "bucket_created": {
-                    "type": "boolean"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "ok": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "handler.StorageEngineStatusItem": {
-            "type": "object",
-            "properties": {
-                "available": {
-                    "description": "whether the engine can be used",
-                    "type": "boolean"
-                },
-                "description": {
-                    "description": "short description for UI",
-                    "type": "string"
-                },
-                "name": {
-                    "description": "\"local\", \"minio\", \"cos\", \"tos\"",
-                    "type": "string"
-                }
-            }
-        },
-        "handler.TestStoreRequest": {
-            "type": "object",
-            "required": [
-                "connection_config",
-                "engine_type"
-            ],
-            "properties": {
-                "connection_config": {
-                    "$ref": "#/definitions/types.ConnectionConfig"
-                },
-                "engine_type": {
-                    "$ref": "#/definitions/types.RetrieverEngineType"
-                }
-            }
-        },
-        "handler.TextRelationExtractionRequest": {
-            "type": "object",
-            "required": [
-                "model_id",
-                "tags",
-                "text"
-            ],
-            "properties": {
-                "model_id": {
-                    "type": "string"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "text": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.UpdateAgentRequest": {
-            "type": "object",
-            "properties": {
-                "avatar": {
-                    "type": "string"
-                },
-                "config": {
-                    "$ref": "#/definitions/types.CustomAgentConfig"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.UpdateChunkRequest": {
-            "type": "object",
-            "properties": {
-                "chunk_index": {
-                    "type": "integer"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "embedding": {
-                    "type": "array",
-                    "items": {
-                        "type": "number"
-                    }
-                },
-                "end_at": {
-                    "type": "integer"
-                },
-                "image_info": {
-                    "type": "string"
-                },
-                "is_enabled": {
-                    "type": "boolean"
-                },
-                "start_at": {
-                    "type": "integer"
-                }
-            }
-        },
-        "handler.UpdateKnowledgeBaseRequest": {
-            "type": "object",
-            "required": [
-                "name"
-            ],
-            "properties": {
-                "config": {
-                    "$ref": "#/definitions/types.KnowledgeBaseConfig"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.UpdateModelRequest": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "parameters": {
-                    "$ref": "#/definitions/types.ModelParameters"
-                },
-                "source": {
-                    "$ref": "#/definitions/types.ModelSource"
-                },
-                "type": {
-                    "$ref": "#/definitions/types.ModelType"
-                }
-            }
-        },
-        "handler.UpdateStoreRequest": {
-            "type": "object",
-            "required": [
-                "name"
-            ],
-            "properties": {
-                "name": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler.addSimilarQuestionsRequest": {
-            "type": "object",
-            "required": [
-                "similar_questions"
-            ],
-            "properties": {
-                "similar_questions": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "handler.updateLastFAQImportResultDisplayStatusRequest": {
-            "type": "object",
-            "required": [
-                "display_status"
-            ],
-            "properties": {
-                "display_status": {
-                    "type": "string",
-                    "enum": [
-                        "open",
-                        "close"
-                    ]
-                }
-            }
-        },
-        "handler_session.AttachmentUpload": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "description": "Base64-encoded file content",
-                    "type": "string"
-                },
-                "file_name": {
-                    "description": "Original filename",
-                    "type": "string"
-                },
-                "file_size": {
-                    "description": "File size in bytes",
-                    "type": "integer"
-                }
-            }
-        },
-        "handler_session.CreateKnowledgeQARequest": {
-            "type": "object",
-            "required": [
-                "query"
-            ],
-            "properties": {
-                "agent_enabled": {
-                    "description": "Whether agent mode is enabled for this request",
-                    "type": "boolean"
-                },
-                "agent_id": {
-                    "description": "Selected custom agent ID (backend resolves shared agent and its tenant from share relation)",
-                    "type": "string"
-                },
-                "attachment_uploads": {
-                    "description": "Attached files (documents, audio, etc.)",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handler_session.AttachmentUpload"
-                    }
-                },
-                "channel": {
-                    "description": "Source channel: \"web\", \"api\", \"im\", etc.",
-                    "type": "string"
-                },
-                "disable_title": {
-                    "description": "Whether to disable auto title generation",
-                    "type": "boolean"
-                },
-                "enable_memory": {
-                    "description": "Whether memory feature is enabled for this request",
-                    "type": "boolean"
-                },
-                "images": {
-                    "description": "Attached images for multimodal chat",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handler_session.ImageAttachment"
-                    }
-                },
-                "knowledge_base_ids": {
-                    "description": "Selected knowledge base ID for this request",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "knowledge_ids": {
-                    "description": "Selected knowledge ID for this request",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "mentioned_items": {
-                    "description": "@mentioned knowledge bases and files",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handler_session.MentionedItemRequest"
-                    }
-                },
-                "query": {
-                    "description": "Query text for knowledge base search",
-                    "type": "string"
-                },
-                "summary_model_id": {
-                    "description": "Optional summary model ID for this request (overrides session default)",
-                    "type": "string"
-                },
-                "web_search_enabled": {
-                    "description": "Whether web search is enabled for this request",
-                    "type": "boolean"
-                }
-            }
-        },
-        "handler_session.CreateSessionRequest": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "description": "Description for the session (optional)",
-                    "type": "string"
-                },
-                "title": {
-                    "description": "Title for the session (optional)",
-                    "type": "string"
-                }
-            }
-        },
-        "handler_session.GenerateTitleRequest": {
-            "type": "object",
-            "required": [
-                "messages"
-            ],
-            "properties": {
-                "messages": {
-                    "description": "Messages to use as context for title generation",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/types.Message"
-                    }
-                }
-            }
-        },
-        "handler_session.ImageAttachment": {
-            "type": "object",
-            "properties": {
-                "caption": {
-                    "description": "VLM analysis result (context-aware, single call)",
-                    "type": "string"
-                },
-                "data": {
-                    "description": "base64 data URI from frontend (data:image/png;base64,...)",
-                    "type": "string"
-                },
-                "url": {
-                    "description": "serving URL after saving to storage",
-                    "type": "string"
-                }
-            }
-        },
-        "handler_session.MentionedItemRequest": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string"
-                },
-                "kb_type": {
-                    "description": "\"document\" or \"faq\" (only for kb type)",
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "type": {
-                    "description": "\"kb\" for knowledge base, \"file\" for file",
-                    "type": "string"
-                }
-            }
-        },
-        "handler_session.SearchKnowledgeRequest": {
-            "type": "object",
-            "required": [
-                "query"
-            ],
-            "properties": {
-                "knowledge_base_id": {
-                    "description": "Single knowledge base ID (for backward compatibility)",
-                    "type": "string"
-                },
-                "knowledge_base_ids": {
-                    "description": "IDs of knowledge bases to search (multi-KB support)",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "knowledge_ids": {
-                    "description": "IDs of specific knowledge (files) to search",
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "query": {
-                    "description": "Query text to search for",
-                    "type": "string"
-                }
-            }
-        },
-        "handler_session.StopSessionRequest": {
-            "type": "object",
-            "required": [
-                "message_id"
-            ],
-            "properties": {
-                "message_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "handler_session.batchDeleteRequest": {
-            "type": "object",
-            "properties": {
-                "delete_all": {
-                    "type": "boolean"
-                },
-                "ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "types.ASRConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ASRConfig": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -9908,7 +9903,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.AgentConfig": {
+        "github_com_Tencent_WeKnora_internal_types.AgentConfig": {
             "type": "object",
             "properties": {
                 "allowed_skills": {
@@ -9978,6 +9973,10 @@ const docTemplate = `{
                     "description": "Whether to execute independent tool calls in parallel (default: false).\nWhen enabled and the LLM returns multiple tool calls, they run concurrently via errgroup.",
                     "type": "boolean"
                 },
+                "retain_retrieval_history": {
+                    "description": "Whether to retain retrieval history (like wiki_read_page results) across turns (default: false)",
+                    "type": "boolean"
+                },
                 "retrieve_kb_only_when_mentioned": {
                     "description": "Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)",
                     "type": "boolean"
@@ -10031,7 +10030,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.AgentStep": {
+        "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
                 "iteration": {
@@ -10050,12 +10049,12 @@ const docTemplate = `{
                     "description": "Tools called in this step (Act phase)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.ToolCall"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall"
                     }
                 }
             }
         },
-        "types.AnswerStrategy": {
+        "github_com_Tencent_WeKnora_internal_types.AnswerStrategy": {
             "type": "string",
             "enum": [
                 "all",
@@ -10066,7 +10065,7 @@ const docTemplate = `{
                 "AnswerStrategyRandom"
             ]
         },
-        "types.COSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.COSEngineConfig": {
             "type": "object",
             "properties": {
                 "app_id": {
@@ -10089,7 +10088,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ChatHistoryConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig": {
             "type": "object",
             "properties": {
                 "embedding_model_id": {
@@ -10106,7 +10105,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ChunkingConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ChunkingConfig": {
             "type": "object",
             "properties": {
                 "child_chunk_size": {
@@ -10137,7 +10136,7 @@ const docTemplate = `{
                     "description": "ParserEngineRules configures which parser engine to use for each file type.\nWhen empty, the builtin engine is used for all types.",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.ParserEngineRule"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
                     }
                 },
                 "separators": {
@@ -10149,7 +10148,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ConnectionConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ConnectionConfig": {
             "type": "object",
             "properties": {
                 "addr": {
@@ -10194,7 +10193,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ContextCompressionStrategy": {
+        "github_com_Tencent_WeKnora_internal_types.ContextCompressionStrategy": {
             "type": "string",
             "enum": [
                 "sliding_window",
@@ -10205,14 +10204,14 @@ const docTemplate = `{
                 "ContextCompressionSmart"
             ]
         },
-        "types.ContextConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ContextConfig": {
             "type": "object",
             "properties": {
                 "compression_strategy": {
                     "description": "Compression strategy: \"sliding_window\" or \"smart\"",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ContextCompressionStrategy"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextCompressionStrategy"
                         }
                     ]
                 },
@@ -10230,7 +10229,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ConversationConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ConversationConfig": {
             "type": "object",
             "properties": {
                 "context_template": {
@@ -10300,7 +10299,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.CreateOrganizationRequest": {
+        "github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest": {
             "type": "object",
             "required": [
                 "name"
@@ -10330,19 +10329,23 @@ const docTemplate = `{
                 }
             }
         },
-        "types.CredentialsConfig": {
+        "github_com_Tencent_WeKnora_internal_types.CredentialsConfig": {
             "type": "object",
             "properties": {
                 "weknoracloud": {
-                    "$ref": "#/definitions/types.WeKnoraCloudCredentials"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials"
                 }
             }
         },
-        "types.CustomAgentConfig": {
+        "github_com_Tencent_WeKnora_internal_types.CustomAgentConfig": {
             "type": "object",
             "properties": {
                 "agent_mode": {
                     "description": "===== Basic Settings =====\nAgent mode: \"quick-answer\" for RAG mode, \"smart-reasoning\" for ReAct agent mode",
+                    "type": "string"
+                },
+                "agent_type": {
+                    "description": "AgentType is a preset category under smart-reasoning mode that pre-fills\nsystem prompt, allowed tools and recommended KB compatibility.\nValid values: \"rag-qa\", \"wiki-qa\", \"hybrid-rag-wiki\", \"custom\".\nEmpty / unknown values are treated as \"custom\" (no preset applied).\nIgnored for quick-answer mode.",
                     "type": "string"
                 },
                 "allowed_tools": {
@@ -10474,6 +10477,10 @@ const docTemplate = `{
                     "description": "Rerank top K",
                     "type": "integer"
                 },
+                "retain_retrieval_history": {
+                    "description": "Whether to retain retrieval history across turns",
+                    "type": "boolean"
+                },
                 "retrieve_kb_only_when_mentioned": {
                     "description": "Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)\nWhen true, knowledge base retrieval only happens if user explicitly mentions KB/files with @\nWhen false, knowledge base retrieval happens according to KBSelectionMode",
                     "type": "boolean"
@@ -10557,7 +10564,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.DataSource": {
+        "github_com_Tencent_WeKnora_internal_types.DataSource": {
             "type": "object",
             "properties": {
                 "config": {
@@ -10617,7 +10624,7 @@ const docTemplate = `{
                     "description": "Latest sync log (not stored in DB, populated on query)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.SyncLog"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                         }
                     ]
                 },
@@ -10663,7 +10670,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.EmbeddingParameters": {
+        "github_com_Tencent_WeKnora_internal_types.EmbeddingParameters": {
             "type": "object",
             "properties": {
                 "dimension": {
@@ -10674,7 +10681,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ExtractConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ExtractConfig": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -10683,13 +10690,13 @@ const docTemplate = `{
                 "nodes": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.GraphNode"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode"
                     }
                 },
                 "relations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.GraphRelation"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
                     }
                 },
                 "tags": {
@@ -10703,7 +10710,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.FAQBatchUpsertPayload": {
+        "github_com_Tencent_WeKnora_internal_types.FAQBatchUpsertPayload": {
             "type": "object",
             "required": [
                 "entries"
@@ -10716,7 +10723,7 @@ const docTemplate = `{
                 "entries": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.FAQEntryPayload"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload"
                     }
                 },
                 "knowledge_id": {
@@ -10735,32 +10742,32 @@ const docTemplate = `{
                 }
             }
         },
-        "types.FAQConfig": {
+        "github_com_Tencent_WeKnora_internal_types.FAQConfig": {
             "type": "object",
             "properties": {
                 "index_mode": {
-                    "$ref": "#/definitions/types.FAQIndexMode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode"
                 },
                 "question_index_mode": {
-                    "$ref": "#/definitions/types.FAQQuestionIndexMode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode"
                 }
             }
         },
-        "types.FAQEntryFieldsBatchUpdate": {
+        "github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsBatchUpdate": {
             "type": "object",
             "properties": {
                 "by_id": {
                     "description": "ByID 按条目ID更新，key为条目ID (seq_id)",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/types.FAQEntryFieldsUpdate"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate"
                     }
                 },
                 "by_tag": {
                     "description": "ByTag 按Tag批量更新，key为TagID (seq_id)",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/types.FAQEntryFieldsUpdate"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate"
                     }
                 },
                 "exclude_ids": {
@@ -10772,7 +10779,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.FAQEntryFieldsUpdate": {
+        "github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate": {
             "type": "object",
             "properties": {
                 "is_enabled": {
@@ -10786,14 +10793,14 @@ const docTemplate = `{
                 }
             }
         },
-        "types.FAQEntryPayload": {
+        "github_com_Tencent_WeKnora_internal_types.FAQEntryPayload": {
             "type": "object",
             "required": [
                 "standard_question"
             ],
             "properties": {
                 "answer_strategy": {
-                    "$ref": "#/definitions/types.AnswerStrategy"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy"
                 },
                 "answers": {
                     "type": "array",
@@ -10834,7 +10841,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.FAQIndexMode": {
+        "github_com_Tencent_WeKnora_internal_types.FAQIndexMode": {
             "type": "string",
             "enum": [
                 "question_only",
@@ -10845,7 +10852,7 @@ const docTemplate = `{
                 "FAQIndexModeQuestionAnswer"
             ]
         },
-        "types.FAQQuestionIndexMode": {
+        "github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode": {
             "type": "string",
             "enum": [
                 "combined",
@@ -10856,7 +10863,7 @@ const docTemplate = `{
                 "FAQQuestionIndexModeSeparate"
             ]
         },
-        "types.FAQSearchRequest": {
+        "github_com_Tencent_WeKnora_internal_types.FAQSearchRequest": {
             "type": "object",
             "required": [
                 "query_text"
@@ -10891,7 +10898,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.GraphNode": {
+        "github_com_Tencent_WeKnora_internal_types.GraphNode": {
             "type": "object",
             "properties": {
                 "attributes": {
@@ -10911,7 +10918,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.GraphRelation": {
+        "github_com_Tencent_WeKnora_internal_types.GraphRelation": {
             "type": "object",
             "properties": {
                 "node1": {
@@ -10925,7 +10932,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ImageProcessingConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig": {
             "type": "object",
             "properties": {
                 "model_id": {
@@ -10934,7 +10941,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.IndexConfig": {
+        "github_com_Tencent_WeKnora_internal_types.IndexConfig": {
             "type": "object",
             "properties": {
                 "collection_name": {
@@ -10942,11 +10949,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "collection_prefix": {
-                    "description": "Qdrant",
+                    "description": "Qdrant, Weaviate",
                     "type": "string"
                 },
+                "desired_shard_count": {
+                    "description": "Weaviate: number of shards per collection",
+                    "type": "integer"
+                },
                 "index_name": {
-                    "description": "ES, OpenSearch",
+                    "description": "--- Existing fields ---",
                     "type": "string"
                 },
                 "number_of_replicas": {
@@ -10956,10 +10967,47 @@ const docTemplate = `{
                 "number_of_shards": {
                     "description": "ES, OpenSearch",
                     "type": "integer"
+                },
+                "replica_number": {
+                    "description": "Milvus: in-memory replica count (LoadCollection)",
+                    "type": "integer"
+                },
+                "replication_factor": {
+                    "description": "Qdrant, Weaviate: number of replicas",
+                    "type": "integer"
+                },
+                "shard_number": {
+                    "description": "--- Scalability fields ---",
+                    "type": "integer"
+                },
+                "shards_num": {
+                    "description": "Milvus: number of shards per collection (CreateCollection)",
+                    "type": "integer"
                 }
             }
         },
-        "types.InviteMemberRequest": {
+        "github_com_Tencent_WeKnora_internal_types.IndexingStrategy": {
+            "type": "object",
+            "properties": {
+                "graph_enabled": {
+                    "description": "GraphEnabled enables knowledge graph entity/relation extraction",
+                    "type": "boolean"
+                },
+                "keyword_enabled": {
+                    "description": "KeywordEnabled enables keyword-based (BM25) search",
+                    "type": "boolean"
+                },
+                "vector_enabled": {
+                    "description": "VectorEnabled enables semantic vector embedding and search",
+                    "type": "boolean"
+                },
+                "wiki_enabled": {
+                    "description": "WikiEnabled enables automatic wiki page generation from documents",
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.InviteMemberRequest": {
             "type": "object",
             "required": [
                 "role",
@@ -10970,7 +11018,7 @@ const docTemplate = `{
                     "description": "Role to assign: admin/editor/viewer",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 },
@@ -10980,7 +11028,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.JoinByOrganizationIDRequest": {
+        "github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest": {
             "type": "object",
             "required": [
                 "organization_id"
@@ -10998,13 +11046,13 @@ const docTemplate = `{
                     "description": "Optional: requested role (admin/editor/viewer); default viewer",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "types.JoinOrganizationRequest": {
+        "github_com_Tencent_WeKnora_internal_types.JoinOrganizationRequest": {
             "type": "object",
             "required": [
                 "invite_code"
@@ -11017,7 +11065,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.Knowledge": {
+        "github_com_Tencent_WeKnora_internal_types.Knowledge": {
             "type": "object",
             "properties": {
                 "channel": {
@@ -11140,14 +11188,14 @@ const docTemplate = `{
                 }
             }
         },
-        "types.KnowledgeBase": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBase": {
             "type": "object",
             "properties": {
                 "asr_config": {
                     "description": "ASR config (Automatic Speech Recognition)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ASRConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
                         }
                     ]
                 },
@@ -11159,7 +11207,7 @@ const docTemplate = `{
                     "description": "Chunking configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ChunkingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                         }
                     ]
                 },
@@ -11187,7 +11235,7 @@ const docTemplate = `{
                     "description": "Extract config",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ExtractConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
                         }
                     ]
                 },
@@ -11195,7 +11243,7 @@ const docTemplate = `{
                     "description": "FAQConfig stores FAQ specific configuration such as indexing strategy",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.FAQConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
                         }
                     ]
                 },
@@ -11207,7 +11255,15 @@ const docTemplate = `{
                     "description": "Image processing configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ImageProcessingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
+                        }
+                    ]
+                },
+                "indexing_strategy": {
+                    "description": "IndexingStrategy controls which indexing pipelines are active for this knowledge base.\nPipelines: vector search, keyword search, wiki generation, knowledge graph extraction.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
                         }
                     ]
                 },
@@ -11243,7 +11299,7 @@ const docTemplate = `{
                     "description": "QuestionGenerationConfig stores question generation configuration for document knowledge bases",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.QuestionGenerationConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
                         }
                     ]
                 },
@@ -11255,7 +11311,7 @@ const docTemplate = `{
                     "description": "Deprecated: legacy COS config column. Kept for backward compatibility with old data.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.StorageConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageConfig"
                         }
                     ]
                 },
@@ -11263,7 +11319,7 @@ const docTemplate = `{
                     "description": "Storage provider config (new): only stores provider selection; credentials from tenant StorageEngineConfig",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.StorageProviderConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageProviderConfig"
                         }
                     ]
                 },
@@ -11283,24 +11339,36 @@ const docTemplate = `{
                     "description": "Last updated time of the knowledge base",
                     "type": "string"
                 },
+                "vector_store_id": {
+                    "description": "VectorStoreID references the VectorStore this knowledge base is bound to.\nWhen nil, the KB falls back to the tenant's effective engines derived from\nthe RETRIEVE_DRIVER environment variable (env store flow).\nThis field is set once at creation time and must not be modified afterwards;\nenforcement lives at the GORM layer (` + "`" + `\u003c-:create` + "`" + `) plus the service-layer\nKB update path, which omits this field from its update DTO.",
+                    "type": "string"
+                },
                 "vlm_config": {
                     "description": "VLM config",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.VLMConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                        }
+                    ]
+                },
+                "wiki_config": {
+                    "description": "WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
                 }
             }
         },
-        "types.KnowledgeBaseConfig": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig": {
             "type": "object",
             "properties": {
                 "chunking_config": {
                     "description": "Chunking configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ChunkingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                         }
                     ]
                 },
@@ -11308,7 +11376,7 @@ const docTemplate = `{
                     "description": "FAQ configuration (only for FAQ type knowledge bases)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.FAQConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
                         }
                     ]
                 },
@@ -11316,13 +11384,29 @@ const docTemplate = `{
                     "description": "Image processing configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ImageProcessingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
+                        }
+                    ]
+                },
+                "indexing_strategy": {
+                    "description": "IndexingStrategy controls which indexing pipelines are active.\nnil means \"no change\" when updating (preserves existing strategy).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
+                        }
+                    ]
+                },
+                "wiki_config": {
+                    "description": "Wiki configuration (only for wiki-enabled knowledge bases)",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
                 }
             }
         },
-        "types.KnowledgeBaseShareResponse": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse": {
             "type": "object",
             "properties": {
                 "chunk_count": {
@@ -11378,13 +11462,13 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ListMembersResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ListMembersResponse": {
             "type": "object",
             "properties": {
                 "members": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.OrganizationMemberResponse"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrganizationMemberResponse"
                     }
                 },
                 "total": {
@@ -11392,20 +11476,20 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ListOrganizationsResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ListOrganizationsResponse": {
             "type": "object",
             "properties": {
                 "organizations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.OrganizationResponse"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrganizationResponse"
                     }
                 },
                 "resource_counts": {
                     "description": "各空间内知识库/智能体数量，供列表侧栏展示",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ResourceCountsByOrgResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ResourceCountsByOrgResponse"
                         }
                     ]
                 },
@@ -11414,13 +11498,13 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ListSharesResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ListSharesResponse": {
             "type": "object",
             "properties": {
                 "shares": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.KnowledgeBaseShareResponse"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse"
                     }
                 },
                 "total": {
@@ -11428,7 +11512,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.LocalEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.LocalEngineConfig": {
             "type": "object",
             "properties": {
                 "path_prefix": {
@@ -11436,7 +11520,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.LoginRequest": {
+        "github_com_Tencent_WeKnora_internal_types.LoginRequest": {
             "type": "object",
             "required": [
                 "email",
@@ -11452,7 +11536,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.LoginResponse": {
+        "github_com_Tencent_WeKnora_internal_types.LoginResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -11465,17 +11549,17 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "tenant": {
-                    "$ref": "#/definitions/types.Tenant"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                 },
                 "token": {
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/types.User"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.User"
                 }
             }
         },
-        "types.MCPAdvancedConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig": {
             "type": "object",
             "properties": {
                 "retry_count": {
@@ -11492,7 +11576,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MCPAuthConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MCPAuthConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -11509,26 +11593,26 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MCPEnvVars": {
+        "github_com_Tencent_WeKnora_internal_types.MCPEnvVars": {
             "type": "object",
             "additionalProperties": {
                 "type": "string"
             }
         },
-        "types.MCPHeaders": {
+        "github_com_Tencent_WeKnora_internal_types.MCPHeaders": {
             "type": "object",
             "additionalProperties": {
                 "type": "string"
             }
         },
-        "types.MCPService": {
+        "github_com_Tencent_WeKnora_internal_types.MCPService": {
             "type": "object",
             "properties": {
                 "advanced_config": {
-                    "$ref": "#/definitions/types.MCPAdvancedConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
                 },
                 "auth_config": {
-                    "$ref": "#/definitions/types.MCPAuthConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthConfig"
                 },
                 "created_at": {
                     "type": "string"
@@ -11546,12 +11630,12 @@ const docTemplate = `{
                     "description": "Environment variables for stdio",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.MCPEnvVars"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars"
                         }
                     ]
                 },
                 "headers": {
-                    "$ref": "#/definitions/types.MCPHeaders"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders"
                 },
                 "id": {
                     "type": "string"
@@ -11567,7 +11651,7 @@ const docTemplate = `{
                     "description": "Required for stdio transport",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.MCPStdioConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig"
                         }
                     ]
                 },
@@ -11575,7 +11659,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "transport_type": {
-                    "$ref": "#/definitions/types.MCPTransportType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
                 },
                 "updated_at": {
                     "type": "string"
@@ -11586,7 +11670,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MCPStdioConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MCPStdioConfig": {
             "type": "object",
             "properties": {
                 "args": {
@@ -11602,7 +11686,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MCPTransportType": {
+        "github_com_Tencent_WeKnora_internal_types.MCPTransportType": {
             "type": "string",
             "enum": [
                 "sse",
@@ -11625,7 +11709,7 @@ const docTemplate = `{
                 "MCPTransportStdio"
             ]
         },
-        "types.ManualKnowledgePayload": {
+        "github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload": {
             "type": "object",
             "properties": {
                 "channel": {
@@ -11645,7 +11729,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MatchType": {
+        "github_com_Tencent_WeKnora_internal_types.MatchType": {
             "type": "integer",
             "enum": [
                 0,
@@ -11691,7 +11775,7 @@ const docTemplate = `{
                 "MatchTypeDataAnalysis"
             ]
         },
-        "types.MentionedItem": {
+        "github_com_Tencent_WeKnora_internal_types.MentionedItem": {
             "type": "object",
             "properties": {
                 "id": {
@@ -11710,7 +11794,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.Message": {
+        "github_com_Tencent_WeKnora_internal_types.Message": {
             "type": "object",
             "properties": {
                 "agent_duration_ms": {
@@ -11721,14 +11805,14 @@ const docTemplate = `{
                     "description": "Agent execution steps (only for assistant messages generated by agent)\nThis contains the detailed reasoning process and tool calls made by the agent\nStored for user history display, but NOT included in LLM context to avoid redundancy",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.AgentStep"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AgentStep"
                     }
                 },
                 "attachments": {
                     "description": "Attached files (documents, audio, etc., for user messages)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.MessageAttachment"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageAttachment"
                     }
                 },
                 "channel": {
@@ -11759,7 +11843,7 @@ const docTemplate = `{
                     "description": "Attached images with OCR/Caption text (for user messages)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.MessageImage"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageImage"
                     }
                 },
                 "is_completed": {
@@ -11778,14 +11862,14 @@ const docTemplate = `{
                     "description": "References to knowledge chunks used in the response",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.SearchResult"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchResult"
                     }
                 },
                 "mentioned_items": {
                     "description": "Mentioned knowledge bases and files (for user messages)\nStores the @mentioned items when user sends a message",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.MentionedItem"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem"
                     }
                 },
                 "request_id": {
@@ -11806,7 +11890,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MessageAttachment": {
+        "github_com_Tencent_WeKnora_internal_types.MessageAttachment": {
             "type": "object",
             "properties": {
                 "content": {
@@ -11839,7 +11923,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MessageImage": {
+        "github_com_Tencent_WeKnora_internal_types.MessageImage": {
             "type": "object",
             "properties": {
                 "caption": {
@@ -11850,7 +11934,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.MinIOEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key_id": {
@@ -11877,7 +11961,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ModelParameters": {
+        "github_com_Tencent_WeKnora_internal_types.ModelParameters": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -11894,8 +11978,15 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "custom_headers": {
+                    "description": "CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，\n用途类似 Python OpenAI SDK 的 extra_headers 参数，\n常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。\n保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "embedding_parameters": {
-                    "$ref": "#/definitions/types.EmbeddingParameters"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EmbeddingParameters"
                 },
                 "extra_config": {
                     "description": "Provider-specific configuration",
@@ -11921,7 +12012,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ModelSource": {
+        "github_com_Tencent_WeKnora_internal_types.ModelSource": {
             "type": "string",
             "enum": [
                 "local",
@@ -12000,7 +12091,7 @@ const docTemplate = `{
                 "ModelSourceAzureOpenAI"
             ]
         },
-        "types.ModelType": {
+        "github_com_Tencent_WeKnora_internal_types.ModelType": {
             "type": "string",
             "enum": [
                 "Embedding",
@@ -12031,7 +12122,7 @@ const docTemplate = `{
                 "ModelTypeASR"
             ]
         },
-        "types.OIDCAuthURLResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OIDCAuthURLResponse": {
             "type": "object",
             "properties": {
                 "authorization_url": {
@@ -12048,7 +12139,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.OIDCConfigResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OIDCConfigResponse": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -12062,7 +12153,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.OSSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.OSSEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -12094,7 +12185,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.OrgMemberRole": {
+        "github_com_Tencent_WeKnora_internal_types.OrgMemberRole": {
             "type": "string",
             "enum": [
                 "admin",
@@ -12107,7 +12198,7 @@ const docTemplate = `{
                 "OrgRoleViewer"
             ]
         },
-        "types.OrganizationMemberResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OrganizationMemberResponse": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -12136,7 +12227,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.OrganizationResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OrganizationResponse": {
             "type": "object",
             "properties": {
                 "agent_share_count": {
@@ -12206,7 +12297,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ParserEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ParserEngineConfig": {
             "type": "object",
             "properties": {
                 "mineru_api_key": {
@@ -12251,7 +12342,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ParserEngineRule": {
+        "github_com_Tencent_WeKnora_internal_types.ParserEngineRule": {
             "type": "object",
             "properties": {
                 "engine": {
@@ -12265,7 +12356,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.QuestionGenerationConfig": {
+        "github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -12277,7 +12368,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.RegisterRequest": {
+        "github_com_Tencent_WeKnora_internal_types.RegisterRequest": {
             "type": "object",
             "required": [
                 "email",
@@ -12299,7 +12390,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.RegisterResponse": {
+        "github_com_Tencent_WeKnora_internal_types.RegisterResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -12309,14 +12400,14 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "tenant": {
-                    "$ref": "#/definitions/types.Tenant"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                 },
                 "user": {
-                    "$ref": "#/definitions/types.User"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.User"
                 }
             }
         },
-        "types.RequestRoleUpgradeRequest": {
+        "github_com_Tencent_WeKnora_internal_types.RequestRoleUpgradeRequest": {
             "type": "object",
             "required": [
                 "requested_role"
@@ -12331,13 +12422,13 @@ const docTemplate = `{
                     "description": "The role user wants to upgrade to",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "types.Resource": {
+        "github_com_Tencent_WeKnora_internal_types.Resource": {
             "type": "object",
             "properties": {
                 "description": {
@@ -12379,7 +12470,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ResourceCountsByOrgResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ResourceCountsByOrgResponse": {
             "type": "object",
             "properties": {
                 "agents": {
@@ -12406,7 +12497,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.RetrievalConfig": {
+        "github_com_Tencent_WeKnora_internal_types.RetrievalConfig": {
             "type": "object",
             "properties": {
                 "embedding_top_k": {
@@ -12435,14 +12526,14 @@ const docTemplate = `{
                 }
             }
         },
-        "types.RetrieverEngineParams": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams": {
             "type": "object",
             "properties": {
                 "retriever_engine_type": {
                     "description": "Retriever engine type",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.RetrieverEngineType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
                         }
                     ]
                 },
@@ -12450,13 +12541,13 @@ const docTemplate = `{
                     "description": "Retriever type",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.RetrieverType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverType"
                         }
                     ]
                 }
             }
         },
-        "types.RetrieverEngineType": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverEngineType": {
             "type": "string",
             "enum": [
                 "postgres",
@@ -12479,18 +12570,18 @@ const docTemplate = `{
                 "SQLiteRetrieverEngineType"
             ]
         },
-        "types.RetrieverEngines": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverEngines": {
             "type": "object",
             "properties": {
                 "engines": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.RetrieverEngineParams"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams"
                     }
                 }
             }
         },
-        "types.RetrieverType": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverType": {
             "type": "string",
             "enum": [
                 "keywords",
@@ -12513,7 +12604,7 @@ const docTemplate = `{
                 "WebSearchRetrieverType"
             ]
         },
-        "types.ReviewJoinRequestRequest": {
+        "github_com_Tencent_WeKnora_internal_types.ReviewJoinRequestRequest": {
             "type": "object",
             "properties": {
                 "approved": {
@@ -12527,13 +12618,13 @@ const docTemplate = `{
                     "description": "Optional: role to assign when approving; overrides applicant's requested role",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "types.S3EngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.S3EngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -12556,7 +12647,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.SearchParams": {
+        "github_com_Tencent_WeKnora_internal_types.SearchParams": {
             "type": "object",
             "properties": {
                 "disable_keywords_match": {
@@ -12612,7 +12703,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.SearchResult": {
+        "github_com_Tencent_WeKnora_internal_types.SearchResult": {
             "type": "object",
             "properties": {
                 "chunk_index": {
@@ -12678,7 +12769,7 @@ const docTemplate = `{
                     "description": "Match type",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.MatchType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType"
                         }
                     ]
                 },
@@ -12718,7 +12809,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.Session": {
+        "github_com_Tencent_WeKnora_internal_types.Session": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -12748,7 +12839,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.ShareKnowledgeBaseRequest": {
+        "github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest": {
             "type": "object",
             "required": [
                 "organization_id",
@@ -12759,11 +12850,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "permission": {
-                    "$ref": "#/definitions/types.OrgMemberRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                 }
             }
         },
-        "types.StorageConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageConfig": {
             "type": "object",
             "properties": {
                 "app_id": {
@@ -12789,34 +12880,34 @@ const docTemplate = `{
                 }
             }
         },
-        "types.StorageEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageEngineConfig": {
             "type": "object",
             "properties": {
                 "cos": {
-                    "$ref": "#/definitions/types.COSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig"
                 },
                 "default_provider": {
                     "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\"",
                     "type": "string"
                 },
                 "local": {
-                    "$ref": "#/definitions/types.LocalEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LocalEngineConfig"
                 },
                 "minio": {
-                    "$ref": "#/definitions/types.MinIOEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig"
                 },
                 "oss": {
-                    "$ref": "#/definitions/types.OSSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig"
                 },
                 "s3": {
-                    "$ref": "#/definitions/types.S3EngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig"
                 },
                 "tos": {
-                    "$ref": "#/definitions/types.TOSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TOSEngineConfig"
                 }
             }
         },
-        "types.StorageProviderConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageProviderConfig": {
             "type": "object",
             "properties": {
                 "provider": {
@@ -12825,7 +12916,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.SubmitJoinRequestRequest": {
+        "github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest": {
             "type": "object",
             "required": [
                 "invite_code"
@@ -12844,13 +12935,13 @@ const docTemplate = `{
                     "description": "Optional: role the applicant requests (admin/editor/viewer); default viewer",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "types.SyncLog": {
+        "github_com_Tencent_WeKnora_internal_types.SyncLog": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -12922,7 +13013,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.TOSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.TOSEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -12945,14 +13036,14 @@ const docTemplate = `{
                 }
             }
         },
-        "types.Tenant": {
+        "github_com_Tencent_WeKnora_internal_types.Tenant": {
             "type": "object",
             "properties": {
                 "agent_config": {
                     "description": "Deprecated: AgentConfig is deprecated, use CustomAgent (builtin-smart-reasoning) config instead.\nThis field is kept for backward compatibility and will be removed in future versions.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.AgentConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AgentConfig"
                         }
                     ]
                 },
@@ -12968,7 +13059,7 @@ const docTemplate = `{
                     "description": "Chat history config: knowledge base configuration for indexing and searching chat messages via vector search",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ChatHistoryConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig"
                         }
                     ]
                 },
@@ -12976,7 +13067,7 @@ const docTemplate = `{
                     "description": "Global Context configuration for this tenant (default for all sessions)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ContextConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig"
                         }
                     ]
                 },
@@ -12984,7 +13075,7 @@ const docTemplate = `{
                     "description": "Deprecated: ConversationConfig is deprecated, use CustomAgent (builtin-quick-answer) config instead.\nThis field is kept for backward compatibility and will be removed in future versions.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ConversationConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ConversationConfig"
                         }
                     ]
                 },
@@ -12996,7 +13087,7 @@ const docTemplate = `{
                     "description": "Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.CredentialsConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CredentialsConfig"
                         }
                     ]
                 },
@@ -13024,7 +13115,7 @@ const docTemplate = `{
                     "description": "Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ParserEngineConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineConfig"
                         }
                     ]
                 },
@@ -13032,7 +13123,7 @@ const docTemplate = `{
                     "description": "Retrieval config: global search/retrieval parameters shared by knowledge search and message search",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.RetrievalConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrievalConfig"
                         }
                     ]
                 },
@@ -13040,7 +13131,7 @@ const docTemplate = `{
                     "description": "Retriever engines",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.RetrieverEngines"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngines"
                         }
                     ]
                 },
@@ -13052,7 +13143,7 @@ const docTemplate = `{
                     "description": "Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.StorageEngineConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageEngineConfig"
                         }
                     ]
                 },
@@ -13072,13 +13163,13 @@ const docTemplate = `{
                     "description": "Global WebSearch configuration for this tenant",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.WebSearchConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig"
                         }
                     ]
                 }
             }
         },
-        "types.ToolCall": {
+        "github_com_Tencent_WeKnora_internal_types.ToolCall": {
             "type": "object",
             "properties": {
                 "args": {
@@ -13106,13 +13197,13 @@ const docTemplate = `{
                     "description": "Execution result (contains Output)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.ToolResult"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolResult"
                         }
                     ]
                 }
             }
         },
-        "types.ToolResult": {
+        "github_com_Tencent_WeKnora_internal_types.ToolResult": {
             "type": "object",
             "properties": {
                 "data": {
@@ -13141,18 +13232,18 @@ const docTemplate = `{
                 }
             }
         },
-        "types.UpdateMemberRoleRequest": {
+        "github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest": {
             "type": "object",
             "required": [
                 "role"
             ],
             "properties": {
                 "role": {
-                    "$ref": "#/definitions/types.OrgMemberRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                 }
             }
         },
-        "types.UpdateOrganizationRequest": {
+        "github_com_Tencent_WeKnora_internal_types.UpdateOrganizationRequest": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -13186,18 +13277,18 @@ const docTemplate = `{
                 }
             }
         },
-        "types.UpdateSharePermissionRequest": {
+        "github_com_Tencent_WeKnora_internal_types.UpdateSharePermissionRequest": {
             "type": "object",
             "required": [
                 "permission"
             ],
             "properties": {
                 "permission": {
-                    "$ref": "#/definitions/types.OrgMemberRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                 }
             }
         },
-        "types.User": {
+        "github_com_Tencent_WeKnora_internal_types.User": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -13236,7 +13327,7 @@ const docTemplate = `{
                     "description": "Association relationship, not stored in the database",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/types.Tenant"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                         }
                     ]
                 },
@@ -13254,7 +13345,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.VLMConfig": {
+        "github_com_Tencent_WeKnora_internal_types.VLMConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -13281,7 +13372,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.WeKnoraCloudCredentials": {
+        "github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials": {
             "type": "object",
             "properties": {
                 "app_id": {
@@ -13292,7 +13383,7 @@ const docTemplate = `{
                 }
             }
         },
-        "types.WebSearchConfig": {
+        "github_com_Tencent_WeKnora_internal_types.WebSearchConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -13334,9 +13425,1107 @@ const docTemplate = `{
                     "description": "Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.",
                     "type": "string"
                 },
+                "proxy_url": {
+                    "description": "Optional per-request proxy override; normally empty — use WebSearchProviderEntity.Parameters.proxy_url. Merged at call time when set.",
+                    "type": "string"
+                },
                 "rerank_model_id": {
                     "description": "重排模型ID（用于RAG压缩）",
                     "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
+            "type": "object",
+            "properties": {
+                "extraction_granularity": {
+                    "description": "ExtractionGranularity controls how many candidate slugs Pass 0 extracts\nper document. Empty / unknown value is treated as WikiExtractionStandard.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity"
+                        }
+                    ]
+                },
+                "max_pages_per_ingest": {
+                    "description": "MaxPagesPerIngest limits pages created/updated per ingest operation (0 = no limit)",
+                    "type": "integer"
+                },
+                "synthesis_model_id": {
+                    "description": "SynthesisModelID is the LLM model ID used for wiki page generation and updates",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity": {
+            "type": "string",
+            "enum": [
+                "focused",
+                "standard",
+                "exhaustive"
+            ],
+            "x-enum-varnames": [
+                "WikiExtractionFocused",
+                "WikiExtractionStandard",
+                "WikiExtractionExhaustive"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphData": {
+            "type": "object",
+            "properties": {
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphEdge"
+                    }
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphNode"
+                    }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphEdge": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "description": "source slug",
+                    "type": "string"
+                },
+                "target": {
+                    "description": "target slug",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphNode": {
+            "type": "object",
+            "properties": {
+                "link_count": {
+                    "description": "Number of inbound + outbound links",
+                    "type": "integer"
+                },
+                "page_type": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPage": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "description": "Alternate names, abbreviations, acronyms or translated names",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "chunk_refs": {
+                    "description": "ChunkRefs records the specific source-document chunks this page was\nbuilt from — one UUID per cited chunk. Populated during ingest from\nthe chunk-citation pass; refreshed wholesale whenever the page is\nre-materialized. Empty for summary pages (they are document-level\nsynopses and don't carry chunk-level citations). Use this when you\nneed to surface the underlying evidence for a wiki page, or to\nretract citations when a source document is deleted.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "description": "Full markdown content",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time",
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "description": "Soft delete",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/gorm.DeletedAt"
+                        }
+                    ]
+                },
+                "id": {
+                    "description": "Unique identifier (UUID)",
+                    "type": "string"
+                },
+                "in_links": {
+                    "description": "Slugs of pages that link TO this page (backlinks)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "knowledge_base_id": {
+                    "description": "Knowledge base this page belongs to",
+                    "type": "string"
+                },
+                "out_links": {
+                    "description": "Slugs of pages this page links to (outbound links)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "page_metadata": {
+                    "description": "Arbitrary metadata (tags, categories, dates, etc.)",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "page_type": {
+                    "description": "Page type: summary, entity, concept, index, log, synthesis, comparison",
+                    "type": "string"
+                },
+                "slug": {
+                    "description": "URL-friendly slug for addressing, e.g. \"entity/acme-corp\", \"concept/rag\"\nUnique within a knowledge base",
+                    "type": "string"
+                },
+                "source_refs": {
+                    "description": "References to source knowledge IDs that contributed to this page.\nFormat matches the legacy \"\u003cknowledge_id\u003e|\u003cdoc_title\u003e\" convention used\nacross the ingest pipeline, so retract / display code can split on ` + "`" + `|` + "`" + `\nto recover the title. Document-level granularity.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "description": "Page status: draft, published, archived",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "One-line summary for index listing",
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "description": "Tenant ID for multi-tenant isolation",
+                    "type": "integer"
+                },
+                "title": {
+                    "description": "Human-readable title",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "Last update time",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version number. Incremented only when a user-visible content field\n(title, content, summary, page_type, status) actually changes; pure\nbookkeeping writes (link maintenance, same-content re-ingest, status\nsync from background jobs) leave it untouched so it can be used as a\nreal \"the page was edited\" signal.",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageIssue": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "$ref": "#/definitions/gorm.DeletedAt"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "issue_type": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "reported_by": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "suspected_knowledge_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageListResponse": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "pages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiStats": {
+            "type": "object",
+            "properties": {
+                "is_active": {
+                    "description": "whether wiki ingestion is currently running",
+                    "type": "boolean"
+                },
+                "orphan_count": {
+                    "description": "pages with no inbound links",
+                    "type": "integer"
+                },
+                "pages_by_type": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "pending_issues": {
+                    "description": "number of pending wiki issues",
+                    "type": "integer"
+                },
+                "pending_tasks": {
+                    "description": "number of documents waiting to be ingested",
+                    "type": "integer"
+                },
+                "recent_updates": {
+                    "description": "last N updated pages",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                    }
+                },
+                "total_links": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "gorm.DeletedAt": {
+            "type": "object",
+            "properties": {
+                "time": {
+                    "type": "string"
+                },
+                "valid": {
+                    "description": "Valid is true if Time is not NULL",
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.CopyKnowledgeBaseRequest": {
+            "type": "object",
+            "required": [
+                "source_id"
+            ],
+            "properties": {
+                "source_id": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.CreateAgentRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.CreateModelRequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "parameters",
+                "source",
+                "type"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelParameters"
+                },
+                "source": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
+                },
+                "type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                }
+            }
+        },
+        "internal_handler.CreateStoreRequest": {
+            "type": "object",
+            "required": [
+                "connection_config",
+                "engine_type",
+                "name"
+            ],
+            "properties": {
+                "connection_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ConnectionConfig"
+                },
+                "engine_type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
+                },
+                "index_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexConfig"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.DeleteTagRequest": {
+            "type": "object",
+            "properties": {
+                "exclude_ids": {
+                    "description": "Chunk seq_ids to exclude from deletion",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "internal_handler.EvaluationRequest": {
+            "type": "object",
+            "properties": {
+                "chat_id": {
+                    "description": "ID of chat model to use",
+                    "type": "string"
+                },
+                "dataset_id": {
+                    "description": "ID of dataset to evaluate",
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "description": "ID of knowledge base to use",
+                    "type": "string"
+                },
+                "rerank_id": {
+                    "description": "ID of rerank model to use",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.FabriTextRequest": {
+            "type": "object",
+            "required": [
+                "model_id"
+            ],
+            "properties": {
+                "model_id": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_handler.GetStorageEngineStatusResponse": {
+            "type": "object",
+            "properties": {
+                "engines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.StorageEngineStatusItem"
+                    }
+                },
+                "minio_env_available": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.GetSystemInfoResponse": {
+            "type": "object",
+            "properties": {
+                "build_time": {
+                    "type": "string"
+                },
+                "commit_id": {
+                    "type": "string"
+                },
+                "db_version": {
+                    "type": "string"
+                },
+                "edition": {
+                    "type": "string"
+                },
+                "go_version": {
+                    "type": "string"
+                },
+                "graph_database_engine": {
+                    "type": "string"
+                },
+                "keyword_index_engine": {
+                    "type": "string"
+                },
+                "minio_enabled": {
+                    "type": "boolean"
+                },
+                "vector_store_engine": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.KBModelConfigRequest": {
+            "type": "object",
+            "required": [
+                "llmModelId"
+            ],
+            "properties": {
+                "asr_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
+                },
+                "documentSplitting": {
+                    "description": "文档分块配置",
+                    "type": "object",
+                    "properties": {
+                        "childChunkSize": {
+                            "type": "integer"
+                        },
+                        "chunkOverlap": {
+                            "type": "integer"
+                        },
+                        "chunkSize": {
+                            "type": "integer"
+                        },
+                        "enableParentChild": {
+                            "type": "boolean"
+                        },
+                        "parentChunkSize": {
+                            "type": "integer"
+                        },
+                        "parserEngineRules": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
+                            }
+                        },
+                        "separators": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "embeddingModelId": {
+                    "description": "optional when RAG indexing is disabled",
+                    "type": "string"
+                },
+                "llmModelId": {
+                    "type": "string"
+                },
+                "multimodal": {
+                    "description": "多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）",
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "nodeExtract": {
+                    "description": "知识图谱配置",
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "nodes": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode"
+                            }
+                        },
+                        "relations": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
+                            }
+                        },
+                        "tags": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "text": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "questionGeneration": {
+                    "description": "问题生成配置",
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "questionCount": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "storageProvider": {
+                    "description": "存储引擎选择（\"local\" | \"minio\" | \"cos\"），影响文档上传与文档内图片存储，参数从全局设置读取",
+                    "type": "string"
+                },
+                "vlm_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
+        "internal_handler.RemoteModelCheckRequest": {
+            "type": "object",
+            "required": [
+                "modelName"
+            ],
+            "properties": {
+                "apiKey": {
+                    "type": "string"
+                },
+                "baseUrl": {
+                    "type": "string"
+                },
+                "customHeaders": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "dimension": {
+                    "type": "integer"
+                },
+                "extraConfig": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "interfaceType": {
+                    "type": "string"
+                },
+                "modelName": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "source": {
+                    "description": "为空时按需默认为 \"remote\"",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.SearchMessagesRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "limit": {
+                    "description": "Maximum number of results to return (default: 20)",
+                    "type": "integer"
+                },
+                "mode": {
+                    "description": "Search mode: \"keyword\", \"vector\", \"hybrid\" (default: \"hybrid\")",
+                    "type": "string"
+                },
+                "query": {
+                    "description": "Query text for search",
+                    "type": "string"
+                },
+                "session_ids": {
+                    "description": "Filter by specific session IDs (optional)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_handler.StorageCheckRequest": {
+            "type": "object",
+            "properties": {
+                "cos": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig"
+                },
+                "minio": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig"
+                },
+                "oss": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig"
+                },
+                "provider": {
+                    "description": "\"minio\", \"cos\", \"tos\", \"s3\", \"oss\"",
+                    "type": "string"
+                },
+                "s3": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig"
+                },
+                "tos": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TOSEngineConfig"
+                }
+            }
+        },
+        "internal_handler.StorageCheckResponse": {
+            "type": "object",
+            "properties": {
+                "bucket_created": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.StorageEngineStatusItem": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "description": "whether the engine can be used",
+                    "type": "boolean"
+                },
+                "description": {
+                    "description": "short description for UI",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "\"local\", \"minio\", \"cos\", \"tos\"",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.TestStoreRequest": {
+            "type": "object",
+            "required": [
+                "connection_config",
+                "engine_type"
+            ],
+            "properties": {
+                "connection_config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ConnectionConfig"
+                },
+                "engine_type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
+                }
+            }
+        },
+        "internal_handler.TextRelationExtractionRequest": {
+            "type": "object",
+            "required": [
+                "model_id",
+                "tags",
+                "text"
+            ],
+            "properties": {
+                "model_id": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.UpdateAgentRequest": {
+            "type": "object",
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.UpdateChunkRequest": {
+            "type": "object",
+            "properties": {
+                "chunk_index": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "embedding": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    }
+                },
+                "end_at": {
+                    "type": "integer"
+                },
+                "image_info": {
+                    "type": "string"
+                },
+                "is_enabled": {
+                    "type": "boolean"
+                },
+                "start_at": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler.UpdateKnowledgeBaseRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.UpdateModelRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "parameters": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelParameters"
+                },
+                "source": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
+                },
+                "type": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
+                }
+            }
+        },
+        "internal_handler.UpdateStoreRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.addSimilarQuestionsRequest": {
+            "type": "object",
+            "required": [
+                "similar_questions"
+            ],
+            "properties": {
+                "similar_questions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_handler.updateLastFAQImportResultDisplayStatusRequest": {
+            "type": "object",
+            "required": [
+                "display_status"
+            ],
+            "properties": {
+                "display_status": {
+                    "type": "string",
+                    "enum": [
+                        "open",
+                        "close"
+                    ]
+                }
+            }
+        },
+        "internal_handler_session.AttachmentUpload": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "Base64-encoded file content",
+                    "type": "string"
+                },
+                "file_name": {
+                    "description": "Original filename",
+                    "type": "string"
+                },
+                "file_size": {
+                    "description": "File size in bytes",
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_handler_session.CreateKnowledgeQARequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "agent_enabled": {
+                    "description": "Whether agent mode is enabled for this request",
+                    "type": "boolean"
+                },
+                "agent_id": {
+                    "description": "Selected custom agent ID (backend resolves shared agent and its tenant from share relation)",
+                    "type": "string"
+                },
+                "attachment_uploads": {
+                    "description": "Attached files (documents, audio, etc.)",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.AttachmentUpload"
+                    }
+                },
+                "channel": {
+                    "description": "Source channel: \"web\", \"api\", \"im\", etc.",
+                    "type": "string"
+                },
+                "disable_title": {
+                    "description": "Whether to disable auto title generation",
+                    "type": "boolean"
+                },
+                "enable_memory": {
+                    "description": "Whether memory feature is enabled for this request",
+                    "type": "boolean"
+                },
+                "images": {
+                    "description": "Attached images for multimodal chat",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.ImageAttachment"
+                    }
+                },
+                "knowledge_base_ids": {
+                    "description": "Selected knowledge base ID for this request",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "knowledge_ids": {
+                    "description": "Selected knowledge ID for this request",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mentioned_items": {
+                    "description": "@mentioned knowledge bases and files",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
+                "query": {
+                    "description": "Query text for knowledge base search",
+                    "type": "string"
+                },
+                "summary_model_id": {
+                    "description": "Optional summary model ID for this request (overrides session default)",
+                    "type": "string"
+                },
+                "web_search_enabled": {
+                    "description": "Whether web search is enabled for this request",
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler_session.CreateSessionRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "Description for the session (optional)",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "Title for the session (optional)",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_session.GenerateTitleRequest": {
+            "type": "object",
+            "required": [
+                "messages"
+            ],
+            "properties": {
+                "messages": {
+                    "description": "Messages to use as context for title generation",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Message"
+                    }
+                }
+            }
+        },
+        "internal_handler_session.ImageAttachment": {
+            "type": "object",
+            "properties": {
+                "caption": {
+                    "description": "VLM analysis result (context-aware, single call)",
+                    "type": "string"
+                },
+                "data": {
+                    "description": "base64 data URI from frontend (data:image/png;base64,...)",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "serving URL after saving to storage",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_session.MentionedItemRequest": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "kb_type": {
+                    "description": "\"document\" or \"faq\" (only for kb type)",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"kb\" for knowledge base, \"file\" for file",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_session.SearchKnowledgeRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "knowledge_base_id": {
+                    "description": "Single knowledge base ID (for backward compatibility)",
+                    "type": "string"
+                },
+                "knowledge_base_ids": {
+                    "description": "IDs of knowledge bases to search (multi-KB support)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "knowledge_ids": {
+                    "description": "IDs of specific knowledge (files) to search",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "query": {
+                    "description": "Query text to search for",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_session.StopSessionRequest": {
+            "type": "object",
+            "required": [
+                "message_id"
+            ],
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler_session.batchDeleteRequest": {
+            "type": "object",
+            "properties": {
+                "delete_all": {
+                    "type": "boolean"
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         }

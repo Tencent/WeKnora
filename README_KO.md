@@ -22,7 +22,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.4.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.5.0-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -44,11 +44,25 @@
 
 [**WeKnora**](https://weknora.weixin.qq.com)는 엔터프라이즈급 문서 이해와 시맨틱 검색을 위해 설계된, LLM 기반의 지능형 지식 관리 및 Q&A 프레임워크입니다.
 
-WeKnora는 **빠른 Q&A**와 **지능형 추론** 두 가지 Q&A 모드를 제공합니다. 빠른 Q&A는 **RAG(Retrieval-Augmented Generation)** 파이프라인으로 관련 조각을 빠르게 검색하여 답변을 생성하며, 일상적인 지식 검색에 적합합니다. 지능형 추론은 **ReACT Agent** 엔진이 **점진적 전략**으로 지식 검색, MCP 도구, 웹 검색을 자율적으로 오케스트레이션하며, 반복 추론과 리플렉션을 통해 단계적으로 결론을 도출합니다. 다중 소스 통합과 복잡한 작업에 적합합니다. 커스텀 에이전트도 지원하여 전용 지식베이스, 도구 세트, 시스템 프롬프트를 유연하게 구성할 수 있습니다. 용도에 맞게 모드를 선택하여 응답 속도와 추론 깊이를 동시에 달성합니다.
+WeKnora는 **빠른 Q&A**와 **지능형 추론** 두 가지 Q&A 모드와 더불어, 자율적인 콘텐츠 구성을 지원하는 **Wiki 모드**를 제공합니다. 빠른 Q&A는 **RAG(Retrieval-Augmented Generation)** 파이프라인으로 관련 조각을 빠르게 검색하여 답변을 생성하며, 일상적인 지식 검색에 적합합니다. 지능형 추론은 **ReACT Agent** 엔진이 **점진적 전략**으로 지식 검색, MCP 도구, 웹 검색을 자율적으로 오케스트레이션하며, 반복 추론과 리플렉션을 통해 단계적으로 결론을 도출합니다. 새로운 **Wiki 모드**를 통해 Agent는 원본 문서에서 구조화되고 상호 연결된 마크다운 Wiki 지식베이스를 자율적으로 생성하고 유지할 수 있습니다. 커스텀 에이전트도 지원하여 전용 지식베이스, 도구 세트, 시스템 프롬프트를 유연하게 구성할 수 있습니다. 용도에 맞게 모드를 선택하여 응답 속도와 추론 깊이를 동시에 달성합니다.
 
-Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가 데이터 소스 개발 중), PDF, Word, 이미지, Excel 등 10가지 이상의 문서 포맷을 처리합니다. WeChat Work, Feishu, Slack, Telegram 등의 IM 채널을 통해 Q&A 서비스를 직접 제공할 수 있습니다. 모델 레이어에서 OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, Ollama 등 주요 프로바이더를 지원합니다. 전체 프로세스가 모듈화 설계되어 LLM, 벡터 DB, 스토리지 등 구성 요소를 유연하게 교체 가능하며, 로컬 및 프라이빗 클라우드 배포를 지원하여 데이터 완전 자체 관리가 가능합니다.
+Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가 데이터 소스 개발 중), PDF, Word, 이미지, Excel 등 10가지 이상의 문서 포맷을 처리합니다. WeChat Work, Feishu, Slack, Telegram 등의 IM 채널을 통해 Q&A 서비스를 직접 제공할 수 있습니다. 모델 레이어에서 OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, Ollama 등 주요 프로바이더를 지원합니다. 전체 프로세스가 모듈화 설계되어 LLM, 벡터 DB, 스토리지 등 구성 요소를 유연하게 교체 가능하며, 로컬 및 프라이빗 클라우드 배포를 지원하여 데이터 완전 자체 관리가 가능합니다. 또한 WeKnora는 **Langfuse**와 원활하게 통합되어 Agent 추론, 토큰 사용량 및 파이프라인에 대한 포괄적인 관측 가능성(Observability)을 제공합니다.
 
 ## ✨ 최신 업데이트
+
+**v0.5.0 하이라이트:**
+
+- **Wiki 모드**: Agent 기반의 새로운 Wiki 지식 체계를 도입했습니다. 원본 문서에서 상호 연결된 마크다운 페이지를 자동으로 정리·생성하고, 전용 Wiki 브라우저와 함께 페이지 간 참조 및 연관 관계를 시각화하는 인터랙티브 지식 그래프를 제공하여, 팀 전용으로 구조화되고 지속적으로 진화하는 지식 베이스를 구축할 수 있도록 돕습니다.
+- **관측 가능성(Observability)**: Langfuse를 통합하여 Agent의 ReAct 루프, LLM 토큰 추적, 도구 호출 및 asynq 파이프라인을 심층적으로 추적하여 Agent 추론 및 시스템 성능을 완벽하게 파악할 수 있습니다.
+- **사용자 정의 인덱싱 전략**: 사용자는 이제 지식베이스 수준에서 벡터 검색, 키워드 검색(하이브리드), Wiki 및 지식 그래프(Knowledge Graph) 인덱싱을 독립적으로 설정하고 전환할 수 있습니다.
+- **벡터 데이터베이스 UI 및 지식베이스 바인딩**: 연결 테스트가 포함된 벡터 데이터베이스 관리를 위한 프론트엔드 UI가 추가되었으며, 특정 지식베이스에 고유한 벡터 데이터베이스를 바인딩할 수 있는 기능이 지원됩니다.
+- **Yuque 커넥터**: API 클라이언트를 통한 Yuque 데이터 소스 통합으로 전체 및 증분 동기화를 지원하여 Yuque 문서를 원활하게 가져옵니다.
+- **Agent 기능 강화**: 잘못된 JSON 출력을 자동으로 수정하는 `json_repair` 도구가 추가되었으며, `OpenMAIC Classroom` 스킬이 사전 탑재되고, DuckDB 데이터 분석에서 Excel의 모든 시트를 로드하도록 지원이 강화되었습니다.
+- **프론트엔드 및 디버깅**: 설정의 모델 카드에 복사 작업이 추가되었으며, 모든 모델 프로바이더에 걸쳐 LLM 요청 디버깅(`llm_debug`) 및 로깅 메커니즘이 크게 향상되었습니다.
+- **버그 수정**: DuckDB 액세스 문제 수정(지식 파일을 임시 경로에 구체화), Wiki 전용 Agent의 Rerank 모델 요구 사항 제거, dockerignore에 오프라인 protoc zip 패키지 허용 목록 추가.
+
+<details>
+<summary><b>이전 릴리스</b></summary>
 
 **v0.4.0 하이라이트:**
 
@@ -184,6 +198,7 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 |------|------|
 | 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·웹 검색을 자율 오케스트레이션, 커스텀 에이전트 지원 |
 | 빠른 Q&A | 지식베이스 기반 RAG Q&A, 빠르고 정확한 답변 |
+| Wiki 모드 | Agent가 주도하여 원본 문서에서 구조화된 마크다운 Wiki 페이지를 자동 생성 및 유지 관리 |
 | 도구 호출 | 내장 도구, MCP 도구, 웹 검색 |
 | 대화 전략 | 온라인 프롬프트 편집, 검색 임계값 조정, 멀티턴 문맥 인식 |
 | 추천 질문 | 지식베이스 콘텐츠 기반 질문 자동 생성 |
@@ -192,8 +207,8 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 
 | 기능 | 상세 |
 |------|------|
-| 지식베이스 타입 | FAQ / 문서, 폴더 임포트·URL 임포트·태그 관리·온라인 입력 |
-| 데이터 소스 임포트 | Feishu / Notion 지식베이스 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
+| 지식베이스 타입 | FAQ / 문서 / Wiki, 폴더 임포트·URL 임포트·태그 관리·온라인 입력 |
+| 데이터 소스 임포트 | Feishu / Notion / Yuque 지식베이스 자동 동기화(추가 데이터 소스 개발 중), 증분·전체 동기화 지원 |
 | 문서 포맷 | PDF / Word / Txt / Markdown / HTML / 이미지 / CSV / Excel / PPT / JSON |
 | 검색 전략 | BM25 희소 / Dense 밀집 / GraphRAG 그래프 강화 / 부모-자식 청킹 / 다차원 인덱싱 |
 | E2E 테스트 | 전체 파이프라인 시각화, 리콜 적중률·BLEU / ROUGE 지표 평가 |
@@ -215,6 +230,7 @@ Feishu 등 외부 플랫폼에서 지식 자동 동기화를 지원하며(추가
 |------|------|
 | 배포 | 로컬 / Docker / Kubernetes (Helm), 프라이빗/오프라인 배포 지원 |
 | UI | Web UI / RESTful API / Chrome Extension |
+| 관측 가능성 | ReAct 루프, 토큰 소비, 도구 호출, 파이프라인 추적을 위한 Langfuse 통합 |
 | 작업 관리 | MQ 비동기 작업, 버전 업그레이드 시 자동 DB 마이그레이션 |
 | 모델 관리 | 중앙 설정, 지식베이스별 모델 선택, 멀티테넌트 내장 모델 공유, WeKnora Cloud 호스팅 모델 및 문서 파싱 |
 
@@ -276,7 +292,7 @@ docker compose up -d   # 코어 서비스 시작
 | 백엔드 API | `http://localhost:8080` |
 | Jaeger 트레이싱 | `http://localhost:16686` |
 
-## 📱 인터페이스 소개
+## 📱 기능 데모
 
 <table>
   <tr>
@@ -284,6 +300,10 @@ docker compose up -d   # 코어 서비스 시작
   </tr>
   <tr>
     <td colspan="2"><b>Agent 모드 도구 호출 과정</b><br/><img src="./docs/images/agent-qa.png" alt="Agent 모드 도구 호출 과정"></td>
+  </tr>
+  <tr>
+    <td><b>Wiki 브라우저</b><br/><img src="./docs/images/wiki-browser.png" alt="Wiki 브라우저"></td>
+    <td><b>Wiki 지식 그래프</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki 지식 그래프"></td>
   </tr>
   <tr>
     <td><b>지식베이스 관리</b><br/><img src="./docs/images/knowledgebases.png" alt="지식베이스 관리"></td>
