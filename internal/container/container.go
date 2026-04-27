@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -1497,23 +1498,30 @@ func credentialBool(creds map[string]interface{}, key string) bool {
 }
 
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
-func initConnectorRegistry() *datasource.ConnectorRegistry {
+// Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
+// container initialization loudly instead of silently disabling the feature at runtime.
+func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
-	// Register Feishu connector
-	_ = registry.Register(feishuConnector.NewConnector())
-
-	// Register Notion connector
-	_ = registry.Register(notionConnector.NewConnector())
-
-	// Register Yuque connector
-	_ = registry.Register(yuqueConnector.NewConnector())
+	var errs error
+	if err := registry.Register(feishuConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
+	}
+	if err := registry.Register(notionConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
+	}
+	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
+	}
 
 	// Future connectors will be registered here:
-	// _ = registry.Register(confluenceConnector.NewConnector())
-	// _ = registry.Register(githubConnector.NewConnector())
+	// if err := registry.Register(confluenceConnector.NewConnector()); err != nil { ... }
+	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
 
-	return registry
+	if errs != nil {
+		return nil, errs
+	}
+	return registry, nil
 }
 
 // startDataSourceScheduler starts the data source cron scheduler and registers cleanup.
