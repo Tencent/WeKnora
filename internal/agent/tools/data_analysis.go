@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"io"
 	"os"
 	"strings"
@@ -40,25 +41,31 @@ type DataAnalysisInput struct {
 
 type DataAnalysisTool struct {
 	BaseTool
-	knowledgeService interfaces.KnowledgeService
-	fileService      interfaces.FileService
-	db               *sql.DB
-	sessionID        string
-	createdTables    []string // Track tables created in this session
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	fileService          interfaces.FileService
+	tenantService        interfaces.TenantService
+	db                   *sql.DB
+	sessionID            string
+	createdTables        []string // Track tables created in this session
 }
 
 func NewDataAnalysisTool(
+	knowledgeBaseService interfaces.KnowledgeBaseService,
 	knowledgeService interfaces.KnowledgeService,
+	tenantService interfaces.TenantService,
 	fileService interfaces.FileService,
 	db *sql.DB,
 	sessionID string,
 ) *DataAnalysisTool {
 	return &DataAnalysisTool{
-		BaseTool:         dataAnalysisTool,
-		knowledgeService: knowledgeService,
-		fileService:      fileService,
-		db:               db,
-		sessionID:        sessionID,
+		BaseTool:             dataAnalysisTool,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		fileService:          fileService,
+		tenantService:        tenantService,
+		db:                   db,
+		sessionID:            sessionID,
 	}
 }
 
@@ -497,7 +504,7 @@ func (t *DataAnalysisTool) LoadFromKnowledge(ctx context.Context, knowledge *typ
 func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowledge *types.Knowledge) (string, func(), error) {
 	noop := func() {}
 
-	reader, err := t.fileService.GetFile(ctx, knowledge.FilePath)
+	reader, err := t.resolveFileServiceForKnowledge(ctx, knowledge).GetFile(ctx, knowledge.FilePath)
 	if err != nil {
 		return "", noop, fmt.Errorf("failed to open file for knowledge '%s': %w", knowledge.ID, err)
 	}
@@ -652,4 +659,80 @@ func (t *TableSchema) Description() string {
 	}
 
 	return builder.String()
+}
+
+// resolveFileServiceForKnowledge resolves a provider-specific FileService based on the knowledge file path.
+// It falls back to the injected default service when provider/config cannot be resolved.
+func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, knowledge *types.Knowledge) interfaces.FileService {
+	if knowledge == nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s reason=knowledge_nil", t.sessionID)
+		return t.fileService
+	}
+
+	kbID := strings.TrimSpace(knowledge.KnowledgeBaseID)
+	var kb *types.KnowledgeBase
+	if t.knowledgeBaseService != nil && kbID != "" {
+		var err error
+		kb, err = t.knowledgeBaseService.GetKnowledgeBaseByID(ctx, kbID)
+		if err != nil {
+			logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get kb failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s err=%v",
+				t.sessionID, knowledge.ID, kbID, err)
+			return t.fileService
+		}
+	}
+	if kb == nil && kbID != "" {
+		logger.Infof(ctx, "[Tool][DataAnalysis][storage] kb not found, fallback default: session_id=%s knowledge_id=%s kb_id=%s",
+			t.sessionID, knowledge.ID, kbID)
+		return t.fileService
+	}
+
+	provider := ""
+	if kb != nil {
+		provider = kb.GetStorageProvider()
+	}
+	tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if tenant == nil {
+		tenantID := uint64(0)
+		if tid, ok := ctx.Value(types.TenantIDContextKey).(uint64); ok {
+			tenantID = tid
+		}
+		if tenantID == 0 && kb != nil {
+			tenantID = knowledge.TenantID
+		}
+		if tenantID > 0 && t.tenantService != nil {
+			resolvedTenant, err := t.tenantService.GetTenantByID(ctx, tenantID)
+			if err != nil {
+				logger.Warnf(ctx, "[Tool][DataAnalysis][storage] get tenant failed: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d err=%v",
+					t.sessionID, knowledge.ID, kbID, tenantID, err)
+			} else if resolvedTenant != nil {
+				tenant = resolvedTenant
+				logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved tenant from service: session_id=%s knowledge_id=%s kb_id=%s tenant_id=%d",
+					t.sessionID, knowledge.ID, kbID, tenantID)
+			}
+		}
+	}
+	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
+		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
+	}
+
+	if provider == "" || tenant == nil || tenant.StorageEngineConfig == nil {
+		hasTenantStorageConfig := tenant != nil && tenant.StorageEngineConfig != nil
+		logger.Infof(ctx, "[Tool][DataAnalysis][storage] fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%q tenant_cfg=%t",
+			t.sessionID, knowledge.ID, kbID, provider, hasTenantStorageConfig)
+		return t.fileService
+	}
+
+	storageConfig := tenant.StorageEngineConfig
+	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
+
+	resolvedSvc, resolvedProvider, err := filesvc.NewFileServiceFromStorageConfig(provider, storageConfig, baseDir)
+	if err != nil {
+		logger.Warnf(ctx, "[Tool][DataAnalysis][storage] create file service failed, fallback default: session_id=%s knowledge_id=%s kb_id=%s provider=%s err=%v",
+			t.sessionID, knowledge.ID, kbID, provider, err)
+		return t.fileService
+	}
+
+	logger.Infof(ctx, "[Tool][DataAnalysis][storage] resolved file service: session_id=%s knowledge_id=%s kb_id=%s provider=%s",
+		t.sessionID, knowledge.ID, kbID, resolvedProvider)
+	return resolvedSvc
 }
