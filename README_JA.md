@@ -183,11 +183,11 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
     <td width="50%" align="center"><b>🕸️ Wiki ナレッジグラフ</b><br/><img src="./docs/images/wiki-graph.png" alt="Wiki ナレッジグラフ" width="100%"></td>
   </tr>
   <tr>
-    <td colspan="2" align="center"><b>🤖 Agent モード · ツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agent モードツール呼び出しプロセス" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent モード · ツール呼び出しプロセス</b><br/><img src="./docs/images/agent-qa.png" alt="Agent モードツール呼び出しプロセス" width="100%"></td>
+    <td width="50%" align="center"><b>⚙️ 対話設定</b><br/><img src="./docs/images/settings.png" alt="対話設定" width="100%"></td>
   </tr>
   <tr>
-    <td width="50%" align="center"><b>📚 ナレッジベース管理</b><br/><img src="./docs/images/knowledgebases.png" alt="ナレッジベース管理" width="100%"></td>
-    <td width="50%" align="center"><b>⚙️ 対話設定</b><br/><img src="./docs/images/settings.png" alt="対話設定" width="100%"></td>
+    <td colspan="2" align="center"><b>🔭 可観測性 · Langfuse Tracing</b><br/><img src="./docs/images/langfuse.png" alt="Langfuse Tracing" width="100%"></td>
   </tr>
 </table>
 
