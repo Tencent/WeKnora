@@ -38,13 +38,13 @@
   </h4>
 </p>
 
-# 💡 WeKnora - LLM-Powered Document Understanding & Retrieval Framework
+# 💡 WeKnora — Turn Documents into Living Knowledge with RAG, Agents and Auto-Wiki
 
 ## 📌 Overview
 
-[**WeKnora**](https://weknora.weixin.qq.com) is an LLM-powered intelligent knowledge management and Q&A framework built for enterprise-grade document understanding and semantic retrieval.
+[**WeKnora**](https://weknora.weixin.qq.com) is an open-source, LLM-powered knowledge framework built for enterprise-grade document understanding, semantic retrieval, and autonomous reasoning.
 
-WeKnora offers two Q&A modes — **Quick Q&A** and **Intelligent Reasoning**, alongside an autonomous **Wiki Mode**. Quick Q&A uses a **RAG (Retrieval-Augmented Generation)** pipeline to rapidly retrieve relevant chunks and generate answers, ideal for everyday knowledge queries. Intelligent Reasoning is powered by a **ReACT Agent** engine that employs a **progressive strategy** to autonomously orchestrate knowledge retrieval, MCP tools, and web search, iteratively reasoning and reflecting to arrive at a final conclusion — suited for multi-source synthesis and complex tasks. The new **Wiki Mode** allows agents to autonomously generate and maintain a structured, interlinked markdown knowledge base from raw documents. Custom agents are also supported, allowing flexible configuration of dedicated knowledge bases, tool sets, and system prompts. Choose the right mode for the task, balancing response speed with reasoning depth.
+It is organized around three core capabilities: **RAG-based Quick Q&A** for everyday lookups, a **ReAct Agent** that autonomously orchestrates retrieval, MCP tools and web search to handle complex multi-step tasks, and a brand-new **Wiki Mode** in which agents distill raw documents into a self-maintaining, interlinked markdown knowledge base with an interactive knowledge graph. Combined with multi-source ingestion (Feishu / Notion / Yuque, and growing), 20+ LLM provider integrations, full Langfuse observability, and a fully self-hostable modular architecture, WeKnora turns scattered documents into a queryable, reasoning-capable, continuously evolving knowledge asset.
 
 The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (more data sources coming soon), handles 10+ document formats including PDF, Word, images, and Excel, and can serve Q&A directly through IM channels like WeCom, Feishu, Slack, and Telegram. It is compatible with major LLM providers including OpenAI, DeepSeek, Qwen (Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, and Ollama. Its fully modular design allows swapping LLMs, vector databases, and storage backends, with support for local and private cloud deployment ensuring complete data sovereignty. WeKnora also integrates with **Langfuse** for comprehensive observability into agent reasoning, token usage, and pipeline tracing.
 
