@@ -1,0 +1,18 @@
+<view class="page">
+  <view class="card">
+    <view class="title">Knowledge Chat</view>
+    <view class="muted">Ask the selected WeKnora knowledge base.</view>
+
+    <view class="field">
+      <text class="label">Question</text>
+      <textarea value="{{query}}" placeholder="Ask something..." bindinput="onQueryInput" />
+    </view>
+
+    <button bindtap="ask" loading="{{loading}}" disabled="{{!query}}">Ask WeKnora</button>
+  </view>
+
+  <view class="card answer-card" wx:if="{{answer || rawResponse}}">
+    <view class="label">Answer</view>
+    <view class="answer">{{answer || rawResponse}}</view>
+  </view>
+</view>

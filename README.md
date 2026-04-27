@@ -237,7 +237,7 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 | Capability | Details |
 |------------|---------|
 | Deployment | Local / Docker / Kubernetes (Helm) with private and offline support |
-| UI | Web UI / RESTful API / Chrome Extension |
+| UI | Web UI / RESTful API / Chrome Extension / WeChat Mini Program |
 | Observability | Integrated Langfuse for ReAct loops, token tracking, tool calls, and pipeline tracing |
 | Task Management | MQ async tasks, automatic database migration on version upgrade |
 | Model Management | Centralized config, per-knowledge-base model selection, multi-tenant built-in model sharing, WeKnora Cloud hosted models and parsing |
@@ -247,6 +247,11 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 [**WeKnora Chrome Extension**](https://chromewebstore.google.com/detail/jpemjbopikggjlmikmclgbmkhhopjdgd) lets you capture web content directly into your WeKnora knowledge base. Select text, images, or entire pages in the browser and save them as knowledge entries with one click — no copy-paste or file upload needed.
 
 
+## 📱 WeChat Mini Program
+
+The [WeKnora Mini Program](./miniprogram/README.md) provides a lightweight mobile client for configuring WeKnora API access, selecting knowledge bases, importing URLs, and asking knowledge chat from WeChat.
+
+
 ## 🦞 ClawHub Skill
 
 [**WeKnora ClawHub Skill**](https://clawhub.ai/lyingbug/weknora) is a WeKnora skill published on the ClawHub platform. Once installed, it enables document import (file / URL / Markdown), hybrid search (vector + keyword) across knowledge bases, and knowledge entry management — all through the WeKnora REST API.
@@ -254,7 +259,6 @@ Fully modular pipeline from document parsing, vectorization, and retrieval to LL
 - **Document Import** — Upload files, import web pages, or write Markdown knowledge via the agent
 - **Hybrid Search** — Search within or across knowledge bases with vector + keyword retrieval
 - **Knowledge Management** — List, browse, edit, and delete knowledge entries programmatically
-
 
 ## 🚀 Getting Started
 

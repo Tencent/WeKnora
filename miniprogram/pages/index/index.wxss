@@ -1,0 +1,16 @@
+.hero {
+  background: linear-gradient(135deg, #102a43 0%, #1264a3 100%);
+  color: #ffffff;
+}
+
+.hero .muted {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.section {
+  margin-top: 28rpx;
+}
+
+.picker-value {
+  color: #102a43;
+}
