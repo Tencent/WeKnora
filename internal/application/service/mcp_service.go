@@ -69,6 +69,11 @@ func (s *mcpServiceService) GetMCPServiceByID(
 		return nil, fmt.Errorf("MCP service not found")
 	}
 
+	// Redact sensitive credentials before returning (mirrors ListMCPServices).
+	// Previously GetMCPServiceByID returned plaintext credentials while List
+	// redacted them, creating an inconsistency (see issue #988).
+	service.MaskSensitiveData()
+
 	return service, nil
 }
 
@@ -173,7 +178,17 @@ func (s *mcpServiceService) UpdateMCPService(ctx context.Context, service *types
 			existing.Headers = service.Headers
 		}
 		if service.AuthConfig != nil {
-			existing.AuthConfig = service.AuthConfig
+			// Preserve existing credentials when the incoming value is the redacted
+			// placeholder or empty — this prevents the UI from silently overwriting
+			// real secrets with masked display values (see issue #988).
+			if existing.AuthConfig == nil {
+				existing.AuthConfig = service.AuthConfig
+			} else {
+				existing.AuthConfig.APIKey = types.PreserveIfRedacted(service.AuthConfig.APIKey, existing.AuthConfig.APIKey)
+				existing.AuthConfig.Token = types.PreserveIfRedacted(service.AuthConfig.Token, existing.AuthConfig.Token)
+				// Copy non-secret fields unconditionally.
+				existing.AuthConfig.AuthType = service.AuthConfig.AuthType
+			}
 		}
 		if service.AdvancedConfig != nil {
 			existing.AdvancedConfig = service.AdvancedConfig

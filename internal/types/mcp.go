@@ -206,14 +206,16 @@ func GetDefaultAdvancedConfig() *MCPAdvancedConfig {
 	}
 }
 
-// MaskSensitiveData masks sensitive information in the MCP service for display
+// MaskSensitiveData redacts sensitive credentials in the MCP service for API
+// responses. The fixed RedactedSecretPlaceholder ("***") is used so that
+// callers can reliably detect it with IsRedactedOrEmpty / PreserveIfRedacted.
 func (m *MCPService) MaskSensitiveData() {
 	if m.AuthConfig != nil {
 		if m.AuthConfig.APIKey != "" {
-			m.AuthConfig.APIKey = maskString(m.AuthConfig.APIKey)
+			m.AuthConfig.APIKey = RedactedSecretPlaceholder
 		}
 		if m.AuthConfig.Token != "" {
-			m.AuthConfig.Token = maskString(m.AuthConfig.Token)
+			m.AuthConfig.Token = RedactedSecretPlaceholder
 		}
 	}
 }
@@ -233,7 +235,10 @@ func (m *MCPService) HideSensitiveInfo() *MCPService {
 	return &copy
 }
 
-// maskString masks a string, showing only first 4 and last 4 characters
+// maskString is retained for any callers not yet migrated to RedactedSecretPlaceholder.
+// Prefer RedactedSecretPlaceholder for new code — it leaks zero entropy.
+//
+// Deprecated: use RedactedSecretPlaceholder instead.
 func maskString(s string) string {
 	if len(s) <= 8 {
 		return "****"
