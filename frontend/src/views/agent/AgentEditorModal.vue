@@ -748,6 +748,25 @@
                       </div>
                     </div>
 
+                    <!-- LLM 调用超时时间 -->
+                    <div class="setting-row">
+                      <div class="setting-info">
+                        <label>{{ $t('agentEditor.llmCallTimeout.label') }}</label>
+                        <p class="desc">{{ $t('agentEditor.llmCallTimeout.desc') }}</p>
+                        <p class="desc-hint">{{ $t('agentEditor.llmCallTimeout.hint') }}</p>
+                      </div>
+                      <div class="setting-control">
+                        <t-input-number 
+                          v-model="formData.config.llm_call_timeout" 
+                          :min="0" 
+                          :max="600" 
+                          theme="column"
+                          :placeholder="$t('agentEditor.llmCallTimeout.placeholder')"
+                          clearable
+                        />
+                      </div>
+                    </div>
+
                     <!-- MCP 服务选择 -->
                     <div class="setting-row">
                       <div class="setting-info">
@@ -1797,6 +1816,7 @@ const defaultFormData = {
     thinking: false, // 默认禁用思考模式
     // Agent模式设置
     max_iterations: 10,
+    llm_call_timeout: 120,  // 120 seconds
     allowed_tools: [] as string[],
     reflection_enabled: false,
     // MCP 服务设置
