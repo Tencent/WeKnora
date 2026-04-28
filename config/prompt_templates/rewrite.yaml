@@ -32,15 +32,16 @@ templates:
       - The rewritten question should be within 30 words
       - IMPORTANT: The rewritten question must be in {{language}}
       - CRITICAL: The rewritten question will be used for knowledge base retrieval. It MUST preserve specific entities, keywords, and core search terms. Do NOT generate meta-instructions like "请在知识库中查找..." or "请搜索..." — instead, produce a self-contained question that contains the actual search keywords (e.g. person names, concepts, technical terms)
+      - EXCEPTION to the above: when the user wants to broadly read, browse, organize, or export knowledge base content WITHOUT specifying particular search terms (e.g. "请整理知识库中的数据", "读取知识库中的报告", "列出所有文档"), there are no specific keywords to extract. In this case, keep the original query's key descriptors intact — do NOT strip them as meta-instructions. For example, "请整理知识库中的数据，输出体检指标" should be rewritten as "体检指标数据整理", NOT reduced to "数据". Preserve any mentioned content types (报告/文档), labels (标签名), or file names.
 
       ## Task 2: Intent Classification
       Classify the user's intent into exactly ONE of the following categories.
       Follow the decision priority below — check from top to bottom, use the FIRST match:
 
       1. `greeting` — Pure greetings, thanks, or farewell with NO substantive question (e.g. "你好", "谢谢", "再见").
-      2. `summarize` — The user asks to summarize, organize, or review the conversation itself (e.g. "总结一下我们的对话").
+      2. `summarize` — The user asks to summarize, organize, or review the **conversation/dialogue itself** (e.g. "总结一下我们的对话", "回顾一下我们聊了什么"). **CRITICAL: If the user mentions "知识库" (knowledge base), documents, files, or reports, it is NOT `summarize` — use `kb_search` instead.** For example, "整理知识库中的数据" is `kb_search`, NOT `summarize`.
       3. `web_search` — The question explicitly asks for real-time, latest, or external information unlikely in the knowledge base (e.g. "今天天气怎么样", "最新的新闻").
-      4. `kb_search` — The user wants to search, find, query, or verify information that could exist in the knowledge base. **This applies even when images or documents are attached** — if the user's intent involves searching or matching against stored documents, it is `kb_search`, NOT `image_only` or `doc_only` (e.g. "知识库里有这个文件吗", "帮我查一下这个", "能找到相关的资料吗").
+      4. `kb_search` — The user wants to search, find, query, read, browse, organize, list, or extract information from the knowledge base. This includes both specific searches (e.g. "帮我查一下这个") AND broad access requests (e.g. "整理知识库中的数据", "读取知识库中的报告", "列出所有文档"). **This applies even when images or documents are attached** — if the user's intent involves searching or matching against stored documents, it is `kb_search`, NOT `image_only` or `doc_only`.
       5. `clarification` — The question is ambiguous or incomplete and likely needs KB retrieval to answer well.
       6. `follow_up` — The question clearly refers to previous conversation content and can be FULLY answered from dialogue history alone, with NO need for new retrieval (e.g. "上面第三点展开讲讲", "你刚才说的那个方案再详细说说").
       7. `image_only` — The user ONLY wants to understand, describe, translate, or extract content from the attached image itself, with NO intent to search or match against any external documents (e.g. "这张图片是什么", "描述一下图片内容", "翻译图中文字"). **CRITICAL: This intent requires `<images_uploaded>` to be present. If `<no_image_attached />` appears, NEVER classify as `image_only` — use `kb_search` instead.**
@@ -101,6 +102,12 @@ templates:
 
       Input: [document attached] "帮我总结一下这份文件"
       Output: {"rewrite_query":"总结一下这份文件","intent":"doc_only","image_description":""}
+
+      Input: "请整理知识库中的数据，用表格形式输出体检指标" (no history)
+      Output: {"rewrite_query":"体检指标数据整理","intent":"kb_search","image_description":""}
+
+      Input: "请读取知识库中体检报告标签的报告，输出体检指标" (no history)
+      Output: {"rewrite_query":"体检报告标签 体检指标","intent":"kb_search","image_description":""}
 
       ## Conversation History
       {{conversation}}
