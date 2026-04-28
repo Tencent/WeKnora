@@ -299,7 +299,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	deduplicatedBeforeRerank := t.deduplicateResults(allResults)
 
 	// Apply ReRank if model is configured
-	// Prefer chatModel (LLM-based reranking) over rerankModel if both are available
+	// Prefer rerankModel; fall back to chatModel (LLM-based reranking) if unavailable
 	// Use first query for reranking (or combine all queries if needed)
 	rerankQuery := ""
 	if len(queries) > 0 {
@@ -313,26 +313,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Variable to hold results through reranking and MMR stages
 	var filteredResults []*searchResultWithMeta
 
-	if t.chatModel != nil && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
-		logger.Infof(
-			ctx,
-			"[Tool][KnowledgeSearch] Applying LLM-based rerank with model: %s, input: %d results, queries: %v",
-			t.chatModel.GetModelName(),
-			len(deduplicatedBeforeRerank),
-			queries,
-		)
-		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
-		if err != nil {
-			logger.Warnf(ctx, "[Tool][KnowledgeSearch] LLM rerank failed, using original results: %v", err)
-			filteredResults = deduplicatedBeforeRerank
-		} else {
-			filteredResults = rerankedResults
-			logger.Infof(ctx, "[Tool][KnowledgeSearch] LLM rerank completed successfully: %d results",
-				len(filteredResults))
-		}
-	} else if t.rerankModel != nil && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank with model: %s, input: %d results, queries: %v",
-			t.rerankModel.GetModelName(), len(deduplicatedBeforeRerank), queries)
+	if (t.rerankModel != nil || t.chatModel != nil) && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank, input: %d results, queries: %v",
+			len(deduplicatedBeforeRerank), queries)
 		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank failed, using original results: %v", err)
@@ -343,7 +326,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 				len(filteredResults))
 		}
 	} else {
-		// No reranking, use deduplicated results
+		// No reranking model available, use deduplicated results
 		filteredResults = deduplicatedBeforeRerank
 	}
 
