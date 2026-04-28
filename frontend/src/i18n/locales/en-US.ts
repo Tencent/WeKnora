@@ -3664,6 +3664,12 @@ export default {
       selectDesc: 'Select MCP services to enable',
       selectPlaceholder: 'Select MCP services',
     },
+    llmCallTimeout: {
+      label: "LLM Call Timeout",
+      desc: "Maximum waiting time for a single LLM call (seconds). Call will be terminated if this time is exceeded",
+      hint: "0 means unlimited wait (not recommended)",
+      placeholder: "Enter seconds, recommended range 60-600",
+    },
     imageUpload: {
       navLabel: 'Multimodal',
       sectionTitle: 'Multimodal Configuration',
