@@ -36,7 +36,7 @@ type AgentEngine struct {
 	contextManager       interfaces.ContextManager // Context manager for writing agent conversation to LLM context
 	sessionID            string                    // Session ID for context management
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
-	skillsManager        *skills.Manager           // Skills manager for Progressive Disclosure (optional)
+	skillRuntime        skills.SkillRuntime       // Skill runtime for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config         // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc        // VLM function for describing images in tool results (optional)
 	tokenEstimator       *agenttoken.Estimator     // Token estimator for context window management
@@ -102,7 +102,7 @@ func NewAgentEngineWithSkills(
 	contextManager interfaces.ContextManager,
 	sessionID string,
 	systemPromptTemplate string,
-	skillsManager *skills.Manager,
+	skillRuntime skills.SkillRuntime,
 ) *AgentEngine {
 	engine := NewAgentEngine(
 		config,
@@ -115,7 +115,7 @@ func NewAgentEngineWithSkills(
 		sessionID,
 		systemPromptTemplate,
 	)
-	engine.skillsManager = skillsManager
+	engine.skillRuntime = skillRuntime
 	return engine
 }
 
@@ -133,14 +133,14 @@ func (e *AgentEngine) SetImageDescriber(fn ImageDescriberFunc) {
 	e.imageDescriber = fn
 }
 
-// SetSkillsManager sets the skills manager for the engine
-func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
-	e.skillsManager = manager
+// SetSkillRuntime sets the skill runtime for the engine
+func (e *AgentEngine) SetSkillRuntime(runtime skills.SkillRuntime) {
+	e.skillRuntime = runtime
 }
 
-// GetSkillsManager returns the skills manager
-func (e *AgentEngine) GetSkillsManager() *skills.Manager {
-	return e.skillsManager
+// GetSkillRuntime returns the skill runtime
+func (e *AgentEngine) GetSkillRuntime() skills.SkillRuntime {
+	return e.skillRuntime
 }
 
 // estimateCurrentTokens returns the best estimate of the current context token count.
@@ -223,8 +223,13 @@ func (e *AgentEngine) Execute(
 	// Extract user language from context for prompt placeholder
 	language := types.LanguageNameFromContext(ctx)
 	var systemPrompt string
-	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
-		skillsMetadata := e.skillsManager.GetAllMetadata()
+	if e.skillRuntime != nil && e.skillRuntime.IsEnabled() {
+		// Apply per-request allow-list (the runtime is a global singleton,
+		// so per-agent filtering happens here rather than in the runtime).
+		skillsMetadata := skills.FilterMetadata(
+			e.skillRuntime.ListMetadata(ctx),
+			e.config.AllowedSkills,
+		)
 		systemPrompt = BuildSystemPromptWithOptions(
 			e.knowledgeBasesInfo,
 			e.config.WebSearchEnabled,

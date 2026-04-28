@@ -133,24 +133,21 @@ func containsSubstring(s, substr string) bool {
 	return false
 }
 
-func TestLoaderDiscoverSkills(t *testing.T) {
-	// Create a temporary skills directory
+func TestRepositoryDiscover(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "skills-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create a test skill directory
 	skillDir := filepath.Join(tmpDir, "test-skill")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
-	// Write SKILL.md
 	skillContent := `---
 name: test-skill
-description: A test skill for loader testing.
+description: A test skill for repository testing.
 ---
 # Test Skill
 
@@ -160,39 +157,35 @@ This is the test skill content.
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
-	// Create loader and discover skills
-	loader := NewLoader([]string{tmpDir})
-	metadata, err := loader.DiscoverSkills()
+	repo := NewFSRepository([]string{tmpDir})
+	all, err := repo.Discover(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to discover skills: %v", err)
 	}
 
-	if len(metadata) != 1 {
-		t.Fatalf("Expected 1 skill, got %d", len(metadata))
+	if len(all) != 1 {
+		t.Fatalf("Expected 1 skill, got %d", len(all))
 	}
 
-	if metadata[0].Name != "test-skill" {
-		t.Errorf("Expected skill name 'test-skill', got '%s'", metadata[0].Name)
+	if all[0].Name != "test-skill" {
+		t.Errorf("Expected skill name 'test-skill', got '%s'", all[0].Name)
 	}
 
-	t.Logf("Discovered %d skills: %v", len(metadata), metadata[0].Name)
+	t.Logf("Discovered %d skills: %v", len(all), all[0].Name)
 }
 
-func TestLoaderLoadSkillInstructions(t *testing.T) {
-	// Create a temporary skills directory
+func TestRepositoryGetByName(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "skills-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create a test skill directory
 	skillDir := filepath.Join(tmpDir, "test-skill")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
-	// Write SKILL.md
 	skillContent := `---
 name: test-skill
 description: A test skill for content loading.
@@ -209,11 +202,10 @@ More content here.
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
-	// Create loader and load skill instructions
-	loader := NewLoader([]string{tmpDir})
-	skill, err := loader.LoadSkillInstructions("test-skill")
+	repo := NewFSRepository([]string{tmpDir})
+	skill, err := repo.GetByName(context.Background(), "test-skill")
 	if err != nil {
-		t.Fatalf("Failed to load skill instructions: %v", err)
+		t.Fatalf("Failed to load skill: %v", err)
 	}
 
 	if skill.Name != "test-skill" {
@@ -227,26 +219,21 @@ More content here.
 	if !skill.Loaded {
 		t.Error("Expected Loaded to be true")
 	}
-
-	t.Logf("Loaded skill: name=%s, instructions_len=%d", skill.Name, len(skill.Instructions))
 }
 
-func TestLoaderLoadSkillFile(t *testing.T) {
-	// Create a temporary skills directory
+func TestRepositoryReadFile(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "skills-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create a test skill directory with additional files
 	skillDir := filepath.Join(tmpDir, "test-skill")
 	scriptsDir := filepath.Join(skillDir, "scripts")
 	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
-	// Write SKILL.md
 	skillContent := `---
 name: test-skill
 description: A test skill with additional files.
@@ -259,27 +246,22 @@ See [GUIDE.md](GUIDE.md) for more info.
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
-	// Write additional file
 	guideContent := "# Guide\n\nThis is the guide content."
 	if err := os.WriteFile(filepath.Join(skillDir, "GUIDE.md"), []byte(guideContent), 0644); err != nil {
 		t.Fatalf("Failed to write GUIDE.md: %v", err)
 	}
 
-	// Write a script
 	scriptContent := "#!/usr/bin/env python3\nprint('Hello from script')"
 	if err := os.WriteFile(filepath.Join(scriptsDir, "hello.py"), []byte(scriptContent), 0644); err != nil {
 		t.Fatalf("Failed to write script: %v", err)
 	}
 
-	// Create loader and discover skills first
-	loader := NewLoader([]string{tmpDir})
-	_, err = loader.DiscoverSkills()
-	if err != nil {
+	repo := NewFSRepository([]string{tmpDir})
+	if _, err := repo.Discover(context.Background()); err != nil {
 		t.Fatalf("Failed to discover skills: %v", err)
 	}
 
-	// Load additional file
-	file, err := loader.LoadSkillFile("test-skill", "GUIDE.md")
+	file, err := repo.ReadFile(context.Background(), "test-skill", "GUIDE.md")
 	if err != nil {
 		t.Fatalf("Failed to load skill file: %v", err)
 	}
@@ -292,8 +274,7 @@ See [GUIDE.md](GUIDE.md) for more info.
 		t.Error("GUIDE.md should not be marked as script")
 	}
 
-	// Load script file
-	scriptFile, err := loader.LoadSkillFile("test-skill", "scripts/hello.py")
+	scriptFile, err := repo.ReadFile(context.Background(), "test-skill", "scripts/hello.py")
 	if err != nil {
 		t.Fatalf("Failed to load script file: %v", err)
 	}
@@ -302,28 +283,27 @@ See [GUIDE.md](GUIDE.md) for more info.
 		t.Error("hello.py should be marked as script")
 	}
 
-	t.Logf("Loaded files: GUIDE.md=%d bytes, hello.py=%d bytes (isScript=%v)",
-		len(file.Content), len(scriptFile.Content), scriptFile.IsScript)
+	// Path traversal protection.
+	if _, err := repo.ReadFile(context.Background(), "test-skill", "../../etc/passwd"); err == nil {
+		t.Error("Expected path-traversal to be rejected")
+	}
 }
 
-func TestManagerIntegration(t *testing.T) {
-	// Create a temporary skills directory
+func TestRuntimeIntegration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "skills-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create a test skill directory
 	skillDir := filepath.Join(tmpDir, "test-skill")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatalf("Failed to create skill dir: %v", err)
 	}
 
-	// Write SKILL.md
 	skillContent := `---
 name: test-skill
-description: A test skill for manager integration testing.
+description: A test skill for runtime integration testing.
 ---
 # Test Skill
 
@@ -333,38 +313,78 @@ Integration test content.
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
-	// Create manager with config
-	config := &ManagerConfig{
-		SkillDirs:     []string{tmpDir},
-		AllowedSkills: []string{}, // Allow all
-		Enabled:       true,
+	rt, err := NewRuntime(Options{
+		SkillDirs:   []string{tmpDir},
+		Enabled:     true,
+		SandboxMode: "disabled",
+	})
+	if err != nil {
+		t.Fatalf("Failed to construct runtime: %v", err)
 	}
 
-	manager := NewManager(config, nil) // No sandbox for this test
-
-	// Initialize
 	ctx := context.Background()
-	if err := manager.Initialize(ctx); err != nil {
-		t.Fatalf("Failed to initialize manager: %v", err)
+	if err := rt.Initialize(ctx); err != nil {
+		t.Fatalf("Failed to initialize runtime: %v", err)
 	}
 
-	// Get all metadata
-	metadata := manager.GetAllMetadata()
-	if len(metadata) != 1 {
-		t.Fatalf("Expected 1 skill, got %d", len(metadata))
+	metas := rt.ListMetadata(ctx)
+	if len(metas) != 1 {
+		t.Fatalf("Expected 1 skill, got %d", len(metas))
 	}
 
-	// Load skill
-	skill, err := manager.LoadSkill(ctx, "test-skill")
+	skill, err := rt.Load(ctx, "test-skill")
 	if err != nil {
 		t.Fatalf("Failed to load skill: %v", err)
 	}
-
 	if skill.Name != "test-skill" {
 		t.Errorf("Expected skill name 'test-skill', got '%s'", skill.Name)
 	}
 
-	t.Logf("Manager integration test passed: %d skills discovered", len(metadata))
+	// Allow-list rejection.
+	rtRestricted, err := NewRuntime(Options{
+		SkillDirs:     []string{tmpDir},
+		AllowedSkills: []string{"other-skill"},
+		Enabled:       true,
+	})
+	if err != nil {
+		t.Fatalf("construct restricted runtime: %v", err)
+	}
+	_ = rtRestricted.Initialize(ctx)
+	if metas := rtRestricted.ListMetadata(ctx); len(metas) != 0 {
+		t.Errorf("Expected allow-list to filter out test-skill, got %d", len(metas))
+	}
+	if _, err := rtRestricted.Load(ctx, "test-skill"); err == nil {
+		t.Error("Expected Load to reject disallowed skill")
+	}
+}
+
+func TestRuntimeDisabled(t *testing.T) {
+	rt, err := NewRuntime(Options{Enabled: false})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+	ctx := context.Background()
+	if rt.IsEnabled() {
+		t.Error("expected runtime to be disabled")
+	}
+	if metas := rt.ListMetadata(ctx); metas != nil {
+		t.Errorf("expected nil metadata when disabled, got %d", len(metas))
+	}
+	if _, err := rt.Load(ctx, "anything"); err == nil {
+		t.Error("expected Load to fail when disabled")
+	}
+}
+
+func TestFilterMetadata(t *testing.T) {
+	all := []*SkillMetadata{
+		{Name: "a"}, {Name: "b"}, {Name: "c"},
+	}
+	if got := FilterMetadata(all, nil); len(got) != 3 {
+		t.Errorf("nil allow-list should pass through, got %d", len(got))
+	}
+	if got := FilterMetadata(all, []string{"a", "c"}); len(got) != 2 {
+		t.Errorf("expected 2 filtered skills, got %d", len(got))
+	}
 }
 
 func TestIsScript(t *testing.T) {

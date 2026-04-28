@@ -43,14 +43,14 @@ type ReadSkillInput struct {
 // ReadSkillTool allows the agent to read skill content on demand
 type ReadSkillTool struct {
 	BaseTool
-	skillManager *skills.Manager
+	runtime skills.SkillRuntime
 }
 
 // NewReadSkillTool creates a new read_skill tool instance
-func NewReadSkillTool(skillManager *skills.Manager) *ReadSkillTool {
+func NewReadSkillTool(runtime skills.SkillRuntime) *ReadSkillTool {
 	return &ReadSkillTool{
-		BaseTool:     readSkillTool,
-		skillManager: skillManager,
+		BaseTool: readSkillTool,
+		runtime:  runtime,
 	}
 }
 
@@ -76,8 +76,8 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}, nil
 	}
 
-	// Check if skill manager is available
-	if t.skillManager == nil || !t.skillManager.IsEnabled() {
+	// Check if skill runtime is available
+	if t.runtime == nil || !t.runtime.IsEnabled() {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "Skills are not enabled",
@@ -89,7 +89,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	if input.FilePath != "" {
 		// Read a specific file from the skill directory
-		content, err := t.skillManager.ReadSkillFile(ctx, input.SkillName, input.FilePath)
+		content, err := t.runtime.ReadFile(ctx, input.SkillName, input.FilePath)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][ReadSkill] Failed to read skill file: %v", err)
 			return &types.ToolResult{
@@ -108,7 +108,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	} else {
 		// Read the main skill instructions (SKILL.md)
-		skill, err := t.skillManager.LoadSkill(ctx, input.SkillName)
+		skill, err := t.runtime.Load(ctx, input.SkillName)
 		if err != nil {
 			logger.Errorf(ctx, "[Tool][ReadSkill] Failed to load skill: %v", err)
 			return &types.ToolResult{
@@ -118,7 +118,7 @@ func (t *ReadSkillTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		}
 
 		// List available files in the skill directory
-		files, err := t.skillManager.ListSkillFiles(ctx, input.SkillName)
+		files, err := t.runtime.ListFiles(ctx, input.SkillName)
 		if err != nil {
 			files = []string{} // Non-fatal error
 		}

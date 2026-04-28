@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	llmcontext "github.com/Tencent/WeKnora/internal/application/service/llmcontext"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -324,14 +325,14 @@ func (s *sessionService) configureSkillsFromAgent(
 	case "all":
 		// Enable all preloaded skills
 		agentConfig.SkillsEnabled = true
-		agentConfig.SkillDirs = []string{DefaultPreloadedSkillsDir}
+		agentConfig.SkillDirs = []string{skills.DefaultPreloadedSkillsDir}
 		agentConfig.AllowedSkills = nil // Empty means all skills allowed
 		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all preloaded skills")
 	case "selected":
 		// Enable only selected skills
 		if len(customAgent.Config.SelectedSkills) > 0 {
 			agentConfig.SkillsEnabled = true
-			agentConfig.SkillDirs = []string{DefaultPreloadedSkillsDir}
+			agentConfig.SkillDirs = []string{skills.DefaultPreloadedSkillsDir}
 			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
 			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
 				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
