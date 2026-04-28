@@ -97,6 +97,8 @@ class DocxParser(BaseParser):
         """
         super().__init__(**kwargs)
         self.max_pages = CONFIG.docx_max_pages if max_pages is None else max_pages
+        if self.max_pages <= 0:
+            self.max_pages = 100000  # no limit (matches Docx.__call__ default)
         logger.info(f"DocxParser initialized with max_pages={self.max_pages}")
 
     def parse_into_text(self, content: bytes) -> DocumentModel:
