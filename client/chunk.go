@@ -75,19 +75,24 @@ type UpdateChunkRequest struct {
 //   - knowledgeID: Knowledge ID
 //   - page: Page number, starts from 1
 //   - pageSize: Number of items per page
+//   - chunkTypes: Optional chunk type filter (e.g. "text", "image_caption", "image_ocr").
+//     When empty, the server defaults to text chunks only.
 //
 // Returns:
 //   - []Chunk: List of chunks
 //   - int64: Total count
 //   - error: Error information
 func (c *Client) ListKnowledgeChunks(ctx context.Context,
-	knowledgeID string, page int, pageSize int,
+	knowledgeID string, page int, pageSize int, chunkTypes ...string,
 ) ([]Chunk, int64, error) {
 	path := fmt.Sprintf("/api/v1/chunks/%s", knowledgeID)
 
 	queryParams := url.Values{}
 	queryParams.Add("page", strconv.Itoa(page))
 	queryParams.Add("page_size", strconv.Itoa(pageSize))
+	for _, ct := range chunkTypes {
+		queryParams.Add("chunk_type", ct)
+	}
 
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil, queryParams)
 	if err != nil {
