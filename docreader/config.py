@@ -73,7 +73,7 @@ def load_config() -> DocReaderConfig:
         * 1024
     )
     grpc_port = _get_int(["DOCREADER_GRPC_PORT", "PORT"], 50051)
-    docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 100)
+    docx_max_pages = _get_int(["DOCREADER_DOCX_MAX_PAGES"], 0)
 
     external_http_proxy = _get_str(
         ["DOCREADER_EXTERNAL_HTTP_PROXY", "EXTERNAL_HTTP_PROXY"], ""
