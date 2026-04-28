@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -139,6 +140,9 @@ type wikiIngestService struct {
 	modelService interfaces.ModelService
 	task         interfaces.TaskEnqueuer
 	redisClient  *redis.Client // nil in Lite mode (no Redis)
+	// liteLocks provides per-KB mutual exclusion in Lite mode (no Redis).
+	// Keys are kbID strings; values are unused (presence = locked).
+	liteLocks sync.Map
 }
 
 // NewWikiIngestService creates a new wiki ingest service
@@ -336,25 +340,52 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, kbID string, co
 	}
 }
 
-// requeueFailedOps appends failed operations back to the pending list so they
-// are retried in the next follow-up batch. Called after trimPendingList has
-// already removed the consumed batch head.
-func (s *wikiIngestService) requeueFailedOps(ctx context.Context, kbID string, ops []WikiPendingOp) {
-	if s.redisClient == nil {
+// requeueFailedOps re-enqueues failed operations for retry.
+//
+// Redis mode: appends ops back to the pending list tail so the next follow-up
+// batch picks them up.
+//
+// Lite mode (no Redis): enqueues a new asynq task per failed op with a short
+// delay, since there is no shared pending list to append to.
+func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIngestPayload, ops []WikiPendingOp) {
+	if s.redisClient != nil {
+		pendingKey := wikiPendingKeyPrefix + payload.KnowledgeBaseID
+		for _, op := range ops {
+			data, err := json.Marshal(op)
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to marshal op for requeue: %v", err)
+				continue
+			}
+			if err := s.redisClient.RPush(ctx, pendingKey, string(data)).Err(); err != nil {
+				logger.Warnf(ctx, "wiki ingest: failed to requeue op %s: %v", op.KnowledgeID, err)
+				continue
+			}
+			logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry", op.KnowledgeID, op.DocTitle)
+		}
 		return
 	}
-	pendingKey := wikiPendingKeyPrefix + kbID
+
+	// Lite mode: re-enqueue each failed op as a new asynq task.
 	for _, op := range ops {
-		data, err := json.Marshal(op)
-		if err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to marshal op for requeue: %v", err)
+		retryPayload := WikiIngestPayload{
+			TenantID:        payload.TenantID,
+			KnowledgeBaseID: payload.KnowledgeBaseID,
+			Language:        op.Language,
+			LiteOps:         []WikiPendingOp{op},
+		}
+		langfuse.InjectTracing(ctx, &retryPayload)
+		payloadBytes, _ := json.Marshal(retryPayload)
+		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
+			asynq.Queue("low"),
+			asynq.MaxRetry(10),
+			asynq.Timeout(60*time.Minute),
+			asynq.ProcessIn(wikiIngestDelay),
+		)
+		if _, err := s.task.Enqueue(t); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to requeue lite op %s: %v", op.KnowledgeID, err)
 			continue
 		}
-		if err := s.redisClient.RPush(ctx, pendingKey, string(data)).Err(); err != nil {
-			logger.Warnf(ctx, "wiki ingest: failed to requeue op %s: %v", op.KnowledgeID, err)
-			continue
-		}
-		logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry", op.KnowledgeID, op.DocTitle)
+		logger.Infof(ctx, "wiki ingest: re-queued failed lite op %s (%s) for retry", op.KnowledgeID, op.DocTitle)
 	}
 }
 
