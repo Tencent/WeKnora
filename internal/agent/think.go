@@ -19,6 +19,7 @@ type streamLLMResult struct {
 	ToolCalls    []types.LLMToolCall
 	Usage        *types.TokenUsage
 	FinishReason string // actual finish_reason from LLM (captured from last stream chunk)
+	StreamError  string // error message from stream (e.g., timeout), kept separate from Content
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -51,6 +52,14 @@ func (e *AgentEngine) streamLLMToEventBus(
 			firstChunkTime = time.Now()
 		}
 		responseTypeCounts[string(chunk.ResponseType)]++
+
+		// Capture error messages from the stream (e.g., "context deadline exceeded")
+		// but do NOT append them to result.Content — they would leak to the user
+		// as if they were part of the LLM answer.
+		if chunk.ResponseType == types.ResponseTypeError {
+			result.StreamError = chunk.Content
+			continue
+		}
 
 		if chunk.Content != "" {
 			isExtracted := chunk.Data != nil && chunk.Data["source"] != nil
@@ -85,6 +94,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 		"stream_duration=%dms, type_distribution=%v",
 		chunkCount, len(result.Content), len(result.ToolCalls),
 		streamDuration.Milliseconds(), responseTypeCounts)
+
+	// If the stream produced an error and no usable content/tool calls,
+	// surface it as a Go error so the caller can retry or degrade gracefully.
+	if result.StreamError != "" && result.Content == "" && len(result.ToolCalls) == 0 {
+		return result, fmt.Errorf("LLM stream error: %s", result.StreamError)
+	}
 
 	return result, nil
 }
