@@ -322,7 +322,7 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string) ([
 		unique = append(unique, reversedUnique[i])
 	}
 
-	return unique, len(ops)
+	return unique, len(result)
 }
 
 // trimPendingList removes the first `count` items from the Redis pending list.
@@ -333,6 +333,28 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, kbID string, co
 	pendingKey := wikiPendingKeyPrefix + kbID
 	if err := s.redisClient.LTrim(ctx, pendingKey, int64(count), -1).Err(); err != nil {
 		logger.Warnf(ctx, "wiki ingest: failed to trim pending list: %v", err)
+	}
+}
+
+// requeueFailedOps appends failed operations back to the pending list so they
+// are retried in the next follow-up batch. Called after trimPendingList has
+// already removed the consumed batch head.
+func (s *wikiIngestService) requeueFailedOps(ctx context.Context, kbID string, ops []WikiPendingOp) {
+	if s.redisClient == nil {
+		return
+	}
+	pendingKey := wikiPendingKeyPrefix + kbID
+	for _, op := range ops {
+		data, err := json.Marshal(op)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to marshal op for requeue: %v", err)
+			continue
+		}
+		if err := s.redisClient.RPush(ctx, pendingKey, string(data)).Err(); err != nil {
+			logger.Warnf(ctx, "wiki ingest: failed to requeue op %s: %v", op.KnowledgeID, err)
+			continue
+		}
+		logger.Infof(ctx, "wiki ingest: re-queued failed op %s (%s) for retry", op.KnowledgeID, op.DocTitle)
 	}
 }
 

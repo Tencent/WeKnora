@@ -228,6 +228,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 
 	// 1. MAP PHASE (Parallel extraction and generation of updates)
 	var mapMu sync.Mutex
+	var failedOps []WikiPendingOp
 	slugUpdates := make(map[string][]SlugUpdate)
 	var docResults []*docIngestResult
 	var retractChangeDesc strings.Builder
@@ -310,6 +311,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			if err != nil {
 				mapMu.Lock()
 				ingestFailed++
+				failedOps = append(failedOps, op)
 				mapMu.Unlock()
 				logger.Warnf(mapCtx, "wiki ingest: failed to map knowledge %s: %v", op.KnowledgeID, err)
 				return nil // Don't fail the whole batch
@@ -412,6 +414,13 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	s.trimPendingList(ctx, payload.KnowledgeBaseID, peekedCount)
+
+	// Re-enqueue failed ops so they get retried in the next follow-up batch.
+	// This must happen after trim: trim removes the consumed batch head, then
+	// requeue appends the failed items to the tail for a future attempt.
+	if len(failedOps) > 0 {
+		s.requeueFailedOps(ctx, payload.KnowledgeBaseID, failedOps)
+	}
 
 	logger.Infof(ctx, "wiki ingest: batch completed for KB %s, %d ops, %d pages affected", payload.KnowledgeBaseID, len(pendingOps), len(allPagesAffected))
 
