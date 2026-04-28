@@ -299,6 +299,8 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string) ([
 		var op WikiPendingOp
 		if err := json.Unmarshal([]byte(item), &op); err == nil {
 			ops = append(ops, op)
+		} else {
+			logger.Warnf(ctx, "wiki ingest: failed to unmarshal pending op: %v, raw_item: %.100s", err, item)
 		}
 	}
 
@@ -320,7 +322,7 @@ func (s *wikiIngestService) peekPendingList(ctx context.Context, kbID string) ([
 		unique = append(unique, reversedUnique[i])
 	}
 
-	return unique, len(result)
+	return unique, len(ops)
 }
 
 // trimPendingList removes the first `count` items from the Redis pending list.

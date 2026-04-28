@@ -48,6 +48,8 @@ frontend/chrome-extension/
 WeKnora-Chrome-Extension
 packages/protoc-3.19.4-linux-x86_64.zip
 
+Claude.md
+
 # 本地测试脚本
 configure-ollama.sh
 fix-docker.sh
