@@ -19,8 +19,8 @@ const (
 	defaultMaxPerUser = 3
 	// defaultWorkers is the default number of concurrent QA workers.
 	defaultWorkers = 5
-	// queueTimeout is how long a request can wait in the queue before being discarded.
-	queueTimeout = 60 * time.Second
+	// defaultQueueTimeout is how long a request can wait in the queue before being discarded.
+	defaultQueueTimeout = 60 * time.Second
 	// redisQueueUserTTL is the TTL for per-user queue counters in Redis.
 	redisQueueUserTTL = 5 * time.Minute
 	// globalGateTTL is the TTL for the global active-worker counter in Redis.
@@ -91,6 +91,8 @@ type qaQueue struct {
 	totalRejected  atomic.Int64
 	totalTimeout   atomic.Int64
 
+	// queueTimeout is how long a request can wait in the queue before being discarded.
+	queueTimeout time.Duration
 	// handler is called by workers to execute the QA request.
 	handler func(req *qaRequest)
 }
@@ -98,7 +100,10 @@ type qaQueue struct {
 // newQAQueue creates a new bounded queue with the given worker count.
 // globalMaxWorkers controls cross-instance concurrency (0 = no limit).
 // redisClient may be nil for single-instance mode.
-func newQAQueue(workers, maxSize, maxPerUser, globalMaxWorkers int, handler func(req *qaRequest), redisClient *redis.Client) *qaQueue {
+func newQAQueue(workers, maxSize, maxPerUser, globalMaxWorkers int, handler func(req *qaRequest), redisClient *redis.Client, queueTimeout time.Duration) *qaQueue {
+	if queueTimeout <= 0 {
+		queueTimeout = defaultQueueTimeout
+	}
 	q := &qaQueue{
 		queue:            make([]*qaRequest, 0, maxSize),
 		maxSize:          maxSize,
@@ -108,6 +113,7 @@ func newQAQueue(workers, maxSize, maxPerUser, globalMaxWorkers int, handler func
 		perUser:          make(map[string]int),
 		redis:            redisClient,
 		handler:          handler,
+		queueTimeout:     queueTimeout,
 	}
 	q.cond = sync.NewCond(&q.mu)
 	return q
@@ -228,7 +234,7 @@ func (q *qaQueue) runWorker(id int) {
 		}
 
 		waitDuration := time.Since(req.enqueuedAt)
-		if waitDuration > queueTimeout {
+		if waitDuration > q.queueTimeout {
 			q.totalTimeout.Add(1)
 			q.redisDecrUser(context.Background(), req.userKey)
 			logger.Warnf(req.ctx, "[IM] Queue timeout: user=%s waited=%s, discarding", req.msg.UserID, waitDuration)
