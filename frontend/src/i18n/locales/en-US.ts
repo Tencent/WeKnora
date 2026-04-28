@@ -1651,6 +1651,7 @@ export default {
       emptyDesc: 'Upload documents with Wiki enabled to auto-generate knowledge pages',
       selectPageHint: 'Select a page from the left to view its content',
       version: 'v{ver}',
+      aliases: 'Aliases',
       linksTo: 'Links to',
       linkedFrom: 'Linked from',
       sources: 'Source documents',
