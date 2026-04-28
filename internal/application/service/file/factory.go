@@ -47,7 +47,8 @@ func NewFileServiceFromStorageConfig(
 				}
 			}
 		}
-		return NewLocalFileService(baseDir), p, nil
+		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))
+		return NewLocalFileService(baseDir, externalURL), p, nil
 
 	case "minio":
 		if sec == nil || sec.MinIO == nil {

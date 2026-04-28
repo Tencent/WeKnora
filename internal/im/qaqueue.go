@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -42,6 +43,10 @@ type qaRequest struct {
 	adapter   Adapter
 	channel   *IMChannel
 	channelID string
+
+	// fileSvc resolves storage URLs to HTTP URLs for the tenant's storage backend.
+	// May be nil if the tenant has no storage config.
+	fileSvc interfaces.FileService
 
 	// userKey is "channelID:userID:chatID", used for per-user limits and /stop.
 	userKey    string
