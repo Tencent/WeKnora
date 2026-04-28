@@ -28,8 +28,6 @@ import (
 )
 
 const (
-	// qaTimeout is the maximum time to wait for the QA pipeline to complete.
-	qaTimeout = 120 * time.Second
 	// dedupTTL is how long processed message IDs are retained.
 	dedupTTL = 5 * time.Minute
 	// dedupCleanupInterval is how often the dedup map is cleaned.
@@ -646,7 +644,7 @@ func (s *Service) storeInflightMapping(ctx context.Context, userKey, sessionID, 
 		return
 	}
 	val := sessionID + ":" + messageID
-	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, qaTimeout+30*time.Second).Err(); err != nil {
+	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, 10*time.Minute).Err(); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: %v", err)
 	}
 }
@@ -1451,7 +1449,9 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	}
 
 	// Prepare the QA pipeline
-	qaCtx, qaCancel := context.WithTimeout(ctx, qaTimeout)
+	// No total deadline: each agent round has its own LLMCallTimeout (default 120s).
+	// A hard pipeline deadline would kill multi-round agent reasoning prematurely.
+	qaCtx, qaCancel := context.WithCancel(ctx)
 	defer qaCancel()
 
 	eventBus := event.NewEventBus()
@@ -1748,8 +1748,9 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
 func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, userKey string, quote *QuotedMessage) (string, error) {
-	// Add timeout to prevent indefinite blocking
-	ctx, cancel := context.WithTimeout(ctx, qaTimeout)
+	// Cancellable context (no hard deadline): each agent round has its own
+	// LLMCallTimeout. The context can still be cancelled by /stop.
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	eventBus := event.NewEventBus()
@@ -1855,18 +1856,18 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		}
 	}()
 
-	// Wait for completion or timeout
+	// Wait for completion or cancellation (e.g., /stop)
 	select {
 	case <-done:
 	case <-ctx.Done():
 		// Mark assistant message as completed to avoid dangling incomplete records
-		assistantMsg.Content = "抱歉，回答超时，请稍后再试。"
+		assistantMsg.Content = "抱歉，回答已被取消。"
 		assistantMsg.IsCompleted = true
 		// Use a fresh context since the original is cancelled
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to update timed-out assistant message: %v", updateErr)
+			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: %v", updateErr)
 		}
-		return "", fmt.Errorf("QA timed out after %v", qaTimeout)
+		return "", fmt.Errorf("QA cancelled: %w", ctx.Err())
 	}
 
 	answerMu.Lock()
