@@ -42,7 +42,7 @@
                   </div>
                   <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
-                      <div v-for="(token, idx) in getTokens(event.content)" :key="idx" v-html="getTokenHTML(token)"></div>
+                      <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
                   </div>
                 </div>
@@ -64,7 +64,7 @@
                   </div>
                   <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
-                      <div v-for="(token, idx) in getTokens(event.tool_data.thought)" :key="idx" v-html="getTokenHTML(token)"></div>
+                      <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
                     </div>
                   </div>
                 </div>
@@ -173,7 +173,7 @@
             </div>
             <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
               <div class="thinking-detail-content markdown-content">
-                <div v-for="(token, idx) in getTokens(event.content)" :key="idx" v-html="getTokenHTML(token)"></div>
+                <div v-html="renderMarkdownContent(event.content)"></div>
               </div>
             </div>
           </div>
@@ -195,7 +195,7 @@
             </div>
             <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
               <div class="thinking-detail-content markdown-content">
-                <div v-for="(token, idx) in getTokens(event.tool_data.thought)" :key="idx" v-html="getTokenHTML(token)"></div>
+                <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
               </div>
             </div>
           </div>
@@ -207,7 +207,7 @@
             v-if="event.content && event.content.trim()"
             class="answer-content markdown-content"
           >
-               <div v-for="(token, idx) in getTokens(event.content)" :key="idx" v-html="getTokenHTML(token)"></div>
+               <div v-html="renderMarkdownContent(event.content)"></div>
           </div>
           <div v-if="event.done" class="answer-toolbar">
             <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)" :title="$t('agent.copy')">
@@ -1657,10 +1657,14 @@ const preprocessMarkdown = (contentStr: string): string => {
     );
 };
 
-// Get tokens from markdown content (with sanitization for user-friendly display)
-const getTokens = (content: any) => {
+// 自定义渲染器 - 支持 Mermaid
+const agentRenderer = new marked.Renderer();
+agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
+
+// 单次渲染 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
+const renderMarkdownContent = (content: any): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
-  if (!contentStr.trim()) return [];
+  if (!contentStr.trim()) return '';
 
   // Extract <kb.../> and <web.../> tags before sanitization to prevent
   // sanitizeForDisplay from stripping chunk_id labels and UUIDs inside them.
@@ -1692,31 +1696,17 @@ const getTokens = (content: any) => {
 
   // Restore preserved wiki links
   sanitized = sanitized.replace(/\x00WIKI(\d+)\x00/g, (_, idx) => wikiPlaceholders[Number(idx)]);
-  
+
   // Restore preserved images
   sanitized = sanitized.replace(/\x00IMG(\d+)\x00/g, (_, idx) => imagePlaceholders[Number(idx)]);
-  
+
   // Restore preserved tags
   sanitized = sanitized.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tagPlaceholders[Number(idx)]);
 
   const processed = preprocessMarkdown(preprocessMathDelimiters(sanitized));
-  return marked.lexer(processed);
-};
-
-// 自定义渲染器 - 支持 Mermaid
-const agentRenderer = new marked.Renderer();
-agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
-
-// Render HTML from a single token
-const getTokenHTML = (token: any): string => {
-  try {
-    const html = marked.parser([token], { renderer: agentRenderer });
-    const protectedHTML = protectProviderImageSrcInHTML(html);
-    return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
-  } catch (e) {
-    console.error('Token rendering error:', e);
-    return '';
-  }
+  const html = marked.parse(processed, { renderer: agentRenderer }) as string;
+  const protectedHTML = protectProviderImageSrcInHTML(html);
+  return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
 };
 
 // Legacy Markdown rendering function (kept for summaries)

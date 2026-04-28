@@ -27,8 +27,7 @@
             <!-- 直接渲染完整内容，避免切分导致的问题，样式与 thinking 一致 -->
             <!-- 只有当有实际内容时才显示包围框 -->
             <div class="content-wrapper" v-if="hasActualContent">
-                <div class="ai-markdown-template markdown-content">
-                    <div v-for="(token, index) in markdownTokens" :key="index" v-html="renderToken(token)"></div>
+                <div class="ai-markdown-template markdown-content" v-html="renderedHTML">
                 </div>
             </div>
             <!-- Streaming indicator (non-Agent mode) -->
@@ -164,20 +163,15 @@ const mentionedItems = computed(() => {
     return props.session?.mentioned_items || [];
 });
 
-const markdownTokens = computed(() => {
+// 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
+const renderedHTML = computed(() => {
     const text = props.content || props.session?.content || '';
-    if (!text || typeof text !== 'string') {
-        return [];
-    }
-
+    if (!text || typeof text !== 'string') return '';
     const processed = replaceIncompleteImageWithPlaceholder(text);
     const safeText = preprocessMathDelimiters(processed);
-    
-    // 首先对 Markdown 内容进行安全处理
     const safeMarkdown = safeMarkdownToHTML(safeText);
-    
-    // 使用 marked.lexer 分词
-    return marked.lexer(safeMarkdown);
+    const html = marked.parse(safeMarkdown, { renderer: customRenderer, breaks: true });
+    return sanitizeHTML(html);
 });
 
 // 计算属性：判断是否有实际内容（非空且不只是空白）
@@ -185,27 +179,6 @@ const hasActualContent = computed(() => {
     const text = props.content || props.session?.content || '';
     return text && text.trim().length > 0;
 });
-
-// 渲染单个 token 为 HTML
-const renderToken = (token) => {
-    try {
-        // 创建临时的 marked 配置
-        const markedOptions = {
-            renderer: customRenderer,
-            breaks: true
-        };
-        
-        // 解析单个 token
-        // marked.parser 接受 token 数组
-        let html = marked.parser([token], markedOptions);
-        
-        // 使用 DOMPurify 进行最终的安全清理
-        return sanitizeHTML(html);
-    } catch (e) {
-        console.error('Token rendering error:', e);
-        return '';
-    }
-};
 
 // 获取实际内容
 const getActualContent = () => {
