@@ -17,7 +17,8 @@ import (
 
 // localFileService implements the FileService interface for local file system storage
 type localFileService struct {
-	baseDir string // Base directory for file storage
+	baseDir     string // Base directory for file storage
+	externalURL string // External URL base for presigned URL generation (empty = return local:// paths)
 }
 
 const localScheme = "local://"
@@ -34,10 +35,13 @@ func (s *localFileService) CheckConnectivity(ctx context.Context) error {
 	return nil
 }
 
-// NewLocalFileService creates a new local file service instance
-func NewLocalFileService(baseDir string) interfaces.FileService {
+// NewLocalFileService creates a new local file service instance.
+// externalURL is the externally-reachable base URL (e.g. "https://weknora.example.com");
+// when set, GetFileURL returns presigned HTTP URLs instead of local:// paths.
+func NewLocalFileService(baseDir, externalURL string) interfaces.FileService {
 	return &localFileService{
-		baseDir: baseDir,
+		baseDir:     baseDir,
+		externalURL: strings.TrimRight(externalURL, "/"),
 	}
 }
 
@@ -183,19 +187,33 @@ func (s *localFileService) SaveBytes(ctx context.Context, data []byte, tenantID 
 	return localScheme + filepath.ToSlash(relPath), nil
 }
 
-// GetFileURL returns a download URL for the file
-// For local storage, returns the local://... path
+// GetFileURL returns a download URL for the file.
+// When externalURL is configured, returns a presigned HTTP URL suitable for external access.
+// Otherwise returns the local://... path for backward compatibility.
 func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	// If already in provider:// format, return as-is
-	if strings.HasPrefix(filePath, localScheme) {
-		return filePath, nil
+	// Normalize to provider:// format.
+	normalized := filePath
+	if !strings.HasPrefix(filePath, localScheme) {
+		relPath, err := filepath.Rel(s.baseDir, filePath)
+		if err != nil {
+			normalized = filePath
+		} else {
+			normalized = localScheme + filepath.ToSlash(relPath)
+		}
 	}
-	// Convert absolute path to provider:// format
-	relPath, err := filepath.Rel(s.baseDir, filePath)
-	if err != nil {
-		return filePath, nil
+
+	// If external URL is configured, generate a presigned HTTP URL.
+	if s.externalURL != "" {
+		tenantID := secutils.ParseTenantIDFromStoragePath(normalized)
+		presignedURL, err := secutils.SignFileURL(s.externalURL, normalized, tenantID, 0)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to generate presigned URL for %s: %v, returning local:// path", normalized, err)
+			return normalized, nil
+		}
+		return presignedURL, nil
 	}
-	return localScheme + filepath.ToSlash(relPath), nil
+
+	return normalized, nil
 }
 
 // normalizePathForBase keeps backward compatibility for legacy file paths:
