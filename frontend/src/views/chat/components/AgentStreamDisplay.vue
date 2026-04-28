@@ -371,8 +371,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
+import { renderMarkdownWithPrerenderedKatex } from '@/utils/katexShared';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -591,7 +591,10 @@ const wikiDrawerContent = computed(() => {
     return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
   });
 
-  return marked.parse(preprocessed, { breaks: true, async: false }) as string;
+  return renderMarkdownWithPrerenderedKatex(
+    preprocessed,
+    (md) => marked.parse(md, { breaks: true, async: false }) as string,
+  );
 });
 
 watch(wikiDrawerContent, async () => {
@@ -736,7 +739,9 @@ const props = defineProps<{
 
 // Configure marked for security
 marked.use({});
-marked.use(markedKatex({ throwOnError: false }));
+// Note: KaTeX rendering is handled by katexShared.ts (pre-render + placeholder approach)
+// to avoid conflicts between marked-katex-extension and Vue's virtual DOM diffing
+// during streaming. See fix for issue #1056.
 
 const preprocessMathDelimiters = (rawText: string): string => {
   if (!rawText || typeof rawText !== 'string') {
@@ -1725,8 +1730,13 @@ const renderMarkdown = (content: any): string => {
   if (!contentStr.trim()) return '';
 
   try {
+    // Use pre-render + placeholder approach for KaTeX to avoid Vue virtual DOM
+    // conflicts during streaming (see issue #1056).
     const processed = preprocessMarkdown(preprocessMathDelimiters(contentStr));
-    const html = marked.parse(processed, { renderer: agentRenderer }) as string;
+    const html = renderMarkdownWithPrerenderedKatex(
+      processed,
+      (md) => marked.parse(md, { renderer: agentRenderer }) as string,
+    );
     if (!html) return '';
 
     const protectedHTML = protectProviderImageSrcInHTML(html);

@@ -62,8 +62,8 @@
 <script setup>
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
 import { marked } from 'marked';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
+import { renderMarkdownWithPrerenderedKatex } from '@/utils/katexShared';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
@@ -88,7 +88,9 @@ marked.use({
     breaks: true,  // 全局启用单个换行支持
 });
 
-marked.use(markedKatex({ throwOnError: false }));
+// Note: KaTeX rendering is handled by katexShared.ts (pre-render + placeholder approach)
+// to avoid conflicts between marked-katex-extension and Vue's virtual DOM diffing
+// during streaming. See fix for issue #1056.
 
 const preprocessMathDelimiters = (rawText) => {
     if (!rawText || typeof rawText !== 'string') {
@@ -189,17 +191,23 @@ const hasActualContent = computed(() => {
 // 渲染单个 token 为 HTML
 const renderToken = (token) => {
     try {
-        // 创建临时的 marked 配置
+        // Create marked options with custom renderer
         const markedOptions = {
             renderer: customRenderer,
             breaks: true
         };
         
-        // 解析单个 token
-        // marked.parser 接受 token 数组
-        let html = marked.parser([token], markedOptions);
+        // Use pre-render + placeholder approach for KaTeX to avoid Vue virtual DOM
+        // conflicts during streaming (see issue #1056).  We pass a parser closure
+        // that runs marked.parser on the (math-extracted) token source so that
+        // mermaid / image / other renderers still use the custom renderer.
+        const tokenSource = token.raw ?? '';
+        const html = renderMarkdownWithPrerenderedKatex(
+            tokenSource,
+            (md) => marked.parser(marked.lexer(md), markedOptions)
+        );
         
-        // 使用 DOMPurify 进行最终的安全清理
+        // Final DOMPurify sanitization
         return sanitizeHTML(html);
     } catch (e) {
         console.error('Token rendering error:', e);
