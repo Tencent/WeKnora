@@ -629,6 +629,105 @@ func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	})
 }
 
+// BatchDeleteKnowledgeRequest is the body schema for POST /knowledge/batch-delete.
+type BatchDeleteKnowledgeRequest struct {
+	KBID string   `json:"kb_id" binding:"required"`
+	IDs  []string `json:"ids"  binding:"required"`
+}
+
+// BatchDeleteKnowledge godoc
+// @Summary      批量删除知识
+// @Description  按 ID 列表批量删除单个知识库下的多个知识条目
+// @Tags         知识管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      BatchDeleteKnowledgeRequest  true  "批量删除请求"
+// @Success      200      {object}  map[string]interface{}       "删除成功"
+// @Failure      400      {object}  errors.AppError              "请求参数错误"
+// @Failure      403      {object}  errors.AppError              "权限不足"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/batch-delete [post]
+func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req BatchDeleteKnowledgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	// Deduplicate and drop empty IDs.
+	seen := make(map[string]struct{}, len(req.IDs))
+	ids := make([]string, 0, len(req.IDs))
+	for _, raw := range req.IDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		c.Error(errors.NewBadRequestError("ids cannot be empty"))
+		return
+	}
+	const maxBatch = 200
+	if len(ids) > maxBatch {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf("too many ids (max %d per batch)", maxBatch)))
+		return
+	}
+
+	// Validate KB access (editor or admin) using the kb_id from body.
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccessWithKBID(c, req.KBID)
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
+		return
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, effectiveTenantID)
+
+	// Single batch fetch to validate that every id exists and belongs to the
+	// requested KB. The service-layer DeleteKnowledgeList only enforces tenant
+	// scope, not KB scope, so the handler must guard against cross-KB deletion.
+	knowledgeList, err := h.kgService.GetKnowledgeBatch(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	if len(knowledgeList) != len(ids) {
+		c.Error(errors.NewBadRequestError("One or more knowledge entries not found"))
+		return
+	}
+	for _, k := range knowledgeList {
+		if k.KnowledgeBaseID != kbID {
+			c.Error(errors.NewBadRequestError(
+				fmt.Sprintf("Knowledge %s does not belong to knowledge base %s",
+					secutils.SanitizeForLog(k.ID), secutils.SanitizeForLog(kbID))))
+			return
+		}
+	}
+
+	logger.Infof(ctx, "Batch deleting %d knowledge entries from KB %s", len(ids), secutils.SanitizeForLog(kbID))
+	if err := h.kgService.DeleteKnowledgeList(ctx, ids); err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"deleted": len(ids),
+	})
+}
+
 // ClearKnowledgeBaseContents godoc
 // @Summary      清空知识库内容
 // @Description  删除知识库下的所有知识条目（异步任务）。知识库本身保留，仅清空其中的内容

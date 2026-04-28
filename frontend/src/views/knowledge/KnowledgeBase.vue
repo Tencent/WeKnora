@@ -28,13 +28,17 @@ import {
   createKnowledgeFromURL,
   listKnowledgeBases,
   reparseKnowledge,
+  batchDeleteKnowledge,
 } from "@/api/knowledge-base/index";
 import FAQEntryManager from './components/FAQEntryManager.vue';
+import DocumentListView from './components/DocumentListView.vue';
+import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import { listMoveTargets, moveKnowledge, getKnowledgeMoveProgress } from '@/api/knowledge-base';
 import { useI18n } from 'vue-i18n';
 import { formatStringDate, kbFileTypeVerification } from '@/utils';
+import { formatFileSize } from '@/utils/files';
 import { getParserEngines, type ParserEngineInfo } from '@/api/system';
 const route = useRoute();
 const { t } = useI18n();
@@ -269,6 +273,26 @@ const moveMode = ref<'reuse_vectors' | 'reparse'>('reuse_vectors');
 const moveSubmitting = ref(false);
 let movePollTimer: ReturnType<typeof setInterval> | null = null;
 
+// View mode (grid / list) — persisted per browser
+type DocViewMode = 'grid' | 'list';
+const VIEW_MODE_KEY = 'weknora.kb.docs.viewMode';
+const initViewMode = (): DocViewMode => {
+  try {
+    return localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid';
+  } catch { return 'grid'; }
+};
+const viewMode = ref<DocViewMode>(initViewMode());
+watch(viewMode, (v) => {
+  try { localStorage.setItem(VIEW_MODE_KEY, v); } catch { /* ignore */ }
+});
+
+// Multi-select state — shared between grid and list views.
+// Vue 3.5 tracks Set#add/delete natively, so direct mutation is reactive.
+const selectedIds = ref<Set<string>>(new Set());
+let lastSelectedIndex = -1;
+const batchDeleteDialog = ref(false);
+const batchDeleting = ref(false);
+
 const selectedTagId = ref<string>('');
 const tagList = ref<any[]>([]);
 const tagLoading = ref(false);
@@ -356,16 +380,6 @@ const formatDocTime = (time?: string) => {
   if (!time) return '--'
   const formatted = formatStringDate(new Date(time))
   return formatted.slice(2, 16) // "YY-MM-DD HH:mm"
-}
-
-// 格式化文件大小，用于气泡等展示
-const formatFileSize = (bytes?: number | string) => {
-  if (bytes == null || bytes === '') return ''
-  const n = typeof bytes === 'string' ? parseInt(bytes, 10) : bytes
-  if (Number.isNaN(n) || n <= 0) return ''
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 const channelLabelMap: Record<string, string> = {
@@ -1600,6 +1614,91 @@ const delCardConfirm = () => {
   });
 };
 
+const toggleSelectRow = (id: string, checked: boolean, shiftKey?: boolean) => {
+  const items = cardList.value || [];
+  const idx = items.findIndex((i: KnowledgeCard) => i.id === id);
+  if (shiftKey && lastSelectedIndex >= 0 && idx >= 0) {
+    const [s, e] = idx < lastSelectedIndex
+      ? [idx, lastSelectedIndex]
+      : [lastSelectedIndex, idx];
+    for (let i = s; i <= e; i++) {
+      if (checked) selectedIds.value.add(items[i].id);
+      else selectedIds.value.delete(items[i].id);
+    }
+  } else {
+    if (checked) selectedIds.value.add(id);
+    else selectedIds.value.delete(id);
+  }
+  lastSelectedIndex = idx;
+};
+
+const toggleSelectAll = (checked: boolean) => {
+  if (checked) {
+    for (const item of cardList.value || []) selectedIds.value.add(item.id);
+  } else {
+    for (const item of cardList.value || []) selectedIds.value.delete(item.id);
+  }
+};
+
+const clearSelection = () => {
+  selectedIds.value.clear();
+  lastSelectedIndex = -1;
+};
+
+const openBatchDeleteDialog = () => {
+  if (selectedIds.value.size === 0) return;
+  batchDeleteDialog.value = true;
+};
+
+const confirmBatchDelete = async () => {
+  if (batchDeleting.value || selectedIds.value.size === 0) return;
+  const ids = Array.from(selectedIds.value);
+  batchDeleting.value = true;
+  try {
+    const res: any = await batchDeleteKnowledge(kbId.value, ids);
+    if (res?.success) {
+      MessagePlugin.success(t('knowledgeBase.batchDeleteSuccess', { count: ids.length }));
+      clearSelection();
+      batchDeleteDialog.value = false;
+      page = 1;
+      loadKnowledgeFiles(kbId.value);
+      loadTags(kbId.value);
+    } else {
+      MessagePlugin.error(res?.message || t('knowledgeBase.batchDeleteFailed'));
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('knowledgeBase.batchDeleteFailed'));
+  } finally {
+    batchDeleting.value = false;
+  }
+};
+
+// Bridge list-view actions back to existing per-card handlers.
+const handleListAction = (
+  action: 'edit' | 'reparse' | 'move' | 'delete',
+  item: KnowledgeCard,
+) => {
+  const idx = (cardList.value || []).findIndex((i: KnowledgeCard) => i.id === item.id);
+  if (action === 'edit') return handleManualEdit(idx, item);
+  if (action === 'reparse') return handleKnowledgeReparse(idx, item);
+  if (action === 'move') return handleMoveKnowledge(item);
+  if (action === 'delete') return delCard(idx, item);
+};
+
+// Clear selection on filter/tag/kb change to avoid acting on hidden items.
+watch([selectedTagId, docSearchKeyword, selectedFileType, kbId], () => {
+  clearSelection();
+});
+
+// After cardList reloads, drop ids that are no longer present.
+watch(cardList, () => {
+  if (selectedIds.value.size === 0) return;
+  const visible = new Set((cardList.value || []).map((i: KnowledgeCard) => i.id));
+  for (const id of selectedIds.value) {
+    if (!visible.has(id)) selectedIds.value.delete(id);
+  }
+}, { deep: false });
+
 // 处理知识库编辑成功后的回调
 const handleKBEditorSuccess = (kbIdValue: string) => {
   if (kbIdValue === kbId.value) {
@@ -1979,6 +2078,30 @@ async function createNewSession(value: string): Promise<void> {
                 class="doc-type-select"
                 clearable
               />
+              <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
+                <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
+                  <button
+                    type="button"
+                    class="doc-view-toggle-btn"
+                    :class="{ active: viewMode === 'grid' }"
+                    @click="viewMode = 'grid'"
+                    :aria-pressed="viewMode === 'grid'"
+                  >
+                    <t-icon name="view-module" size="16px" />
+                  </button>
+                </t-tooltip>
+                <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
+                  <button
+                    type="button"
+                    class="doc-view-toggle-btn"
+                    :class="{ active: viewMode === 'list' }"
+                    @click="viewMode = 'list'"
+                    :aria-pressed="viewMode === 'list'"
+                  >
+                    <t-icon name="view-list" size="16px" />
+                  </button>
+                </t-tooltip>
+              </div>
               <div v-if="canEdit" class="doc-filter-actions">
                 <t-tooltip :content="$t('knowledgeBase.addDocument')" placement="top">
                   <t-dropdown
@@ -2014,11 +2137,12 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </div>
               </div>
-              <template v-else-if="cardList.length">
+              <template v-else-if="cardList.length && viewMode === 'grid'">
                 <div class="doc-card-list doc-card-list-animated">
                   <!-- 现有文档卡片 -->
                   <div
                     class="knowledge-card"
+                    :class="{ 'is-selected': selectedIds.has(item.id), 'has-selection': selectedIds.size > 0 }"
                     v-for="(item, index) in cardList"
                     :key="index"
                     @click="openCardDetails(item)"
@@ -2026,6 +2150,19 @@ async function createNewSession(value: string): Promise<void> {
                     @mousemove="onCardMouseMove($event)"
                     @mouseleave="onCardMouseLeave"
                   >
+                    <label
+                      v-if="canEdit"
+                      class="card-select-overlay"
+                      :class="{ active: selectedIds.has(item.id) }"
+                      @click.stop
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="selectedIds.has(item.id)"
+                        @click.stop="(e: MouseEvent) => toggleSelectRow(item.id, !selectedIds.has(item.id), e.shiftKey)"
+                        :aria-label="item.file_name"
+                      />
+                    </label>
                     <div class="card-content">
                       <div class="card-content-nav">
                         <span class="card-content-title" :title="item.file_name">{{ item.file_name }}</span>
@@ -2234,11 +2371,29 @@ async function createNewSession(value: string): Promise<void> {
                   </div>
                 </Teleport>
               </template>
+              <template v-else-if="cardList.length && viewMode === 'list'">
+                <DocumentListView
+                  :items="cardList"
+                  :selected-ids="selectedIds"
+                  :tag-list="tagList"
+                  :can-edit="canEdit"
+                  @open="(item: any) => openCardDetails(item)"
+                  @toggle-row="toggleSelectRow"
+                  @toggle-all="toggleSelectAll"
+                  @action="(action: any, item: any) => handleListAction(action, item)"
+                />
+              </template>
               <template v-else-if="!docListLoading">
                 <div class="doc-empty-state">
                   <EmptyKnowledge />
                 </div>
               </template>
+              <DocumentBatchBar
+                :count="selectedIds.size"
+                :loading="batchDeleting"
+                @clear="clearSelection"
+                @delete="openBatchDeleteDialog"
+              />
             </div>
           </div>
           <t-dialog
@@ -2260,6 +2415,41 @@ async function createNewSession(value: string): Promise<void> {
                 <span class="circle-btn-txt" @click="delDialog = false">{{ t('common.cancel') }}</span>
                 <span class="circle-btn-txt confirm" @click="delCardConfirm">
                   {{ t('knowledgeBase.confirmDelete') }}
+                </span>
+              </div>
+            </div>
+          </t-dialog>
+
+          <!-- 批量删除确认弹窗 -->
+          <t-dialog
+            v-model:visible="batchDeleteDialog"
+            dialogClassName="del-knowledge"
+            :closeBtn="false"
+            :cancelBtn="null"
+            :confirmBtn="null"
+          >
+            <div class="circle-wrap">
+              <div class="header">
+                <img class="circle-img" src="@/assets/img/circle.png" alt="" />
+                <span class="circle-title">{{ t('knowledgeBase.batchDeleteConfirmation') }}</span>
+              </div>
+              <span class="del-circle-txt">
+                {{ t('knowledgeBase.confirmBatchDeleteDocument', { count: selectedIds.size }) }}
+              </span>
+              <div class="circle-btn">
+                <span
+                  class="circle-btn-txt"
+                  :class="{ disabled: batchDeleting }"
+                  @click="batchDeleting ? null : (batchDeleteDialog = false)"
+                >
+                  {{ t('common.cancel') }}
+                </span>
+                <span
+                  class="circle-btn-txt confirm"
+                  :class="{ disabled: batchDeleting }"
+                  @click="confirmBatchDelete"
+                >
+                  {{ batchDeleting ? '...' : t('knowledgeBase.confirmDelete') }}
                 </span>
               </div>
             </div>
@@ -2828,6 +3018,38 @@ async function createNewSession(value: string): Promise<void> {
     flex-shrink: 0;
   }
 
+  .doc-view-toggle {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: 6px;
+    gap: 0;
+
+    .doc-view-toggle-btn {
+      width: 28px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: transparent;
+      border-radius: 4px;
+      color: var(--td-text-color-secondary, #888);
+      cursor: pointer;
+      transition: background-color 0.12s ease, color 0.12s ease;
+
+      &:hover { color: var(--td-text-color-primary, #232323); }
+
+      &.active {
+        background: var(--td-bg-color-container, #fff);
+        color: var(--td-brand-color, #0052d9);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+      }
+    }
+  }
+
   .doc-filter-actions {
     flex-shrink: 0;
     :deep(.content-bar-icon-btn) {
@@ -3326,6 +3548,11 @@ async function createNewSession(value: string): Promise<void> {
     font-weight: 400;
     line-height: 22px;
     cursor: pointer;
+
+    &.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 
   .confirm {
@@ -3538,7 +3765,50 @@ async function createNewSession(value: string): Promise<void> {
   background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+
+  &.is-selected {
+    border-color: var(--td-brand-color, #0052d9);
+    box-shadow: 0 0 0 1px var(--td-brand-color, #0052d9), 0 4px 12px rgba(0, 82, 217, 0.08);
+    background: var(--td-brand-color-1, #f0f6ff);
+  }
+
+  .card-select-overlay {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--td-bg-color-container, #fff);
+    border: 1px solid var(--td-component-border, #e0e0e0);
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+    z-index: 1;
+
+    input[type='checkbox'] {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      cursor: pointer;
+      accent-color: var(--td-brand-color, #0052d9);
+    }
+
+    &.active,
+    &:focus-within {
+      opacity: 1;
+      border-color: var(--td-brand-color, #0052d9);
+    }
+  }
+
+  &:hover .card-select-overlay,
+  &.has-selection .card-select-overlay {
+    opacity: 1;
+  }
 
   .card-content {
     padding: 15px 17px 13px;
