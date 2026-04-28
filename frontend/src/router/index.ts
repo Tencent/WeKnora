@@ -131,6 +131,13 @@ const router = createRouter({
         },
       ],
     },
+    // Dev-only markdown rendering test page
+    ...(import.meta.env.DEV ? [{
+      path: '/platform/dev/markdown',
+      name: 'markdownTest',
+      component: () => import('../views/dev/MarkdownTestPage.vue'),
+      meta: { requiresAuth: false, requiresInit: false }
+    }] : []),
   ],
 });
 
