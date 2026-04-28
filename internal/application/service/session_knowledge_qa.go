@@ -767,9 +767,13 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 	if rq := strings.TrimSpace(chatManage.RewriteQuery); rq != "" {
 		query = rq
 	}
+
+	kbDocuments := s.buildKBDocumentListing(ctx, chatManage)
+
 	result := types.RenderPromptPlaceholders(chatManage.FallbackPrompt, types.PlaceholderValues{
-		"query":    query,
-		"language": chatManage.Language,
+		"query":        query,
+		"language":     chatManage.Language,
+		"kb_documents": kbDocuments,
 	})
 
 	if chatManage.ImageDescription != "" && !chatManage.ChatModelSupportsVision {
@@ -779,6 +783,76 @@ func (s *sessionService) renderFallbackPrompt(ctx context.Context, chatManage *t
 		result += "\n\n" + chatManage.QuotedContext
 	}
 	return result, nil
+}
+
+// buildKBDocumentListing returns a concise listing of documents in the knowledge bases
+// associated with the current pipeline. This gives the LLM visibility into KB contents
+// when vector/keyword search returns empty (e.g., broad browse queries).
+func (s *sessionService) buildKBDocumentListing(ctx context.Context, chatManage *types.ChatManage) string {
+	// Collect unique KB IDs from search targets
+	kbIDs := make(map[string]struct{})
+	for _, t := range chatManage.SearchTargets {
+		kbIDs[t.KnowledgeBaseID] = struct{}{}
+	}
+	for _, id := range chatManage.KnowledgeBaseIDs {
+		kbIDs[id] = struct{}{}
+	}
+	if len(kbIDs) == 0 {
+		return ""
+	}
+
+	const maxDocuments = 50
+	var b strings.Builder
+	total := 0
+
+	for kbID := range kbIDs {
+		if total >= maxDocuments {
+			break
+		}
+		knowledges, err := s.knowledgeService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+		if err != nil {
+			logger.Warnf(ctx, "buildKBDocumentListing: failed to list knowledge for KB %s: %v", kbID, err)
+			continue
+		}
+		for _, k := range knowledges {
+			if total >= maxDocuments {
+				break
+			}
+			if k.EnableStatus != "enabled" {
+				continue
+			}
+			title := k.Title
+			if title == "" {
+				title = k.FileName
+			}
+			if title == "" {
+				continue
+			}
+			fmt.Fprintf(&b, "- %s", title)
+			if k.FileType != "" {
+				fmt.Fprintf(&b, " (%s)", k.FileType)
+			}
+			if k.Description != "" {
+				desc := k.Description
+				if len([]rune(desc)) > 100 {
+					desc = string([]rune(desc)[:100]) + "..."
+				}
+				fmt.Fprintf(&b, ": %s", desc)
+			}
+			b.WriteString("\n")
+			total++
+		}
+	}
+
+	if b.Len() == 0 {
+		return ""
+	}
+
+	if total >= maxDocuments {
+		fmt.Fprintf(&b, "... (showing first %d documents)\n", maxDocuments)
+	}
+
+	return b.String()
 }
 
 // consumeFallbackStream consumes the streaming response and emits events
