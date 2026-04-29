@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/internal/modelconfig"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -115,17 +116,18 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 	if m == nil {
 		return nil
 	}
+	base := modelconfig.FromModel(m, appID, appSecret)
 	return &ChatConfig{
-		ModelID:       m.ID,
-		APIKey:        m.Parameters.APIKey,
-		BaseURL:       m.Parameters.BaseURL,
-		ModelName:     m.Name,
-		Source:        m.Source,
-		Provider:      m.Parameters.Provider,
-		ExtraConfig:   m.Parameters.ExtraConfig,
-		CustomHeaders: m.Parameters.CustomHeaders,
-		AppID:         appID,
-		AppSecret:     appSecret,
+		ModelID:       base.ModelID,
+		APIKey:        base.APIKey,
+		BaseURL:       base.BaseURL,
+		ModelName:     base.ModelName,
+		Source:        base.Source,
+		Provider:      base.Provider,
+		ExtraConfig:   base.ExtraConfig,
+		CustomHeaders: base.CustomHeaders,
+		AppID:         base.AppID,
+		AppSecret:     base.AppSecret,
 	}
 }
 
