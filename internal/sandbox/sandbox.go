@@ -16,6 +16,8 @@ const (
 	SandboxTypeDocker SandboxType = "docker"
 	// SandboxTypeLocal uses local process with restrictions
 	SandboxTypeLocal SandboxType = "local"
+	// SandboxTypeE2B uses E2B cloud sandbox for isolation
+	SandboxTypeE2B SandboxType = "e2b"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
@@ -261,6 +263,18 @@ type Config struct {
 
 	// MaxCPU is the maximum CPU cores
 	MaxCPU float64
+
+	// E2BAPIKey is the E2B API key (falls back to E2B_API_KEY env var)
+	E2BAPIKey string
+
+	// E2BTemplate is the E2B sandbox template id/alias (default: code-interpreter-v1)
+	E2BTemplate string
+
+	// E2BDomain overrides the E2B domain (default: e2b.app)
+	E2BDomain string
+
+	// E2BSandboxTimeout is the wall-clock lifetime of the E2B sandbox
+	E2BSandboxTimeout time.Duration
 }
 
 // DefaultConfig returns a default sandbox configuration
@@ -322,7 +336,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeLocal, SandboxTypeE2B, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

@@ -33,6 +33,16 @@ func NewManager(config *Config) (Manager, error) {
 		validator: NewScriptValidator(),
 	}
 
+	if e2bDomain := os.Getenv("E2B_API_URL"); e2bDomain != "" {
+		config.E2BDomain = e2bDomain
+	}
+	if e2bAPIKey := os.Getenv("E2B_API_KEY"); e2bAPIKey != "" {
+		config.E2BAPIKey = e2bAPIKey
+	}
+	if e2bTemplate := os.Getenv("E2B_TEMPLATE_ID"); e2bTemplate != "" {
+		config.E2BTemplate = e2bTemplate
+	}
+
 	// Initialize the appropriate sandbox
 	if err := manager.initializeSandbox(context.Background()); err != nil {
 		return nil, err
@@ -74,6 +84,19 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 	case SandboxTypeLocal:
 		m.sandbox = NewLocalSandbox(m.config)
 		return nil
+
+	case SandboxTypeE2B:
+		e2bSandbox := NewE2BSandbox(m.config)
+		if e2bSandbox.IsAvailable(ctx) {
+			m.sandbox = e2bSandbox
+			return nil
+		}
+		if m.config.FallbackEnabled {
+			log.Printf("[sandbox] e2b is not available (missing API key), falling back to local sandbox")
+			m.sandbox = NewLocalSandbox(m.config)
+			return nil
+		}
+		return fmt.Errorf("e2b is not available (missing API key) and fallback is disabled")
 
 	default:
 		return fmt.Errorf("unknown sandbox type: %s", m.config.Type)
@@ -130,6 +153,8 @@ func (m *DefaultManager) ExecuteInWorkspace(ctx context.Context, config *Workspa
 	case *DockerSandbox:
 		return s.ExecuteInWorkspace(ctx, config)
 	case *LocalSandbox:
+		return s.ExecuteInWorkspace(ctx, config)
+	case *E2BSandbox:
 		return s.ExecuteInWorkspace(ctx, config)
 	default:
 		log.Printf("[sandbox] workspace execution not supported for %T, falling back to legacy mode", sandbox)
@@ -283,6 +308,8 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 		sType = SandboxTypeDocker
 	case "local":
 		sType = SandboxTypeLocal
+	case "e2b":
+		sType = SandboxTypeE2B
 	case "disabled", "":
 		sType = SandboxTypeDisabled
 	default:

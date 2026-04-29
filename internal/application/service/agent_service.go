@@ -304,6 +304,12 @@ func (s *agentService) initializeSkillsManager(
 			logger.Warnf(ctx, "Failed to initialize local sandbox: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()
 		}
+	case "e2b":
+		sandboxMgr, err = sandbox.NewManagerFromType("e2b", false, "")
+		if err != nil {
+			logger.Warnf(ctx, "Failed to initialize E2B sandbox: %v", err)
+			sandboxMgr = sandbox.NewDisabledManager()
+		}
 	default:
 		sandboxMgr = sandbox.NewDisabledManager()
 	}
