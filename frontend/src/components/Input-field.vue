@@ -45,6 +45,41 @@ const imageUploading = ref(false);
 // Attachment upload state
 const attachmentUploadRef = ref<InstanceType<typeof AttachmentUpload>>();
 const uploadedAttachments = ref<AttachmentFile[]>([]);
+const CHAT_FILE_DROP_EVENT = 'weknora:chat-file-drop';
+
+const isImageFile = (file: File) => {
+  if (file.type.startsWith('image/')) {
+    return true;
+  }
+  const fileName = file.name.toLowerCase();
+  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].some(ext => fileName.endsWith(ext));
+};
+
+const handleDroppedFiles = (files: File[]) => {
+  if (!files.length) return;
+
+  const imageFiles = files.filter(isImageFile);
+  const attachmentFiles = files.filter(file => !isImageFile(file));
+
+  if (imageFiles.length > 0) {
+    if (isImageUploadEnabledByAgent.value) {
+      addImageFiles(imageFiles);
+    } else {
+      MessagePlugin.warning(t('input.imageUploadDisabledByAgent'));
+    }
+  }
+
+  if (attachmentFiles.length > 0) {
+    attachmentUploadRef.value?.addFiles(attachmentFiles);
+  }
+};
+
+const handleChatFileDrop = (event: Event) => {
+  const customEvent = event as CustomEvent<{ files?: File[] }>;
+  const files = customEvent.detail?.files;
+  if (!files || files.length === 0) return;
+  handleDroppedFiles(files);
+};
 
 const handleImageSelect = (event: Event) => {
   const input = event.target as HTMLInputElement;
@@ -1372,6 +1407,7 @@ onMounted(() => {
   loadConversationConfig();
   loadChatModels();
   loadAgents();
+  window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
   // 从持久化恢复 fileId -> kbId，刷新后共享知识库文件可带 kb_id 拉取（仅保留当前仍选中的文件）
   const persisted = settingsStore.settings.selectedFileKbMap;
@@ -1427,6 +1463,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
   document.removeEventListener('click', closeMentionSelector);
@@ -1768,11 +1805,8 @@ const onPaste = (e: ClipboardEvent) => {
 const onDrop = (e: DragEvent) => {
   e.preventDefault();
   const files = e.dataTransfer?.files;
-  if (!files) return;
-  const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
-  if (imageFiles.length > 0 && isImageUploadEnabledByAgent.value) {
-    addImageFiles(imageFiles);
-  }
+  if (!files || files.length === 0) return;
+  handleDroppedFiles(Array.from(files));
 };
 
 const onDragOver = (e: DragEvent) => {

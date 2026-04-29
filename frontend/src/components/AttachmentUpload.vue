@@ -124,6 +124,7 @@ const getFileIcon = (fileName: string): string => {
 defineExpose({
   attachments,
   triggerFileSelect,
+  addFiles,
   clear: () => {
     attachments.value = [];
     emit('update:files', []);
