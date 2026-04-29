@@ -227,7 +227,7 @@ export default {
     columnActions: 'Действия',
     selectAll: 'Выбрать все',
     selectedCount: 'Выбрано: {count}',
-    clearSelection: 'Очистить',
+    clearSelection: 'Снять выделение',
     batchDelete: 'Удалить выбранные',
     batchDeleteConfirmation: 'Подтверждение пакетного удаления',
     confirmBatchDeleteDocument: 'Удалить {count} выбранных документов? Это действие нельзя отменить.',
