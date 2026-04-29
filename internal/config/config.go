@@ -687,8 +687,16 @@ func FindTemplateByID(pt *PromptTemplatesConfig, id string) *PromptTemplate {
 
 // resolveBuiltinAgentPromptIDs resolves system_prompt_id and context_template_id
 // references in builtin agent configs by looking up the actual content from
-// prompt template YAML files.
+// prompt template YAML files (or, after DB seeding, from the merged
+// cfg.PromptTemplates).
+//
+// Idempotent: we always reset cached SystemPrompt/ContextTemplate fields that
+// were originally derived from an *_id before re-resolving. This lets the
+// same function be called twice — once during LoadConfig (cheap no-op reset)
+// and once after RefreshPromptTemplatesFromDB swaps in the DB-sourced
+// templates (real reset so the new content can repopulate the cache).
 func resolveBuiltinAgentPromptIDs(pt *PromptTemplatesConfig) {
+	types.ResetBuiltinAgentResolvedPrompts()
 	types.ResolveBuiltinAgentPromptRefs(func(id string) string {
 		if t := FindTemplateByID(pt, id); t != nil {
 			return t.Content

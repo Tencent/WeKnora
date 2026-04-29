@@ -20,10 +20,11 @@ import (
 // Provides functionality for creating, retrieving, updating, and deleting tenants
 // through the REST API endpoints
 type TenantHandler struct {
-	service     interfaces.TenantService
-	userService interfaces.UserService
-	kbService   interfaces.KnowledgeBaseService
-	config      *config.Config
+	service              interfaces.TenantService
+	userService          interfaces.UserService
+	kbService            interfaces.KnowledgeBaseService
+	config               *config.Config
+	promptTemplateRepo   interfaces.PromptTemplateRepository
 }
 
 // authorizeTenantAccess checks that the authenticated user owns the target tenant
@@ -58,12 +59,19 @@ func (h *TenantHandler) authorizeTenantAccess(c *gin.Context, targetTenantID uin
 //   - config: Application configuration
 //
 // Returns a pointer to the newly created TenantHandler
-func NewTenantHandler(service interfaces.TenantService, userService interfaces.UserService, kbService interfaces.KnowledgeBaseService, config *config.Config) *TenantHandler {
+func NewTenantHandler(
+	service interfaces.TenantService,
+	userService interfaces.UserService,
+	kbService interfaces.KnowledgeBaseService,
+	config *config.Config,
+	promptTemplateRepo interfaces.PromptTemplateRepository,
+) *TenantHandler {
 	return &TenantHandler{
-		service:     service,
-		userService: userService,
-		kbService:   kbService,
-		config:      config,
+		service:            service,
+		userService:        userService,
+		kbService:          kbService,
+		config:             config,
+		promptTemplateRepo: promptTemplateRepo,
 	}
 }
 
@@ -682,6 +690,9 @@ func (h *TenantHandler) UpdateTenantKV(c *gin.Context) {
 	case "retrieval-config":
 		h.updateTenantRetrievalConfigInternal(c)
 		return
+	case "prompt-templates":
+		h.upsertPromptTemplateInternal(c)
+		return
 	default:
 		logger.Info(ctx, "KV key not supported", "key", key)
 		c.Error(errors.NewBadRequestError("unsupported key"))
@@ -1213,3 +1224,150 @@ func (h *TenantHandler) updateTenantRetrievalConfigInternal(c *gin.Context) {
 		"message": "Retrieval configuration updated successfully",
 	})
 }
+
+// promptTemplateUpsertRequest is the JSON body accepted by
+// PUT /tenants/kv/prompt-templates. Field names mirror config.PromptTemplate
+// (the YAML shape) plus an explicit `category` discriminator. Any field
+// omitted by the client is taken as zero/empty rather than "leave unchanged"
+// — this is a write-through replacement, not a partial patch.
+type promptTemplateUpsertRequest struct {
+	Category         string                               `json:"category"          binding:"required"`
+	ID               string                               `json:"id"                binding:"required"`
+	Name             string                               `json:"name"`
+	Description      string                               `json:"description"`
+	Content          string                               `json:"content"           binding:"required"`
+	User             string                               `json:"user"`
+	HasKnowledgeBase bool                                 `json:"has_knowledge_base"`
+	HasWebSearch     bool                                 `json:"has_web_search"`
+	Default          bool                                 `json:"default"`
+	Mode             string                               `json:"mode"`
+	I18n             map[string]config.PromptTemplateI18n `json:"i18n,omitempty"`
+}
+
+// requireGlobalAdmin gates write access to globally-shared resources (such
+// as the prompt_templates table) behind the super-admin flag. Reads are
+// purposely *not* gated here — they're public-looking content the UI needs
+// to display to every tenant.
+//
+// We deliberately do NOT also require config.Tenant.EnableCrossTenantAccess
+// (unlike authorizeTenantAccess), because prompt_templates is a global
+// resource, not "another tenant's data". Coupling it to the cross-tenant
+// switch would force every deployment that wants prompt management to also
+// enable cross-tenant browsing, which is unrelated.
+//
+// Returns false (and writes the appropriate error to c) when the caller is
+// unauthenticated or lacks the privilege.
+func (h *TenantHandler) requireGlobalAdmin(c *gin.Context) bool {
+	ctx := c.Request.Context()
+	user, ok := ctx.Value(types.UserContextKey).(*types.User)
+	if !ok || user == nil {
+		c.Error(errors.NewUnauthorizedError("Authentication required"))
+		return false
+	}
+	if !user.CanAccessAllTenants {
+		logger.Warnf(ctx, "User %s attempted a global-admin operation without privilege", user.ID)
+		c.Error(errors.NewForbiddenError("Only super-admin can modify global resources"))
+		return false
+	}
+	return true
+}
+
+// upsertPromptTemplateInternal handles PUT /tenants/kv/prompt-templates.
+// Validates the body, writes through to the prompt_templates table, and
+// refreshes the in-memory snapshot so subsequent requests see the change
+// without restarting.
+func (h *TenantHandler) upsertPromptTemplateInternal(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Prompt templates are global; only super-admin may mutate them.
+	if !h.requireGlobalAdmin(c) {
+		return
+	}
+
+	if h.promptTemplateRepo == nil {
+		c.Error(errors.NewInternalServerError("Prompt template repository is not configured"))
+		return
+	}
+
+	var req promptTemplateUpsertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse prompt template payload", err)
+		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	if !types.IsValidPromptTemplateCategory(req.Category) {
+		c.Error(errors.NewBadRequestError("unsupported prompt template category"))
+		return
+	}
+	// Defensive caps so a malicious payload can't blow up downstream
+	// renderers or LLM context windows. The numbers are generous on purpose.
+	const (
+		maxIDLen          = 64
+		maxNameLen        = 255
+		maxDescriptionLen = 1024
+		maxContentLen     = 32 * 1024
+	)
+	if len(req.ID) == 0 || len(req.ID) > maxIDLen {
+		c.Error(errors.NewBadRequestError("id length must be between 1 and 64"))
+		return
+	}
+	if len(req.Name) > maxNameLen {
+		c.Error(errors.NewBadRequestError("name too long"))
+		return
+	}
+	if len(req.Description) > maxDescriptionLen {
+		c.Error(errors.NewBadRequestError("description too long"))
+		return
+	}
+	if len(req.Content) == 0 || len(req.Content) > maxContentLen {
+		c.Error(errors.NewBadRequestError("content length must be between 1 and 32K"))
+		return
+	}
+	if len(req.User) > maxContentLen {
+		c.Error(errors.NewBadRequestError("user prompt too long"))
+		return
+	}
+
+	rec := &types.PromptTemplateRecord{
+		Category:     req.Category,
+		ID:           req.ID,
+		Name:         req.Name,
+		Description:  req.Description,
+		Content:      req.Content,
+		UserPrompt:   req.User,
+		HasKB:        req.HasKnowledgeBase,
+		HasWebSearch: req.HasWebSearch,
+		IsDefault:    req.Default,
+		Mode:         req.Mode,
+	}
+	if len(req.I18n) > 0 {
+		rec.I18n = make(types.PromptTemplateI18nMap, len(req.I18n))
+		for locale, entry := range req.I18n {
+			rec.I18n[locale] = types.PromptTemplateI18nEntry{
+				Name:        entry.Name,
+				Description: entry.Description,
+			}
+		}
+	}
+
+	if err := h.promptTemplateRepo.Upsert(ctx, rec); err != nil {
+		logger.Error(ctx, "Failed to upsert prompt template", err)
+		c.Error(errors.NewInternalServerError("Failed to upsert prompt template").WithDetails(err.Error()))
+		return
+	}
+
+	// Refresh cfg.PromptTemplates + cfg.Conversation defaults so this
+	// request and subsequent ones see the new value without a restart.
+	// A failure here means the DB write succeeded but the in-memory view
+	// is stale — log and continue, the next restart resyncs.
+	if err := config.RefreshPromptTemplatesFromDB(ctx, h.config, h.promptTemplateRepo); err != nil {
+		logger.Warnf(ctx, "Prompt template upserted but in-memory refresh failed: %v", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    rec,
+		"message": "Prompt template updated successfully",
+	})
+}
+

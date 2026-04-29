@@ -539,3 +539,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_vector_stores_name_tenant
 CREATE INDEX IF NOT EXISTS idx_vector_stores_tenant_id ON vector_stores(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_engine_type ON vector_stores(engine_type);
 CREATE INDEX IF NOT EXISTS idx_vector_stores_deleted_at ON vector_stores(deleted_at);
+
+-- Prompt templates: user-managed prompt templates seeded from
+-- config/prompt_templates/*.yaml on first startup; thereafter DB is the source
+-- of truth. Deleting a row makes the next startup re-seed that ID from YAML
+-- (effective "reset to factory").
+CREATE TABLE IF NOT EXISTS prompt_templates (
+    id              VARCHAR(64)   NOT NULL,
+    category        VARCHAR(64)   NOT NULL,
+    name            VARCHAR(255)  NOT NULL DEFAULT '',
+    description     TEXT          NOT NULL DEFAULT '',
+    content         TEXT          NOT NULL,
+    user_prompt     TEXT          NOT NULL DEFAULT '',
+    has_kb          INTEGER       NOT NULL DEFAULT 0,
+    has_web_search  INTEGER       NOT NULL DEFAULT 0,
+    is_default      INTEGER       NOT NULL DEFAULT 0,
+    mode            VARCHAR(32)   NOT NULL DEFAULT '',
+    i18n            TEXT          NOT NULL DEFAULT '{}',
+    version         INTEGER       NOT NULL DEFAULT 1,
+    created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (category, id),
+    CHECK (category IN (
+        'system_prompt',
+        'agent_system_prompt',
+        'context_template',
+        'rewrite',
+        'fallback'
+    ))
+);
+
+CREATE INDEX IF NOT EXISTS idx_prompt_templates_category
+    ON prompt_templates(category);
+
+CREATE INDEX IF NOT EXISTS idx_prompt_templates_updated_at
+    ON prompt_templates(updated_at);
