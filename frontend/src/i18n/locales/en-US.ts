@@ -255,7 +255,7 @@ export default {
     columnActions: 'Actions',
     selectAll: 'Select all',
     selectedCount: '{count} selected',
-    clearSelection: 'Clear',
+    clearSelection: 'Deselect all',
     batchDelete: 'Delete selected',
     batchDeleteConfirmation: 'Confirm Batch Delete',
     confirmBatchDeleteDocument: 'Delete {count} selected documents? This action cannot be undone.',

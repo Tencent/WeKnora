@@ -38,11 +38,11 @@ export default function (knowledgeBaseId?: string) {
   const getKnowled = (
     query: { page: number; page_size: number; tag_id?: string; keyword?: string; file_type?: string } = { page: 1, page_size: 35 },
     kbId?: string,
-  ) => {
+  ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
-    if (!targetKbId) return;
-    
-    listKnowledgeFiles(targetKbId, query)
+    if (!targetKbId) return Promise.resolve();
+
+    return listKnowledgeFiles(targetKbId, query)
       .then((result: any) => {
         const { data, total: totalResult } = result;
     const cardList_ = data.map((item: any) => {

@@ -1,7 +1,9 @@
 <template>
     <div class="main" ref="dropzone">
         <Menu></Menu>
-        <RouterView v-if="isRouterAlive" />
+        <div v-if="isRouterAlive" class="platform-route-outlet">
+            <RouterView />
+        </div>
         <div class="upload-mask" v-show="ismask">
             <input type="file" style="display: none" ref="uploadInput" accept=".pdf,.docx,.doc,.pptx,.ppt,.txt,.md,.jpg,.jpeg,.png,.csv,.xls,.xlsx" />
             <UploadMask></UploadMask>
@@ -177,11 +179,23 @@ onUnmounted(() => {
 <style lang="less">
 .main {
     display: flex;
+    align-items: stretch;
     width: 100%;
     height: 100%;
     min-width: 600px;
+    min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+/* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */
+.platform-route-outlet {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .upload-mask {

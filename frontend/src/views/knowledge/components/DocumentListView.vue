@@ -110,14 +110,13 @@ const someSelected = computed(() => {
   return props.items.some(i => props.selectedIds.has(i.id)) && !allSelected.value;
 });
 
-const onHeaderToggle = (e: Event) => {
-  const checked = (e.target as HTMLInputElement).checked;
+const onHeaderCheckboxChange = (checked: boolean) => {
   emit('toggle-all', checked);
 };
 
-const onRowToggle = (item: KnowledgeItem, e: MouseEvent) => {
-  const checked = !props.selectedIds.has(item.id);
-  emit('toggle-row', item.id, checked, e.shiftKey);
+const onRowCheckboxChange = (item: KnowledgeItem, checked: boolean, ctx?: { e?: Event }) => {
+  const me = ctx?.e as MouseEvent | undefined;
+  emit('toggle-row', item.id, checked, !!me?.shiftKey);
 };
 
 const moreOpen = ref<string | null>(null);
@@ -130,22 +129,22 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   item.isMore = false;
   emit('action', action, item);
 };
+
 </script>
 
 <template>
   <div class="doc-list-view" :class="{ 'is-loading': loading }">
     <div class="doc-list-header" role="row">
-      <div class="cell cell-check" role="columnheader">
-        <label class="checkbox-wrap" @click.stop>
-          <input
-            type="checkbox"
-            :checked="allSelected"
-            :indeterminate.prop="someSelected"
-            :disabled="!items.length"
-            @change="onHeaderToggle"
-            :aria-label="t('knowledgeBase.selectAll')"
-          />
-        </label>
+      <div class="cell cell-check" role="columnheader" @click.stop>
+        <t-checkbox
+          class="doc-list-check"
+          size="small"
+          :checked="allSelected"
+          :indeterminate="someSelected"
+          :disabled="!items.length"
+          :title="t('knowledgeBase.selectAll')"
+          @change="onHeaderCheckboxChange"
+        />
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
       <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
@@ -166,18 +165,19 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
         @click="emit('open', item)"
       >
         <div class="cell cell-check" @click.stop>
-          <label class="checkbox-wrap">
-            <input
-              type="checkbox"
-              :checked="selectedIds.has(item.id)"
-              @click="onRowToggle(item, $event as unknown as MouseEvent)"
-              :aria-label="item.file_name"
-            />
-          </label>
+          <t-checkbox
+            class="doc-list-check"
+            size="small"
+            :checked="selectedIds.has(item.id)"
+            :title="item.file_name"
+            @change="(c, ctx) => onRowCheckboxChange(item, c, ctx)"
+          />
         </div>
 
         <div class="cell cell-name">
-          <t-icon :name="getFileIcon(item)" class="row-file-icon" />
+          <span class="row-file-icon-wrap">
+            <t-icon :name="getFileIcon(item)" />
+          </span>
           <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
         </div>
 
@@ -203,7 +203,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
               v-if="statusByRow.get(item.id)!.label !== '--'"
               size="small"
               :theme="statusByRow.get(item.id)!.theme"
-              variant="light"
+              variant="light-outline"
               class="row-status-tag"
             >
               <template v-if="statusByRow.get(item.id)!.icon" #icon>
@@ -239,16 +239,20 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
                   class="row-menu-item"
                   @click.stop="handleAction('edit', item)"
                 >
-                  <t-icon name="edit" /> <span>{{ t('knowledgeBase.editDocument') }}</span>
+                  <t-icon class="icon" name="edit" />
+                  <span>{{ t('knowledgeBase.editDocument') }}</span>
                 </div>
                 <div class="row-menu-item" @click.stop="handleAction('reparse', item)">
-                  <t-icon name="refresh" /> <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
+                  <t-icon class="icon" name="refresh" />
+                  <span>{{ t('knowledgeBase.rebuildDocument') }}</span>
                 </div>
                 <div class="row-menu-item" @click.stop="handleAction('move', item)">
-                  <t-icon name="swap" /> <span>{{ t('knowledgeBase.moveDocument') }}</span>
+                  <t-icon class="icon" name="swap" />
+                  <span>{{ t('knowledgeBase.moveDocument') }}</span>
                 </div>
                 <div class="row-menu-item danger" @click.stop="handleAction('delete', item)">
-                  <t-icon name="delete" /> <span>{{ t('knowledgeBase.deleteDocument') }}</span>
+                  <t-icon class="icon" name="delete" />
+                  <span>{{ t('knowledgeBase.deleteDocument') }}</span>
                 </div>
               </div>
             </template>
@@ -260,14 +264,28 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 </template>
 
 <style scoped lang="less">
+@keyframes doc-list-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .doc-list-view {
   display: flex;
   flex-direction: column;
   width: 100%;
-  background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-stroke, #f0f0f0);
-  border-radius: 8px;
-  overflow: hidden;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 9px;
+  /* 不能用 overflow:hidden，否则表头 position:sticky 相对外层滚动区失效 */
+  overflow: visible;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  animation: doc-list-fade-in 0.32s ease-out;
 }
 
 .doc-list-header,
@@ -284,59 +302,54 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
     48px;                      // actions
   align-items: center;
   column-gap: 0;
-  padding: 0 12px;
+  padding: 0 16px;
 }
 
 .doc-list-header {
   position: sticky;
   top: 0;
-  z-index: 2;
-  height: 36px;
+  z-index: 3;
+  height: 40px;
   font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--td-text-color-placeholder, #a6a6a6);
-  background: var(--td-bg-color-page, #fafbfc);
-  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--td-text-color-secondary);
+  background: var(--td-bg-color-secondarycontainer);
+  border-bottom: 1px solid var(--td-component-stroke);
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .doc-list-body {
   display: flex;
   flex-direction: column;
+  border-radius: 0 0 8px 8px;
+  overflow: hidden;
 }
 
 .doc-list-row {
   position: relative;
-  height: 48px;
+  min-height: 52px;
   font-size: 13px;
-  color: var(--td-text-color-primary, #232323);
-  border-bottom: 1px solid var(--td-component-stroke, #f3f3f3);
+  color: var(--td-text-color-primary);
+  border-bottom: 1px solid var(--td-component-stroke);
   cursor: pointer;
-  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 
-  &:last-child { border-bottom: 0; }
+  &:last-child {
+    border-bottom: 0;
+  }
 
   &:hover:not(.selected),
   &.menu-open:not(.selected) {
-    background: var(--td-bg-color-page, #f7f8fa);
-  }
-
-  &.selected {
-    background: var(--td-brand-color-1, #f2f5fc);
-    box-shadow: inset 3px 0 0 var(--td-brand-color, #0052d9);
-
-    // brand-color-light alias maps back to brand-color-1, so a plain
-    // var() swap produces no visible hover delta. Mix in a touch of
-    // brand-color so the hover state is perceptible in both light and
-    // dark themes without falling back to the saturated brand-color-2.
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color-1) 75%, var(--td-brand-color));
-    }
+    background: var(--td-bg-color-secondarycontainer);
   }
 
   &:hover .row-more-btn,
   &.menu-open .row-more-btn,
-  &.selected .row-more-btn { opacity: 1; }
+  &.selected .row-more-btn {
+    opacity: 1;
+  }
 }
 
 .cell {
@@ -354,8 +367,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 }
 
 .cell-name {
-  gap: 8px;
-  font-weight: 500;
+  gap: 10px;
+  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .cell-size,
@@ -367,23 +380,42 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   justify-content: flex-end;
 }
 
-.checkbox-wrap {
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  input[type='checkbox'] {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--td-brand-color, #0052d9);
-    cursor: pointer;
+/* TDesign 勾选框：去掉空白 label、与表格行对齐 */
+.doc-list-check {
+  margin: 0;
+
+  :deep(.t-checkbox) {
+    align-items: center;
+  }
+
+  :deep(.t-checkbox__label) {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  :deep(.t-checkbox__input) {
+    margin: 0;
+  }
+
+  :deep(.t-checkbox__input-wrapper) {
     margin: 0;
   }
 }
 
-.row-file-icon {
+.row-file-icon-wrap {
   flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 16px;
-  color: var(--td-text-color-secondary, #888);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
 }
 
 .row-file-name {
@@ -392,6 +424,10 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--td-text-color-primary);
 }
 
 .row-tag {
@@ -411,7 +447,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 .row-mono {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  color: var(--td-text-color-secondary, #666);
+  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--td-text-color-secondary);
 }
 
 .row-status-tag :deep(.t-icon) {
@@ -432,35 +469,94 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   justify-content: center;
   border: 0;
   background: transparent;
-  border-radius: 6px;
-  color: var(--td-text-color-secondary, #666);
+  border-radius: 5px;
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s ease, background-color 0.12s ease;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 
-  &:hover { background: var(--td-bg-color-component-hover, #ececec); }
-  &.active { opacity: 1; background: var(--td-bg-color-component-active, #e0e0e0); }
+  &:hover {
+    background: var(--td-component-stroke);
+    color: var(--td-text-color-primary);
+  }
+
+  &.active {
+    opacity: 1;
+    background: var(--td-component-stroke);
+    color: var(--td-text-color-primary);
+  }
 }
 
 .row-menu {
-  min-width: 160px;
-  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  gap: 2px;
+  padding: 4px 6px;
 }
 
 .row-menu-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 8px 12px;
-  font-size: 13px;
-  color: var(--td-text-color-primary, #232323);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--td-text-color-primary);
   cursor: pointer;
-  transition: background-color 0.12s ease;
+  border-radius: 6px;
+  transition: background-color 0.15s cubic-bezier(0.2, 0, 0, 1), transform 0.12s ease;
 
-  &:hover { background: var(--td-bg-color-component-hover, #f5f5f5); }
-  &.danger { color: var(--td-error-color, #d54941); }
-  &.danger:hover { background: var(--td-error-color-1, #fff1f0); }
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
 
-  .t-icon { font-size: 14px; }
+  &:active {
+    background: var(--td-bg-color-container-active);
+    transform: scale(0.98);
+  }
+
+  .icon {
+    font-size: 16px;
+    color: var(--td-text-color-secondary);
+    transition: color 0.15s ease;
+  }
+
+  &:hover .icon {
+    color: var(--td-text-color-primary);
+  }
+
+  &.danger {
+    color: var(--td-error-color-6);
+    margin-top: 4px;
+    position: relative;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: -3px;
+      left: 8px;
+      right: 8px;
+      height: 1px;
+      background: var(--td-component-stroke);
+    }
+
+    .icon {
+      color: var(--td-error-color-6);
+    }
+
+    &:hover {
+      background: var(--td-error-color-1);
+      color: var(--td-error-color-6);
+
+      .icon {
+        color: var(--td-error-color-6);
+      }
+    }
+
+    &:active {
+      background: var(--td-error-color-2);
+    }
+  }
 }
 </style>
