@@ -392,9 +392,20 @@ secrets:
   redisPassword: ""
   # -- JWT signing secret (REQUIRED: change in production)
   jwtSecret: ""
-  # -- Tenant AES encryption key
+  # -- Tenant AES encryption key (32 bytes).
+  # STRONGLY RECOMMENDED to set this explicitly in production.
+  # If left empty, a random 32-char value is generated on first install and
+  # reused on subsequent `helm upgrade` via Secret lookup. However, if the
+  # Secret is ever deleted/recreated (e.g. namespace recreated, GitOps prune,
+  # cluster rebuilt) a new random value will be generated and any data
+  # encrypted with the old key becomes UNRECOVERABLE.
   tenantAesKey: ""
-  # -- System AES-256 key for database API key encryption (32 bytes)
+  # -- System AES-256 key for database field encryption (must be exactly 32 bytes).
+  # Encrypts: tenants.api_key, model API keys, vector store credentials,
+  # web search provider keys, WeKnoraCloud.AppSecret.
+  # STRONGLY RECOMMENDED to set this explicitly in production. Same caveat as
+  # tenantAesKey: losing this key makes all encrypted fields unreadable
+  # (the UI will display ciphertext like "enc:v1:..." instead of plaintext).
   systemAesKey: ""
 
   # -- Use existing secret instead of creating one
