@@ -126,8 +126,11 @@ func (r *ImageResolver) ResolveAndStore(
 			continue
 		}
 
-		// Filter out small icons and decorative images
-		if isIconImage(ref.ImageData) {
+		// Filter out small icons and decorative images. Skip the filter
+		// when the reference is the originally uploaded file itself, so
+		// that a standalone image upload is never silently dropped even
+		// if its dimensions are below the icon threshold.
+		if !ref.IsOriginal && isIconImage(ref.ImageData) {
 			// Remove the image reference from markdown entirely
 			markdown = markdown[:m[0]] + markdown[m[1]:]
 			continue
