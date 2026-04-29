@@ -209,7 +209,7 @@
           >
                <div v-html="renderMarkdownContent(event.content)"></div>
           </div>
-          <div v-if="event.done" class="answer-toolbar">
+          <div v-if="event.done && event.content && event.content.trim()" class="answer-toolbar">
             <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)" :title="$t('agent.copy')">
               <t-icon name="copy" />
             </t-button>
@@ -894,6 +894,19 @@ const finalContent = computed(() => {
     return { type: 'answer' };
   }
 
+  // Do NOT fall back to re-rendering the last thinking event when the
+  // intermediate-steps tree already shows it — that would duplicate the
+  // thinking card below the tree. The fallback is only meaningful for
+  // legacy conversations where the tree is absent. Also skip for
+  // user-stopped conversations which have no final answer to fall back to.
+  if (shouldShowCollapsedSteps.value) {
+    return null;
+  }
+  const wasStopped = stream.some((e: any) => e.type === 'stop');
+  if (wasStopped) {
+    return null;
+  }
+
   // Fallback: if no answer content (legacy path or LLM didn't call final_answer),
   // use last thinking as final content
   const thinkingEvents = stream.filter((e: any) => e.type === 'thinking' && e.content && e.content.trim());
@@ -1069,6 +1082,14 @@ const displayEvents = computed(() => {
   const answerEvents = result.filter((e: any) => e.type === 'answer');
   if (answerEvents.length > 0) {
     return answerEvents;
+  }
+
+  // If the intermediate-steps tree is active, all thinking/tool_call events
+  // are already rendered there. Showing anything else here would duplicate
+  // them. This covers both the user-stopped case and any completion path
+  // that didn't produce an answer event.
+  if (shouldShowCollapsedSteps.value) {
+    return [];
   }
 
   // Fallback: if no answer events, show last thinking (legacy compatibility)

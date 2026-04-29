@@ -353,6 +353,24 @@ func (e *AgentEngine) executeLoop(
 	common.PipelineInfo(ctx, "Agent", "loop_start", map[string]interface{}{
 		"max_iterations": e.config.MaxIterations,
 	})
+
+	// Guarantee exactly-one EventAgentComplete emission on every exit path
+	// (normal finish, ctx cancel observed at the loop head, or iteration error
+	// bubbling up while ctx was cancelled). The emission triggers
+	// agent_stream_handler.handleComplete, which is where state.RoundSteps
+	// (thinking + tool_call history) gets written onto assistantMessage.AgentSteps
+	// so it can be persisted by the caller's defer. Use WithoutCancel so a
+	// cancelled ctx does not short-circuit the emit on the stop path.
+	completionEmitted := false
+	emitCompletion := func() {
+		if completionEmitted {
+			return
+		}
+		completionEmitted = true
+		e.emitCompletionEvent(context.WithoutCancel(ctx), state, sessionID, messageID, startTime)
+	}
+	defer emitCompletion()
+
 	emptyRetries := 0
 	consecutiveSameContent := 0
 	lastResponseContent := ""
@@ -393,13 +411,15 @@ loop:
 		}
 	}
 
-	// If loop finished without final answer, generate one
-	if !state.IsComplete {
+	// If loop finished without final answer, generate one — but skip this
+	// when the context was cancelled (user pressed stop). In that case the
+	// fallback LLM call would fail on the already-cancelled ctx and set
+	// state.FinalAnswer to the generic "Sorry, I was unable to generate a
+	// complete answer." message, which then leaks to the UI as the final
+	// answer for a conversation the user deliberately stopped.
+	if !state.IsComplete && ctx.Err() == nil {
 		e.handleMaxIterations(ctx, query, state, sessionID)
 	}
-
-	// Emit completion event
-	e.emitCompletionEvent(ctx, state, sessionID, messageID, startTime)
 
 	return state, nil
 }
@@ -552,6 +572,25 @@ func (e *AgentEngine) runReActIteration(
 		Thought:   response.Content,
 		ToolCalls: make([]types.ToolCall, 0),
 		Timestamp: time.Now(),
+	}
+
+	// If the request was cancelled while the LLM was streaming (e.g. the
+	// user pressed "stop"), the stream driver still returns a usable
+	// response (partial content / finish_reason="stop" / no tool calls).
+	// Do NOT let analyzeResponse treat that partial thinking text as the
+	// final answer — it would pollute Message.Content with mid-stream
+	// thinking and show up as a duplicate card next to the intermediate-
+	// steps tree. Preserve the partial thinking as an AgentStep and break
+	// out of the loop without marking state.IsComplete. executeLoop's
+	// deferred emitCompletionEvent will persist the step onto
+	// Message.AgentSteps so it still appears in the tree on refresh.
+	if ctx.Err() != nil {
+		logger.Warnf(ctx, "[Agent][Round-%d] Context cancelled during LLM call; preserving partial step",
+			round)
+		if step.Thought != "" || len(step.ToolCalls) > 0 {
+			state.RoundSteps = append(state.RoundSteps, step)
+		}
+		return iterOutcomeBreak, nil
 	}
 
 	// 2. Analyze: Check for stop conditions (natural stop or final_answer tool)
