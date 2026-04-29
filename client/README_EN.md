@@ -23,7 +23,7 @@ The client includes the following main functional modules:
 ```go
 import (
     "context"
-    "github.com/Tencent/WeKnora/internal/client"
+    "github.com/Tencent/WeKnora/client"
     "time"
 )
 
@@ -33,6 +33,26 @@ apiClient := client.NewClient(
     client.WithToken("your-auth-token"),
     client.WithTimeout(30*time.Second),
 )
+```
+
+### Tenant Configuration
+
+You can set a default tenant with `WithTenantID`; the client will automatically send the `X-Tenant-ID` header:
+
+```go
+tenantID := uint64(10000)
+apiClient := client.NewClient(
+    "http://api.example.com",
+    client.WithToken("your-auth-token"),
+    client.WithTenantID(tenantID),
+)
+```
+
+If a single request needs a different tenant, set `TenantID` in the request context. The value can be a `uint64`, `*uint64`, or a numeric string, and it will take precedence over the client default:
+
+```go
+ctx := context.WithValue(context.Background(), "TenantID", uint64(10000))
+// Pass ctx into any client method to switch to tenant 10000 for that request
 ```
 
 ### Example: Create Knowledge Base and Upload File
