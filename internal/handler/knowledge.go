@@ -187,6 +187,29 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	return false
 }
 
+// enqueueKnowledgeListDelete enqueues an async batch-delete task for the
+// given knowledge IDs and returns the asynq task ID.
+func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
+	ctx context.Context, tenantID uint64, ids []string,
+) (string, error) {
+	payload := types.KnowledgeListDeletePayload{
+		TenantID:     tenantID,
+		KnowledgeIDs: ids,
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
+	task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes,
+		asynq.Queue("low"), asynq.MaxRetry(3))
+	info, err := h.asynqClient.Enqueue(task)
+	if err != nil {
+		return "", fmt.Errorf("enqueue task: %w", err)
+	}
+	return info.ID, nil
+}
+
 // CreateKnowledgeFromFile godoc
 // @Summary      从文件创建知识
 // @Description  上传文件并创建知识条目
@@ -715,16 +738,23 @@ func (h *KnowledgeHandler) BatchDeleteKnowledge(c *gin.Context) {
 		}
 	}
 
-	logger.Infof(ctx, "Batch deleting %d knowledge entries from KB %s", len(ids), secutils.SanitizeForLog(kbID))
-	if err := h.kgService.DeleteKnowledgeList(ctx, ids); err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue batch knowledge delete task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue batch delete task"))
 		return
 	}
 
+	logger.Infof(ctx, "Batch knowledge delete task enqueued: %s, kb_id: %s, count: %d",
+		taskID, secutils.SanitizeForLog(kbID), len(ids))
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"deleted": len(ids),
+		"message": "Batch delete task submitted",
+		"data": gin.H{
+			"task_id":       taskID,
+			"deleted_count": len(ids),
+		},
 	})
 }
 
@@ -782,21 +812,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 		knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 	}
 
-	payload := types.KnowledgeListDeletePayload{
-		TenantID:     effectiveTenantID,
-		KnowledgeIDs: knowledgeIDs,
-	}
-	langfuse.InjectTracing(ctx, &payload)
-	payloadBytes, err := json.Marshal(payload)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to marshal knowledge list delete payload: %v", err)
-		c.Error(errors.NewInternalServerError("Failed to create cleanup task"))
-		return
-	}
-
-	task := asynq.NewTask(types.TypeKnowledgeListDelete, payloadBytes,
-		asynq.Queue("low"), asynq.MaxRetry(3))
-	info, err := h.asynqClient.Enqueue(task)
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, knowledgeIDs)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to enqueue knowledge list delete task: %v", err)
 		c.Error(errors.NewInternalServerError("Failed to enqueue cleanup task"))
@@ -804,7 +820,7 @@ func (h *KnowledgeHandler) ClearKnowledgeBaseContents(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Knowledge base contents clear task enqueued: %s, kb_id: %s, count: %d",
-		info.ID, secutils.SanitizeForLog(kbID), len(knowledgeIDs))
+		taskID, secutils.SanitizeForLog(kbID), len(knowledgeIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

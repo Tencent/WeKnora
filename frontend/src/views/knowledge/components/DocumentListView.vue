@@ -265,8 +265,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   flex-direction: column;
   width: 100%;
   background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-border, #e7e7e7);
-  border-radius: 10px;
+  border: 1px solid var(--td-component-stroke, #f0f0f0);
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -291,12 +291,13 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   position: sticky;
   top: 0;
   z-index: 2;
-  height: 40px;
+  height: 36px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--td-text-color-secondary, #888);
-  background: var(--td-bg-color-secondarycontainer, #fafafa);
-  border-bottom: 1px solid var(--td-component-border, #e7e7e7);
+  letter-spacing: 0.02em;
+  color: var(--td-text-color-placeholder, #a6a6a6);
+  background: var(--td-bg-color-page, #fafbfc);
+  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
 }
 
 .doc-list-body {
@@ -305,25 +306,31 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 }
 
 .doc-list-row {
+  position: relative;
   height: 48px;
   font-size: 13px;
   color: var(--td-text-color-primary, #232323);
-  border-bottom: 1px solid var(--td-component-stroke, #f0f0f0);
+  border-bottom: 1px solid var(--td-component-stroke, #f3f3f3);
   cursor: pointer;
-  transition: background-color 0.12s ease;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
 
   &:last-child { border-bottom: 0; }
 
-  &:hover,
-  &.menu-open {
-    background: var(--td-bg-color-container-hover, #f6f8fa);
-    .row-more-btn { opacity: 1; }
+  &:hover:not(.selected),
+  &.menu-open:not(.selected) {
+    background: var(--td-bg-color-page, #f7f8fa);
   }
 
   &.selected {
-    background: var(--td-brand-color-1, #f0f6ff);
-    &:hover { background: var(--td-brand-color-2, #e6f0ff); }
+    background: var(--td-brand-color-1, #f2f5fc);
+    box-shadow: inset 3px 0 0 var(--td-brand-color, #0052d9);
+
+    &:hover { background: var(--td-brand-color-light, #e8eefc); }
   }
+
+  &:hover .row-more-btn,
+  &.menu-open .row-more-btn,
+  &.selected .row-more-btn { opacity: 1; }
 }
 
 .cell {
