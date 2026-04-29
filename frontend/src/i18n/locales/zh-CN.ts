@@ -2852,6 +2852,13 @@ export default {
   modelSettings: {
     title: "模型配置",
     description: "管理不同类型的 AI 模型，支持 Ollama 本地模型和远程 API",
+    typeShort: {
+      chat: "对话",
+      embedding: "Embedding",
+      rerank: "ReRank",
+      vllm: "视觉",
+      asr: "语音",
+    },
     actions: {
       addModel: "添加模型",
       setDefault: "设为默认",

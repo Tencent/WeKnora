@@ -1,17 +1,17 @@
 <template>
-  <t-dialog
-    v-model:visible="dialogVisible"
-    :header="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
-    width="700px"
-    :on-confirm="handleSubmit"
-    :on-cancel="handleClose"
-    :confirm-btn="{ content: t('common.save'), loading: submitting }"
+  <SettingDrawer
+    :visible="dialogVisible"
+    :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
+    :confirm-loading="submitting"
+    @update:visible="(v: boolean) => dialogVisible = v"
+    @confirm="handleSubmit"
+    @cancel="handleClose"
   >
     <t-form
       ref="formRef"
       :data="formData"
       :rules="rules"
-      label-width="120px"
+      label-align="top"
     >
       <t-form-item :label="t('mcpServiceDialog.name')" name="name">
         <t-input v-model="formData.name" :placeholder="t('mcpServiceDialog.namePlaceholder')" />
@@ -95,7 +95,7 @@
         </t-collapse-panel>
       </t-collapse>
     </t-form>
-  </t-dialog>
+  </SettingDrawer>
 </template>
 
 <script setup lang="ts">
@@ -108,6 +108,7 @@ import {
   updateMCPService,
   type MCPService
 } from '@/api/mcp-service'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 
 interface Props {
   visible: boolean

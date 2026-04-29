@@ -2855,6 +2855,13 @@ export default {
   modelSettings: {
     title: 'Model Settings',
     description: 'Manage different types of AI models, including local Ollama and remote APIs',
+    typeShort: {
+      chat: 'Chat',
+      embedding: 'Embedding',
+      rerank: 'ReRank',
+      vllm: 'Vision',
+      asr: 'Speech',
+    },
     actions: {
       addModel: 'Add Model',
       setDefault: 'Set as Default'

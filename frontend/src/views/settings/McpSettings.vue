@@ -11,9 +11,9 @@
       <t-loading :text="$t('common.loading')" />
     </div>
 
-    <div v-else class="services-container">
-      <div class="services-header">
-        <div class="header-info">
+    <template v-else>
+      <div class="settings-toolbar">
+        <div class="toolbar-info">
           <h3>{{ $t('mcpSettings.configuredServices') }}</h3>
           <p>{{ $t('mcpSettings.manageAndTest') }}</p>
         </div>
@@ -24,73 +24,67 @@
       </div>
 
       <div v-if="services.length === 0" class="empty-state">
-        <t-empty :description="$t('mcpSettings.empty')" >
-          <t-button theme="primary" @click="handleAdd">{{ $t('mcpSettings.addFirst') }}</t-button>
+        <t-empty :description="$t('mcpSettings.empty')">
+          <t-button theme="primary" size="small" @click="handleAdd">
+            <template #icon><t-icon name="add" /></template>
+            {{ $t('mcpSettings.addFirst') }}
+          </t-button>
         </t-empty>
       </div>
 
-      <div v-else class="services-list">
-        <div v-for="service in services" :key="service.id" class="service-card">
-          <div class="service-info">
-            <div class="service-header">
-              <div class="service-name">
-                {{ service.name }}
-                <t-tag 
-                  v-if="service.is_builtin"
-                  theme="warning"
-                  size="small"
-                  variant="light"
-                >
-                  {{ $t('mcpSettings.builtin') }}
-                </t-tag>
-                <t-tag 
-                  :theme="getTransportTypeTheme(service.transport_type)" 
-                  size="small"
-                  variant="light"
-                >
-                  {{ getTransportTypeLabel(service.transport_type) }}
-                </t-tag>
-              </div>
-              <div class="service-controls">
-                <t-switch 
-                  v-model="service.enabled" 
-                  @change="() => handleToggleEnabled(service)"
-                  size="medium"
-                  :disabled="service.is_builtin"
-                />
-                <t-dropdown 
-                  v-if="!service.is_builtin"
-                  :options="getServiceOptions(service)" 
-                  @click="(data: any) => handleMenuAction(data, service)"
-                  placement="bottom-right"
-                  :disabled="testing"
-                >
-                  <t-button variant="text" shape="square" size="small" class="more-btn" :disabled="testing">
-                    <t-icon name="more" />
-                  </t-button>
-                </t-dropdown>
-                <t-dropdown 
-                  v-else
-                  :options="getBuiltinServiceOptions(service)" 
-                  @click="(data: any) => handleMenuAction(data, service)"
-                  placement="bottom-right"
-                  :disabled="testing"
-                >
-                  <t-button variant="text" shape="square" size="small" class="more-btn" :disabled="testing">
-                    <t-icon name="more" />
-                  </t-button>
-                </t-dropdown>
-              </div>
-            </div>
-            <div v-if="service.description" class="service-description">
-              {{ service.description }}
-            </div>
-          </div>
-        </div>
+      <div v-else class="services-grid">
+        <SettingCard
+          v-for="service in services"
+          :key="service.id"
+          :title="service.name"
+          :description="service.description || ''"
+          :disabled="service.is_builtin"
+          :actions="service.is_builtin ? getBuiltinServiceOptions() : getServiceOptions()"
+          @action="(value: string) => handleMenuAction({ value }, service)"
+        >
+          <template #tags>
+            <t-tag
+              :theme="getTransportTypeTheme(service.transport_type)"
+              size="small"
+              variant="light"
+            >
+              {{ getTransportTypeLabel(service.transport_type) }}
+            </t-tag>
+            <t-tag
+              v-if="service.is_builtin"
+              theme="warning"
+              size="small"
+              variant="light"
+            >
+              {{ $t('mcpSettings.builtin') }}
+            </t-tag>
+            <t-tag
+              :theme="service.enabled ? 'success' : 'default'"
+              size="small"
+              variant="light"
+            >
+              {{ service.enabled ? $t('common.on') : $t('common.off') }}
+            </t-tag>
+          </template>
+          <template #controls>
+            <t-switch
+              v-model="service.enabled"
+              size="medium"
+              :disabled="service.is_builtin"
+              @change="() => handleToggleEnabled(service)"
+            />
+          </template>
+          <template #meta>
+            <span v-if="service.url" class="service-meta-item" :title="service.url">
+              <t-icon name="link" size="12px" />
+              <span class="service-meta-text">{{ service.url }}</span>
+            </span>
+          </template>
+        </SettingCard>
       </div>
-    </div>
+    </template>
 
-    <!-- Add/Edit Dialog -->
+    <!-- Add/Edit Drawer -->
     <McpServiceDialog
       v-model:visible="dialogVisible"
       :service="currentService"
@@ -109,7 +103,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
   listMCPServices,
@@ -121,8 +115,11 @@ import {
 } from '@/api/mcp-service'
 import McpServiceDialog from './components/McpServiceDialog.vue'
 import McpTestResult from './components/McpTestResult.vue'
+import SettingCard from '@/components/settings/SettingCard.vue'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 
 const { t } = useI18n()
+const confirmDelete = useConfirmDelete()
 
 const services = ref<MCPService[]>([])
 const loading = ref(false)
@@ -170,13 +167,12 @@ const handleDialogSuccess = () => {
 // Handle toggle enabled/disabled
 const handleToggleEnabled = async (service: MCPService) => {
   if (!service || !service.id) return
-  
+
   const originalState = service.enabled
   try {
     await updateMCPService(service.id, { enabled: service.enabled })
     MessagePlugin.success(service.enabled ? t('mcpSettings.toasts.enabled') : t('mcpSettings.toasts.disabled'))
   } catch (error) {
-    // Revert on error
     service.enabled = originalState
     MessagePlugin.error(t('mcpSettings.toasts.updateStateFailed'))
     console.error('Failed to update MCP service:', error)
@@ -186,28 +182,22 @@ const handleToggleEnabled = async (service: MCPService) => {
 // Handle test button click
 const handleTest = async (service: MCPService) => {
   if (!service || !service.id) return
-  
+
   testingServiceName.value = service.name
   testing.value = true
-  
-  // 显示测试开始提示
+
   MessagePlugin.info({
     content: t('mcpSettings.toasts.testing', { name: service.name }),
-    duration: 0, // 不自动关闭
+    duration: 0,
     closeBtn: false
   })
-  
+
   try {
     const result = await testMCPService(service.id)
-    
-    console.log('Test result received:', result)
-    
-    // 关闭所有消息提示
+
     MessagePlugin.closeAll()
-    
-    // 检查结果是否存在
+
     if (!result) {
-      // 即使没有结果，也显示错误对话框
       testResult.value = {
         success: false,
         message: t('mcpSettings.toasts.noResponse')
@@ -215,48 +205,35 @@ const handleTest = async (service: MCPService) => {
       testDialogVisible.value = true
       return
     }
-    
-    // 设置测试结果
+
     testResult.value = result
-    
-    // 显示详细结果对话框
-    console.log('Opening test dialog, result:', testResult.value)
     testDialogVisible.value = true
   } catch (error: any) {
-    // 关闭所有消息提示
     MessagePlugin.closeAll()
-    
-    // 显示错误信息
+
     const errorMessage = error?.response?.data?.error?.message || error?.message || t('mcpSettings.toasts.testFailed')
     console.error('Failed to test MCP service:', error)
-    
-    // 即使出错也显示结果对话框，显示错误信息
+
     testResult.value = {
       success: false,
       message: errorMessage
     }
     testDialogVisible.value = true
   } finally {
-    // 确保关闭 loading
     testing.value = false
   }
 }
 
 // Handle delete button click
-const handleDelete = async (service: MCPService) => {
+const handleDelete = (service: MCPService) => {
   if (!service || !service.id) return
-  
-  const confirmDialog = DialogPlugin.confirm({
-    header: t('common.confirmDelete'),
+
+  confirmDelete({
     body: t('mcpSettings.deleteConfirmBody', { name: service.name || t('mcpSettings.unnamed') }),
-    confirmBtn: t('common.delete'),
-    cancelBtn: t('common.cancel'),
-    theme: 'warning',
     onConfirm: async () => {
       try {
         await deleteMCPService(service.id)
         MessagePlugin.success(t('mcpSettings.toasts.deleted'))
-        confirmDialog.hide()
         loadServices()
       } catch (error) {
         MessagePlugin.error(t('mcpSettings.toasts.deleteFailed'))
@@ -267,44 +244,34 @@ const handleDelete = async (service: MCPService) => {
 }
 
 // Get service options for dropdown menu
-const getServiceOptions = (service: MCPService) => {
+const getServiceOptions = () => {
   return [
-    {
-      content: t('mcpSettings.actions.test'),
-      value: `test-${service.id}`
-    },
-    {
-      content: t('common.edit'),
-      value: `edit-${service.id}`
-    },
-    {
-      content: t('common.delete'),
-      value: `delete-${service.id}`,
-      theme: 'error'
-    }
+    { content: t('mcpSettings.actions.test'), value: 'test' },
+    { content: t('common.edit'), value: 'edit' },
+    { content: t('common.delete'), value: 'delete', theme: 'error' as const }
   ]
 }
 
-// Get service options for builtin services (test only)
-const getBuiltinServiceOptions = (service: MCPService) => {
+// Builtin: 仅测试
+const getBuiltinServiceOptions = () => {
   return [
-    {
-      content: t('mcpSettings.actions.test'),
-      value: `test-${service.id}`
-    }
+    { content: t('mcpSettings.actions.test'), value: 'test' }
   ]
 }
 
 // Handle menu action
 const handleMenuAction = (data: { value: string }, service: MCPService) => {
-  const value = data.value
-  
-  if (value.startsWith('test-')) {
-    handleTest(service)
-  } else if (value.startsWith('edit-')) {
-    handleEdit(service)
-  } else if (value.startsWith('delete-')) {
-    handleDelete(service)
+  if (testing.value) return
+  switch (data.value) {
+    case 'test':
+      handleTest(service)
+      break
+    case 'edit':
+      handleEdit(service)
+      break
+    case 'delete':
+      handleDelete(service)
+      break
   }
 }
 
@@ -347,7 +314,7 @@ onMounted(() => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 
   h2 {
     font-size: 20px;
@@ -360,7 +327,7 @@ onMounted(() => {
     font-size: 14px;
     color: var(--td-text-color-secondary);
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 }
 
@@ -369,20 +336,16 @@ onMounted(() => {
   text-align: center;
 }
 
-.services-container {
-  margin-top: 16px;
-}
-
-.services-header {
+.settings-toolbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--td-component-stroke);
 
-  .header-info {
+  .toolbar-info {
     flex: 1;
+    min-width: 0;
 
     h3 {
       font-size: 15px;
@@ -411,91 +374,23 @@ onMounted(() => {
   }
 }
 
-.services-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  padding: 16px;
-  background: var(--td-bg-color-secondarycontainer);
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.service-card {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-  transition: all 0.2s;
+.service-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
 
-  &:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-  }
-
-  &:first-child {
-    padding-top: 0;
-  }
-}
-
-.service-info {
-  .service-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-
-    .service-name {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--td-text-color-primary);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 1;
-    }
-
-    .service-controls {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-
-      .more-btn {
-        color: var(--td-text-color-placeholder);
-        padding: 4px;
-        transition: all 0.2s;
-
-        &:hover {
-          background: var(--td-bg-color-secondarycontainer);
-          color: var(--td-text-color-primary);
-        }
-      }
-    }
-  }
-
-  .service-description {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin-bottom: 8px;
-    line-height: 1.5;
-  }
-
-  .service-meta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 12px;
-    color: var(--td-text-color-placeholder);
-
-    .meta-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-
-      .meta-icon {
-        font-size: 12px;
-      }
-    }
+  .service-meta-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>
-

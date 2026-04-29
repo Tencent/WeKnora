@@ -5,141 +5,138 @@
       <p class="section-description">{{ t('webSearchSettings.description') }}</p>
     </div>
 
-    <div class="settings-group">
-      <div class="section-subheader">
-        <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
+    <div class="settings-toolbar">
+      <h3>{{ t('webSearchSettings.providersTitle') }}</h3>
+      <t-button theme="primary" size="small" @click="openAddDialog">
+        <template #icon><add-icon /></template>
+        {{ t('webSearchSettings.addProvider') }}
+      </t-button>
+    </div>
+
+    <!-- Provider List -->
+    <div v-if="providerEntities.length > 0" class="provider-grid">
+      <SettingCard
+        v-for="entity in providerEntities"
+        :key="entity.id"
+        :title="entity.name"
+        :description="entity.description || ''"
+        :actions="getProviderOptions(entity)"
+        @action="(value: string) => handleMenuAction({ value }, entity)"
+      >
+        <template #tags>
+          <t-tag theme="primary" size="small" variant="light">
+            {{ entity.provider }}
+          </t-tag>
+          <t-tag v-if="entity.is_default" theme="success" size="small" variant="light">
+            {{ t('webSearchSettings.default') }}
+          </t-tag>
+          <t-tag v-if="isEntityFree(entity)" theme="warning" size="small" variant="light">
+            {{ t('webSearchSettings.free') }}
+          </t-tag>
+        </template>
+        <template #meta>
+          <span v-if="entity.parameters?.proxy_url" class="provider-meta-item" :title="entity.parameters.proxy_url">
+            <t-icon name="internet" size="12px" />
+            <span class="provider-meta-text">{{ entity.parameters.proxy_url }}</span>
+          </span>
+        </template>
+      </SettingCard>
+    </div>
+
+    <!-- Empty State -->
+    <div v-else class="empty-state">
+      <t-empty :description="t('webSearchSettings.noProvidersDesc')">
         <t-button theme="primary" size="small" @click="openAddDialog">
           <template #icon><add-icon /></template>
           {{ t('webSearchSettings.addProvider') }}
         </t-button>
-      </div>
-
-      <!-- Provider List -->
-      <div v-if="providerEntities.length > 0" class="provider-list">
-        <div v-for="entity in providerEntities" :key="entity.id" class="provider-item">
-          <div class="item-info">
-            <div class="item-header">
-              <span class="item-name">{{ entity.name }}</span>
-              <t-tag v-if="entity.is_default" theme="primary" size="small" variant="light">
-                {{ t('webSearchSettings.default') }}
-              </t-tag>
-              <t-tag size="small" variant="outline">{{ entity.provider }}</t-tag>
-            </div>
-            <div class="item-desc">{{ entity.description || t('webSearchSettings.noDescription') }}</div>
-          </div>
-          <div class="item-actions">
-            <t-button theme="default" variant="text" size="small" @click="testExistingConnection(entity)" :loading="testingId === entity.id">
-              {{ t('webSearchSettings.testConnection') }}
-            </t-button>
-            <t-button theme="primary" variant="text" size="small" @click="editProvider(entity)">
-              {{ t('common.edit') }}
-            </t-button>
-            <t-popconfirm :content="t('webSearchSettings.deleteConfirm')" @confirm="deleteProvider(entity.id!)">
-              <t-button theme="danger" variant="text" size="small">
-                {{ t('common.delete') }}
-              </t-button>
-            </t-popconfirm>
-          </div>
-        </div>
-      </div>
-
-      <!-- Empty State -->
-      <div v-else class="empty-providers">
-        <p>{{ t('webSearchSettings.noProvidersDesc') }}</p>
-      </div>
+      </t-empty>
     </div>
 
-    <!-- Add/Edit Dialog -->
-    <t-dialog
+    <!-- Add/Edit Drawer -->
+    <SettingDrawer
       v-model:visible="showAddProviderDialog"
-      :header="editingProvider ? t('webSearchSettings.editProvider') : t('webSearchSettings.addProvider')"
-      width="520px"
-      :footer="false"
-      destroy-on-close
+      :title="editingProvider ? t('webSearchSettings.editProvider') : t('webSearchSettings.addProvider')"
+      :confirm-loading="saving"
+      @confirm="saveProvider"
     >
-      <div class="dialog-form-container">
-        <t-form :data="providerForm" label-align="top" @submit="saveProvider" class="provider-form">
-          <t-form-item :label="t('webSearchSettings.providerTypeLabel')" name="provider">
-            <t-select v-model="providerForm.provider" :disabled="!!editingProvider" @change="onProviderTypeChange">
-              <t-option v-for="pt in providerTypes" :key="pt.id" :value="pt.id" :label="pt.name">
-                <div class="provider-option">
-                  <span>{{ pt.name }}</span>
-                  <t-tag v-if="isProviderFree(pt)" theme="success" size="small" variant="light">{{ t('webSearchSettings.free') }}</t-tag>
-                </div>
-              </t-option>
-            </t-select>
-          </t-form-item>
+      <t-form ref="formRef" :data="providerForm" label-align="top" class="provider-form">
+        <t-form-item :label="t('webSearchSettings.providerTypeLabel')" name="provider">
+          <t-select v-model="providerForm.provider" :disabled="!!editingProvider" @change="onProviderTypeChange">
+            <t-option v-for="pt in providerTypes" :key="pt.id" :value="pt.id" :label="pt.name">
+              <div class="provider-option">
+                <span>{{ pt.name }}</span>
+                <t-tag v-if="isProviderFree(pt)" theme="success" size="small" variant="light">
+                  {{ t('webSearchSettings.free') }}
+                </t-tag>
+              </div>
+            </t-option>
+          </t-select>
+        </t-form-item>
 
-          <t-form-item :label="t('webSearchSettings.providerNameLabel')" name="name">
-            <t-input v-model="providerForm.name" :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
-          </t-form-item>
+        <t-form-item :label="t('webSearchSettings.providerNameLabel')" name="name">
+          <t-input v-model="providerForm.name" :placeholder="selectedProviderType?.name || t('webSearchSettings.providerNamePlaceholder')" />
+        </t-form-item>
 
-          <t-form-item :label="t('webSearchSettings.providerDescLabel')" name="description">
-            <t-input v-model="providerForm.description" :placeholder="t('webSearchSettings.providerDescPlaceholder')" />
-          </t-form-item>
+        <t-form-item :label="t('webSearchSettings.providerDescLabel')" name="description">
+          <t-input v-model="providerForm.description" :placeholder="t('webSearchSettings.providerDescPlaceholder')" />
+        </t-form-item>
 
-          <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id">
-            <div class="form-divider"></div>
-            
-            <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
-              <a :href="selectedProviderType.docs_url" target="_blank" rel="noopener noreferrer">
-                {{ t('webSearchSettings.viewDocs') }} ↗
-              </a>
-            </div>
-            
-            <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">
-              <t-input
-                v-model="providerForm.parameters.api_key"
-                type="password"
-                :placeholder="editingProvider ? t('webSearchSettings.apiKeyUnchanged') : t('webSearchSettings.apiKeyPlaceholder')"
-              />
-            </t-form-item>
-            <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')" name="parameters.engine_id">
-              <t-input v-model="providerForm.parameters.engine_id" :placeholder="t('webSearchSettings.engineIdLabel')" />
-            </t-form-item>
-          </template>
-
-          <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')" name="parameters.proxy_url">
-            <t-input
-              v-model="providerForm.parameters.proxy_url"
-              :placeholder="t('webSearchSettings.proxyUrlPlaceholder')"
-            />
-            <template #help>
-              <span class="switch-help">{{ t('webSearchSettings.proxyUrlHelp') }}</span>
-            </template>
-          </t-form-item>
-
+        <template v-if="selectedProviderType?.requires_api_key || selectedProviderType?.requires_engine_id">
           <div class="form-divider"></div>
 
-          <t-form-item :label="t('webSearchSettings.setAsDefault')" name="is_default">
-            <template #help>
-              <div class="switch-help">
-                {{ t('webSearchSettings.setAsDefaultDesc') }}
-              </div>
-            </template>
-            <t-switch v-model="providerForm.is_default" />
-          </t-form-item>
-
-          <div class="dialog-footer">
-            <div class="footer-left">
-              <t-button
-                v-if="selectedProviderType && !isProviderFree(selectedProviderType)"
-                theme="default"
-                variant="outline"
-                :loading="testing"
-                @click="testConnection"
-              >
-                {{ testing ? t('webSearchSettings.testing') : t('webSearchSettings.testConnection') }}
-              </t-button>
-            </div>
-            <div class="footer-right">
-              <t-button theme="default" variant="base" @click="showAddProviderDialog = false">{{ t('common.cancel') }}</t-button>
-              <t-button theme="primary" type="submit" :loading="saving">{{ t('common.save') }}</t-button>
-            </div>
+          <div class="credentials-hint" v-if="selectedProviderType?.docs_url">
+            <a :href="selectedProviderType.docs_url" target="_blank" rel="noopener noreferrer">
+              {{ t('webSearchSettings.viewDocs') }} ↗
+            </a>
           </div>
-        </t-form>
-      </div>
-    </t-dialog>
+
+          <t-form-item v-if="selectedProviderType?.requires_api_key" :label="t('webSearchSettings.apiKeyLabel')" name="parameters.api_key">
+            <t-input
+              v-model="providerForm.parameters.api_key"
+              type="password"
+              :placeholder="editingProvider ? t('webSearchSettings.apiKeyUnchanged') : t('webSearchSettings.apiKeyPlaceholder')"
+            />
+          </t-form-item>
+          <t-form-item v-if="selectedProviderType?.requires_engine_id" :label="t('webSearchSettings.engineIdLabel')" name="parameters.engine_id">
+            <t-input v-model="providerForm.parameters.engine_id" :placeholder="t('webSearchSettings.engineIdLabel')" />
+          </t-form-item>
+        </template>
+
+        <t-form-item v-if="selectedProviderType?.supports_proxy" :label="t('webSearchSettings.proxyUrlLabel')" name="parameters.proxy_url">
+          <t-input
+            v-model="providerForm.parameters.proxy_url"
+            :placeholder="t('webSearchSettings.proxyUrlPlaceholder')"
+          />
+          <template #help>
+            <span class="switch-help">{{ t('webSearchSettings.proxyUrlHelp') }}</span>
+          </template>
+        </t-form-item>
+
+        <div class="form-divider"></div>
+
+        <t-form-item :label="t('webSearchSettings.setAsDefault')" name="is_default">
+          <template #help>
+            <div class="switch-help">
+              {{ t('webSearchSettings.setAsDefaultDesc') }}
+            </div>
+          </template>
+          <t-switch v-model="providerForm.is_default" />
+        </t-form-item>
+      </t-form>
+
+      <template #footer-left>
+        <t-button
+          v-if="selectedProviderType && !isProviderFree(selectedProviderType)"
+          theme="default"
+          variant="outline"
+          :loading="testing"
+          @click="testConnection"
+        >
+          {{ testing ? t('webSearchSettings.testing') : t('webSearchSettings.testConnection') }}
+        </t-button>
+      </template>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -158,8 +155,12 @@ import {
   type WebSearchProviderEntity,
   type WebSearchProviderTypeInfo,
 } from '@/api/web-search-provider'
+import SettingCard from '@/components/settings/SettingCard.vue'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 
 const { t } = useI18n()
+const confirmDelete = useConfirmDelete()
 
 // ===== State =====
 const providerEntities = ref<WebSearchProviderEntity[]>([])
@@ -169,6 +170,7 @@ const editingProvider = ref<WebSearchProviderEntity | null>(null)
 const testing = ref(false)
 const testingId = ref<string | null>(null)
 const saving = ref(false)
+const formRef = ref<any>()
 
 const providerForm = ref<{
   name: string
@@ -191,6 +193,11 @@ const selectedProviderType = computed(() => {
 
 const isProviderFree = (providerType: WebSearchProviderTypeInfo) => {
   return !providerType.requires_api_key && !providerType.requires_engine_id
+}
+
+const isEntityFree = (entity: WebSearchProviderEntity) => {
+  const pt = providerTypes.value.find(p => p.id === entity.provider)
+  return pt ? isProviderFree(pt) : false
 }
 
 // ===== Methods =====
@@ -219,12 +226,12 @@ const loadProviderTypes = async () => {
 
 const openAddDialog = () => {
   editingProvider.value = null
-  providerForm.value = { 
-    name: '', 
-    provider: providerTypes.value[0]?.id || 'duckduckgo', 
-    description: '', 
-    parameters: {}, 
-    is_default: providerEntities.value.length === 0 
+  providerForm.value = {
+    name: '',
+    provider: providerTypes.value[0]?.id || 'duckduckgo',
+    description: '',
+    parameters: {},
+    is_default: providerEntities.value.length === 0
   }
   showAddProviderDialog.value = true
 }
@@ -245,12 +252,14 @@ const editProvider = (entity: WebSearchProviderEntity) => {
   showAddProviderDialog.value = true
 }
 
-const saveProvider = async ({ validateResult, firstError }: any) => {
+const saveProvider = async () => {
+  const validateResult = await formRef.value?.validate()
   if (validateResult !== true && validateResult !== undefined) {
-    MessagePlugin.warning(firstError || 'Please check the form fields')
+    const firstError = typeof validateResult === 'object' ? Object.values(validateResult)[0] : ''
+    MessagePlugin.warning(typeof firstError === 'string' ? firstError : 'Please check the form fields')
     return
   }
-  
+
   saving.value = true
   try {
     const data: Partial<WebSearchProviderEntity> = {
@@ -260,7 +269,7 @@ const saveProvider = async ({ validateResult, firstError }: any) => {
       parameters: { ...providerForm.value.parameters },
       is_default: providerForm.value.is_default,
     }
-    
+
     if (editingProvider.value && !data.parameters!.api_key) {
       delete data.parameters!.api_key
     }
@@ -281,14 +290,19 @@ const saveProvider = async ({ validateResult, firstError }: any) => {
   }
 }
 
-const deleteProvider = async (id: string) => {
-  try {
-    await deleteWebSearchProviderAPI(id)
-    MessagePlugin.success(t('webSearchSettings.toasts.providerDeleted'))
-    await loadProviderEntities()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || 'Failed to delete provider')
-  }
+const deleteProvider = (entity: WebSearchProviderEntity) => {
+  confirmDelete({
+    body: t('webSearchSettings.deleteConfirm'),
+    onConfirm: async () => {
+      try {
+        await deleteWebSearchProviderAPI(entity.id!)
+        MessagePlugin.success(t('webSearchSettings.toasts.providerDeleted'))
+        await loadProviderEntities()
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || 'Failed to delete provider')
+      }
+    }
+  })
 }
 
 const testConnection = async () => {
@@ -298,7 +312,7 @@ const testConnection = async () => {
       provider: providerForm.value.provider,
       parameters: { ...providerForm.value.parameters },
     }
-    
+
     if (editingProvider.value && !data.parameters.api_key) {
       const res = await testWebSearchProvider(editingProvider.value.id!)
       if (res.success) {
@@ -337,6 +351,28 @@ const testExistingConnection = async (entity: WebSearchProviderEntity) => {
   }
 }
 
+const getProviderOptions = (_entity: WebSearchProviderEntity) => {
+  return [
+    { content: t('webSearchSettings.testConnection'), value: 'test' },
+    { content: t('common.edit'), value: 'edit' },
+    { content: t('common.delete'), value: 'delete', theme: 'error' as const }
+  ]
+}
+
+const handleMenuAction = (data: { value: string }, entity: WebSearchProviderEntity) => {
+  switch (data.value) {
+    case 'test':
+      testExistingConnection(entity)
+      break
+    case 'edit':
+      editProvider(entity)
+      break
+    case 'delete':
+      deleteProvider(entity)
+      break
+  }
+}
+
 // ===== Init =====
 onMounted(async () => {
   await Promise.all([loadProviderTypes(), loadProviderEntities()])
@@ -349,7 +385,7 @@ onMounted(async () => {
 }
 
 .section-header {
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 
   h2 {
     font-size: 20px;
@@ -362,16 +398,11 @@ onMounted(async () => {
     font-size: 14px;
     color: var(--td-text-color-secondary);
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 }
 
-.settings-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.section-subheader {
+.settings-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -385,67 +416,35 @@ onMounted(async () => {
   }
 }
 
-.provider-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.provider-item {
-  display: flex;
+.provider-meta-item {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  gap: 4px;
+  max-width: 100%;
+  overflow: hidden;
 
-  &:hover {
-    border-color: var(--td-brand-color);
+  .provider-meta-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
-.item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.item-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.item-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-}
-
-.item-desc {
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-}
-
-.item-actions {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.empty-providers {
-  padding: 32px;
+.empty-state {
+  padding: 64px 0;
   text-align: center;
-  color: var(--td-text-color-placeholder);
-  border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
-  font-size: 14px;
-}
 
-.dialog-form-container {
-  margin-top: 12px;
+  :deep(.t-empty__description) {
+    font-size: 14px;
+    color: var(--td-text-color-placeholder);
+    margin-bottom: 16px;
+  }
 }
 
 .provider-option {
@@ -464,11 +463,11 @@ onMounted(async () => {
 .credentials-hint {
   margin-bottom: 12px;
   font-size: 13px;
-  
+
   a {
     color: var(--td-brand-color);
     text-decoration: none;
-    
+
     &:hover {
       text-decoration: underline;
     }
@@ -480,19 +479,5 @@ onMounted(async () => {
   color: var(--td-text-color-secondary);
   margin-top: 4px;
   line-height: 1.4;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 32px;
-  padding-top: 20px;
-  border-top: 1px solid var(--td-component-border);
-
-  .footer-right {
-    display: flex;
-    gap: 12px;
-  }
 }
 </style>
