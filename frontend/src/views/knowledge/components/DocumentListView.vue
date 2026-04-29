@@ -325,7 +325,13 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
     background: var(--td-brand-color-1, #f2f5fc);
     box-shadow: inset 3px 0 0 var(--td-brand-color, #0052d9);
 
-    &:hover { background: var(--td-brand-color-light, #e8eefc); }
+    // brand-color-light alias maps back to brand-color-1, so a plain
+    // var() swap produces no visible hover delta. Mix in a touch of
+    // brand-color so the hover state is perceptible in both light and
+    // dark themes without falling back to the saturated brand-color-2.
+    &:hover {
+      background: color-mix(in srgb, var(--td-brand-color-1) 75%, var(--td-brand-color));
+    }
   }
 
   &:hover .row-more-btn,
