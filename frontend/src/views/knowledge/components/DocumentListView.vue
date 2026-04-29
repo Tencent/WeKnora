@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { formatFileSize, getFileIcon } from '@/utils/files';
 
@@ -124,6 +124,25 @@ const onMoreVisible = (id: string, visible: boolean) => {
   moreOpen.value = visible ? id : null;
 };
 
+// 吸顶检测：哨兵离开视口说明 header 已吸附在滚动容器顶部
+const stickySentinel = ref<HTMLElement | null>(null);
+const headerStuck = ref(false);
+let stickyObserver: IntersectionObserver | null = null;
+onMounted(() => {
+  if (!stickySentinel.value || typeof IntersectionObserver === 'undefined') return;
+  stickyObserver = new IntersectionObserver(
+    (entries) => {
+      headerStuck.value = !entries[0].isIntersecting;
+    },
+    { threshold: 0 },
+  );
+  stickyObserver.observe(stickySentinel.value);
+});
+onBeforeUnmount(() => {
+  stickyObserver?.disconnect();
+  stickyObserver = null;
+});
+
 const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: KnowledgeItem) => {
   moreOpen.value = null;
   item.isMore = false;
@@ -134,7 +153,8 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 
 <template>
   <div class="doc-list-view" :class="{ 'is-loading': loading }">
-    <div class="doc-list-header" role="row">
+    <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
+    <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
       <div class="cell cell-check" role="columnheader" @click.stop>
         <t-checkbox
           class="doc-list-check"
@@ -305,6 +325,14 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   padding: 0 16px;
 }
 
+.doc-list-sticky-sentinel {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
+}
+
 .doc-list-header {
   position: sticky;
   top: 0;
@@ -318,6 +346,12 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   border-bottom: 1px solid var(--td-component-stroke);
   border-radius: 8px 8px 0 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: border-radius 0.15s ease, box-shadow 0.2s ease;
+
+  &.is-stuck {
+    border-radius: 0;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  }
 }
 
 .doc-list-body {
