@@ -369,6 +369,7 @@ func RegisterTenantRoutes(r *gin.RouterGroup, handler *handler.TenantHandler) {
 		tenantRoutes.GET("/:id", handler.GetTenant)
 		tenantRoutes.PUT("/:id", handler.UpdateTenant)
 		tenantRoutes.DELETE("/:id", handler.DeleteTenant)
+		tenantRoutes.POST("/:id/api-key", handler.ResetAPIKey)
 		tenantRoutes.GET("", handler.ListTenants)
 
 		// Generic KV configuration management (tenant-level)

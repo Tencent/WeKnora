@@ -51,6 +51,16 @@
             >
               <t-icon name="file-copy" />
             </t-button>
+            <t-button
+              size="small"
+              variant="text"
+              theme="danger"
+              :loading="resetting"
+              :title="$t('tenant.api.resetTitle')"
+              @click="confirmResetApiKey"
+            >
+              <t-icon name="refresh" />
+            </t-button>
           </div>
         </div>
       </div>
@@ -213,8 +223,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { getCurrentUser, type TenantInfo, type UserInfo } from '@/api/auth'
+import { resetTenantApiKey } from '@/api/tenant'
 import { getApiBaseUrl } from '@/utils/api-base'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -225,6 +236,7 @@ const userInfo = ref<UserInfo | null>(null)
 const loading = ref(true)
 const error = ref('')
 const showApiKey = ref(false)
+const resetting = ref(false)
 /** WeKnora Lite (Wails): real API origin is loopback + dynamic port, not window.location.origin */
 const wailsApiBaseURL = ref<string | null>(null)
 const showDesktopPortSetting = ref(false)
@@ -439,6 +451,43 @@ const fallbackCopyText = (text: string) => {
   textArea.select()
   document.execCommand('copy')
   document.body.removeChild(textArea)
+}
+
+const confirmResetApiKey = () => {
+  if (!tenantInfo.value?.id) {
+    MessagePlugin.warning(t('tenant.api.noKey'))
+    return
+  }
+  const dialog = DialogPlugin.confirm({
+    header: t('tenant.api.resetConfirmTitle'),
+    body: t('tenant.api.resetConfirmBody'),
+    confirmBtn: { content: t('tenant.api.resetConfirmOk'), theme: 'danger' },
+    cancelBtn: t('tenant.api.resetConfirmCancel'),
+    onConfirm: async () => {
+      await performResetApiKey()
+      dialog.destroy()
+    },
+    onClose: () => dialog.destroy(),
+  })
+}
+
+const performResetApiKey = async () => {
+  if (!tenantInfo.value?.id) return
+  resetting.value = true
+  try {
+    const resp = await resetTenantApiKey(tenantInfo.value.id)
+    if (resp.success && resp.data?.api_key) {
+      tenantInfo.value = { ...tenantInfo.value, api_key: resp.data.api_key }
+      showApiKey.value = true
+      MessagePlugin.success(t('tenant.api.resetSuccess'))
+    } else {
+      MessagePlugin.error(resp.message || t('tenant.api.resetFailed'))
+    }
+  } catch (err: any) {
+    MessagePlugin.error(err?.message || t('tenant.api.resetFailed'))
+  } finally {
+    resetting.value = false
+  }
 }
 
 const copyApiKey = async () => {

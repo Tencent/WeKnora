@@ -1554,6 +1554,13 @@ export default {
       copyUrlTitle: "复制 API 地址",
       urlCopySuccess: "API 地址已复制到剪贴板",
       copyTitle: "复制 API Key",
+      resetTitle: "重置 API Key",
+      resetConfirmTitle: "确认重置 API Key？",
+      resetConfirmBody: "重置后，旧的 API Key 会立即失效，所有使用旧 Key 的应用、SDK 与脚本必须更换为新 Key 才能继续访问。此操作不可撤销。",
+      resetConfirmOk: "确认重置",
+      resetConfirmCancel: "取消",
+      resetSuccess: "API Key 已重置，新 Key 已显示在输入框中",
+      resetFailed: "重置 API Key 失败",
       docLabel: "API 文档",
       docDescription: "查看完整的 API 调用文档和示例，",
       openDoc: "打开文档",
@@ -1664,6 +1671,7 @@ export default {
     tenant: {
       listFailed: "获取租户列表失败",
       searchFailed: "搜索租户失败",
+      resetApiKeyFailed: "重置 API Key 失败",
     },
     initialization: {
       checkFailed: "检查失败",
