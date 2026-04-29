@@ -23,7 +23,7 @@
 ```go
 import (
     "context"
-    "github.com/Tencent/WeKnora/internal/client"
+    "github.com/Tencent/WeKnora/client"
     "time"
 )
 
@@ -33,6 +33,26 @@ apiClient := client.NewClient(
     client.WithToken("your-auth-token"),
     client.WithTimeout(30*time.Second),
 )
+```
+
+### 租户配置
+
+客户端支持通过 `WithTenantID` 设置默认租户，请求时会自动携带 `X-Tenant-ID` 请求头：
+
+```go
+tenantID := uint64(10000)
+apiClient := client.NewClient(
+    "http://api.example.com",
+    client.WithToken("your-auth-token"),
+    client.WithTenantID(tenantID),
+)
+```
+
+如果某个请求需要临时切换租户，可以在 `context` 中设置 `TenantID`，值可以是 `uint64`、`*uint64` 或字符串形式的数字，客户端会优先使用该值：
+
+```go
+ctx := context.WithValue(context.Background(), "TenantID", uint64(10000))
+// 调用任意客户端方法时传入 ctx，即可切换到租户 10000
 ```
 
 ### 示例：创建知识库并上传文件

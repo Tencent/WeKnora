@@ -21,11 +21,18 @@ import (
 // - Cleaning up resources
 func ExampleUsage() {
 	// Create a client instance
+	tenantID := uint64(10000) // default tenant for all requests from this client
 	apiClient := NewClient(
 		"http://localhost:8080",
 		WithToken("your-auth-token"),
 		WithTimeout(30*time.Second),
+		WithTenantID(tenantID), // default tenant for all requests from this client
 	)
+
+	// Per-request tenant override example:
+	// You can override the tenant for a single request by setting the "TenantID" value in the context.
+	// e.g. ctx := context.WithValue(context.Background(), "TenantID", &tenantID)
+	// then pass `ctx` to any client method to use tenant 2 for that request only.
 
 	// 1. Create a knowledge base
 	fmt.Println("1. Creating knowledge base...")

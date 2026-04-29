@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	token      string
+	tenantID   *uint64
 }
 
 // ClientOption defines client configuration options
@@ -34,6 +36,14 @@ func WithTimeout(timeout time.Duration) ClientOption {
 func WithToken(token string) ClientOption {
 	return func(c *Client) {
 		c.token = token
+	}
+}
+
+// WithTenantID sets the tenant ID that will be included in requests as the X-Tenant-ID header.
+// It can be overridden per-request by setting the "TenantID" value in the request context.
+func WithTenantID(tenantID uint64) ClientOption {
+	return func(c *Client) {
+		c.tenantID = &tenantID
 	}
 }
 
@@ -82,6 +92,50 @@ func (c *Client) doRequest(ctx context.Context,
 	}
 	if requestID := ctx.Value("RequestID"); requestID != nil {
 		req.Header.Set("X-Request-ID", requestID.(string))
+	}
+
+	// Tenant header: prefer per-request context value, fall back to client-level tenantID
+	tenantID := c.tenantID
+
+	if ctxTenant := ctx.Value("TenantID"); ctxTenant != nil {
+		switch v := ctxTenant.(type) {
+		case *uint64:
+			if v != nil {
+				tenantID = v
+			}
+		case uint64:
+			tmp := v
+			tenantID = &tmp
+		case string:
+			if parsed, err := strconv.ParseUint(v, 10, 64); err == nil {
+				tmp := parsed
+				tenantID = &tmp
+			}
+		}
+	}
+
+	// 2) Fallback: plain string key "TenantID" (some callers may use this)
+	if tenantID == nil {
+		if ctxTenant := ctx.Value("TenantID"); ctxTenant != nil {
+			switch v := ctxTenant.(type) {
+			case *uint64:
+				if v != nil {
+					tenantID = v
+				}
+			case uint64:
+				tmp := v
+				tenantID = &tmp
+			case string:
+				if parsed, err := strconv.ParseUint(v, 10, 64); err == nil {
+					tmp := parsed
+					tenantID = &tmp
+				}
+			}
+		}
+	}
+
+	if tenantID != nil {
+		req.Header.Set("X-Tenant-ID", strconv.FormatUint(*tenantID, 10))
 	}
 
 	return c.httpClient.Do(req)
