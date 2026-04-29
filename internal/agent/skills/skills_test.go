@@ -289,6 +289,44 @@ See [GUIDE.md](GUIDE.md) for more info.
 	}
 }
 
+// TestRepositoryReadFileSiblingPrefix ensures that a sibling skill
+// directory whose name starts with the target skill's name cannot be
+// reached through ReadFile (regression test for a naive prefix check).
+func TestRepositoryReadFileSiblingPrefix(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "skills-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Two sibling skills: "alpha" and "alpha-evil". "alpha-evil" shares
+	// the absolute-path prefix of "alpha" but is a different directory.
+	for _, name := range []string{"alpha", "alpha-evil"} {
+		dir := filepath.Join(tmpDir, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		skillContent := "---\nname: " + name + "\ndescription: sibling test.\n---\nbody\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+			t.Fatalf("write SKILL.md: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "alpha-evil", "secret.txt"), []byte("top-secret"), 0644); err != nil {
+		t.Fatalf("write secret.txt: %v", err)
+	}
+
+	repo := NewFSRepository([]string{tmpDir})
+	if _, err := repo.Discover(context.Background()); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	// Crafted relative path that Clean() leaves intact but that, under a
+	// naive prefix check, would resolve to ../alpha-evil/secret.txt.
+	if _, err := repo.ReadFile(context.Background(), "alpha", "../alpha-evil/secret.txt"); err == nil {
+		t.Error("Expected sibling-prefix escape to be rejected")
+	}
+}
+
 func TestRuntimeIntegration(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "skills-test")
 	if err != nil {
@@ -313,14 +351,11 @@ Integration test content.
 		t.Fatalf("Failed to write SKILL.md: %v", err)
 	}
 
-	rt, err := NewRuntime(Options{
+	rt := NewRuntime(Options{
 		SkillDirs:   []string{tmpDir},
 		Enabled:     true,
 		SandboxMode: "disabled",
 	})
-	if err != nil {
-		t.Fatalf("Failed to construct runtime: %v", err)
-	}
 
 	ctx := context.Background()
 	if err := rt.Initialize(ctx); err != nil {
@@ -341,14 +376,11 @@ Integration test content.
 	}
 
 	// Allow-list rejection.
-	rtRestricted, err := NewRuntime(Options{
+	rtRestricted := NewRuntime(Options{
 		SkillDirs:     []string{tmpDir},
 		AllowedSkills: []string{"other-skill"},
 		Enabled:       true,
 	})
-	if err != nil {
-		t.Fatalf("construct restricted runtime: %v", err)
-	}
 	_ = rtRestricted.Initialize(ctx)
 	if metas := rtRestricted.ListMetadata(ctx); len(metas) != 0 {
 		t.Errorf("Expected allow-list to filter out test-skill, got %d", len(metas))
@@ -359,10 +391,7 @@ Integration test content.
 }
 
 func TestRuntimeDisabled(t *testing.T) {
-	rt, err := NewRuntime(Options{Enabled: false})
-	if err != nil {
-		t.Fatalf("construct: %v", err)
-	}
+	rt := NewRuntime(Options{Enabled: false})
 	ctx := context.Background()
 	if rt.IsEnabled() {
 		t.Error("expected runtime to be disabled")

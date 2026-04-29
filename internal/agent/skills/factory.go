@@ -2,7 +2,6 @@ package skills
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,7 +46,11 @@ type Options struct {
 
 // NewRuntime builds the default fileSystemRuntime from explicit options.
 // It is the preferred constructor for tests and embedding scenarios.
-func NewRuntime(opts Options) (SkillRuntime, error) {
+//
+// Sandbox construction failures are logged and downgraded to a disabled
+// sandbox rather than surfaced — the runtime itself cannot fail to
+// construct, so no error is returned.
+func NewRuntime(opts Options) SkillRuntime {
 	dirs := opts.SkillDirs
 	if len(dirs) == 0 {
 		dirs = []string{resolvePreloadedDir()}
@@ -55,23 +58,22 @@ func NewRuntime(opts Options) (SkillRuntime, error) {
 
 	sbx, sandboxAvail := buildSandbox(opts.SandboxMode, opts.SandboxImage)
 	repo := NewFSRepository(dirs)
-	rt := newFileSystemRuntime(repo, sbx, opts.Enabled, sandboxAvail, opts.AllowedSkills)
-	return rt, nil
+	return newFileSystemRuntime(repo, sbx, opts.Enabled, sandboxAvail, opts.AllowedSkills)
 }
 
 // NewRuntimeFromEnv is the constructor used by the DI container.
 // It reads the existing environment variables so that operators do not
 // have to change their deployment configuration:
 //
-//   WEKNORA_SKILLS_DIR     – override the preloaded skill directory
-//   WEKNORA_SANDBOX_MODE   – "docker" | "local" | "disabled" (default)
-//   WEKNORA_SANDBOX_DOCKER_IMAGE
-//   WEKNORA_SANDBOX_TIMEOUT (seconds)
+//	WEKNORA_SKILLS_DIR     – override the preloaded skill directory
+//	WEKNORA_SANDBOX_MODE   – "docker" | "local" | "disabled" (default)
+//	WEKNORA_SANDBOX_DOCKER_IMAGE
+//	WEKNORA_SANDBOX_TIMEOUT (seconds)
 //
 // The runtime is always returned in the "enabled" state; whether
 // individual agents take advantage of it is still controlled by
 // AgentConfig.SkillsEnabled at request time.
-func NewRuntimeFromEnv() (SkillRuntime, error) {
+func NewRuntimeFromEnv() SkillRuntime {
 	mode := os.Getenv("WEKNORA_SANDBOX_MODE")
 	if mode == "" {
 		mode = "disabled"
@@ -87,14 +89,13 @@ func NewRuntimeFromEnv() (SkillRuntime, error) {
 		}
 	}
 
-	opts := Options{
+	return NewRuntime(Options{
 		SkillDirs:      []string{resolvePreloadedDir()},
 		Enabled:        true,
 		SandboxMode:    mode,
 		SandboxImage:   image,
 		SandboxTimeout: timeout,
-	}
-	return NewRuntime(opts)
+	})
 }
 
 // resolvePreloadedDir mirrors the previous getPreloadedSkillsDir logic
@@ -167,17 +168,4 @@ func FilterMetadata(all []*SkillMetadata, allowed []string) []*SkillMetadata {
 		}
 	}
 	return out
-}
-
-// MustBeReady is a small convenience for places (mainly tests) that
-// want a one-shot construction + initialisation.
-func MustBeReady(opts Options) SkillRuntime {
-	rt, err := NewRuntime(opts)
-	if err != nil {
-		panic(fmt.Errorf("skills.MustBeReady: %w", err))
-	}
-	if err := rt.Initialize(context.Background()); err != nil {
-		panic(fmt.Errorf("skills.MustBeReady: initialize: %w", err))
-	}
-	return rt
 }

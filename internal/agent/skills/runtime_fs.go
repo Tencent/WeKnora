@@ -22,11 +22,24 @@ type fileSystemRuntime struct {
 	mu       sync.RWMutex
 	metaList []*SkillMetadata
 	ready    bool
+
+	// initOnce guards Initialize so concurrent first-time callers do not
+	// each trigger a redundant filesystem scan. Reload bypasses it
+	// deliberately — operators use Reload precisely to re-scan, and if
+	// the initial Initialize failed (e.g. ctx cancelled) Reload is the
+	// intended retry entry point.
+	initOnce sync.Once
+	initErr  error
 }
 
 // newFileSystemRuntime is the internal constructor. Callers should use
 // NewRuntime / NewRuntimeFromEnv from factory.go instead.
-func newFileSystemRuntime(repo SkillRepository, sbx sandbox.Manager, enabled, sandboxAvailable bool, allowed []string) *fileSystemRuntime {
+func newFileSystemRuntime(
+	repo SkillRepository,
+	sbx sandbox.Manager,
+	enabled, sandboxAvailable bool,
+	allowed []string,
+) *fileSystemRuntime {
 	rt := &fileSystemRuntime{
 		repo:    repo,
 		sandbox: sbx,
@@ -48,18 +61,16 @@ func (r *fileSystemRuntime) IsEnabled() bool { return r.enabled }
 // SandboxAvailable implements SkillRuntime.
 func (r *fileSystemRuntime) SandboxAvailable() bool { return r.hasSbx }
 
-// Initialize discovers skills once. It is safe to call multiple times.
+// Initialize discovers skills at most once. Subsequent calls return the
+// result of the first call; use Reload to force a re-scan.
 func (r *fileSystemRuntime) Initialize(ctx context.Context) error {
 	if !r.enabled {
 		return nil
 	}
-	r.mu.Lock()
-	if r.ready {
-		r.mu.Unlock()
-		return nil
-	}
-	r.mu.Unlock()
-	return r.refresh(ctx)
+	r.initOnce.Do(func() {
+		r.initErr = r.refresh(ctx)
+	})
+	return r.initErr
 }
 
 // Reload re-scans every directory and replaces the metadata cache.

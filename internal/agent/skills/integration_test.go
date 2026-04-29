@@ -90,14 +90,11 @@ func TestRuntimeWithExampleSkills(t *testing.T) {
 
 	skillsDir := filepath.Join(filepath.Dir(filename), "..", "..", "..", "examples", "skills")
 
-	rt, err := NewRuntime(Options{
+	rt := NewRuntime(Options{
 		SkillDirs:   []string{skillsDir},
 		Enabled:     true,
 		SandboxMode: "disabled",
 	})
-	if err != nil {
-		t.Fatalf("construct runtime: %v", err)
-	}
 
 	ctx := context.Background()
 	if err := rt.Initialize(ctx); err != nil {

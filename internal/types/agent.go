@@ -40,9 +40,10 @@ type AgentConfig struct {
 	// Whether to retain retrieval history (like wiki_read_page results) across turns (default: false)
 	RetainRetrievalHistory bool `json:"retain_retrieval_history"`
 
-	// Skills configuration (Progressive Disclosure pattern)
+	// Skills configuration (Progressive Disclosure pattern).
+	// Skill directories are resolved at process startup (WEKNORA_SKILLS_DIR)
+	// and shared across all agents via the global SkillRuntime singleton.
 	SkillsEnabled bool     `json:"skills_enabled"` // Whether skills are enabled (default: false)
-	SkillDirs     []string `json:"skill_dirs"`     // Directories to search for skills
 	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
 
 	// Runtime-only fields (not persisted)

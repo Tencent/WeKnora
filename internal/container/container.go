@@ -218,11 +218,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(event.NewEventBus))
 	// SkillRuntime must be registered BEFORE AgentService because AgentService
 	// depends on it. Handler registration happens later (HTTP layer).
-	must(container.Provide(func() (skills.SkillRuntime, error) {
-		rt, err := skills.NewRuntimeFromEnv()
-		if err != nil {
-			return nil, err
-		}
+	must(container.Provide(func() skills.SkillRuntime {
+		rt := skills.NewRuntimeFromEnv()
 		// Best-effort discovery at startup. A failed scan is logged but
 		// does not abort the container — Skills are optional.
 		if initErr := rt.Initialize(ctx); initErr != nil {
@@ -230,7 +227,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		} else {
 			logger.Infof(ctx, "[Container] skill runtime ready (sandbox_available=%v)", rt.SandboxAvailable())
 		}
-		return rt, nil
+		return rt
 	}))
 	must(container.Provide(service.NewAgentService))
 

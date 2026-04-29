@@ -57,10 +57,15 @@ func NewFSRepository(dirs []string) SkillRepository {
 // (subdirectories that contain SKILL.md). Errors on individual
 // directories are swallowed (matching the previous Loader behaviour) so
 // that a missing optional path does not abort discovery.
+//
+// The internal cache is rebuilt from scratch on every call so that
+// skills which have been removed from the filesystem disappear from
+// subsequent GetByName lookups (important for Reload).
 func (r *fsRepository) Discover(ctx context.Context) ([]*Skill, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	fresh := make(map[string]*Skill)
 	var all []*Skill
 	for _, dir := range r.dirs {
 		found, err := r.discoverIn(dir)
@@ -69,10 +74,11 @@ func (r *fsRepository) Discover(ctx context.Context) ([]*Skill, error) {
 			continue
 		}
 		for _, s := range found {
-			r.cache[s.Name] = s
+			fresh[s.Name] = s
 			all = append(all, s)
 		}
 	}
+	r.cache = fresh
 	return all, nil
 }
 
@@ -210,7 +216,11 @@ func (r *fsRepository) ReadFile(ctx context.Context, name, relPath string) (*Ski
 	if err != nil {
 		return nil, err
 	}
-	if !strings.HasPrefix(absFile, absSkill) {
+	// Reject paths that escape via "..", absolute paths, or sibling
+	// directories that happen to share a common prefix (e.g. /foo/skill
+	// vs /foo/skill-evil). The latter is the reason we compare against
+	// absSkill + path separator rather than using a plain prefix check.
+	if absFile != absSkill && !strings.HasPrefix(absFile, absSkill+string(os.PathSeparator)) {
 		return nil, fmt.Errorf("file path outside skill directory: %s", relPath)
 	}
 

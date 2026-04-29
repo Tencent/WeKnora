@@ -36,7 +36,7 @@ type AgentEngine struct {
 	contextManager       interfaces.ContextManager // Context manager for writing agent conversation to LLM context
 	sessionID            string                    // Session ID for context management
 	systemPromptTemplate string                    // System prompt template (optional, uses default if empty)
-	skillRuntime        skills.SkillRuntime       // Skill runtime for Progressive Disclosure (optional)
+	skillRuntime         skills.SkillRuntime       // Skill runtime for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config         // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc        // VLM function for describing images in tool results (optional)
 	tokenEstimator       *agenttoken.Estimator     // Token estimator for context window management
