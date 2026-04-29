@@ -380,15 +380,14 @@ const reconstructEventStreamFromSteps = (agentSteps, messageContent, isCompleted
         if (isFallback) answerEvent.is_fallback = true;
         events.push(answerEvent);
     } else if (isCompleted) {
-        // 如果消息已完成但 content 为空（Agent 模式常见情况），添加一个空的 answer 事件标记完成
-        // 这样可以确保 isConversationDone 返回 true，不显示 loading-indicator
-        const answerEvent = {
-            type: 'answer',
-            content: '',
-            done: true
-        };
-        if (isFallback) answerEvent.is_fallback = true;
-        events.push(answerEvent);
+        // 消息已完成但 content 为空：说明是"停止时尚未产出最终答案"的场景。
+        // Push 一个 stop 事件，让 AgentStreamDisplay 的 isConversationDone 返回 true，
+        // 但不产生 answer 内容，也就不会渲染最终答案的 toolbar。与实时 stop 分支保持一致。
+        events.push({
+            type: 'stop',
+            timestamp: Date.now(),
+            reason: 'user_requested'
+        });
     }
     
     return events;
@@ -435,11 +434,9 @@ const handleMsgList = async (data, isScrollType = false, newScrollHeight) => {
             }
         }
         
-        // 只给非Agent模式的空内容已完成消息设置默认错误消息
-        // Agent模式的消息内容在agent_steps中，content为空是正常的
-        if (item.is_completed && !item.content && !item.isAgentMode) {
-            item.content = t('chat.cannotAnswer');
-        }
+        // 非 Agent 模式下若 content 为空（例如用户停止时尚未产出任何文字），
+        // 保持为空；botmsg.vue 会因 hasActualContent=false 不渲染内容区和 toolbar。
+        // 此前这里会兜底为 "chat.cannotAnswer"，会让停止场景显示误导性文案并出现复制按钮。
         messagesList.unshift(item);
         if (isFirstEnter.value) {
             scrollToBottom(true);
@@ -725,7 +722,25 @@ onChunk((data) => {
     
     // 原有的知识库 QA 处理逻辑（非 Agent 模式）
     // answer 内容中可能包含 <think>...</think> 标签
-    
+
+    // 非 Agent 模式下的 stop 事件：只更新状态，不把后端附带的 "Generation stopped by user"
+    // 文案拼进 content，保留用户点停止时已经流式输出的内容不变。
+    if (data.response_type === 'stop') {
+        console.log('[Stop Event] Non-agent generation stopped');
+        const stoppedMessage = messagesList.findLast((item) => {
+            if (item.request_id === data.id) return true;
+            return item.id === data.id;
+        });
+        if (stoppedMessage) {
+            stoppedMessage.is_completed = true;
+        }
+        loading.value = false;
+        isReplying.value = false;
+        fullContent.value = '';
+        currentAssistantMessageId.value = '';
+        return;
+    }
+
     // 检查消息是否已经完成，如果已完成则忽略后续的完成事件（防止空内容覆盖）
     const existingMessage = messagesList.findLast((item) => {
         if (item.request_id === data.id) {

@@ -19,7 +19,7 @@
 
       <div v-else class="channels-list">
         <div v-for="channel in channels" :key="channel.id" class="channel-item">
-          <div class="channel-info">
+          <div class="channel-item-header">
             <div class="channel-info-top">
               <div class="channel-main">
                 <span class="platform-badge" :class="channel.platform">
@@ -28,6 +28,28 @@
                 <span class="channel-name">{{ channel.name || $t('agentEditor.im.unnamed') }}</span>
               </div>
             </div>
+            <div class="channel-actions">
+              <t-switch
+                :value="channel.enabled"
+                size="small"
+                @change="handleToggle(channel)"
+              />
+              <t-dropdown
+                trigger="click"
+                placement="bottom-right"
+                :options="[
+                  { content: $t('common.edit'), value: 'edit', onClick: () => editChannel(channel) },
+                  { content: $t('common.delete'), value: 'delete', theme: 'error' }
+                ]"
+                @click="(data) => data.value === 'delete' && handleDelete(channel.id)"
+              >
+                <t-button variant="text" theme="default" size="small">
+                  <t-icon name="more" />
+                </t-button>
+              </t-dropdown>
+            </div>
+          </div>
+          <div class="channel-info">
             <div class="channel-meta">
               <span class="meta-tag">
                 <t-icon name="link" class="meta-icon" />
@@ -50,21 +72,6 @@
               </t-button>
             </div>
           </div>
-          <div class="channel-actions">
-            <t-switch
-              :value="channel.enabled"
-              size="small"
-              @change="handleToggle(channel)"
-            />
-            <t-button variant="text" theme="default" size="small" @click="editChannel(channel)">
-              <t-icon name="edit" />
-            </t-button>
-            <t-popconfirm :content="$t('agentEditor.im.deleteConfirm')" @confirm="handleDelete(channel.id)">
-              <t-button variant="text" theme="danger" size="small">
-                <t-icon name="delete" />
-              </t-button>
-            </t-popconfirm>
-          </div>
         </div>
       </div>
     </div>
@@ -75,29 +82,43 @@
       {{ $t('agentEditor.im.addChannel') }}
     </t-button>
 
-    <!-- Create/Edit dialog -->
-    <t-dialog
+    <!-- Create/Edit drawer -->
+    <t-drawer
       v-model:visible="showCreateDialog"
       :header="editingChannel ? $t('agentEditor.im.editChannel') : $t('agentEditor.im.addChannel')"
       :confirm-btn="$t('common.save')"
       :cancel-btn="$t('common.cancel')"
       @confirm="handleSave"
       @close="resetForm"
-      width="560px"
+      size="560px"
     >
-      <div class="dialog-form">
+      <div class="drawer-form">
         <!-- Platform -->
         <div class="form-item">
           <label class="form-label">{{ $t('agentEditor.im.platform') }}</label>
-          <t-radio-group v-model="formData.platform" :disabled="!!editingChannel" @change="onPlatformChange">
-            <t-radio-button value="wecom">{{ $t('agentEditor.im.wecom') }}</t-radio-button>
-            <t-radio-button value="feishu">{{ $t('agentEditor.im.feishu') }}</t-radio-button>
-            <t-radio-button value="slack">{{ $t('agentEditor.im.slack') }}</t-radio-button>
-            <t-radio-button value="telegram">{{ $t('agentEditor.im.telegram') }}</t-radio-button>
-            <t-radio-button value="dingtalk">{{ $t('agentEditor.im.dingtalk') }}</t-radio-button>
-            <t-radio-button value="mattermost">{{ $t('agentEditor.im.mattermost') }}</t-radio-button>
-            <t-radio-button value="wechat">{{ $t('agentEditor.im.wechat') }}</t-radio-button>
-          </t-radio-group>
+          <t-select v-model="formData.platform" :disabled="!!editingChannel" @change="onPlatformChange">
+            <t-option value="wecom" :label="$t('agentEditor.im.wecom')">
+              <span class="platform-badge wecom" style="margin-right: 8px;">{{ $t('agentEditor.im.wecom') }}</span>
+            </t-option>
+            <t-option value="feishu" :label="$t('agentEditor.im.feishu')">
+              <span class="platform-badge feishu" style="margin-right: 8px;">{{ $t('agentEditor.im.feishu') }}</span>
+            </t-option>
+            <t-option value="slack" :label="$t('agentEditor.im.slack')">
+              <span class="platform-badge slack" style="margin-right: 8px;">{{ $t('agentEditor.im.slack') }}</span>
+            </t-option>
+            <t-option value="telegram" :label="$t('agentEditor.im.telegram')">
+              <span class="platform-badge telegram" style="margin-right: 8px;">{{ $t('agentEditor.im.telegram') }}</span>
+            </t-option>
+            <t-option value="dingtalk" :label="$t('agentEditor.im.dingtalk')">
+              <span class="platform-badge dingtalk" style="margin-right: 8px;">{{ $t('agentEditor.im.dingtalk') }}</span>
+            </t-option>
+            <t-option value="mattermost" :label="$t('agentEditor.im.mattermost')">
+              <span class="platform-badge mattermost" style="margin-right: 8px;">{{ $t('agentEditor.im.mattermost') }}</span>
+            </t-option>
+            <t-option value="wechat" :label="$t('agentEditor.im.wechat')">
+              <span class="platform-badge wechat" style="margin-right: 8px;">{{ $t('agentEditor.im.wechat') }}</span>
+            </t-option>
+          </t-select>
         </div>
 
         <!-- Name -->
@@ -394,7 +415,7 @@
           </div>
         </template>
       </div>
-    </t-dialog>
+    </t-drawer>
   </div>
 </template>
 
@@ -766,27 +787,35 @@ onUnmounted(() => {
 }
 
 .channels-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
   max-height: 400px;
   overflow-y: auto;
 }
 
 .channel-item {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--td-bg-color-secondarycontainer);
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: all 0.2s cubic-bezier(0.38, 0, 0.24, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 
   &:hover {
-    border-color: var(--td-brand-color-focus);
+    border-color: var(--td-brand-color);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   }
+}
+
+.channel-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .channel-info {
@@ -924,7 +953,7 @@ onUnmounted(() => {
   }
 }
 
-.dialog-form {
+.drawer-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
