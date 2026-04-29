@@ -3024,6 +3024,7 @@ async function createNewSession(value: string): Promise<void> {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  position: relative; /* 作为批量工具栏悬浮的定位上下文 */
 }
 
 .doc-filter-bar {
@@ -3137,10 +3138,21 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
-/* 批量条在滚动区外，始终贴主内容列底部，不随列表高度在列内上下漂移 */
+/* 批量条悬浮在滚动区底部，不挤占列表高度 */
 .doc-batch-bar-anchor {
-  flex-shrink: 0;
-  padding-top: 4px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;
+
+  & > * {
+    pointer-events: auto;
+  }
 }
 
 // Header 样式（无底部分割线，留更多空间给下方内容区）
