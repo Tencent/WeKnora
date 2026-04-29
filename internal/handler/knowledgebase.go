@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -128,6 +129,11 @@ func (h *KnowledgeBaseHandler) CreateKnowledgeBase(c *gin.Context) {
 	if err := validateExtractConfig(req.ExtractConfig); err != nil {
 		logger.Error(ctx, "Invalid extract configuration", err)
 		c.Error(err)
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(req.GetStorageProvider()))
+	if provider != "" && !isStorageProviderAllowed(provider) {
+		c.Error(apperrors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
 		return
 	}
 

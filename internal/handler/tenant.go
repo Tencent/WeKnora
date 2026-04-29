@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -842,6 +843,19 @@ func (h *TenantHandler) updateTenantStorageEngineConfigInternal(c *gin.Context) 
 		c.Error(errors.NewValidationError("Invalid request data").WithDetails(err.Error()))
 		return
 	}
+	provider := strings.ToLower(strings.TrimSpace(cfg.DefaultProvider))
+	if provider == "" {
+		provider = firstAllowedStorageProvider()
+	}
+	if provider == "" {
+		c.Error(errors.NewBadRequestError("No storage provider is allowed by STORAGE_ALLOW_LIST"))
+		return
+	}
+	if !isStorageProviderAllowed(provider) {
+		c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
+		return
+	}
+	cfg.DefaultProvider = provider
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	if tenant == nil {
 		logger.Error(ctx, "Tenant is empty")
