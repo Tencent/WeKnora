@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -26,10 +27,18 @@ var listKnowledgeChunksTool = BaseTool{
 ## Parameters:
 - knowledge_id (required): Document ID
 - limit (optional): Chunks per page (default 20, max 100)
-- offset (optional): Start position (default 0)
+- offset (optional): 0-based position in the chunk list (NOT chunk_index).
+  Must be < total. Use offset=0 to read from the first chunk, offset=N to
+  skip the first N chunks. If offset >= total the tool returns an explicit
+  out-of-range error with the valid total so you can retry.
 
 ## Output:
-Full chunk content with chunk_id, chunk_index, and content text.`,
+Full chunk content with chunk_id, chunk_index, and content text.
+The response attributes include:
+- total: total number of chunks in the document
+- fetched: how many chunks this page returned
+If fetched=0 with total>0, your offset is past the end — retry with a
+smaller offset (e.g. offset = max(0, total - limit)).`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -51,7 +60,7 @@ Full chunk content with chunk_id, chunk_index, and content text.`,
       "minimum": 0
     }
   },
-  "required": ["knowledge_id", "limit", "offset"]
+  "required": ["knowledge_id"]
 }`),
 }
 
@@ -160,6 +169,48 @@ func (t *ListKnowledgeChunksTool) Execute(ctx context.Context, args json.RawMess
 	totalChunks := total
 	fetched := len(chunks)
 
+	// Explicit out-of-range guidance: when the caller paged past the end
+	// (offset >= total with total > 0), silently returning fetched=0 is
+	// confusing for LLMs that just saw the document in search results. Tell
+	// them exactly what happened and what offset would be valid so the next
+	// call lands on a real page.
+	if fetched == 0 && totalChunks > 0 && int64(offset) >= totalChunks {
+		suggestedOffset := totalChunks - int64(chunkLimit)
+		if suggestedOffset < 0 {
+			suggestedOffset = 0
+		}
+		return &types.ToolResult{
+			Success: false,
+			Error: fmt.Sprintf(
+				"offset %d is out of range: document has only %d chunks (valid offset range: 0..%d). Retry with offset=%d (or any value < %d).",
+				offset, totalChunks, totalChunks-1, suggestedOffset, totalChunks,
+			),
+			Data: map[string]interface{}{
+				"knowledge_id":     knowledgeID,
+				"total_chunks":     totalChunks,
+				"requested_offset": offset,
+				"requested_limit":  chunkLimit,
+				"suggested_offset": suggestedOffset,
+			},
+		}, nil
+	}
+
+	// Enrich image info from child image chunks (lazy loading)
+	if fetched > 0 {
+		chunkIDs := make([]string, 0, fetched)
+		for _, c := range chunks {
+			chunkIDs = append(chunkIDs, c.ID)
+		}
+		infoMap := searchutil.CollectImageInfoByChunkIDs(ctx, t.chunkService.GetRepository(), effectiveTenantID, chunkIDs)
+		for _, c := range chunks {
+			if c.ImageInfo == "" {
+				if merged, ok := infoMap[c.ID]; ok {
+					c.ImageInfo = merged
+				}
+			}
+		}
+	}
+
 	knowledgeTitle := t.lookupKnowledgeTitle(ctx, knowledgeID)
 
 	output := t.buildOutput(knowledgeID, knowledgeTitle, totalChunks, fetched, chunks)
@@ -236,7 +287,7 @@ func (t *ListKnowledgeChunksTool) lookupKnowledgeTitle(ctx context.Context, know
 	return strings.TrimSpace(knowledge.Title)
 }
 
-// buildOutput builds the output for the list knowledge chunks tool
+// buildOutput builds the output as XML for the list knowledge chunks tool
 func (t *ListKnowledgeChunksTool) buildOutput(
 	knowledgeID string,
 	knowledgeTitle string,
@@ -244,65 +295,54 @@ func (t *ListKnowledgeChunksTool) buildOutput(
 	fetched int,
 	chunks []*types.Chunk,
 ) string {
-	builder := &strings.Builder{}
-	builder.WriteString("=== Knowledge Document Chunks ===\n\n")
+	var b strings.Builder
 
+	titleAttr := ""
 	if knowledgeTitle != "" {
-		fmt.Fprintf(builder, "Document: %s (%s)\n", knowledgeTitle, knowledgeID)
-	} else {
-		fmt.Fprintf(builder, "Document ID: %s\n", knowledgeID)
+		titleAttr = fmt.Sprintf(" title=\"%s\"", knowledgeTitle)
 	}
-	fmt.Fprintf(builder, "Total chunks: %d\n", total)
+	fmt.Fprintf(&b, "<knowledge_chunks knowledge_id=\"%s\"%s total=\"%d\" fetched=\"%d\">\n",
+		knowledgeID, titleAttr, total, fetched)
 
 	if fetched == 0 {
-		builder.WriteString("No chunks found. Please confirm the document has been parsed.\n")
-		if total > 0 {
-			builder.WriteString("Document exists but the current page is empty. Please check pagination parameters.\n")
-		}
-		return builder.String()
+		b.WriteString("</knowledge_chunks>")
+		return b.String()
 	}
-	fmt.Fprintf(
-		builder,
-		"Fetched: %d chunks, range: %d - %d\n\n",
-		fetched,
-		chunks[0].ChunkIndex,
-		chunks[len(chunks)-1].ChunkIndex,
-	)
 
-	builder.WriteString("=== Chunk Content Preview ===\n\n")
-	for idx, c := range chunks {
-		fmt.Fprintf(builder, "Chunk #%d (Index %d)\n", idx+1, c.ChunkIndex+1)
-		fmt.Fprintf(builder, "  chunk_id: %s\n", c.ID)
-		fmt.Fprintf(builder, "  Type: %s\n", c.ChunkType)
-		fmt.Fprintf(builder, "  Content: %s\n", summarizeContent(c.Content))
+	for _, c := range chunks {
+		fmt.Fprintf(&b, "<chunk chunk_id=\"%s\" chunk_index=\"%d\" type=\"%s\">\n",
+			c.ID, c.ChunkIndex, c.ChunkType)
+		fmt.Fprintf(&b, "<content>%s</content>\n", summarizeContent(c.Content))
 
-		// Output associated image information
 		if c.ImageInfo != "" {
 			var imageInfos []types.ImageInfo
 			if err := json.Unmarshal([]byte(c.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
-				fmt.Fprintf(builder, "  Associated images (%d):\n", len(imageInfos))
-				for imgIdx, img := range imageInfos {
-					fmt.Fprintf(builder, "    Image %d:\n", imgIdx+1)
+				for _, img := range imageInfos {
 					if img.URL != "" {
-						fmt.Fprintf(builder, "      URL: %s\n", img.URL)
+						fmt.Fprintf(&b, "<image url=\"%s\">\n", img.URL)
+					} else {
+						b.WriteString("<image>\n")
 					}
 					if img.Caption != "" {
-						fmt.Fprintf(builder, "      Caption: %s\n", img.Caption)
+						fmt.Fprintf(&b, "<image_caption>%s</image_caption>\n", img.Caption)
 					}
 					if img.OCRText != "" {
-						fmt.Fprintf(builder, "      OCR Text: %s\n", img.OCRText)
+						fmt.Fprintf(&b, "<image_ocr>%s</image_ocr>\n", img.OCRText)
 					}
+					b.WriteString("</image>\n")
 				}
 			}
 		}
-		builder.WriteString("\n")
+
+		b.WriteString("</chunk>\n")
 	}
 
 	if int64(fetched) < total {
-		builder.WriteString("Note: The document has more chunks. Adjust offset or make multiple calls to retrieve all content.\n")
+		fmt.Fprintf(&b, "<pagination remaining=\"%d\" />\n", int64(total)-int64(fetched))
 	}
 
-	return builder.String()
+	b.WriteString("</knowledge_chunks>")
+	return b.String()
 }
 
 // summarizeContent summarizes the content of a chunk

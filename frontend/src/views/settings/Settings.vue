@@ -117,6 +117,11 @@
                   <ChatHistorySettings />
                 </div>
 
+                <!-- 向量数据库引擎 -->
+                <div v-if="currentSection === 'vectorstore'" class="section">
+                  <VectorStoreSettings />
+                </div>
+
                 <!-- 解析引擎 -->
                 <div v-if="currentSection === 'parser'" class="section">
                   <ParserEngineSettings />
@@ -169,6 +174,7 @@ import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
 import WebSearchSettings from './WebSearchSettings.vue'
 import ChatHistorySettings from './ChatHistorySettings.vue'
+import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
@@ -186,45 +192,12 @@ const navItems = computed(() => [
   { key: 'general', icon: 'setting', label: t('general.title') },
   { key: 'ollama', icon: 'server', label: 'Ollama' },
   { key: 'weknoracloud', icon: '', label: 'WeKnora Cloud' },
-  { 
-    key: 'models', 
-    icon: 'control-platform', 
-    label: t('settings.modelManagement'),
-    children: [
-      { key: 'chat', label: t('model.llmModel') },
-      { key: 'embedding', label: t('model.embeddingModel') },
-      { key: 'rerank', label: t('model.rerankModel') },
-      { key: 'vllm', label: t('model.vlmModel') }
-    ]
-  },
+  { key: 'models', icon: 'control-platform', label: t('settings.modelManagement') },
    { key: 'websearch', icon: 'search', label: t('settings.webSearchConfig')  },
   { key: 'chathistory', icon: 'chat', label: t('chatHistorySettings.title') },
-  {
-    key: 'parser',
-    icon: 'file-search',
-    label: t('settings.parserEngine'),
-    children: [
-      { key: 'builtin', label: 'Builtin (DocReader)' },
-      { key: 'weknoracloud', label: 'WeKnora Cloud' },
-      { key: 'simple', label: 'Simple' },
-      { key: 'markitdown', label: 'Markitdown' },
-      { key: 'mineru', label: 'MinerU' },
-      { key: 'mineru_cloud', label: 'MinerU Cloud' },
-    ]
-  },
-  {
-    key: 'storage',
-    icon: 'cloud',
-    label: t('settings.storageEngine'),
-    children: [
-      { key: 'local', label: 'Local' },
-      { key: 'minio', label: 'MinIO' },
-      { key: 'cos', label: t('settings.storage.cos') },
-      { key: 'tos', label: t('settings.storage.tos') },
-      { key: 's3', label: 'AWS S3' },
-      { key: 'oss', label: t('settings.storage.oss') },
-    ]
-  },
+  { key: 'vectorstore', icon: 'data-base', label: t('settings.vectorStoreEngine') },
+  { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
+  { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
   { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
   { key: 'system', icon: 'info-circle', label: t('settings.systemSettings') },
   { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },

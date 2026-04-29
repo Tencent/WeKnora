@@ -8,9 +8,9 @@ export function listKnowledgeBases(params?: { agent_id?: string }) {
   return get(qs ? `/api/v1/knowledge-bases?${qs}` : '/api/v1/knowledge-bases');
 }
 
-export function createKnowledgeBase(data: { 
-  name: string; 
-  description?: string; 
+export function createKnowledgeBase(data: {
+  name: string;
+  description?: string;
   type?: 'document' | 'faq';
   chunking_config?: any;
   embedding_model_id?: string;
@@ -28,6 +28,17 @@ export function createKnowledgeBase(data: {
   };
   extract_config?: any;
   faq_config?: { index_mode: string; question_index_mode?: string };
+  wiki_config?: {
+    synthesis_model_id?: string;
+    max_pages_per_ingest?: number;
+    extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
+  };
+  indexing_strategy?: {
+    vector_enabled: boolean;
+    keyword_enabled: boolean;
+    wiki_enabled: boolean;
+    graph_enabled: boolean;
+  };
 }) {
   return post(`/api/v1/knowledge-bases`, data);
 }
@@ -39,8 +50,31 @@ export function getKnowledgeBaseById(id: string, options?: { agent_id?: string }
   return get(qs ? `/api/v1/knowledge-bases/${id}?${qs}` : `/api/v1/knowledge-bases/${id}`);
 }
 
-export function updateKnowledgeBase(id: string, data: { name: string; description?: string; config: any }) {
+export function updateKnowledgeBase(id: string, data: {
+  name: string;
+  description?: string;
+  config?: {
+    chunking_config?: any;
+    image_processing_config?: any;
+    faq_config?: any;
+    wiki_config?: {
+      synthesis_model_id?: string;
+      max_pages_per_ingest?: number;
+      extraction_granularity?: 'focused' | 'standard' | 'exhaustive';
+    };
+    indexing_strategy?: {
+      vector_enabled: boolean;
+      keyword_enabled: boolean;
+      wiki_enabled: boolean;
+      graph_enabled: boolean;
+    };
+  }
+}) {
   return put(`/api/v1/knowledge-bases/${id}` , data);
+}
+
+export function rebuildKBIndex(kbId: string) {
+  return post(`/api/v1/knowledge-bases/${kbId}/rebuild-index`, {});
 }
 
 export function deleteKnowledgeBase(id: string) {
@@ -134,6 +168,11 @@ export function reparseKnowledge(id: string) {
 
 export function delKnowledgeDetails(id: string) {
   return del(`/api/v1/knowledge/${id}`);
+}
+
+// 批量删除（同一知识库内）。后端会校验所有 id 隶属于 kb_id 且具有编辑权限。
+export function batchDeleteKnowledge(kbId: string, ids: string[]) {
+  return post(`/api/v1/knowledge/batch-delete`, { kb_id: kbId, ids });
 }
 
 export function downKnowledgeDetails(id: string) {

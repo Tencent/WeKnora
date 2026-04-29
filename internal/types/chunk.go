@@ -34,6 +34,8 @@ const (
 	ChunkTypeTableSummary ChunkType = "table_summary"
 	// ChunkTypeTableColumn 表示数据表列描述的 Chunk
 	ChunkTypeTableColumn ChunkType = "table_column"
+	// ChunkTypeWikiPage 表示 Wiki 页面同步的 Chunk，用于将 wiki 页面接入现有检索管线
+	ChunkTypeWikiPage ChunkType = "wiki_page"
 )
 
 // ChunkStatus 定义了不同状态的 Chunk

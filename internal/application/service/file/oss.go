@@ -172,7 +172,7 @@ func (s *ossFileService) SaveFile(ctx context.Context,
 
 	contentType := file.Header.Get("Content-Type")
 	if contentType == "" {
-		contentType = getContentTypeByExt(ext)
+		contentType = utils.GetContentTypeByExt(ext)
 	}
 
 	// Use Uploader for files > 10MB (auto multipart with concurrent uploads)
@@ -233,7 +233,7 @@ func (s *ossFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		Bucket:      oss.Ptr(targetBucket),
 		Key:         oss.Ptr(objectName),
 		Body:        bytes.NewReader(data),
-		ContentType: oss.Ptr("text/csv; charset=utf-8"),
+		ContentType: oss.Ptr(utils.GetContentTypeByExt(ext)),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to upload bytes to OSS: %w", err)

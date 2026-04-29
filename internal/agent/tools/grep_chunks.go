@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -16,86 +18,70 @@ import (
 
 var grepChunksTool = BaseTool{
 	name: ToolGrepChunks,
-	description: `Unix-style text pattern matching tool for knowledge base chunks.
-
-Searches for text patterns in chunk content using strict literal text matching (fixed-string search). This tool performs exact keyword lookup, not semantic search.
-
-## Core Function
-Performs exact, literal text pattern matching. Accepts multiple patterns and returns chunks matching any of them (OR logic).
-
-## CRITICAL – Keyword Extraction Rules
-This tool MUST receive **short, high-value keywords** only.  
-**Do NOT use long phrases, sentences, or multi-word expressions.**
-
-Provide only the **minimal core entities** extracted from user query, such as:
-- Proper nouns
-- Key concepts
-- Domain terms
-- Distinct entities that define the query
-
-### Requirements
-- Keywords should be **1–3 words maximum**
-- Focus exclusively on **core entities**, not descriptions
-- Break complex input into individual, essential keywords
-- Avoid phrases, explanations, or anything that reduces match probability
-- Preserve precision details embedded in the query (e.g., version numbers, build IDs) when they materially define the entity being matched.
-
-Long phrases dramatically reduce recall because chunks rarely contain identical wording.  
-Only short, atomic keywords ensure accurate matching and avoid unrelated retrieval.
-
-
-## Usage
-grep_chunks scans enabled chunks across the specified knowledge bases and returns those containing any provided keyword. Matching is case-insensitive, with chunk indices and local context included.
-
-## When to Use
-- Extracting core entities from user input
-- Exact keyword presence checks
-- Fast preliminary filtering before semantic search
-- Situations requiring deterministic text search
-`,
+	description: `Search knowledge base chunk content using PostgreSQL POSIX regular expressions (~* operator, case-insensitive; REGEXP on MySQL/SQLite).
+STRONGLY PREFER using regex to search for multiple concepts at once rather than simple plain text queries.
+Returns matching chunks with per-pattern hit counts and a <match_snippet> around the first match (each tagged with its knowledge_id and chunk_id).
+Examples:
+- Alternation (RECOMMENDED): "stardust|skyvault" (matches either word)
+- Multiple terms (RECOMMENDED): "psionic.*engine" (matches both words in order)
+- Word boundary / anchor: "\\brag\\b" or "^chapter\\s+\\d+"
+- Plain text: "engine" (matches literal substring anywhere in chunk content)
+IMPORTANT — JSON escaping: every backslash in a regex MUST be written as \\ inside the JSON tool arguments (e.g. to search for literal "C++" write "C\\+\\+", NOT "C\+\+"; for "\d+" write "\\d+"). Plain "\+" / "\d" etc. are invalid JSON escapes and will fail to parse.
+Use this to locate candidate chunks by exact identifiers, error codes, product names, or recurring terms. Pair with list_knowledge_chunks afterwards to read the full context around any promising chunk_id.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
-    "patterns": {
+    "queries": {
       "type": "array",
-      "description": "REQUIRED: Text patterns to search for. Can be a single pattern or multiple patterns. Treated as literal text (fixed string matching). Results match any of the patterns (OR logic).",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
+      "items": { "type": "string" },
+      "description": "List of regex queries to run. A chunk matches when ANY query matches its content. Prefer one alternation query (\"a|b|c\") over multiple single-keyword queries.",
+      "minItems": 1,
+      "maxItems": 5
     },
     "knowledge_base_ids": {
       "type": "array",
-      "description": "Filter by knowledge base IDs. If empty, searches all allowed KBs.",
-      "items": {
-        "type": "string"
-      }
+      "items": { "type": "string" },
+      "description": "Optional: restrict search to specific KB IDs within the agent scope."
     },
-    "max_results": {
+    "limit": {
       "type": "integer",
-      "description": "Maximum number of matching chunks to return (default: 50, max: 200)",
-      "default": 50,
+      "description": "Max matching chunks to return (default 30, max 100).",
+      "default": 30,
       "minimum": 1,
-      "maximum": 200
+      "maximum": 100
     }
   },
-  "required": ["patterns"]
+  "required": ["queries"]
 }`),
 }
 
-// GrepChunksInput defines the input parameters for grep chunks tool
+// GrepChunksInput defines the input parameters for grep chunks tool.
+// The canonical parameter names are `queries` and `limit` (mirroring
+// wiki_search). The legacy `patterns` and `max_results` keys remain accepted
+// so older model outputs or external callers don't break silently.
 type GrepChunksInput struct {
-	Patterns         []string `json:"patterns" `
+	Queries          []string `json:"queries,omitempty"`
+	Patterns         []string `json:"patterns,omitempty"` // legacy alias for queries
 	KnowledgeBaseIDs []string `json:"knowledge_base_ids,omitempty"`
-	MaxResults       int      `json:"max_results,omitempty"`
+	Limit            int      `json:"limit,omitempty"`
+	MaxResults       int      `json:"max_results,omitempty"` // legacy alias for limit
 }
 
-// GrepChunksTool performs text pattern matching in knowledge base chunks
-// Similar to grep command in Unix-like systems, but operates on knowledge base content
+// GrepChunksTool performs regex pattern matching across knowledge base chunks.
+// PostgreSQL: uses the case-insensitive POSIX operator ~*.
+// MySQL/SQLite: falls back to REGEXP.
+//
+// The tool tracks previously-returned chunk IDs per-instance (one instance per
+// agent session) so that a subsequent search hitting the same chunk can be
+// rendered compactly with an `already_seen="true"` marker instead of replaying
+// the snippet, mirroring the UX of wiki_search.
 type GrepChunksTool struct {
 	BaseTool
 	db            *gorm.DB
-	searchTargets types.SearchTargets // Pre-computed unified search targets with KB-tenant mapping
+	searchTargets types.SearchTargets
+
+	mu          sync.Mutex
+	seenChunks  map[string]bool
 }
 
 // NewGrepChunksTool creates a new grep chunks tool
@@ -104,6 +90,7 @@ func NewGrepChunksTool(db *gorm.DB, searchTargets types.SearchTargets) *GrepChun
 		BaseTool:      grepChunksTool,
 		db:            db,
 		searchTargets: searchTargets,
+		seenChunks:    make(map[string]bool),
 	}
 }
 
@@ -111,7 +98,6 @@ func NewGrepChunksTool(db *gorm.DB, searchTargets types.SearchTargets) *GrepChun
 func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][GrepChunks] Execute started")
 
-	// Parse args from json.RawMessage
 	var input GrepChunksInput
 	if err := json.Unmarshal(args, &input); err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to parse args: %v", err)
@@ -121,36 +107,60 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, err
 	}
 
-	// Parse pattern parameter (required) - support multiple patterns
-	patterns := input.Patterns
+	// Accept both canonical (`queries`) and legacy (`patterns`) field names.
+	// When both are present we concatenate, preserving whichever came first,
+	// so a caller migrating between the two won't end up with nothing.
+	rawQueries := append([]string{}, input.Queries...)
+	rawQueries = append(rawQueries, input.Patterns...)
 
-	// Validate patterns
-	if len(patterns) == 0 {
-		logger.Errorf(ctx, "[Tool][GrepChunks] Missing or invalid patterns parameter")
-		return &types.ToolResult{
-			Success: false,
-			Error:   "pattern parameter is required and must contain at least one non-empty pattern",
-		}, fmt.Errorf("missing pattern parameter")
-	}
-
-	// Use default values for all options
-	countOnly := false // default: show results
-
-	maxResults := 50
-	if input.MaxResults > 0 {
-		maxResults = input.MaxResults
-		if maxResults < 1 {
-			maxResults = 1
-		} else if maxResults > 200 {
-			maxResults = 200
+	queries := make([]string, 0, len(rawQueries))
+	for _, q := range rawQueries {
+		if strings.TrimSpace(q) != "" {
+			queries = append(queries, q)
 		}
 	}
 
-	// Get allowed KBs from searchTargets
+	if len(queries) == 0 {
+		logger.Errorf(ctx, "[Tool][GrepChunks] Missing or empty queries parameter")
+		return &types.ToolResult{
+			Success: false,
+			Error:   "queries parameter is required and must contain at least one non-empty regex query",
+		}, fmt.Errorf("missing queries parameter")
+	}
+	if len(queries) > 5 {
+		queries = queries[:5]
+	}
+
+	// Compile queries with (?i) prefix for case-insensitive Go-side matching.
+	// Compilation also validates the regex syntax before we send it to the DB.
+	compiled := make([]*regexp.Regexp, 0, len(queries))
+	for _, q := range queries {
+		re, err := regexp.Compile("(?i)" + q)
+		if err != nil {
+			logger.Errorf(ctx, "[Tool][GrepChunks] Invalid regex %q: %v", q, err)
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("invalid regex query %q: %v", q, err),
+			}, err
+		}
+		compiled = append(compiled, re)
+	}
+
+	// Canonical `limit`, with `max_results` accepted as legacy alias.
+	limit := input.Limit
+	if limit <= 0 && input.MaxResults > 0 {
+		limit = input.MaxResults
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
 	allowedKBIDs := t.searchTargets.GetAllKnowledgeBaseIDs()
 	kbTenantMap := t.searchTargets.GetKBTenantMap()
 
-	// Collect all specific knowledge IDs from searchTargets
 	var allowedKnowledgeIDs []string
 	for _, target := range t.searchTargets {
 		if target.Type == types.SearchTargetTypeKnowledge && len(target.KnowledgeIDs) > 0 {
@@ -158,12 +168,10 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}
 	}
 
-	// Parse knowledge_base_ids filter from input
 	kbIDs := input.KnowledgeBaseIDs
 	if len(kbIDs) == 0 {
 		kbIDs = allowedKBIDs
 	} else {
-		// Validate input KBs against allowed KBs
 		validKBs := make([]string, 0)
 		for _, kbID := range kbIDs {
 			if t.searchTargets.ContainsKB(kbID) {
@@ -173,11 +181,10 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		kbIDs = validKBs
 	}
 
-	logger.Infof(ctx, "[Tool][GrepChunks] Patterns: %v, MaxResults: %d, KBs: %v, KnowledgeIDs: %v, KBTenantMap: %v",
-		patterns, maxResults, kbIDs, allowedKnowledgeIDs, kbTenantMap)
+	logger.Infof(ctx, "[Tool][GrepChunks] Queries: %v, Limit: %d, KBs: %v, KnowledgeIDs: %v",
+		queries, limit, kbIDs, allowedKnowledgeIDs)
 
-	// Build and execute query with tenant info
-	results, totalCount, err := t.searchChunks(ctx, patterns, kbIDs, allowedKnowledgeIDs, kbTenantMap)
+	results, err := t.searchChunks(ctx, queries, kbIDs, allowedKnowledgeIDs, kbTenantMap)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Search failed: %v", err)
 		return &types.ToolResult{
@@ -188,36 +195,28 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 
 	logger.Infof(ctx, "[Tool][GrepChunks] Found %d matching chunks", len(results))
 
-	// Apply deduplication to remove duplicate or near-duplicate chunks
 	deduplicatedResults := t.deduplicateChunks(ctx, results)
 	logger.Infof(ctx, "[Tool][GrepChunks] After deduplication: %d chunks (from %d)",
 		len(deduplicatedResults), len(results))
 
-	// Calculate match scores for sorting (based on match count and position)
-	scoredResults := t.scoreChunks(ctx, deduplicatedResults, patterns)
+	// Score chunks using compiled regex (counts + earliest-position boost).
+	scoredResults := t.scoreChunks(ctx, deduplicatedResults, compiled)
 
-	// Apply MMR to reduce redundancy if we have many results
 	finalResults := scoredResults
 	if len(scoredResults) > 10 {
-		// Use MMR when we have more than 10 results
 		mmrK := len(scoredResults)
-		if maxResults > 0 && mmrK > maxResults {
-			mmrK = maxResults
+		if limit > 0 && mmrK > limit {
+			mmrK = limit
 		}
-		logger.Debugf(
-			ctx,
-			"[Tool][GrepChunks] Applying MMR: k=%d, lambda=0.7, input=%d results",
-			mmrK,
-			len(scoredResults),
-		)
-		mmrResults := t.applyMMR(ctx, scoredResults, patterns, mmrK, 0.7)
+		logger.Debugf(ctx, "[Tool][GrepChunks] Applying MMR: k=%d, lambda=0.7, input=%d results",
+			mmrK, len(scoredResults))
+		mmrResults := t.applyMMR(ctx, scoredResults, mmrK, 0.7)
 		if len(mmrResults) > 0 {
 			finalResults = mmrResults
 			logger.Infof(ctx, "[Tool][GrepChunks] MMR completed: %d results selected", len(finalResults))
 		}
 	}
 
-	// Sort by match score (descending), then by chunk index
 	sort.Slice(finalResults, func(i, j int) bool {
 		if finalResults[i].MatchedPatterns != finalResults[j].MatchedPatterns {
 			return finalResults[i].MatchedPatterns > finalResults[j].MatchedPatterns
@@ -228,29 +227,30 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		return finalResults[i].ChunkIndex < finalResults[j].ChunkIndex
 	})
 
-	aggregatedResults := t.aggregateByKnowledge(finalResults, patterns)
+	if len(finalResults) > limit {
+		finalResults = finalResults[:limit]
+	}
 
-	totalKnowledge := len(aggregatedResults)
-
+	// Aggregation by knowledge is still useful for the frontend summary view.
+	aggregatedResults := t.aggregateByKnowledge(finalResults, queries, compiled)
 	if len(aggregatedResults) > 20 {
 		aggregatedResults = aggregatedResults[:20]
 	}
 
-	logger.Infof(ctx, "[Tool][GrepChunks] Aggregated results: %d", len(aggregatedResults))
-
-	// Format output
-	output := t.formatOutput(ctx, aggregatedResults, totalCount, patterns, countOnly)
+	output := t.formatOutput(ctx, finalResults, queries, compiled)
 
 	return &types.ToolResult{
 		Success: true,
 		Output:  output,
 		Data: map[string]interface{}{
-			"patterns":           patterns,
+			"queries":            queries,
+			"patterns":           queries, // legacy alias; frontend currently reads `patterns`
 			"knowledge_results":  aggregatedResults,
 			"result_count":       len(aggregatedResults),
-			"total_matches":      totalKnowledge,
+			"total_matches":      len(finalResults),
 			"knowledge_base_ids": kbIDs,
-			"max_results":        maxResults,
+			"limit":              limit,
+			"max_results":        limit, // legacy alias
 			"display_type":       "grep_results",
 		},
 	}, nil
@@ -259,33 +259,42 @@ func (t *GrepChunksTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 type chunkWithTitle struct {
 	types.Chunk
 	KnowledgeTitle  string  `json:"knowledge_title"   gorm:"column:knowledge_title"`
-	MatchScore      float64 `json:"match_score"       gorm:"column:match_score"` // Score based on match count and position
-	MatchedPatterns int     `json:"matched_patterns"`                            // Number of unique patterns matched
+	MatchScore      float64 `json:"match_score"       gorm:"column:match_score"`
+	MatchedPatterns int     `json:"matched_patterns"`
 	TotalChunkCount int     `json:"total_chunk_count" gorm:"column:total_chunk_count"`
 }
 
-// searchChunks performs the database search with pattern matching
-// kbTenantMap provides KB-to-tenant mapping for cross-tenant queries
+// regexOperatorForDialect returns the SQL operator used to apply a POSIX
+// regular expression to a text column for the current dialect.
+// PostgreSQL ~* is case-insensitive by default; MySQL/SQLite REGEXP relies on
+// collation / driver extensions.
+func (t *GrepChunksTool) regexOperatorForDialect() string {
+	switch t.db.Dialector.Name() {
+	case "postgres":
+		return "~*"
+	default:
+		// MySQL, SQLite (with the go-sqlite3 REGEXP extension), or anything else
+		// that understands the REGEXP keyword.
+		return "REGEXP"
+	}
+}
+
+// searchChunks performs the database search using regex queries.
 func (t *GrepChunksTool) searchChunks(
 	ctx context.Context,
-	patterns []string,
+	queries []string,
 	kbIDs []string,
 	knowledgeIDs []string,
 	kbTenantMap map[string]uint64,
-) ([]chunkWithTitle, int64, error) {
+) ([]chunkWithTitle, error) {
 	if len(kbIDs) == 0 && len(knowledgeIDs) == 0 {
 		logger.Warnf(ctx, "[Tool][GrepChunks] No kbIDs or knowledgeIDs specified, returning empty results")
-		return nil, 0, nil
+		return nil, nil
 	}
 
-	// PostgreSQL uses ILIKE for case-insensitive matching;
-	// MySQL and SQLite LIKE is already case-insensitive under default collation.
-	likeOp := "LIKE"
-	if t.db.Dialector.Name() == "postgres" {
-		likeOp = "ILIKE"
-	}
+	regexOp := t.regexOperatorForDialect()
 
-	query := t.db.Debug().WithContext(ctx).Table("chunks").
+	query := t.db.WithContext(ctx).Table("chunks").
 		Select("chunks.id, chunks.content, chunks.chunk_index, chunks.knowledge_id, "+
 			"chunks.knowledge_base_id, chunks.chunk_type, chunks.created_at, "+
 			"knowledges.title as knowledge_title").
@@ -311,28 +320,27 @@ func (t *GrepChunksTool) searchChunks(
 			query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
 		} else {
 			logger.Warnf(ctx, "[Tool][GrepChunks] No valid KB-tenant pairs found")
-			return nil, 0, nil
+			return nil, nil
 		}
 	}
 
-	if len(patterns) == 1 {
-		query = query.Where("chunks.content "+likeOp+" ?", "%"+patterns[0]+"%")
-	} else {
-		var conditions []string
-		var args []interface{}
-		for _, pattern := range patterns {
-			conditions = append(conditions, "chunks.content "+likeOp+" ?")
-			args = append(args, "%"+pattern+"%")
-		}
-		query = query.Where("("+strings.Join(conditions, " OR ")+")", args...)
+	// For MySQL/SQLite REGEXP case-insensitivity we rely on the column's default
+	// collation (utf8mb4_general_ci etc.) OR the driver's REGEXP implementation,
+	// which mirrors what wiki_search already ships in this codebase.
+	var regexConditions []string
+	var regexArgs []interface{}
+	for _, q := range queries {
+		regexConditions = append(regexConditions, fmt.Sprintf("chunks.content %s ?", regexOp))
+		regexArgs = append(regexArgs, q)
 	}
+	query = query.Where("("+strings.Join(regexConditions, " OR ")+")", regexArgs...)
 
 	const maxFetchLimit = 500
 
 	var results []chunkWithTitle
 	if err := query.Order("chunks.created_at DESC").Limit(maxFetchLimit).Find(&results).Error; err != nil {
 		logger.Errorf(ctx, "[Tool][GrepChunks] Failed to fetch results: %v", err)
-		return nil, 0, err
+		return nil, err
 	}
 
 	if len(results) > 0 {
@@ -371,57 +379,84 @@ func (t *GrepChunksTool) searchChunks(
 		}
 	}
 
-	return results, int64(len(results)), nil
+	return results, nil
 }
 
-// formatOutput formats the search results for display (grep-style output)
+// formatOutput emits per-chunk XML with <match_snippet> and <query_hit>
+// elements, mirroring the wiki_search output shape. Chunks that were already
+// surfaced by a previous call to this tool in the same session are rendered
+// compactly with `already_seen="true"` so the LLM doesn't waste context
+// re-reading the same snippet.
 func (t *GrepChunksTool) formatOutput(
 	ctx context.Context,
-	results []knowledgeAggregation,
-	totalCount int64,
-	patterns []string,
-	countOnly bool,
+	results []chunkWithTitle,
+	queries []string,
+	compiled []*regexp.Regexp,
 ) string {
-	var output strings.Builder
+	var b strings.Builder
 
-	// If count_only mode, just return the count
-	if countOnly {
-		output.WriteString(fmt.Sprintf("%d\n", totalCount))
-		return output.String()
+	b.WriteString(fmt.Sprintf("<grep_results chunk_count=\"%d\">\n", len(results)))
+	for _, q := range queries {
+		b.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
 	}
-
-	// Show search info
-	if len(patterns) == 1 {
-		output.WriteString(fmt.Sprintf("Pattern: '%s' (case-insensitive)\n", patterns[0]))
-	} else {
-		output.WriteString(fmt.Sprintf("Patterns (%d): %v (case-insensitive, OR logic)\n", len(patterns), patterns))
-	}
-	output.WriteString(fmt.Sprintf("Matches: %d knowledge item(s)\n\n", len(results)))
 
 	if len(results) == 0 {
-		output.WriteString("No matches found.\n")
-		return output.String()
+		b.WriteString("</grep_results>")
+		return b.String()
 	}
 
-	for idx, result := range results {
-		var patternSummaries []string
-		for _, pattern := range patterns {
-			count := result.PatternCounts[pattern]
-			patternSummaries = append(patternSummaries, fmt.Sprintf("%s=%d", pattern, count))
+	for _, r := range results {
+		counts := countRegexHits(r.Content, compiled, queries)
+		snippet := extractSnippetRegex(r.Content, compiled)
+
+		t.mu.Lock()
+		seen := t.seenChunks[r.ID]
+		t.seenChunks[r.ID] = true
+		t.mu.Unlock()
+
+		if seen {
+			b.WriteString(fmt.Sprintf(
+				"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\" chunk_index=\"%d\" score=\"%.3f\" already_seen=\"true\">\n",
+				xmlEscape(r.ID),
+				xmlEscape(r.KnowledgeID),
+				xmlEscape(r.KnowledgeTitle),
+				r.ChunkIndex,
+				r.MatchScore,
+			))
+			for _, q := range queries {
+				if c := counts[q]; c > 0 {
+					b.WriteString(fmt.Sprintf("<query_hit query=\"%s\" count=\"%d\" />\n",
+						xmlEscape(q), c))
+				}
+			}
+			b.WriteString("<note>(snippet omitted, already returned in a previous grep_chunks call this session)</note>\n")
+			b.WriteString("</chunk>\n")
+			continue
 		}
 
-		output.WriteString(
-			fmt.Sprintf("%d) knowledge_id=%s | title=%s | chunk_hits=%d | chunk_total=%d | pattern_hits=[%s]\n",
-				idx+1,
-				result.KnowledgeID,
-				result.KnowledgeTitle,
-				result.ChunkHitCount,
-				result.TotalChunkCount,
-				strings.Join(patternSummaries, ", "),
-			),
-		)
+		b.WriteString(fmt.Sprintf(
+			"<chunk chunk_id=\"%s\" knowledge_id=\"%s\" knowledge_title=\"%s\" chunk_index=\"%d\" score=\"%.3f\">\n",
+			xmlEscape(r.ID),
+			xmlEscape(r.KnowledgeID),
+			xmlEscape(r.KnowledgeTitle),
+			r.ChunkIndex,
+			r.MatchScore,
+		))
+		for _, q := range queries {
+			if c := counts[q]; c > 0 {
+				b.WriteString(fmt.Sprintf("<query_hit query=\"%s\" count=\"%d\" />\n",
+					xmlEscape(q), c))
+			}
+		}
+		if snippet != "" {
+			b.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
+		}
+		b.WriteString("</chunk>\n")
 	}
-	return output.String()
+
+	b.WriteString("</grep_results>")
+	_ = ctx
+	return b.String()
 }
 
 type knowledgeAggregation struct {
@@ -435,17 +470,21 @@ type knowledgeAggregation struct {
 	DistinctPatterns int            `json:"distinct_patterns"`
 }
 
-func (t *GrepChunksTool) aggregateByKnowledge(results []chunkWithTitle, patterns []string) []knowledgeAggregation {
+func (t *GrepChunksTool) aggregateByKnowledge(
+	results []chunkWithTitle,
+	queries []string,
+	compiled []*regexp.Regexp,
+) []knowledgeAggregation {
 	if len(results) == 0 {
 		return nil
 	}
 
-	patternKeys := make([]string, 0, len(patterns))
-	for _, p := range patterns {
-		if strings.TrimSpace(p) == "" {
+	queryKeys := make([]string, 0, len(queries))
+	for _, q := range queries {
+		if strings.TrimSpace(q) == "" {
 			continue
 		}
-		patternKeys = append(patternKeys, p)
+		queryKeys = append(queryKeys, q)
 	}
 
 	aggregated := make(map[string]*knowledgeAggregation)
@@ -465,23 +504,23 @@ func (t *GrepChunksTool) aggregateByKnowledge(results []chunkWithTitle, patterns
 				KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeTitle:  title,
 				TotalChunkCount: chunk.TotalChunkCount,
-				PatternCounts:   make(map[string]int, len(patternKeys)),
+				PatternCounts:   make(map[string]int, len(queryKeys)),
 			}
-			for _, pKey := range patternKeys {
-				aggregated[knowledgeID].PatternCounts[pKey] = 0
+			for _, qKey := range queryKeys {
+				aggregated[knowledgeID].PatternCounts[qKey] = 0
 			}
 		}
 
 		entry := aggregated[knowledgeID]
 		entry.ChunkHitCount++
 
-		patternOccurrences := t.countPatternOccurrences(chunk.Content, patternKeys)
-		for _, p := range patternKeys {
-			count := patternOccurrences[p]
+		occurrences := countRegexHits(chunk.Content, compiled, queryKeys)
+		for _, q := range queryKeys {
+			count := occurrences[q]
 			if count == 0 {
 				continue
 			}
-			entry.PatternCounts[p] += count
+			entry.PatternCounts[q] += count
 			entry.TotalPatternHits += count
 		}
 	}
@@ -513,38 +552,89 @@ func (t *GrepChunksTool) aggregateByKnowledge(results []chunkWithTitle, patterns
 	return resultSlice
 }
 
-func (t *GrepChunksTool) countPatternOccurrences(content string, patterns []string) map[string]int {
+// countRegexHits returns the total number of matches per (compiled) pattern
+// within content, keyed by the original (uncompiled) pattern string.
+func countRegexHits(content string, compiled []*regexp.Regexp, patterns []string) map[string]int {
 	counts := make(map[string]int, len(patterns))
-	if content == "" || len(patterns) == 0 {
+	if content == "" || len(compiled) == 0 {
 		return counts
 	}
-
-	contentLower := strings.ToLower(content)
-	for _, pattern := range patterns {
-		p := strings.ToLower(pattern)
-		if strings.TrimSpace(p) == "" {
+	for i, re := range compiled {
+		if re == nil {
 			continue
 		}
-		counts[pattern] = countOccurrences(contentLower, p)
+		matches := re.FindAllStringIndex(content, -1)
+		counts[patterns[i]] = len(matches)
 	}
 	return counts
 }
 
-func countOccurrences(text string, pattern string) int {
-	if pattern == "" {
-		return 0
+// extractSnippetRegex returns a short context snippet around the earliest
+// regex match across any of the provided compiled patterns. Result is
+// compressed to a single line and bounded in length on both sides of the
+// match to keep the XML output concise.
+func extractSnippetRegex(content string, compiled []*regexp.Regexp) string {
+	if content == "" || len(compiled) == 0 {
+		return ""
 	}
-	count := 0
-	index := 0
-	for index < len(text) {
-		pos := strings.Index(text[index:], pattern)
-		if pos == -1 {
-			break
+
+	earliest := -1
+	earliestEnd := -1
+	for _, re := range compiled {
+		if re == nil {
+			continue
 		}
-		count++
-		index += pos + len(pattern)
+		loc := re.FindStringIndex(content)
+		if loc == nil {
+			continue
+		}
+		if earliest < 0 || loc[0] < earliest {
+			earliest = loc[0]
+			earliestEnd = loc[1]
+		}
 	}
-	return count
+	if earliest < 0 {
+		return ""
+	}
+
+	matchStr := content[earliest:earliestEnd]
+	before := content[:earliest]
+	after := content[earliestEnd:]
+
+	const contextRunes = 60
+	beforeRunes := []rune(before)
+	if len(beforeRunes) > contextRunes {
+		beforeRunes = beforeRunes[len(beforeRunes)-contextRunes:]
+	}
+	afterRunes := []rune(after)
+	if len(afterRunes) > contextRunes {
+		afterRunes = afterRunes[:contextRunes]
+	}
+	matchRunes := []rune(matchStr)
+	if len(matchRunes) > 120 {
+		matchRunes = append(matchRunes[:120], []rune("...")...)
+	}
+
+	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
+	snippet = strings.ReplaceAll(snippet, "\n", " ")
+	for strings.Contains(snippet, "  ") {
+		snippet = strings.ReplaceAll(snippet, "  ", " ")
+	}
+	return "... " + strings.TrimSpace(snippet) + " ..."
+}
+
+// xmlEscape replaces characters that would break simple XML attribute /
+// element values. It is intentionally minimal because the rendered output is
+// consumed by the LLM (forgiving parser) rather than a strict XML processor.
+func xmlEscape(s string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"\"", "&quot;",
+		"'", "&apos;",
+	)
+	return replacer.Replace(s)
 }
 
 // deduplicateChunks removes duplicate or near-duplicate chunks using content signature
@@ -554,7 +644,6 @@ func (t *GrepChunksTool) deduplicateChunks(ctx context.Context, results []chunkW
 	uniqueResults := make([]chunkWithTitle, 0)
 
 	for _, r := range results {
-		// Build multiple keys for deduplication
 		keys := []string{r.ID}
 		if r.ParentChunkID != "" {
 			keys = append(keys, "parent:"+r.ParentChunkID)
@@ -563,7 +652,6 @@ func (t *GrepChunksTool) deduplicateChunks(ctx context.Context, results []chunkW
 			keys = append(keys, fmt.Sprintf("kb:%s#%d", r.KnowledgeID, r.ChunkIndex))
 		}
 
-		// Check if any key is already seen
 		dup := false
 		for _, k := range keys {
 			if seen[k] {
@@ -575,7 +663,6 @@ func (t *GrepChunksTool) deduplicateChunks(ctx context.Context, results []chunkW
 			continue
 		}
 
-		// Check content signature for near-duplicate content
 		sig := t.buildContentSignature(r.Content)
 		if sig != "" {
 			if contentSig[sig] {
@@ -584,15 +671,12 @@ func (t *GrepChunksTool) deduplicateChunks(ctx context.Context, results []chunkW
 			contentSig[sig] = true
 		}
 
-		// Mark all keys as seen
 		for _, k := range keys {
 			seen[k] = true
 		}
-
 		uniqueResults = append(uniqueResults, r)
 	}
 
-	// If we have duplicates by ID, keep the first one
 	seenByID := make(map[string]bool)
 	deduplicated := make([]chunkWithTitle, 0)
 	for _, r := range uniqueResults {
@@ -601,7 +685,7 @@ func (t *GrepChunksTool) deduplicateChunks(ctx context.Context, results []chunkW
 			deduplicated = append(deduplicated, r)
 		}
 	}
-
+	_ = ctx
 	return deduplicated
 }
 
@@ -610,53 +694,55 @@ func (t *GrepChunksTool) buildContentSignature(content string) string {
 	return searchutil.BuildContentSignature(content)
 }
 
-// scoreChunks calculates match scores for chunks based on pattern matches
+// scoreChunks calculates match scores for chunks based on regex matches.
 func (t *GrepChunksTool) scoreChunks(
 	ctx context.Context,
 	results []chunkWithTitle,
-	patterns []string,
+	compiled []*regexp.Regexp,
 ) []chunkWithTitle {
 	scored := make([]chunkWithTitle, len(results))
 	for i := range results {
 		scored[i] = results[i]
-		score, patternCount := t.calculateMatchScore(results[i].Content, patterns)
+		score, patternCount := t.calculateMatchScore(results[i].Content, compiled)
 		scored[i].MatchScore = score
 		scored[i].MatchedPatterns = patternCount
 	}
+	_ = ctx
 	return scored
 }
 
-// calculateMatchScore calculates a score based on how many patterns match and their positions
-func (t *GrepChunksTool) calculateMatchScore(content string, patterns []string) (float64, int) {
-	if content == "" || len(patterns) == 0 {
+// calculateMatchScore counts how many regex patterns match the content and
+// applies a small boost for earlier match positions.
+func (t *GrepChunksTool) calculateMatchScore(content string, compiled []*regexp.Regexp) (float64, int) {
+	if content == "" || len(compiled) == 0 {
 		return 0.0, 0
 	}
 
-	contentLower := strings.ToLower(content)
 	matchCount := 0
 	earliestPos := len(content)
 
-	// Count how many patterns match and find earliest position
-	for _, pattern := range patterns {
-		patternLower := strings.ToLower(pattern)
-		if strings.Contains(contentLower, patternLower) {
-			matchCount++
-			// Find position of first match
-			pos := strings.Index(contentLower, patternLower)
-			if pos >= 0 && pos < earliestPos {
-				earliestPos = pos
-			}
+	for _, re := range compiled {
+		if re == nil {
+			continue
+		}
+		loc := re.FindStringIndex(content)
+		if loc == nil {
+			continue
+		}
+		matchCount++
+		if loc[0] < earliestPos {
+			earliestPos = loc[0]
 		}
 	}
 
-	// Score: higher for more matches, slightly higher for earlier positions
-	// Base score: match ratio (0.0 to 1.0)
-	baseScore := float64(matchCount) / float64(len(patterns))
+	if matchCount == 0 {
+		return 0.0, 0
+	}
 
-	// Position bonus: earlier matches get slight boost (max 0.1)
+	baseScore := float64(matchCount) / float64(len(compiled))
+
 	positionBonus := 0.0
 	if earliestPos < len(content) {
-		// Normalize position to [0, 1] and apply small bonus
 		positionRatio := 1.0 - float64(earliestPos)/float64(len(content))
 		positionBonus = positionRatio * 0.1
 	}
@@ -668,7 +754,6 @@ func (t *GrepChunksTool) calculateMatchScore(content string, patterns []string) 
 func (t *GrepChunksTool) applyMMR(
 	ctx context.Context,
 	results []chunkWithTitle,
-	patterns []string,
 	k int,
 	lambda float64,
 ) []chunkWithTitle {
@@ -680,18 +765,16 @@ func (t *GrepChunksTool) applyMMR(
 		lambda, k, len(results))
 
 	selected := make([]chunkWithTitle, 0, k)
-	selectedTokenSets := make([]map[string]struct{}, 0, k) // cache of token sets
+	selectedTokenSets := make([]map[string]struct{}, 0, k)
 
 	candidates := make([]chunkWithTitle, len(results))
 	copy(candidates, results)
 
-	// Pre-compute token sets for all candidates
 	tokenSets := make([]map[string]struct{}, len(candidates))
 	for i, r := range candidates {
 		tokenSets[i] = t.tokenizeSimple(r.Content)
 	}
 
-	// MMR selection loop
 	for len(selected) < k && len(candidates) > 0 {
 		bestIdx := 0
 		bestScore := -1.0
@@ -699,13 +782,9 @@ func (t *GrepChunksTool) applyMMR(
 		for i, r := range candidates {
 			relevance := r.MatchScore
 			redundancy := 0.0
-
-			// Calculate maximum redundancy with already selected results
 			for _, selectedTS := range selectedTokenSets {
 				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTS))
 			}
-
-			// MMR score: balance relevance and diversity
 			mmr := lambda*relevance - (1.0-lambda)*redundancy
 			if mmr > bestScore {
 				bestScore = mmr
@@ -713,35 +792,15 @@ func (t *GrepChunksTool) applyMMR(
 			}
 		}
 
-		// Add best candidate to selected and remove from candidates
 		selected = append(selected, candidates[bestIdx])
 		selectedTokenSets = append(selectedTokenSets, tokenSets[bestIdx])
 
-		// Remove corresponding token set. Use swap deletion
 		last := len(candidates) - 1
 		candidates[bestIdx] = candidates[last]
 		tokenSets[bestIdx] = tokenSets[last]
 		candidates = candidates[:last]
 		tokenSets = tokenSets[:last]
 	}
-
-	// Compute average redundancy among selected results
-	avgRed := 0.0
-	if len(selected) > 1 {
-		pairs := 0
-		for i := 0; i < len(selected); i++ {
-			for j := i + 1; j < len(selected); j++ {
-				avgRed += t.jaccard(selectedTokenSets[i], selectedTokenSets[j]) // read token from cache
-				pairs++
-			}
-		}
-		if pairs > 0 {
-			avgRed /= float64(pairs)
-		}
-	}
-
-	logger.Debugf(ctx, "[Tool][GrepChunks] MMR completed: selected=%d, avg_redundancy=%.4f",
-		len(selected), avgRed)
 
 	return selected
 }

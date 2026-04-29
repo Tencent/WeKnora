@@ -67,7 +67,12 @@ type ModelParameters struct {
 	ParameterSize       string              `yaml:"parameter_size"       json:"parameter_size"`  // Ollama model parameter size (e.g., "7B", "13B", "70B")
 	Provider            string              `yaml:"provider"             json:"provider"`        // Provider identifier: openai, aliyun, zhipu, generic
 	ExtraConfig         map[string]string   `yaml:"extra_config"         json:"extra_config"`    // Provider-specific configuration
-	SupportsVision      bool                `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
+	// CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，
+	// 用途类似 Python OpenAI SDK 的 extra_headers 参数，
+	// 常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。
+	// 保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。
+	CustomHeaders  map[string]string `yaml:"custom_headers,omitempty" json:"custom_headers,omitempty"`
+	SupportsVision bool              `yaml:"supports_vision"      json:"supports_vision"` // Whether the model accepts image/multimodal input
 	// WeKnoraCloud 厂商专用凭证
 	AppID     string `yaml:"app_id,omitempty"     json:"app_id,omitempty"`
 	AppSecret string `yaml:"app_secret,omitempty" json:"app_secret,omitempty"` // AES-256 加密存储，实际承载上游 API Key

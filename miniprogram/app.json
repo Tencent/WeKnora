@@ -1,0 +1,33 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/chat/chat",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "navigationBarTitleText": "WeKnora",
+    "navigationBarBackgroundColor": "#0d3b2a",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f3f3f3"
+  },
+  "tabBar": {
+    "color": "#8b8b8b",
+    "selectedColor": "#07c05f",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "Knowledge"
+      },
+      {
+        "pagePath": "pages/chat/chat",
+        "text": "Chat"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "Settings"
+      }
+    ]
+  }
+}

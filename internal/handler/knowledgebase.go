@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -352,6 +354,30 @@ func (h *KnowledgeBaseHandler) ListKnowledgeBases(c *gin.Context) {
 			}
 			kbs = filtered
 		}
+
+		// `all` mode: authoritative server-side capability filter so a client
+		// that bypassed the frontend (old tab, curl, rogue plugin) can't @ a
+		// KB whose capabilities don't match any allowed tool of this agent.
+		// Non-`all` modes already constrain the scope explicitly.
+		if mode == "all" && len(agent.Config.AllowedTools) > 0 {
+			filter := tools.DeriveKBFilterFromTools(agent.Config.AllowedTools)
+			if !filter.IsEmpty() {
+				before := len(kbs)
+				kept := make([]*types.KnowledgeBase, 0, before)
+				for _, kb := range kbs {
+					if tools.KBSatisfiesToolRequirements(kb.Capabilities(), agent.Config.AllowedTools) {
+						kept = append(kept, kb)
+					}
+				}
+				if removed := before - len(kept); removed > 0 {
+					logger.Infof(ctx,
+						"ListKnowledgeBases(agent=%s, mode=all): tool-capability filter removed %d of %d KBs",
+						agentID, removed, before)
+				}
+				kbs = kept
+			}
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    kbs,
@@ -636,6 +662,7 @@ func (h *KnowledgeBaseHandler) CopyKnowledgeBase(c *gin.Context) {
 		SourceID: req.SourceID,
 		TargetID: req.TargetID,
 	}
+	langfuse.InjectTracing(ctx, &payload)
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

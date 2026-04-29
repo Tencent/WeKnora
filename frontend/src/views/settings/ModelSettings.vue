@@ -350,7 +350,11 @@ function convertToLegacyFormat(model: ModelConfig) {
     provider: model.parameters.provider || '', // 添加 provider 字段
     dimension: model.parameters.embedding_parameters?.dimension,
     isBuiltin: model.is_builtin || false,
-    supportsVision: model.parameters.supports_vision || false
+    supportsVision: model.parameters.supports_vision || false,
+    // 将后端 map 形式转换为前端可编辑的数组形式
+    customHeaders: model.parameters.custom_headers
+      ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
+      : []
   }
 }
 
@@ -426,6 +430,18 @@ const handleModelSave = async (modelData: any) => {
       }
     }
     
+    // 将前端 Key-Value 数组形式的自定义 Header 转换成后端期望的 map
+    const customHeadersMap: Record<string, string> = {}
+    if (Array.isArray(modelData.customHeaders)) {
+      for (const item of modelData.customHeaders) {
+        const key = (item?.key ?? '').trim()
+        const value = (item?.value ?? '').trim()
+        if (key && value) {
+          customHeadersMap[key] = value
+        }
+      }
+    }
+
     // 将前端格式转换为后端格式
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(), // 使用 modelName 作为 name，并去除首尾空格
@@ -436,6 +452,7 @@ const handleModelSave = async (modelData: any) => {
         base_url: modelData.baseUrl?.trim() || '',
         api_key: modelData.apiKey?.trim() || '',
         provider: modelData.provider || '', // 添加 provider 字段
+        ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
         ...(currentModelType.value === 'embedding' && modelData.dimension ? {
           embedding_parameters: {
             dimension: modelData.dimension,
@@ -503,6 +520,12 @@ const getModelOptions = (type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr',
     value: `edit-${type}-${model.id}`
   })
 
+  // 复制选项
+  options.push({
+    content: t('common.copy'),
+    value: `copy-${type}-${model.id}`
+  })
+
   // 删除选项
   options.push({
     content: t('common.delete'),
@@ -519,11 +542,55 @@ const handleMenuAction = (data: { value: string }, type: 'chat' | 'embedding' | 
   
   if (value.indexOf('edit-') === 0) {
     editModel(type, model)
+  } else if (value.indexOf('copy-') === 0) {
+    copyModel(type, model.id)
   } else if (value.indexOf('delete-') === 0) {
     // 使用确认对话框进行确认
     if (confirm(t('modelSettings.confirmDelete'))) {
       deleteModel(type, model.id)
     }
+  }
+}
+
+// 生成不重复的复制名称：原名 + 复制后缀（若已存在则追加序号）
+const generateCopyName = (originalName: string): string => {
+  const suffix = t('modelSettings.copySuffix')
+  const existingNames = new Set(allModels.value.map(m => m.name))
+  let candidate = `${originalName}${suffix}`
+  let counter = 2
+  while (existingNames.has(candidate)) {
+    candidate = `${originalName}${suffix} ${counter}`
+    counter += 1
+  }
+  return candidate
+}
+
+// 复制模型
+const copyModel = async (_type: 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr', modelId: string) => {
+  const source = allModels.value.find(m => m.id === modelId)
+  if (!source) {
+    return
+  }
+  if (source.is_builtin) {
+    MessagePlugin.warning(t('modelSettings.toasts.builtinCannotCopy'))
+    return
+  }
+
+  try {
+    const newModel: ModelConfig = {
+      name: generateCopyName(source.name),
+      type: source.type,
+      source: source.source,
+      description: source.description || '',
+      parameters: JSON.parse(JSON.stringify(source.parameters || {}))
+    }
+
+    await createModel(newModel)
+    MessagePlugin.success(t('modelSettings.toasts.copied'))
+    await loadModels()
+  } catch (error: any) {
+    console.error('复制模型失败:', error)
+    MessagePlugin.error(error.message || t('modelSettings.toasts.copyFailed'))
   }
 }
 

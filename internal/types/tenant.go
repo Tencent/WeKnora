@@ -165,7 +165,9 @@ func (c RetrieverEngines) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Scan implements the sql.Scanner interface, used to convert database value to RetrieverEngines
+// Scan implements the sql.Scanner interface, used to convert database value to RetrieverEngines.
+// It supports both the legacy bare-array format (e.g. [{...}, {...}]) and the current
+// object-wrapped format (e.g. {"engines": [{...}, {...}]}).
 func (c *RetrieverEngines) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -174,7 +176,19 @@ func (c *RetrieverEngines) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	return json.Unmarshal(b, c)
+
+	// Try the current object format first: {"engines": [...]}
+	if err := json.Unmarshal(b, c); err == nil {
+		return nil
+	}
+
+	// Fallback: legacy bare-array format: [{...}, {...}]
+	var engines []RetrieverEngineParams
+	if err := json.Unmarshal(b, &engines); err != nil {
+		return fmt.Errorf("retriever_engines: cannot unmarshal as object or array: %w", err)
+	}
+	c.Engines = engines
+	return nil
 }
 
 // ConversationConfig represents the conversation configuration for normal mode

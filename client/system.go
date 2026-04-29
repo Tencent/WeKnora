@@ -57,13 +57,6 @@ type StorageCheckResponse struct {
 	BucketCreated bool   `json:"bucket_created,omitempty"`
 }
 
-// MinioBucketInfo represents MinIO bucket information
-type MinioBucketInfo struct {
-	Name      string `json:"name"`
-	Policy    string `json:"policy"`
-	CreatedAt string `json:"created_at,omitempty"`
-}
-
 // GetSystemInfo gets system version and configuration information
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/system/info", nil, nil)
@@ -153,22 +146,4 @@ func (c *Client) CheckStorageEngine(ctx context.Context, req *StorageCheckReques
 		return nil, err
 	}
 	return result.Data, nil
-}
-
-// ListMinioBuckets lists all MinIO buckets with their access policies
-func (c *Client) ListMinioBuckets(ctx context.Context) ([]MinioBucketInfo, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/system/minio/buckets", nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	var result struct {
-		Code int `json:"code"`
-		Data struct {
-			Buckets []MinioBucketInfo `json:"buckets"`
-		} `json:"data"`
-	}
-	if err := parseResponse(resp, &result); err != nil {
-		return nil, err
-	}
-	return result.Data.Buckets, nil
 }

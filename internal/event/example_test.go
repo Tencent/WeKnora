@@ -25,7 +25,7 @@ func ExampleEventBus_basic() {
 	})
 
 	_ = bus.Emit(ctx, event)
-	// Output: Query received: {What is RAG?   session-123  map[]}
+	// Output: Query received: {What is RAG?  session-123  map[]}
 }
 
 // Example: Using middleware

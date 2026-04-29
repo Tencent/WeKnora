@@ -20,14 +20,22 @@ func (r *RecallMetric) Compute(metricInput *types.MetricInput) float64 {
 
 	// Convert ground truth to sets for efficient lookup
 	gtSets := SliceMap(gts, ToSet)
-	// Count total hits across all relevant documents
-	ahit := Fold(gtSets, 0, func(a int, b map[int]struct{}) int { return a + Hit(ids, b) })
-
-	// Handle case with no ground truth
 	if len(gtSets) == 0 {
 		return 0.0
 	}
 
-	// Recall = total hits / total relevant documents
-	return float64(ahit) / float64(len(gtSets))
+	if len(ids) == 0 {
+		return 0.0
+	}
+
+	var totalRecall float64
+	for _, gtSet := range gtSets {
+		hits := Hit(ids, gtSet)
+		if len(gtSet) > 0 {
+			totalRecall += float64(hits) / float64(len(gtSet))
+		}
+	}
+
+	// Recall = average recall across all ground truth sets
+	return totalRecall / float64(len(gtSets))
 }

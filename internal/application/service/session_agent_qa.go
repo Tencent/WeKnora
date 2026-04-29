@@ -91,13 +91,20 @@ func (s *sessionService) AgentQA(
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
-	// Get rerank model from custom agent config (only required when knowledge bases are configured)
+	// Get rerank model from custom agent config (only required when knowledge_search is allowed)
 	var rerankModel rerank.Reranker
-	hasKnowledge := len(agentConfig.KnowledgeBases) > 0 || len(agentConfig.KnowledgeIDs) > 0
-	if hasKnowledge {
+	hasKnowledgeSearchTool := false
+	for _, tool := range agentConfig.AllowedTools {
+		if tool == tools.ToolKnowledgeSearch {
+			hasKnowledgeSearchTool = true
+			break
+		}
+	}
+
+	if hasKnowledgeSearchTool {
 		rerankModelID := req.CustomAgent.Config.RerankModelID
 		if rerankModelID == "" {
-			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge bases are specified", req.CustomAgent.ID)
+			logger.Warnf(ctx, "No rerank model configured for custom agent %s, but knowledge_search tool is enabled", req.CustomAgent.ID)
 			return errors.New("rerank model (rerank_model_id) is not configured in custom agent settings")
 		}
 
@@ -107,7 +114,7 @@ func (s *sessionService) AgentQA(
 			return fmt.Errorf("failed to get rerank model: %w", err)
 		}
 	} else {
-		logger.Infof(ctx, "No knowledge bases configured, skipping rerank model initialization")
+		logger.Infof(ctx, "knowledge_search tool not enabled, skipping rerank model initialization")
 	}
 
 	// Get or create contextManager for this session
@@ -220,6 +227,7 @@ func (s *sessionService) buildAgentConfig(
 		Thinking:                    customAgent.Config.Thinking,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
+		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.

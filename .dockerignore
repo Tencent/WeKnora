@@ -1,2 +1,76 @@
+# VCS / CI
+.git/
+.github/
+.gitignore
+.gitattributes
+
+# 编辑器 / IDE 本地配置
+.cursor/
+.claude/
+.codebuddy/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Python 虚拟环境 / 缓存
 **/.venv/
+.venv_proto/
 **/.python-version
+**/__pycache__/
+**/*.pyc
+
+# Node / 前端
+# 注意:build-ui 用的 context 是 ./frontend,根 .dockerignore 对它无效,
+# 其它镜像(app/docreader/sandbox)的 Dockerfile 都不引用 frontend/,
+# 所以这里可以直接排除整个 frontend/ 目录。
+**/node_modules/
+frontend/
+WeKnora-Chrome-Extension/
+
+# 日志 / 临时文件
+logs/
+tmp/
+temp/
+*.log
+*.pid
+
+# 本地构建产物 / 二进制
+WeKnora
+WeKnora-lite
+/server
+/dist/
+/build/
+cmd/desktop/build/bin/
+
+# 本地数据 / 模型文件
+/models/
+data/files/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+test/data/mswag.txt
+
+# 敏感文件
+.env
+.env.lite
+*.pem
+*.key
+*.crt
+*_key
+*_secret
+
+# 大的归档/压缩包
+packages/protoc-*.zip
+!packages/protoc-*-linux-x86_64.zip
+!packages/protoc-*-linux-aarch_64.zip
+!packages/protoc-*-linux-arm.zip
+
+# 本地测试脚本
+configure-ollama.sh
+fix-docker.sh
+/scripts/scale_dev_jobs.sh
+
+# 注意:不要排除 docs/ —— 里面的 docs.go / swagger.json 是 Go 代码依赖的 swagger 包
+# 注意:不要用 *.md 通配排除 —— skills/preloaded/**/SKILL.md 会被打进镜像给 agent 用

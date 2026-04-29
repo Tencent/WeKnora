@@ -615,7 +615,15 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			// Agent mode: complete the assistant message in defer (normal mode does it via event handler)
 			if mode == qaModeAgent {
-				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
+				// Use WithoutCancel so a user-triggered stop (which cancels
+				// asyncCtx) doesn't also cancel the GORM UPDATE that persists
+				// AgentSteps/Content. Without this, cancelled-ctx makes
+				// GORM skip the write and the agent's intermediate steps
+				// (thinking / tool_call history) are lost on page refresh.
+				updateCtx := context.WithValue(
+					context.WithoutCancel(streamCtx.asyncCtx),
+					types.TenantIDContextKey, reqCtx.session.TenantID,
+				)
 				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query)
 				logger.Infof(streamCtx.asyncCtx, "Agent QA service completed for session: %s", sessionID)
 			}

@@ -41,16 +41,13 @@ var (
 		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
 )
 
-// NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository
-func NewMilvusRetrieveEngineRepository(client *client.Client) interfaces.RetrieveEngineRepository {
+// NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository.
+// indexCfg is optional — pass nil to use env var / default values (env path).
+func NewMilvusRetrieveEngineRepository(client *client.Client, indexCfg *types.IndexConfig) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[Milvus] Initializing Milvus retriever engine repository")
 
-	collectionBaseName := os.Getenv(envMilvusCollection)
-	if collectionBaseName == "" {
-		log.Warn("[Milvus] MILVUS_COLLECTION environment variable not set, using default collection name")
-		collectionBaseName = defaultCollectionName
-	}
+	collectionBaseName := types.ResolveCollectionName(indexCfg, envMilvusCollection, defaultCollectionName)
 
 	metricType := entity.IP
 	if mt := os.Getenv(envMilvusMetricType); mt != "" {
@@ -72,6 +69,8 @@ func NewMilvusRetrieveEngineRepository(client *client.Client) interfaces.Retriev
 		client:             client,
 		collectionBaseName: collectionBaseName,
 		metricType:         metricType,
+		shardsNum:          indexCfg.GetShardsNum(0),
+		replicaNumber:      indexCfg.GetReplicaNumber(0),
 	}
 
 	log.Info("[Milvus] Successfully initialized repository")
@@ -176,7 +175,11 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		}
 
 		// Create collection
-		err = m.client.CreateCollection(ctx, client.NewCreateCollectionOption(collectionName, schema).WithIndexOptions(indexOpts...))
+		createOpt := client.NewCreateCollectionOption(collectionName, schema).WithIndexOptions(indexOpts...)
+		if m.shardsNum > 0 {
+			createOpt = createOpt.WithShardNum(int32(m.shardsNum))
+		}
+		err = m.client.CreateCollection(ctx, createOpt)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
@@ -185,7 +188,11 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		log.Infof("[Milvus] Successfully created collection %s", collectionName)
 	}
 
-	loadTask, err := m.client.LoadCollection(ctx, client.NewLoadCollectionOption(collectionName))
+	loadOpt := client.NewLoadCollectionOption(collectionName)
+	if m.replicaNumber > 0 {
+		loadOpt = loadOpt.WithReplica(m.replicaNumber)
+	}
+	loadTask, err := m.client.LoadCollection(ctx, loadOpt)
 	if err != nil {
 		log.Errorf("[Milvus] Failed to load collection: %v", err)
 		return fmt.Errorf("failed to load collection: %w", err)

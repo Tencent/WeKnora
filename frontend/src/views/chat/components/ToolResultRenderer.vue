@@ -73,6 +73,12 @@
       :data="toolData as GrepResultsData"
     />
     
+    <!-- Wiki Edit Results Display -->
+    <WikiEditResult
+      v-else-if="displayType === 'wiki_write_page' || displayType === 'wiki_replace_text' || displayType === 'wiki_rename_page' || displayType === 'wiki_delete_page'"
+      :data="toolData as WikiEditData"
+    />
+    
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
       <div class="fallback-header">
@@ -100,7 +106,8 @@ import type {
   DatabaseQueryData,
   WebSearchResultsData,
   WebFetchResultsData,
-  GrepResultsData
+  GrepResultsData,
+  WikiEditData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -115,6 +122,7 @@ import DatabaseQuery from './tool-results/DatabaseQuery.vue';
 import WebSearchResults from './tool-results/WebSearchResults.vue';
 import WebFetchResults from './tool-results/WebFetchResults.vue';
 import GrepResults from './tool-results/GrepResults.vue';
+import WikiEditResult from './tool-results/WikiEditResult.vue';
 
 interface Props {
   displayType?: DisplayType;

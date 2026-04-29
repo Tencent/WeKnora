@@ -218,6 +218,46 @@
             />
           </div>
 
+          <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
+          <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
+            <div class="custom-headers-header">
+              <label class="form-label" style="margin-bottom: 0;">{{ $t('model.editor.customHeadersLabel') }}</label>
+              <t-button variant="text" size="small" theme="primary" @click="addCustomHeader">
+                <template #icon><t-icon name="add" /></template>
+                {{ $t('model.editor.customHeadersAdd') }}
+              </t-button>
+            </div>
+            <p class="form-desc custom-headers-desc">{{ $t('model.editor.customHeadersDesc') }}</p>
+            <div v-if="formData.customHeaders && formData.customHeaders.length > 0" class="custom-headers-list">
+              <div
+                v-for="(item, idx) in formData.customHeaders"
+                :key="idx"
+                class="custom-header-row"
+              >
+                <t-input
+                  v-model="item.key"
+                  :placeholder="$t('model.editor.customHeadersKeyPlaceholder')"
+                  class="custom-header-key"
+                />
+                <t-input
+                  v-model="item.value"
+                  :placeholder="$t('model.editor.customHeadersValuePlaceholder')"
+                  class="custom-header-value"
+                />
+                <t-button
+                  variant="text"
+                  shape="square"
+                  size="small"
+                  theme="danger"
+                  @click="removeCustomHeader(idx)"
+                  :aria-label="$t('common.delete')"
+                >
+                  <t-icon name="close" />
+                </t-button>
+              </div>
+            </div>
+          </div>
+
           <!-- Remote API 校验 -->
           <div class="form-item">
             <label class="form-label">{{ $t('model.editor.connectionTest') }}</label>
@@ -314,6 +354,11 @@ import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 
+interface CustomHeaderItem {
+  key: string
+  value: string
+}
+
 interface ModelFormData {
   id: string
   name: string
@@ -326,6 +371,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
+  customHeaders?: CustomHeaderItem[]
 }
 
 interface Props {
@@ -571,7 +618,8 @@ const formData = ref<ModelFormData>({
   dimension: undefined,
   interfaceType: 'ollama',
   isDefault: false,
-  supportsVision: false
+  supportsVision: false,
+  customHeaders: []
 })
 
 const rules = computed(() => ({
@@ -693,7 +741,12 @@ watch(() => props.visible, (val) => {
     loadProviders()
 
     if (props.modelData) {
-      formData.value = { ...props.modelData }
+      formData.value = {
+        ...props.modelData,
+        customHeaders: Array.isArray(props.modelData.customHeaders)
+          ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
+          : []
+      }
     } else {
       resetForm()
     }
@@ -726,7 +779,8 @@ const resetForm = () => {
     dimension: undefined, // 默认不填，让用户手动输入或通过检测按钮获取
     interfaceType: undefined,
     isDefault: false,
-    supportsVision: false
+    supportsVision: false,
+    customHeaders: []
   }
   modelChecked.value = false
   modelAvailable.value = false
@@ -763,6 +817,19 @@ const handleProviderChange = (value: string) => {
 // 生成唯一ID
 const generateId = () => {
   return `model_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+// 自定义 HTTP Header 编辑
+const addCustomHeader = () => {
+  if (!Array.isArray(formData.value.customHeaders)) {
+    formData.value.customHeaders = []
+  }
+  formData.value.customHeaders.push({ key: '', value: '' })
+}
+
+const removeCustomHeader = (idx: number) => {
+  if (!Array.isArray(formData.value.customHeaders)) return
+  formData.value.customHeaders.splice(idx, 1)
 }
 
 // 过滤后的模型列表
@@ -900,7 +967,23 @@ const checkRemoteAPI = async () => {
   
   try {
     let result: any
-    
+
+    // 把表单里 Key-Value 数组形式的自定义 Header 转成后端期望的 map。
+    // 跟 ModelSettings.vue 保存时一致，空行自动丢弃，保证测试连接与真正保存后的
+    // 生产调用使用完全相同的 Header 集合。
+    const customHeaders: Record<string, string> = {}
+    if (Array.isArray(formData.value.customHeaders)) {
+      for (const item of formData.value.customHeaders) {
+        const key = (item?.key ?? '').trim()
+        const value = (item?.value ?? '').trim()
+        if (key && value) customHeaders[key] = value
+      }
+    }
+    // 只在非空时带上字段，避免在 URL query / 日志里出现空对象
+    const headerPayload = Object.keys(customHeaders).length > 0
+      ? { customHeaders }
+      : {}
+
     // 根据模型类型调用不同的校验接口
     switch (props.modelType) {
       case 'chat':
@@ -909,7 +992,8 @@ const checkRemoteAPI = async () => {
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider
+          provider: formData.value.provider,
+          ...headerPayload,
         })
         break
         
@@ -921,7 +1005,8 @@ const checkRemoteAPI = async () => {
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
           dimension: formData.value.dimension,
-          provider: formData.value.provider
+          provider: formData.value.provider,
+          ...headerPayload,
         })
         // 如果测试成功且返回了维度，自动填充
         if (result.available && result.dimension) {
@@ -935,7 +1020,9 @@ const checkRemoteAPI = async () => {
         result = await checkRerankModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
-          apiKey: formData.value.apiKey || ''
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider,
+          ...headerPayload,
         })
         break
         
@@ -946,7 +1033,8 @@ const checkRemoteAPI = async () => {
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
           apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider
+          provider: formData.value.provider,
+          ...headerPayload,
         })
         break
 
@@ -955,7 +1043,9 @@ const checkRemoteAPI = async () => {
         result = await checkASRModel({
           modelName: formData.value.modelName,
           baseUrl: formData.value.baseUrl,
-          apiKey: formData.value.apiKey || ''
+          apiKey: formData.value.apiKey || '',
+          provider: formData.value.provider,
+          ...headerPayload,
         })
         break
 
@@ -1680,6 +1770,55 @@ const handleOverlayMouseUp = () => {
   &.success {
     color: var(--td-brand-color);
   }
+}
+
+// 自定义 HTTP Header 区域
+.custom-headers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.custom-headers-desc {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.custom-headers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .custom-header-key {
+    flex: 0 0 38%;
+  }
+
+  .custom-header-value {
+    flex: 1;
+  }
+
+  :deep(.t-button) {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+  }
+}
+
+.form-desc {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
 }
 
 // Ollama不可用提示样式

@@ -11,19 +11,26 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // NvidiaEmbedder implements text vectorization functionality using NVIDIA API
 type NvidiaEmbedder struct {
-	apiKey     string
-	baseURL    string
-	modelName  string
-	dimensions int
-	modelID    string
-	httpClient *http.Client
-	timeout    time.Duration
-	maxRetries int
+	apiKey        string
+	baseURL       string
+	modelName     string
+	dimensions    int
+	modelID       string
+	httpClient    *http.Client
+	timeout       time.Duration
+	maxRetries    int
+	customHeaders map[string]string
 	EmbedderPooler
+}
+
+// SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+func (e *NvidiaEmbedder) SetCustomHeaders(headers map[string]string) {
+	e.customHeaders = headers
 }
 
 // NvidiaEmbedRequest represents an NVIDIA embedding request
@@ -118,6 +125,7 @@ func (e *NvidiaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
+		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
 		resp, err = e.httpClient.Do(req)
 		if err == nil {

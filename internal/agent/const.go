@@ -34,6 +34,12 @@ const (
 	// produce content (e.g., thinking-only loops without KB).
 	// Trade-off: each retry costs ~2s of LLM latency; 2 retries = max 4s extra.
 	maxEmptyResponseRetries = 2
+
+	// maxRepeatedResponseRounds is the maximum number of consecutive rounds
+	// where the LLM returns identical content without any tool calls before
+	// the loop is forcibly terminated. This catches stuck loops caused by
+	// unhandled finish reasons (e.g., content_filter not caught elsewhere).
+	maxRepeatedResponseRounds = 2
 )
 
 // transientErrorMarkers are substrings that indicate a transient (retryable) error.

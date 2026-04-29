@@ -3,6 +3,7 @@ package im
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -28,8 +29,6 @@ import (
 )
 
 const (
-	// qaTimeout is the maximum time to wait for the QA pipeline to complete.
-	qaTimeout = 120 * time.Second
 	// dedupTTL is how long processed message IDs are retained.
 	dedupTTL = 5 * time.Minute
 	// dedupCleanupInterval is how often the dedup map is cleaned.
@@ -646,7 +645,7 @@ func (s *Service) storeInflightMapping(ctx context.Context, userKey, sessionID, 
 		return
 	}
 	val := sessionID + ":" + messageID
-	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, qaTimeout+30*time.Second).Err(); err != nil {
+	if err := s.redis.Set(ctx, RedisKeyInflight+userKey, val, 10*time.Minute).Err(); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to store inflight mapping: %v", err)
 	}
 }
@@ -925,7 +924,28 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 	// 4. Get the WeKnora session
 	session, err := s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
 	if err != nil {
-		return fmt.Errorf("get session: %w", err)
+		// The underlying session may have been deleted from the UI while the
+		// ChannelSession mapping still exists (GORM soft-delete does not trigger
+		// SQL ON DELETE CASCADE). Recover by soft-deleting the stale mapping and
+		// re-creating a fresh session so the IM bot doesn't become permanently
+		// unresponsive. (fixes #1046)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			logger.Warnf(ctx, "[IM] Session %s not found (deleted?), recycling stale channel session %s",
+				channelSession.SessionID, channelSession.ID)
+			if delErr := s.db.Delete(&ChannelSession{}, "id = ?", channelSession.ID).Error; delErr != nil {
+				logger.Warnf(ctx, "[IM] Failed to delete stale channel session %s: %v", channelSession.ID, delErr)
+			}
+			channelSession, err = s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
+			if err != nil {
+				return fmt.Errorf("resolve session (retry): %w", err)
+			}
+			session, err = s.sessionService.GetSession(sessionCtx, channelSession.SessionID)
+			if err != nil {
+				return fmt.Errorf("get session (retry): %w", err)
+			}
+		} else {
+			return fmt.Errorf("get session: %w", err)
+		}
 	}
 
 	// 5. Enqueue the QA request into the bounded worker pool.
@@ -1195,12 +1215,12 @@ func (s *Service) resolveSession(ctx context.Context, msg *IncomingMessage, tena
 	}
 }
 
-// resolveUserSession finds or creates a ChannelSession keyed by (platform, user_id, chat_id, tenant_id).
+// resolveUserSession finds or creates a ChannelSession keyed by (platform, user_id, chat_id, tenant_id, agent_id).
 // This is the original session resolution strategy.
 func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, tenantID uint64, agentID string, imChannelID string) (*ChannelSession, error) {
 	var cs ChannelSession
-	result := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND deleted_at IS NULL",
-		string(msg.Platform), msg.UserID, msg.ChatID, tenantID).
+	result := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
+		string(msg.Platform), msg.UserID, msg.ChatID, tenantID, agentID).
 		First(&cs)
 
 	if result.Error == nil {
@@ -1244,8 +1264,8 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 			logger.Warnf(ctx, "[IM] Failed to clean up orphaned session %s: %v", createdSession.ID, delErr)
 		}
 		var existing ChannelSession
-		if findErr := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND deleted_at IS NULL",
-			string(msg.Platform), msg.UserID, msg.ChatID, tenantID).
+		if findErr := s.db.Where("platform = ? AND user_id = ? AND chat_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
+			string(msg.Platform), msg.UserID, msg.ChatID, tenantID, agentID).
 			First(&existing).Error; findErr != nil {
 			return nil, fmt.Errorf("create channel session: %w (lookup fallback: %v)", err, findErr)
 		}
@@ -1258,7 +1278,7 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 	return &cs, nil
 }
 
-// resolveThreadSession finds or creates a ChannelSession keyed by (platform, chat_id, thread_id, tenant_id).
+// resolveThreadSession finds or creates a ChannelSession keyed by (platform, chat_id, thread_id, tenant_id, agent_id).
 // In thread mode, each message thread gets its own session. Multiple users in the
 // same thread share the same session. Top-level messages use their own ID as
 // ThreadID, creating a new session per top-level message.
@@ -1274,8 +1294,8 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 
 	var cs ChannelSession
 	result := s.db.Where(
-		"platform = ? AND chat_id = ? AND thread_id = ? AND tenant_id = ? AND deleted_at IS NULL",
-		string(msg.Platform), threadID, msg.ChatID, tenantID,
+		"platform = ? AND chat_id = ? AND thread_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
+		string(msg.Platform), msg.ChatID, threadID, tenantID, agentID,
 	).First(&cs)
 
 	if result.Error == nil {
@@ -1322,8 +1342,8 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 		}
 		var existing ChannelSession
 		if findErr := s.db.Where(
-			"platform = ? AND chat_id = ? AND thread_id = ? AND tenant_id = ? AND deleted_at IS NULL",
-			string(msg.Platform), msg.ChatID, threadID, tenantID,
+			"platform = ? AND chat_id = ? AND thread_id = ? AND tenant_id = ? AND agent_id = ? AND deleted_at IS NULL",
+			string(msg.Platform), msg.ChatID, threadID, tenantID, agentID,
 		).First(&existing).Error; findErr != nil {
 			return nil, fmt.Errorf("create thread session: %w (lookup fallback: %v)", err, findErr)
 		}
@@ -1451,7 +1471,9 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	}
 
 	// Prepare the QA pipeline
-	qaCtx, qaCancel := context.WithTimeout(ctx, qaTimeout)
+	// No total deadline: each agent round has its own LLMCallTimeout (default 120s).
+	// A hard pipeline deadline would kill multi-round agent reasoning prematurely.
+	qaCtx, qaCancel := context.WithCancel(ctx)
 	defer qaCancel()
 
 	eventBus := event.NewEventBus()
@@ -1748,8 +1770,9 @@ func (s *Service) fallbackNonStream(ctx context.Context, msg *IncomingMessage, s
 
 // runQA executes the WeKnora QA pipeline and returns the full answer text.
 func (s *Service) runQA(ctx context.Context, session *types.Session, query string, customAgent *types.CustomAgent, kbIDs []string, userKey string, quote *QuotedMessage) (string, error) {
-	// Add timeout to prevent indefinite blocking
-	ctx, cancel := context.WithTimeout(ctx, qaTimeout)
+	// Cancellable context (no hard deadline): each agent round has its own
+	// LLMCallTimeout. The context can still be cancelled by /stop.
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	eventBus := event.NewEventBus()
@@ -1855,18 +1878,18 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 		}
 	}()
 
-	// Wait for completion or timeout
+	// Wait for completion or cancellation (e.g., /stop)
 	select {
 	case <-done:
 	case <-ctx.Done():
 		// Mark assistant message as completed to avoid dangling incomplete records
-		assistantMsg.Content = "抱歉，回答超时，请稍后再试。"
+		assistantMsg.Content = "抱歉，回答已被取消。"
 		assistantMsg.IsCompleted = true
 		// Use a fresh context since the original is cancelled
 		if updateErr := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); updateErr != nil {
-			logger.Warnf(ctx, "[IM] Failed to update timed-out assistant message: %v", updateErr)
+			logger.Warnf(ctx, "[IM] Failed to update cancelled assistant message: %v", updateErr)
 		}
-		return "", fmt.Errorf("QA timed out after %v", qaTimeout)
+		return "", fmt.Errorf("QA cancelled: %w", ctx.Err())
 	}
 
 	answerMu.Lock()

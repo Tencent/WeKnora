@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -35,19 +34,19 @@ const (
 	fieldID               = "id"
 )
 
-func NewWeaviateRetrieveEngineRepository(client *weaviate.Client) interfaces.RetrieveEngineRepository {
+// NewWeaviateRetrieveEngineRepository creates and initializes a new Weaviate repository.
+// indexCfg is optional — pass nil to use env var / default values (env path).
+func NewWeaviateRetrieveEngineRepository(client *weaviate.Client, indexCfg *types.IndexConfig) interfaces.RetrieveEngineRepository {
 	log := logger.GetLogger(context.Background())
 	log.Info("[Weaviate] Initializing Weaviate retriever engine repository")
 
-	collectionBaseName := os.Getenv(envWeaviateCollection)
-	if collectionBaseName == "" {
-		log.Warn("[Weaviate] WEAVIATE_COLLECTION environment variable not set, using default collection name")
-		collectionBaseName = defaultCollectionName
-	}
+	collectionBaseName := types.ResolveCollectionName(indexCfg, envWeaviateCollection, defaultCollectionName)
 
 	res := &weaviateRepository{
 		client:             client,
 		collectionBaseName: collectionBaseName,
+		replicationFactor:  indexCfg.GetReplicationFactor(0),
+		desiredShardCount:  indexCfg.GetDesiredShardCount(0),
 	}
 
 	log.Info("[Weaviate] Successfully initialized repository")
@@ -136,6 +135,18 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 					IndexFilterable: &enabled,
 				},
 			},
+		}
+		// Set replication factor if explicitly configured (> 0)
+		if w.replicationFactor > 0 {
+			classObj.ReplicationConfig = &models.ReplicationConfig{
+				Factor: int64(w.replicationFactor),
+			}
+		}
+		// Set shard count if explicitly configured (> 0)
+		if w.desiredShardCount > 0 {
+			classObj.ShardingConfig = map[string]interface{}{
+				"desiredCount": w.desiredShardCount,
+			}
 		}
 		//创建collection
 		if err = w.client.Schema().ClassCreator().WithClass(&classObj).Do(ctx); err != nil {
@@ -429,7 +440,7 @@ func (w *weaviateRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTag
 	// Get all collections
 	collections, err := w.ListCollections(ctx)
 	if err != nil {
-		log.Errorf("[Weaviate] Failed to list collections: %w", err)
+		log.Errorf("[Weaviate] Failed to list collections: %v", err)
 		return fmt.Errorf("failed to list collections: %w", err)
 	}
 
@@ -568,7 +579,7 @@ func (w *weaviateRepository) VectorRetrieve(ctx context.Context,
 	}
 	if len(result.Errors) > 0 {
 		log.Errorf("[Weaviate] Vector search failed: %v", result.Errors)
-		return nil, fmt.Errorf("graphql search failed: %w", result.Errors[0].Message)
+		return nil, fmt.Errorf("graphql search failed: %s", result.Errors[0].Message)
 	}
 
 	data, ok := result.Data["Get"].(map[string]interface{})
@@ -637,7 +648,7 @@ func (w *weaviateRepository) KeywordsRetrieve(ctx context.Context,
 		}
 		if len(result.Errors) > 0 {
 			log.Errorf("[Weaviate] keywords search failed: %v", result.Errors)
-			return nil, fmt.Errorf("graphql search failed: %w", result.Errors[0].Message)
+			return nil, fmt.Errorf("graphql search failed: %s", result.Errors[0].Message)
 		}
 		data, ok := result.Data["Get"].(map[string]interface{})
 		if !ok || data[collectionName] == nil {

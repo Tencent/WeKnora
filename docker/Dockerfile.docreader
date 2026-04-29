@@ -29,12 +29,24 @@ RUN apt-get update && apt-get install -y \
 # 检查是否存在本地protoc安装包，如果存在则离线安装，否则在线安装
 ARG TARGETARCH
 COPY packages/ /app/packages/
-RUN echo "检查本地protoc安装包..." && \
-    case ${TARGETARCH} in \
+RUN ls -lah /app/packages/
+# 兼容 BuildKit 和传统构建：如果 TARGETARCH 为空，使用 uname 检测
+RUN if [ -z "$TARGETARCH" ]; then \
+        case $(uname -m) in \
+            "x86_64") TARGETARCH="amd64" ;; \
+            "aarch64") TARGETARCH="arm64" ;; \
+            "armv7l") TARGETARCH="arm" ;; \
+            *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
+        esac; \
+        echo "[自动检测] 架构: $TARGETARCH"; \
+    else \
+        echo "[BuildKit] 架构: $TARGETARCH"; \
+    fi && \
+    case $TARGETARCH in \
         "amd64") PROTOC_ARCH="x86_64" ;; \
         "arm64") PROTOC_ARCH="aarch_64" ;; \
         "arm") PROTOC_ARCH="arm" ;; \
-        *) echo "Unsupported architecture for protoc: ${TARGETARCH}" && exit 1 ;; \
+        *) echo "Unsupported architecture for protoc: $TARGETARCH" && exit 1 ;; \
     esac && \
     PROTOC_PACKAGE="protoc-3.19.4-linux-${PROTOC_ARCH}.zip" && \
     if [ -f "/app/packages/${PROTOC_PACKAGE}" ]; then \
@@ -100,12 +112,24 @@ RUN apt-get update && apt-get install -y \
 
 # 安装 grpc_health_probe
 ARG TARGETARCH
-RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
-    case ${TARGETARCH} in \
+# 兼容 BuildKit 和传统构建：如果 TARGETARCH 为空，使用 uname 检测
+RUN if [ -z "$TARGETARCH" ]; then \
+        case $(uname -m) in \
+            "x86_64") TARGETARCH="amd64" ;; \
+            "aarch64") TARGETARCH="arm64" ;; \
+            "armv7l") TARGETARCH="arm" ;; \
+            *) echo "Unsupported architecture: $(uname -m)" && exit 1 ;; \
+        esac; \
+        echo "[自动检测] 架构: $TARGETARCH"; \
+    else \
+        echo "[BuildKit] 架构: $TARGETARCH"; \
+    fi && \
+    GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
+    case $TARGETARCH in \
         "amd64") ARCH="amd64" ;; \
         "arm64") ARCH="arm64" ;; \
         "arm") ARCH="arm" ;; \
-        *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+        *) echo "Unsupported architecture: $TARGETARCH" && exit 1 ;; \
     esac && \
     wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-${ARCH} && \
     chmod +x /bin/grpc_health_probe

@@ -162,8 +162,8 @@ func IsValidURL(url string) bool {
 		return false
 	}
 
-	// 检查协议， 只允许 http, https, local, minio, cos, tos 协议
-	allowedProtocols := []string{"http://", "https://", "local://", "minio://", "cos://", "tos://"}
+	// 检查协议， 只允许 http, https, local, minio, cos, tos, oss 协议
+	allowedProtocols := []string{"http://", "https://", "local://", "minio://", "cos://", "tos://", "oss://"}
 	isAllowed := false
 	for _, protocol := range allowedProtocols {
 		if strings.HasPrefix(strings.ToLower(url), protocol) {

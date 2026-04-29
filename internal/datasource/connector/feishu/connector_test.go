@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -128,7 +129,7 @@ func fakeFeishu(nodes []wikiNode) (*httptest.Server, *Config) {
 	})
 
 	// --- export file download ---
-	mux.HandleFunc("/open-apis/drive/v1/export_tasks/file/ticket-123/download", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/open-apis/drive/v1/export_tasks/file/ft-abc/download", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Write([]byte("fake-docx-content"))
 	})
@@ -219,6 +220,22 @@ func TestSanitizeFileName(t *testing.T) {
 				t.Errorf("sanitizeFileName(%q) = %q, want %q", tt.input, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSanitizeFileName_TruncatesAtRuneBoundary(t *testing.T) {
+	// Each 测 is 3 bytes; raw byte truncation at 200 would split a rune and
+	// produce invalid UTF-8 that downstream filename validation rejects.
+	long := strings.Repeat("测试", 100)
+	got := sanitizeFileName(long)
+	if !utf8.ValidString(got) {
+		t.Fatalf("sanitizeFileName produced invalid UTF-8: %q", got)
+	}
+	if len(got) > 200 {
+		t.Errorf("len = %d, want ≤ 200", len(got))
+	}
+	if len(got) == 0 {
+		t.Error("result is empty")
 	}
 }
 

@@ -1,5 +1,5 @@
 <template>
-    <div class="bot_msg">
+    <div class="bot_msg" :class="{ 'is-embedded': embeddedMode }">
         <div style="display: flex;flex-direction: column; gap:8px">
             <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
             <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
@@ -27,8 +27,7 @@
             <!-- 直接渲染完整内容，避免切分导致的问题，样式与 thinking 一致 -->
             <!-- 只有当有实际内容时才显示包围框 -->
             <div class="content-wrapper" v-if="hasActualContent">
-                <div class="ai-markdown-template markdown-content">
-                    <div v-for="(token, index) in markdownTokens" :key="index" v-html="renderToken(token)"></div>
+                <div class="ai-markdown-template markdown-content" v-html="renderedHTML">
                 </div>
             </div>
             <!-- Streaming indicator (non-Agent mode) -->
@@ -62,6 +61,8 @@
 <script setup>
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, defineProps, nextTick, onUpdated } from 'vue';
 import { marked } from 'marked';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
 import deepThink from './deepThink.vue';
 import AgentStreamDisplay from './AgentStreamDisplay.vue';
@@ -85,6 +86,17 @@ import {
 marked.use({
     breaks: true,  // 全局启用单个换行支持
 });
+
+marked.use(markedKatex({ throwOnError: false }));
+
+const preprocessMathDelimiters = (rawText) => {
+    if (!rawText || typeof rawText !== 'string') {
+        return '';
+    }
+    return rawText
+        .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+        .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+};
 
 ensureMermaidInitialized();
 
@@ -114,6 +126,10 @@ const props = defineProps({
     isFirstEnter: {
         type: Boolean,
         required: false
+    },
+    embeddedMode: {
+        type: Boolean,
+        default: false
     }
 });
 
@@ -147,19 +163,15 @@ const mentionedItems = computed(() => {
     return props.session?.mentioned_items || [];
 });
 
-const markdownTokens = computed(() => {
+// 单次渲染整个 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
+const renderedHTML = computed(() => {
     const text = props.content || props.session?.content || '';
-    if (!text || typeof text !== 'string') {
-        return [];
-    }
-
+    if (!text || typeof text !== 'string') return '';
     const processed = replaceIncompleteImageWithPlaceholder(text);
-    
-    // 首先对 Markdown 内容进行安全处理
-    const safeMarkdown = safeMarkdownToHTML(processed);
-    
-    // 使用 marked.lexer 分词
-    return marked.lexer(safeMarkdown);
+    const safeText = preprocessMathDelimiters(processed);
+    const safeMarkdown = safeMarkdownToHTML(safeText);
+    const html = marked.parse(safeMarkdown, { renderer: customRenderer, breaks: true });
+    return sanitizeHTML(html);
 });
 
 // 计算属性：判断是否有实际内容（非空且不只是空白）
@@ -167,31 +179,6 @@ const hasActualContent = computed(() => {
     const text = props.content || props.session?.content || '';
     return text && text.trim().length > 0;
 });
-
-// 渲染单个 token 为 HTML
-const renderToken = (token) => {
-    try {
-        // 创建临时的 marked 配置
-        const markedOptions = {
-            renderer: customRenderer,
-            breaks: true
-        };
-        
-        // 解析单个 token
-        // marked.parser 接受 token 数组
-        let html = marked.parser([token], markedOptions);
-        
-        // 使用 DOMPurify 进行最终的安全清理
-        return sanitizeHTML(html);
-    } catch (e) {
-        console.error('Token rendering error:', e);
-        return '';
-    }
-};
-
-const myMarkdown = (res) => {
-    return marked.parse(res, { renderer })
-}
 
 // 获取实际内容
 const getActualContent = () => {
@@ -287,6 +274,16 @@ onBeforeUnmount(() => {
 <style lang="less" scoped>
 @import '../../../components/css/markdown.less';
 @import '../../../components/css/chat-message-shared.less';
+
+.bot_msg {
+    &.is-embedded {
+        width: 100%;
+        
+        :deep(.agent-stream-display) {
+            width: 100%;
+        }
+    }
+}
 
 // 内容包装器 - 与 Agent 模式的 answer 样式一致
 .content-wrapper {

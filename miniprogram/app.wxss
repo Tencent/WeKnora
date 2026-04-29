@@ -1,0 +1,74 @@
+page {
+  min-height: 100%;
+  background: #f3f3f3;
+  color: #1a1a1a;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  background: linear-gradient(180deg, #f8faf9 0%, #f3f3f3 100%);
+  padding: 32rpx;
+}
+
+.card {
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: #ffffff;
+  border: 1rpx solid #e7ebf0;
+  box-shadow: 0 12rpx 36rpx rgba(7, 192, 95, 0.08);
+}
+
+.title {
+  font-size: 40rpx;
+  font-weight: 700;
+  margin-bottom: 12rpx;
+}
+
+.muted {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 26rpx;
+}
+
+.field {
+  margin-top: 24rpx;
+}
+
+.label {
+  display: block;
+  margin-bottom: 12rpx;
+  color: rgba(0, 0, 0, 0.9);
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+input,
+textarea,
+picker {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88rpx;
+  padding: 20rpx 24rpx;
+  border: 1rpx solid #dcdcdc;
+  border-radius: 18rpx;
+  background: #ffffff;
+  color: #1a1a1a;
+  font-size: 28rpx;
+}
+
+textarea {
+  min-height: 180rpx;
+}
+
+button {
+  margin-top: 24rpx;
+  border-radius: 18rpx;
+  background: #07c05f;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+button[disabled] {
+  background: #c5c5c5;
+}

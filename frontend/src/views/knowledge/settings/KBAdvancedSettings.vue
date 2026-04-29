@@ -6,7 +6,8 @@
     </div>
 
     <div class="settings-group">
-      <!-- Question Generation feature -->
+      <!-- Question Generation feature (only useful for RAG indexing) -->
+      <template v-if="ragEnabled !== false">
       <div class="setting-row">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.advanced.questionGeneration.label') }}</label>
@@ -41,6 +42,7 @@
           </div>
         </div>
       </div>
+      </template>
 
     </div>
   </div>
@@ -56,6 +58,7 @@ interface QuestionGenerationConfig {
 
 interface Props {
   questionGeneration?: QuestionGenerationConfig
+  ragEnabled?: boolean
   allModels?: any[]
 }
 

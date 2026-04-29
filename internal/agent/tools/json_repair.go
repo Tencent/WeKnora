@@ -11,6 +11,8 @@ import (
 //   - Trailing commas before closing brackets
 //   - Single quotes instead of double quotes
 //   - Unquoted keys
+//   - Invalid backslash escapes inside strings (e.g. regex patterns like
+//     "C\+\+", "\d+", "\.log$") where the LLM forgot to double-escape.
 //
 // Returns the repaired JSON string. If repair is not possible,
 // returns the original string unchanged (caller should handle parse errors).
@@ -30,6 +32,10 @@ func RepairJSON(s string) string {
 		}
 	}
 
+	// Fix invalid backslash escapes before anything else, because unbalanced
+	// strings confuse the comma/bracket trackers below.
+	s = fixInvalidEscapes(s)
+
 	// Fix trailing commas: ,} or ,]
 	s = fixTrailingCommas(s)
 
@@ -37,6 +43,63 @@ func RepairJSON(s string) string {
 	s = balanceBrackets(s)
 
 	return s
+}
+
+// fixInvalidEscapes turns invalid JSON string escapes into literal backslash
+// sequences. JSON only allows the escape letters \" \\ \/ \b \f \n \r \t \u;
+// any other backslash inside a string (e.g. \+ \d \w \. \| \( \)) is a parse
+// error. LLMs frequently emit these when they meant to pass a regex pattern
+// without double-escaping — rewriting "\+" to "\\+" recovers the LLM's intent
+// (the unmarshalled Go string becomes "\+", which is what the regex engine
+// expects) and is idempotent on already-valid JSON.
+func fixInvalidEscapes(s string) string {
+	var out strings.Builder
+	out.Grow(len(s) + 8)
+	runes := []rune(s)
+	inString := false
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if !inString {
+			out.WriteRune(r)
+			if r == '"' {
+				inString = true
+			}
+			continue
+		}
+		if r == '"' {
+			out.WriteRune(r)
+			inString = false
+			continue
+		}
+		if r != '\\' {
+			out.WriteRune(r)
+			continue
+		}
+		// Found a backslash inside a string. Peek at the next rune to decide
+		// whether this is a valid JSON escape.
+		if i+1 >= len(runes) {
+			// Dangling backslash at EOF — escape it so we don't leave the
+			// string in a "pending escape" state for downstream parsers.
+			out.WriteString(`\\`)
+			continue
+		}
+		next := runes[i+1]
+		switch next {
+		case '"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u':
+			// Valid JSON escape — pass through unchanged.
+			out.WriteRune(r)
+			out.WriteRune(next)
+			i++
+		default:
+			// Invalid escape — most likely a regex metachar that the LLM
+			// forgot to double-escape. Emit a literal backslash + the next
+			// rune, so the final Go string preserves the \X sequence.
+			out.WriteString(`\\`)
+			out.WriteRune(next)
+			i++
+		}
+	}
+	return out.String()
 }
 
 // fixTrailingCommas removes trailing commas before closing brackets/braces.

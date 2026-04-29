@@ -350,7 +350,7 @@ func TestValidateSQL_CombinedOptions(t *testing.T) {
 			sql:           "SELECT * FROM users WHERE id = 1 OR 1=1",
 			allowedTables: []string{"users", "orders"},
 			wantValid:     false,
-			wantErrorCnt:  1, // Only injection error
+			wantErrorCnt:  2, // Injection errors
 		},
 		{
 			name:          "Invalid table but no injection",
@@ -408,7 +408,7 @@ func ExampleValidateSQL() {
 	// Output:
 	// Example 1 - Valid: true
 	// Example 2 - Valid: false
-	// Error: High-risk SQL injection pattern detected
+	// Error: Potential SQL injection risk detected
 	// Example 3 - Valid: false, Error count: 2
 }
 

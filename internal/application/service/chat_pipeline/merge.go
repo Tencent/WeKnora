@@ -260,136 +260,207 @@ func (p *PluginMerge) resolveParentChunks(
 		parentMap[c.ID] = c
 	}
 
+	// Check if any results are image chunks; only then do we need
+	// grandparent resolution and the extra DB round-trip.
+	hasImageResults := false
+	for _, r := range results {
+		if r.ChunkType == string(types.ChunkTypeImageOCR) || r.ChunkType == string(types.ChunkTypeImageCaption) {
+			hasImageResults = true
+			break
+		}
+	}
+
+	var grandparentIDs []string
+	if hasImageResults {
+		// Fetch grandparent chunks for the image → text → parent_text chain.
+		for _, pc := range parentChunks {
+			if pc.ParentChunkID != "" && pc.ChunkType == types.ChunkTypeText {
+				if _, already := parentMap[pc.ParentChunkID]; !already {
+					grandparentIDs = append(grandparentIDs, pc.ParentChunkID)
+				}
+			}
+		}
+		if len(grandparentIDs) > 0 {
+			gpChunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, grandparentIDs)
+			if err != nil {
+				pipelineWarn(ctx, "Merge", "grandparent_fetch_failed", map[string]interface{}{
+					"error": err.Error(),
+				})
+			} else {
+				for _, c := range gpChunks {
+					parentMap[c.ID] = c
+				}
+			}
+		}
+	}
+
 	// Collect merged ImageInfo for each parent by fetching ALL sibling
 	// child chunks. Individual child chunks only carry ImageInfo for images
 	// within their own range, but the parent content spans all children.
-	parentImageInfoMap := p.collectParentImageInfo(ctx, tenantID, ids)
+	imageInfoIDs := ids
+	if len(grandparentIDs) > 0 {
+		imageInfoIDs = append(append([]string(nil), ids...), grandparentIDs...)
+	}
+	parentImageInfoMap := p.collectParentImageInfo(ctx, tenantID, imageInfoIDs)
 
-	// Replace child content with parent content.
-	// Only replace for text chunks whose parent is a parent_text chunk
-	// (i.e., the parent-child chunking strategy). Summary chunks also carry
-	// a ParentChunkID that points to their source chunk, but that is a
-	// different semantic — replacing summary content with its source would
-	// degrade quality.
 	for _, r := range results {
 		if r.ParentChunkID == "" {
 			continue
 		}
-		// Skip non-text chunks (e.g., summary, image_caption) — their
-		// ParentChunkID has a different meaning than the parent-child
-		// chunking strategy.
-		if r.ChunkType != string(types.ChunkTypeText) {
-			continue
-		}
-		parent, ok := parentMap[r.ParentChunkID]
-		if !ok || parent.Content == "" {
-			continue
-		}
-		// Only replace if the parent is actually a parent_text chunk from
-		// the parent-child chunking strategy.
-		if parent.ChunkType != types.ChunkTypeParentText {
-			continue
-		}
-		pipelineInfo(ctx, "Merge", "parent_resolve", map[string]interface{}{
-			"child_id":   r.ID,
-			"parent_id":  r.ParentChunkID,
-			"child_len":  runeLen(r.Content),
-			"parent_len": runeLen(parent.Content),
-		})
-		r.Content = parent.Content
-		r.StartAt = parent.StartAt
-		r.EndAt = parent.EndAt
-		if mergedImageInfo, ok := parentImageInfoMap[r.ParentChunkID]; ok && mergedImageInfo != "" {
-			r.ImageInfo = mergedImageInfo
-		}
-		// Track the original child as a sub-chunk
-		if !containsID(r.SubChunkID, r.ID) {
-			r.SubChunkID = append(r.SubChunkID, r.ID)
+
+		switch r.ChunkType {
+		case string(types.ChunkTypeText):
+			// text → parent_text resolution (parent-child chunking strategy).
+			// Summary chunks also carry a ParentChunkID that points to their
+			// source chunk, but that is a different semantic — replacing
+			// summary content with its source would degrade quality.
+			parent, ok := parentMap[r.ParentChunkID]
+			if !ok || parent.Content == "" || parent.ChunkType != types.ChunkTypeParentText {
+				continue
+			}
+			pipelineInfo(ctx, "Merge", "parent_resolve", map[string]interface{}{
+				"child_id":   r.ID,
+				"parent_id":  r.ParentChunkID,
+				"child_len":  runeLen(r.Content),
+				"parent_len": runeLen(parent.Content),
+			})
+			r.Content = parent.Content
+			r.StartAt = parent.StartAt
+			r.EndAt = parent.EndAt
+			if mergedImageInfo, ok := parentImageInfoMap[r.ParentChunkID]; ok && mergedImageInfo != "" {
+				r.ImageInfo = mergedImageInfo
+			}
+			if !containsID(r.SubChunkID, r.ID) {
+				r.SubChunkID = append(r.SubChunkID, r.ID)
+			}
+
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+			// image_ocr/image_caption → text parent → optional parent_text grandparent.
+			// Replace content with parent text for surrounding context.
+			parent, ok := parentMap[r.ParentChunkID]
+			if !ok || parent.Content == "" {
+				continue
+			}
+			resolvedParent := parent
+			// If parent text uses parent-child chunking, resolve one more level
+			if parent.ChunkType == types.ChunkTypeText && parent.ParentChunkID != "" {
+				if gp, gpOK := parentMap[parent.ParentChunkID]; gpOK && gp.ChunkType == types.ChunkTypeParentText && gp.Content != "" {
+					resolvedParent = gp
+				}
+			}
+			pipelineInfo(ctx, "Merge", "image_parent_resolve", map[string]interface{}{
+				"child_id":    r.ID,
+				"child_type":  r.ChunkType,
+				"resolved_id": resolvedParent.ID,
+				"child_len":   runeLen(r.Content),
+				"parent_len":  runeLen(resolvedParent.Content),
+			})
+			r.Content = resolvedParent.Content
+			r.StartAt = resolvedParent.StartAt
+			r.EndAt = resolvedParent.EndAt
+			if mergedInfo, ok := parentImageInfoMap[resolvedParent.ID]; ok && mergedInfo != "" {
+				r.ImageInfo = mergedInfo
+			}
+			if !containsID(r.SubChunkID, r.ID) {
+				r.SubChunkID = append(r.SubChunkID, r.ID)
+			}
 		}
 	}
 
 	return results
 }
 
-// collectParentImageInfo batch-fetches all child chunks for the given parents
-// and merges their ImageInfo into a single JSON string per parent. This ensures
-// that when child content is replaced with parent content, the complete set of
-// image descriptions across all sibling chunks is preserved.
+// collectParentImageInfo batch-fetches image info for the given parent_text
+// chunk IDs using a two-level query:
+//
+//	Level 1: parent_text → text children
+//	Level 2: text children → image_ocr / image_caption grandchildren (carry image_info)
 func (p *PluginMerge) collectParentImageInfo(
 	ctx context.Context,
 	tenantID uint64,
 	parentIDs []string,
 ) map[string]string {
-	result := make(map[string]string, len(parentIDs))
-
-	allChildren, err := p.chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
+	// Level 1: get direct children of parent_text chunks
+	children, err := p.chunkRepo.ListChunksByParentIDs(ctx, tenantID, parentIDs)
 	if err != nil {
 		pipelineWarn(ctx, "Merge", "parent_imageinfo_fetch_failed", map[string]interface{}{
 			"parent_cnt": len(parentIDs),
 			"error":      err.Error(),
 		})
-		return result
+		return nil
 	}
 
-	// Group children by parent chunk ID, collecting unique ImageInfo entries
-	type parentAgg struct {
-		imageInfos []types.ImageInfo
-		uniqueURLs map[string]bool
-		siblingCnt int
+	type agg struct {
+		infos    []types.ImageInfo
+		seenURLs map[string]bool
 	}
-	aggMap := make(map[string]*parentAgg, len(parentIDs))
-
-	for _, child := range allChildren {
-		agg, ok := aggMap[child.ParentChunkID]
-		if !ok {
-			agg = &parentAgg{uniqueURLs: make(map[string]bool)}
-			aggMap[child.ParentChunkID] = agg
-		}
-		agg.siblingCnt++
-
-		if child.ImageInfo == "" {
-			continue
+	aggMap := make(map[string]*agg)
+	addInfo := func(targetID string, chunk *types.Chunk) {
+		if chunk.ImageInfo == "" {
+			return
 		}
 		var infos []types.ImageInfo
-		if err := json.Unmarshal([]byte(child.ImageInfo), &infos); err != nil {
-			pipelineWarn(ctx, "Merge", "parent_imageinfo_parse", map[string]interface{}{
-				"chunk_id": child.ID,
-				"error":    err.Error(),
-			})
-			continue
+		if err := json.Unmarshal([]byte(chunk.ImageInfo), &infos); err != nil || len(infos) == 0 {
+			return
+		}
+		a, ok := aggMap[targetID]
+		if !ok {
+			a = &agg{seenURLs: make(map[string]bool)}
+			aggMap[targetID] = a
 		}
 		for _, info := range infos {
 			key := info.URL
 			if key == "" {
 				key = info.OriginalURL
 			}
-			if key != "" && !agg.uniqueURLs[key] {
-				agg.uniqueURLs[key] = true
-				agg.imageInfos = append(agg.imageInfos, info)
+			if key != "" && !a.seenURLs[key] {
+				a.seenURLs[key] = true
+				a.infos = append(a.infos, info)
 			}
 		}
 	}
 
-	for parentID, agg := range aggMap {
-		if len(agg.imageInfos) == 0 {
-			continue
+	var textChildIDs []string
+	textToParent := make(map[string]string, len(children))
+	for _, child := range children {
+		switch child.ChunkType {
+		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
+			addInfo(child.ParentChunkID, child)
+		case types.ChunkTypeText:
+			textChildIDs = append(textChildIDs, child.ID)
+			textToParent[child.ID] = child.ParentChunkID
 		}
-		merged, err := json.Marshal(agg.imageInfos)
-		if err != nil {
-			pipelineWarn(ctx, "Merge", "parent_imageinfo_marshal", map[string]interface{}{
-				"parent_id": parentID,
-				"error":     err.Error(),
-			})
-			continue
-		}
-		result[parentID] = string(merged)
-
-		pipelineInfo(ctx, "Merge", "parent_imageinfo_collected", map[string]interface{}{
-			"parent_id":   parentID,
-			"sibling_cnt": agg.siblingCnt,
-			"image_cnt":   len(agg.imageInfos),
-		})
 	}
 
+	// Level 2: text children → image grandchildren
+	if len(textChildIDs) > 0 {
+		grandChildren, err := p.chunkRepo.ListChunksByParentIDs(ctx, tenantID, textChildIDs)
+		if err != nil {
+			pipelineWarn(ctx, "Merge", "parent_imageinfo_l2_fetch_failed", map[string]interface{}{
+				"text_cnt": len(textChildIDs),
+				"error":    err.Error(),
+			})
+		} else {
+			for _, gc := range grandChildren {
+				if gc.ChunkType != types.ChunkTypeImageOCR && gc.ChunkType != types.ChunkTypeImageCaption {
+					continue
+				}
+				if parentTextID, ok := textToParent[gc.ParentChunkID]; ok {
+					addInfo(parentTextID, gc)
+				}
+			}
+		}
+	}
+
+	result := make(map[string]string, len(aggMap))
+	for id, a := range aggMap {
+		if len(a.infos) == 0 {
+			continue
+		}
+		data, err := json.Marshal(a.infos)
+		if err == nil {
+			result[id] = string(data)
+		}
+	}
 	return result
 }

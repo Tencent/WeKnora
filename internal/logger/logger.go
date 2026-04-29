@@ -191,6 +191,16 @@ func GetLogger(c context.Context) *logrus.Entry {
 	return logrus.NewEntry(appLogger)
 }
 
+// SetOutput overrides the internal logger's output destination.
+// Intended for use in tests that need to capture and assert on log content
+// (e.g. verifying secrets are not written out). Restore the original writer
+// (usually os.Stdout) in a defer after the test.
+func SetOutput(w io.Writer) {
+	loggerMu.Lock()
+	defer loggerMu.Unlock()
+	appLogger.SetOutput(w)
+}
+
 // SetLogLevel 设置日志级别
 func SetLogLevel(level LogLevel) {
 	var logLevel logrus.Level
@@ -388,6 +398,11 @@ func CloneContext(ctx context.Context) context.Context {
 		types.LanguageContextKey,
 		types.SessionTenantIDContextKey,
 		types.EmbedQueryContextKey,
+		// Keep the Langfuse trace alive across CloneContext boundaries so
+		// LLM/Embedder/Reranker/VLM/ASR wrappers attach their generations
+		// to the same trace opened by GinMiddleware, instead of each call
+		// auto-creating its own orphan trace.
+		types.LangfuseTraceContextKey,
 	} {
 		if v := ctx.Value(k); v != nil {
 			newCtx = context.WithValue(newCtx, k, v)

@@ -32,7 +32,12 @@ type KnowledgeTag struct {
 
 // BeforeCreate ensures SeqID is populated for databases that don't support
 // autoIncrement on non-primary-key columns (e.g. SQLite).
+// On PostgreSQL/MySQL the DB sequence handles this, so we skip to avoid
+// duplicate key races under concurrent inserts.
 func (t *KnowledgeTag) BeforeCreate(tx *gorm.DB) error {
+	if tx.Dialector.Name() != "sqlite" {
+		return nil
+	}
 	if t.SeqID == 0 {
 		var maxSeqID *int64
 		tx.Unscoped().Model(&KnowledgeTag{}).

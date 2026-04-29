@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 const (
@@ -29,7 +30,13 @@ type AliyunEmbedder struct {
 	httpClient           *http.Client
 	timeout              time.Duration
 	maxRetries           int
+	customHeaders        map[string]string
 	EmbedderPooler
+}
+
+// SetCustomHeaders 设置用户自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+func (e *AliyunEmbedder) SetCustomHeaders(headers map[string]string) {
+	e.customHeaders = headers
 }
 
 // AliyunEmbedRequest represents an Aliyun DashScope multimodal embedding request
@@ -154,6 +161,7 @@ func (e *AliyunEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
+		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
 		resp, err = e.httpClient.Do(req)
 		if err == nil {

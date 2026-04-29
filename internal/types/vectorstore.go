@@ -4,6 +4,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -201,11 +203,19 @@ func (c ConnectionConfig) MaskSensitiveFields() ConnectionConfig {
 // IndexConfig holds optional index/collection configuration for the vector store.
 // If empty, engine-specific defaults are used.
 type IndexConfig struct {
+	// --- Existing fields ---
 	IndexName        string `yaml:"index_name" json:"index_name,omitempty"`                 // ES, OpenSearch
 	NumberOfShards   int    `yaml:"number_of_shards" json:"number_of_shards,omitempty"`     // ES, OpenSearch
 	NumberOfReplicas int    `yaml:"number_of_replicas" json:"number_of_replicas,omitempty"` // ES, OpenSearch
-	CollectionPrefix string `yaml:"collection_prefix" json:"collection_prefix,omitempty"`   // Qdrant
+	CollectionPrefix string `yaml:"collection_prefix" json:"collection_prefix,omitempty"`   // Qdrant, Weaviate
 	CollectionName   string `yaml:"collection_name" json:"collection_name,omitempty"`       // Milvus
+
+	// --- Scalability fields ---
+	ShardNumber       int `yaml:"shard_number" json:"shard_number,omitempty"`               // Qdrant: number of shards per collection
+	ReplicationFactor int `yaml:"replication_factor" json:"replication_factor,omitempty"`    // Qdrant, Weaviate: number of replicas
+	ShardsNum         int `yaml:"shards_num" json:"shards_num,omitempty"`                   // Milvus: number of shards per collection (CreateCollection)
+	ReplicaNumber     int `yaml:"replica_number" json:"replica_number,omitempty"`            // Milvus: in-memory replica count (LoadCollection)
+	DesiredShardCount int `yaml:"desired_shard_count" json:"desired_shard_count,omitempty"`  // Weaviate: number of shards per collection
 }
 
 // Value implements the driver.Valuer interface.
@@ -248,10 +258,179 @@ func (c IndexConfig) GetIndexNameOrDefault(engineType RetrieverEngineType) strin
 		if c.CollectionPrefix != "" {
 			return c.CollectionPrefix
 		}
-		return "WeKnora"
+		return "Weknora_embeddings"
 	default:
 		return c.IndexName
 	}
+}
+
+// ---------------------------------------------------------------------------
+// IndexConfig — getter helpers (pointer receiver for nil safety)
+// ---------------------------------------------------------------------------
+
+// GetNumberOfShards returns the configured number_of_shards, or def if unset/zero.
+func (c *IndexConfig) GetNumberOfShards(def int) int {
+	if c != nil && c.NumberOfShards > 0 {
+		return c.NumberOfShards
+	}
+	return def
+}
+
+// GetNumberOfReplicas returns the configured number_of_replicas, or def if unset/zero.
+// Note: 0 replicas cannot be distinguished from "not set" because the int field with
+// json:"omitempty" omits zero values. If zero-replica support is needed in the future,
+// change the field type to *int. Currently 0 is treated as "use server default".
+func (c *IndexConfig) GetNumberOfReplicas(def int) int {
+	if c != nil && c.NumberOfReplicas > 0 {
+		return c.NumberOfReplicas
+	}
+	return def
+}
+
+// GetShardNumber returns the configured shard_number (Qdrant), or def if unset/zero.
+func (c *IndexConfig) GetShardNumber(def int) int {
+	if c != nil && c.ShardNumber > 0 {
+		return c.ShardNumber
+	}
+	return def
+}
+
+// GetReplicationFactor returns the configured replication_factor (Qdrant, Weaviate), or def if unset/zero.
+func (c *IndexConfig) GetReplicationFactor(def int) int {
+	if c != nil && c.ReplicationFactor > 0 {
+		return c.ReplicationFactor
+	}
+	return def
+}
+
+// GetShardsNum returns the configured shards_num (Milvus), or def if unset/zero.
+func (c *IndexConfig) GetShardsNum(def int) int {
+	if c != nil && c.ShardsNum > 0 {
+		return c.ShardsNum
+	}
+	return def
+}
+
+// GetReplicaNumber returns the configured replica_number (Milvus in-memory replicas), or def if unset/zero.
+// Milvus replicas are set at LoadCollection time, not CreateCollection.
+// They control how many query nodes hold the data in memory for read HA/throughput.
+func (c *IndexConfig) GetReplicaNumber(def int) int {
+	if c != nil && c.ReplicaNumber > 0 {
+		return c.ReplicaNumber
+	}
+	return def
+}
+
+// GetDesiredShardCount returns the configured desired_shard_count (Weaviate), or def if unset/zero.
+func (c *IndexConfig) GetDesiredShardCount(def int) int {
+	if c != nil && c.DesiredShardCount > 0 {
+		return c.DesiredShardCount
+	}
+	return def
+}
+
+// ---------------------------------------------------------------------------
+// IndexConfig — resolve helpers (for Repository layer, with env var fallback)
+// ---------------------------------------------------------------------------
+
+// ResolveIndexName returns the index name from IndexConfig, falling back to env var and then default.
+// Used by Repository constructors. For service-layer duplicate checking, use GetIndexNameOrDefault instead.
+func ResolveIndexName(ic *IndexConfig, envKey, defaultVal string) string {
+	if ic != nil && ic.IndexName != "" {
+		return ic.IndexName
+	}
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+// ResolveCollectionName returns the collection name from IndexConfig, falling back to env var and then default.
+// Priority: CollectionPrefix > CollectionName > env var > defaultVal.
+// CollectionPrefix is checked first because Qdrant/Weaviate use it as the base name.
+// CollectionName (Milvus) is checked second. If both are set, CollectionPrefix wins —
+// this is safe because each VectorStore has a single engine type, so only one field is relevant.
+func ResolveCollectionName(ic *IndexConfig, envKey, defaultVal string) string {
+	if ic != nil {
+		if ic.CollectionPrefix != "" {
+			return ic.CollectionPrefix
+		}
+		if ic.CollectionName != "" {
+			return ic.CollectionName
+		}
+	}
+	if v := os.Getenv(envKey); v != "" {
+		return v
+	}
+	return defaultVal
+}
+
+// OptionalUint32 converts int to *uint32 for Qdrant SDK.
+// Returns nil for values <= 0, which tells Qdrant to use its server default.
+func OptionalUint32(v int) *uint32 {
+	if v <= 0 {
+		return nil
+	}
+	u := uint32(v)
+	return &u
+}
+
+// ---------------------------------------------------------------------------
+// IndexConfig — validation
+// ---------------------------------------------------------------------------
+
+const (
+	// maxShards is the upper bound for shard-related configuration values.
+	maxShards = 64
+	// maxReplicas is the upper bound for replication-related configuration values.
+	maxReplicas = 10
+)
+
+// validIndexNamePattern restricts index/collection names to safe characters.
+// Must start with a letter, followed by alphanumeric, underscore, or hyphen. Max 128 chars.
+var validIndexNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,127}$`)
+
+// ValidateIndexConfig checks IndexConfig fields for safe values.
+// Call this from the service layer before persisting a VectorStore.
+func ValidateIndexConfig(ic IndexConfig) error {
+	// Validate string fields (index/collection names)
+	if ic.IndexName != "" && !validIndexNamePattern.MatchString(ic.IndexName) {
+		return errors.NewValidationError(
+			"index_name must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)")
+	}
+	if ic.CollectionPrefix != "" && !validIndexNamePattern.MatchString(ic.CollectionPrefix) {
+		return errors.NewValidationError(
+			"collection_prefix must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)")
+	}
+	if ic.CollectionName != "" && !validIndexNamePattern.MatchString(ic.CollectionName) {
+		return errors.NewValidationError(
+			"collection_name must start with a letter and contain only alphanumeric, underscore, or hyphen characters (max 128)")
+	}
+
+	// Validate numeric fields (shards/replicas) — must be within safe bounds
+	if ic.NumberOfShards < 0 || ic.NumberOfShards > maxShards {
+		return errors.NewValidationError(fmt.Sprintf("number_of_shards must be between 0 and %d", maxShards))
+	}
+	if ic.NumberOfReplicas < 0 || ic.NumberOfReplicas > maxReplicas {
+		return errors.NewValidationError(fmt.Sprintf("number_of_replicas must be between 0 and %d", maxReplicas))
+	}
+	if ic.ShardNumber < 0 || ic.ShardNumber > maxShards {
+		return errors.NewValidationError(fmt.Sprintf("shard_number must be between 0 and %d", maxShards))
+	}
+	if ic.ReplicationFactor < 0 || ic.ReplicationFactor > maxReplicas {
+		return errors.NewValidationError(fmt.Sprintf("replication_factor must be between 0 and %d", maxReplicas))
+	}
+	if ic.ShardsNum < 0 || ic.ShardsNum > maxShards {
+		return errors.NewValidationError(fmt.Sprintf("shards_num must be between 0 and %d", maxShards))
+	}
+	if ic.ReplicaNumber < 0 || ic.ReplicaNumber > maxReplicas {
+		return errors.NewValidationError(fmt.Sprintf("replica_number must be between 0 and %d", maxReplicas))
+	}
+	if ic.DesiredShardCount < 0 || ic.DesiredShardCount > maxShards {
+		return errors.NewValidationError(fmt.Sprintf("desired_shard_count must be between 0 and %d", maxShards))
+	}
+
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -305,72 +484,64 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 	return []VectorStoreTypeInfo{
 		{
 			Type:        "elasticsearch",
-			DisplayName: "Elasticsearch (Keywords + Vector)",
+			DisplayName: "Elasticsearch",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "Elasticsearch URL (e.g., http://localhost:9200)"},
-				{Name: "username", Type: "string", Required: false},
-				{Name: "password", Type: "string", Required: false, Sensitive: true},
+				{Name: "addr", Type: "string", Required: true, Description: "URL", Default: "http://localhost:9200"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "elastic"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "index_name", Type: "string", Required: false, Default: "xwrag_default"},
-				{Name: "number_of_shards", Type: "number", Required: false},
-				{Name: "number_of_replicas", Type: "number", Required: false},
+				{Name: "index_name", Type: "string", Required: false, Description: "Index Name", Default: "weknora"},
+				{Name: "number_of_shards", Type: "number", Required: false, Description: "Shards", Default: 4},
+				{Name: "number_of_replicas", Type: "number", Required: false, Description: "Replicas", Default: 1},
 			},
 		},
-		{
-			Type:        "postgres",
-			DisplayName: "PostgreSQL (Keywords + Vector)",
-			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "use_default_connection", Type: "boolean", Required: false, Default: true,
-					Description: "Use the application's default database connection"},
-				{Name: "addr", Type: "string", Required: false,
-					Description: "PostgreSQL connection string (required if use_default_connection is false)"},
-				{Name: "username", Type: "string", Required: false},
-				{Name: "password", Type: "string", Required: false, Sensitive: true},
-			},
-		},
+		// PostgreSQL and SQLite are excluded from the type list because they only support
+		// the app's default DB connection (UseDefaultConnection=true). They appear as
+		// env stores when configured via RETRIEVE_DRIVER but cannot be added as DB stores.
 		{
 			Type:        "qdrant",
-			DisplayName: "Qdrant (Keywords + Vector)",
+			DisplayName: "Qdrant",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "host", Type: "string", Required: true, Description: "Qdrant host"},
-				{Name: "port", Type: "number", Required: false, Default: 6334},
-				{Name: "api_key", Type: "string", Required: false, Sensitive: true},
-				{Name: "use_tls", Type: "boolean", Required: false, Default: false},
+				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "localhost"},
+				{Name: "port", Type: "number", Required: false, Description: "Port", Default: 6334},
+				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
+				{Name: "use_tls", Type: "boolean", Required: false, Description: "Use TLS", Default: false},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Default: "weknora_embeddings"},
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "weknora_embeddings"},
+				{Name: "shard_number", Type: "number", Required: false, Description: "Shard Number", Default: 1},
+				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
 			},
 		},
 		{
 			Type:        "milvus",
-			DisplayName: "Milvus (Keywords + Vector)",
+			DisplayName: "Milvus",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "addr", Type: "string", Required: true, Description: "Milvus address (e.g., localhost:19530)"},
-				{Name: "username", Type: "string", Required: false},
-				{Name: "password", Type: "string", Required: false, Sensitive: true},
+				{Name: "addr", Type: "string", Required: true, Description: "Address", Default: "localhost:19530"},
+				{Name: "username", Type: "string", Required: false, Description: "Username", Default: "root"},
+				{Name: "password", Type: "string", Required: false, Sensitive: true, Description: "Password"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_name", Type: "string", Required: false, Default: "weknora_embeddings"},
+				{Name: "collection_name", Type: "string", Required: false, Description: "Collection Name", Default: "weknora_embeddings"},
+				{Name: "shards_num", Type: "number", Required: false, Description: "Shards (write parallelism)", Default: 1},
+				{Name: "replica_number", Type: "number", Required: false, Description: "In-memory Replicas (read HA)", Default: 1},
 			},
 		},
 		{
 			Type:        "weaviate",
-			DisplayName: "Weaviate (Keywords + Vector)",
+			DisplayName: "Weaviate",
 			ConnectionFields: []VectorStoreFieldInfo{
-				{Name: "host", Type: "string", Required: true, Description: "Weaviate host (e.g., weaviate:8080)"},
-				{Name: "grpc_address", Type: "string", Required: false, Default: "weaviate:50051"},
-				{Name: "scheme", Type: "string", Required: false, Default: "http"},
-				{Name: "api_key", Type: "string", Required: false, Sensitive: true},
+				{Name: "host", Type: "string", Required: true, Description: "Host", Default: "weaviate:8080"},
+				{Name: "grpc_address", Type: "string", Required: false, Description: "gRPC Address", Default: "weaviate:50051"},
+				{Name: "scheme", Type: "string", Required: false, Description: "Scheme", Default: "http"},
+				{Name: "api_key", Type: "string", Required: false, Sensitive: true, Description: "API Key"},
 			},
 			IndexFields: []VectorStoreFieldInfo{
-				{Name: "collection_prefix", Type: "string", Required: false, Default: "WeKnora"},
+				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "Weknora_embeddings"},
+				{Name: "desired_shard_count", Type: "number", Required: false, Description: "Shard Count", Default: 1},
+				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
 			},
-		},
-		{
-			Type:        "sqlite",
-			DisplayName: "SQLite (Keywords + Vector)",
-			ConnectionFields: []VectorStoreFieldInfo{},
 		},
 	}
 }
@@ -426,7 +597,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "postgres":
 		return &VectorStore{
 			ID:         "__env_postgres__",
-			Name:       "postgres (env)",
+			Name:       "PostgreSQL",
 			EngineType: PostgresRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				UseDefaultConnection: true,
@@ -435,13 +606,13 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "sqlite":
 		return &VectorStore{
 			ID:         "__env_sqlite__",
-			Name:       "sqlite (env)",
+			Name:       "SQLite",
 			EngineType: SQLiteRetrieverEngineType,
 		}
 	case "elasticsearch_v8":
 		return &VectorStore{
 			ID:         "__env_elasticsearch_v8__",
-			Name:       "elasticsearch v8 (env)",
+			Name:       "Elasticsearch v8",
 			EngineType: ElasticsearchRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Addr:     envLookup("ELASTICSEARCH_ADDR"),
@@ -455,7 +626,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "elasticsearch_v7":
 		return &VectorStore{
 			ID:         "__env_elasticsearch_v7__",
-			Name:       "elasticsearch v7 (env)",
+			Name:       "Elasticsearch v7",
 			EngineType: ElasticsearchRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Addr:     envLookup("ELASTICSEARCH_ADDR"),
@@ -469,7 +640,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "qdrant":
 		return &VectorStore{
 			ID:         "__env_qdrant__",
-			Name:       "qdrant (env)",
+			Name:       "Qdrant",
 			EngineType: QdrantRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Host:   envLookup("QDRANT_HOST"),
@@ -479,7 +650,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "milvus":
 		return &VectorStore{
 			ID:         "__env_milvus__",
-			Name:       "milvus (env)",
+			Name:       "Milvus",
 			EngineType: MilvusRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Addr:     envLookup("MILVUS_ADDRESS"),
@@ -490,7 +661,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 	case "weaviate":
 		return &VectorStore{
 			ID:         "__env_weaviate__",
-			Name:       "weaviate (env)",
+			Name:       "Weaviate",
 			EngineType: WeaviateRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
 				Host:        envLookup("WEAVIATE_HOST"),

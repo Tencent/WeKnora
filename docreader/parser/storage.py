@@ -165,12 +165,9 @@ class MinioStorage(Storage):
                     '"Version":"2012-10-17",'
                     '"Statement":['
                     '{"Effect":"Allow","Principal":{"AWS":["*"]},'
-                    '"Action":["s3:GetBucketLocation","s3:ListBucket"],'
-                    '"Resource":["arn:aws:s3:::%s"]},'
-                    '{"Effect":"Allow","Principal":{"AWS":["*"]},'
                     '"Action":["s3:GetObject"],'
                     '"Resource":["arn:aws:s3:::%s/*"]}'
-                    "]}" % (bucket_name, bucket_name)
+                    "]}" % (bucket_name)
                 )
                 client.set_bucket_policy(bucket_name, policy)
 

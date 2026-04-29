@@ -197,6 +197,7 @@ const getWebSearchDisplayText = (item) => {
     background-color: var(--td-bg-color-container);
     border: .5px solid var(--td-component-stroke);
     box-shadow: 0 2px 4px rgba(7, 192, 95, 0.08);
+    box-sizing: border-box;
     overflow: hidden;
     box-sizing: border-box;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);

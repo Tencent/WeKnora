@@ -29,7 +29,7 @@ import (
 const (
 	// minImageDimension is the minimum width/height in pixels; images smaller
 	// than this on either axis are treated as icons and filtered out.
-	minImageDimension = 128
+	minImageDimension = 64
 	// minImageBytes is the minimum file size in bytes; very small images are
 	// almost certainly icons or decorative elements.
 	minImageBytes = 512 // 512 bytes
@@ -44,7 +44,7 @@ func isIconImage(data []byte) bool {
 		// Cannot decode dimensions — fall back to size-only heuristic.
 		return len(data) < minImageBytes
 	}
-	if cfg.Width < minImageDimension || cfg.Height < minImageDimension {
+	if cfg.Width < minImageDimension && cfg.Height < minImageDimension {
 		return true
 	}
 	return false
@@ -126,8 +126,11 @@ func (r *ImageResolver) ResolveAndStore(
 			continue
 		}
 
-		// Filter out small icons and decorative images
-		if isIconImage(ref.ImageData) {
+		// Filter out small icons and decorative images. Skip the filter
+		// when the reference is the originally uploaded file itself, so
+		// that a standalone image upload is never silently dropped even
+		// if its dimensions are below the icon threshold.
+		if !ref.IsOriginal && isIconImage(ref.ImageData) {
 			// Remove the image reference from markdown entirely
 			markdown = markdown[:m[0]] + markdown[m[1]:]
 			continue

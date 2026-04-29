@@ -8,11 +8,8 @@ const close = () => {
 }
 </script>
 <template>
-    <t-image-viewer :visible="reviewImg"  closeOnOverlay closeOnEscKeydown @close="close"
-        :images="[{
-            mainImage: reviewUrl,
-            download: false
-        }]">
+    <t-image-viewer :visible="reviewImg" closeOnOverlay closeOnEscKeydown @close="close"
+        :images="reviewUrl ? [reviewUrl] : []">
     </t-image-viewer>
 </template>
 <style scoped lang="less"></style>

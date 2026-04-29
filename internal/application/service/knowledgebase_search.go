@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -114,8 +113,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// Use 5x over-retrieval to ensure sufficient candidates for RRF fusion and reranking.
 	// Scale proportionally when searching multiple KBs to maintain per-KB recall quality.
 	matchCount := max(params.MatchCount*5, 50) * len(searchKBIDs)
-	if matchCount > 1000 {
-		matchCount = 1000
+	if matchCount > 500 {
+		matchCount = 500
 	}
 
 	// Build retrieval parameters for vector and keyword engines
@@ -124,8 +123,14 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 	if len(retrieveParams) == 0 {
-		logger.Error(ctx, "No retrieval parameters available")
-		return nil, errors.New("no retrieve params")
+		// No retrievable pipelines for this KB (e.g. a wiki-only or graph-only
+		// KB that has neither vector nor keyword indexing). Return empty
+		// results rather than erroring so callers that combine multiple KB
+		// scopes (agent knowledge_search tool, chat pipeline, etc.) degrade
+		// gracefully when one of the scopes is non-searchable.
+		logger.Infof(ctx, "No retrievable indexing pipelines for KB %s (vector=%v, keyword=%v), returning empty results",
+			kb.ID, kb.IsVectorEnabled(), kb.IsKeywordEnabled())
+		return nil, nil
 	}
 
 	// Execute retrieval using the configured engines
@@ -175,8 +180,17 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	currentTenantID := types.MustTenantIDFromContext(ctx)
 	var retrieveParams []types.RetrieveParams
 
+	// Respect the KB's IndexingStrategy: a KB that does not have vector
+	// indexing enabled (e.g. wiki-only or graph-only KBs) has no embeddings
+	// to retrieve from, and typically has no EmbeddingModelID configured
+	// either. Skipping vector retrieval for such KBs avoids spurious
+	// "model ID cannot be empty" errors when an agent's retrieval scope
+	// happens to include them (e.g. KBSelectionMode=all picking up a
+	// wiki-only KB).
+	vectorIndexed := kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
+
 	// Add vector retrieval params if supported
-	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch {
+	if retrieveEngine.SupportRetriever(types.VectorRetrieverType) && !params.DisableVectorMatch && vectorIndexed {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
 		var queryEmbedding []float32
@@ -233,9 +247,9 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		logger.Info(ctx, "Vector retrieval parameters setup completed")
 	}
 
-	// Add keyword retrieval params if supported and not FAQ
+	// Add keyword retrieval params if supported, KB has keyword indexing, and not FAQ
 	if retrieveEngine.SupportRetriever(types.KeywordsRetrieverType) && !params.DisableKeywordsMatch &&
-		kb.Type != types.KnowledgeBaseTypeFAQ {
+		kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
 			Query:            params.QueryText,

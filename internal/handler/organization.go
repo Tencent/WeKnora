@@ -1262,7 +1262,7 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrAgentNotConfigured) {
-			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model and, if using knowledge bases, the rerank model in agent settings."))
+			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model, and set the rerank model if the knowledge_search tool is enabled in agent settings."))
 			return
 		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))

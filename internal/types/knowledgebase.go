@@ -14,6 +14,7 @@ const (
 	// KnowledgeBaseTypeDocument represents the document knowledge base type
 	KnowledgeBaseTypeDocument = "document"
 	KnowledgeBaseTypeFAQ      = "faq"
+	KnowledgeBaseTypeWiki     = "wiki"
 )
 
 // FAQIndexMode represents the FAQ index mode: only index questions or index questions and answers
@@ -66,12 +67,24 @@ type KnowledgeBase struct {
 	StorageProviderConfig *StorageProviderConfig `yaml:"storage_provider_config" json:"storage_provider_config"  gorm:"column:storage_provider_config;type:jsonb"`
 	// Deprecated: legacy COS config column. Kept for backward compatibility with old data.
 	StorageConfig StorageConfig `yaml:"-" json:"storage_config" gorm:"column:cos_config;type:json"`
+	// VectorStoreID references the VectorStore this knowledge base is bound to.
+	// When nil, the KB falls back to the tenant's effective engines derived from
+	// the RETRIEVE_DRIVER environment variable (env store flow).
+	// This field is set once at creation time and must not be modified afterwards;
+	// enforcement lives at the GORM layer (`<-:create`) plus the service-layer
+	// KB update path, which omits this field from its update DTO.
+	VectorStoreID *string `yaml:"vector_store_id"         json:"vector_store_id,omitempty" gorm:"column:vector_store_id;type:varchar(36);<-:create"`
 	// Extract config
 	ExtractConfig *ExtractConfig `yaml:"extract_config"          json:"extract_config"          gorm:"column:extract_config;type:json"`
 	// FAQConfig stores FAQ specific configuration such as indexing strategy
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"              gorm:"column:faq_config;type:json"`
 	// QuestionGenerationConfig stores question generation configuration for document knowledge bases
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
+	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
+	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
+	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
+	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
+	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
 	// Whether this knowledge base is pinned to the top of the list
 	IsPinned bool `yaml:"is_pinned"               json:"is_pinned"               gorm:"default:false"`
 	// Time when the knowledge base was pinned (nil if not pinned)
@@ -102,6 +115,11 @@ type KnowledgeBaseConfig struct {
 	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
 	// FAQ configuration (only for FAQ type knowledge bases)
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
+	// Wiki configuration (only for wiki-enabled knowledge bases)
+	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"`
+	// IndexingStrategy controls which indexing pipelines are active.
+	// nil means "no change" when updating (preserves existing strategy).
+	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
 }
 
 // ParserEngineRule maps a set of file types to a specific parser engine.
@@ -474,23 +492,117 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	if kb.Type == "" {
 		kb.Type = KnowledgeBaseTypeDocument
 	}
+	// Clear type-specific configs that don't belong
 	if kb.Type != KnowledgeBaseTypeFAQ {
 		kb.FAQConfig = nil
-		return
 	}
-	if kb.FAQConfig == nil {
-		kb.FAQConfig = &FAQConfig{
-			IndexMode:         FAQIndexModeQuestionAnswer,
-			QuestionIndexMode: FAQQuestionIndexModeCombined,
+	// Set defaults for FAQ
+	if kb.Type == KnowledgeBaseTypeFAQ {
+		if kb.FAQConfig == nil {
+			kb.FAQConfig = &FAQConfig{
+				IndexMode:         FAQIndexModeQuestionAnswer,
+				QuestionIndexMode: FAQQuestionIndexModeCombined,
+			}
+			return
 		}
-		return
+		if kb.FAQConfig.IndexMode == "" {
+			kb.FAQConfig.IndexMode = FAQIndexModeQuestionAnswer
+		}
+		if kb.FAQConfig.QuestionIndexMode == "" {
+			kb.FAQConfig.QuestionIndexMode = FAQQuestionIndexModeCombined
+		}
 	}
-	if kb.FAQConfig.IndexMode == "" {
-		kb.FAQConfig.IndexMode = FAQIndexModeQuestionAnswer
+
+	// Ensure IndexingStrategy has defaults.
+	// For existing rows where indexing_strategy is NULL, GORM Scan() returns
+	// DefaultIndexingStrategy() (vector+keyword=true). This block handles the
+	// case where a fresh struct was created in-memory without touching DB.
+	if kb.IndexingStrategy.IsZero() {
+		kb.IndexingStrategy = DefaultIndexingStrategy()
 	}
-	if kb.FAQConfig.QuestionIndexMode == "" {
-		kb.FAQConfig.QuestionIndexMode = FAQQuestionIndexModeCombined
+	// Sync legacy ExtractConfig.Enabled → IndexingStrategy.GraphEnabled
+	if kb.ExtractConfig != nil && kb.ExtractConfig.Enabled && !kb.IndexingStrategy.GraphEnabled {
+		kb.IndexingStrategy.GraphEnabled = true
 	}
+}
+
+// KBCapabilities describes the functional features a knowledge base exposes.
+// It is computed from the KB's configuration (IndexingStrategy, Type, WikiConfig, …)
+// and surfaced in the JSON representation of a KnowledgeBase so that the frontend
+// can filter / enable / disable KB options based on what the selected agent type needs.
+type KBCapabilities struct {
+	// Vector means semantic (embedding) search is indexed.
+	Vector bool `json:"vector"`
+	// Keyword means BM25 / sparse keyword search is indexed.
+	Keyword bool `json:"keyword"`
+	// Wiki means the wiki feature is enabled and authored pages exist / will be generated.
+	Wiki bool `json:"wiki"`
+	// Graph means knowledge-graph extraction is enabled.
+	Graph bool `json:"graph"`
+	// FAQ means the KB is a FAQ-type KB (Q/A pairs).
+	FAQ bool `json:"faq"`
+}
+
+// Capabilities returns the computed capability flags for this KB.
+// Safe to call on a nil KB (returns zero value).
+func (kb *KnowledgeBase) Capabilities() KBCapabilities {
+	if kb == nil {
+		return KBCapabilities{}
+	}
+	return KBCapabilities{
+		Vector:  kb.IsVectorEnabled(),
+		Keyword: kb.IsKeywordEnabled(),
+		Wiki:    kb.IsWikiEnabled(),
+		Graph:   kb.IsGraphEnabled(),
+		FAQ:     kb.Type == KnowledgeBaseTypeFAQ,
+	}
+}
+
+// MarshalJSON augments the default JSON encoding of KnowledgeBase with a computed
+// `capabilities` field so clients (agent editor) can filter KBs by feature.
+// It preserves all existing fields verbatim.
+func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
+	type alias KnowledgeBase
+	aux := struct {
+		*alias
+		Capabilities KBCapabilities `json:"capabilities"`
+	}{
+		alias:        (*alias)(kb),
+		Capabilities: kb.Capabilities(),
+	}
+	return json.Marshal(aux)
+}
+
+// IsWikiEnabled checks if the wiki feature is enabled for this knowledge base.
+// Wiki enablement is the single source of truth on IndexingStrategy.WikiEnabled.
+func (kb *KnowledgeBase) IsWikiEnabled() bool {
+	if kb == nil {
+		return false
+	}
+	return kb.IndexingStrategy.WikiEnabled
+}
+
+// IsVectorEnabled checks if vector (semantic) search is enabled.
+func (kb *KnowledgeBase) IsVectorEnabled() bool {
+	return kb != nil && kb.IndexingStrategy.VectorEnabled
+}
+
+// IsKeywordEnabled checks if keyword (BM25) search is enabled.
+func (kb *KnowledgeBase) IsKeywordEnabled() bool {
+	return kb != nil && kb.IndexingStrategy.KeywordEnabled
+}
+
+// IsGraphEnabled checks if knowledge graph extraction is enabled.
+// Requires both the IndexingStrategy flag and a valid ExtractConfig.
+func (kb *KnowledgeBase) IsGraphEnabled() bool {
+	return kb != nil && kb.IndexingStrategy.GraphEnabled &&
+		kb.ExtractConfig != nil && kb.ExtractConfig.Enabled
+}
+
+// NeedsEmbeddingModel returns true if any enabled pipeline requires an embedding model.
+// Currently only vector and keyword search need embeddings.
+func (kb *KnowledgeBase) NeedsEmbeddingModel() bool {
+	return kb != nil && kb.IndexingStrategy.NeedsEmbedding()
 }
 
 // IsMultimodalEnabled 判断多模态是否启用（兼容新老版本配置）

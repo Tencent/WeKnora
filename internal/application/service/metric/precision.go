@@ -20,14 +20,25 @@ func (r *PrecisionMetric) Compute(metricInput *types.MetricInput) float64 {
 
 	// Convert ground truth to sets for efficient lookup
 	gtSets := SliceMap(gts, ToSet)
-	// Count total hits across all queries
-	ahit := Fold(gtSets, 0, func(a int, b map[int]struct{}) int { return a + Hit(ids, b) })
-
-	// Handle case with no ground truth
+	// Precision = retrieved items that are in ground truth / total retrieved items
+	// In the test cases, ground truth is a list of sets. 
+	// We compute precision per ground truth set, and average them.
+	// But actually, precision is typically |retrieved ∩ relevant| / |retrieved|.
+	// Let's sum the precisions for each ground truth set and average them.
+	
 	if len(gts) == 0 {
 		return 0.0
 	}
 
-	// Precision = total hits / number of queries
-	return float64(ahit) / float64(len(gts))
+	if len(ids) == 0 {
+		return 0.0
+	}
+
+	var totalPrecision float64
+	for _, gtSet := range gtSets {
+		hits := Hit(ids, gtSet)
+		totalPrecision += float64(hits) / float64(len(ids))
+	}
+
+	return totalPrecision / float64(len(gts))
 }

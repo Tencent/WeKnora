@@ -25,195 +25,201 @@
         <p class="empty-text">{{ $t('settings.parser.noEngineDetected') }}</p>
       </div>
 
-      <template v-else>
+      <div v-else class="engine-cards">
         <!-- 当后端未返回 builtin 引擎项时，仍展示 DocReader 状态卡片 -->
-        <div v-if="!hasBuiltinEngine" class="engine-item first" data-model-type="builtin">
-          <div class="engine-item-header">
-            <div class="engine-title-row">
-              <h3>builtin</h3>
-              <t-tag
-                :theme="connected ? 'success' : 'danger'"
-                variant="light"
-                size="small"
-              >{{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}</t-tag>
-            </div>
-            <p>{{ $t('settings.parser.builtinDesc') }}</p>
+        <div
+          v-if="!hasBuiltinEngine"
+          :class="['engine-card', { active: drawerVisible && currentEngine?.Name === 'builtin' }]"
+          @click="openDrawer({ Name: 'builtin' } as any)"
+        >
+          <div class="engine-card-header">
+            <h3>builtin</h3>
+            <t-tag
+              :theme="connected ? 'success' : 'danger'"
+              variant="light"
+              size="small"
+            >{{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}</t-tag>
           </div>
-          <div class="docreader-inline">
-            <div class="status-line">
-              <t-tag
-                :theme="connected ? 'success' : 'danger'"
-                variant="light"
-                size="small"
-              >{{ connected ? $t('settings.parser.connected') : $t('settings.parser.disconnected') }}</t-tag>
-              <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-              <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
-            </div>
-            <p class="docreader-desc">
-              {{ $t('settings.parser.envVarHint') }}
-            </p>
-          </div>
+          <p class="engine-card-desc">{{ $t('settings.parser.builtinDesc') }}</p>
         </div>
 
         <div
-          v-for="(engine, idx) in sortedEngines"
+          v-for="engine in sortedEngines"
           :key="engine.Name"
-          :class="['engine-item', { first: idx === 0 && hasBuiltinEngine }]"
-          :data-model-type="engine.Name"
+          :class="['engine-card', { active: drawerVisible && currentEngine?.Name === engine.Name }]"
+          @click="openDrawer(engine)"
         >
-          <div class="engine-item-header">
-            <div class="engine-title-row">
-              <h3>{{ getEngineDisplayName(engine.Name) }}</h3>
-              <t-tag v-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
-              <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
-                <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">{{ $t('settings.parser.unavailable') }}</t-tag>
-              </t-tooltip>
-              <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.unavailable') }}</t-tag>
-              <a
-                v-if="engineDocLink(engine.Name)"
-                :href="engineDocLink(engine.Name)"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="engine-doc-link"
-              >{{ engineDocLabel(engine.Name) }} ↗</a>
-            </div>
-            <p>{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
+          <div class="engine-card-header">
+            <h3>{{ getEngineDisplayName(engine.Name) }}</h3>
+            <t-tag v-if="engine.Available" theme="success" variant="light" size="small">{{ $t('settings.parser.available') }}</t-tag>
+            <t-tooltip v-else-if="engine.UnavailableReason" :content="engine.UnavailableReason" placement="top">
+              <t-tag theme="danger" variant="light" size="small" class="tag-with-tooltip">{{ $t('settings.parser.unavailable') }}</t-tag>
+            </t-tooltip>
+            <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.unavailable') }}</t-tag>
           </div>
-
-          <!-- builtin: DocReader 连接信息 -->
-          <div v-if="engine.Name === 'builtin'" class="docreader-inline">
-            <div class="status-line">
-              <t-tag v-if="connected" theme="success" variant="light" size="small">{{ $t('settings.parser.connected') }}</t-tag>
-              <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
-              <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
-              <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
-            </div>
-            <p class="docreader-desc">
-              {{ $t('settings.parser.envVarHint') }}
-            </p>
-          </div>
-
-          <!-- weknoracloud: 凭证状态 -->
-          <template v-if="engine.Name === 'weknoracloud'">
-            <div v-if="wkcState === 'configured'" class="wkc-status wkc-status--ok">
-              <t-icon name="check-circle" style="font-size: 15px; color: var(--td-success-color); flex-shrink: 0;" />
-              <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
-            </div>
-            <div v-else-if="wkcState === 'loading'" class="wkc-status">
-              <t-loading size="small" />
-              <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
-            </div>
-            <div v-else class="wkc-status wkc-status--warn">
-              <t-icon name="error-circle" style="font-size: 15px; color: #f97316; flex-shrink: 0;" />
-              <div style="flex: 1;">
-                <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
-                <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
-                <div style="margin-top: 6px;">
-                  <t-button
-                    variant="text"
-                    size="small"
-                    theme="primary"
-                    @click="goToWkcSettings"
-                    style="padding: 0; height: auto;"
-                  >{{ $t('settings.weknoraCloud.goToSettings') }}</t-button>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <div v-if="engine.FileTypes && engine.FileTypes.length" class="file-types">
-            <t-tag
-              v-for="ft in engine.FileTypes"
-              :key="ft"
-              size="small"
-              variant="light"
-              theme="default"
-            >{{ ft }}</t-tag>
-          </div>
-
-          <!-- mineru 自建配置 -->
-          <div v-if="engine.Name === 'mineru'" class="engine-form">
-            <div class="form-field">
-              <label>{{ t('settings.parser.selfHostedEndpoint') }}</label>
-              <t-input
-                v-model="config.mineru_endpoint"
-                :placeholder="$t('settings.parser.mineruEndpointPlaceholder')"
-                clearable
-              />
-            </div>
-            <div class="form-field">
-              <label>Backend</label>
-              <t-select v-model="config.mineru_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
-                <t-option value="pipeline" label="pipeline" />
-                <t-option value="vlm-auto-engine" label="vlm-auto-engine" />
-                <t-option value="vlm-http-client" label="vlm-http-client" />
-                <t-option value="hybrid-auto-engine" label="hybrid-auto-engine" />
-                <t-option value="hybrid-http-client" label="hybrid-http-client" />
-              </t-select>
-            </div>
-            <div class="form-toggles">
-              <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
-            </div>
-            <div class="form-field">
-              <label>{{ t('settings.parser.language') }}</label>
-              <t-input
-                v-model="config.mineru_language"
-                :placeholder="$t('settings.parser.languagePlaceholder')"
-                clearable
-              />
-            </div>
-          </div>
-
-          <!-- mineru_cloud 云 API 配置 -->
-          <div v-if="engine.Name === 'mineru_cloud'" class="engine-form">
-            <div class="form-field">
-              <label>API Key</label>
-              <t-input
-                v-model="config.mineru_api_key"
-                type="password"
-                :placeholder="$t('settings.parser.mineruCloudApiKeyPlaceholder')"
-                clearable
-              />
-            </div>
-            <div class="form-field">
-              <label>Model Version</label>
-              <t-select v-model="config.mineru_cloud_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
-                <t-option value="pipeline" label="pipeline" />
-                <t-option value="vlm" :label="$t('settings.parser.vlmLabel')" />
-                <t-option value="MinerU-HTML" :label="$t('settings.parser.mineruHtmlLabel')" />
-              </t-select>
-            </div>
-            <div class="form-toggles">
-              <t-checkbox v-model="config.mineru_cloud_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_cloud_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
-              <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
-            </div>
-            <div class="form-field">
-              <label>{{ t('settings.parser.language') }}</label>
-              <t-input
-                v-model="config.mineru_cloud_language"
-                :placeholder="$t('settings.parser.languagePlaceholder')"
-                clearable
-              />
-            </div>
-          </div>
+          <p class="engine-card-desc">{{ getEngineDisplayDesc(engine.Name, engine.Description) }}</p>
         </div>
-      </template>
-
-      <!-- 检测与保存 -->
-      <div class="save-bar">
-        <t-button theme="default" variant="outline" :loading="checking" @click="onCheck">
-          {{ $t('settings.parser.checkWithParams') }}
-        </t-button>
-        <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('settings.parser.saveConfig') }}</t-button>
-        <span v-if="checkMessage" class="save-msg hint">{{ checkMessage }}</span>
-        <span v-else-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
-          {{ saveMessage }}
-        </span>
       </div>
     </template>
+
+    <!-- 配置抽屉 -->
+    <t-drawer
+      v-model:visible="drawerVisible"
+      :header="drawerTitle"
+      size="500px"
+    >
+      <div v-if="currentEngine" class="drawer-content">
+        <div class="engine-info-block">
+          <p class="engine-desc">{{ getEngineDisplayDesc(currentEngine.Name, currentEngine.Description) }}
+          <a
+            v-if="engineDocLink(currentEngine.Name)"
+            :href="engineDocLink(currentEngine.Name)"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="engine-doc-link"
+          >{{ engineDocLabel(currentEngine.Name) }} ↗</a>
+          </p>
+        </div>
+
+        <!-- builtin: DocReader 连接信息 -->
+        <div v-if="currentEngine.Name === 'builtin'" class="docreader-inline">
+          <div class="status-line">
+            <t-tag v-if="connected" theme="success" variant="light" size="small">{{ $t('settings.parser.connected') }}</t-tag>
+            <t-tag v-else theme="danger" variant="light" size="small">{{ $t('settings.parser.disconnected') }}</t-tag>
+            <t-tag theme="default" variant="light" size="small">{{ docreaderTransport === 'http' ? 'HTTP' : 'gRPC' }}</t-tag>
+            <span v-if="docreaderAddrEnv" class="env-hint">{{ $t('settings.parser.currentAddr') }}: {{ docreaderAddrEnv }}</span>
+          </div>
+          <p class="docreader-desc">
+            {{ $t('settings.parser.envVarHint') }}
+          </p>
+        </div>
+
+        <!-- weknoracloud: 凭证状态 -->
+        <template v-if="currentEngine.Name === 'weknoracloud'">
+          <div v-if="wkcState === 'configured'" class="wkc-status wkc-status--ok">
+            <t-icon name="check-circle" style="font-size: 15px; color: var(--td-success-color); flex-shrink: 0;" />
+            <span>{{ $t('settings.weknoraCloud.credentialConfigured') }}</span>
+          </div>
+          <div v-else-if="wkcState === 'loading'" class="wkc-status">
+            <t-loading size="small" />
+            <span>{{ $t('settings.weknoraCloud.checkingStatus') }}</span>
+          </div>
+          <div v-else class="wkc-status wkc-status--warn">
+            <t-icon name="error-circle" style="font-size: 15px; color: #f97316; flex-shrink: 0;" />
+            <div style="flex: 1;">
+              <span v-if="wkcState === 'expired'">{{ $t('settings.weknoraCloud.credentialExpired') }}</span>
+              <span v-else>{{ $t('settings.weknoraCloud.unconfigured') }}</span>
+              <div style="margin-top: 6px;">
+                <t-button
+                  variant="text"
+                  size="small"
+                  theme="primary"
+                  @click="goToWkcSettings"
+                  style="padding: 0; height: auto;"
+                >{{ $t('settings.weknoraCloud.goToSettings') }}</t-button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="currentEngine.FileTypes && currentEngine.FileTypes.length" class="file-types">
+          <t-tag
+            v-for="ft in currentEngine.FileTypes"
+            :key="ft"
+            size="small"
+            variant="light"
+            theme="default"
+          >{{ ft }}</t-tag>
+        </div>
+
+        <!-- mineru 自建配置 -->
+        <div v-if="currentEngine.Name === 'mineru'" class="engine-form">
+          <div class="form-item">
+            <label class="form-label">{{ t('settings.parser.selfHostedEndpoint') }}</label>
+            <t-input
+              v-model="config.mineru_endpoint"
+              :placeholder="$t('settings.parser.mineruEndpointPlaceholder')"
+              clearable
+            />
+          </div>
+          <div class="form-item">
+            <label class="form-label">Backend</label>
+            <t-select v-model="config.mineru_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
+              <t-option value="pipeline" label="pipeline" />
+              <t-option value="vlm-auto-engine" label="vlm-auto-engine" />
+              <t-option value="vlm-http-client" label="vlm-http-client" />
+              <t-option value="hybrid-auto-engine" label="hybrid-auto-engine" />
+              <t-option value="hybrid-http-client" label="hybrid-http-client" />
+            </t-select>
+          </div>
+          <div class="form-toggles">
+            <t-checkbox v-model="config.mineru_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
+            <t-checkbox v-model="config.mineru_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
+            <t-checkbox v-model="config.mineru_enable_ocr">OCR</t-checkbox>
+          </div>
+          <div class="form-item" style="margin-top: 16px;">
+            <label class="form-label">{{ t('settings.parser.language') }}</label>
+            <t-input
+              v-model="config.mineru_language"
+              :placeholder="$t('settings.parser.languagePlaceholder')"
+              clearable
+            />
+          </div>
+        </div>
+
+        <!-- mineru_cloud 云 API 配置 -->
+        <div v-if="currentEngine.Name === 'mineru_cloud'" class="engine-form">
+          <div class="form-item">
+            <label class="form-label">API Key</label>
+            <t-input
+              v-model="config.mineru_api_key"
+              type="password"
+              :placeholder="$t('settings.parser.mineruCloudApiKeyPlaceholder')"
+              clearable
+            />
+          </div>
+          <div class="form-item">
+            <label class="form-label">Model Version</label>
+            <t-select v-model="config.mineru_cloud_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
+              <t-option value="pipeline" label="pipeline" />
+              <t-option value="vlm" :label="$t('settings.parser.vlmLabel')" />
+              <t-option value="MinerU-HTML" :label="$t('settings.parser.mineruHtmlLabel')" />
+            </t-select>
+          </div>
+          <div class="form-toggles">
+            <t-checkbox v-model="config.mineru_cloud_enable_formula">{{ $t('settings.parser.formulaRecognition') }}</t-checkbox>
+            <t-checkbox v-model="config.mineru_cloud_enable_table">{{ $t('settings.parser.tableRecognition') }}</t-checkbox>
+            <t-checkbox v-model="config.mineru_cloud_enable_ocr">OCR</t-checkbox>
+          </div>
+          <div class="form-item" style="margin-top: 16px;">
+            <label class="form-label">{{ t('settings.parser.language') }}</label>
+            <t-input
+              v-model="config.mineru_cloud_language"
+              :placeholder="$t('settings.parser.languagePlaceholder')"
+              clearable
+            />
+          </div>
+        </div>
+        <div class="form-item" v-if="currentEngine && (hasConfigFields(currentEngine.Name) || currentEngine.Name === 'builtin')">
+          <label class="form-label">{{ $t('settings.parser.testConnection', '测试连接') }}</label>
+          <div class="api-test-section">
+            <t-button variant="outline" :loading="checking" @click="onCheck">
+              {{ $t('settings.parser.testConnection', '测试连接') }}
+            </t-button>
+            <span v-if="checkMessage || saveMessage" :class="['test-message', saveSuccess && !checkMessage ? 'success' : (checkMessage ? 'hint' : 'error')]">
+              {{ checkMessage || saveMessage }}
+            </span>
+          </div>
+        </div>
+      </div>
+      
+      <template #footer>
+        <div class="drawer-footer-actions">
+          <t-button theme="default" variant="outline" @click="drawerVisible = false">{{ $t('common.cancel') }}</t-button>
+          <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('common.save') }}</t-button>
+        </div>
+      </template>
+    </t-drawer>
   </div>
 </template>
 
@@ -278,6 +284,12 @@ const checkMessage = ref('')
 
 const hasBuiltinEngine = computed(() => engines.value.some(e => e.Name === 'builtin'))
 
+const drawerVisible = ref(false)
+const currentEngine = ref<ParserEngineInfo | null>(null)
+const drawerTitle = computed(() => {
+  return currentEngine.value ? getEngineDisplayName(currentEngine.value.Name) : ''
+})
+
 /** 固定展示顺序，未列出的引擎排在末尾按名称排序 */
 const ENGINE_ORDER: Record<string, number> = {
   builtin: 0,
@@ -319,6 +331,13 @@ function getEngineDisplayDesc(engineName: string, fallback: string): string {
   const key = `kbSettings.parser.engines.${engineName}.desc`
   const translated = t(key)
   return translated !== key ? translated : fallback
+}
+
+function openDrawer(engine: ParserEngineInfo) {
+  currentEngine.value = engine
+  drawerVisible.value = true
+  saveMessage.value = ''
+  checkMessage.value = ''
 }
 
 async function loadEngines() {
@@ -394,13 +413,47 @@ async function onCheck() {
   }
   checking.value = true
   checkMessage.value = ''
+  saveMessage.value = ''
   try {
     const res = await checkParserEngines(buildConfigPayload())
     engines.value = res?.data ?? []
-    checkMessage.value = t('settings.parser.checkDoneStatusUpdated')
+    if (res?.connected !== undefined) {
+      connected.value = res.connected
+    }
+
+    if (currentEngine.value) {
+      if (currentEngine.value.Name === 'builtin') {
+        if (connected.value) {
+          checkMessage.value = t('settings.parser.checkSuccess', '测试连接成功')
+          saveSuccess.value = true
+        } else {
+          checkMessage.value = t('settings.parser.checkFailed', '测试连接失败')
+          saveSuccess.value = false
+        }
+      } else {
+        const updatedEngine = engines.value.find(e => e.Name === currentEngine.value!.Name)
+        if (updatedEngine) {
+          if (updatedEngine.Available) {
+            checkMessage.value = t('settings.parser.checkSuccess', '测试连接成功')
+            saveSuccess.value = true
+          } else {
+            checkMessage.value = updatedEngine.UnavailableReason || t('settings.parser.checkFailed', '测试连接失败')
+            saveSuccess.value = false
+          }
+        } else {
+          checkMessage.value = t('settings.parser.checkFailed', '引擎状态未知')
+          saveSuccess.value = false
+        }
+      }
+    } else {
+      checkMessage.value = t('settings.parser.checkDoneStatusUpdated', '检测已完成，状态已更新')
+      saveSuccess.value = true
+    }
+
     setTimeout(() => { checkMessage.value = '' }, 3000)
   } catch (e: any) {
-    checkMessage.value = e?.message || t('settings.parser.checkFailed')
+    checkMessage.value = e?.message || t('settings.parser.checkFailed', '测试连接失败')
+    saveSuccess.value = false
   } finally {
     checking.value = false
   }
@@ -413,6 +466,7 @@ async function onSave() {
     await updateParserEngineConfig(buildConfigPayload())
     saveSuccess.value = true
     saveMessage.value = t('settings.parser.saveSuccess')
+    drawerVisible.value = false
     loadEngines()
   } catch (e: any) {
     saveSuccess.value = false
@@ -500,34 +554,41 @@ onMounted(loadAll)
   }
 }
 
-// ---- 引擎条目 ----
-.engine-item {
-  padding-top: 24px;
+// ---- 引擎卡片布局 ----
+.engine-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
   margin-top: 24px;
-  border-top: 1px solid var(--td-component-stroke);
+}
 
-  &.first {
-    margin-top: 0;
-    padding-top: 0;
-    border-top: none;
+.engine-card {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--td-bg-color-container);
+  display: flex;
+  flex-direction: column;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  }
+
+  &.active {
+    border-color: var(--td-brand-color);
+    background: rgba(var(--td-brand-color-5-rgba), 0.05);
   }
 }
 
-.engine-item-header {
-  margin-bottom: 16px;
-
-  p {
-    font-size: 13px;
-    color: var(--td-text-color-placeholder);
-    margin: 6px 0 0 0;
-    line-height: 1.5;
-  }
-}
-
-.engine-title-row {
+.engine-card-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
 
   h3 {
     font-size: 15px;
@@ -535,30 +596,86 @@ onMounted(loadAll)
     color: var(--td-text-color-primary);
     margin: 0;
     font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.engine-card-desc {
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  margin: 0;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+// ---- 抽屉内容 ----
+.drawer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.engine-info-block {
+  .engine-desc {
+    font-size: 13px;
+    color: var(--td-text-color-secondary);
+    margin: 0 0 8px 0;
+    line-height: 1.5;
+  }
+}
+
+// 输入框样式
+:deep(.t-input),
+:deep(.t-select) {
+  width: 100%;
+  font-size: 13px;
+
+  .t-input__inner,
+  .t-input__wrap,
+  input {
+    font-size: 13px;
+    border-radius: 6px;
+    border-color: var(--td-component-stroke);
+    transition: all 0.15s ease;
+  }
+
+  &:hover .t-input__inner,
+  &:hover .t-input__wrap,
+  &:hover input {
+    border-color: var(--td-component-stroke);
+  }
+
+  &.t-is-focused .t-input__inner,
+  &.t-is-focused .t-input__wrap,
+  &.t-is-focused input {
+    border-color: var(--td-brand-color);
+    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
   }
 }
 
 .engine-doc-link {
-  margin-left: auto;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--td-brand-color);
   text-decoration: none;
-  white-space: nowrap;
 
   &:hover {
-    opacity: 0.8;
+    text-decoration: underline;
   }
 }
 
 // ---- DocReader 连接信息 ----
 .docreader-inline {
-  padding: 10px 14px;
+  padding: 12px 16px;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: 8px;
-  margin-bottom: 12px;
 
   .status-line {
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 }
 
@@ -567,13 +684,6 @@ onMounted(loadAll)
   font-size: 12px;
   color: var(--td-text-color-placeholder);
   line-height: 1.6;
-
-  code {
-    padding: 1px 5px;
-    font-size: 11px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 3px;
-  }
 }
 
 .status-line {
@@ -593,28 +703,35 @@ onMounted(loadAll)
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 4px;
 }
 
 // ---- 配置表单 ----
 .engine-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--td-component-stroke);
+  gap: 0;
 }
 
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.form-item {
+  margin-bottom: 20px;
 
-  label {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-secondary);
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+
+  &.required::after {
+    content: '*';
+    color: var(--td-error-color);
+    margin-left: 4px;
+    font-weight: 600;
   }
 }
 
@@ -622,35 +739,7 @@ onMounted(loadAll)
   display: flex;
   flex-wrap: wrap;
   gap: 16px;
-}
-
-// ---- 保存栏（sticky） ----
-.save-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  position: sticky;
-  bottom: 0;
-  margin-top: 32px;
-  padding: 16px 0 4px;
-  background: linear-gradient(to bottom, transparent 0%, var(--td-bg-color-container) 12%);
-  z-index: 10;
-}
-
-.save-msg {
-  font-size: 13px;
-
-  &.success {
-    color: var(--td-success-color);
-  }
-
-  &.error {
-    color: var(--td-error-color);
-  }
-
-  &.hint {
-    color: var(--td-text-color-secondary);
-  }
+  margin-bottom: 20px;
 }
 
 .tag-with-tooltip {
@@ -662,11 +751,10 @@ onMounted(loadAll)
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 12px 16px;
   border-radius: 6px;
   font-size: 13px;
   color: var(--td-text-color-secondary);
-  margin-bottom: 12px;
   background: var(--td-bg-color-secondarycontainer);
 
   &--ok {
@@ -679,6 +767,78 @@ onMounted(loadAll)
     background: #fff7ed;
     border: 1px solid #fed7aa;
     border-left: 3px solid #f97316;
+  }
+}
+
+.api-test-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .test-message {
+    font-size: 13px;
+    line-height: 1.5;
+    flex: 1;
+
+    &.success {
+      color: var(--td-brand-color-active);
+    }
+
+    &.error {
+      color: var(--td-error-color);
+    }
+
+    &.hint {
+      color: var(--td-text-color-secondary);
+    }
+  }
+
+  :deep(.t-button) {
+    min-width: 88px;
+    height: 32px;
+    font-size: 13px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .status-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+
+    &.available {
+      color: var(--td-brand-color);
+    }
+
+    &.unavailable {
+      color: var(--td-error-color);
+    }
+  }
+}
+
+.drawer-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  width: 100%;
+
+  :deep(.t-button) {
+    min-width: 80px;
+    height: 36px;
+    font-weight: 500;
+    font-size: 14px;
+    border-radius: 6px;
+    transition: all 0.15s ease;
+
+    &.t-button--variant-outline {
+      color: var(--td-text-color-secondary);
+      border-color: var(--td-component-stroke);
+
+      &:hover {
+        border-color: var(--td-brand-color);
+        color: var(--td-brand-color);
+        background: rgba(7, 192, 95, 0.04);
+      }
+    }
   }
 }
 </style>

@@ -166,8 +166,26 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	}
 
 	// Per-tenant "disabled by me" for own agents (only affects this tenant's conversation dropdown)
-	tenantID, _ := c.Get(types.TenantIDContextKey.String())
-	disabledOwnIDs, _ := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID.(uint64))
+	tenantIDVal, exists := c.Get(types.TenantIDContextKey.String())
+	if !exists {
+		logger.Error(ctx, "Tenant ID not found in context")
+		c.Error(errors.NewUnauthorizedError("Missing tenant context"))
+		return
+	}
+	tenantID, ok := tenantIDVal.(uint64)
+	if !ok {
+		logger.Errorf(ctx, "Tenant ID has unexpected type %T in context", tenantIDVal)
+		c.Error(errors.NewInternalServerError("Invalid tenant context type"))
+		return
+	}
+	disabledOwnIDs, err := h.disabledRepo.ListDisabledOwnAgentIDs(ctx, tenantID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"tenant_id": tenantID,
+		})
+		c.Error(errors.NewInternalServerError("Failed to list disabled agent IDs: " + err.Error()))
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success":                true,
@@ -376,6 +394,25 @@ func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
 			"rewrite_prompt":        types.PlaceholdersByField(types.PromptFieldRewritePrompt),
 			"fallback_prompt":       types.PlaceholdersByField(types.PromptFieldFallbackPrompt),
 		},
+	})
+}
+
+// GetAgentTypePresets godoc
+// @Summary      获取智能体类型预设列表
+// @Description  返回所有 smart-reasoning 下可用的智能体类型预设（RAG/Wiki/Hybrid/Custom），用于编辑器自动填充系统提示词、工具和 KB 兼容性
+// @Tags         智能体
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "预设列表"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /agents/type-presets [get]
+func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
+	ctx := c.Request.Context()
+	presets := types.ListAgentTypePresetsWithContext(ctx)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    presets,
 	})
 }
 

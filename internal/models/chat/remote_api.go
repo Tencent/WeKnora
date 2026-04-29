@@ -41,6 +41,8 @@ type RemoteAPIChat struct {
 	provider  provider.ProviderName
 	appID     string
 	appSecret string
+	// customHeaders 为用户在模型配置中指定的自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）。
+	customHeaders map[string]string
 
 	// requestCustomizer 允许子类自定义请求
 	// 返回自定义请求体（如果为 nil 则使用标准请求）和是否需要使用原始 HTTP 请求
@@ -86,6 +88,17 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		}
 	}
 
+	// 如果指定了 CustomHeaders，则给 SDK 使用的 HTTPClient 挂一层 RoundTripper，
+	// 在每个请求上自动注入这些 header（raw HTTP 路径会在发送前单独处理）。
+	if len(chatConfig.CustomHeaders) > 0 {
+		if httpClient, ok := config.HTTPClient.(*http.Client); ok {
+			config.HTTPClient = secutils.WrapHTTPClientWithHeaders(httpClient, chatConfig.CustomHeaders)
+		} else {
+			// SDK 默认未显式设置时 HTTPClient 为 nil，此时构造一个新的注入了 header 的 client。
+			config.HTTPClient = secutils.WrapHTTPClientWithHeaders(nil, chatConfig.CustomHeaders)
+		}
+	}
+
 	modelName := chatConfig.ModelName
 	if chatConfig.ExtraConfig != nil {
 		if override := strings.TrimSpace(chatConfig.ExtraConfig["remote_model_name"]); override != "" {
@@ -102,14 +115,15 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 	}
 
 	return &RemoteAPIChat{
-		modelName: modelName,
-		client:    openai.NewClientWithConfig(config),
-		modelID:   chatConfig.ModelID,
-		baseURL:   chatConfig.BaseURL,
-		apiKey:    apiKey,
-		provider:  providerName,
-		appID:     chatConfig.AppID,
-		appSecret: chatConfig.AppSecret,
+		modelName:     modelName,
+		client:        openai.NewClientWithConfig(config),
+		modelID:       chatConfig.ModelID,
+		baseURL:       chatConfig.BaseURL,
+		apiKey:        apiKey,
+		provider:      providerName,
+		appID:         chatConfig.AppID,
+		appSecret:     chatConfig.AppSecret,
+		customHeaders: chatConfig.CustomHeaders,
 	}, nil
 }
 
@@ -255,7 +269,8 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(messages []Message, opts *Cha
 
 		// 处理 ParallelToolCalls
 		if opts.ParallelToolCalls != nil {
-			req.ParallelToolCalls = *opts.ParallelToolCalls
+			val := *opts.ParallelToolCalls
+			req.ParallelToolCalls = val
 		}
 
 		// 处理 ToolChoice（标准实现）
@@ -367,13 +382,11 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	// print headers
-	headers, err := json.Marshal(httpReq.Header)
-	if err != nil {
-		return nil, fmt.Errorf("marshal headers: %w", err)
-	}
-	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, headers: %s",
-		endpoint, c.modelName, string(headers))
+	// 注入用户自定义 header（保留头会在工具内部自动跳过）
+	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+
+	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s",
+		endpoint, c.modelName)
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
@@ -511,13 +524,18 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	logger.Infof(ctx, "[LLM Stream] model=%s", c.modelName)
-
 	if endpoint == "" {
 		endpoint = c.baseURL + "/chat/completions"
 	}
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
+	}
+
+	if prettyJSON, pErr := json.MarshalIndent(customReq, "", "  "); pErr == nil {
+		logger.Infof(ctx, "[LLM Stream Request] endpoint=%s, model=%s, stream=true, request:\n%s",
+			endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(prettyJSON)))
+	} else {
+		logger.Infof(ctx, "[LLM Stream] endpoint=%s, model=%s", endpoint, c.modelName)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -536,6 +554,9 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 	httpReq.Header.Set("Accept", "text/event-stream")
+
+	// 注入用户自定义 header（保留头会在工具内部自动跳过）
+	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {
@@ -570,11 +591,12 @@ func (c *RemoteAPIChat) processStream(ctx context.Context, stream *openai.ChatCo
 					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
 				}
+				toolCalls := state.buildOrderedToolCalls()
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      "",
 					Done:         true,
-					ToolCalls:    state.buildOrderedToolCalls(),
+					ToolCalls:    toolCalls,
 					Usage:        state.usage,
 					FinishReason: state.lastFinishReason,
 				}
@@ -614,16 +636,16 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 		event, err := reader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
-				// 部分模型不发送 [DONE] 标记，直接关闭连接，视为正常结束
 				if state.usage != nil {
 					logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 						c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
 				}
+				toolCalls := state.buildOrderedToolCalls()
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      "",
 					Done:         true,
-					ToolCalls:    state.buildOrderedToolCalls(),
+					ToolCalls:    toolCalls,
 					Usage:        state.usage,
 				}
 			} else {
@@ -646,11 +668,12 @@ func (c *RemoteAPIChat) processRawHTTPStream(ctx context.Context, resp *http.Res
 				logger.Infof(ctx, "[LLM Usage] model=%s, prompt_tokens=%d, completion_tokens=%d, total_tokens=%d",
 					c.modelName, state.usage.PromptTokens, state.usage.CompletionTokens, state.usage.TotalTokens)
 			}
+			toolCalls := state.buildOrderedToolCalls()
 			streamChan <- types.StreamResponse{
 				ResponseType: types.ResponseTypeAnswer,
 				Content:      "",
 				Done:         true,
-				ToolCalls:    state.buildOrderedToolCalls(),
+				ToolCalls:    toolCalls,
 				Usage:        state.usage,
 			}
 			return

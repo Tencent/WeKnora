@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -62,26 +63,88 @@ func NewFinalAnswerTool() *FinalAnswerTool {
 func (t *FinalAnswerTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.Infof(ctx, "[Tool][FinalAnswer] Execute started")
 
-	var input FinalAnswerInput
-	if err := json.Unmarshal(args, &input); err != nil {
-		logger.Errorf(ctx, "[Tool][FinalAnswer] Failed to parse args: %v", err)
+	answer, ok := ParseFinalAnswerArgs(string(args))
+	if !ok {
+		logger.Errorf(ctx, "[Tool][FinalAnswer] Failed to parse args (even with repair): %s", string(args))
 		return &types.ToolResult{
 			Success: false,
-			Error:   fmt.Sprintf("Failed to parse args: %v", err),
-		}, err
+			Error:   "Failed to parse final_answer args: malformed JSON and no recoverable answer field",
+		}, fmt.Errorf("malformed final_answer arguments")
 	}
 
-	if input.Answer == "" {
+	if answer == "" {
 		return &types.ToolResult{
 			Success: false,
 			Error:   "answer must be a non-empty string",
 		}, fmt.Errorf("answer must be a non-empty string")
 	}
 
-	logger.Infof(ctx, "[Tool][FinalAnswer] Answer length: %d characters", len(input.Answer))
+	logger.Infof(ctx, "[Tool][FinalAnswer] Answer length: %d characters", len(answer))
 
 	return &types.ToolResult{
 		Success: true,
-		Output:  input.Answer,
+		Output:  answer,
 	}, nil
+}
+
+// answerRegex best-effort extracts the value of an "answer": "..." field from
+// a malformed JSON string. Used as a last resort when both strict parsing and
+// RepairJSON fail — this keeps the final_answer tool call terminal so the
+// agent loop cannot re-enter and emit duplicate answers.
+//
+// The pattern handles escaped quotes inside the answer via the non-greedy
+// body `(?:\\.|[^"\\])*` which consumes either an escape sequence or any
+// non-quote, non-backslash char.
+var answerRegex = regexp.MustCompile(`"answer"\s*:\s*"((?:\\.|[^"\\])*)"`)
+
+// ParseFinalAnswerArgs extracts the `answer` field from the final_answer
+// tool's raw arguments. It is intentionally tolerant of malformed JSON that
+// LLMs sometimes emit (unescaped quotes inside the answer, trailing commas,
+// truncated closing braces, etc.), applying three fallbacks in order:
+//
+//  1. Strict json.Unmarshal on the raw string.
+//  2. RepairJSON (trailing commas, invalid escapes, bracket balance) + Unmarshal.
+//  3. Regex best-effort extraction of the `"answer": "..."` field.
+//
+// Returns the answer string and a bool indicating whether any path succeeded
+// with a non-empty answer. Callers should treat ok=false as "unrecoverable"
+// and surface a fallback message to the user, but must still treat the
+// tool call as terminal to avoid the agent loop re-emitting final_answer.
+func ParseFinalAnswerArgs(raw string) (string, bool) {
+	var input FinalAnswerInput
+	if err := json.Unmarshal([]byte(raw), &input); err == nil && input.Answer != "" {
+		return input.Answer, true
+	}
+
+	repaired := RepairJSON(raw)
+	if repaired != raw {
+		if err := json.Unmarshal([]byte(repaired), &input); err == nil && input.Answer != "" {
+			return input.Answer, true
+		}
+	}
+
+	if m := answerRegex.FindStringSubmatch(raw); len(m) == 2 {
+		if unquoted, err := unquoteJSONString(m[1]); err == nil && unquoted != "" {
+			return unquoted, true
+		}
+		// Unquoting failed: the capture may contain invalid escapes. Fall back
+		// to returning the raw capture so the user still sees *something*.
+		if m[1] != "" {
+			return m[1], true
+		}
+	}
+
+	return "", false
+}
+
+// unquoteJSONString decodes a JSON-escaped string body (without surrounding
+// quotes) into its literal form. It wraps the body in quotes and leans on
+// json.Unmarshal so we get the standard escape semantics (\n, \", \uXXXX, …)
+// without reimplementing them.
+func unquoteJSONString(body string) (string, error) {
+	var out string
+	if err := json.Unmarshal([]byte(`"`+body+`"`), &out); err != nil {
+		return "", err
+	}
+	return out, nil
 }

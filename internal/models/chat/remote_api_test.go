@@ -17,7 +17,7 @@ func newTestRemoteChat(t *testing.T) *RemoteAPIChat {
 
 	chat, err := NewRemoteAPIChat(&ChatConfig{
 		Source:    types.ModelSourceRemote,
-		BaseURL:   "https://example.com/v1",
+		BaseURL:   "",
 		ModelName: "test-model",
 		APIKey:    "test-key",
 		ModelID:   "test-model",
@@ -51,7 +51,15 @@ func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
 			}},
 		}
 		req := chat.BuildChatCompletionRequest(messages, opts, true)
-		assert.Equal(t, true, req.ParallelToolCalls)
+		assert.NotNil(t, req.ParallelToolCalls)
+
+		val, ok := req.ParallelToolCalls.(bool)
+		if ok {
+			assert.Equal(t, true, val)
+		} else {
+			assert.Equal(t, true, req.ParallelToolCalls)
+		}
+
 		assert.Len(t, req.Tools, 1)
 		assert.Equal(t, "mcp_weather_getforecast", req.Tools[0].Function.Name)
 	})
@@ -63,7 +71,14 @@ func TestBuildChatCompletionRequest_ParallelToolCalls(t *testing.T) {
 			ParallelToolCalls: &ptc,
 		}
 		req := chat.BuildChatCompletionRequest(messages, opts, false)
-		assert.Equal(t, false, req.ParallelToolCalls)
+		assert.NotNil(t, req.ParallelToolCalls)
+
+		val, ok := req.ParallelToolCalls.(bool)
+		if ok {
+			assert.Equal(t, false, val)
+		} else {
+			assert.Equal(t, false, req.ParallelToolCalls)
+		}
 	})
 }
 

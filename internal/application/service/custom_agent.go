@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-	"sort"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -24,9 +24,10 @@ var (
 
 // customAgentService implements the CustomAgentService interface
 type customAgentService struct {
-	repo      interfaces.CustomAgentRepository
-	chunkRepo interfaces.ChunkRepository
-	kbService interfaces.KnowledgeBaseService
+	repo         interfaces.CustomAgentRepository
+	chunkRepo    interfaces.ChunkRepository
+	kbService    interfaces.KnowledgeBaseService
+	wikiPageRepo interfaces.WikiPageRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -34,11 +35,13 @@ func NewCustomAgentService(
 	repo interfaces.CustomAgentRepository,
 	chunkRepo interfaces.ChunkRepository,
 	kbService interfaces.KnowledgeBaseService,
+	wikiPageRepo interfaces.WikiPageRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
-		repo:      repo,
-		chunkRepo: chunkRepo,
-		kbService: kbService,
+		repo:         repo,
+		chunkRepo:    chunkRepo,
+		kbService:    kbService,
+		wikiPageRepo: wikiPageRepo,
 	}
 }
 
@@ -503,22 +506,19 @@ func (s *customAgentService) GetSuggestedQuestions(
 		return s.truncateQuestions(result, limit), nil
 	}
 
-	// 3. Collect all candidate chunks from both FAQ and Document KBs,
-	//    then sort by updated_at uniformly (not FAQ-first).
-	type candidate struct {
-		question  types.SuggestedQuestion
-		updatedAt time.Time
-	}
-	var candidates []candidate
+	// 3. Collect candidate chunks from both FAQ and Document KBs,
+	//    grouped by knowledge_id for diversity.
+	//    knowledgeID -> list of questions
+	buckets := make(map[string][]types.SuggestedQuestion)
 
 	// Determine query scope
 	queryKBIDs := effectiveKBIDs
 	queryKnowledgeIDs := knowledgeIDs
 
-	// Fetch more than needed from each source, we'll merge-sort and truncate
-	fetchLimit := remaining * 2
-	if fetchLimit < 10 {
-		fetchLimit = 10
+	// Fetch a large pool so DB-level random sampling covers multiple documents.
+	fetchLimit := remaining * 5
+	if fetchLimit < 20 {
+		fetchLimit = 20
 	}
 
 	// Collect FAQ recommended chunks
@@ -537,13 +537,10 @@ func (s *customAgentService) GetSuggestedQuestions(
 				continue
 			}
 			seen[meta.StandardQuestion] = true
-			candidates = append(candidates, candidate{
-				question: types.SuggestedQuestion{
-					Question:        meta.StandardQuestion,
-					Source:          "faq",
-					KnowledgeBaseID: chunk.KnowledgeBaseID,
-				},
-				updatedAt: chunk.UpdatedAt,
+			buckets[chunk.KnowledgeID] = append(buckets[chunk.KnowledgeID], types.SuggestedQuestion{
+				Question:        meta.StandardQuestion,
+				Source:          "faq",
+				KnowledgeBaseID: chunk.KnowledgeBaseID,
 			})
 		}
 	}
@@ -565,28 +562,75 @@ func (s *customAgentService) GetSuggestedQuestions(
 				continue
 			}
 			seen[q] = true
-			candidates = append(candidates, candidate{
-				question: types.SuggestedQuestion{
-					Question:        q,
-					Source:          "document",
-					KnowledgeBaseID: chunk.KnowledgeBaseID,
-				},
-				updatedAt: chunk.UpdatedAt,
+			buckets[chunk.KnowledgeID] = append(buckets[chunk.KnowledgeID], types.SuggestedQuestion{
+				Question:        q,
+				Source:          "document",
+				KnowledgeBaseID: chunk.KnowledgeBaseID,
 			})
 		}
 	}
 
-	// 4. Sort all candidates by updated_at descending (newest first)
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].updatedAt.After(candidates[j].updatedAt)
+	// Collect Wiki pages as a fallback source. This covers Wiki-only KBs where no
+	// document chunks carry AI-generated questions (question_generation is skipped
+	// when the KB does not need an embedding model). knowledge_id filter is
+	// intentionally ignored here because wiki pages are authored at the KB level
+	// and are not 1:1 with source knowledge items.
+	if len(queryKBIDs) > 0 && s.wikiPageRepo != nil {
+		wikiPages, err := s.wikiPageRepo.ListRecentForSuggestions(ctx, tenantID, queryKBIDs, fetchLimit)
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"agent_id": agentID,
+			})
+		} else {
+			locale, _ := types.LanguageFromContext(ctx)
+			for _, page := range wikiPages {
+				q := wikiSuggestionFromPage(page, locale)
+				if q == "" || seen[q] {
+					continue
+				}
+				seen[q] = true
+				// Use page.ID as the bucket key so round-robin mixes pages from
+				// different wiki entries rather than clumping them.
+				buckets[page.ID] = append(buckets[page.ID], types.SuggestedQuestion{
+					Question:        q,
+					Source:          "wiki",
+					KnowledgeBaseID: page.KnowledgeBaseID,
+				})
+			}
+		}
+	}
+
+	// 4. Shuffle within each bucket, then round-robin across buckets
+	//    to ensure diversity across different documents.
+	bucketKeys := make([]string, 0, len(buckets))
+	for k, qs := range buckets {
+		bucketKeys = append(bucketKeys, k)
+		rand.Shuffle(len(qs), func(i, j int) { qs[i], qs[j] = qs[j], qs[i] })
+		buckets[k] = qs
+	}
+	rand.Shuffle(len(bucketKeys), func(i, j int) {
+		bucketKeys[i], bucketKeys[j] = bucketKeys[j], bucketKeys[i]
 	})
 
-	// 5. Pick top N
-	for _, c := range candidates {
-		if len(result) >= limit {
+	// Round-robin pick one question from each document in turn.
+	offsets := make(map[string]int, len(bucketKeys))
+	for len(result) < limit {
+		picked := false
+		for _, key := range bucketKeys {
+			if len(result) >= limit {
+				break
+			}
+			qs := buckets[key]
+			idx := offsets[key]
+			if idx < len(qs) {
+				result = append(result, qs[idx])
+				offsets[key] = idx + 1
+				picked = true
+			}
+		}
+		if !picked {
 			break
 		}
-		result = append(result, c.question)
 	}
 
 	return s.truncateQuestions(result, limit), nil
@@ -598,4 +642,48 @@ func (s *customAgentService) truncateQuestions(questions []types.SuggestedQuesti
 		return questions[:limit]
 	}
 	return questions
+}
+
+// wikiSuggestionFromPage converts a wiki page into a human-readable suggested
+// question string. The template is chosen per page type so the chip reads
+// naturally for that kind of content:
+//   - concept: "What is <title>?" works for abstract terms (RAG, embedding,
+//     idempotency…).
+//   - entity / summary: "Tell me about <title>" is neutral and works for
+//     people, places, organizations, products and document summaries where
+//     "what is <name>?" would read awkwardly ("什么是张三？").
+//   - everything else (synthesis, comparison, …): the raw title is already a
+//     good topical query on its own.
+func wikiSuggestionFromPage(page *types.WikiPage, locale string) string {
+	if page == nil {
+		return ""
+	}
+	title := strings.TrimSpace(page.Title)
+	if title == "" {
+		return ""
+	}
+	switch page.PageType {
+	case types.WikiPageTypeConcept:
+		if isEnglishLocale(locale) {
+			return "What is " + title + "?"
+		}
+		return "什么是" + title + "？"
+	case types.WikiPageTypeEntity, types.WikiPageTypeSummary:
+		if isEnglishLocale(locale) {
+			return "Tell me about " + title
+		}
+		return "介绍一下" + title
+	default:
+		return title
+	}
+}
+
+// isEnglishLocale reports whether the locale string is an English variant.
+// Unknown / empty locales fall back to Chinese, matching the product default.
+func isEnglishLocale(locale string) bool {
+	switch locale {
+	case "en-US", "en", "en-GB":
+		return true
+	}
+	return false
 }

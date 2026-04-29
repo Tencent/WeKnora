@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
@@ -64,6 +65,7 @@ type RouterParams struct {
 	IMHandler                *handler.IMHandler
 	DataSourceHandler        *handler.DataSourceHandler
 	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
+	WikiPageHandler          *handler.WikiPageHandler
 }
 
 // NewRouter 创建新的路由
@@ -121,6 +123,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 添加OpenTelemetry追踪中间件
 	// r.Use(middleware.TracingMiddleware())
 
+	// Langfuse observability — only active when LANGFUSE_* env vars are set.
+	// The middleware is registered unconditionally; when disabled it's a no-op.
+	r.Use(langfuse.GinMiddleware())
+
 	// 需要认证的API路由
 	v1 := r.Group("/api/v1")
 	{
@@ -148,6 +154,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterIMChannelRoutes(v1, params.IMHandler)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler)
+		RegisterWikiPageRoutes(v1, params.WikiPageHandler)
 	}
 
 	return r
@@ -215,6 +222,8 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 		k.PUT("/tags", handler.UpdateKnowledgeTagBatch)
 		// 搜索知识
 		k.GET("/search", handler.SearchKnowledge)
+		// 批量删除知识（同一知识库内）
+		k.POST("/batch-delete", handler.BatchDeleteKnowledge)
 		// 移动知识到其他知识库
 		k.POST("/move", handler.MoveKnowledge)
 		// 获取知识移动进度
@@ -448,7 +457,6 @@ func RegisterSystemRoutes(r *gin.RouterGroup, handler *handler.SystemHandler) {
 		systemRoutes.POST("/docreader/reconnect", handler.ReconnectDocReader)
 		systemRoutes.GET("/storage-engine-status", handler.GetStorageEngineStatus)
 		systemRoutes.POST("/storage-engine-check", handler.CheckStorageEngine)
-		systemRoutes.GET("/minio/buckets", handler.ListMinioBuckets)
 	}
 }
 
@@ -529,6 +537,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 	{
 		// Get placeholder definitions (must be before /:id to avoid conflict)
 		agents.GET("/placeholders", agentHandler.GetPlaceholders)
+		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom)
+		agents.GET("/type-presets", agentHandler.GetAgentTypePresets)
 		// Create custom agent
 		agents.POST("", agentHandler.CreateAgent)
 		// List all agents (including built-in)
@@ -833,4 +843,35 @@ func RegisterDataSourceRoutes(r *gin.RouterGroup, handler *handler.DataSourceHan
 func RegisterWeKnoraCloudRoutes(r *gin.RouterGroup, handler *handler.WeKnoraCloudHandler) {
 	r.POST("/weknoracloud/credentials", handler.SaveCredentials)
 	r.GET("/models/weknoracloud/status", handler.Status)
+}
+
+// RegisterWikiPageRoutes registers wiki page related routes
+func RegisterWikiPageRoutes(r *gin.RouterGroup, wikiHandler *handler.WikiPageHandler) {
+	wiki := r.Group("/knowledgebase/:kb_id/wiki")
+	{
+		// Page CRUD
+		wiki.GET("/pages", wikiHandler.ListPages)
+		wiki.POST("/pages", wikiHandler.CreatePage)
+		wiki.GET("/pages/*slug", wikiHandler.GetPage)
+		wiki.PUT("/pages/*slug", wikiHandler.UpdatePage)
+		wiki.DELETE("/pages/*slug", wikiHandler.DeletePage)
+
+		// Special pages
+		wiki.GET("/index", wikiHandler.GetIndex)
+		wiki.GET("/log", wikiHandler.GetLog)
+
+		// Graph and stats
+		wiki.GET("/graph", wikiHandler.GetGraph)
+		wiki.GET("/stats", wikiHandler.GetStats)
+
+		// Search and maintenance
+		wiki.GET("/search", wikiHandler.SearchPages)
+		wiki.POST("/rebuild-links", wikiHandler.RebuildLinks)
+		wiki.GET("/lint", wikiHandler.Lint)
+		wiki.POST("/auto-fix", wikiHandler.AutoFix)
+
+		// Issues
+		wiki.GET("/issues", wikiHandler.ListIssues)
+		wiki.PUT("/issues/:issue_id/status", wikiHandler.UpdateIssueStatus)
+	}
 }

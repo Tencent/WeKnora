@@ -611,6 +611,8 @@ func (p *PluginSearch) tryDirectChunkLoading(ctx context.Context, tenantID uint6
 		results = append(results, res)
 	}
 
+	searchutil.EnrichSearchResultsImageInfo(ctx, p.chunkService.GetRepository(), tenantID, results)
+
 	return results, skippedIDs
 }
 

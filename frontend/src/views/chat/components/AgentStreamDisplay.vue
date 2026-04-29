@@ -42,7 +42,7 @@
                   </div>
                   <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
-                      <div v-for="(token, idx) in getTokens(event.content)" :key="idx" v-html="getTokenHTML(token)"></div>
+                      <div v-html="renderMarkdownContent(event.content)"></div>
                     </div>
                   </div>
                 </div>
@@ -64,7 +64,7 @@
                   </div>
                   <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
                     <div class="thinking-detail-content markdown-content">
-                      <div v-for="(token, idx) in getTokens(event.tool_data.thought)" :key="idx" v-html="getTokenHTML(token)"></div>
+                      <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
                     </div>
                   </div>
                 </div>
@@ -173,7 +173,7 @@
             </div>
             <div v-if="event.content && isEventExpanded(event.event_id)" class="action-details">
               <div class="thinking-detail-content markdown-content">
-                <div v-for="(token, idx) in getTokens(event.content)" :key="idx" v-html="getTokenHTML(token)"></div>
+                <div v-html="renderMarkdownContent(event.content)"></div>
               </div>
             </div>
           </div>
@@ -195,7 +195,7 @@
             </div>
             <div v-if="event.tool_data?.thought && isEventExpanded(event.tool_call_id)" class="action-details">
               <div class="thinking-detail-content markdown-content">
-                <div v-for="(token, idx) in getTokens(event.tool_data.thought)" :key="idx" v-html="getTokenHTML(token)"></div>
+                <div v-html="renderMarkdownContent(event.tool_data.thought)"></div>
               </div>
             </div>
           </div>
@@ -207,9 +207,9 @@
             v-if="event.content && event.content.trim()"
             class="answer-content markdown-content"
           >
-               <div v-for="(token, idx) in getTokens(event.content)" :key="idx" v-html="getTokenHTML(token)"></div>
+               <div v-html="renderMarkdownContent(event.content)"></div>
           </div>
-          <div v-if="event.done" class="answer-toolbar">
+          <div v-if="event.done && event.content && event.content.trim()" class="answer-toolbar">
             <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)" :title="$t('agent.copy')">
               <t-icon name="copy" />
             </t-button>
@@ -335,18 +335,53 @@
   
   <!-- Image Preview -->
   <picturePreview :reviewImg="imagePreviewVisible" :reviewUrl="imagePreviewUrl" @closePreImg="closeImagePreview" />
+  
+  <!-- Wiki Page Detail Drawer -->
+  <t-drawer
+    v-model:visible="wikiDrawerVisible"
+    :header="wikiDrawerPage?.title || ''"
+    size="480px"
+    :footer="false"
+    placement="right"
+    attach="body"
+    :show-overlay="true"
+    :close-btn="true"
+    :close-on-overlay-click="true"
+    class="wiki-graph-drawer"
+  >
+    <template v-if="wikiDrawerPage">
+      <div class="wiki-reader-meta" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <t-tag size="small" :theme="getTypeTheme(wikiDrawerPage.page_type)" variant="light-outline">
+            {{ getTypeLabel(wikiDrawerPage.page_type) }}
+          </t-tag>
+          <span class="wiki-reader-meta-text">{{ $t('knowledgeEditor.wikiBrowser.version', { ver: wikiDrawerPage.version || 1 }) }}</span>
+        </div>
+        <t-link theme="primary" hover="color" @click="navigateToWikiGraph">
+          <template #prefixIcon><t-icon name="chart-bubble" /></template>
+          {{ $t('knowledgeEditor.wikiBrowser.viewInGraph') }}
+        </t-link>
+      </div>
+      <div ref="wikiDrawerBodyRef" class="wiki-reader-body" v-html="wikiDrawerContent" @click="handleWikiDrawerClick"></div>
+    </template>
+  </t-drawer>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
+import markedKatex from 'marked-katex-extension';
+import 'katex/dist/katex.min.css';
 import DOMPurify from 'dompurify';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import picturePreview from '@/components/picture-preview.vue';
 import { getChunkByIdOnly } from '@/api/knowledge-base';
+import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
+import { useSettingsStore } from '@/stores/settings';
+import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages } from '@/utils/security';
@@ -363,7 +398,10 @@ import {
 } from '@/utils/mermaidShared';
 
 const router = useRouter();
+const route = useRoute();
 const uiStore = useUIStore();
+const settingsStore = useSettingsStore();
+const authStore = useAuthStore();
 const { t } = useI18n();
 
 ensureMermaidInitialized();
@@ -378,11 +416,13 @@ const DOMPurifyConfig = {
     'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
     'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
     'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern',
-    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask'
+    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask',
+    // KaTeX MathML 支持的标签
+    'math', 'annotation', 'semantics', 'mo', 'mi', 'mn', 'msup', 'mrow', 'mfrac', 'msqrt', 'mroot', 'mstyle'
   ],
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'data-tooltip', 'data-url', 'data-kb-id',
-    'data-chunk-id', 'data-doc', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src',
+    'data-chunk-id', 'data-doc', 'data-slug', 'class', 'role', 'tabindex', 'src', 'alt', 'data-protected-src',
     'width', 'height', 'style', 'id',
     // Mermaid SVG 支持的属性
     'd', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin',
@@ -397,8 +437,11 @@ const DOMPurifyConfig = {
     'patternunits', 'patterntransform', 'clippathunits', 'maskunits',
     'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
     'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
-    'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
+    'display', 'pointer-events', 'cursor', 'data-emit', 'direction',
+    // KaTeX MathML 支持的属性
+    'mathvariant', 'encoding', 'aria-hidden'
   ],
+  USE_PROFILES: { html: true, svg: true, mathMl: true },
   // Allow provider:// URLs so they can be hydrated later.
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
 };
@@ -478,7 +521,10 @@ const sanitizeForDisplay = (text: string): string => {
   });
   result = result.replace(ID_LABEL_RE, '');
   result = result.replace(UUID_RE, '');
-  result = result.replace(/`\s*`/g, '');
+  // Remove empty inline code like `` or ` ` while preserving triple-backtick
+  // fenced code blocks (```). Without the lookaround the greedy pair match
+  // would eat two of the three fence backticks and break code block rendering.
+  result = result.replace(/(?<!`)`[ \t]*`(?!`)/g, '');
   result = result.replace(/\(\s*\)/g, '');
   return result;
 };
@@ -498,6 +544,110 @@ const openImagePreview = (url: string) => {
 
 const closeImagePreview = () => {
   imagePreviewVisible.value = false;
+};
+
+// Wiki Drawer 状态
+const wikiDrawerVisible = ref(false);
+const wikiDrawerPage = ref<WikiPage | null>(null);
+const wikiDrawerBodyRef = ref<HTMLElement | null>(null);
+const currentWikiKbId = ref<string>('');
+
+function getTypeTheme(type: string): string {
+  const map: Record<string, string> = {
+    summary: 'primary', entity: 'success', concept: 'warning',
+    synthesis: 'primary', comparison: 'danger', index: 'default', log: 'default',
+  };
+  return map[type] || 'default';
+}
+
+function getTypeLabel(type: string): string {
+  const map: Record<string, string> = {
+    summary: t('knowledgeEditor.wikiBrowser.filterSummary'),
+    entity: t('knowledgeEditor.wikiBrowser.filterEntity'),
+    concept: t('knowledgeEditor.wikiBrowser.filterConcept'),
+    synthesis: t('knowledgeEditor.wikiBrowser.filterSynthesis'),
+    comparison: t('knowledgeEditor.wikiBrowser.filterComparison'),
+    index: 'Index',
+    log: 'Log',
+  };
+  return map[type] || type;
+}
+
+const wikiDrawerContent = computed(() => {
+  if (!wikiDrawerPage.value) return '';
+  const content = wikiDrawerPage.value.content || '';
+  
+  // Pre-process wiki links [[slug|name]] to custom HTML tags for the drawer
+  let preprocessed = content.replace(/\[\[([^\]]+)\]\]/g, (_, inner: string) => {
+    const pipeIdx = inner.indexOf('|');
+    const slug = pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim();
+    let display = slug;
+    if (pipeIdx > 0) {
+      display = inner.substring(pipeIdx + 1).trim();
+    } else {
+      const parts = slug.split('/');
+      display = parts.length > 1 ? parts.slice(1).join('/') : slug;
+    }
+    return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${escapeHtml(slug)}">${escapeHtml(display)}</a>`;
+  });
+
+  return marked.parse(preprocessed, { breaks: true, async: false }) as string;
+});
+
+watch(wikiDrawerContent, async () => {
+  await nextTick();
+  if (wikiDrawerBodyRef.value) {
+    await hydrateProtectedFileImages(wikiDrawerBodyRef.value);
+  }
+});
+
+const openWikiDrawer = async (kbId: string, slug: string) => {
+  if (!kbId || !slug) return;
+  try {
+    currentWikiKbId.value = kbId;
+    const res = await getWikiPage(kbId, slug);
+    wikiDrawerPage.value = (res as any).data || res as any;
+    wikiDrawerVisible.value = true;
+  } catch (e) {
+    console.error(`Failed to load page ${slug}:`, e);
+    MessagePlugin.warning(t('agentStream.citation.loadFailed'));
+  }
+};
+
+const navigateToWikiGraph = () => {
+  if (currentWikiKbId.value && wikiDrawerPage.value?.slug) {
+    wikiDrawerVisible.value = false;
+    try {
+      router.push(`/platform/knowledge-bases/${currentWikiKbId.value}?tab=graph&slug=${encodeURIComponent(wikiDrawerPage.value.slug)}`);
+    } catch (error) {
+      console.error('Failed to navigate to wiki graph:', error);
+    }
+  }
+};
+
+const handleWikiDrawerClick = (e: MouseEvent) => {
+  const target = e.target as HTMLElement;
+  if (target.closest('.citation-wiki')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const slug = target.closest('.citation-wiki')?.getAttribute('data-slug');
+    if (slug) openWikiDrawer(currentWikiKbId.value, slug);
+  } else if (target.tagName.toLowerCase() === 'img') {
+    e.preventDefault();
+    const src = target.getAttribute('src');
+    if (src) openImagePreview(src);
+  } else {
+    // allow link navigation inside drawer
+    const aEl = target.closest?.('a') as HTMLAnchorElement | null;
+    // @ts-ignore
+    if (aEl && aEl.href && window.runtime && window.runtime.BrowserOpenURL) {
+      if (aEl.href.startsWith('http://') || aEl.href.startsWith('https://')) {
+        e.preventDefault();
+        // @ts-ignore
+        window.runtime.BrowserOpenURL(aEl.href);
+      }
+    }
+  }
 };
 
 // 浮层状态（Web/KB 共用）
@@ -586,6 +736,16 @@ const props = defineProps<{
 
 // Configure marked for security
 marked.use({});
+marked.use(markedKatex({ throwOnError: false }));
+
+const preprocessMathDelimiters = (rawText: string): string => {
+  if (!rawText || typeof rawText !== 'string') {
+    return '';
+  }
+  return rawText
+    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
+    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
+};
 
 // Event stream
 const eventStream = computed(() => props.session?.agentEventStream || []);
@@ -732,6 +892,19 @@ const finalContent = computed(() => {
 
   if (hasAnswerContent) {
     return { type: 'answer' };
+  }
+
+  // Do NOT fall back to re-rendering the last thinking event when the
+  // intermediate-steps tree already shows it — that would duplicate the
+  // thinking card below the tree. The fallback is only meaningful for
+  // legacy conversations where the tree is absent. Also skip for
+  // user-stopped conversations which have no final answer to fall back to.
+  if (shouldShowCollapsedSteps.value) {
+    return null;
+  }
+  const wasStopped = stream.some((e: any) => e.type === 'stop');
+  if (wasStopped) {
+    return null;
   }
 
   // Fallback: if no answer content (legacy path or LLM didn't call final_answer),
@@ -911,6 +1084,14 @@ const displayEvents = computed(() => {
     return answerEvents;
   }
 
+  // If the intermediate-steps tree is active, all thinking/tool_call events
+  // are already rendered there. Showing anything else here would duplicate
+  // them. This covers both the user-stopped case and any completion path
+  // that didn't produce an answer event.
+  if (shouldShowCollapsedSteps.value) {
+    return [];
+  }
+
   // Fallback: if no answer events, show last thinking (legacy compatibility)
   const final = finalContent.value;
   if (!final) {
@@ -1024,13 +1205,14 @@ type KbTooltipState = {
 
 const kbChunkDetails = ref<Record<string, KbTooltipState>>({});
 
-const escapeHtml = (value: string): string =>
-  value
+function escapeHtml(value: string): string {
+  return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
 
 const buildKbTooltipContent = (content: string): string => {
   const escapedContent = escapeHtml(content).replace(/\n/g, '<br>');
@@ -1185,6 +1367,49 @@ const onHoverOut = (e: Event) => {
   scheduleFloatClose();
 };
 
+const getKbIdForWiki = (slug: string): string => {
+  if (route.params.kbId) return route.params.kbId as string;
+
+  // The backend ships `found_kbs` as a map<slug, string[]> — a single slug can
+  // legitimately resolve to more than one KB when multiple wiki KBs are in
+  // scope. For navigation we just pick the first one; cross-KB disambiguation
+  // (if ever needed) can layer on top. We also defensively handle the legacy
+  // string shape in case older tool outputs are still cached in a session.
+  const pickKbId = (v: unknown): string => {
+    if (!v) return '';
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (typeof item === 'string' && item) return item;
+      }
+    }
+    return '';
+  };
+
+  // Try to extract from agent event stream (retrieval pipeline). Walk
+  // backwards so we prefer the most recent tool call's mapping.
+  if (props.session?.agentEventStream) {
+    for (let i = props.session.agentEventStream.length - 1; i >= 0; i--) {
+      const event = props.session.agentEventStream[i];
+      const foundKbs = event?.tool_data?.found_kbs;
+      if (event.type === 'tool_call' && foundKbs) {
+        const hit = pickKbId(foundKbs[slug]);
+        if (hit) return hit;
+      }
+    }
+  }
+
+  // Fallbacks
+  const selectedKbs = settingsStore.getSelectedKnowledgeBases();
+  if (selectedKbs && selectedKbs.length > 0) return selectedKbs[0];
+
+  if (authStore.knowledgeBases && authStore.knowledgeBases.length > 0) {
+    return authStore.knowledgeBases[0].id;
+  }
+
+  return '';
+};
+
 const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
@@ -1228,6 +1453,24 @@ const onRootClick = (e: Event) => {
     return;
   }
   
+  // Handle wiki link clicks -> navigate to KB wiki browser page
+  const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null;
+  if (wikiEl && wikiEl.getAttribute('data-slug')) {
+    e.preventDefault();
+    e.stopPropagation();
+    const slug = wikiEl.getAttribute('data-slug');
+    
+    // Determine the relevant KB ID
+    const kbId = getKbIdForWiki(slug);
+    
+    if (kbId && slug) {
+      openWikiDrawer(kbId, slug);
+    } else {
+      MessagePlugin.warning(t('agentStream.citation.noKbForWiki'));
+    }
+    return;
+  }
+  
   // Handle generic a clicks (especially in Wails desktop)
   const aEl = target.closest?.('a') as HTMLAnchorElement | null;
   // @ts-ignore
@@ -1267,6 +1510,24 @@ const onRootKeydown = (e: KeyboardEvent) => {
         } catch (error) {
           console.error('Failed to navigate to knowledge base:', error);
         }
+      }
+    }
+    return;
+  }
+
+  // Handle wiki citation keyboard -> navigate to KB wiki browser
+  const wikiEl = target.closest?.('.citation-wiki') as HTMLElement | null;
+  if (wikiEl) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const slug = wikiEl.getAttribute('data-slug');
+      
+      const kbId = getKbIdForWiki(slug || '');
+      
+      if (kbId && slug) {
+        openWikiDrawer(kbId, slug);
+      } else {
+        MessagePlugin.warning(t('agentStream.citation.noKbForWiki'));
       }
     }
     return;
@@ -1389,13 +1650,42 @@ const preprocessMarkdown = (contentStr: string): string => {
         const displayDoc = escapeHtml(truncateMiddle(doc));
         return `<span class="citation citation-kb" data-kb-id="${safeKbId}" data-chunk-id="${safeChunkId}" data-doc="${safeDoc}" role="button" tabindex="0"><span class="citation-icon kb"></span><span class="citation-text">${displayDoc}</span><span class="citation-tip"><span class="t-popup__content"><span class="tip-loading">${t('agentStream.citation.loading')}</span></span></span></span>`;
       }
+    )
+    .replace(
+      /\[\[([^\]]+)\]\]/g,
+      (match, inner: string) => {
+        const pipeIdx = inner.indexOf('|');
+        const slug = pipeIdx > 0 ? inner.substring(0, pipeIdx).trim() : inner.trim();
+        let display = slug;
+        if (pipeIdx > 0) {
+          display = inner.substring(pipeIdx + 1).trim();
+        } else {
+          // Fallback: strip type prefix like "summary/" or "concept/"
+          const parts = slug.split('/');
+          display = parts.length > 1 ? parts.slice(1).join('/') : slug;
+        }
+
+        // Bail out on empty slug; otherwise accept any non-empty slug.
+        // Structural pages like "index" and "log" have no slash but are
+        // still valid targets — the drawer renderer already treats them
+        // as such, so the chat bubble must match.
+        if (!slug) return match;
+
+        const safeSlug = escapeHtml(slug);
+        const safeDisplay = escapeHtml(display);
+        return `<a href="#" class="wiki-content-link citation-wiki" data-slug="${safeSlug}">${safeDisplay}</a>`;
+      }
     );
 };
 
-// Get tokens from markdown content (with sanitization for user-friendly display)
-const getTokens = (content: any) => {
+// 自定义渲染器 - 支持 Mermaid
+const agentRenderer = new marked.Renderer();
+agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
+
+// 单次渲染 Markdown 内容（替代 token-by-token，修复 KaTeX 公式在 streaming 时闪烁消失的问题）
+const renderMarkdownContent = (content: any): string => {
   const contentStr = typeof content === 'string' ? content : String(content || '');
-  if (!contentStr.trim()) return [];
+  if (!contentStr.trim()) return '';
 
   // Extract <kb.../> and <web.../> tags before sanitization to prevent
   // sanitizeForDisplay from stripping chunk_id labels and UUIDs inside them.
@@ -1415,32 +1705,29 @@ const getTokens = (content: any) => {
     return `\x00IMG${idx}\x00`;
   });
 
-  let sanitized = sanitizeForDisplay(preservedWithImages);
+  // Preserve wiki links [[slug|name]]
+  const wikiPlaceholders: string[] = [];
+  const preservedWithWiki = preservedWithImages.replace(/\[\[([^\]]+)\]\]/g, (match) => {
+    const idx = wikiPlaceholders.length;
+    wikiPlaceholders.push(match);
+    return `\x00WIKI${idx}\x00`;
+  });
+
+  let sanitized = sanitizeForDisplay(preservedWithWiki);
+
+  // Restore preserved wiki links
+  sanitized = sanitized.replace(/\x00WIKI(\d+)\x00/g, (_, idx) => wikiPlaceholders[Number(idx)]);
 
   // Restore preserved images
   sanitized = sanitized.replace(/\x00IMG(\d+)\x00/g, (_, idx) => imagePlaceholders[Number(idx)]);
-  
+
   // Restore preserved tags
   sanitized = sanitized.replace(/\x00TAG(\d+)\x00/g, (_, idx) => tagPlaceholders[Number(idx)]);
 
-  const processed = preprocessMarkdown(sanitized);
-  return marked.lexer(processed);
-};
-
-// 自定义渲染器 - 支持 Mermaid
-const agentRenderer = new marked.Renderer();
-agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
-
-// Render HTML from a single token
-const getTokenHTML = (token: any): string => {
-  try {
-    const html = marked.parser([token], { renderer: agentRenderer });
-    const protectedHTML = protectProviderImageSrcInHTML(html);
-    return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
-  } catch (e) {
-    console.error('Token rendering error:', e);
-    return '';
-  }
+  const processed = preprocessMarkdown(preprocessMathDelimiters(sanitized));
+  const html = marked.parse(processed, { renderer: agentRenderer }) as string;
+  const protectedHTML = protectProviderImageSrcInHTML(html);
+  return DOMPurify.sanitize(protectedHTML, DOMPurifyConfig);
 };
 
 // Legacy Markdown rendering function (kept for summaries)
@@ -1449,7 +1736,7 @@ const renderMarkdown = (content: any): string => {
   if (!contentStr.trim()) return '';
 
   try {
-    const processed = preprocessMarkdown(contentStr);
+    const processed = preprocessMarkdown(preprocessMathDelimiters(contentStr));
     const html = marked.parse(processed, { renderer: agentRenderer }) as string;
     if (!html) return '';
 
@@ -2867,6 +3154,29 @@ const handleAddToKnowledge = (answerEvent: any) => {
   pointer-events: none;
 }
 
+/* Inline wiki link style for chat bubbles — brand-blue dashed underline,
+   matching the style used inside the wiki drawer. Rendered inline with
+   the surrounding text, NOT as a pill, so it reads like a regular link. */
+:deep(a.wiki-content-link) {
+  color: var(--td-brand-color);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--td-brand-color);
+  cursor: pointer;
+  font-weight: 500;
+  transition: border-bottom-style 0.15s ease;
+}
+
+:deep(a.wiki-content-link:hover) {
+  border-bottom-style: solid;
+  text-decoration: none !important;
+}
+
+:deep(a.wiki-content-link:focus-visible) {
+  outline: 2px solid var(--td-brand-color);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .tool-arguments-wrapper {
   margin-top: 8px;
   padding: 0 10px;
@@ -3012,6 +3322,114 @@ const handleAddToKnowledge = (answerEvent: any) => {
 </style>
 
 <style lang="less">
+/* Global styles for teleported components */
+
+.wiki-graph-drawer {
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+
+  .wiki-reader-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .wiki-reader-meta-text {
+    font-size: 13px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .wiki-reader-body {
+    line-height: 1.6;
+    font-size: 14px;
+    color: var(--td-text-color-primary);
+
+    h1 { font-size: 24px; margin: 28px 0 16px; font-weight: 600; line-height: 1.4; }
+    h2 { font-size: 18px; margin: 24px 0 12px; font-weight: 600; line-height: 1.4; }
+    h3 { font-size: 16px; margin: 20px 0 10px; font-weight: 600; line-height: 1.5; }
+    h4, h5, h6 { font-size: 14px; margin: 16px 0 8px; font-weight: 600; line-height: 1.5; }
+    
+    p { margin: 0 0 14px; }
+    
+    ul, ol { 
+      margin: 0 0 14px; 
+      padding-left: 24px; 
+    }
+    li { 
+      margin-bottom: 6px; 
+      line-height: 1.6;
+    }
+    li > p {
+      margin-bottom: 6px;
+    }
+
+    blockquote {
+      margin: 0 0 14px;
+      padding: 10px 16px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-left: 4px solid var(--td-component-border);
+      border-radius: 0 4px 4px 0;
+      color: var(--td-text-color-secondary);
+    }
+    
+    code {
+      font-family: monospace;
+      font-size: 13px;
+      padding: 2px 4px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-radius: 4px;
+      color: var(--td-brand-color);
+    }
+    
+    pre {
+      margin: 0 0 14px;
+      padding: 12px 16px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-radius: 6px;
+      overflow-x: auto;
+      
+      code {
+        padding: 0;
+        background: transparent;
+        color: inherit;
+      }
+    }
+
+    p:has(img) {
+      text-align: center;
+      color: var(--td-text-color-secondary);
+      font-size: 13px;
+      margin-top: 16px;
+      margin-bottom: 24px;
+      
+      img {
+        max-width: 100%;
+        max-height: 400px;
+        object-fit: contain;
+        border-radius: 6px;
+        display: block;
+        margin: 0 auto 8px;
+        cursor: zoom-in;
+        transition: opacity 0.2s;
+        
+        &:hover {
+          opacity: 0.9;
+        }
+      }
+    }
+
+    a.wiki-content-link {
+      color: var(--td-brand-color);
+      text-decoration: none;
+      border-bottom: 1px dashed var(--td-brand-color);
+      cursor: pointer;
+      font-weight: 500;
+      &:hover {
+        border-bottom-style: solid;
+        text-decoration: none !important;
+      }
+    }
+  }
+}
 // Dark mode: invert agent icon (uses currentColor which doesn't work in <img>)
 html[theme-mode="dark"] .tree-root-title img {
   filter: invert(1);

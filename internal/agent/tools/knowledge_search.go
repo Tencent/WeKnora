@@ -117,7 +117,10 @@ type searchResultWithMeta struct {
 	KnowledgeBaseType string // Type of the knowledge base (document, faq, etc.)
 }
 
-// KnowledgeSearchTool searches knowledge bases with flexible query modes
+// KnowledgeSearchTool searches knowledge bases with flexible query modes.
+// seenChunks lets repeated calls in the same session surface previously-
+// returned chunks in a compact form (mirroring wiki_search's de-duping UX)
+// so the LLM doesn't burn tokens re-reading identical content.
 type KnowledgeSearchTool struct {
 	BaseTool
 	knowledgeBaseService interfaces.KnowledgeBaseService
@@ -127,6 +130,9 @@ type KnowledgeSearchTool struct {
 	rerankModel          rerank.Reranker
 	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
+
+	seenMu     sync.Mutex
+	seenChunks map[string]bool
 }
 
 // NewKnowledgeSearchTool creates a new knowledge search tool
@@ -148,6 +154,7 @@ func NewKnowledgeSearchTool(
 		rerankModel:          rerankModel,
 		chatModel:            chatModel,
 		config:               cfg,
+		seenChunks:           make(map[string]bool),
 	}
 }
 
@@ -292,7 +299,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	deduplicatedBeforeRerank := t.deduplicateResults(allResults)
 
 	// Apply ReRank if model is configured
-	// Prefer chatModel (LLM-based reranking) over rerankModel if both are available
+	// Prefer rerankModel; fall back to chatModel (LLM-based reranking) if unavailable
 	// Use first query for reranking (or combine all queries if needed)
 	rerankQuery := ""
 	if len(queries) > 0 {
@@ -306,26 +313,9 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Variable to hold results through reranking and MMR stages
 	var filteredResults []*searchResultWithMeta
 
-	if t.chatModel != nil && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
-		logger.Infof(
-			ctx,
-			"[Tool][KnowledgeSearch] Applying LLM-based rerank with model: %s, input: %d results, queries: %v",
-			t.chatModel.GetModelName(),
-			len(deduplicatedBeforeRerank),
-			queries,
-		)
-		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
-		if err != nil {
-			logger.Warnf(ctx, "[Tool][KnowledgeSearch] LLM rerank failed, using original results: %v", err)
-			filteredResults = deduplicatedBeforeRerank
-		} else {
-			filteredResults = rerankedResults
-			logger.Infof(ctx, "[Tool][KnowledgeSearch] LLM rerank completed successfully: %d results",
-				len(filteredResults))
-		}
-	} else if t.rerankModel != nil && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank with model: %s, input: %d results, queries: %v",
-			t.rerankModel.GetModelName(), len(deduplicatedBeforeRerank), queries)
+	if (t.rerankModel != nil || t.chatModel != nil) && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank, input: %d results, queries: %v",
+			len(deduplicatedBeforeRerank), queries)
 		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank failed, using original results: %v", err)
@@ -336,7 +326,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 				len(filteredResults))
 		}
 	} else {
-		// No reranking, use deduplicated results
+		// No reranking model available, use deduplicated results
 		filteredResults = deduplicatedBeforeRerank
 	}
 
@@ -395,6 +385,21 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
+	// Enrich image info for search results (lazy-loaded from child image chunks)
+	if t.chunkService != nil && len(deduplicatedResults) > 0 {
+		byTenant := make(map[uint64][]*types.SearchResult)
+		for _, r := range deduplicatedResults {
+			tid := t.searchTargets.GetTenantIDForKB(r.KnowledgeBaseID)
+			if tid == 0 {
+				continue
+			}
+			byTenant[tid] = append(byTenant[tid], r.SearchResult)
+		}
+		for tid, batch := range byTenant {
+			searchutil.EnrichSearchResultsImageInfo(ctx, t.chunkService.GetRepository(), tid, batch)
+		}
+	}
+
 	// Build output
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Formatting output with %d final results", len(deduplicatedResults))
 	result, err := t.formatOutput(ctx, deduplicatedResults, kbIDs, queries)
@@ -448,6 +453,44 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 	if kbs, err := t.knowledgeBaseService.GetKnowledgeBasesByIDsOnly(ctx, kbIDs); err == nil {
 		kbList = kbs
 	}
+
+	// Filter out non-searchable KBs (wiki-only / graph-only). knowledge_search
+	// can only serve KBs with vector or keyword indexing; feeding a wiki-only
+	// KB into HybridSearch causes spurious "model ID cannot be empty" errors
+	// because such KBs have no EmbeddingModelID configured. Such scopes
+	// should be queried via wiki_search / graph tools instead.
+	//
+	// KBs that we couldn't fetch from the repo (not in kbList) are kept so
+	// the downstream HybridSearch path can still surface the real error.
+	searchableKBs := make(map[string]bool, len(kbList))
+	knownKBs := make(map[string]bool, len(kbList))
+	for _, kb := range kbList {
+		if kb == nil {
+			continue
+		}
+		knownKBs[kb.ID] = true
+		if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
+			searchableKBs[kb.ID] = true
+		}
+	}
+	filteredTargets := make(types.SearchTargets, 0, len(searchTargets))
+	for _, st := range searchTargets {
+		if searchableKBs[st.KnowledgeBaseID] {
+			filteredTargets = append(filteredTargets, st)
+			continue
+		}
+		if knownKBs[st.KnowledgeBaseID] {
+			logger.Infof(ctx, "[Tool][KnowledgeSearch] Skipping non-searchable KB %s (no vector/keyword index, likely wiki/graph-only)", st.KnowledgeBaseID)
+			continue
+		}
+		// KB record unavailable; keep so downstream can surface real errors.
+		filteredTargets = append(filteredTargets, st)
+	}
+	if len(filteredTargets) == 0 {
+		logger.Infof(ctx, "[Tool][KnowledgeSearch] No searchable KBs in scope (all wiki/graph-only); skipping retrieval")
+		return nil
+	}
+	searchTargets = filteredTargets
 
 	// Resolve actual model identities (name + endpoint) for cross-tenant grouping
 	modelKeyMap := t.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
@@ -1065,144 +1108,152 @@ func (t *KnowledgeSearchTool) formatOutput(
 		}, nil
 	}
 
-	// Build output header
-	output := "=== Search Results ===\n"
-	output += fmt.Sprintf("Found %d relevant results", len(results))
-	output += "\n\n"
-
 	// Count results by KB
 	kbCounts := make(map[string]int)
 	for _, r := range results {
 		kbCounts[r.KnowledgeID]++
 	}
 
-	output += "Knowledge Base Coverage:\n"
-	for kbID, count := range kbCounts {
-		output += fmt.Sprintf("  - %s: %d results\n", kbID, count)
+	// Format individual results as XML. Tag names are kept in sync with
+	// wiki_search (`<search_results>`, per-entry element, `<query>`) so that
+	// agents and downstream consumers see a single consistent shape across
+	// all retrieval tools.
+	var ob strings.Builder
+	ob.WriteString(fmt.Sprintf("<search_results count=\"%d\">\n", len(results)))
+	for _, q := range queries {
+		ob.WriteString(fmt.Sprintf("<query>%s</query>\n", xmlEscape(q)))
 	}
-	output += "\n=== Detailed Results ===\n\n"
 
-	// Format individual results
 	formattedResults := make([]map[string]interface{}, 0, len(results))
-	currentKB := ""
 
 	faqMetadataCache := make(map[string]*types.FAQChunkMetadata)
 
-	// Track chunks per knowledge for statistics
-	knowledgeChunkMap := make(map[string]map[int]bool) // knowledge_id -> set of chunk_index
-	knowledgeTotalMap := make(map[string]int64)        // knowledge_id -> total chunks
-	knowledgeTitleMap := make(map[string]string)       // knowledge_id -> title
+	knowledgeChunkMap := make(map[string]map[int]bool)
+	knowledgeTotalMap := make(map[string]int64)
+	knowledgeTitleMap := make(map[string]string)
 
 	for i, result := range results {
 		var faqMeta *types.FAQChunkMetadata
 		if result.KnowledgeBaseType == types.KnowledgeBaseTypeFAQ {
 			meta, err := t.getFAQMetadata(ctx, result.ID, faqMetadataCache)
 			if err != nil {
-				logger.Warnf(
-					ctx,
-					"[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v",
-					result.ID,
-					err,
-				)
+				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to load FAQ metadata for chunk %s: %v", result.ID, err)
 			} else {
 				faqMeta = meta
 			}
 		}
 
-		// Track chunk indices per knowledge
 		if knowledgeChunkMap[result.KnowledgeID] == nil {
 			knowledgeChunkMap[result.KnowledgeID] = make(map[int]bool)
 		}
 		knowledgeChunkMap[result.KnowledgeID][result.ChunkIndex] = true
 		knowledgeTitleMap[result.KnowledgeID] = result.KnowledgeTitle
 
-		// Group by knowledge base
-		if result.KnowledgeID != currentKB {
-			currentKB = result.KnowledgeID
-			if i > 0 {
-				output += "\n"
-			}
-			output += fmt.Sprintf("[Source Document: %s]\n", result.KnowledgeTitle)
-
-			// Get total chunk count for this knowledge (cache it)
-			// Use KB's tenant_id from searchTargets to support cross-tenant shared KB
-			if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
-				// Get tenant_id from searchTargets using the KB ID from the result
-				effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
-				if effectiveTenantID == 0 {
-					logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
+		// Cache total chunk count per knowledge
+		if _, exists := knowledgeTotalMap[result.KnowledgeID]; !exists {
+			effectiveTenantID := t.searchTargets.GetTenantIDForKB(result.KnowledgeBaseID)
+			if effectiveTenantID == 0 {
+				logger.Warnf(ctx, "[Tool][KnowledgeSearch] KB %s not found in searchTargets, skipping chunk count", result.KnowledgeBaseID)
+				knowledgeTotalMap[result.KnowledgeID] = 0
+			} else {
+				// Use the same chunk-type filter as list_knowledge_chunks so the
+				// total reported here matches what list_knowledge_chunks can page
+				// over. Mismatched filters previously let LLMs compute offsets
+				// against an inflated/deflated total and page past the end.
+				_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
+					effectiveTenantID, result.KnowledgeID,
+					&types.Pagination{Page: 1, PageSize: 1},
+					[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "",
+				)
+				if err != nil {
+					logger.Warnf(ctx, "[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v", result.KnowledgeID, err)
 					knowledgeTotalMap[result.KnowledgeID] = 0
 				} else {
-					_, total, err := t.chunkService.GetRepository().ListPagedChunksByKnowledgeID(ctx,
-						effectiveTenantID, result.KnowledgeID,
-						&types.Pagination{Page: 1, PageSize: 1},
-						[]types.ChunkType{types.ChunkTypeText}, "", "", "", "", "",
-					)
-					if err != nil {
-						logger.Warnf(
-							ctx,
-							"[Tool][KnowledgeSearch] Failed to get total chunks for knowledge %s: %v",
-							result.KnowledgeID,
-							err,
-						)
-						knowledgeTotalMap[result.KnowledgeID] = 0
-					} else {
-						knowledgeTotalMap[result.KnowledgeID] = total
-					}
+					knowledgeTotalMap[result.KnowledgeID] = total
 				}
 			}
 		}
 
-		// relevanceLevel := GetRelevanceLevel(result.Score)
-		output += fmt.Sprintf("\nResult #%d:\n", i+1)
-		output += fmt.Sprintf(
-			"  [chunk_id: %s][chunk_index: %d]\nContent: %s\n",
-			result.ID,
-			result.ChunkIndex,
-			result.Content,
-		)
+		t.seenMu.Lock()
+		seen := t.seenChunks[result.ID]
+		t.seenChunks[result.ID] = true
+		t.seenMu.Unlock()
 
-		// 解析并输出关联的图片信息
-		if result.ImageInfo != "" {
-			var imageInfos []types.ImageInfo
-			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
-				output += fmt.Sprintf("  Related Images (%d):\n", len(imageInfos))
-				for imgIdx, img := range imageInfos {
-					output += fmt.Sprintf("    Image %d:\n", imgIdx+1)
-					if img.URL != "" {
-						output += fmt.Sprintf("      URL: %s\n", img.URL)
-					}
-					if img.Caption != "" {
-						output += fmt.Sprintf("      Caption: %s\n", img.Caption)
-					}
-					if img.OCRText != "" {
-						output += fmt.Sprintf("      OCR Text: %s\n", img.OCRText)
+		if seen {
+			// Compact rendering for chunks we already returned in a previous
+			// knowledge_search call during this session. The model has the
+			// content in context already, so re-emitting it only burns tokens.
+			ob.WriteString(fmt.Sprintf(
+				"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\" already_seen=\"true\">\n",
+				i+1,
+				xmlEscape(result.ID),
+				result.ChunkIndex,
+				xmlEscape(result.KnowledgeID),
+				xmlEscape(result.KnowledgeBaseID),
+				xmlEscape(result.KnowledgeTitle),
+				result.Score,
+				xmlEscape(result.SourceQuery),
+			))
+			ob.WriteString("<note>(content omitted, already returned in a previous knowledge_search call this session)</note>\n")
+			ob.WriteString("</chunk>\n")
+		} else {
+			ob.WriteString(fmt.Sprintf(
+				"<chunk rank=\"%d\" chunk_id=\"%s\" chunk_index=\"%d\" knowledge_id=\"%s\" knowledge_base_id=\"%s\" knowledge_title=\"%s\" score=\"%.3f\" source_query=\"%s\">\n",
+				i+1,
+				xmlEscape(result.ID),
+				result.ChunkIndex,
+				xmlEscape(result.KnowledgeID),
+				xmlEscape(result.KnowledgeBaseID),
+				xmlEscape(result.KnowledgeTitle),
+				result.Score,
+				xmlEscape(result.SourceQuery),
+			))
+			if snippet := extractSnippetForQueries(result.Content, queries); snippet != "" {
+				ob.WriteString(fmt.Sprintf("<match_snippet>%s</match_snippet>\n", xmlEscape(snippet)))
+			}
+			ob.WriteString(fmt.Sprintf("<content>%s</content>\n", result.Content))
+
+			if result.ImageInfo != "" {
+				var imageInfos []types.ImageInfo
+				if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
+					for _, img := range imageInfos {
+						ob.WriteString(fmt.Sprintf("<image url=\"%s\">\n", xmlEscape(img.URL)))
+						if img.Caption != "" {
+							ob.WriteString(fmt.Sprintf("<image_caption>%s</image_caption>\n", xmlEscape(img.Caption)))
+						}
+						if img.OCRText != "" {
+							ob.WriteString(fmt.Sprintf("<image_ocr>%s</image_ocr>\n", xmlEscape(img.OCRText)))
+						}
+						ob.WriteString("</image>\n")
 					}
 				}
 			}
-		}
 
-		if faqMeta != nil {
-			if faqMeta.StandardQuestion != "" {
-				output += fmt.Sprintf("  FAQ Standard Question: %s\n", faqMeta.StandardQuestion)
-			}
-			if len(faqMeta.SimilarQuestions) > 0 {
-				output += fmt.Sprintf("  FAQ Similar Questions: %s\n", strings.Join(faqMeta.SimilarQuestions, "; "))
-			}
-			if len(faqMeta.Answers) > 0 {
-				output += "  FAQ Answers:\n"
-				for ansIdx, ans := range faqMeta.Answers {
-					output += fmt.Sprintf("    Answer Choice %d: %s\n", ansIdx+1, ans)
+			if faqMeta != nil {
+				ob.WriteString("<faq>\n")
+				if faqMeta.StandardQuestion != "" {
+					ob.WriteString(fmt.Sprintf("<question>%s</question>\n", xmlEscape(faqMeta.StandardQuestion)))
 				}
+				if len(faqMeta.SimilarQuestions) > 0 {
+					for _, sq := range faqMeta.SimilarQuestions {
+						ob.WriteString(fmt.Sprintf("<similar_question>%s</similar_question>\n", xmlEscape(sq)))
+					}
+				}
+				if len(faqMeta.Answers) > 0 {
+					for _, ans := range faqMeta.Answers {
+						ob.WriteString(fmt.Sprintf("<answer>%s</answer>\n", xmlEscape(ans)))
+					}
+				}
+				ob.WriteString("</faq>\n")
 			}
+
+			ob.WriteString("</chunk>\n")
 		}
 
 		formattedResults = append(formattedResults, map[string]interface{}{
-			"result_index": i + 1,
-			"chunk_id":     result.ID,
-			"content":      result.Content,
-			// "score":        result.Score,
-			// "relevance_level":     relevanceLevel,
+			"result_index":        i + 1,
+			"chunk_id":            result.ID,
+			"content":             result.Content,
 			"knowledge_id":        result.KnowledgeID,
 			"knowledge_title":     result.KnowledgeTitle,
 			"match_type":          result.MatchType,
@@ -1213,11 +1264,9 @@ func (t *KnowledgeSearchTool) formatOutput(
 
 		last := formattedResults[len(formattedResults)-1]
 
-		// 添加图片信息到结构化数据
 		if result.ImageInfo != "" {
 			var imageInfos []types.ImageInfo
 			if err := json.Unmarshal([]byte(result.ImageInfo), &imageInfos); err == nil && len(imageInfos) > 0 {
-				// 构建简化的图片信息列表
 				imageList := make([]map[string]string, 0, len(imageInfos))
 				for _, img := range imageInfos {
 					imgData := make(map[string]string)
@@ -1253,36 +1302,23 @@ func (t *KnowledgeSearchTool) formatOutput(
 		}
 	}
 
-	// Add statistics and recommendations for each knowledge
-	output += "\n=== Retrieval Statistics ===\n\n"
+	// Retrieval statistics
+	ob.WriteString("<retrieval_statistics>\n")
 	for knowledgeID, retrievedChunks := range knowledgeChunkMap {
 		totalChunks := knowledgeTotalMap[knowledgeID]
 		retrievedCount := len(retrievedChunks)
 		title := knowledgeTitleMap[knowledgeID]
-
 		if totalChunks > 0 {
-			percentage := float64(retrievedCount) / float64(totalChunks) * 100
 			remaining := totalChunks - int64(retrievedCount)
-
-			output += fmt.Sprintf("Document: %s (%s)\n", title, knowledgeID)
-			output += fmt.Sprintf("  Total Chunks: %d\n", totalChunks)
-			output += fmt.Sprintf("  Retrieved: %d (%.1f%%)\n", retrievedCount, percentage)
-			output += fmt.Sprintf("  Remaining: %d\n", remaining)
-
+			percentage := float64(retrievedCount) / float64(totalChunks) * 100
+			ob.WriteString(fmt.Sprintf("<document_stat knowledge_id=\"%s\" title=\"%s\" total_chunks=\"%d\" retrieved=\"%d\" remaining=\"%d\" coverage=\"%.1f%%\" />\n",
+				xmlEscape(knowledgeID), xmlEscape(title), totalChunks, retrievedCount, remaining, percentage))
 		}
 	}
+	ob.WriteString("</retrieval_statistics>\n")
+	ob.WriteString("</search_results>")
 
-	// // Add usage guidance
-	// output += "\n\n=== Usage Guidelines ===\n"
-	// output += "- High relevance (>=0.8): directly usable for answering\n"
-	// output += "- Medium relevance (0.6-0.8): use as supplementary reference\n"
-	// output += "- Low relevance (<0.6): use with caution, may not be accurate\n"
-	// if totalBeforeFilter > len(results) {
-	// 	output += "- Results below threshold have been automatically filtered\n"
-	// }
-	// output += "- Full content is already included in search results above\n"
-	// output += "- Results are deduplicated across knowledge bases and sorted by relevance\n"
-	// output += "- Use list_knowledge_chunks to expand context if needed\n"
+	output := ob.String()
 
 	data := map[string]interface{}{
 		"knowledge_base_ids": kbsToSearch,
@@ -1474,6 +1510,89 @@ func (t *KnowledgeSearchTool) applyMMR(
 // tokenizeSimple tokenizes text into a set of words (simple whitespace-based)
 func (t *KnowledgeSearchTool) tokenizeSimple(text string) map[string]struct{} {
 	return searchutil.TokenizeSimple(text)
+}
+
+// extractSnippetForQueries tries to produce a short contextual snippet around
+// the first occurrence of any token extracted from the provided queries.
+// When no token matches (common for fully paraphrased semantic queries) it
+// falls back to the leading 160 runes of content so callers always get
+// something to scan. The snippet is single-lined and bounded in length to
+// keep the rendered XML compact.
+func extractSnippetForQueries(content string, queries []string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+
+	tokens := make([]string, 0, 8)
+	seen := make(map[string]struct{})
+	for _, q := range queries {
+		for _, tok := range strings.FieldsFunc(q, func(r rune) bool {
+			// Split on whitespace and common punctuation; keep CJK as whole tokens.
+			switch r {
+			case ' ', '\t', '\n', '\r', ',', '.', ';', ':', '?', '!',
+				'(', ')', '[', ']', '{', '}', '"', '\'':
+				return true
+			}
+			return false
+		}) {
+			tok = strings.ToLower(strings.TrimSpace(tok))
+			// Skip trivially-short stopwords. Three rune floor covers most
+			// English function words without chopping CJK bigrams.
+			if len([]rune(tok)) < 2 {
+				continue
+			}
+			if _, ok := seen[tok]; ok {
+				continue
+			}
+			seen[tok] = struct{}{}
+			tokens = append(tokens, tok)
+		}
+	}
+
+	lowered := strings.ToLower(content)
+	earliest := -1
+	earliestEnd := -1
+	for _, tok := range tokens {
+		idx := strings.Index(lowered, tok)
+		if idx < 0 {
+			continue
+		}
+		end := idx + len(tok)
+		if earliest < 0 || idx < earliest {
+			earliest = idx
+			earliestEnd = end
+		}
+	}
+
+	const contextRunes = 60
+	if earliest < 0 {
+		runes := []rune(content)
+		if len(runes) > contextRunes*2 {
+			return strings.TrimSpace(string(runes[:contextRunes*2])) + " ..."
+		}
+		return content
+	}
+
+	matchStr := content[earliest:earliestEnd]
+	before := content[:earliest]
+	after := content[earliestEnd:]
+
+	beforeRunes := []rune(before)
+	if len(beforeRunes) > contextRunes {
+		beforeRunes = beforeRunes[len(beforeRunes)-contextRunes:]
+	}
+	afterRunes := []rune(after)
+	if len(afterRunes) > contextRunes {
+		afterRunes = afterRunes[:contextRunes]
+	}
+
+	snippet := string(beforeRunes) + matchStr + string(afterRunes)
+	snippet = strings.ReplaceAll(snippet, "\n", " ")
+	for strings.Contains(snippet, "  ") {
+		snippet = strings.ReplaceAll(snippet, "  ", " ")
+	}
+	return "... " + strings.TrimSpace(snippet) + " ..."
 }
 
 // jaccard calculates Jaccard similarity between two token sets

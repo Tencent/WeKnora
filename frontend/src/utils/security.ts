@@ -19,7 +19,9 @@ const DOMPurifyConfig = {
     'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polygon',
     'polyline', 'text', 'tspan', 'defs', 'marker', 'filter', 'use',
     'clippath', 'lineargradient', 'radialgradient', 'stop', 'pattern',
-    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask'
+    'image', 'foreignobject', 'desc', 'title', 'switch', 'symbol', 'mask',
+    // KaTeX MathML 支持的标签
+    'math', 'annotation', 'semantics', 'mo', 'mi', 'mn', 'msup', 'mrow', 'mfrac', 'msqrt', 'mroot', 'mstyle'
   ],
   // 允许的属性
   ALLOWED_ATTR: [
@@ -38,8 +40,11 @@ const DOMPurifyConfig = {
     'patternunits', 'patterntransform', 'clippathunits', 'maskunits',
     'filterunits', 'primitiveunits', 'xmlns', 'xmlns:xlink', 'xlink:href',
     'version', 'baseprofile', 'enable-background', 'overflow', 'visibility',
-    'display', 'pointer-events', 'cursor', 'data-emit', 'direction'
+    'display', 'pointer-events', 'cursor', 'data-emit', 'direction',
+    // KaTeX MathML 支持的属性
+    'mathvariant', 'encoding', 'aria-hidden'
   ],
+  USE_PROFILES: { html: true, svg: true, mathMl: true },
   // 允许的协议
   ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp):|(?:local|minio|cos|tos|s3|oss):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
   // 禁止的标签和属性

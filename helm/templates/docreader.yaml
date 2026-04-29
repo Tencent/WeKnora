@@ -55,7 +55,7 @@ spec:
             exec:
               command:
                 - grpc_health_probe
-                - -addr=:50051
+                - -addr=localhost:50051
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -64,7 +64,7 @@ spec:
             exec:
               command:
                 - grpc_health_probe
-                - -addr=:50051
+                - -addr=localhost:50051
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3

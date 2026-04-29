@@ -67,6 +67,7 @@ builtin_agents:
         description: "ReAct 추론 프레임워크, 다단계 사고 및 도구 호출 지원"
     config:
       agent_mode: "smart-reasoning"
+      agent_type: "rag-qa"
       system_prompt: ""
       temperature: 0.7
       max_completion_tokens: 2048
@@ -74,8 +75,6 @@ builtin_agents:
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       allowed_tools:
-        - "thinking"
-        - "todo_write"
         - "knowledge_search"
         - "grep_chunks"
         - "list_knowledge_chunks"
@@ -116,6 +115,7 @@ builtin_agents:
         description: "CSV/Excel 파일에 대한 SQL 쿼리 및 통계 분석을 지원하는 전문 데이터 분석 에이전트"
     config:
       agent_mode: "smart-reasoning"
+      agent_type: "data-analysis"
       system_prompt_id: "data_analyst"
       temperature: 0.3
       max_completion_tokens: 4096
@@ -126,8 +126,6 @@ builtin_agents:
         - "csv"
         - "xlsx"
       allowed_tools:
-        - "thinking"
-        - "todo_write"
         - "data_schema"
         - "data_analysis"
       web_search_enabled: false
@@ -140,3 +138,98 @@ builtin_agents:
       vector_threshold: 0.5
       rerank_top_k: 5
       rerank_threshold: 0.3
+
+  - id: "builtin-wiki-researcher"
+    avatar: "📚"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Wiki Questioner"
+        description: "Specialized agent for answering questions based on Wiki knowledge bases"
+      zh-CN:
+        name: "维基问答"
+        description: "专注于在 Wiki 知识库中回答问题的智能体"
+      zh-TW:
+        name: "維基問答"
+        description: "專注於在 Wiki 知識庫中回答問題的智能體"
+      ja-JP:
+        name: "Wiki 問答"
+        description: "Wikiナレッジベースでの回答問題に特化したエージェント"
+      ko-KR:
+        name: "위키 질문"
+        description: "위키 지식 베이스에서 답변하는 데 특화된 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "wiki-qa"
+      system_prompt_id: "wiki_researcher"
+      temperature: 0.7
+      max_completion_tokens: 4096
+      max_iterations: 30
+      kb_selection_mode: "all"
+      retrieve_kb_only_when_mentioned: false
+      allowed_tools:
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+        - "wiki_flag_issue"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      history_turns: 10
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+
+  - id: "builtin-wiki-fixer"
+    avatar: "🔧"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Wiki Fixer"
+        description: "Specialized agent for revising Wiki pages based on inspection issues"
+      zh-CN:
+        name: "维基修订"
+        description: "专门用于根据巡检问题修订 Wiki 页面的智能体"
+      zh-TW:
+        name: "維基修訂"
+        description: "專門用於根據巡檢問題修訂 Wiki 頁面的智能體"
+      ja-JP:
+        name: "Wiki 修訂"
+        description: "検査の問題に基づいてWikiページを修復および最適化するための専用エージェント"
+      ko-KR:
+        name: "위키 수정"
+        description: "검사 문제를 기반으로 Wiki 페이지를 修復하고 最適化하는 전용 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "wiki_fixer"
+      temperature: 0.7
+      max_completion_tokens: 4096
+      max_iterations: 30
+      kb_selection_mode: "selected"
+      retrieve_kb_only_when_mentioned: false
+      retain_retrieval_history: true
+      allowed_tools:
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+        - "wiki_write_page"
+        - "wiki_replace_text"
+        - "wiki_rename_page"
+        - "wiki_delete_page"
+        - "wiki_read_issue"
+        - "wiki_update_issue"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      history_turns: 10
+      embedding_top_k: 10
+      keyword_threshold: 0.3
+      vector_threshold: 0.5
+      rerank_top_k: 10
+      rerank_threshold: 0.3
+

@@ -141,9 +141,9 @@ type sqlValidator struct {
 	enableHiddenKBFilter bool
 
 	// Search scope filtering (restrict to specific KBs and knowledges)
-	enableSearchScopeFilter  bool
-	searchScopeKBIDs         []string
-	searchScopeKnowledgeIDs  []string
+	enableSearchScopeFilter bool
+	searchScopeKBIDs        []string
+	searchScopeKnowledgeIDs []string
 }
 
 // ParseSQL parses a SQL statement using pg_query_go and extracts table names, select fields, and where fields
@@ -287,12 +287,12 @@ func extractColumnNamesFromNode(node *pg_query.Node) []string {
 
 	// Handle ColumnRef (column reference)
 	if colRef := node.GetColumnRef(); colRef != nil {
-		if colRef.Fields != nil {
-			for _, field := range colRef.Fields {
-				if strNode := field.GetString_(); strNode != nil {
-					if strNode.Sval != "*" { // Skip wildcard
-						colNames = append(colNames, strNode.Sval)
-					}
+		if len(colRef.Fields) > 0 {
+			// Extract only the actual column name (the last part of table.column or schema.table.column)
+			lastField := colRef.Fields[len(colRef.Fields)-1]
+			if strNode := lastField.GetString_(); strNode != nil {
+				if strNode.Sval != "*" { // Skip wildcard
+					colNames = append(colNames, strNode.Sval)
 				}
 			}
 		}
@@ -661,12 +661,12 @@ func WithSecurityDefaults(tenantID uint64) SQLValidationOption {
 func ValidateSQL(sql string, opts ...SQLValidationOption) (*SQLParseResult, *SQLValidationResult) {
 	// Initialize validator with defaults
 	validator := &sqlValidator{
-		allowedTables:      make(map[string]bool),
-		allowedFunctions:   make(map[string]bool),
-		tablesWithTenantID: make(map[string]bool),
+		allowedTables:       make(map[string]bool),
+		allowedFunctions:    make(map[string]bool),
+		tablesWithTenantID:  make(map[string]bool),
 		tablesWithDeletedAt: make(map[string]bool),
-		minLength:          6,
-		maxLength:          4096,
+		minLength:           6,
+		maxLength:           4096,
 	}
 
 	// Apply options
@@ -828,7 +828,7 @@ func ValidateAndSecureSQL(sql string, opts ...SQLValidationOption) (string, *SQL
 
 	// Find validator config to check if tenant injection is enabled
 	validator := &sqlValidator{
-		tablesWithTenantID: make(map[string]bool),
+		tablesWithTenantID:  make(map[string]bool),
 		tablesWithDeletedAt: make(map[string]bool),
 	}
 	for _, opt := range opts {
@@ -1860,13 +1860,13 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 			"create_extension": true,
 
 			// Copy operations
-			"copy":        true,
-			"copy_to":     true,
-			"copy_from":   true,
-			"pg_copy_to":  true,
-			"pg_dump":     true,
-			"pg_dumpall":  true,
-			"pg_restore":  true,
+			"copy":          true,
+			"copy_to":       true,
+			"copy_from":     true,
+			"pg_copy_to":    true,
+			"pg_dump":       true,
+			"pg_dumpall":    true,
+			"pg_restore":    true,
 			"pg_basebackup": true,
 
 			// Process and system functions
@@ -1875,17 +1875,17 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 			"pg_rotate_logfile":    true,
 
 			// Advisory locks (can be abused for DoS)
-			"pg_advisory_lock":           true,
-			"pg_advisory_unlock":         true,
-			"pg_advisory_lock_shared":    true,
-			"pg_advisory_unlock_shared":  true,
-			"pg_try_advisory_lock":       true,
+			"pg_advisory_lock":            true,
+			"pg_advisory_unlock":          true,
+			"pg_advisory_lock_shared":     true,
+			"pg_advisory_unlock_shared":   true,
+			"pg_try_advisory_lock":        true,
 			"pg_try_advisory_lock_shared": true,
 
 			// Backup and replication
-			"pg_start_backup":  true,
-			"pg_stop_backup":   true,
-			"pg_switch_wal":    true,
+			"pg_start_backup":         true,
+			"pg_stop_backup":          true,
+			"pg_switch_wal":           true,
 			"pg_create_restore_point": true,
 
 			// Foreign data wrappers
@@ -1893,12 +1893,12 @@ func (v *sqlValidator) validateFuncCall(fc *pg_query.FuncCall, result *SQLValida
 			"file_fdw_handler":     true,
 
 			// Procedural languages (code execution)
-			"plpgsql_call_handler": true,
+			"plpgsql_call_handler":  true,
 			"plpython_call_handler": true,
-			"plperl_call_handler": true,
+			"plperl_call_handler":   true,
 
 			// System catalog modification
-			"pg_catalog":  true,
+			"pg_catalog":         true,
 			"information_schema": true,
 		}
 		if dangerousFunctions[funcName] {

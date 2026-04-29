@@ -1,6 +1,6 @@
 {
   "name": "knowledage-base",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,8 +20,10 @@
     "docx-preview": "^0.3.7",
     "dompurify": "^3.2.6",
     "highlight.js": "^11.11.1",
+    "katex": "^0.16.45",
     "marked": "^17.0.5",
-    "mermaid": "^11.4.1",
+    "marked-katex-extension": "^5.1.8",
+    "mermaid": "^11.14.0",
     "pagefind": "^1.1.1",
     "papaparse": "^5.5.3",
     "pinia": "^3.0.1",

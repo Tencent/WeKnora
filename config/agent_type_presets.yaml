@@ -1,0 +1,203 @@
+# Agent Type Presets for Smart-Reasoning Mode
+#
+# When a user creates/edits a custom agent and picks "smart-reasoning" mode,
+# they can additionally pick an "agent type" from the list below. Each type
+# bundles a recommended system prompt template, tool allowlist, and KB
+# compatibility rules so the user doesn't have to configure everything.
+#
+# A user can always override any auto-filled value — the preset only seeds
+# the form.
+#
+# `kb_filter` decides which KBs the agent editor allows the user to select
+# under this type. The frontend reads this config via GET /agents/type-presets
+# and applies it as a client-side filter.
+#
+# Supported kb_filter predicates (evaluated against a KB's `capabilities`):
+#   any_of:   KB must expose at least ONE of the listed capability names.
+#   all_of:   KB must expose ALL of the listed capability names.
+#   none_of:  KB must expose NONE of the listed capability names.
+# Capability names: vector, keyword, wiki, graph, faq.
+# An empty kb_filter (or kb_filter absent) means "any KB is allowed".
+#
+# NOTE: In the default "tool-driven" mode, the frontend DERIVES the any_of
+# predicate from `config.allowed_tools` via `deriveKbFilterFromTools` (see
+# `frontend/src/utils/tool-capabilities.ts`). You only need to write an
+# explicit `kb_filter` here when the preset requires a business rule that
+# can't be inferred from the tools alone (e.g. `none_of: [faq]` on
+# data-analysis). Keeping the map lean avoids the "two sources of truth"
+# drift that used to plague this file.
+
+agent_type_presets:
+  # --------------------------------------------------------------------------
+  # RAG Q&A — classic evidence-based retrieval over chunk indexes.
+  # Best for document / FAQ KBs without wiki.
+  # --------------------------------------------------------------------------
+  - id: "rag-qa"
+    i18n:
+      default:
+        label: "RAG Q&A"
+        description: "Evidence-based retrieval over document chunks. Best for document or FAQ KBs without Wiki."
+      zh-CN:
+        label: "RAG 问答"
+        description: "基于文档分块的检索式问答，适合未启用 Wiki 的文档 / FAQ 知识库。"
+      zh-TW:
+        label: "RAG 問答"
+        description: "基於文件分塊的檢索式問答，適合未啟用 Wiki 的文件 / FAQ 知識庫。"
+    config:
+      system_prompt_id: "progressive_rag_agent"
+      temperature: 0.7
+      max_iterations: 30
+      # `thinking` and `todo_write` are intentionally NOT included by default.
+      # They are useful for multi-step planning / self-reflection, but most
+      # users don't need them for single-turn Q&A and they noticeably bloat
+      # token usage. Enable them manually in the tool list when needed.
+      allowed_tools:
+        - "knowledge_search"
+        - "grep_chunks"
+        - "list_knowledge_chunks"
+        - "get_document_info"
+        - "final_answer"
+      retain_retrieval_history: false
+      faq_priority_enabled: true
+      kb_selection_mode: "all"
+    # kb_filter derived from allowed_tools: any_of = [vector, keyword]
+
+  # --------------------------------------------------------------------------
+  # Wiki Q&A — graph-navigated wiki answering.
+  # Only meaningful on KBs where Wiki is enabled.
+  # --------------------------------------------------------------------------
+  - id: "wiki-qa"
+    i18n:
+      default:
+        label: "Wiki Q&A"
+        description: "Wiki-first answering: search, read and follow links across wiki pages. Requires a Wiki-enabled KB."
+      zh-CN:
+        label: "Wiki 问答"
+        description: "以 Wiki 为主的检索与图谱跳转回答，必须绑定已启用 Wiki 的知识库。"
+      zh-TW:
+        label: "Wiki 問答"
+        description: "以 Wiki 為主的檢索與圖譜跳轉回答，必須綁定已啟用 Wiki 的知識庫。"
+    config:
+      system_prompt_id: "wiki_researcher"
+      temperature: 0.7
+      max_iterations: 30
+      # `thinking` / `todo_write` can be enabled manually if the user wants
+      # explicit reflection or planning across long wiki navigation chains;
+      # not on by default.
+      allowed_tools:
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+        - "wiki_flag_issue"
+        - "final_answer"
+      retain_retrieval_history: false
+      kb_selection_mode: "all"
+    # kb_filter derived from allowed_tools: any_of = [wiki]
+
+  # --------------------------------------------------------------------------
+  # Hybrid RAG + Wiki — single agent that orchestrates both indexes.
+  # Requires KBs that expose BOTH wiki AND (vector or keyword).
+  # --------------------------------------------------------------------------
+  - id: "hybrid-rag-wiki"
+    i18n:
+      default:
+        label: "Hybrid (Wiki + RAG)"
+        description: "Uses wiki pages for navigation and context, then drills into chunks for precise quotes. Requires KBs with BOTH Wiki and chunk indexing."
+      zh-CN:
+        label: "Wiki + RAG 混合"
+        description: "先用 Wiki 建立导航和背景，再用分块检索精确引用。需绑定同时启用 Wiki 与向量/关键词索引的知识库。"
+      zh-TW:
+        label: "Wiki + RAG 混合"
+        description: "先用 Wiki 建立導覽和背景，再用分塊檢索精確引用。需綁定同時啟用 Wiki 與向量/關鍵詞索引的知識庫。"
+    config:
+      system_prompt_id: "hybrid_rag_wiki_agent"
+      temperature: 0.7
+      max_iterations: 40
+      # `thinking` and `todo_write` are opt-in. Turn them on manually when the
+      # user wants explicit self-reflection or a visible step-by-step plan for
+      # multi-hop hybrid searches.
+      allowed_tools:
+        - "wiki_search"
+        - "wiki_read_page"
+        - "knowledge_search"
+        - "grep_chunks"
+        - "list_knowledge_chunks"
+        - "get_document_info"
+        - "wiki_flag_issue"
+        - "final_answer"
+      retain_retrieval_history: false
+      faq_priority_enabled: true
+      kb_selection_mode: "all"
+    # Hybrid is meant to be the most flexible preset: the agent adapts at
+    # runtime based on what each KB exposes.
+    #  - KB has wiki + chunks  → full "wiki-first, RAG-verify" workflow
+    #  - KB has only chunks    → fallback to pure RAG (see prompt's "Fallback rules")
+    #  - KB has only wiki      → fallback to wiki-only answering
+    #  - FAQ KB                → allowed; knowledge_search still works on FAQ chunks
+    # kb_filter derived from allowed_tools: any_of = [vector, keyword, wiki].
+    # We only require that the KB expose AT LEAST ONE retrievable surface so
+    # the agent has SOMETHING to call. KBs with zero indexing (e.g. graph-only
+    # or completely unindexed) are still excluded since no tool will return
+    # anything useful.
+
+  # --------------------------------------------------------------------------
+  # Data Analysis — SQL / statistics over tabular files (CSV / Excel) in the KB.
+  # Retrieval capabilities (vector/wiki/…) are largely irrelevant here — the
+  # agent drives `data_schema` + `data_analysis` tools against uploaded files,
+  # so we gate on supported_file_types rather than KB capabilities.
+  # --------------------------------------------------------------------------
+  - id: "data-analysis"
+    i18n:
+      default:
+        label: "Data Analysis"
+        description: "SQL queries and statistics over tabular files (CSV / Excel). Pair with a KB that holds data files."
+      zh-CN:
+        label: "数据分析"
+        description: "对 CSV / Excel 等表格文件执行 SQL 查询和统计分析。请绑定包含数据文件的知识库。"
+      zh-TW:
+        label: "數據分析"
+        description: "對 CSV / Excel 等表格檔案執行 SQL 查詢和統計分析。請綁定包含數據檔案的知識庫。"
+    config:
+      system_prompt_id: "data_analyst"
+      temperature: 0.3
+      max_iterations: 30
+      # `thinking` / `todo_write` are opt-in for data-analysis too. Enable
+      # manually if the user wants explicit reflection or to break a long
+      # analysis into tracked sub-tasks.
+      allowed_tools:
+        - "data_schema"
+        - "data_analysis"
+        - "final_answer"
+      # retain_retrieval_history is irrelevant here — data-analysis has no
+      # retrieval tools in allowed_tools. Leave defaults.
+      web_search_enabled: false
+      supported_file_types:
+        - "csv"
+        - "xlsx"
+      kb_selection_mode: "all"
+    # data_schema / data_analysis tools read ChunkTypeTableSummary /
+    # ChunkTypeTableColumn chunks, which are produced by the normal RAG
+    # ingestion pipeline (vector / keyword indexing on). The any_of predicate
+    # is derived automatically from allowed_tools; we only need to add the
+    # FAQ exclusion here since it's a business rule the tool map can't express
+    # (FAQ KBs technically have vector/keyword chunks but they're Q&A pairs,
+    # not tabular data, so data_schema would produce garbage on them).
+    kb_filter:
+      none_of: ["faq"]
+
+  # --------------------------------------------------------------------------
+  # Custom — no preset; user configures everything by hand.
+  # --------------------------------------------------------------------------
+  - id: "custom"
+    i18n:
+      default:
+        label: "Custom"
+        description: "Full control. Manually pick tools, prompt and KB scope."
+      zh-CN:
+        label: "自定义"
+        description: "完全自定义：自行选择工具、提示词和知识库。"
+      zh-TW:
+        label: "自訂"
+        description: "完全自訂：自行選擇工具、提示詞和知識庫。"
+    # No `config:` block → preset applies no auto-fill.
+    # No `kb_filter:`    → all KBs are selectable.

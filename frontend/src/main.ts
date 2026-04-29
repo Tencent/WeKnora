@@ -10,6 +10,10 @@ import "@/assets/theme/theme.css";
 import "@/assets/dropdown-menu.less";
 import i18n from "./i18n";
 import { initTheme } from "@/composables/useTheme";
+import { installTDesignIconOfflineGuard } from "@/utils/tdesign-icon-offline";
+
+// 必须在 Vue 组件挂载之前执行，避免 tdesign-icons 运行时请求 tdesign.gtimg.com
+installTDesignIconOfflineGuard();
 
 initTheme();
 

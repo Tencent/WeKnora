@@ -1,0 +1,10 @@
+.answer-card {
+  margin-top: 28rpx;
+}
+
+.answer {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: #1a1a1a;
+  font-size: 28rpx;
+}

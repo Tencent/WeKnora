@@ -67,12 +67,15 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     is_pinned INTEGER NOT NULL DEFAULT 0,
     pinned_at DATETIME NULL,
     asr_config TEXT,
+    vector_store_id VARCHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_id ON knowledge_bases(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_tenant_vector_store
+    ON knowledge_bases(tenant_id, vector_store_id);
 
 CREATE TABLE IF NOT EXISTS knowledges (
     id VARCHAR(36) PRIMARY KEY,

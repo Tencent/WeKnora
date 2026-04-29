@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -52,6 +53,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	feishuConnector "github.com/Tencent/WeKnora/internal/datasource/connector/feishu"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -72,6 +74,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	slackpkg "github.com/slack-go/slack"
@@ -99,6 +102,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering core infrastructure...")
 	must(container.Provide(config.LoadConfig))
 	must(container.Provide(initTracer))
+	must(container.Provide(initLangfuse))
 	must(container.Provide(initDatabase))
 	must(container.Provide(initFileService))
 	must(container.Provide(initRedisClient))
@@ -107,6 +111,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Register tracer cleanup handler (tracer needs to be available for cleanup registration)
 	must(container.Invoke(registerTracerCleanup))
+	must(container.Invoke(registerLangfuseCleanup))
 
 	// Register goroutine pool cleanup handler
 	must(container.Invoke(registerPoolCleanup))
@@ -149,6 +154,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewWebSearchStateService))
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
+	must(container.Provide(repository.NewWikiPageRepository))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -175,11 +181,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
 	must(container.Provide(service.NewImageMultimodalService, dig.Name("imageMultimodal")))
+	must(container.Provide(service.NewKnowledgePostProcessService, dig.Name("knowledgePostProcess")))
 
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMCPServiceService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(memoryService.NewMemoryService))
+	must(container.Provide(service.NewWikiPageService))
+	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
+	must(container.Provide(service.NewWikiLintService))
 
 	// Web search service (needed by AgentService)
 	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
@@ -189,6 +199,16 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(service.NewWebSearchService))
 	must(container.Provide(service.NewWebSearchProviderService))
+	must(container.Provide(NewEngineFactory))
+	// StoreRegistry: same instance as RetrieveEngineRegistry, exposed as StoreRegistry interface.
+	// NewRetrieveEngineRegistry always returns *retriever.RetrieveEngineRegistry which implements both.
+	must(container.Provide(func(r interfaces.RetrieveEngineRegistry) (interfaces.StoreRegistry, error) {
+		sr, ok := r.(*retriever.RetrieveEngineRegistry)
+		if !ok {
+			return nil, fmt.Errorf("registry does not implement StoreRegistry")
+		}
+		return sr, nil
+	}))
 	must(container.Provide(service.NewVectorStoreService))
 
 	// Agent service layer (requires event bus, web search service)
@@ -238,6 +258,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginExtractEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchEntity))
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
+	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(chatpipeline.NewMemoryPlugin))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
@@ -267,6 +288,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Data source handler
 	must(container.Provide(handler.NewDataSourceHandler))
+	// Wiki page handler
+	must(container.Provide(handler.NewWikiPageHandler))
 	// IM integration
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
 	must(container.Provide(imPkg.NewService))
@@ -308,6 +331,15 @@ func must(err error) {
 //   - Error if initialization fails
 func initTracer() (*tracing.Tracer, error) {
 	return tracing.InitTracer()
+}
+
+// initLangfuse initializes the Langfuse ingestion client.
+// Configuration is read from LANGFUSE_* environment variables (see
+// docs/langfuse.md). Returns a disabled manager if credentials are absent —
+// never an error — so deployments that don't use Langfuse are unaffected.
+func initLangfuse() (*langfuse.Manager, error) {
+	cfg := langfuse.LoadConfigFromEnv()
+	return langfuse.Init(cfg)
 }
 
 func initRedisClient() (*redis.Client, error) {
@@ -514,8 +546,39 @@ func resolveStorageProviderPending(db *gorm.DB) {
 		logger.Infof(context.Background(), "Resolved %d knowledge bases with __pending_env__ storage provider → %s", result.RowsAffected, storageType)
 	}
 
+	// Sync PostgreSQL sequences with actual MAX values to prevent duplicate key
+	// errors. The old code assigned seq_id via SELECT MAX()+1 in application
+	// code, which could push values past the DB sequence counter.
+	syncSequences(db)
+
 	// Reset any pending tasks left over from previous aborted runs (Lite App mode)
 	resetPendingTasks(db)
+}
+
+// syncSequences ensures PostgreSQL sequences for auto-increment columns (seq_id)
+// are at least as high as the current MAX value in each table. This is needed
+// because older code assigned seq_id via application-level MAX()+1, which could
+// advance values past the DB sequence counter and cause duplicate key errors.
+func syncSequences(db *gorm.DB) {
+	if db.Dialector.Name() != "postgres" {
+		return
+	}
+	pairs := [][2]string{
+		{"chunks", "chunks_seq_id_seq"},
+		{"knowledge_tags", "knowledge_tags_seq_id_seq"},
+	}
+	for _, p := range pairs {
+		table, seq := p[0], p[1]
+		sql := fmt.Sprintf(
+			`SELECT setval('%s', GREATEST(nextval('%s'), (SELECT COALESCE(MAX(seq_id), 0) FROM %s)))`,
+			seq, seq, table,
+		)
+		if err := db.Exec(sql).Error; err != nil {
+			logger.Warnf(context.Background(), "Failed to sync sequence %s: %v", seq, err)
+		} else {
+			logger.Infof(context.Background(), "Synced sequence %s with table %s", seq, table)
+		}
+	}
 }
 
 // resetPendingTasks resets the state of any knowledge items or sync logs stuck in processing
@@ -728,7 +791,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create elasticsearch_v8 client failed: %v", err)
 		} else {
-			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg)
+			elasticsearchRepo := elasticsearchRepoV8.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
@@ -750,7 +813,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create elasticsearch_v7 client failed: %v", err)
 		} else {
-			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg)
+			elasticsearchRepo := elasticsearchRepoV7.NewElasticsearchEngineRepository(client, cfg, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					elasticsearchRepo, types.ElasticsearchRetrieverEngineType,
@@ -798,7 +861,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create qdrant client failed: %v", err)
 		} else {
-			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client)
+			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					qdrantRepository, types.QdrantRetrieverEngineType,
@@ -841,7 +904,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create weaviate client failed: %v", err)
 		} else {
-			weaviateRepository := weaviateRepo.NewWeaviateRetrieveEngineRepository(weaviateClient)
+			weaviateRepository := weaviateRepo.NewWeaviateRetrieveEngineRepository(weaviateClient, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					weaviateRepository, types.WeaviateRetrieverEngineType,
@@ -878,7 +941,7 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 		if err != nil {
 			log.Errorf("Create milvus client failed: %v", err)
 		} else {
-			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli)
+			milvusRepository := milvusRepo.NewMilvusRetrieveEngineRepository(milvusCli, nil)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					milvusRepository, types.MilvusRetrieverEngineType,
@@ -890,7 +953,41 @@ func initRetrieveEngineRegistry(db *gorm.DB, cfg *config.Config) (interfaces.Ret
 			}
 		}
 	}
+	// ─── DB store registration (byStoreID) ───
+	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
+		loadDBStoresIntoRegistry(storeReg, db, cfg)
+	}
+
 	return registry, nil
+}
+
+// loadDBStoresIntoRegistry loads VectorStore records from DB and registers them
+// in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
+func loadDBStoresIntoRegistry(storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config) {
+	ctx := context.Background()
+	log := logger.GetLogger(ctx)
+
+	var stores []types.VectorStore
+	// GORM soft delete automatically adds "deleted_at IS NULL" condition
+	if err := db.Find(&stores).Error; err != nil {
+		log.Warnf("Failed to load vector stores from DB: %v", err)
+		return
+	}
+
+	if len(stores) == 0 {
+		return
+	}
+
+	log.Infof("Loading %d vector store(s) from database", len(stores))
+	for _, store := range stores {
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg)
+		if err != nil {
+			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
+			continue
+		}
+		storeRegistry.RegisterWithStoreID(store.ID, svc)
+		log.Infof("Registered DB vector store: id=%s, name=%s, engine=%s", store.ID, store.Name, store.EngineType)
+	}
 }
 
 // initAntsPool initializes the goroutine pool
@@ -937,6 +1034,20 @@ func registerTracerCleanup(tracer *tracing.Tracer, cleaner interfaces.ResourceCl
 	cleaner.RegisterWithName("Tracer", func() error {
 		// Create context for cleanup with longer timeout for tracer shutdown
 		return tracer.Cleanup(context.Background())
+	})
+}
+
+// registerLangfuseCleanup ensures buffered Langfuse events are flushed on
+// shutdown. A 5-second timeout matches other external-service cleanups and
+// balances data durability against a slow remote endpoint holding up exit.
+func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceCleaner) {
+	if mgr == nil {
+		return
+	}
+	cleaner.RegisterWithName("Langfuse", func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return mgr.Shutdown(ctx)
 	})
 }
 
@@ -1022,16 +1133,17 @@ func NewDuckDB() (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open duckdb: %w", err)
 	}
 
-	// Try to install and load spatial extension
-	installSQL := "INSTALL spatial;"
-	if _, err := sqlDB.ExecContext(context.Background(), installSQL); err != nil {
-		logger.Warnf(context.Background(), "[DuckDB] Failed to install spatial extension: %v", err)
-	}
-
-	// Try to load spatial extension
-	loadSQL := "LOAD spatial;"
-	if _, err := sqlDB.ExecContext(context.Background(), loadSQL); err != nil {
-		logger.Warnf(context.Background(), "[DuckDB] Failed to load spatial extension: %v", err)
+	// Try to install and load required extensions.
+	//   - spatial: used for st_read_meta() to enumerate layer (sheet) names from .xlsx/.xls
+	//   - excel:   used for read_xlsx() which gives proper type inference per sheet
+	bgCtx := context.Background()
+	for _, ext := range []string{"spatial", "excel"} {
+		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("INSTALL %s;", ext)); err != nil {
+			logger.Warnf(bgCtx, "[DuckDB] Failed to install %s extension: %v", ext, err)
+		}
+		if _, err := sqlDB.ExecContext(bgCtx, fmt.Sprintf("LOAD %s;", ext)); err != nil {
+			logger.Warnf(bgCtx, "[DuckDB] Failed to load %s extension: %v", ext, err)
+		}
 	}
 
 	return sqlDB, nil
@@ -1386,21 +1498,30 @@ func credentialBool(creds map[string]interface{}, key string) bool {
 }
 
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
-func initConnectorRegistry() *datasource.ConnectorRegistry {
+// Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
+// container initialization loudly instead of silently disabling the feature at runtime.
+func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
-	// Register Feishu connector
-	_ = registry.Register(feishuConnector.NewConnector())
-
-	// Register Notion connector
-	_ = registry.Register(notionConnector.NewConnector())
+	var errs error
+	if err := registry.Register(feishuConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
+	}
+	if err := registry.Register(notionConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
+	}
+	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
+	}
 
 	// Future connectors will be registered here:
-	// _ = registry.Register(confluenceConnector.NewConnector())
-	// _ = registry.Register(yuqueConnector.NewConnector())
-	// _ = registry.Register(githubConnector.NewConnector())
+	// if err := registry.Register(confluenceConnector.NewConnector()); err != nil { ... }
+	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
 
-	return registry
+	if errs != nil {
+		return nil, errs
+	}
+	return registry, nil
 }
 
 // startDataSourceScheduler starts the data source cron scheduler and registers cleanup.

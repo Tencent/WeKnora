@@ -36,8 +36,9 @@ func NewTavilyProvider(params types.WebSearchProviderParameters) (interfaces.Web
 	if params.APIKey == "" {
 		return nil, fmt.Errorf("API key is required for Tavily provider")
 	}
-	client := &http.Client{
-		Timeout: defaultTavilyTimeout,
+	client, err := NewSearchHTTPClient(defaultTavilyTimeout, params.ProxyURL)
+	if err != nil {
+		return nil, err
 	}
 	return &TavilyProvider{
 		client:  client,

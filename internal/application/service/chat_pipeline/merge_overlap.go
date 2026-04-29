@@ -30,10 +30,36 @@ func (p *PluginMerge) mergeOverlappingChunks(
 			continue
 		}
 
-		// Partial overlap: append the non-overlapping suffix
+		// Partial overlap: append the non-overlapping suffix.
+		//
+		// Offset math assumes len([]rune(Content)) == EndAt-StartAt, but a
+		// few upstream paths break that invariant:
+		//   - Parent-child chunker prepends table headers, so Content may be
+		//     longer than EndAt-StartAt.
+		//   - Legacy data / mixed chunk sources may carry EndAt-StartAt that
+		//     exceed the actual rune length of Content.
+		// We clamp offset into [0, len(contentRunes)] so the merge degrades
+		// gracefully instead of panicking with a negative slice bound.
 		if chunks[i].EndAt > lastChunk.EndAt {
 			contentRunes := []rune(chunks[i].Content)
-			offset := len(contentRunes) - (chunks[i].EndAt - lastChunk.EndAt)
+			suffixLen := chunks[i].EndAt - lastChunk.EndAt
+			offset := len(contentRunes) - suffixLen
+			if offset < 0 || offset > len(contentRunes) {
+				pipelineWarn(ctx, "Merge", "overlap_offset_clamp", map[string]interface{}{
+					"knowledge_id":    knowledgeID,
+					"chunk_id":        chunks[i].ID,
+					"content_runes":   len(contentRunes),
+					"chunk_start":     chunks[i].StartAt,
+					"chunk_end":       chunks[i].EndAt,
+					"last_end":        lastChunk.EndAt,
+					"computed_offset": offset,
+				})
+				if offset < 0 {
+					offset = 0
+				} else {
+					offset = len(contentRunes)
+				}
+			}
 			lastChunk.Content = lastChunk.Content + string(contentRunes[offset:])
 			lastChunk.EndAt = chunks[i].EndAt
 			lastChunk.SubChunkID = append(lastChunk.SubChunkID, chunks[i].ID)

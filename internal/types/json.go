@@ -59,7 +59,9 @@ func (j *JSON) UnmarshalJSON(data []byte) error {
 	if j == nil {
 		return errors.New("JSON: UnmarshalJSON on nil pointer")
 	}
-	*j = JSON(data)
+	copied := make([]byte, len(data))
+	copy(copied, data)
+	*j = JSON(copied)
 	return nil
 }
 

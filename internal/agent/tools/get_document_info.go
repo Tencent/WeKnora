@@ -129,12 +129,14 @@ func (t *GetDocumentInfoTool) Execute(ctx context.Context, args json.RawMessage)
 				return
 			}
 
-			// Use knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB)
+			// Use knowledge's actual tenant_id for chunk query (supports cross-tenant shared KB).
+			// Keep chunk-type filter aligned with list_knowledge_chunks so the
+			// "chunk_count" reported here matches what that tool can page over.
 			_, total, err := t.chunkService.GetRepository().
 				ListPagedChunksByKnowledgeID(ctx, knowledge.TenantID, id, &types.Pagination{
 					Page:     1,
 					PageSize: 1,
-				}, []types.ChunkType{"text"}, "", "", "", "", "")
+				}, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ}, "", "", "", "", "")
 			if err != nil {
 				mu.Lock()
 				results[id] = &docInfo{

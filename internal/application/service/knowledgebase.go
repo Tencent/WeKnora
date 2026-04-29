@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -294,6 +295,27 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.FAQConfig != nil {
 			kb.FAQConfig = config.FAQConfig
 		}
+		if config.WikiConfig != nil {
+			kb.WikiConfig = config.WikiConfig
+		}
+		// Update indexing strategy — syncs to ExtractConfig for backward compat
+		if config.IndexingStrategy != nil {
+			if !config.IndexingStrategy.HasAnyIndexing() {
+				return nil, errors.New("at least one indexing strategy must be enabled")
+			}
+			kb.IndexingStrategy = *config.IndexingStrategy
+			// Ensure WikiConfig exists when wiki indexing is enabled so that
+			// wiki-specific tunables (synthesis model, granularity, …) have a home.
+			if kb.WikiConfig == nil && config.IndexingStrategy.WikiEnabled {
+				kb.WikiConfig = &types.WikiConfig{}
+			}
+			// Sync GraphEnabled → ExtractConfig
+			if kb.ExtractConfig != nil {
+				kb.ExtractConfig.Enabled = config.IndexingStrategy.GraphEnabled
+			} else if config.IndexingStrategy.GraphEnabled {
+				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
+			}
+		}
 	}
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
@@ -363,6 +385,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 		KnowledgeBaseID:  id,
 		EffectiveEngines: tenantInfo.GetEffectiveEngines(),
 	}
+	langfuse.InjectTracing(ctx, &payload)
 
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

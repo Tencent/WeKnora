@@ -70,6 +70,9 @@ type WebSearchProviderParameters struct {
 	APIKey string `yaml:"api_key" json:"api_key,omitempty"`
 	// Google Custom Search Engine ID (only for Google provider)
 	EngineID string `yaml:"engine_id" json:"engine_id,omitempty"`
+	// Optional HTTP/HTTPS proxy URL for outbound search requests (e.g. http://host:port); validated with utils.ValidateURLForSSRF.
+	// Does not replace the search API endpoint; only tunnels traffic to the official APIs.
+	ProxyURL string `yaml:"proxy_url" json:"proxy_url,omitempty"`
 	// Provider-specific extra configuration for future extensibility
 	ExtraConfig map[string]string `yaml:"extra_config" json:"extra_config,omitempty"`
 }
@@ -117,6 +120,8 @@ type WebSearchProviderTypeInfo struct {
 	RequiresAPIKey bool `json:"requires_api_key"`
 	// Whether the provider requires an engine ID (e.g., Google CSE)
 	RequiresEngineID bool `json:"requires_engine_id"`
+	// Whether optional proxy_url in parameters is honored for outbound requests
+	SupportsProxy bool `json:"supports_proxy"`
 	// Description
 	Description string `json:"description"`
 	// URL to the provider's official website or documentation for obtaining credentials
@@ -130,6 +135,7 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID:             "duckduckgo",
 			Name:           "DuckDuckGo",
 			RequiresAPIKey: false,
+			SupportsProxy:  true,
 			Description:    "DuckDuckGo Search (free, no API key required)",
 			DocsURL:        "https://duckduckgo.com/",
 		},
@@ -137,6 +143,7 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID:             "bing",
 			Name:           "Bing",
 			RequiresAPIKey: true,
+			SupportsProxy:  true,
 			Description:    "Bing Search API (requires API key from Azure)",
 			DocsURL:        "https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/overview",
 		},
@@ -145,6 +152,7 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			Name:             "Google",
 			RequiresAPIKey:   true,
 			RequiresEngineID: true,
+			SupportsProxy:    true,
 			Description:      "Google Custom Search API (requires API key and engine ID)",
 			DocsURL:          "https://developers.google.com/custom-search/v1/overview",
 		},
@@ -152,6 +160,7 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID:             "tavily",
 			Name:           "Tavily",
 			RequiresAPIKey: true,
+			SupportsProxy:  true,
 			Description:    "Tavily Search API (requires API key)",
 			DocsURL:        "https://tavily.com/",
 		},

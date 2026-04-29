@@ -22,6 +22,10 @@ const (
 	BuiltinKnowledgeGraphExpertID = "builtin-knowledge-graph-expert"
 	// BuiltinDocumentAssistantID is the ID for the built-in document assistant agent
 	BuiltinDocumentAssistantID = "builtin-document-assistant"
+	// BuiltinWikiResearcherID is the ID for the built-in wiki researcher agent
+	BuiltinWikiResearcherID = "builtin-wiki-researcher"
+	// BuiltinWikiFixerID is the ID for the built-in wiki fixer agent
+	BuiltinWikiFixerID = "builtin-wiki-fixer"
 )
 
 // AgentMode constants for agent running mode
@@ -30,6 +34,27 @@ const (
 	AgentModeQuickAnswer = "quick-answer"
 	// AgentModeSmartReasoning is the ReAct mode for multi-step reasoning
 	AgentModeSmartReasoning = "smart-reasoning"
+)
+
+// AgentType constants for Smart-Reasoning agent presets.
+// These presets bundle a recommended system prompt template,
+// tool allowlist, KB compatibility hint, and other defaults so users
+// don't have to configure everything from scratch.
+// AgentTypeCustom means the user wants full control and we won't
+// auto-fill anything based on the preset.
+const (
+	// AgentTypeRAGQA prefers vector/keyword chunk retrieval on document KBs.
+	AgentTypeRAGQA = "rag-qa"
+	// AgentTypeWikiQA prefers wiki-page navigation on wiki-enabled KBs.
+	AgentTypeWikiQA = "wiki-qa"
+	// AgentTypeHybridRAGWiki orchestrates Wiki + RAG on KBs where both are enabled.
+	AgentTypeHybridRAGWiki = "hybrid-rag-wiki"
+	// AgentTypeDataAnalysis runs SQL / statistics over tabular files (CSV, Excel)
+	// uploaded into the KB. Retrieval semantics (vector/wiki/…) are largely
+	// irrelevant — this type is about data_schema + data_analysis tools.
+	AgentTypeDataAnalysis = "data-analysis"
+	// AgentTypeCustom is the "no preset" option; user-configured end to end.
+	AgentTypeCustom = "custom"
 )
 
 // CustomAgent represents a configurable AI agent (similar to GPTs)
@@ -65,6 +90,12 @@ type CustomAgentConfig struct {
 	// ===== Basic Settings =====
 	// Agent mode: "quick-answer" for RAG mode, "smart-reasoning" for ReAct agent mode
 	AgentMode string `yaml:"agent_mode" json:"agent_mode"`
+	// AgentType is a preset category under smart-reasoning mode that pre-fills
+	// system prompt, allowed tools and recommended KB compatibility.
+	// Valid values: "rag-qa", "wiki-qa", "hybrid-rag-wiki", "custom".
+	// Empty / unknown values are treated as "custom" (no preset applied).
+	// Ignored for quick-answer mode.
+	AgentType string `yaml:"agent_type" json:"agent_type,omitempty"`
 	// System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)
 	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
 	// SystemPromptID references a template ID in prompt_templates/ YAML files.
@@ -114,6 +145,9 @@ type CustomAgentConfig struct {
 	// When true, knowledge base retrieval only happens if user explicitly mentions KB/files with @
 	// When false, knowledge base retrieval happens according to KBSelectionMode
 	RetrieveKBOnlyWhenMentioned bool `yaml:"retrieve_kb_only_when_mentioned" json:"retrieve_kb_only_when_mentioned"`
+
+	// Whether to retain retrieval history across turns
+	RetainRetrievalHistory bool `yaml:"retain_retrieval_history" json:"retain_retrieval_history"`
 
 	// ===== Image Upload / Multimodal Settings =====
 	// Whether image upload is enabled for this agent (default: false)
@@ -273,9 +307,9 @@ func (a *CustomAgent) IsAgentMode() bool {
 type SuggestedQuestion struct {
 	// 问题文本
 	Question string `json:"question"`
-	// 来源类型: "faq", "document", "agent_config"
+	// 来源类型: "agent_config", "faq", "document", "wiki"
 	Source string `json:"source"`
-	// 来源知识库ID（仅 faq/document 来源时有值）
+	// 来源知识库ID（仅 faq/document/wiki 来源时有值）
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
 }
 
@@ -285,9 +319,17 @@ type SuggestedQuestion struct {
 var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{}
 
 // builtinAgentIDsOrdered defines the fixed display order of built-in agents
+// that are exposed in the user-facing agent list (ListAgents).
+//
+// NOTE: BuiltinWikiFixerID is intentionally excluded here. The wiki fixer is
+// an internal agent invoked programmatically from the Wiki editor
+// (see frontend WikiBrowser.vue) and should not clutter the tenant's agent
+// picker. It remains fully usable via GetAgentByID because the YAML entry
+// still registers it in BuiltinAgentRegistry.
 var builtinAgentIDsOrdered = []string{
 	BuiltinQuickAnswerID,
 	BuiltinSmartReasoningID,
+	BuiltinWikiResearcherID,
 	BuiltinDeepResearcherID,
 	BuiltinDataAnalystID,
 	BuiltinKnowledgeGraphExpertID,

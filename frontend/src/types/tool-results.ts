@@ -20,7 +20,11 @@ export type DisplayType =
     | 'database_query'
     | 'web_search_results'
     | 'web_fetch_results'
-    | 'grep_results';
+    | 'grep_results'
+    | 'wiki_write_page'
+    | 'wiki_replace_text'
+    | 'wiki_rename_page'
+    | 'wiki_delete_page';
 
 // Search result item
 export interface SearchResultItem {
@@ -216,6 +220,47 @@ export interface GrepResultsData {
     max_results: number;
 }
 
+// Wiki write page data
+export interface WikiWritePageData {
+    display_type: 'wiki_write_page';
+    action: 'created' | 'updated';
+    slug: string;
+    title: string;
+    page_type: string;
+    summary: string;
+}
+
+// Wiki replace text data
+export interface WikiReplaceTextData {
+    display_type: 'wiki_replace_text';
+    slug: string;
+    title: string;
+    old_text: string;
+    new_text: string;
+}
+
+// Wiki rename page data
+export interface WikiRenamePageData {
+    display_type: 'wiki_rename_page';
+    old_slug: string;
+    new_slug: string;
+    title: string;
+    updated_count: number;
+    affected_pages?: string[];
+}
+
+// Wiki delete page data
+export interface WikiDeletePageData {
+    display_type: 'wiki_delete_page';
+    slug: string;
+    title: string;
+    updated_count: number;
+    affected_pages?: string[];
+}
+
+// Union type for all wiki edit data
+export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
+
 // Union type for all tool result data
 export type ToolResultData =
     | SearchResultsData
@@ -229,7 +274,11 @@ export type ToolResultData =
     | DatabaseQueryData
     | WebSearchResultsData
     | WebFetchResultsData
-    | GrepResultsData;
+    | GrepResultsData
+    | WikiWritePageData
+    | WikiReplaceTextData
+    | WikiRenamePageData
+    | WikiDeletePageData;
 
 // Action data (from index.vue)
 export interface ActionData {

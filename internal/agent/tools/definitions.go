@@ -22,6 +22,17 @@ const (
 	// Skills-related tools (only available when skills are enabled)
 	ToolExecuteSkillScript = "execute_skill_script"
 	ToolReadSkill          = "read_skill"
+	// Wiki-related tools (only available when wiki KBs are in scope)
+	ToolWikiReadPage      = "wiki_read_page"
+	ToolWikiWritePage     = "wiki_write_page"
+	ToolWikiReplaceText   = "wiki_replace_text"
+	ToolWikiRenamePage    = "wiki_rename_page"
+	ToolWikiDeletePage    = "wiki_delete_page"
+	ToolWikiSearch        = "wiki_search"
+	ToolWikiReadSourceDoc = "wiki_read_source_doc"
+	ToolWikiFlagIssue     = "wiki_flag_issue"
+	ToolWikiReadIssue     = "wiki_read_issue"
+	ToolWikiUpdateIssue   = "wiki_update_issue"
 )
 
 // AvailableTool defines a simple tool metadata used by settings APIs.
@@ -48,6 +59,16 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolReadSkill, Label: "读取技能", Description: "按需读取技能内容以学习专业能力"},
 		{Name: ToolExecuteSkillScript, Label: "执行技能脚本", Description: "在沙箱环境中执行技能脚本"},
 		{Name: ToolFinalAnswer, Label: "提交最终回答", Description: "提交最终回答给用户"},
+		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
+		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
+		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},
+		{Name: ToolWikiFlagIssue, Label: "标记Wiki问题", Description: "标记页面中存在的事实错误或合并冲突问题"},
+		{Name: ToolWikiWritePage, Label: "创建/覆盖Wiki", Description: "创建新页面或完全覆盖已有页面"},
+		{Name: ToolWikiReplaceText, Label: "局部替换Wiki", Description: "替换Wiki页面中的特定文本"},
+		{Name: ToolWikiRenamePage, Label: "重命名Wiki", Description: "重命名Wiki页面并自动更新关联链接"},
+		{Name: ToolWikiDeletePage, Label: "删除Wiki", Description: "删除Wiki页面并自动清理关联死链"},
+		{Name: ToolWikiReadIssue, Label: "查看Wiki问题", Description: "查看特定的Wiki页面问题详情"},
+		{Name: ToolWikiUpdateIssue, Label: "更新Wiki问题状态", Description: "更新特定的Wiki页面问题状态"},
 	}
 }
 
