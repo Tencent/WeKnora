@@ -61,6 +61,35 @@ const getCurrentKbId = (): string | null => {
     return (route.params as any)?.kbId as string || null
 }
 
+const CHAT_DROP_ROUTE_NAMES = new Set(['chat', 'globalCreatChat', 'kbCreatChat']);
+
+const isChatDropRoute = () => {
+    return CHAT_DROP_ROUTE_NAMES.has(String(route.name || ''));
+}
+
+const collectDroppedFiles = async (event: DragEvent): Promise<File[]> => {
+    const dataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
+    if (dataTransferFiles.length > 0) {
+        return dataTransferFiles;
+    }
+
+    const dataTransferItems = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
+    if (dataTransferItems.length === 0) {
+        return [];
+    }
+
+    const files = await Promise.all(dataTransferItems.map(item => new Promise<File | null>((resolve) => {
+        const fileEntry = (item as any).webkitGetAsEntry?.();
+        if (fileEntry?.isFile && typeof fileEntry.file === 'function') {
+            fileEntry.file((file: File) => resolve(file), () => resolve(null));
+            return;
+        }
+        resolve(null);
+    })));
+
+    return files.filter((file): file is File => file instanceof File);
+}
+
 // 检查知识库初始化状态
 const checkKnowledgeBaseInitialization = async (): Promise<boolean> => {
     const currentKbId = getCurrentKbId();
@@ -121,27 +150,27 @@ const handleGlobalDrop = async (event: DragEvent) => {
     event.preventDefault();
     dragCounter = 0;
     ismask.value = false;
-    
-    const DataTransferFiles = event.dataTransfer?.files ? Array.from(event.dataTransfer.files) : [];
-    const DataTransferItemList = event.dataTransfer?.items ? Array.from(event.dataTransfer.items) : [];
+
+    const droppedFiles = await collectDroppedFiles(event);
+    if (droppedFiles.length === 0) {
+        MessagePlugin.warning(t('knowledgeBase.dragFileNotText'));
+        return;
+    }
+
+    if (isChatDropRoute()) {
+        event.stopPropagation();
+        window.dispatchEvent(new CustomEvent('weknora:chat-file-drop', {
+            detail: { files: droppedFiles }
+        }));
+        return;
+    }
     
     const isInitialized = await checkKnowledgeBaseInitialization();
     if (!isInitialized) {
         return;
     }
-    
-    if (DataTransferFiles.length > 0) {
-        DataTransferFiles.forEach(file => requestMethod(file, uploadInput));
-    } else if (DataTransferItemList.length > 0) {
-        DataTransferItemList.forEach(dataTransferItem => {
-            const fileEntry = dataTransferItem.webkitGetAsEntry() as FileSystemFileEntry | null;
-            if (fileEntry) {
-                fileEntry.file((file: File) => requestMethod(file, uploadInput));
-            }
-        });
-    } else {
-        MessagePlugin.warning(t('knowledgeBase.dragFileNotText'));
-    }
+
+    droppedFiles.forEach(file => requestMethod(file, uploadInput));
 }
 
 // 组件挂载时添加全局事件监听器
