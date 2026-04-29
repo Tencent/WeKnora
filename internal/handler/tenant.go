@@ -226,6 +226,54 @@ func (h *TenantHandler) UpdateTenant(c *gin.Context) {
 	})
 }
 
+// ResetAPIKey godoc
+// @Summary      重置租户 API Key
+// @Description  为指定租户生成一个新的 API Key，旧 Key 立即失效
+// @Tags         租户管理
+// @Accept       json
+// @Produce      json
+// @Param        id   path      int  true  "租户ID"
+// @Success      200  {object}  map[string]interface{}  "新生成的 API Key"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      403  {object}  errors.AppError         "权限不足"
+// @Security     Bearer
+// @Router       /tenants/{id}/api-key [post]
+func (h *TenantHandler) ResetAPIKey(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		logger.Errorf(ctx, "Invalid tenant ID: %s", secutils.SanitizeForLog(c.Param("id")))
+		c.Error(errors.NewBadRequestError("Invalid tenant ID"))
+		return
+	}
+
+	if _, ok := h.authorizeTenantAccess(c, id); !ok {
+		return
+	}
+
+	logger.Infof(ctx, "Resetting API key for tenant, ID: %d", id)
+	apiKey, err := h.service.UpdateAPIKey(ctx, id)
+	if err != nil {
+		if appErr, ok := errors.IsAppError(err); ok {
+			logger.Error(ctx, "Failed to reset API key: application error", appErr)
+			c.Error(appErr)
+		} else {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError("Failed to reset API key").WithDetails(err.Error()))
+		}
+		return
+	}
+
+	logger.Infof(ctx, "API key reset successfully, tenant ID: %d", id)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"api_key": apiKey,
+		},
+	})
+}
+
 // DeleteTenant godoc
 // @Summary      删除租户
 // @Description  删除指定的租户

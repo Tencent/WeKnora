@@ -1573,6 +1573,13 @@ export default {
       copyUrlTitle: "API URL 복사",
       urlCopySuccess: "API URL이 클립보드에 복사되었습니다",
       copyTitle: "API 키 복사",
+      resetTitle: "API 키 재설정",
+      resetConfirmTitle: "API 키를 재설정할까요?",
+      resetConfirmBody: "재설정하면 기존 API 키는 즉시 무효화됩니다. 기존 키를 사용하는 앱, SDK, 스크립트는 모두 새 키로 교체해야 계속 사용할 수 있습니다. 이 작업은 되돌릴 수 없습니다.",
+      resetConfirmOk: "재설정",
+      resetConfirmCancel: "취소",
+      resetSuccess: "API 키가 재설정되었습니다. 새 키는 위 입력란에 표시됩니다",
+      resetFailed: "API 키 재설정에 실패했습니다",
       docLabel: "API 문서",
       docDescription: "전체 API 호출 문서 및 예시 보기, ",
       openDoc: "문서 열기",
@@ -1684,6 +1691,7 @@ export default {
     tenant: {
       listFailed: '테넌트 목록 조회 실패',
       searchFailed: '테넌트 검색 실패',
+      resetApiKeyFailed: 'API 키 재설정 실패',
     },
     initialization: {
       checkFailed: '검사 실패',

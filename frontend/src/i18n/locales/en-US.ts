@@ -2206,6 +2206,13 @@ export default {
       copyUrlTitle: 'Copy API URL',
       urlCopySuccess: 'API URL copied to clipboard',
       copyTitle: 'Copy API Key',
+      resetTitle: 'Reset API Key',
+      resetConfirmTitle: 'Reset API Key?',
+      resetConfirmBody: 'After reset, the old API Key is revoked immediately. Every app, SDK, and script using the old key must switch to the new key to keep working. This action cannot be undone.',
+      resetConfirmOk: 'Reset',
+      resetConfirmCancel: 'Cancel',
+      resetSuccess: 'API Key reset; the new key is shown in the field above',
+      resetFailed: 'Failed to reset API Key',
       docLabel: 'API Documentation',
       docDescription: 'View complete API documentation and examples,',
       openDoc: 'Open documentation',
@@ -2316,6 +2323,7 @@ export default {
     tenant: {
       listFailed: 'Failed to list tenants',
       searchFailed: 'Failed to search tenants',
+      resetApiKeyFailed: 'Failed to reset API Key',
     },
     initialization: {
       checkFailed: 'Check failed',

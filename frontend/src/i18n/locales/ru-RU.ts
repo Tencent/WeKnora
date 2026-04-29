@@ -1391,6 +1391,13 @@ export default {
       copyUrlTitle: 'Скопировать URL API',
       urlCopySuccess: 'URL API скопирован в буфер обмена',
       copyTitle: 'Скопировать API Key',
+      resetTitle: 'Сбросить API Key',
+      resetConfirmTitle: 'Сбросить API Key?',
+      resetConfirmBody: 'После сброса прежний API Key немедленно перестаёт действовать. Все приложения, SDK и скрипты, использующие старый ключ, должны быть переведены на новый ключ. Это действие нельзя отменить.',
+      resetConfirmOk: 'Сбросить',
+      resetConfirmCancel: 'Отмена',
+      resetSuccess: 'API Key сброшен; новый ключ показан в поле выше',
+      resetFailed: 'Не удалось сбросить API Key',
       docLabel: 'Документация API',
       docDescription: 'Ознакомьтесь с полной документацией и примерами API,',
       openDoc: 'Открыть документацию',
@@ -1499,7 +1506,8 @@ export default {
     },
     tenant: {
       listFailed: 'Не удалось получить список тенантов',
-      searchFailed: 'Не удалось выполнить поиск тенантов'
+      searchFailed: 'Не удалось выполнить поиск тенантов',
+      resetApiKeyFailed: 'Не удалось сбросить API Key'
     },
     initialization: {
       checkFailed: 'Проверка не пройдена',
