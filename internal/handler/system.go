@@ -457,6 +457,7 @@ type ListMinioBucketsResponse struct {
 // StorageEngineStatusItem describes one storage engine's availability and description.
 type StorageEngineStatusItem struct {
 	Name        string `json:"name"`        // "local", "minio", "cos", "tos"
+	Allowed     bool   `json:"allowed"`
 	Available   bool   `json:"available"`   // whether the engine can be used
 	Description string `json:"description"` // short description for UI
 }
@@ -464,6 +465,7 @@ type StorageEngineStatusItem struct {
 // GetStorageEngineStatusResponse is the response for GET /system/storage-engine-status.
 type GetStorageEngineStatusResponse struct {
 	Engines           []StorageEngineStatusItem `json:"engines"`
+	AllowedProviders  []string                  `json:"allowed_providers"`
 	MinioEnvAvailable bool                      `json:"minio_env_available"`
 }
 
@@ -479,18 +481,27 @@ func (h *SystemHandler) GetStorageEngineStatus(c *gin.Context) {
 	minioEnvAvailable := h.isMinioEnvAvailable()
 	cosConfigured := h.isCOSConfigured(c)
 	tosConfigured := h.isTOSConfigured(c)
+	s3Configured := h.isS3Configured(c)
 	ossConfigured := h.isOSSConfigured(c)
+	allowed := getAllowedStorageProviders()
+	allowedProviders := make([]string, 0, len(supportedStorageProviders))
+	for _, provider := range getSupportedStorageProviders() {
+		if allowed[provider] {
+			allowedProviders = append(allowedProviders, provider)
+		}
+	}
 	engines := []StorageEngineStatusItem{
-		{Name: "local", Available: true, Description: "本地文件系统存储，仅适合单机部署"},
-		{Name: "minio", Available: minioConfigured || minioEnvAvailable, Description: "S3 兼容的自托管对象存储，适合内网和私有云部署"},
-		{Name: "cos", Available: cosConfigured, Description: "腾讯云对象存储服务，适合公有云部署，支持 CDN 加速"},
-		{Name: "tos", Available: tosConfigured, Description: "火山引擎对象存储服务，适合公有云部署"},
-		{Name: "oss", Available: ossConfigured, Description: "阿里云对象存储服务，适合公有云部署，支持 S3 兼容协议"},
+		{Name: "local", Allowed: allowed["local"], Available: true, Description: "本地文件系统存储，仅适合单机部署"},
+		{Name: "minio", Allowed: allowed["minio"], Available: minioConfigured || minioEnvAvailable, Description: "S3 兼容的自托管对象存储，适合内网和私有云部署"},
+		{Name: "cos", Allowed: allowed["cos"], Available: cosConfigured, Description: "腾讯云对象存储服务，适合公有云部署，支持 CDN 加速"},
+		{Name: "tos", Allowed: allowed["tos"], Available: tosConfigured, Description: "火山引擎对象存储服务，适合公有云部署"},
+		{Name: "s3", Allowed: allowed["s3"], Available: s3Configured, Description: "AWS S3 与兼容对象存储服务，适合公有云与混合云部署"},
+		{Name: "oss", Allowed: allowed["oss"], Available: ossConfigured, Description: "阿里云对象存储服务，适合公有云部署，支持 S3 兼容协议"},
 	}
 	c.JSON(200, gin.H{
 		"code": 0,
 		"msg":  "success",
-		"data": GetStorageEngineStatusResponse{Engines: engines, MinioEnvAvailable: minioEnvAvailable},
+		"data": GetStorageEngineStatusResponse{Engines: engines, AllowedProviders: allowedProviders, MinioEnvAvailable: minioEnvAvailable},
 	})
 }
 
@@ -801,6 +812,10 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 		c.JSON(400, gin.H{"code": 1, "msg": "请求体格式错误"})
 		return
 	}
+	if !isStorageProviderAllowed(req.Provider) {
+		c.JSON(403, gin.H{"code": 1, "msg": "该存储引擎已被禁用"})
+		return
+	}
 
 	switch req.Provider {
 	case "minio":
@@ -816,6 +831,16 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 	default:
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: true, Message: "本地存储无需检测"}})
 	}
+}
+
+func (h *SystemHandler) isS3Configured(c *gin.Context) bool {
+	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.S3 != nil {
+			s3Conf := tenant.StorageEngineConfig.S3
+			return s3Conf.Endpoint != "" && s3Conf.Region != "" && s3Conf.AccessKey != "" && s3Conf.SecretKey != "" && s3Conf.BucketName != ""
+		}
+	}
+	return false
 }
 
 func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *types.MinIOEngineConfig) {

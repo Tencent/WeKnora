@@ -328,6 +328,10 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if provider == "" {
 		provider = "local"
 	}
+	if !isStorageProviderAllowed(provider) {
+		c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
+		return
+	}
 	oldProvider := kb.GetStorageProvider()
 	if oldProvider == "" {
 		oldProvider = "local"

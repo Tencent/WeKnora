@@ -35,7 +35,8 @@
             >
               <span class="select-option">
                 <span>{{ opt.label }}</span>
-                <t-tag v-if="opt.disabled" theme="warning" variant="light" size="small">{{ $t('kbSettings.storage.notConfigured') }}</t-tag>
+                 <t-tag v-if="opt.disabled && opt.allowed === false" theme="danger" variant="light" size="small">{{ $t('kbSettings.storage.unavailable') }}</t-tag>
+                 <t-tag v-else-if="opt.disabled" theme="warning" variant="light" size="small">{{ $t('kbSettings.storage.notConfigured') }}</t-tag>
                 <t-tag v-else-if="opt.available === false" theme="danger" variant="light" size="small">{{ $t('kbSettings.storage.unavailable') }}</t-tag>
               </span>
             </t-option>
@@ -71,55 +72,64 @@ const localProvider = ref(props.storageProvider || 'local')
 const loading = ref(true)
 const engineStatus = ref<StorageEngineStatusItem[]>([])
 const defaultProvider = ref('local')
+const allowedProviders = ref<string[]>([])
 const hasAnyConfig = ref(false)
 
 const engineOptions = computed(() => {
   const statusMap: Record<string, boolean> = {}
+  const allowedMap: Record<string, boolean> = {}
   for (const e of engineStatus.value) {
     statusMap[e.name] = e.available
+    allowedMap[e.name] = e.allowed !== false
   }
   return [
     {
       value: 'local',
       label: t('kbSettings.storage.engineLocal'),
       desc: t('kbSettings.storage.engineLocalDesc'),
+      allowed: allowedMap.local !== false,
       available: statusMap.local !== false,
-      disabled: false,
+      disabled: allowedMap.local === false,
     },
     {
       value: 'minio',
       label: 'MinIO',
       desc: t('kbSettings.storage.engineMinioDesc'),
+      allowed: allowedMap.minio !== false,
       available: statusMap.minio,
-      disabled: statusMap.minio === false,
+      disabled: allowedMap.minio === false || statusMap.minio === false,
     },
     {
       value: 'cos',
       label: t('kbSettings.storage.engineCos'),
       desc: t('kbSettings.storage.engineCosDesc'),
+      allowed: allowedMap.cos !== false,
       available: statusMap.cos,
-      disabled: statusMap.cos === false,
+      disabled: allowedMap.cos === false || statusMap.cos === false,
     },
     {
       value: 'tos',
       label: t('kbSettings.storage.engineTos'),
       desc: t('kbSettings.storage.engineTosDesc'),
+      allowed: allowedMap.tos !== false,
       available: statusMap.tos,
-      disabled: statusMap.tos === false,
+      disabled: allowedMap.tos === false || statusMap.tos === false,
     },
     {
       value: 's3',
       label: t('kbSettings.storage.engineS3'),
       desc: t('kbSettings.storage.engineS3Desc'),
+      allowed: allowedMap.s3 !== false,
       available: statusMap.s3,
-      disabled: statusMap.s3 === false,
+      disabled: allowedMap.s3 === false || statusMap.s3 === false,
     },
     {
       value: 'oss',
       label: t('kbSettings.storage.engineOss'),
       desc: t('kbSettings.storage.engineOssDesc'),
+      allowed: allowedMap.oss !== false,
       available: statusMap.oss,
-      disabled: statusMap.oss === false,
+      disabled: allowedMap.oss === false || statusMap.oss === false,
     },
   ]
 })
@@ -133,6 +143,14 @@ const selectedOption = computed(() =>
 )
 
 function handleChange() {
+  emit('update:storageProvider', localProvider.value)
+}
+
+function ensureAllowedProvider() {
+  const current = engineOptions.value.find(o => o.value === localProvider.value && !o.disabled)
+  if (current) return
+  const fallback = engineOptions.value.find(o => !o.disabled)?.value || defaultProvider.value || 'local'
+  localProvider.value = fallback
   emit('update:storageProvider', localProvider.value)
 }
 
@@ -150,6 +168,7 @@ async function load() {
     ])
     const engines = statusRes?.data?.engines ?? []
     engineStatus.value = engines
+    allowedProviders.value = statusRes?.data?.allowed_providers ?? []
     defaultProvider.value = configRes?.data?.default_provider || 'local'
     const d = configRes?.data
     hasAnyConfig.value = !!(d?.local?.path_prefix || d?.minio?.bucket_name || d?.cos?.bucket_name || d?.tos?.bucket_name || d?.s3?.bucket_name)
@@ -157,6 +176,7 @@ async function load() {
       localProvider.value = defaultProvider.value
       emit('update:storageProvider', localProvider.value)
     }
+    ensureAllowedProvider()
   } catch {
     engineStatus.value = []
   } finally {

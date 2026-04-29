@@ -28,20 +28,15 @@
             <p class="desc">{{ $t('settings.storage.defaultEngineDesc') }}</p>
           </div>
           <div class="setting-control">
-            <t-select v-model="config.default_provider" style="width: 280px;" :placeholder="$t('settings.storage.defaultEngine')">
-              <t-option value="local" :label="$t('settings.storage.engineLocal')" />
-              <t-option value="minio" label="MinIO" />
-              <t-option value="cos" :label="$t('settings.storage.engineCos')" />
-              <t-option value="tos" :label="$t('settings.storage.engineTos')" />
-              <t-option value="s3" label="AWS S3" />
-              <t-option value="oss" :label="$t('settings.storage.engineOss')" />
+            <t-select v-model="config.default_provider" style="width: 280px;" :placeholder="$t('settings.storage.defaultEngine')" :disabled="!hasAllowedProviders">
+              <t-option v-for="opt in providerOptions" :key="opt.value" :value="opt.value" :label="opt.label" :disabled="!opt.allowed" />
             </t-select>
           </div>
         </div>
       </div>
 
       <!-- Local -->
-      <div class="engine-section" data-model-type="local">
+      <div v-if="isProviderAllowed('local')" class="engine-section" data-model-type="local">
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
@@ -64,7 +59,7 @@
       </div>
 
       <!-- MinIO -->
-      <div class="engine-section" data-model-type="minio">
+      <div v-if="isProviderAllowed('minio')" class="engine-section" data-model-type="minio">
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
@@ -202,7 +197,7 @@
       </div>
 
       <!-- COS -->
-      <div class="engine-section" data-model-type="cos">
+      <div v-if="isProviderAllowed('cos')" class="engine-section" data-model-type="cos">
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
@@ -276,7 +271,7 @@
       </div>
 
       <!-- TOS -->
-      <div class="engine-section" data-model-type="tos">
+      <div v-if="isProviderAllowed('tos')" class="engine-section" data-model-type="tos">
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
@@ -350,7 +345,7 @@
       </div>
 
       <!-- S3 -->
-      <div class="engine-section" data-model-type="s3">
+      <div v-if="isProviderAllowed('s3')" class="engine-section" data-model-type="s3">
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
@@ -424,7 +419,7 @@
       </div>
 
       <!-- OSS -->
-      <div class="engine-section" data-model-type="oss">
+      <div v-if="isProviderAllowed('oss')" class="engine-section" data-model-type="oss">
         <div class="engine-header">
           <div class="engine-header-info">
             <div class="engine-title-row">
@@ -499,7 +494,7 @@
 
       <!-- Save -->
       <div class="save-bar">
-        <t-button theme="primary" :loading="saving" @click="onSave">{{ $t('settings.storage.saveConfig') }}</t-button>
+        <t-button theme="primary" :loading="saving" :disabled="!hasAllowedProviders" @click="onSave">{{ $t('settings.storage.saveConfig') }}</t-button>
         <span v-if="saveMessage" :class="['save-msg', saveSuccess ? 'success' : 'error']">
           {{ saveMessage }}
         </span>
@@ -567,6 +562,7 @@ const defaultConfig = (): StorageEngineConfig => ({
 const loading = ref(true)
 const error = ref('')
 const config = ref<StorageEngineConfig>(defaultConfig())
+const allowedProviders = ref<string[] | null>(null)
 const engineStatus = ref<{ local: boolean; minio: boolean; cos: boolean }>({
   local: true,
   minio: false,
@@ -590,12 +586,34 @@ const s3CheckResult = ref<{ ok: boolean; message: string } | null>(null)
 const checkingOss = ref(false)
 const ossCheckResult = ref<{ ok: boolean; message: string } | null>(null)
 
+const providerOptions = computed(() => [
+  { value: 'local', label: t('settings.storage.engineLocal'), allowed: isProviderAllowed('local') },
+  { value: 'minio', label: 'MinIO', allowed: isProviderAllowed('minio') },
+  { value: 'cos', label: t('settings.storage.engineCos'), allowed: isProviderAllowed('cos') },
+  { value: 'tos', label: t('settings.storage.engineTos'), allowed: isProviderAllowed('tos') },
+  { value: 's3', label: 'AWS S3', allowed: isProviderAllowed('s3') },
+  { value: 'oss', label: t('settings.storage.engineOss'), allowed: isProviderAllowed('oss') },
+])
+
+const hasAllowedProviders = computed(() => (allowedProviders.value?.length ?? 0) > 0)
+
 const minioAvailable = computed(() => {
   if (config.value.minio?.mode === 'remote') {
     return !!(config.value.minio.endpoint && config.value.minio.access_key_id && config.value.minio.secret_access_key)
   }
   return minioEnvAvailable.value
 })
+
+function isProviderAllowed(provider: string) {
+	if (allowedProviders.value === null) return true
+	return allowedProviders.value.includes(provider)
+}
+
+function ensureAllowedDefaultProvider() {
+	if (isProviderAllowed(config.value.default_provider)) return
+	const fallback = allowedProviders.value?.[0] || 'local'
+	config.value.default_provider = fallback
+}
 
 async function loadConfig() {
   try {
@@ -670,6 +688,9 @@ async function loadStatus() {
   try {
     const res = await getStorageEngineStatus()
     const engines = res?.data?.engines ?? []
+    allowedProviders.value = res?.data?.allowed_providers?.length
+      ? res.data.allowed_providers
+      : engines.filter(e => e.allowed !== false).map(e => e.name)
     const status = { local: true, minio: false, cos: true }
     for (const e of engines) {
       if (e.name === 'local') status.local = e.available
@@ -680,6 +701,7 @@ async function loadStatus() {
     minioEnvAvailable.value = res?.data?.minio_env_available ?? false
   } catch {
     engineStatus.value = { local: true, minio: false, cos: true }
+    allowedProviders.value = ['local', 'minio', 'cos', 'tos', 's3', 'oss']
     minioEnvAvailable.value = false
   }
 }
@@ -704,6 +726,7 @@ async function loadAll() {
   error.value = ''
   try {
     await Promise.all([loadConfig(), loadStatus()])
+    ensureAllowedDefaultProvider()
     if (minioEnvAvailable.value) loadMinioBuckets()
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : t('settings.storage.loadFailed')

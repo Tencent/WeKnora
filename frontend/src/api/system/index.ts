@@ -184,9 +184,9 @@ export function reconnectDocReader(addr: string): Promise<ParserEnginesResponse 
 
 export interface StorageEngineConfig {
   default_provider: string // "local" | "minio" | "cos" | "tos" | "s3" | "oss"
-  local?: { path_prefix: string }
-  minio?: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string }
-  cos?: {
+  local: { path_prefix: string }
+  minio: { mode: string; endpoint: string; access_key_id: string; secret_access_key: string; bucket_name: string; use_ssl: boolean; path_prefix: string }
+  cos: {
     secret_id: string
     secret_key: string
     region: string
@@ -194,7 +194,7 @@ export interface StorageEngineConfig {
     app_id: string
     path_prefix: string
   }
-  tos?: {
+  tos: {
     endpoint: string
     region: string
     access_key: string
@@ -202,7 +202,7 @@ export interface StorageEngineConfig {
     bucket_name: string
     path_prefix: string
   }
-  s3?: {
+  s3: {
     endpoint: string
     region: string
     access_key: string
@@ -210,7 +210,7 @@ export interface StorageEngineConfig {
     bucket_name: string
     path_prefix: string
   }
-  oss?: {
+  oss: {
     endpoint: string
     region: string
     access_key: string
@@ -225,12 +225,14 @@ export interface StorageEngineConfig {
 
 export interface StorageEngineStatusItem {
   name: string
+  allowed?: boolean
   available: boolean
   description: string
 }
 
 export interface GetStorageEngineStatusResponse {
   engines: StorageEngineStatusItem[]
+  allowed_providers?: string[]
   minio_env_available: boolean
 }
 
