@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -116,6 +117,8 @@ func (p *AttachmentProcessor) ProcessAttachment(
 			attachment.Content = fmt.Sprintf("<error><message>Failed to read document</message><details>%v</details></error>", err)
 		}
 	}
+
+	attachment.Content = common.CleanInvalidUTF8(attachment.Content)
 
 	logger.Infof(ctx, "attachment processed: fileName=%s, truncated=%v, contentLen=%d",
 		secutils.SanitizeForLog(baseName), attachment.IsTruncated, len(attachment.Content))
@@ -232,11 +235,14 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	if p.documentReader == nil {
 		return fmt.Errorf("DocumentReader not configured")
 	}
+	
+	normalizedType := strings.TrimPrefix(fileType, ".")
 
 	result, err := p.documentReader.Read(ctx, &types.ReadRequest{
-		FileContent: data,
-		FileName:    fileName,
-		FileType:    fileType,
+		FileContent:           data,
+		FileName:              fileName,
+		FileType:              normalizedType,
+		ParserEngineOverrides: getParserEngineOverridesFromContext(ctx),
 	})
 	if err != nil {
 		return fmt.Errorf("DocumentReader failed: %w", err)
@@ -299,6 +305,16 @@ func isValidFileType(fileName string) bool {
 		}
 	}
 	return false
+}
+
+// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context.
+func getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
+		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
+			return tenant.ParserEngineConfig.ToOverridesMap()
+		}
+	}
+	return nil
 }
 
 // DecodeBase64Attachment decodes a base64 attachment payload, stripping any data URI prefix.
