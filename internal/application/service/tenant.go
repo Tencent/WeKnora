@@ -75,7 +75,8 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	}
 
 	logger.Infof(ctx, "Tenant created successfully, ID: %d, generating official API Key", tenant.ID)
-	tenant.APIKey = s.generateApiKey(tenant.ID)
+	plaintextAPIKey := s.generateApiKey(tenant.ID)
+	tenant.APIKey = plaintextAPIKey
 
 	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
 	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
@@ -91,6 +92,9 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 		})
 		return nil, err
 	}
+
+	// Restore plaintext for the response so callers don't see enc:v1: ciphertext.
+	tenant.APIKey = plaintextAPIKey
 
 	logger.Infof(ctx, "Tenant creation and update completed, ID: %d, name: %s", tenant.ID, tenant.Name)
 	return tenant, nil
@@ -218,7 +222,8 @@ func (s *tenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, er
 	}
 
 	logger.Infof(ctx, "Generating new API Key for tenant, ID: %d", id)
-	tenant.APIKey = s.generateApiKey(tenant.ID)
+	plaintextAPIKey := s.generateApiKey(tenant.ID)
+	tenant.APIKey = plaintextAPIKey
 
 	// Manually encrypt APIKey before update, because db.Updates() does not trigger BeforeSave hook
 	if key := utils.GetAESKey(); key != nil && tenant.APIKey != "" {
@@ -235,7 +240,7 @@ func (s *tenantService) UpdateAPIKey(ctx context.Context, id uint64) (string, er
 	}
 
 	logger.Infof(ctx, "Tenant API Key updated successfully, ID: %d", id)
-	return tenant.APIKey, nil
+	return plaintextAPIKey, nil
 }
 
 // generateApiKey generates a secure API key for tenant authentication
