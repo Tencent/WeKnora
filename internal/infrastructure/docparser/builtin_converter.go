@@ -98,6 +98,7 @@ func imageToResult(fileName string, data []byte) *types.ReadResult {
 				OriginalRef: safeRef,
 				MimeType:    mime,
 				ImageData:   data,
+				IsOriginal:  true,
 			},
 		},
 	}
@@ -170,6 +171,7 @@ func ensureOriginalImageRef(req *types.ReadRequest, mdContent string, imageRefs 
 		OriginalRef: refPath,
 		MimeType:    mime,
 		ImageData:   req.FileContent,
+		IsOriginal:  true,
 	})
 
 	return mdContent, imageRefs

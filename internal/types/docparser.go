@@ -31,6 +31,11 @@ type ImageRef struct {
 	MimeType    string
 	StorageKey  string
 	ImageData   []byte // inline image bytes (universal fallback for cross-machine deployments)
+	// IsOriginal marks references that point to the originally uploaded file
+	// itself (e.g. when the user uploads a standalone image). Such references
+	// must not be dropped by the icon/size filter — otherwise a small image
+	// upload would be silently discarded before multimodal processing.
+	IsOriginal bool
 }
 
 // ParserEngineInfo describes a registered parser engine.
