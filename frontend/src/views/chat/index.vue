@@ -1234,6 +1234,11 @@ onBeforeRouteUpdate((to, from, next) => {
     padding: 20px;
     box-sizing: border-box;
     flex: 1;
+    // The parent .platform-route-outlet is a flex column with min-height:0
+    // and overflow:hidden — we also need min-height:0 here so that our
+    // own flex:1 child (.chat_scroll_box) can shrink below its content
+    // height and scroll instead of pushing .input-container out of view.
+    min-height: 0;
     position: relative;
     display: flex;
     flex-direction: column;
@@ -1272,6 +1277,12 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .chat_scroll_box {
     flex: 1;
+    // Without min-height: 0, a flex-column child defaults to min-height: auto
+    // and expands to fit all inner content. When there are many messages,
+    // that pushes .input-container out of the viewport. Clamping min-height
+    // to 0 lets overflow-y: auto take effect so the messages scroll inside
+    // this box instead of stretching it.
+    min-height: 0;
     width: 100%;
     overflow-y: auto;
 
@@ -1372,6 +1383,9 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .input-container {
     min-height: 115px;
+    // Keep the input visible when messages overflow: without flex-shrink: 0
+    // a tall .chat_scroll_box can squeeze this container down to 0 height.
+    flex-shrink: 0;
     margin: 16px auto 4px;
     width: 100%;
     max-width: 800px;
