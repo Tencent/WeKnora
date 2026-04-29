@@ -1,24 +1,15 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal">
-      <div v-if="dialogVisible" class="model-editor-overlay" @mousedown.self="handleOverlayMouseDown" @mouseup.self="handleOverlayMouseUp">
-        <div class="model-editor-modal">
-          <!-- 关闭按钮 -->
-          <button class="close-btn" @click="handleCancel" :aria-label="$t('common.close')">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-          </button>
-
-          <!-- 标题区域 -->
-          <div class="modal-header">
-            <h2 class="modal-title">{{ isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle') }}</h2>
-            <p class="modal-desc">{{ getModalDescription() }}</p>
-          </div>
-
-          <!-- 表单内容区域 -->
-          <div class="modal-body">
-            <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
+  <SettingDrawer
+    :visible="dialogVisible"
+    :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
+    :description="getModalDescription()"
+    :confirm-loading="saving"
+    :confirm-disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
+    @update:visible="(v: boolean) => dialogVisible = v"
+    @confirm="handleConfirm"
+    @cancel="handleCancel"
+  >
+    <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
         <!-- 模型来源 -->
         <div class="form-item">
           <label class="form-label required">{{ $t('model.editor.sourceLabel') }}</label>
@@ -329,21 +320,7 @@
         </div>
 
       </t-form>
-          </div>
-
-          <!-- 底部按钮区域 -->
-          <div class="modal-footer">
-            <t-button theme="default" variant="outline" @click="handleCancel">
-              {{ $t('common.cancel') }}
-            </t-button>
-            <t-button theme="primary" @click="handleConfirm" :loading="saving" :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'">
-              {{ $t('common.save') }}
-            </t-button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+  </SettingDrawer>
 </template>
 
 <script setup lang="ts">
@@ -353,6 +330,7 @@ import { checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankMod
 import { getWeKnoraCloudStatus } from '@/api/model'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 
 interface CustomHeaderItem {
   key: string
@@ -707,6 +685,11 @@ const checkOllamaServiceStatus = async () => {
   } finally {
     checkingOllamaStatus.value = false
   }
+
+  // Ollama 不可用时，新增场景下默认切换到 remote
+  if (ollamaServiceStatus.value === false && !isEdit.value && formData.value.source === 'local') {
+    formData.value.source = 'remote'
+  }
 }
 
 // 打开Ollama设置窗口
@@ -728,28 +711,46 @@ const goToOllamaSettings = async () => {
   console.log('uiStore.openSettings调用完成')
 }
 
+// 上一次打开时的 modelData id：用来判断切换模型/新增 vs. 同一次新增的连续打开
+const lastOpenedModelId = ref<string | null>(null)
+
 // 监听 visible 变化，初始化表单
 watch(() => props.visible, (val) => {
   if (val) {
-    // 锁定背景滚动
-    document.body.style.overflow = 'hidden'
-
     // 检查Ollama服务状态
     checkOllamaServiceStatus()
 
     // 从 API 加载 Model Provider 列表
     loadProviders()
 
+    // 每次打开都清理上一次遗留的校验/检测结果，避免编辑别的模型时
+    // 直接显示上一次的“连接成功”
+    modelChecked.value = false
+    modelAvailable.value = false
+    remoteChecked.value = false
+    remoteAvailable.value = false
+    remoteMessage.value = ''
+    dimensionChecked.value = false
+    dimensionSuccess.value = false
+    dimensionMessage.value = ''
+
+    const currentId = props.modelData?.id ?? null
+
     if (props.modelData) {
+      // 编辑：始终用最新的 modelData 覆盖
       formData.value = {
         ...props.modelData,
         customHeaders: Array.isArray(props.modelData.customHeaders)
           ? props.modelData.customHeaders.map(h => ({ key: h.key, value: h.value }))
           : []
       }
-    } else {
+    } else if (lastOpenedModelId.value !== null || !formData.value.id) {
+      // 上次是编辑某个模型，或第一次新增 → 重置成空白
       resetForm()
     }
+    // 否则：连续两次"新增"打开（中间是点遮罩/ESC 关闭的）→ 保留上次填写
+
+    lastOpenedModelId.value = currentId
 
     // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
     if (props.modelType === 'rerank') {
@@ -760,9 +761,6 @@ watch(() => props.visible, (val) => {
     if (formData.value.provider === 'weknoracloud') {
       checkWkcCredentialStatus()
     }
-  } else {
-    // 恢复背景滚动
-    document.body.style.overflow = ''
   }
 })
 
@@ -1121,6 +1119,9 @@ const handleConfirm = async () => {
     
     emit('confirm', { ...formData.value })
     dialogVisible.value = false
+    // 保存成功后重置草稿，下次打开新增模型时是空白
+    resetForm()
+    lastOpenedModelId.value = null
     // 移除此处的成功提示，由父组件统一处理
   } catch (error) {
     console.error('表单验证失败:', error)
@@ -1253,133 +1254,19 @@ watch(() => formData.value.modelName, () => {
   dimensionMessage.value = ''
 })
 
-// 取消
+// 取消（点击底部"取消"按钮触发；点遮罩/ESC 不触发，从而保留草稿）
 const handleCancel = () => {
+  resetForm()
+  lastOpenedModelId.value = null
   dialogVisible.value = false
-}
-
-// 遮罩层点击关闭：只有 mousedown 和 mouseup 都发生在遮罩层上才关闭，
-// 防止在输入框中拖选文字时鼠标滑出弹窗导致误关闭
-let overlayMouseDownFired = false
-const handleOverlayMouseDown = () => {
-  overlayMouseDownFired = true
-}
-const handleOverlayMouseUp = () => {
-  if (overlayMouseDownFired) {
-    handleCancel()
-  }
-  overlayMouseDownFired = false
 }
 </script>
 
 <style lang="less" scoped>
-// 遮罩层
-.model-editor-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1200;
-  backdrop-filter: blur(4px);
-  overflow: hidden;
-  padding: 20px;
-}
-
-// 弹窗主体
-.model-editor-modal {
-  position: relative;
-  width: 100%;
-  max-width: 560px;
-  max-height: 90vh;
-  background: var(--td-bg-color-container);
-  border-radius: 12px;
-  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-// 关闭按钮
-.close-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--td-text-color-secondary);
-  transition: all 0.15s ease;
-  z-index: 10;
-
-  &:hover {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-  }
-}
-
-// 标题区域
-.modal-header {
-  padding: 24px 24px 16px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  flex-shrink: 0;
-}
-
-.modal-title {
-  margin: 0 0 6px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-}
-
-.modal-desc {
-  margin: 0;
-  font-size: 13px;
-  color: var(--td-text-color-secondary);
-  line-height: 1.5;
-}
-
-// 内容区域
-.modal-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px;
-  background: var(--td-bg-color-container);
-
-  // 自定义滚动条
-  &::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: 3px;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: var(--td-bg-color-component-disabled);
-    border-radius: 3px;
-    transition: background 0.15s;
-
-    &:hover {
-      background: var(--td-bg-color-component-disabled);
-    }
-  }
-
-  :deep(.t-form) {
-    .t-form-item {
-      display: none;
-    }
+// 原生 t-form-item 容器置空（本组件使用自定义 .form-item + 手写 label）
+:deep(.t-form) {
+  .t-form-item {
+    display: none;
   }
 }
 
@@ -1407,38 +1294,14 @@ const handleOverlayMouseUp = () => {
   }
 }
 
-// 输入框样式
+// 输入框样式：只在最外层 .t-input 上调字号，避免在内部 wrap/inner 上重复加边
+// 与 border-radius，造成视觉上"嵌套圆角容器"的错觉
 :deep(.t-input),
 :deep(.t-select),
 :deep(.t-textarea),
 :deep(.t-input-number) {
   width: 100%;
   font-size: 13px;
-
-  .t-input__inner,
-  .t-input__wrap,
-  input,
-  textarea {
-    font-size: 13px;
-    border-radius: 6px;
-    border-color: var(--td-component-stroke);
-    transition: all 0.15s ease;
-  }
-
-  &:hover .t-input__inner,
-  &:hover .t-input__wrap,
-  &:hover input,
-  &:hover textarea {
-    border-color: var(--td-component-stroke);
-  }
-
-  &.t-is-focused .t-input__inner,
-  &.t-is-focused .t-input__wrap,
-  &.t-is-focused input,
-  &.t-is-focused textarea {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
-  }
 }
 
 // 厂商选择器样式 — 移至非 scoped 块，因为 t-select popup 渲染到 body 下
@@ -1479,72 +1342,6 @@ const handleOverlayMouseUp = () => {
   .t-checkbox__label {
     font-size: 13px;
     color: var(--td-text-color-primary);
-  }
-}
-
-// 底部按钮区域
-.modal-footer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--td-component-stroke);
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-shrink: 0;
-  background: var(--td-bg-color-secondarycontainer);
-
-  :deep(.t-button) {
-    min-width: 80px;
-    height: 36px;
-    font-weight: 500;
-    font-size: 14px;
-    border-radius: 6px;
-    transition: all 0.15s ease;
-
-    &.t-button--theme-primary {
-      background: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-
-      &:hover {
-        background: var(--td-brand-color);
-        border-color: var(--td-brand-color);
-      }
-
-      &:active {
-        background: var(--td-brand-color-active);
-        border-color: var(--td-brand-color-active);
-      }
-    }
-
-    &.t-button--variant-outline {
-      color: var(--td-text-color-secondary);
-      border-color: var(--td-component-stroke);
-
-      &:hover {
-        border-color: var(--td-brand-color);
-        color: var(--td-brand-color);
-        background: rgba(7, 192, 95, 0.04);
-      }
-    }
-  }
-}
-
-// 过渡动画
-.modal-enter-active,
-.modal-leave-active {
-  transition: opacity 0.2s ease;
-
-  .model-editor-modal {
-    transition: transform 0.2s ease, opacity 0.2s ease;
-  }
-}
-
-.modal-enter-from,
-.modal-leave-to {
-  opacity: 0;
-
-  .model-editor-modal {
-    transform: scale(0.95);
-    opacity: 0;
   }
 }
 
@@ -1903,20 +1700,36 @@ const handleOverlayMouseUp = () => {
   // 覆盖 TDesign option 默认固定高度，让两行内容正常展示
   .t-select-option {
     height: auto !important;
-    padding: 0 8px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    margin: 0 4px;
+    outline: none;
+
+    &:focus,
+    &:focus-visible {
+      outline: none;
+    }
+  }
+
+  // 命中态：浅一点的底色，去掉默认的描边/反色
+  .t-select-option.t-is-selected {
+    background-color: var(--td-brand-color-light);
+    color: var(--td-text-color-primary);
+    font-weight: 500;
   }
 
   .provider-option {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 6px 0;
+    width: 100%;
+    min-width: 0;
 
     .provider-name {
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 500;
       color: var(--td-text-color-primary);
-      line-height: 22px;
+      line-height: 20px;
     }
 
     .provider-desc {

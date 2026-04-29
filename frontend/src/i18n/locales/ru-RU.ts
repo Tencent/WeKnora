@@ -2660,6 +2660,13 @@ export default {
   modelSettings: {
     title: 'Настройки моделей',
     description: 'Управление типами AI‑моделей: локальные (Ollama) и удалённые API',
+    typeShort: {
+      chat: 'Чат',
+      embedding: 'Embedding',
+      rerank: 'ReRank',
+      vllm: 'Зрение',
+      asr: 'Речь',
+    },
     actions: {
       addModel: 'Добавить модель',
       setDefault: 'Сделать по умолчанию'

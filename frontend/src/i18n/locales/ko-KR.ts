@@ -2902,6 +2902,13 @@ export default {
   modelSettings: {
     title: "모델 설정",
     description: "다양한 유형의 AI 모델을 관리합니다. Ollama 로컬 모델과 원격 API를 지원합니다",
+    typeShort: {
+      chat: "대화",
+      embedding: "Embedding",
+      rerank: "ReRank",
+      vllm: "비전",
+      asr: "음성",
+    },
     actions: {
       addModel: "모델 추가",
       setDefault: "기본값으로 설정",
