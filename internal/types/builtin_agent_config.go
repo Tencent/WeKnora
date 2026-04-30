@@ -209,6 +209,11 @@ func localeFromCtx(ctx context.Context) string {
 //
 // This must be called after both LoadBuiltinAgentsConfig and prompt template
 // loading have completed.
+//
+// Resolution is gated by `Config.SystemPrompt == ""` (and likewise for
+// ContextTemplate). If you want to re-resolve from a refreshed template
+// source, call ResetBuiltinAgentResolvedPrompts first to clear the cached
+// fields.
 func ResolveBuiltinAgentPromptRefs(resolver func(id string) string) {
 	builtinAgentEntriesMu.Lock()
 	defer builtinAgentEntriesMu.Unlock()
@@ -234,6 +239,35 @@ func ResolveBuiltinAgentPromptRefs(resolver func(id string) string) {
 				fmt.Printf("Warning: builtin agent %q references context_template_id %q but template not found\n",
 					entry.ID, entry.Config.ContextTemplateID)
 			}
+		}
+	}
+}
+
+// ResetBuiltinAgentResolvedPrompts clears the cached SystemPrompt /
+// ContextTemplate fields on every builtin agent that originally derived them
+// from an *_id reference. Pair with ResolveBuiltinAgentPromptRefs after
+// refreshing the prompt template source (e.g. after replacing
+// cfg.PromptTemplates with a DB-sourced snapshot) so the next resolve picks
+// up the new content.
+//
+// Safety: we only clear a field when its corresponding *_id is non-empty.
+// This means agents whose YAML wrote SystemPrompt directly (e.g.
+// builtin-smart-reasoning has system_prompt: "" and no system_prompt_id, or
+// a future agent with literal text in YAML) are left untouched — they were
+// never resolver-driven and shouldn't be wiped.
+func ResetBuiltinAgentResolvedPrompts() {
+	builtinAgentEntriesMu.Lock()
+	defer builtinAgentEntriesMu.Unlock()
+
+	for _, entry := range builtinAgentEntries {
+		if entry == nil {
+			continue
+		}
+		if entry.Config.SystemPromptID != "" {
+			entry.Config.SystemPrompt = ""
+		}
+		if entry.Config.ContextTemplateID != "" {
+			entry.Config.ContextTemplate = ""
 		}
 	}
 }

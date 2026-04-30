@@ -11,8 +11,8 @@
 | GET    | `/tenants`     | 获取租户列表          |
 | GET    | `/tenants/all` | 获取所有租户列表（需跨租户权限） |
 | GET    | `/tenants/search` | 搜索租户（需跨租户权限）      |
-| GET    | `/tenants/kv/:key` | 获取租户KV配置               |
-| PUT    | `/tenants/kv/:key` | 更新租户KV配置               |
+| GET    | `/tenants/kv/:key` | 获取租户KV配置（含 `prompt-templates`） |
+| PUT    | `/tenants/kv/:key` | 更新租户KV配置；`key=prompt-templates` 时 **仅超级管理员** 可写，详见 [提示词模板管理](../wiki/核心功能/提示词模板管理.md) |
 
 ## POST `/tenants` - 创建新租户
 

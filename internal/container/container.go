@@ -153,6 +153,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
+	must(container.Provide(repository.NewPromptTemplateRepository))
+
+	// Seed YAML prompt templates into DB on first boot, then merge DB rows
+	// back into cfg.PromptTemplates. After this, the DB is the source of
+	// truth for system_prompt / agent_system_prompt / context_template /
+	// rewrite / fallback. Failures are logged but do not abort startup —
+	// the service falls back to the YAML-loaded snapshot.
+	must(container.Invoke(initPromptTemplateStore))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -1215,4 +1223,18 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 		scheduler.Stop()
 		return nil
 	})
+}
+
+// initPromptTemplateStore seeds YAML prompt templates into the database on
+// first boot and replaces cfg.PromptTemplates with the DB-sourced view.
+// After this, the DB is the source of truth for the five user-facing
+// categories. Failures are logged but never abort startup: the service then
+// continues with the YAML snapshot until the DB recovers.
+func initPromptTemplateStore(cfg *config.Config, repo interfaces.PromptTemplateRepository) {
+	ctx := context.Background()
+	if err := config.SeedAndLoadPromptTemplates(ctx, cfg, repo); err != nil {
+		logger.Warnf(ctx, "[Container] Failed to initialise prompt template store: %v", err)
+		return
+	}
+	logger.Infof(ctx, "[Container] Prompt template store initialised from DB")
 }
