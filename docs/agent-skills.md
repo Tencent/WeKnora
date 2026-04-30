@@ -126,11 +126,14 @@ type AgentConfig struct {
 
 Sandbox 相关配置通过环境变量设置：
 
-| 环境变量 | 说明 | 默认值 |
-|---------|------|--------|
-| `WEKNORA_SANDBOX_MODE` | sandbox 模式: `docker`, `local`, `disabled` | `disabled` |
-| `WEKNORA_SANDBOX_TIMEOUT` | 脚本执行超时（秒） | `60` |
-| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像 | `wechatopenai/weknora-sandbox:latest` |
+| 环境变量 | 说明                                                                           | 默认值                               |
+|---------|------------------------------------------------------------------------------|-----------------------------------|
+| `WEKNORA_SANDBOX_MODE` | sandbox 模式: `docker`, `local`, `e2b`, `disabled`                             | `disabled`                        |
+| `WEKNORA_SANDBOX_TIMEOUT` | 脚本执行超时（秒）                                                                    | `60`                              |
+| `WEKNORA_SANDBOX_DOCKER_IMAGE` | 自定义 Docker 镜像                                                                | `wechatopenai/weknora-sandbox:latest` |
+| `E2B_API_KEY` | e2b api key e2b_xxxxxx                                                       |                                   |
+| `E2B_API_URL` | e2b 服务端地址, 如果使用[CubeSandbox](https://github.com/TencentCloud/CubeSandbox)需要配置 |                                   |
+| `E2B_TEMPLATE_ID` | e2b 模版ID |  `code-interpreter-v1`            |
 
 ### Sandbox 模式
 
@@ -138,6 +141,7 @@ Sandbox 相关配置通过环境变量设置：
 |------|------|
 | `docker` | 使用 Docker 容器隔离（推荐） |
 | `local` | 本地进程执行（基础安全限制） |
+| `e2b` | 在远端sandbox隔离环境中执行（推荐）|
 | `disabled` | 禁用脚本执行 |
 
 ## Agent 工具

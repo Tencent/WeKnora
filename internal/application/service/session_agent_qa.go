@@ -320,21 +320,28 @@ func (s *sessionService) configureSkillsFromAgent(
 		return
 	}
 
+	// build skill dirs(preloaded + installed)
+	skillDirs := []string{getPreloadedSkillsDir()}
+	installedDir := getInstalledSkillsDir()
+	if _, err := os.Stat(installedDir); err == nil {
+		skillDirs = append(skillDirs, installedDir)
+	}
+
 	switch customAgent.Config.SkillsSelectionMode {
 	case "all":
-		// Enable all preloaded skills
+		// Enable all skills (preloaded + installed)
 		agentConfig.SkillsEnabled = true
-		agentConfig.SkillDirs = []string{DefaultPreloadedSkillsDir}
+		agentConfig.SkillDirs = skillDirs
 		agentConfig.AllowedSkills = nil // Empty means all skills allowed
-		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all preloaded skills")
+		logger.Infof(ctx, "SkillsSelectionMode=all: enabled all skills from dirs: %v", skillDirs)
 	case "selected":
 		// Enable only selected skills
 		if len(customAgent.Config.SelectedSkills) > 0 {
 			agentConfig.SkillsEnabled = true
-			agentConfig.SkillDirs = []string{DefaultPreloadedSkillsDir}
+			agentConfig.SkillDirs = skillDirs
 			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
-			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
-				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
+			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v from dirs: %v",
+				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills, skillDirs)
 		} else {
 			agentConfig.SkillsEnabled = false
 			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")

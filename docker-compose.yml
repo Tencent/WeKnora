@@ -41,6 +41,7 @@ services:
       - ./config/config.yaml:/app/config/config.yaml
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
+      - skills_data:/app/skills/installed
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -142,6 +143,9 @@ services:
       - WEKNORA_SANDBOX_MODE=${WEKNORA_SANDBOX_MODE:-docker}
       - WEKNORA_SANDBOX_TIMEOUT=${WEKNORA_SANDBOX_TIMEOUT:-60}
       - WEKNORA_SANDBOX_DOCKER_IMAGE=${WEKNORA_SANDBOX_DOCKER_IMAGE:-wechatopenai/weknora-sandbox:${WEKNORA_VERSION:-latest}}
+      - E2B_API_KEY=${E2B_API_KEY:-}
+      - E2B_API_URL=${E2B_API_URL:-}
+      - E2B_TEMPLATE_ID=${E2B_TEMPLATE_ID:-}
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - APK_MIRROR_ARG=${APK_MIRROR_ARG:-}
@@ -600,6 +604,7 @@ networks:
 volumes:
   postgres-data:
   data-files:
+  skills_data:
   docreader-tmp:
   jaeger_data:
   minio_data:
