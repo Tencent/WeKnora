@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -75,6 +76,109 @@ func (r *sessionRepository) GetPagedByTenantID(
 	}
 
 	return sessions, total, nil
+}
+
+// QueryPaged lists sessions for tenant/user with keyword/source/agent filters,
+// pin-aware ordering, and IM origin fields from a LEFT JOIN.
+func (r *sessionRepository) QueryPaged(
+	ctx context.Context, q *types.SessionListQuery,
+) ([]*types.SessionListItem, int64, error) {
+	// Base filter shared by count and list queries.
+	applyBase := func(db *gorm.DB) *gorm.DB {
+		db = db.Where("s.tenant_id = ? AND s.deleted_at IS NULL", q.TenantID)
+		if q.UserID != "" {
+			db = db.Where("(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')", q.UserID)
+		}
+		if kw := strings.TrimSpace(q.Keyword); kw != "" {
+			db = db.Where("s.title ILIKE ?", "%"+kw+"%")
+		}
+		return db
+	}
+
+	// LEFT JOIN IM mappings to surface origin fields and support source/agent filters.
+	joinClause := "LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id AND ics.deleted_at IS NULL"
+
+	applySource := func(db *gorm.DB) *gorm.DB {
+		switch strings.ToLower(strings.TrimSpace(q.Source)) {
+		case "":
+			return db
+		case "web":
+			return db.Where("ics.id IS NULL")
+		default:
+			return db.Where("ics.platform = ?", strings.ToLower(q.Source))
+		}
+	}
+	applyAgent := func(db *gorm.DB) *gorm.DB {
+		if q.AgentID != "" {
+			return db.Where("ics.agent_id = ?", q.AgentID)
+		}
+		return db
+	}
+
+	// Count distinct sessions to guard against fan-out from the join.
+	var total int64
+	countQ := applyAgent(applySource(applyBase(
+		r.db.WithContext(ctx).Table("sessions AS s").Joins(joinClause),
+	)))
+	if err := countQ.Distinct("s.id").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	page := q.Page
+	if page < 1 {
+		page = 1
+	}
+	size := q.PageSize
+	if size < 1 {
+		size = 20
+	}
+
+	items := make([]*types.SessionListItem, 0)
+	rowsQ := applyAgent(applySource(applyBase(
+		r.db.WithContext(ctx).Table("sessions AS s").Joins(joinClause),
+	))).
+		Select(`s.*,
+			ics.platform       AS im_platform,
+			ics.chat_id        AS im_chat_id,
+			ics.thread_id      AS im_thread_id,
+			ics.user_id        AS im_user_id,
+			ics.agent_id       AS im_agent_id,
+			ics.im_channel_id  AS im_channel_id`).
+		Order("s.is_pinned DESC, s.pinned_at DESC NULLS LAST, s.updated_at DESC").
+		Offset((page - 1) * size).
+		Limit(size)
+	if err := rowsQ.Find(&items).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return items, total, nil
+}
+
+// SetPinned toggles is_pinned/pinned_at for a single session.
+// Scope: must match tenant, and user_id (when provided) to prevent pinning
+// other users' sessions. Legacy rows with user_id NULL/'' remain mutable
+// at the tenant level (same visibility rule as QueryPaged).
+func (r *sessionRepository) SetPinned(
+	ctx context.Context, tenantID uint64, userID string, id string, pinned bool,
+) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"is_pinned":  pinned,
+		"updated_at": now,
+	}
+	if pinned {
+		updates["pinned_at"] = now
+	} else {
+		updates["pinned_at"] = nil
+	}
+
+	q := r.db.WithContext(ctx).
+		Model(&types.Session{}).
+		Where("tenant_id = ? AND id = ?", tenantID, id)
+	if userID != "" {
+		q = q.Where("(user_id = ? OR user_id IS NULL OR user_id = '')", userID)
+	}
+	return q.Updates(updates).Error
 }
 
 // Update updates a session

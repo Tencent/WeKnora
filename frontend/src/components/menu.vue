@@ -61,6 +61,18 @@
                 </div>
                 </t-tooltip>
                 <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children && !uiStore.sidebarCollapsed">
+                    <!-- 搜索输入 -->
+                    <div class="submenu_search" v-if="!batchMode">
+                        <t-input
+                            v-model="searchKeyword"
+                            :placeholder="t('menu.searchPlaceholder')"
+                            size="small"
+                            clearable
+                            @input="onSearchKeywordChange"
+                            @clear="onSearchKeywordChange">
+                            <template #prefix-icon><t-icon name="search" /></template>
+                        </t-input>
+                    </div>
                     <!-- 骨架屏占位 -->
                     <template v-if="loading && groupedSessions.length === 0">
                         <div v-for="n in 5" :key="'skel-'+n" class="submenu_item_p">
@@ -83,10 +95,12 @@
                                 />
                                 <span class="submenu_title"
                                     :style="batchMode ? 'margin-left:4px;max-width:170px;' : (currentSecondpath == subitem.path ? 'margin-left:18px;max-width:160px;' : 'margin-left:18px;max-width:185px;')">
+                                    <t-icon v-if="subitem.is_pinned" name="push-pin" class="submenu_pin_icon" :title="t('menu.pinned')" />
+                                    <span v-if="subitem.source_label" class="submenu_source_badge">{{ subitem.source_label }}</span>
                                     {{ subitem.title }}
                                 </span>
                                 <t-dropdown v-if="!batchMode"
-                                    :options="[{ content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear', size: '16px' }) }, { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue', size: '16px' }) }, { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete', size: '16px' }) }]"
+                                    :options="buildSessionMenuOptions(subitem)"
                                     @click="handleSessionMenuClick($event, subitem.originalIndex, subitem)"
                                     placement="bottom-right"
                                     trigger="click">
@@ -135,7 +149,7 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, watch, computed, ref, h } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages } from "@/api/chat/index";
+import { getSessionsList, delSession, batchDelSessions, deleteAllSessions, clearSessionMessages, pinSession, unpinSession } from "@/api/chat/index";
 import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { logout as logoutApi } from '@/api/auth';
 import { useMenuStore } from '@/stores/menu';
@@ -281,6 +295,11 @@ const bottomMenuItems = computed<MenuItem[]>(() => {
 const currentKbName = ref<string>('')
 const currentKbInfo = ref<any>(null)
 
+// 搜索关键字（节流后触发后端 keyword 过滤）
+const searchKeyword = ref<string>('')
+// 进行中的置顶/取消置顶请求，避免重复点击
+const pinningIds = ref<Set<string>>(new Set())
+
 // 时间分组函数
 const getTimeCategory = (dateStr: string): string => {
     if (!dateStr) return t('time.earlier');
@@ -310,14 +329,16 @@ const getTimeCategory = (dateStr: string): string => {
     }
 };
 
-// 按时间分组Session列表
+// 按时间分组Session列表，置顶会话单独置于最上方
 const groupedSessions = computed(() => {
     const chatMenu = (menuArr.value as unknown as MenuItem[]).find((item: MenuItem) => item.path === 'creatChat');
     if (!chatMenu || !chatMenu.children || chatMenu.children.length === 0) {
         return [];
     }
-    
+
+    const pinnedLabel = t('time.pinned');
     const groups: { [key: string]: any[] } = {
+        [pinnedLabel]: [],
         [t('time.today')]: [],
         [t('time.yesterday')]: [],
         [t('time.last7Days')]: [],
@@ -325,18 +346,19 @@ const groupedSessions = computed(() => {
         [t('time.lastYear')]: [],
         [t('time.earlier')]: []
     };
-    
-    // 将sessions按时间分组
+
     (chatMenu.children as any[]).forEach((session: any, index: number) => {
+        const withIndex = { ...session, originalIndex: index };
+        if (session.is_pinned) {
+            groups[pinnedLabel].push(withIndex);
+            return;
+        }
         const category = getTimeCategory(session.updated_at || session.created_at);
-        groups[category].push({
-            ...session,
-            originalIndex: index
-        });
+        groups[category].push(withIndex);
     });
-    
-    // 按顺序返回非空分组
-    const orderedLabels = [t('time.today'), t('time.yesterday'), t('time.last7Days'), t('time.last30Days'), t('time.lastYear'), t('time.earlier')];
+
+    // 按顺序返回非空分组（置顶组在最上方）
+    const orderedLabels = [pinnedLabel, t('time.today'), t('time.yesterday'), t('time.last7Days'), t('time.last30Days'), t('time.lastYear'), t('time.earlier')];
     return orderedLabels
         .filter(label => groups[label].length > 0)
         .map(label => ({
@@ -438,7 +460,74 @@ const handleSessionMenuClick = (data: { value: string }, index: number, item: an
         clearMessages(item);
     } else if (data?.value === 'batchManage') {
         enterBatchMode()
+    } else if (data?.value === 'pin' || data?.value === 'unpin') {
+        togglePin(item, data.value === 'pin');
     }
+};
+
+// 基于会话来源推导展示用的短标签。IM 会话的 title 已经用 "[platform] ..." 前缀表达来源，
+// 这里只在列表里加一个可过滤/可见的简短标签，Web 会话保持无标签。
+const deriveSourceLabel = (item: any): string => {
+    if (item?.im_platform) {
+        return `[${item.im_platform}]`;
+    }
+    return '';
+};
+
+const buildSessionMenuOptions = (item: any) => {
+    const options: any[] = [];
+    if (item.is_pinned) {
+        options.push({
+            content: t('menu.unpin'),
+            value: 'unpin',
+            prefixIcon: () => h(TIcon, { name: 'push-pin', size: '16px' }),
+        });
+    } else {
+        options.push({
+            content: t('menu.pin'),
+            value: 'pin',
+            prefixIcon: () => h(TIcon, { name: 'push-pin', size: '16px' }),
+        });
+    }
+    options.push(
+        { content: t('menu.clearMessages'), value: 'clearMessages', prefixIcon: () => h(TIcon, { name: 'clear', size: '16px' }) },
+        { content: t('menu.batchManage'), value: 'batchManage', prefixIcon: () => h(TIcon, { name: 'queue', size: '16px' }) },
+        { content: t('upload.deleteRecord'), value: 'delete', theme: 'error', prefixIcon: () => h(TIcon, { name: 'delete', size: '16px' }) },
+    );
+    return options;
+};
+
+const togglePin = (item: any, pin: boolean) => {
+    if (pinningIds.value.has(item.id)) return;
+    pinningIds.value.add(item.id);
+
+    const call = pin ? pinSession(item.id) : unpinSession(item.id);
+    call.then((res: any) => {
+        if (res && res.success) {
+            // 乐观更新本地列表项，避免整表重拉引起抖动。
+            const chatMenu = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
+            const target = chatMenu?.children?.find((s: any) => s.id === item.id);
+            if (target) {
+                target.is_pinned = pin;
+                target.pinned_at = pin ? new Date().toISOString() : null;
+            }
+        } else {
+            MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
+        }
+    }).catch(() => {
+        MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
+    }).finally(() => {
+        pinningIds.value.delete(item.id);
+    });
+};
+
+// 搜索框输入节流：延迟 300ms 触发一次后端查询。
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+const onSearchKeywordChange = () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+        getMessageList();
+    }, 300);
 };
 
 const clearMessages = (item: any) => {
@@ -511,25 +600,33 @@ const handleScroll = debounce(checkScrollBottom, 200)
 const getMessageList = async (isLoadMore = false) => {
     if (loading.value) return Promise.resolve();
     loading.value = true;
-    
+
     // 只有在首次加载或路由变化时才清空数组，滚动加载时不清空
     if (!isLoadMore) {
         currentPage.value = 1; // 重置页码
         usemenuStore.clearMenuArr();
     }
-    
-    return getSessionsList(currentPage.value, page_size.value).then((res: any) => {
+
+    const filters: { keyword?: string } = {};
+    const kw = searchKeyword.value.trim();
+    if (kw) filters.keyword = kw;
+
+    return getSessionsList(currentPage.value, page_size.value, filters).then((res: any) => {
         if (res.data && res.data.length) {
             // Display all sessions globally without filtering
             res.data.forEach((item: any) => {
-                let obj = { 
+                let obj = {
                     title: item.title ? item.title : t('menu.newSession'),
-                    path: `chat/${item.id}`, 
-                    id: item.id, 
-                    isMore: false, 
+                    path: `chat/${item.id}`,
+                    id: item.id,
+                    isMore: false,
                     isNoTitle: item.title ? false : true,
                     created_at: item.created_at,
-                    updated_at: item.updated_at
+                    updated_at: item.updated_at,
+                    is_pinned: !!item.is_pinned,
+                    pinned_at: item.pinned_at || null,
+                    im_platform: item.im_platform || '',
+                    source_label: deriveSourceLabel(item),
                 }
                 usemenuStore.updatemenuArr(obj)
             });
@@ -1031,6 +1128,29 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         flex: 1;
         min-height: 0;
         margin-left: 4px;
+    }
+
+    .submenu_search {
+        padding: 8px 12px 4px 12px;
+    }
+
+    .submenu_pin_icon {
+        color: var(--td-text-color-secondary);
+        font-size: 12px;
+        margin-right: 4px;
+        vertical-align: middle;
+    }
+
+    .submenu_source_badge {
+        display: inline-block;
+        padding: 0 6px;
+        margin-right: 6px;
+        font-size: 11px;
+        line-height: 16px;
+        color: var(--td-text-color-secondary);
+        background: var(--td-bg-color-secondarycontainer);
+        border-radius: 4px;
+        vertical-align: middle;
     }
     
     @keyframes menuItemFadeIn {

@@ -6,8 +6,26 @@ export async function createSessions(data = {}) {
   return post("/api/v1/sessions", data);
 }
 
-export async function getSessionsList(page: number, page_size: number) {
-  return get(`/api/v1/sessions?page=${page}&page_size=${page_size}`);
+export async function getSessionsList(
+  page: number,
+  page_size: number,
+  filters: { keyword?: string; source?: string; agent_id?: string } = {}
+) {
+  const params = new URLSearchParams();
+  params.set("page", String(page));
+  params.set("page_size", String(page_size));
+  if (filters.keyword) params.set("keyword", filters.keyword);
+  if (filters.source) params.set("source", filters.source);
+  if (filters.agent_id) params.set("agent_id", filters.agent_id);
+  return get(`/api/v1/sessions?${params.toString()}`);
+}
+
+export async function pinSession(session_id: string) {
+  return post(`/api/v1/sessions/${session_id}/pin`, {});
+}
+
+export async function unpinSession(session_id: string) {
+  return del(`/api/v1/sessions/${session_id}/pin`);
 }
 
 export async function generateSessionsTitle(session_id: string, data: any) {
