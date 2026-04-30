@@ -750,6 +750,8 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 		return
 	}
 
+	cfg = *types.EffectiveWebSearchConfig(&cfg)
+
 	// Validate configuration
 	if cfg.MaxResults < 1 || cfg.MaxResults > 50 {
 		c.Error(errors.NewBadRequestError("max_results must be between 1 and 50"))
@@ -777,7 +779,7 @@ func (h *TenantHandler) updateTenantWebSearchConfigInternal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    updatedTenant.WebSearchConfig,
+		"data":    types.EffectiveWebSearchConfig(updatedTenant.WebSearchConfig),
 		"message": "Web search configuration updated successfully",
 	})
 }
@@ -807,7 +809,7 @@ func (h *TenantHandler) GetTenantWebSearchConfig(c *gin.Context) {
 	logger.Infof(ctx, "Tenant web search config retrieved successfully, Tenant ID: %d", tenant.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    tenant.WebSearchConfig,
+		"data":    types.EffectiveWebSearchConfig(tenant.WebSearchConfig),
 	})
 }
 
