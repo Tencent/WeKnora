@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -139,18 +140,16 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	if err := json.Unmarshal(b, c); err != nil {
 		return err
 	}
-	if key := utils.GetAESKey(); key != nil {
-		if c.APIKey != "" {
-			if decrypted, err := utils.DecryptAESGCM(c.APIKey, key); err == nil {
-				c.APIKey = decrypted
-			}
-		}
-		if c.AppSecret != "" {
-			if decrypted, err := utils.DecryptAESGCM(c.AppSecret, key); err == nil {
-				c.AppSecret = decrypted
-			}
-		}
+	apiKey, err := utils.DecryptStoredSecret(c.APIKey)
+	if err != nil {
+		return fmt.Errorf("decrypt model parameters api_key: %w", err)
 	}
+	c.APIKey = apiKey
+	appSecret, err := utils.DecryptStoredSecret(c.AppSecret)
+	if err != nil {
+		return fmt.Errorf("decrypt model parameters app_secret: %w", err)
+	}
+	c.AppSecret = appSecret
 	return nil
 }
 
