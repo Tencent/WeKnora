@@ -25,6 +25,11 @@ type SessionService interface {
 	BatchDeleteSessions(ctx context.Context, ids []string) error
 	// DeleteAllSessions deletes all sessions for the current tenant
 	DeleteAllSessions(ctx context.Context) error
+	// ListSessions returns a page of sessions for the current tenant/user with
+	// search/source filters and pin-aware ordering. User scope is pulled from ctx.
+	ListSessions(ctx context.Context, query *types.SessionListQuery) (*types.PageResult, error)
+	// SetSessionPinned pins or unpins the session for the current user scope.
+	SetSessionPinned(ctx context.Context, sessionID string, pinned bool) error
 	// GenerateTitle generates a title for the current conversation
 	// modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 	GenerateTitle(ctx context.Context, session *types.Session, messages []types.Message, modelID string) (string, error)
@@ -57,8 +62,13 @@ type SessionRepository interface {
 	GetByTenantID(ctx context.Context, tenantID uint64) ([]*types.Session, error)
 	// GetPagedByTenantID gets paged sessions of a tenant
 	GetPagedByTenantID(ctx context.Context, tenantID uint64, page *types.Pagination) ([]*types.Session, int64, error)
+	// QueryPaged lists sessions with filters, user-scoped ownership and pin-aware ordering.
+	QueryPaged(ctx context.Context, q *types.SessionListQuery) ([]*types.SessionListItem, int64, error)
 	// Update updates a session
 	Update(ctx context.Context, session *types.Session) error
+	// SetPinned pins or unpins a session row scoped by tenant.
+	// userID, when non-empty, is enforced so users cannot pin sessions they don't own.
+	SetPinned(ctx context.Context, tenantID uint64, userID string, id string, pinned bool) error
 	// Delete deletes a session
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// BatchDelete deletes multiple sessions by IDs

@@ -1336,6 +1336,51 @@ func (s *Service) resolveSession(ctx context.Context, msg *IncomingMessage, tena
 	}
 }
 
+// buildUserSessionTitle produces a human-distinguishable title for a user-mode
+// IM session. Platform adapters only surface ChatID, not a readable chat name,
+// so we fall back to short ID suffixes to keep group/DM sessions visually distinct.
+func buildUserSessionTitle(msg *IncomingMessage) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] ", msg.Platform)
+	if msg.UserName != "" {
+		b.WriteString(msg.UserName)
+	} else if msg.UserID != "" {
+		b.WriteString("user ")
+		b.WriteString(shortID(msg.UserID))
+	} else {
+		b.WriteString("user")
+	}
+	if msg.ChatType == ChatTypeGroup && msg.ChatID != "" {
+		fmt.Fprintf(&b, " · group %s", shortID(msg.ChatID))
+	} else if msg.ChatType == ChatTypeDirect {
+		b.WriteString(" · dm")
+	}
+	return b.String()
+}
+
+// buildThreadSessionTitle produces a title for a thread-mode IM session.
+// In thread mode different users can share one session, so the user name is
+// omitted and chat/thread IDs carry the distinguishing information.
+func buildThreadSessionTitle(msg *IncomingMessage) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] ", msg.Platform)
+	if msg.ChatID != "" {
+		fmt.Fprintf(&b, "chat %s · ", shortID(msg.ChatID))
+	}
+	b.WriteString("thread ")
+	b.WriteString(shortID(msg.ThreadID))
+	return b.String()
+}
+
+// shortID returns the last 8 characters of id, or id itself when shorter.
+// Used to keep long platform IDs readable inside titles without losing uniqueness.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[len(id)-8:]
+	}
+	return id
+}
+
 // resolveUserSession finds or creates a ChannelSession keyed by (platform, user_id, chat_id, tenant_id, agent_id).
 // This is the original session resolution strategy.
 func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, tenantID uint64, agentID string, imChannelID string) (*ChannelSession, error) {
@@ -1353,10 +1398,7 @@ func (s *Service) resolveUserSession(ctx context.Context, msg *IncomingMessage, 
 	}
 
 	// Create a new WeKnora session
-	title := fmt.Sprintf("IM-%s", msg.Platform)
-	if msg.UserName != "" {
-		title = fmt.Sprintf("IM-%s-%s", msg.Platform, msg.UserName)
-	}
+	title := buildUserSessionTitle(msg)
 
 	newSession := &types.Session{
 		TenantID:    tenantID,
@@ -1427,12 +1469,8 @@ func (s *Service) resolveThreadSession(ctx context.Context, msg *IncomingMessage
 		return nil, fmt.Errorf("query thread session: %w", result.Error)
 	}
 
-	// Build a session title with thread ID suffix for traceability.
-	threadSuffix := threadID
-	if len(threadSuffix) > 8 {
-		threadSuffix = threadSuffix[len(threadSuffix)-8:]
-	}
-	title := fmt.Sprintf("IM-%s-thread-%s", msg.Platform, threadSuffix)
+	// Build a session title including chat + thread suffix for traceability.
+	title := buildThreadSessionTitle(msg)
 
 	newSession := &types.Session{
 		TenantID:    tenantID,

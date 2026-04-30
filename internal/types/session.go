@@ -81,6 +81,13 @@ type Session struct {
 	Description string `json:"description"`
 	// Tenant ID
 	TenantID uint64 `json:"tenant_id"   gorm:"index"`
+	// UserID is the owner of the session. Empty for legacy rows (visible at
+	// tenant level) and for IM-created sessions that do not map to a WeKnora user.
+	UserID string `json:"user_id,omitempty" gorm:"type:varchar(36);index"`
+	// IsPinned indicates whether the session is pinned in the list.
+	IsPinned bool `json:"is_pinned" gorm:"default:false"`
+	// PinnedAt records when the session was pinned; nil when not pinned.
+	PinnedAt *time.Time `json:"pinned_at,omitempty"`
 
 	// // Strategy configuration
 	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
@@ -110,6 +117,34 @@ type Session struct {
 func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 	s.ID = uuid.New().String()
 	return nil
+}
+
+// SessionListQuery bundles the parameters for listing sessions.
+// UserID empty means "tenant-wide" (used by API-key callers / legacy rows).
+// Keyword matches title ILIKE '%keyword%'.
+// Source values: "web" (no IM mapping) or an IM platform name (e.g. "feishu", "wechat").
+// AgentID currently only filters sessions that have an IM channel mapping.
+type SessionListQuery struct {
+	TenantID uint64
+	UserID   string
+	Keyword  string
+	Source   string
+	AgentID  string
+	Page     int
+	PageSize int
+}
+
+// SessionListItem is a session row enriched with its IM origin (when any).
+// IM-related fields are populated from the im_channel_sessions table via LEFT JOIN
+// and are empty for Web-created sessions.
+type SessionListItem struct {
+	Session
+	IMPlatform  string `json:"im_platform,omitempty"   gorm:"column:im_platform"`
+	IMChatID    string `json:"im_chat_id,omitempty"    gorm:"column:im_chat_id"`
+	IMThreadID  string `json:"im_thread_id,omitempty"  gorm:"column:im_thread_id"`
+	IMUserID    string `json:"im_user_id,omitempty"    gorm:"column:im_user_id"`
+	IMAgentID   string `json:"im_agent_id,omitempty"   gorm:"column:im_agent_id"`
+	IMChannelID string `json:"im_channel_id,omitempty" gorm:"column:im_channel_id"`
 }
 
 // StringArray represents a list of strings

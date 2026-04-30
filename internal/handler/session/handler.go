@@ -108,6 +108,11 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		Title:       request.Title,
 		Description: request.Description,
 	}
+	// Attach the calling user as the session owner when available.
+	// API-key / legacy callers without a user id fall back to tenant-level visibility.
+	if userID, ok := types.UserIDFromContext(ctx); ok {
+		createdSession.UserID = userID
+	}
 
 	// Call service to create session
 	logger.Infof(ctx, "Calling session service to create session")
@@ -175,12 +180,15 @@ func (h *Handler) GetSession(c *gin.Context) {
 
 // GetSessionsByTenant godoc
 // @Summary      获取会话列表
-// @Description  获取当前租户的会话列表，支持分页
+// @Description  获取当前租户的会话列表，支持分页、关键字搜索、按来源/Agent 筛选
 // @Tags         会话
 // @Accept       json
 // @Produce      json
-// @Param        page       query     int  false  "页码"
-// @Param        page_size  query     int  false  "每页数量"
+// @Param        page       query     int     false  "页码"
+// @Param        page_size  query     int     false  "每页数量"
+// @Param        keyword    query     string  false  "标题模糊搜索"
+// @Param        source     query     string  false  "来源过滤：web / feishu / wechat / slack / ..."
+// @Param        agent_id   query     string  false  "按 Agent 过滤（仅对 IM 会话生效）"
 // @Success      200        {object}  map[string]interface{}  "会话列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -194,6 +202,36 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 	if err := c.ShouldBindQuery(&pagination); err != nil {
 		logger.Error(ctx, "Failed to parse pagination parameters", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	keyword := c.Query("keyword")
+	source := c.Query("source")
+	agentID := c.Query("agent_id")
+
+	// When the caller uses any of the new filter knobs, return enriched items
+	// (with IM origin fields). Otherwise keep the legacy response so existing
+	// clients are unaffected.
+	if keyword != "" || source != "" || agentID != "" {
+		result, err := h.sessionService.ListSessions(ctx, &types.SessionListQuery{
+			Keyword:  keyword,
+			Source:   source,
+			AgentID:  agentID,
+			Page:     pagination.Page,
+			PageSize: pagination.PageSize,
+		})
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, nil)
+			c.Error(errors.NewInternalServerError(err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"success":   true,
+			"data":      result.Data,
+			"total":     result.Total,
+			"page":      result.Page,
+			"page_size": result.PageSize,
+		})
 		return
 	}
 
@@ -439,5 +477,60 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Sessions deleted successfully",
+	})
+}
+
+// PinSession godoc
+// @Summary      置顶会话
+// @Description  将指定会话置顶（用户维度）
+// @Tags         会话
+// @Produce      json
+// @Param        id   path      string  true  "会话ID"
+// @Success      200  {object}  map[string]interface{}  "置顶成功"
+// @Failure      404  {object}  errors.AppError         "会话不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sessions/{id}/pin [post]
+func (h *Handler) PinSession(c *gin.Context) {
+	h.setSessionPinned(c, true)
+}
+
+// UnpinSession godoc
+// @Summary      取消置顶会话
+// @Description  取消指定会话的置顶
+// @Tags         会话
+// @Produce      json
+// @Param        id   path      string  true  "会话ID"
+// @Success      200  {object}  map[string]interface{}  "取消置顶成功"
+// @Failure      404  {object}  errors.AppError         "会话不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /sessions/{id}/pin [delete]
+func (h *Handler) UnpinSession(c *gin.Context) {
+	h.setSessionPinned(c, false)
+}
+
+func (h *Handler) setSessionPinned(c *gin.Context, pinned bool) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Session ID is empty")
+		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		return
+	}
+
+	if err := h.sessionService.SetSessionPinned(ctx, id, pinned); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": id,
+			"pinned":     pinned,
+		})
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"is_pinned": pinned,
 	})
 }
