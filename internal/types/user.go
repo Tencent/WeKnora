@@ -87,6 +87,10 @@ type OIDCCallbackResponse struct {
 	IsNewUser    bool    `json:"is_new_user,omitempty"`
 }
 
+type OIDCCallbackExchangeRequest struct {
+	Ticket string `json:"ticket" binding:"required"`
+}
+
 type OIDCUserInfo struct {
 	Subject  string                 `json:"subject,omitempty"`
 	Username string                 `json:"username,omitempty"`

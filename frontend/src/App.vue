@@ -6,7 +6,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
-import { getCurrentUser } from '@/api/auth'
+import { exchangeOIDCCallbackTicket, getCurrentUser } from '@/api/auth'
 
 // TDesign locale configs
 import enUSConfig from 'tdesign-vue-next/esm/locale/en_US'
@@ -95,9 +95,10 @@ const handleGlobalOIDCCallback = async () => {
   const params = new URLSearchParams(hash)
   const oidcError = params.get('oidc_error')
   const oidcErrorDescription = params.get('oidc_error_description')
+  const oidcCallbackTicket = params.get('oidc_callback_ticket')
   const oidcResult = params.get('oidc_result')
 
-  if (!oidcError && !oidcResult) return
+  if (!oidcError && !oidcCallbackTicket && !oidcResult) return
 
   if (oidcError) {
     clearOIDCCallbackState('/login')
@@ -107,14 +108,18 @@ const handleGlobalOIDCCallback = async () => {
   }
 
   try {
-    if (!oidcResult) {
+    let response: any
+
+    if (oidcCallbackTicket) {
+      response = await exchangeOIDCCallbackTicket(oidcCallbackTicket)
+    } else if (oidcResult) {
+      response = decodeOIDCResult(oidcResult)
+    } else {
       clearOIDCCallbackState('/login')
       await router.replace('/login')
       MessagePlugin.error('OIDC login failed')
       return
     }
-
-    const response = decodeOIDCResult(oidcResult)
     if (response.success) {
       clearOIDCCallbackState('/')
       MessagePlugin.success('Login successful')

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -23,9 +24,10 @@ import (
 // Provides functionality for user registration, login, logout, and token management
 // through the REST API endpoints
 type AuthHandler struct {
-	userService   interfaces.UserService
-	tenantService interfaces.TenantService
-	configInfo    *config.Config
+	userService     interfaces.UserService
+	tenantService   interfaces.TenantService
+	configInfo      *config.Config
+	oidcTicketStore oidcCallbackTicketStore
 }
 
 // NewAuthHandler creates a new auth handler instance with the provided services
@@ -35,11 +37,12 @@ type AuthHandler struct {
 //
 // Returns a pointer to the newly created AuthHandler
 func NewAuthHandler(configInfo *config.Config,
-	userService interfaces.UserService, tenantService interfaces.TenantService) *AuthHandler {
+	userService interfaces.UserService, tenantService interfaces.TenantService, redisClient *redis.Client) *AuthHandler {
 	return &AuthHandler{
-		configInfo:    configInfo,
-		userService:   userService,
-		tenantService: tenantService,
+		configInfo:      configInfo,
+		userService:     userService,
+		tenantService:   tenantService,
+		oidcTicketStore: newOIDCCallbackTicketStore(redisClient),
 	}
 }
 
@@ -265,14 +268,14 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 		return
 	}
 
-	payload, err := encodeOIDCCallbackPayload(resp)
+	ticket, err := h.oidcTicketStore.Save(ctx, resp)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to encode OIDC callback payload: %v", err)
-		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("payload_encode_failed"))
+		logger.Errorf(ctx, "Failed to persist OIDC callback ticket: %v", err)
+		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("callback_ticket_store_failed"))
 		return
 	}
 
-	c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_result="+urlQueryEscape(payload))
+	c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_callback_ticket="+urlQueryEscape(ticket))
 }
 
 func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
@@ -314,6 +317,48 @@ func urlQueryEscape(value string) string {
 		"?", "%3F",
 	)
 	return replacer.Replace(value)
+}
+
+// ExchangeOIDCCallbackTicket godoc
+// @Summary      Exchange OIDC callback ticket
+// @Description  Exchanges a one-time OIDC callback ticket for the stored OIDC login result
+// @Tags         认证
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.OIDCCallbackExchangeRequest  true  "OIDC callback ticket"
+// @Success      200      {object}  types.OIDCCallbackResponse
+// @Failure      400      {object}  errors.AppError  "请求参数错误"
+// @Failure      410      {object}  types.OIDCCallbackResponse  "ticket invalid or expired"
+// @Router       /auth/oidc/callback/exchange [post]
+func (h *AuthHandler) ExchangeOIDCCallbackTicket(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	var req types.OIDCCallbackExchangeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		appErr := errors.NewValidationError("Invalid OIDC callback ticket request").WithDetails(err.Error())
+		c.Error(appErr)
+		return
+	}
+
+	resp, err := h.oidcTicketStore.Consume(ctx, req.Ticket)
+	if err != nil {
+		if err == errOIDCCallbackTicketNotFound {
+			c.JSON(http.StatusGone, &types.OIDCCallbackResponse{
+				Success: false,
+				Message: err.Error(),
+			})
+			return
+		}
+
+		logger.Errorf(ctx, "Failed to exchange OIDC callback ticket: %v", err)
+		c.JSON(http.StatusInternalServerError, &types.OIDCCallbackResponse{
+			Success: false,
+			Message: "Failed to exchange OIDC callback ticket",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, resp)
 }
 
 // Logout godoc
