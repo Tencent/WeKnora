@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -205,12 +204,12 @@ func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (str
 
 	// If external URL is configured, generate a presigned HTTP URL.
 	if s.externalURL != "" {
-		// Prefer tenant ID from context (authoritative); fall back to parsing
-		// the storage path for callers that don't propagate tenant context.
-		tenantID, ok := types.TenantIDFromContext(ctx)
-		if !ok || tenantID == 0 {
-			tenantID = secutils.ParseTenantIDFromStoragePath(normalized)
-		}
+		// Tenant ID is parsed from the storage path, which encodes the
+		// resource owner's tenant (not the caller's). The verifier on
+		// /api/v1/files/presigned uses this ID to look up the owning
+		// tenant's StorageEngineConfig — using the caller's tenant would
+		// break cross-tenant shared resources (e.g. shared KB images).
+		tenantID := secutils.ParseTenantIDFromStoragePath(normalized)
 		presignedURL, err := secutils.SignFileURL(s.externalURL, normalized, tenantID, 0)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to generate presigned URL for %s: %v, returning local:// path", normalized, err)
