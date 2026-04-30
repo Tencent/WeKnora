@@ -1339,9 +1339,10 @@ func (s *Service) resolveSession(ctx context.Context, msg *IncomingMessage, tena
 // buildUserSessionTitle produces a human-distinguishable title for a user-mode
 // IM session. Platform adapters only surface ChatID, not a readable chat name,
 // so we fall back to short ID suffixes to keep group/DM sessions visually distinct.
+// Platform prefix is intentionally omitted — the UI renders a platform icon badge
+// alongside the title, so the `[feishu]` prefix would be redundant clutter.
 func buildUserSessionTitle(msg *IncomingMessage) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[%s] ", msg.Platform)
 	if msg.UserName != "" {
 		b.WriteString(msg.UserName)
 	} else if msg.UserID != "" {
@@ -1361,9 +1362,9 @@ func buildUserSessionTitle(msg *IncomingMessage) string {
 // buildThreadSessionTitle produces a title for a thread-mode IM session.
 // In thread mode different users can share one session, so the user name is
 // omitted and chat/thread IDs carry the distinguishing information.
+// Platform prefix is omitted for the same reason as buildUserSessionTitle.
 func buildThreadSessionTitle(msg *IncomingMessage) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[%s] ", msg.Platform)
 	if msg.ChatID != "" {
 		fmt.Fprintf(&b, "chat %s · ", shortID(msg.ChatID))
 	}

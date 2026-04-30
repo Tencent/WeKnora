@@ -199,11 +199,13 @@ func (s *sessionService) ListSessions(
 }
 
 // SetSessionPinned pins or unpins a session for the current user scope.
+// Returns the number of rows affected; 0 means the session doesn't exist
+// or is not owned by the caller so the handler can respond 404.
 func (s *sessionService) SetSessionPinned(
 	ctx context.Context, sessionID string, pinned bool,
-) error {
+) (int64, error) {
 	if sessionID == "" {
-		return errors.New("session id is required")
+		return 0, errors.New("session id is required")
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID, _ := types.UserIDFromContext(ctx)

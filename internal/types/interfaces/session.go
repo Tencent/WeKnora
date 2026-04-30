@@ -29,7 +29,8 @@ type SessionService interface {
 	// search/source filters and pin-aware ordering. User scope is pulled from ctx.
 	ListSessions(ctx context.Context, query *types.SessionListQuery) (*types.PageResult, error)
 	// SetSessionPinned pins or unpins the session for the current user scope.
-	SetSessionPinned(ctx context.Context, sessionID string, pinned bool) error
+	// Returns the number of rows affected; 0 signals "not found" to the handler.
+	SetSessionPinned(ctx context.Context, sessionID string, pinned bool) (int64, error)
 	// GenerateTitle generates a title for the current conversation
 	// modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 	GenerateTitle(ctx context.Context, session *types.Session, messages []types.Message, modelID string) (string, error)
@@ -68,7 +69,9 @@ type SessionRepository interface {
 	Update(ctx context.Context, session *types.Session) error
 	// SetPinned pins or unpins a session row scoped by tenant.
 	// userID, when non-empty, is enforced so users cannot pin sessions they don't own.
-	SetPinned(ctx context.Context, tenantID uint64, userID string, id string, pinned bool) error
+	// Returns the number of rows affected; 0 means the session doesn't exist or is
+	// not visible to this caller.
+	SetPinned(ctx context.Context, tenantID uint64, userID string, id string, pinned bool) (int64, error)
 	// Delete deletes a session
 	Delete(ctx context.Context, tenantID uint64, id string) error
 	// BatchDelete deletes multiple sessions by IDs
