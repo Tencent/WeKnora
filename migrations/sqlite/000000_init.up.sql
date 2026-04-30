@@ -134,6 +134,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     agent_config TEXT DEFAULT NULL,
     context_config TEXT DEFAULT NULL,
     agent_id VARCHAR(36),
+    user_id VARCHAR(36),
+    is_pinned BOOLEAN NOT NULL DEFAULT 0,
+    pinned_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     deleted_at DATETIME
@@ -141,6 +144,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_tenant_id ON sessions(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent_id ON sessions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_tenant_user_pin
+    ON sessions (tenant_id, user_id, is_pinned, pinned_at, updated_at)
+    WHERE deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS messages (
     id VARCHAR(36) PRIMARY KEY,

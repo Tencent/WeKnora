@@ -83,6 +83,21 @@ func (r *sessionRepository) GetPagedByTenantID(
 func (r *sessionRepository) QueryPaged(
 	ctx context.Context, q *types.SessionListQuery,
 ) ([]*types.SessionListItem, int64, error) {
+	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
+	isPostgres := r.db.Dialector.Name() == "postgres"
+	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
+	if isPostgres {
+		titleLikeExpr = "s.title ILIKE ?"
+	}
+	// SQLite (the driver used by Lite) does not support NULLS LAST; its default
+	// nulls ordering puts NULLs first for DESC, which is actually what we want
+	// for pinned_at (rows with pinned_at=NULL are never pinned, so they get
+	// filtered to the tail by the preceding is_pinned DESC anyway).
+	orderClause := "s.is_pinned DESC, s.pinned_at DESC NULLS LAST, s.updated_at DESC"
+	if !isPostgres {
+		orderClause = "s.is_pinned DESC, s.pinned_at DESC, s.updated_at DESC"
+	}
+
 	// Base filter shared by count and list queries.
 	applyBase := func(db *gorm.DB) *gorm.DB {
 		db = db.Where("s.tenant_id = ? AND s.deleted_at IS NULL", q.TenantID)
@@ -90,7 +105,7 @@ func (r *sessionRepository) QueryPaged(
 			db = db.Where("(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')", q.UserID)
 		}
 		if kw := strings.TrimSpace(q.Keyword); kw != "" {
-			db = db.Where("s.title ILIKE ?", "%"+kw+"%")
+			db = db.Where(titleLikeExpr, "%"+escapeLikeKeyword(kw)+"%")
 		}
 		return db
 	}
@@ -144,7 +159,7 @@ func (r *sessionRepository) QueryPaged(
 			ics.user_id        AS im_user_id,
 			ics.agent_id       AS im_agent_id,
 			ics.im_channel_id  AS im_channel_id`).
-		Order("s.is_pinned DESC, s.pinned_at DESC NULLS LAST, s.updated_at DESC").
+		Order(orderClause).
 		Offset((page - 1) * size).
 		Limit(size)
 	if err := rowsQ.Find(&items).Error; err != nil {
@@ -156,11 +171,14 @@ func (r *sessionRepository) QueryPaged(
 
 // SetPinned toggles is_pinned/pinned_at for a single session.
 // Scope: must match tenant, and user_id (when provided) to prevent pinning
-// other users' sessions. Legacy rows with user_id NULL/'' remain mutable
+// other users' sessions. Legacy rows with user_id NULL/” remain mutable
 // at the tenant level (same visibility rule as QueryPaged).
+//
+// Returns the number of rows affected so callers can distinguish "session
+// doesn't exist / not visible to this user" (0) from a real DB error.
 func (r *sessionRepository) SetPinned(
 	ctx context.Context, tenantID uint64, userID string, id string, pinned bool,
-) error {
+) (int64, error) {
 	now := time.Now()
 	updates := map[string]interface{}{
 		"is_pinned":  pinned,
@@ -178,7 +196,8 @@ func (r *sessionRepository) SetPinned(
 	if userID != "" {
 		q = q.Where("(user_id = ? OR user_id IS NULL OR user_id = '')", userID)
 	}
-	return q.Updates(updates).Error
+	res := q.Updates(updates)
+	return res.RowsAffected, res.Error
 }
 
 // Update updates a session

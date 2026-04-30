@@ -61,18 +61,6 @@
                 </div>
                 </t-tooltip>
                 <div ref="submenuscrollContainer" @scroll="handleScroll" class="submenu" v-if="item.children && !uiStore.sidebarCollapsed">
-                    <!-- 搜索输入 -->
-                    <div class="submenu_search" v-if="!batchMode">
-                        <t-input
-                            v-model="searchKeyword"
-                            :placeholder="t('menu.searchPlaceholder')"
-                            size="small"
-                            clearable
-                            @input="onSearchKeywordChange"
-                            @clear="onSearchKeywordChange">
-                            <template #prefix-icon><t-icon name="search" /></template>
-                        </t-input>
-                    </div>
                     <!-- 骨架屏占位 -->
                     <template v-if="loading && groupedSessions.length === 0">
                         <div v-for="n in 5" :key="'skel-'+n" class="submenu_item_p">
@@ -95,8 +83,12 @@
                                 />
                                 <span class="submenu_title"
                                     :style="batchMode ? 'margin-left:4px;max-width:170px;' : (currentSecondpath == subitem.path ? 'margin-left:18px;max-width:160px;' : 'margin-left:18px;max-width:185px;')">
-                                    <t-icon v-if="subitem.is_pinned" name="push-pin" class="submenu_pin_icon" :title="t('menu.pinned')" />
-                                    <span v-if="subitem.source_label" class="submenu_source_badge">{{ subitem.source_label }}</span>
+                                    <t-icon v-if="subitem.is_pinned" name="pin" class="submenu_pin_icon" :title="t('menu.pinned')" />
+                                    <img v-if="subitem.im_platform && platformLogo(subitem.im_platform)"
+                                        :src="platformLogo(subitem.im_platform)"
+                                        :alt="subitem.im_platform"
+                                        :title="subitem.im_platform"
+                                        class="submenu_source_icon" />
                                     {{ subitem.title }}
                                 </span>
                                 <t-dropdown v-if="!batchMode"
@@ -161,6 +153,27 @@ import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
 import { getSystemInfo } from '@/api/system';
+// Platform logos reused from IMChannelsOverviewPanel — keeps the session list
+// visually consistent with the channels admin view.
+import wecomLogo from '@/assets/img/im/wecom.svg';
+import feishuLogo from '@/assets/img/im/feishu.svg';
+import slackLogo from '@/assets/img/im/slack.svg';
+import telegramLogo from '@/assets/img/im/telegram.svg';
+import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
+import mattermostLogo from '@/assets/img/im/mattermost.svg';
+import wechatLogo from '@/assets/img/im/wechat.svg';
+
+const PLATFORM_LOGO: Record<string, string> = {
+    wecom: wecomLogo,
+    feishu: feishuLogo,
+    slack: slackLogo,
+    telegram: telegramLogo,
+    dingtalk: dingtalkLogo,
+    mattermost: mattermostLogo,
+    wechat: wechatLogo,
+};
+
+const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -295,8 +308,6 @@ const bottomMenuItems = computed<MenuItem[]>(() => {
 const currentKbName = ref<string>('')
 const currentKbInfo = ref<any>(null)
 
-// 搜索关键字（节流后触发后端 keyword 过滤）
-const searchKeyword = ref<string>('')
 // 进行中的置顶/取消置顶请求，避免重复点击
 const pinningIds = ref<Set<string>>(new Set())
 
@@ -465,14 +476,7 @@ const handleSessionMenuClick = (data: { value: string }, index: number, item: an
     }
 };
 
-// 基于会话来源推导展示用的短标签。IM 会话的 title 已经用 "[platform] ..." 前缀表达来源，
-// 这里只在列表里加一个可过滤/可见的简短标签，Web 会话保持无标签。
-const deriveSourceLabel = (item: any): string => {
-    if (item?.im_platform) {
-        return `[${item.im_platform}]`;
-    }
-    return '';
-};
+// 基于会话来源推导展示用的短标签已经被 platformLogo(<img>) 取代，Web 会话没有图标。
 
 const buildSessionMenuOptions = (item: any) => {
     const options: any[] = [];
@@ -480,13 +484,13 @@ const buildSessionMenuOptions = (item: any) => {
         options.push({
             content: t('menu.unpin'),
             value: 'unpin',
-            prefixIcon: () => h(TIcon, { name: 'push-pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
         });
     } else {
         options.push({
             content: t('menu.pin'),
             value: 'pin',
-            prefixIcon: () => h(TIcon, { name: 'push-pin', size: '16px' }),
+            prefixIcon: () => h(TIcon, { name: 'pin', size: '16px' }),
         });
     }
     options.push(
@@ -506,10 +510,18 @@ const togglePin = (item: any, pin: boolean) => {
         if (res && res.success) {
             // 乐观更新本地列表项，避免整表重拉引起抖动。
             const chatMenu = (menuArr.value as any[]).find((m: any) => m.path === 'creatChat');
-            const target = chatMenu?.children?.find((s: any) => s.id === item.id);
-            if (target) {
+            const idx = chatMenu?.children?.findIndex((s: any) => s.id === item.id) ?? -1;
+            if (idx >= 0) {
+                const target = chatMenu.children[idx];
                 target.is_pinned = pin;
                 target.pinned_at = pin ? new Date().toISOString() : null;
+                // 置顶时把元素挪到数组最前，确保在置顶分组中出现在最上方
+                // （groupedSessions 按 children 顺序分组）。取消置顶时无需移动，
+                // 元素会自然回到它在时间分组内的原位。
+                if (pin && idx > 0) {
+                    chatMenu.children.splice(idx, 1);
+                    chatMenu.children.unshift(target);
+                }
             }
         } else {
             MessagePlugin.error(pin ? t('menu.pinFailed') : t('menu.unpinFailed'));
@@ -519,15 +531,6 @@ const togglePin = (item: any, pin: boolean) => {
     }).finally(() => {
         pinningIds.value.delete(item.id);
     });
-};
-
-// 搜索框输入节流：延迟 300ms 触发一次后端查询。
-let searchTimer: ReturnType<typeof setTimeout> | null = null;
-const onSearchKeywordChange = () => {
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-        getMessageList();
-    }, 300);
 };
 
 const clearMessages = (item: any) => {
@@ -607,11 +610,7 @@ const getMessageList = async (isLoadMore = false) => {
         usemenuStore.clearMenuArr();
     }
 
-    const filters: { keyword?: string } = {};
-    const kw = searchKeyword.value.trim();
-    if (kw) filters.keyword = kw;
-
-    return getSessionsList(currentPage.value, page_size.value, filters).then((res: any) => {
+    return getSessionsList(currentPage.value, page_size.value).then((res: any) => {
         if (res.data && res.data.length) {
             // Display all sessions globally without filtering
             res.data.forEach((item: any) => {
@@ -626,7 +625,6 @@ const getMessageList = async (isLoadMore = false) => {
                     is_pinned: !!item.is_pinned,
                     pinned_at: item.pinned_at || null,
                     im_platform: item.im_platform || '',
-                    source_label: deriveSourceLabel(item),
                 }
                 usemenuStore.updatemenuArr(obj)
             });
@@ -1130,27 +1128,31 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
         margin-left: 4px;
     }
 
-    .submenu_search {
-        padding: 8px 12px 4px 12px;
-    }
-
     .submenu_pin_icon {
-        color: var(--td-text-color-secondary);
+        color: inherit;
         font-size: 12px;
         margin-right: 4px;
         vertical-align: middle;
     }
 
-    .submenu_source_badge {
-        display: inline-block;
-        padding: 0 6px;
-        margin-right: 6px;
-        font-size: 11px;
-        line-height: 16px;
-        color: var(--td-text-color-secondary);
-        background: var(--td-bg-color-secondarycontainer);
-        border-radius: 4px;
+    .submenu_source_icon {
+        width: 14px;
+        height: 14px;
+        margin-right: 0px;
         vertical-align: middle;
+        object-fit: contain;
+        flex-shrink: 0;
+        // 默认淡化处理，避免未选中状态下彩色图标与灰色标题不协调；
+        // 悬浮或选中时恢复彩色，交互时才引人注意。
+        filter: grayscale(1);
+        opacity: 0.55;
+        transition: filter 0.15s ease, opacity 0.15s ease;
+    }
+
+    .submenu_item:hover .submenu_source_icon,
+    .submenu_item_active .submenu_source_icon {
+        filter: none;
+        opacity: 1;
     }
     
     @keyframes menuItemFadeIn {

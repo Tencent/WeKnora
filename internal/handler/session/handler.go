@@ -205,45 +205,22 @@ func (h *Handler) GetSessionsByTenant(c *gin.Context) {
 		return
 	}
 
-	keyword := c.Query("keyword")
-	source := c.Query("source")
-	agentID := c.Query("agent_id")
-
-	// When the caller uses any of the new filter knobs, return enriched items
-	// (with IM origin fields). Otherwise keep the legacy response so existing
-	// clients are unaffected.
-	if keyword != "" || source != "" || agentID != "" {
-		result, err := h.sessionService.ListSessions(ctx, &types.SessionListQuery{
-			Keyword:  keyword,
-			Source:   source,
-			AgentID:  agentID,
-			Page:     pagination.Page,
-			PageSize: pagination.PageSize,
-		})
-		if err != nil {
-			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError(err.Error()))
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"success":   true,
-			"data":      result.Data,
-			"total":     result.Total,
-			"page":      result.Page,
-			"page_size": result.PageSize,
-		})
-		return
-	}
-
-	// Use paginated query to get sessions
-	result, err := h.sessionService.GetPagedSessionsByTenant(ctx, &pagination)
+	// Response items always include pin state and (when available) IM origin
+	// fields so the frontend can render pin icons / source badges without a
+	// second roundtrip. Unset filter params behave like "no filter".
+	result, err := h.sessionService.ListSessions(ctx, &types.SessionListQuery{
+		Keyword:  c.Query("keyword"),
+		Source:   c.Query("source"),
+		AgentID:  c.Query("agent_id"),
+		Page:     pagination.Page,
+		PageSize: pagination.PageSize,
+	})
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	// Return sessions with pagination data
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
 		"data":      result.Data,
@@ -485,12 +462,12 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 // @Description  将指定会话置顶（用户维度）
 // @Tags         会话
 // @Produce      json
-// @Param        id   path      string  true  "会话ID"
+// @Param        session_id   path      string  true  "会话ID"
 // @Success      200  {object}  map[string]interface{}  "置顶成功"
 // @Failure      404  {object}  errors.AppError         "会话不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /sessions/{id}/pin [post]
+// @Router       /sessions/{session_id}/pin [post]
 func (h *Handler) PinSession(c *gin.Context) {
 	h.setSessionPinned(c, true)
 }
@@ -513,19 +490,32 @@ func (h *Handler) UnpinSession(c *gin.Context) {
 func (h *Handler) setSessionPinned(c *gin.Context, pinned bool) {
 	ctx := c.Request.Context()
 
-	id := secutils.SanitizeForLog(c.Param("id"))
+	// POST and DELETE for /sessions/.../pin register under different wildcards
+	// (POST :session_id, DELETE :id — see router.go). Accept whichever is set.
+	rawID := c.Param("session_id")
+	if rawID == "" {
+		rawID = c.Param("id")
+	}
+	id := secutils.SanitizeForLog(rawID)
 	if id == "" {
 		logger.Error(ctx, "Session ID is empty")
 		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
-	if err := h.sessionService.SetSessionPinned(ctx, id, pinned); err != nil {
+	rows, err := h.sessionService.SetSessionPinned(ctx, id, pinned)
+	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": id,
 			"pinned":     pinned,
 		})
 		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	// Zero rows means the session doesn't exist or isn't visible to this user;
+	// tell the client rather than reporting success.
+	if rows == 0 {
+		c.Error(errors.NewNotFoundError(errors.ErrSessionNotFound.Error()))
 		return
 	}
 
