@@ -13,16 +13,16 @@
 </p>
 <p align="center">
     <a href="https://weknora.weixin.qq.com" target="_blank">
-        <img alt="官方网站" src="https://img.shields.io/badge/官方网站-WeKnora-4e6b99">
+        <img alt="Official Website" src="https://img.shields.io/badge/Official Website-WeKnora-4e6b99">
     </a>
     <a href="https://chatbot.weixin.qq.com" target="_blank">
-        <img alt="微信对话开放平台" src="https://img.shields.io/badge/微信对话开放平台-5ac725">
+        <img alt="WeChat Dialog Open Platform" src="https://img.shields.io/badge/WeChat Dialog Open Platform-5ac725">
     </a>
     <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.5.1-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -51,16 +51,17 @@ The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (mo
 
 ## ✨ Latest Updates
 
-**v0.5.0 Highlights:**
+**v0.5.1 Highlights:**
 
 - **Wiki Mode**: A brand-new agent-driven Wiki knowledge system that automatically distills raw documents into interlinked markdown pages. It ships with a dedicated WikiBrowser and an interactive knowledge graph that visualizes references and relationships between pages, helping teams grow a structured, continuously evolving knowledge base from their own materials.
 - **Observability**: Integrated Langfuse for agent ReAct loop, LLM token tracking, tool calls, and asynq pipeline tracing, providing deep visibility into agent reasoning and system performance.
-- **Customizable Indexing Strategy**: Users can now independently configure and toggle Vector Search, Keyword Search (Hybrid), Wiki, and Knowledge Graph indexing per knowledge base.
+- **Customizable Indexing Strategy**: Independently configure and toggle Vector Search, Keyword Search (Hybrid), Wiki, and Knowledge Graph indexing per knowledge base.
 - **Vector Store UI & Per-KB Binding**: Full frontend management for Vector Stores with connectivity testing, plus the ability to bind distinct vector databases to specific knowledge bases.
-- **Yuque Connector**: Yuque data source integration with API client, full and incremental fetch, enabling seamless synchronization of Yuque documents.
-- **Agent Capabilities**: Added `json_repair` tool for automatic JSON fixing, preloaded `OpenMAIC Classroom` skill, and DuckDB multi-sheet Excel data analysis.
-- **Frontend & Debugging**: Added copy action for model cards in settings, and enhanced LLM request debugging and logging across all model providers.
-- **Bug Fixes**: Fixed DuckDB access issues by materializing knowledge files to temp path, removed rerank model requirement for wiki-only agents, and whitelisted offline protoc zip packages in dockerignore.
+- **Yuque Connector**: Yuque data source integration with full and incremental fetch, enabling seamless synchronization of Yuque documents.
+- **WeChat Mini Program**: New lightweight mobile client (`miniprogram/`) for configuring WeKnora API access, picking knowledge bases, importing URLs, and chatting directly from WeChat.
+- **Knowledge Base List View & Batch Operations**: Document management now supports a list view alongside cards, multi-select with a floating action bar, and batch delete for large knowledge bases.
+- **Conversation & IM Workflow**: Tenant-wide IM Channels overview under the user menu, conversation list keyword search, user-scoped session pinning, and clear IM-source labels for chats coming from IM channels.
+- **Bug Fixes**: Fixed LaTeX flashing during streaming responses (#1056), removed the default 100-page DOCX parsing cap, dropped IM pipeline-level timeouts that killed multi-round agent reasoning, isolated IM sessions per agent, hardened Wiki ingest against malformed JSON / failed-operation loss, and made encrypted-field decryption fail loudly instead of silently returning empty data.
 
 <details>
 <summary><b>Earlier Releases</b></summary>
