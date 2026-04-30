@@ -16,7 +16,10 @@ const (
 	// presignPath is the URL path for presigned file access.
 	presignPath = "/api/v1/files/presigned"
 	// presignDefaultTTL is the default validity period for presigned URLs.
-	presignDefaultTTL = 24 * time.Hour
+	// Kept short because the HMAC key alone authorizes cross-tenant access —
+	// a leaked URL should expire before it can be widely abused. IM clients
+	// typically fetch and cache images within seconds of receipt.
+	presignDefaultTTL = 2 * time.Hour
 )
 
 // getPresignKey returns the HMAC key derived from SYSTEM_AES_KEY.
@@ -41,7 +44,7 @@ func signPayload(key []byte, filePath string, tenantID uint64, expires int64) st
 // baseURL is the external URL of the WeKnora instance (e.g. "https://weknora.example.com").
 // filePath is the provider:// storage path (e.g. "local://1/abc/img.png").
 // tenantID identifies the tenant that owns the file.
-// ttl is how long the URL remains valid (0 uses the default 24h).
+// ttl is how long the URL remains valid (0 uses the default presignDefaultTTL).
 //
 // Returns ("", error) if the signing key is not configured.
 func SignFileURL(baseURL, filePath string, tenantID uint64, ttl time.Duration) (string, error) {
@@ -95,6 +98,10 @@ func VerifyFileURLSig(filePath string, tenantID uint64, expiresStr, sig string) 
 // ParseTenantIDFromStoragePath extracts the tenant ID from a provider:// storage path.
 // Storage paths follow the convention: {scheme}://{tenantID}/...
 // Returns 0 if the path does not contain a valid tenant ID.
+//
+// NOTE: This is a best-effort fallback. Prefer passing the tenant ID from
+// request context when available — for cloud providers with numeric bucket
+// or region names, the first numeric segment may not be the tenant ID.
 func ParseTenantIDFromStoragePath(filePath string) uint64 {
 	// Strip scheme: "local://1/abc/img.png" → "1/abc/img.png"
 	_, rest, ok := strings.Cut(filePath, "://")
