@@ -624,20 +624,16 @@ func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types
 	tenant, _ := types.TenantInfoFromContext(ctx)
 	providerID := chatManage.WebSearchProviderID
 
-	var webConfig *types.WebSearchConfig
-	if tenant != nil && tenant.WebSearchConfig != nil {
-		// Clone tenant config so we can safely override MaxResults
-		cfg := *tenant.WebSearchConfig
-		webConfig = &cfg
-	} else if providerID != "" {
-		webConfig = &types.WebSearchConfig{
-			MaxResults: 10,
-		}
-	} else {
+	if providerID == "" {
 		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
 			"tenant_id": chatManage.TenantID,
 		})
 		return nil
+	}
+
+	webConfig := types.EffectiveWebSearchConfig(nil)
+	if tenant != nil {
+		webConfig = types.EffectiveWebSearchConfig(tenant.WebSearchConfig)
 	}
 
 	// Apply agent-level web search overrides

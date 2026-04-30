@@ -152,20 +152,19 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	// Get tenant info from context (same approach as search.go)
-	tenant := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
-	if tenant == nil || tenant.WebSearchConfig == nil {
-		logger.Errorf(ctx, "[Tool][WebSearch] Web search not configured for tenant %d", tenantID)
-		return &types.ToolResult{
-			Success: false,
-			Error:   "web search is not configured for this tenant",
-		}, fmt.Errorf("web search is not configured for tenant %d", tenantID)
+	var tenant *types.Tenant
+	if tenantValue := ctx.Value(types.TenantInfoContextKey); tenantValue != nil {
+		tenant, _ = tenantValue.(*types.Tenant)
 	}
 
 	// Resolve provider ID: tool-level (set from agent config, which already resolved default)
 	resolvedProviderID := t.providerID
 
-	// Create a copy of web search config with maxResults from agent config
-	searchConfig := *tenant.WebSearchConfig
+	// Create a copy of the effective web search config with maxResults from agent config.
+	searchConfig := types.EffectiveWebSearchConfig(nil)
+	if tenant != nil {
+		searchConfig = types.EffectiveWebSearchConfig(tenant.WebSearchConfig)
+	}
 	searchConfig.MaxResults = t.maxResults
 
 	// Perform web search
@@ -175,7 +174,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		resolvedProviderID,
 		searchConfig.MaxResults,
 	)
-	webResults, err := t.webSearchService.Search(ctx, resolvedProviderID, &searchConfig, query)
+	webResults, err := t.webSearchService.Search(ctx, resolvedProviderID, searchConfig, query)
 	if err != nil {
 		logger.Errorf(ctx, "[Tool][WebSearch] Web search failed: %v", err)
 		return &types.ToolResult{
@@ -187,8 +186,8 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	logger.Infof(ctx, "[Tool][WebSearch] Web search returned %d results", len(webResults))
 
 	// Apply RAG compression if configured
-	if len(webResults) > 0 && tenant.WebSearchConfig.CompressionMethod != "none" &&
-		tenant.WebSearchConfig.CompressionMethod != "" {
+	if len(webResults) > 0 && searchConfig.CompressionMethod != "none" &&
+		searchConfig.CompressionMethod != "" {
 		// Load session-scoped temp KB state from Redis using WebSearchStateRepository
 		tempKBID, seen, ids := t.webSearchStateService.GetWebSearchTempKBState(ctx, t.sessionID)
 
@@ -197,7 +196,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 		logger.Infof(ctx, "[Tool][WebSearch] Applying RAG compression")
 		compressed, kbID, newSeen, newIDs, err := t.webSearchService.CompressWithRAG(
-			ctx, t.sessionID, tempKBID, questions, webResults, tenant.WebSearchConfig,
+			ctx, t.sessionID, tempKBID, questions, webResults, searchConfig,
 			t.knowledgeBaseService, t.knowledgeService, seen, ids,
 		)
 		if err != nil {

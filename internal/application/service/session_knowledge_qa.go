@@ -962,8 +962,8 @@ func (s *sessionService) resolveWebSearchMaxResults(ctx context.Context, req *ty
 		return req.CustomAgent.Config.WebSearchMaxResults
 	}
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
-	if tenantInfo != nil && tenantInfo.WebSearchConfig != nil && tenantInfo.WebSearchConfig.MaxResults > 0 {
-		return tenantInfo.WebSearchConfig.MaxResults
+	if tenantInfo != nil {
+		return types.EffectiveWebSearchConfig(tenantInfo.WebSearchConfig).MaxResults
 	}
-	return 10
+	return types.DefaultWebSearchMaxResults
 }

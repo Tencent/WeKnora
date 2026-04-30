@@ -25,6 +25,41 @@ type WebSearchConfig struct {
 	ProxyURL           string `json:"proxy_url,omitempty"`           // Optional per-request proxy override; normally empty — use WebSearchProviderEntity.Parameters.proxy_url. Merged at call time when set.
 }
 
+const (
+	DefaultWebSearchMaxResults        = 10
+	DefaultWebSearchCompressionMethod = "none"
+)
+
+// DefaultWebSearchConfig returns the shared default tenant-level web search configuration.
+func DefaultWebSearchConfig() *WebSearchConfig {
+	return &WebSearchConfig{
+		MaxResults:        DefaultWebSearchMaxResults,
+		IncludeDate:       false,
+		CompressionMethod: DefaultWebSearchCompressionMethod,
+		Blacklist:         []string{},
+	}
+}
+
+// EffectiveWebSearchConfig normalizes a possibly empty config to the effective runtime config.
+func EffectiveWebSearchConfig(cfg *WebSearchConfig) *WebSearchConfig {
+	if cfg == nil {
+		return DefaultWebSearchConfig()
+	}
+
+	normalized := *cfg
+	if normalized.MaxResults <= 0 {
+		normalized.MaxResults = DefaultWebSearchMaxResults
+	}
+	if normalized.CompressionMethod == "" {
+		normalized.CompressionMethod = DefaultWebSearchCompressionMethod
+	}
+	if normalized.Blacklist == nil {
+		normalized.Blacklist = []string{}
+	}
+
+	return &normalized
+}
+
 // Value implements driver.Valuer interface for WebSearchConfig
 func (c WebSearchConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
