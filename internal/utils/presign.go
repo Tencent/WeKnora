@@ -96,12 +96,13 @@ func VerifyFileURLSig(filePath string, tenantID uint64, expiresStr, sig string) 
 }
 
 // ParseTenantIDFromStoragePath extracts the tenant ID from a provider:// storage path.
-// Storage paths follow the convention: {scheme}://{tenantID}/...
+// Storage paths follow the convention: {scheme}://.../{tenantID}/...
 // Returns 0 if the path does not contain a valid tenant ID.
 //
-// NOTE: This is a best-effort fallback. Prefer passing the tenant ID from
-// request context when available — for cloud providers with numeric bucket
-// or region names, the first numeric segment may not be the tenant ID.
+// NOTE: For cloud providers whose paths embed numeric bucket or region names
+// before the tenant segment, the first numeric segment may not be the tenant.
+// Callers that have an authoritative resource-owner tenant ID available
+// should pass it directly to SignFileURL instead of relying on this parser.
 func ParseTenantIDFromStoragePath(filePath string) uint64 {
 	// Strip scheme: "local://1/abc/img.png" → "1/abc/img.png"
 	_, rest, ok := strings.Cut(filePath, "://")
