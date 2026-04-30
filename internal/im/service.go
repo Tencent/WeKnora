@@ -2058,6 +2058,48 @@ func (s *Service) ListChannelsByAgent(agentID string, tenantID uint64) ([]IMChan
 	return channels, nil
 }
 
+// ChannelWithAgent augments an IMChannel summary with its owning agent's display name.
+// Credentials are intentionally omitted so this type is safe to return from a
+// tenant-scoped list endpoint; callers that need credentials must use the
+// per-agent endpoint which enforces the same tenant scope anyway.
+type ChannelWithAgent struct {
+	ID          string    `json:"id"`
+	TenantID    uint64    `json:"tenant_id"`
+	AgentID     string    `json:"agent_id"`
+	AgentName   string    `json:"agent_name"`
+	Platform    string    `json:"platform"`
+	Name        string    `json:"name"`
+	Enabled     bool      `json:"enabled"`
+	Mode        string    `json:"mode"`
+	OutputMode  string    `json:"output_mode"`
+	SessionMode string    `json:"session_mode"`
+	BotIdentity string    `json:"bot_identity"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ListChannelsByTenant returns all non-deleted IM channels in the given tenant,
+// joined with custom_agents.name. Built-in agent IDs (whose rows may not exist
+// in custom_agents) produce an empty AgentName — the frontend can substitute a
+// localized "builtin agent" label in that case.
+func (s *Service) ListChannelsByTenant(tenantID uint64) ([]ChannelWithAgent, error) {
+	var rows []ChannelWithAgent
+	err := s.db.Table("im_channels AS c").
+		Select(`c.id, c.tenant_id, c.agent_id,
+                COALESCE(a.name, '') AS agent_name,
+                c.platform, c.name, c.enabled, c.mode, c.output_mode,
+                c.session_mode, c.bot_identity, c.created_at, c.updated_at`).
+		Joins(`LEFT JOIN custom_agents AS a
+               ON a.id = c.agent_id AND a.tenant_id = c.tenant_id`).
+		Where("c.tenant_id = ? AND c.deleted_at IS NULL", tenantID).
+		Order("c.created_at DESC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // CreateChannel creates a new IM channel and optionally starts it.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) CreateChannel(channel *IMChannel) error {
