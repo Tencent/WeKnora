@@ -3,6 +3,7 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -101,11 +102,11 @@ func (p *WebSearchProviderParameters) Scan(value interface{}) error {
 	if err := json.Unmarshal(b, p); err != nil {
 		return err
 	}
-	if key := utils.GetAESKey(); key != nil && p.APIKey != "" {
-		if decrypted, err := utils.DecryptAESGCM(p.APIKey, key); err == nil {
-			p.APIKey = decrypted
-		}
+	apiKey, err := utils.DecryptStoredSecret(p.APIKey)
+	if err != nil {
+		return fmt.Errorf("decrypt web search provider api_key: %w", err)
 	}
+	p.APIKey = apiKey
 	return nil
 }
 

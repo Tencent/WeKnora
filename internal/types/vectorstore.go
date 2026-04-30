@@ -151,18 +151,16 @@ func (c *ConnectionConfig) Scan(value interface{}) error {
 	if err := json.Unmarshal(b, c); err != nil {
 		return err
 	}
-	if key := utils.GetAESKey(); key != nil {
-		if c.Password != "" {
-			if decrypted, err := utils.DecryptAESGCM(c.Password, key); err == nil {
-				c.Password = decrypted
-			}
-		}
-		if c.APIKey != "" {
-			if decrypted, err := utils.DecryptAESGCM(c.APIKey, key); err == nil {
-				c.APIKey = decrypted
-			}
-		}
+	password, err := utils.DecryptStoredSecret(c.Password)
+	if err != nil {
+		return fmt.Errorf("decrypt vector store connection password: %w", err)
 	}
+	c.Password = password
+	apiKey, err := utils.DecryptStoredSecret(c.APIKey)
+	if err != nil {
+		return fmt.Errorf("decrypt vector store connection api_key: %w", err)
+	}
+	c.APIKey = apiKey
 	return nil
 }
 

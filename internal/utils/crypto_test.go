@@ -74,6 +74,70 @@ func TestDecryptAESGCM(t *testing.T) {
 	})
 }
 
+func TestDecryptStoredSecret(t *testing.T) {
+	t.Run("returns empty string as-is", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", testAESKey)
+		out, err := DecryptStoredSecret("")
+		require.NoError(t, err)
+		assert.Equal(t, "", out)
+	})
+
+	t.Run("legacy plaintext (no enc:v1: prefix) returned as-is", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", testAESKey)
+		out, err := DecryptStoredSecret("sk-legacy-plaintext")
+		require.NoError(t, err)
+		assert.Equal(t, "sk-legacy-plaintext", out)
+	})
+
+	t.Run("legacy plaintext is returned even when key is unset", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", "")
+		out, err := DecryptStoredSecret("sk-legacy-plaintext")
+		require.NoError(t, err)
+		assert.Equal(t, "sk-legacy-plaintext", out)
+	})
+
+	t.Run("round-trip with valid key", func(t *testing.T) {
+		t.Setenv("SYSTEM_AES_KEY", testAESKey)
+		encrypted, err := EncryptAESGCM("sk-secret", []byte(testAESKey))
+		require.NoError(t, err)
+
+		out, err := DecryptStoredSecret(encrypted)
+		require.NoError(t, err)
+		assert.Equal(t, "sk-secret", out)
+	})
+
+	t.Run("encrypted value with missing key returns ErrEncryptedDataMissingKey", func(t *testing.T) {
+		encrypted, err := EncryptAESGCM("sk-secret", []byte(testAESKey))
+		require.NoError(t, err)
+
+		t.Setenv("SYSTEM_AES_KEY", "")
+		out, err := DecryptStoredSecret(encrypted)
+		require.ErrorIs(t, err, ErrEncryptedDataMissingKey)
+		assert.Equal(t, "", out, "ciphertext must NOT leak when decryption is impossible")
+	})
+
+	t.Run("encrypted value with wrong-length key returns ErrEncryptedDataMissingKey", func(t *testing.T) {
+		encrypted, err := EncryptAESGCM("sk-secret", []byte(testAESKey))
+		require.NoError(t, err)
+
+		t.Setenv("SYSTEM_AES_KEY", "too-short")
+		out, err := DecryptStoredSecret(encrypted)
+		require.ErrorIs(t, err, ErrEncryptedDataMissingKey)
+		assert.Equal(t, "", out)
+	})
+
+	t.Run("encrypted value with rotated key returns auth-tag error", func(t *testing.T) {
+		encrypted, err := EncryptAESGCM("sk-secret", []byte(testAESKey))
+		require.NoError(t, err)
+
+		t.Setenv("SYSTEM_AES_KEY", "abcdefghijklmnopqrstuvwxyz123456")
+		out, err := DecryptStoredSecret(encrypted)
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrEncryptedDataMissingKey, "should be a real auth failure, not the missing-key sentinel")
+		assert.Equal(t, "", out, "ciphertext must NOT leak when decryption fails")
+	})
+}
+
 func TestGetAESKey(t *testing.T) {
 	t.Run("returns key when SYSTEM_AES_KEY is 32 bytes", func(t *testing.T) {
 		t.Setenv("SYSTEM_AES_KEY", testAESKey)
