@@ -676,6 +676,7 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler) {
 	// Channel operations by channel ID
 	channels := r.Group("/im-channels")
 	{
+		channels.GET("", imHandler.ListAllIMChannels)
 		channels.PUT("/:id", imHandler.UpdateIMChannel)
 		channels.DELETE("/:id", imHandler.DeleteIMChannel)
 		channels.POST("/:id/toggle", imHandler.ToggleIMChannel)

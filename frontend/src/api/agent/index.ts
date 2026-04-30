@@ -262,6 +262,28 @@ export function listIMChannels(agentId: string) {
   return get<{ data: IMChannel[] }>(`/api/v1/agents/${agentId}/im-channels`);
 }
 
+// Tenant-wide overview row. Credentials are intentionally omitted — use
+// listIMChannels(agentId) when you need to edit a specific channel.
+export interface IMChannelOverview {
+  id: string;
+  tenant_id: number;
+  agent_id: string;
+  agent_name: string; // empty string for built-in agents
+  platform: IMChannel['platform'];
+  name: string;
+  enabled: boolean;
+  mode: IMChannel['mode'];
+  output_mode: IMChannel['output_mode'];
+  session_mode?: IMChannel['session_mode'];
+  bot_identity: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listAllIMChannels() {
+  return get<{ data: IMChannelOverview[] }>('/api/v1/im-channels');
+}
+
 export function createIMChannel(agentId: string, data: Partial<IMChannel>) {
   return post<{ data: IMChannel }>(`/api/v1/agents/${agentId}/im-channels`, data);
 }

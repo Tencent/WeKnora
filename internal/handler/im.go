@@ -134,6 +134,26 @@ func (h *IMHandler) ListIMChannels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": channels})
 }
 
+// ListAllIMChannels lists every IM channel in the current tenant, across
+// agents, for the cross-agent overview page. Credentials are intentionally
+// NOT included in the response — callers that need credentials must use the
+// per-agent endpoint (GET /agents/:id/im-channels).
+func (h *IMHandler) ListAllIMChannels(c *gin.Context) {
+	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	channels, err := h.imService.ListChannelsByTenant(tenantID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list channels"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": channels})
+}
+
 // UpdateIMChannel updates an IM channel.
 func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	channelID := c.Param("id")

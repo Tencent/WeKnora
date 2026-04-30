@@ -715,6 +715,19 @@ const checkAndOpenEditModal = () => {
   }
 }
 
+// Also re-run when the query mutates while this view is already mounted —
+// e.g. the IM overview dialog navigating here via router.push lands on the
+// same route, so onMounted alone never fires and the editor would only open
+// after a manual refresh.
+watch(
+  () => route.query.edit,
+  (v) => {
+    if (v && agents.value.length > 0) {
+      checkAndOpenEditModal()
+    }
+  },
+)
+
 // 监听菜单创建智能体事件
 const handleOpenAgentEditor = (event: CustomEvent) => {
   if (event.detail?.mode === 'create') {
