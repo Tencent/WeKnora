@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-04-30
+
+### 🚀 New Features
+- **NEW**: WeChat Mini Program — added a lightweight mobile client (`miniprogram/`) for configuring WeKnora API access, selecting knowledge bases, importing URLs, and chatting from inside WeChat, extending WeKnora from desktop to mobile.
+- **NEW**: Knowledge Base — document list view with multi-select, floating batch action bar, and batch delete to streamline managing large knowledge bases.
+- **NEW**: IM — tenant-wide IM Channels Overview entry under the user menu so administrators can inspect every IM channel of the tenant from a single page.
+- **NEW**: Sessions — keyword search across the conversation list, user-scoped pinning of important sessions, and clear IM-source visibility for chats originating from IM channels.
+- **NEW**: Frontend — unified Model / Web Search / MCP settings pages onto a shared card + drawer pattern with consistent layouts and reusable confirm-delete behavior.
+- **NEW**: IM channel form — switched from dialog to drawer UX, channel list moved from vertical layout to responsive grid cards with dropdown action menu, platform radio replaced with a select dropdown.
+- **NEW**: Tenant — exposed API Key reset from the API Info page; create/reset returns plaintext key once.
+- **NEW**: Storage — `STORAGE_ALLOW_LIST` env var to whitelist external storage hosts during URL rewriting / serving.
+- **NEW**: Agent — configurable per-agent LLM call timeout from the agent editor frontend.
+- **NEW**: Desktop client — added tenant switching support.
+- **NEW**: Frontend — markdown test page under dev tools for previewing rendering behavior.
+
+### ⚡ Improvements
+- **IMPROVED**: Agent — `data_analysis` tool gained SQL validation and stricter type processing.
+- **IMPROVED**: Agent — broad queries fall back to a knowledge-base document listing for better coverage (#959).
+- **IMPROVED**: Wiki ingest — failed operations are now requeued, and sync task retry behavior is aligned across regular and Lite modes.
+- **IMPROVED**: Wiki ingest (Lite) — added ingest lock to prevent concurrent execution issues.
+- **IMPROVED**: Search — `RetrieverEngines.Scan` enhanced to support both legacy and current data formats.
+- **IMPROVED**: i18n — aligned `en-US`, `ko-KR`, `ru-RU` locales with `zh-CN` as the source of truth.
+- **IMPROVED**: Helm — preserve `SYSTEM_AES_KEY` / `TENANT_AES_KEY` across upgrades to avoid breaking existing encrypted data.
+- **IMPROVED**: IM — secure private storage URL handling with HTTP rewriting in IM replies, presigned URL TTL shortening, and tenant ID preference from context.
+- **IMPROVED**: Docs — README tracing references updated from Jaeger to Langfuse across all language variants; Agent Mode and Observability sections were polished.
+
+### 🐛 Bug Fixes
+- **FIXED**: Frontend — LaTeX formulas flashing and disappearing during streaming responses (#1056).
+- **FIXED**: Docreader — removed default 100-page DOCX parsing limit.
+- **FIXED**: IM — removed pipeline-level timeout that killed multi-round agent reasoning.
+- **FIXED**: IM — sessions now isolated per agent and recover gracefully from deleted sessions.
+- **FIXED**: Search — aligned rerank priority between `Execute` and `rerankResults`.
+- **FIXED**: Container — aggregated registration errors in connector registry initialization for clearer startup diagnostics.
+- **FIXED**: Crypto — fail loudly when encrypted DB fields cannot be decrypted instead of returning empty data.
+- **FIXED**: Web search — normalized default tenant web search config at runtime.
+- **FIXED**: Wiki ingest — silent data loss caused by malformed JSON in the Redis queue.
+- **FIXED**: Tenant — return plaintext API key after create/reset for safe distribution.
+- **FIXED**: Frontend — chat drag-and-drop uploads routed correctly to the right pipeline.
+- **FIXED**: Frontend — hidden card checkbox when not in selection mode.
+- **FIXED**: Frontend — knowledge list sticky header and floating batch bar polish.
+- **FIXED**: Frontend — knowledge document list layout, batch bar, and selection behavior.
+- **FIXED**: Frontend — restored hover feedback on selected list rows.
+- **FIXED**: Frontend — keep chat input visible when conversation overflows the viewport.
+- **FIXED**: Mini program — improved knowledge base selection flow.
+- **FIXED**: Document parser — preserve standalone image uploads from the icon filter.
+- **FIXED**: Knowledge — fixed attachment document failure handling.
+
+### 🔧 Refactoring
+- **REFACTOR**: IM — moved adapter factories into per-platform subpackages (`feishu/`, `wechat/`, `wecom/`, `slack/`, `telegram/`, `dingtalk/`, `mattermost/`) for cleaner package boundaries.
+
 ## [0.5.0] - 2026-04-27
 
 ### 🚀 New Features
