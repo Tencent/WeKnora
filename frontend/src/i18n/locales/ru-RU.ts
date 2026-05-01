@@ -739,6 +739,13 @@ export default {
       s3Desc: 'AWS S3 и совместимые сервисы объектного хранилища для публичного облака.',
       s3AccessKeyPlaceholder: 'AWS Access Key',
       s3SecretKeyPlaceholder: 'AWS Secret Key',
+      ks3Title: 'Kingsoft Cloud KS3',
+      ks3Desc: 'Объектное хранилище Kingsoft Cloud (KS3), подходит для публичного облака.',
+      ks3AccessKeyPlaceholder: 'Kingsoft Cloud Access Key',
+      ks3SecretKeyPlaceholder: 'Kingsoft Cloud Secret Key',
+      ks3EndpointPlaceholder: 'e.g. ks3-cn-beijing.ksyuncs.com',
+      ks3RegionPlaceholder: 'e.g. BEIJING',
+      engineKs3: 'Kingsoft Cloud KS3',
       ossTitle: 'Alibaba Cloud OSS',
       ossDesc: 'Объектное хранилище Alibaba Cloud (OSS), подходит для публичного облака.',
       ossAccessKeyPlaceholder: 'Alibaba Cloud Access Key',
@@ -755,6 +762,7 @@ export default {
       cos: 'Tencent Cloud COS',
       tos: 'Volcengine TOS',
       oss: 'Alibaba Cloud OSS',
+      ks3: 'Kingsoft Cloud KS3',
     }
   },
   webSearchSettings: {
@@ -3064,6 +3072,8 @@ export default {
       engineS3Desc: 'AWS S3 и совместимые хранилища, для публичного облака',
       engineOss: 'Alibaba Cloud OSS',
       engineOssDesc: 'Объектное хранилище Alibaba Cloud, для публичного облака',
+      engineKs3: 'Kingsoft Cloud KS3',
+      engineKs3Desc: 'Объектное хранилище Kingsoft Cloud, для публичного облака',
     },
     parser: {
       title: 'Парсер',

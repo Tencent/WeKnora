@@ -126,6 +126,17 @@ func NewFileServiceFromStorageConfig(
 		}
 		return svc, p, err
 
+	case "ks3":
+		if sec == nil || sec.KS3 == nil || sec.KS3.Endpoint == "" || sec.KS3.Region == "" || sec.KS3.AccessKey == "" || sec.KS3.SecretKey == "" || sec.KS3.BucketName == "" {
+			return nil, p, fmt.Errorf("incomplete ks3 config")
+		}
+		pathPrefix := strings.TrimSpace(sec.KS3.PathPrefix)
+		if pathPrefix == "" {
+			pathPrefix = "weknora/"
+		}
+		svc, err := NewKS3FileService(sec.KS3.Endpoint, sec.KS3.Region, sec.KS3.AccessKey, sec.KS3.SecretKey, sec.KS3.BucketName, pathPrefix)
+		return svc, p, err
+
 	default:
 		return nil, p, fmt.Errorf("unsupported provider %q", p)
 	}

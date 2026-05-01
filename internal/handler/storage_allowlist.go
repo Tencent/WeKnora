@@ -7,7 +7,7 @@ import (
 
 const storageAllowListEnv = "STORAGE_ALLOW_LIST"
 
-var supportedStorageProviders = []string{"local", "minio", "cos", "tos", "s3", "oss"}
+var supportedStorageProviders = []string{"local", "minio", "cos", "tos", "s3", "oss", "ks3"}
 
 func getSupportedStorageProviders() []string {
 	providers := make([]string, len(supportedStorageProviders))
