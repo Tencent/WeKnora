@@ -269,11 +269,13 @@ import { searchMessages, type MessageSearchGroupItem } from '@/api/chat-history'
 import RetrievalSettings from '@/views/settings/RetrievalSettings.vue'
 import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
+import { useOrganizationStore } from '@/stores/organization'
 
 const { t } = useI18n()
 const router = useRouter()
 const menuStore = useMenuStore()
 const settingsStore = useSettingsStore()
+const orgStore = useOrganizationStore()
 
 // ─── Shared state ───
 const query = ref('')
@@ -346,6 +348,21 @@ const groupedResults = computed<FileGroup[]>(() => {
 
 const totalChunks = computed(() => results.value.length)
 
+const mergeKnowledgeBases = (myKbs: any[], sharedShares: any[]) => {
+  const ownKbIds = new Set(myKbs.map((kb: any) => String(kb.id)))
+  const sharedKbs = (sharedShares || [])
+    .filter((share: any) => share?.knowledge_base != null)
+    .map((share: any) => ({
+      id: String(share.knowledge_base.id),
+      name: share.knowledge_base.name,
+      type: share.knowledge_base.type || 'document',
+      org_name: share.org_name || '',
+    }))
+    .filter((kb: any) => !ownKbIds.has(kb.id))
+
+  return [...myKbs, ...sharedKbs]
+}
+
 const switchTab = (tab: 'knowledge' | 'messages') => {
   activeTab.value = tab
 }
@@ -353,10 +370,17 @@ const switchTab = (tab: 'knowledge' | 'messages') => {
 const fetchKnowledgeBases = async () => {
   kbLoading.value = true
   try {
-    const res: any = await listKnowledgeBases()
-    if (res?.data) {
-      knowledgeBases.value = res.data
-    }
+    const [kbRes, sharedKbs] = await Promise.all([
+      listKnowledgeBases(),
+      orgStore.fetchSharedKnowledgeBases(),
+    ])
+
+    const myKbs = (kbRes?.data || []).map((kb: any) => ({
+      ...kb,
+      id: String(kb.id),
+    }))
+
+    knowledgeBases.value = mergeKnowledgeBases(myKbs, sharedKbs)
   } catch (e) {
     console.error('Failed to load knowledge bases', e)
   } finally {
