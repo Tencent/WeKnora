@@ -75,11 +75,7 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 		{Role: "system", Content: systemPrompt},
 	}
 
-	// Add conversation history (already limited by maxRounds in load_history/rewrite plugins)
-	for _, history := range chatManage.History {
-		chatMessages = append(chatMessages, chat.Message{Role: "user", Content: history.Query})
-		chatMessages = append(chatMessages, chat.Message{Role: "assistant", Content: history.Answer})
-	}
+	chatMessages = AppendHistoryMessages(chatMessages, chatManage.History)
 
 	// Add current user message. Only include images when the chat model supports
 	// vision; non-vision models rely on the text description in UserContent.
@@ -90,6 +86,16 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	chatMessages = append(chatMessages, userMsg)
 
 	return chatMessages
+}
+
+// AppendHistoryMessages appends prior Q&A rounds in chronological order.
+// History is already filtered and truncated upstream by the load_history plugin.
+func AppendHistoryMessages(messages []chat.Message, history []*types.History) []chat.Message {
+	for _, history := range history {
+		messages = append(messages, chat.Message{Role: "user", Content: history.Query})
+		messages = append(messages, chat.Message{Role: "assistant", Content: history.Answer})
+	}
+	return messages
 }
 
 // loadAndProcessHistory fetches recent messages, groups them into Q&A pairs,
