@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/internal/modelconfig"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -44,6 +45,7 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 	if m == nil {
 		return nil
 	}
+	base := modelconfig.FromModel(m, appID, appSecret)
 	ifType := m.Parameters.InterfaceType
 	if ifType == "" {
 		if m.Source == types.ModelSourceLocal {
@@ -53,17 +55,17 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *Config {
 		}
 	}
 	return &Config{
-		ModelID:       m.ID,
-		APIKey:        m.Parameters.APIKey,
-		BaseURL:       m.Parameters.BaseURL,
-		ModelName:     m.Name,
-		Source:        m.Source,
+		ModelID:       base.ModelID,
+		APIKey:        base.APIKey,
+		BaseURL:       base.BaseURL,
+		ModelName:     base.ModelName,
+		Source:        base.Source,
 		InterfaceType: ifType,
-		Provider:      m.Parameters.Provider,
-		Extra:         stringMapToAnyMap(m.Parameters.ExtraConfig),
-		CustomHeaders: m.Parameters.CustomHeaders,
-		AppID:         appID,
-		AppSecret:     appSecret,
+		Provider:      base.Provider,
+		Extra:         stringMapToAnyMap(base.ExtraConfig),
+		CustomHeaders: base.CustomHeaders,
+		AppID:         base.AppID,
+		AppSecret:     base.AppSecret,
 	}
 }
 

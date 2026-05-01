@@ -59,6 +59,8 @@ const (
 	ProviderNovita ProviderName = "novita"
 	// Azure OpenAI
 	ProviderAzureOpenAI ProviderName = "azure_openai"
+	// WeKnoraCloud (腾讯 WeKnora 托管服务)
+	ProviderWeKnoraCloud ProviderName = "weknoracloud"
 )
 
 // AllProviders 返回所有注册的提供者名称

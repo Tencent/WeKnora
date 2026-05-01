@@ -3,6 +3,7 @@ package asr
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/models/internal/modelconfig"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -47,13 +48,14 @@ func ConfigFromModel(m *types.Model) *Config {
 	if m == nil {
 		return nil
 	}
+	base := modelconfig.FromModel(m, "", "")
 	return &Config{
-		ModelID:       m.ID,
-		APIKey:        m.Parameters.APIKey,
-		BaseURL:       m.Parameters.BaseURL,
-		ModelName:     m.Name,
-		Source:        m.Source,
-		CustomHeaders: m.Parameters.CustomHeaders,
+		ModelID:       base.ModelID,
+		APIKey:        base.APIKey,
+		BaseURL:       base.BaseURL,
+		ModelName:     base.ModelName,
+		Source:        base.Source,
+		CustomHeaders: base.CustomHeaders,
 	}
 }
 

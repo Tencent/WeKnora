@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/internal/modelconfig"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -99,17 +100,18 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *RerankerConfig {
 	if m == nil {
 		return nil
 	}
+	base := modelconfig.FromModel(m, appID, appSecret)
 	return &RerankerConfig{
-		ModelID:       m.ID,
-		APIKey:        m.Parameters.APIKey,
-		BaseURL:       m.Parameters.BaseURL,
-		ModelName:     m.Name,
-		Source:        m.Source,
-		Provider:      m.Parameters.Provider,
-		ExtraConfig:   m.Parameters.ExtraConfig,
-		CustomHeaders: m.Parameters.CustomHeaders,
-		AppID:         appID,
-		AppSecret:     appSecret,
+		ModelID:       base.ModelID,
+		APIKey:        base.APIKey,
+		BaseURL:       base.BaseURL,
+		ModelName:     base.ModelName,
+		Source:        base.Source,
+		Provider:      base.Provider,
+		ExtraConfig:   base.ExtraConfig,
+		CustomHeaders: base.CustomHeaders,
+		AppID:         base.AppID,
+		AppSecret:     base.AppSecret,
 	}
 }
 
@@ -131,34 +133,27 @@ type customHeaderSetter interface {
 }
 
 func newReranker(config *RerankerConfig) (Reranker, error) {
-	// Use provider field if set, otherwise detect from URL using provider registry
-	providerName := provider.ProviderName(config.Provider)
-	if providerName == "" {
-		providerName = provider.DetectProvider(config.BaseURL)
+	name := provider.ProviderName(config.Provider)
+	if name == "" {
+		name = provider.DetectProvider(config.BaseURL)
 	}
 
-	var (
-		reranker Reranker
-		err      error
-	)
-	switch providerName {
-	case provider.ProviderAliyun:
-		reranker, err = NewAliyunReranker(config)
-	case provider.ProviderZhipu:
-		reranker, err = NewZhipuReranker(config)
-	case provider.ProviderJina:
-		reranker, err = NewJinaReranker(config)
-	case provider.ProviderNvidia:
-		reranker, err = NewNvidiaReranker(config)
-	case provider.ProviderWeKnoraCloud:
-		reranker, err = NewWeKnoraCloudReranker(config)
-	default:
-		reranker, err = NewOpenAIReranker(config)
+	// WeKnoraCloud uses a signer-based transport; everything else routes to
+	// the shared httpReranker.
+	if name == provider.ProviderWeKnoraCloud {
+		reranker, err := NewWeKnoraCloudReranker(config)
+		if err != nil {
+			return nil, err
+		}
+		return reranker, nil
 	}
+
+	spec, _ := specForProvider(name)
+	reranker, err := newHTTPReranker(config, spec)
 	if err != nil {
 		return nil, err
 	}
-	if setter, ok := reranker.(customHeaderSetter); ok {
+	if setter, ok := Reranker(reranker).(customHeaderSetter); ok {
 		setter.SetCustomHeaders(config.CustomHeaders)
 	}
 	return reranker, nil
