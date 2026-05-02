@@ -2385,6 +2385,13 @@ export default {
       consolas: 'Consolas',
       monospace: 'Стандартный моноширинный',
     },
+    fontSize: 'Размер шрифта',
+    fontSizeDescription: 'Регулирует общий размер текста в интерфейсе',
+    size: {
+      small: 'Маленький',
+      normal: 'Обычный',
+      large: 'Крупный',
+    },
   },
   platform: {
     subtitle: 'Корпоративная платформа интеллектуального поиска документов',

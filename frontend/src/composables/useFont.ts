@@ -18,8 +18,11 @@ export type MonoFontKey =
   | 'consolas'
   | 'monospace'
 
-const SANS_STORAGE_KEY = 'WeKnora_font_sans'
-const MONO_STORAGE_KEY = 'WeKnora_font_mono'
+export type FontSizeKey = 'small' | 'normal' | 'large'
+
+const SANS_KEY = 'font_sans'
+const MONO_KEY = 'font_mono'
+const SIZE_KEY = 'font_size'
 
 export const SANS_STACKS: Record<FontKey, string> = {
   system:
@@ -50,8 +53,15 @@ export const MONO_STACKS: Record<MonoFontKey, string> = {
   monospace: 'monospace',
 }
 
+export const FONT_SCALES: Record<FontSizeKey, number> = {
+  small: 0.875,
+  normal: 1,
+  large: 1.125,
+}
+
 const DEFAULT_SANS: FontKey = 'system'
 const DEFAULT_MONO: MonoFontKey = 'system'
+const DEFAULT_SIZE: FontSizeKey = 'normal'
 
 const isFontKey = (v: string | null): v is FontKey =>
   !!v && Object.prototype.hasOwnProperty.call(SANS_STACKS, v)
@@ -59,41 +69,88 @@ const isFontKey = (v: string | null): v is FontKey =>
 const isMonoFontKey = (v: string | null): v is MonoFontKey =>
   !!v && Object.prototype.hasOwnProperty.call(MONO_STACKS, v)
 
-const currentSans = ref<FontKey>(
-  isFontKey(localStorage.getItem(SANS_STORAGE_KEY))
-    ? (localStorage.getItem(SANS_STORAGE_KEY) as FontKey)
-    : DEFAULT_SANS,
-)
+const isFontSizeKey = (v: string | null): v is FontSizeKey =>
+  v === 'small' || v === 'normal' || v === 'large'
 
-const currentMono = ref<MonoFontKey>(
-  isMonoFontKey(localStorage.getItem(MONO_STORAGE_KEY))
-    ? (localStorage.getItem(MONO_STORAGE_KEY) as MonoFontKey)
-    : DEFAULT_MONO,
-)
+function readUserId(): string {
+  try {
+    const raw = localStorage.getItem('weknora_user')
+    if (!raw) return 'anon'
+    const parsed = JSON.parse(raw)
+    return parsed?.id ? String(parsed.id) : 'anon'
+  } catch {
+    return 'anon'
+  }
+}
 
-function applyFont(sans: FontKey, mono: MonoFontKey) {
+function nsKey(suffix: string): string {
+  return `WeKnora_${readUserId()}_${suffix}`
+}
+
+function loadSans(): FontKey {
+  const v = localStorage.getItem(nsKey(SANS_KEY))
+  return isFontKey(v) ? v : DEFAULT_SANS
+}
+
+function loadMono(): MonoFontKey {
+  const v = localStorage.getItem(nsKey(MONO_KEY))
+  return isMonoFontKey(v) ? v : DEFAULT_MONO
+}
+
+function loadSize(): FontSizeKey {
+  const v = localStorage.getItem(nsKey(SIZE_KEY))
+  return isFontSizeKey(v) ? v : DEFAULT_SIZE
+}
+
+const currentSans = ref<FontKey>(loadSans())
+const currentMono = ref<MonoFontKey>(loadMono())
+const currentSize = ref<FontSizeKey>(loadSize())
+
+function applyFont() {
   const root = document.documentElement
-  root.style.setProperty('--app-font-family', SANS_STACKS[sans])
-  root.style.setProperty('--app-font-family-mono', MONO_STACKS[mono])
+  root.style.setProperty('--app-font-family', SANS_STACKS[currentSans.value])
+  root.style.setProperty('--app-font-family-mono', MONO_STACKS[currentMono.value])
+  root.style.setProperty('--app-font-scale', String(FONT_SCALES[currentSize.value]))
 }
 
 export function useFont() {
   function setSansFont(key: FontKey) {
     currentSans.value = key
-    localStorage.setItem(SANS_STORAGE_KEY, key)
-    applyFont(currentSans.value, currentMono.value)
+    localStorage.setItem(nsKey(SANS_KEY), key)
+    applyFont()
   }
 
   function setMonoFont(key: MonoFontKey) {
     currentMono.value = key
-    localStorage.setItem(MONO_STORAGE_KEY, key)
-    applyFont(currentSans.value, currentMono.value)
+    localStorage.setItem(nsKey(MONO_KEY), key)
+    applyFont()
   }
 
-  return { currentSans, currentMono, setSansFont, setMonoFont }
+  function setFontSize(key: FontSizeKey) {
+    currentSize.value = key
+    localStorage.setItem(nsKey(SIZE_KEY), key)
+    applyFont()
+  }
+
+  return {
+    currentSans,
+    currentMono,
+    currentSize,
+    setSansFont,
+    setMonoFont,
+    setFontSize,
+  }
 }
 
 /** Call once in main.ts to apply persisted font preferences before mount. */
 export function initFont() {
-  applyFont(currentSans.value, currentMono.value)
+  applyFont()
+}
+
+/** Re-read preferences from storage (call after login / logout). */
+export function reloadFontFromStorage() {
+  currentSans.value = loadSans()
+  currentMono.value = loadMono()
+  currentSize.value = loadSize()
+  applyFont()
 }

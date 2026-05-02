@@ -1926,6 +1926,13 @@ export default {
       consolas: "Consolas",
       monospace: "通用等宽",
     },
+    fontSize: "字体大小",
+    fontSizeDescription: "调整整体界面文字大小",
+    size: {
+      small: "小",
+      normal: "正常",
+      large: "大",
+    },
   },
   platform: {
     subtitle: "企业级智能文档检索框架",

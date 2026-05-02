@@ -1948,6 +1948,13 @@ export default {
       consolas: "Consolas",
       monospace: "일반 고정폭",
     },
+    fontSize: "글꼴 크기",
+    fontSizeDescription: "전체 인터페이스 텍스트 크기를 조정합니다",
+    size: {
+      small: "작게",
+      normal: "보통",
+      large: "크게",
+    },
   },
   platform: {
     subtitle: "엔터프라이즈급 지능형 문서 검색 프레임워크",

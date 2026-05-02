@@ -97,6 +97,25 @@
         </div>
       </div>
 
+      <!-- 字体大小 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('font.fontSize') }}</label>
+          <p class="desc">{{ $t('font.fontSizeDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-radio-group
+            v-model="localFontSize"
+            variant="default-filled"
+            @change="handleFontSizeChange"
+          >
+            <t-radio-button value="small">{{ $t('font.size.small') }}</t-radio-button>
+            <t-radio-button value="normal">{{ $t('font.size.normal') }}</t-radio-button>
+            <t-radio-button value="large">{{ $t('font.size.large') }}</t-radio-button>
+          </t-radio-group>
+        </div>
+      </div>
+
       <!-- 记忆功能开关 -->
       <div class="setting-row">
         <div class="setting-info">
@@ -154,19 +173,28 @@ import {
   MONO_STACKS,
   type FontKey,
   type MonoFontKey,
+  type FontSizeKey,
 } from '@/composables/useFont'
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
 const authStore = useAuthStore()
 const { currentTheme, setTheme } = useTheme()
-const { currentSans, currentMono, setSansFont, setMonoFont } = useFont()
+const {
+  currentSans,
+  currentMono,
+  currentSize,
+  setSansFont,
+  setMonoFont,
+  setFontSize,
+} = useFont()
 
 // 本地状态
 const localLanguage = ref('zh-CN')
 const localTheme = ref<ThemeMode>(currentTheme.value)
 const localSansFont = ref<FontKey>(currentSans.value)
 const localMonoFont = ref<MonoFontKey>(currentMono.value)
+const localFontSize = ref<FontSizeKey>(currentSize.value)
 
 const sansFontOptions = computed<{ value: FontKey; label: string; preview: string }[]>(() => [
   { value: 'system', label: t('font.sans.system'), preview: SANS_STACKS.system },
@@ -271,6 +299,11 @@ const handleSansFontChange = (val: FontKey) => {
 
 const handleMonoFontChange = (val: MonoFontKey) => {
   setMonoFont(val)
+  MessagePlugin.success(t('common.success'))
+}
+
+const handleFontSizeChange = (val: FontSizeKey) => {
+  setFontSize(val)
   MessagePlugin.success(t('common.success'))
 }
 </script>

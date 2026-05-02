@@ -2578,6 +2578,13 @@ export default {
       consolas: 'Consolas',
       monospace: 'Generic Monospace',
     },
+    fontSize: 'Font Size',
+    fontSizeDescription: 'Adjust the overall interface text size',
+    size: {
+      small: 'Small',
+      normal: 'Normal',
+      large: 'Large',
+    },
   },
   platform: {
     subtitle: 'Enterprise-level Intelligent Document Retrieval Framework',

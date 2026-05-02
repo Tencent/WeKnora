@@ -3,6 +3,15 @@ import { ref, computed } from 'vue'
 import type { UserInfo, TenantInfo, KnowledgeBaseInfo } from '@/api/auth'
 import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
+import { reloadFontFromStorage } from '@/composables/useFont'
+import { reloadThemeFromStorage } from '@/composables/useTheme'
+
+// Per-user UI preferences are namespaced by user id in localStorage.
+// Reload them whenever the active user changes.
+function reloadUserPreferences() {
+  reloadFontFromStorage()
+  reloadThemeFromStorage()
+}
 
 export const useAuthStore = defineStore('auth', () => {
   // 状态
@@ -45,9 +54,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 操作方法
   const setUser = (userData: UserInfo) => {
+    const previousId = user.value?.id
     user.value = userData
     // 保存到localStorage
     localStorage.setItem('weknora_user', JSON.stringify(userData))
+    if (previousId !== userData.id) {
+      reloadUserPreferences()
+    }
   }
 
   const setTenant = (tenantData: TenantInfo) => {
@@ -140,6 +153,7 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {
       /* ignore */
     }
+    reloadUserPreferences()
   }
 
   const initFromStorage = () => {

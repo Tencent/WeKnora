@@ -1,13 +1,32 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'WeKnora_theme'
+const STORAGE_SUFFIX = 'theme'
+
+function readUserId(): string {
+  try {
+    const raw = localStorage.getItem('weknora_user')
+    if (!raw) return 'anon'
+    const parsed = JSON.parse(raw)
+    return parsed?.id ? String(parsed.id) : 'anon'
+  } catch {
+    return 'anon'
+  }
+}
+
+function nsKey(): string {
+  return `WeKnora_${readUserId()}_${STORAGE_SUFFIX}`
+}
+
+function loadTheme(): ThemeMode {
+  const v = localStorage.getItem(nsKey())
+  if (v === 'light' || v === 'dark' || v === 'system') return v
+  return 'light'
+}
 
 // Shared reactive state across all consumers
-const currentTheme = ref<ThemeMode>(
-  (localStorage.getItem(STORAGE_KEY) as ThemeMode) || 'light'
-)
+const currentTheme = ref<ThemeMode>(loadTheme())
 
 function getSystemTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -58,7 +77,7 @@ function applyTheme(mode: ThemeMode) {
 export function useTheme() {
   function setTheme(mode: ThemeMode) {
     currentTheme.value = mode
-    localStorage.setItem(STORAGE_KEY, mode)
+    localStorage.setItem(nsKey(), mode)
     applyTheme(mode)
   }
 
@@ -67,9 +86,8 @@ export function useTheme() {
 
 /** Call once in main.ts to initialise theme and listen for OS changes. */
 export function initTheme() {
-  const saved = (localStorage.getItem(STORAGE_KEY) as ThemeMode) || 'light'
-  currentTheme.value = saved
-  applyTheme(saved)
+  currentTheme.value = loadTheme()
+  applyTheme(currentTheme.value)
 
   // React to OS theme changes when user chose "system"
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -77,4 +95,10 @@ export function initTheme() {
       applyTheme('system')
     }
   })
+}
+
+/** Re-read preferences from storage (call after login / logout). */
+export function reloadThemeFromStorage() {
+  currentTheme.value = loadTheme()
+  applyTheme(currentTheme.value)
 }
