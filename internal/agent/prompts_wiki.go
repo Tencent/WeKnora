@@ -262,9 +262,9 @@ If nothing in this batch is cite-worthy, return: {"citations": {}, "new_slugs": 
 const WikiPageModifyPrompt = `You are a wiki editor tasked with updating an existing wiki page. You must process a set of NEW information to add, AND/OR a set of deleted documents whose exclusive contributions must be REMOVED.
 
 ### STRICT CITATION & MERGE RULES (CRITICAL):
-1. **Preserve Citations:** When merging new information with existing content, you MUST strictly preserve all existing chunk citations (e.g.,[chunk_id]). 
-2. **Mandatory Tracing:** Any newly added facts, entities, or numerical data MUST be followed by an inline citation to the new source document. 
-3. **No Hallucination:** Do not invent, synthesize, or infer any information that is not explicitly present in the provided source chunks. If the chunks contradict the existing page, create a "Contradictions / Updates" section instead of silently overwriting.
+1. **Preserve Citations:** When merging new information with existing content, you MUST strictly preserve all existing chunk citations (e.g.,[c001], [c002]). 
+2. **Mandatory Tracing:** Any newly added facts, entities, or numerical data MUST be followed by an inline citation to the appropriate chunk ID (e.g.,[c003]). 
+3. **No Hallucination & Contradiction Handling:** Do not invent or synthesize information not explicitly present in the provided chunks. If new chunks contradict the existing page, update the main text to reflect the newer information, but you MUST also add a brief note in a "Contradictions / Updates" section to track the revision.
 
 <page_metadata>
   <slug>{{.PageSlug}}</slug>
