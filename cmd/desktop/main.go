@@ -173,8 +173,12 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
+	//intialize the OS signal context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	// Build dependency injection container
-	c := container.BuildContainer(runtime.GetContainer())
+	c := container.BuildContainer(ctx, runtime.GetContainer())
 
 	// Initialize the WeKnora App struct
 	app := NewApp()
@@ -217,6 +221,7 @@ func main() {
 				<-app.shutdownCh
 				logger.Infof(context.Background(), "Wails shutting down, stopping Go backend...")
 
+				cancel()
 				listener.Close()
 				shutdownTimeout := cfg.Server.ShutdownTimeout
 				if shutdownTimeout == 0 {
