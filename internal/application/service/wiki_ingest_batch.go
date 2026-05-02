@@ -779,7 +779,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	batchCtx *WikiBatchContext,
 ) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
 	// Only entity/* and concept/* slugs are relevant for LLM slug-continuity —
-	// summary slugs are code-generated from the document title and never appear
+	// summary slugs are code-generated from the knowledge ID and never appear
 	// in the extraction output, so including them just wastes tokens and risks
 	// confusing the model.
 	var prevSlugsText string
