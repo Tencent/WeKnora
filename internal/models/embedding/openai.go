@@ -122,8 +122,20 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 			}
 		}
 
-		// Rebuild request each time to ensure Body is valid
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		// Rebuild request each time to ensure Body is valid.
+		// IMPORTANT: declare `req` separately (var) so the assignment to `err`
+		// below uses the outer-scope variable, not a fresh loop-local one.
+		// Previously this read `req, err := http.NewRequestWithContext(...)`,
+		// where `:=` introduced a new `err` shadowing the outer one. The
+		// `resp, err = httpClient.Do(req)` line then wrote to the shadowed
+		// `err` only, so when all retries failed with connection errors the
+		// outer `err` stayed nil. The function returned `(nil, nil)`, and
+		// callers (BatchEmbed line 195) blindly dereferenced `resp.Body` →
+		// SIGSEGV nil-pointer panic that took down the whole process.
+		// Reproduce: stop the embedding upstream (e.g. localhost:3130), make
+		// any RAG query → backend SIGSEGV instead of returning HTTP 500.
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("OpenAIEmbedder failed to create request: %v", err)
 			continue
