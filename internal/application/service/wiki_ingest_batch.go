@@ -500,7 +500,11 @@ func (s *wikiIngestService) mapOneDocument(
 		}
 	}
 
-	sourceRef := fmt.Sprintf("%s|%s", knowledgeID, docTitle)
+	// Citation source reference. We deliberately use only the knowledge ID
+	// (not docTitle, which is typically the upload filename) so the filename
+	// does not leak into citation strings that downstream LLM prompts may
+	// surface during wiki page editing.
+	sourceRef := knowledgeID
 	oldPageSlugs := s.getExistingPageSlugsForKnowledge(ctx, payload.KnowledgeBaseID, knowledgeID)
 
 	// Pass 0: lightweight candidate slug extraction (skeleton only).
@@ -513,11 +517,11 @@ func (s *wikiIngestService) mapOneDocument(
 		pass0Failed       bool
 	)
 	logger.Infof(ctx, "wiki ingest: pass 0 — extracting candidate slugs for %s", knowledgeID)
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, content, docTitle, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, content, docTitle, lang, oldPageSlugs, batchCtx)
+		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
 			return nil, nil, err
@@ -529,7 +533,12 @@ func (s *wikiIngestService) mapOneDocument(
 	for slug := range slugItems {
 		summaryExtractedPages = append(summaryExtractedPages, slug)
 	}
-	summarySlug := fmt.Sprintf("summary/%s", slugify(docTitle))
+	// Wiki summary slug is derived from the knowledge ID rather than the
+	// docTitle (which is typically the upload filename). Filename-based slugs
+	// like "summary/mx5280-pdf" expose the filename in cross-link contexts
+	// that downstream LLM prompts read; a UUID-based slug is uglier but
+	// hallucination-safe.
+	summarySlug := fmt.Sprintf("summary/%s", slugify(knowledgeID))
 	var slugListing string
 	for _, slug := range summaryExtractedPages {
 		if item, ok := slugItems[slug]; ok {
@@ -574,7 +583,7 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, docTitle, chunks, lang)
+		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang)
 	}()
 	wg.Wait()
 
@@ -765,7 +774,7 @@ func (s *wikiIngestService) mapOneDocument(
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	ctx context.Context,
 	chatModel chat.Chat,
-	content, docTitle, lang string,
+	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
 ) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {

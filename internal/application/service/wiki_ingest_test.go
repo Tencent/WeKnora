@@ -122,7 +122,24 @@ func TestStripImageMarkup(t *testing.T) {
 		},
 		{"mixed text and image keeps text", "Intro paragraph.\n![fig](a.png)\nConclusion.", "Intro paragraph.\n\nConclusion."},
 		{"html img tag stripped", `Before <img src="x.png" alt="y"/> after`, "Before  after"},
-		{"images xml block stripped", "Body <images><image>x</image></images> tail", "Body  tail"},
+		{
+			// Regression guard: an earlier version stripped the WHOLE
+			// <image>...</image> block (including <image_ocr> content),
+			// silently destroying successful VLM OCR results. The fix must
+			// preserve the inner OCR / caption text.
+			"enriched <image> block keeps inner OCR + caption text",
+			`<image url="images/page_1.png">
+<image_original>![p1](images/page_1.png)</image_original>
+<image_caption>scanned letter on letterhead</image_caption>
+<image_ocr>SEHR GEEHRTER HERR MUSTERMANN, ...</image_ocr>
+</image>`,
+			"\n\nscanned letter on letterhead\nSEHR GEEHRTER HERR MUSTERMANN, ...\n",
+		},
+		{
+			"empty <image> block (OCR failed) reduces to whitespace",
+			`<image url="x"><image_original>![a](x)</image_original></image>`,
+			"",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,20 +164,31 @@ func TestHasSufficientTextContent(t *testing.T) {
 			"![MX5280_page_1.png](images/MX5280_page_1.png)\n![MX5280_page_2.png](images/MX5280_page_2.png)",
 			false,
 		},
-		{"short text below threshold", "tiny", false},
+		{"too-short text below 10-rune threshold", "hi", false},
 		{
-			"short text mixed with images still below threshold",
-			"![a](x.png)\nshort\n![b](y.png)",
-			false,
-		},
-		{
-			"sufficient text passes",
-			"This is a substantial paragraph of real content describing a legal matter and the parties involved.",
+			"short legitimate note above threshold",
+			"Meeting at 3pm tomorrow.",
 			true,
 		},
 		{
+			"image-only with successful VLM OCR (the fix)",
+			`<image url="images/p1.png">
+<image_original>![p1](images/p1.png)</image_original>
+<image_caption>scanned letter</image_caption>
+<image_ocr>Sehr geehrter Herr Mustermann, in der Sache 4711/2024 ...</image_ocr>
+</image>`,
+			true,
+		},
+		{
+			"image-only with failed VLM OCR (still rejected)",
+			`<image url="images/p1.png">
+<image_original>![p1](images/p1.png)</image_original>
+</image>`,
+			false,
+		},
+		{
 			"sufficient text mixed with images still passes",
-			"![cover](cover.png)\nThis is a substantial paragraph of real content describing a legal matter and the parties involved.\n![sig](sig.png)",
+			"![cover](cover.png)\nDie Beklagte hat die Klage anerkannt.\n![sig](sig.png)",
 			true,
 		},
 	}

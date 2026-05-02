@@ -71,7 +71,7 @@ type citationPipelineOutcome struct {
 func (s *wikiIngestService) extractCandidateSlugs(
 	ctx context.Context,
 	chatModel chat.Chat,
-	content, docTitle, lang string,
+	content, lang string,
 	oldPageSlugs map[string]bool,
 	batchCtx *WikiBatchContext,
 ) ([]extractedItem, []extractedItem, map[string]extractedItem, error) {
@@ -276,7 +276,6 @@ func (s *wikiIngestService) classifyChunkCitations(
 	ctx context.Context,
 	chatModel chat.Chat,
 	candidatesXML string,
-	docTitle string,
 	chunks []*types.Chunk,
 	lang string,
 ) (map[string][]string, []newSlugFromCitation, int) {

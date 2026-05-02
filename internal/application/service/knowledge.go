@@ -2308,10 +2308,11 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// scanner model), and feeding that to the model would invite it to
 	// hallucinate a scanner manual instead of admitting the document had no
 	// extractable text.
-	if !hasSufficientTextContent(chunkContents) {
+	realTextLen := realTextRuneCount(chunkContents)
+	if realTextLen < minTextContentRunes {
 		logger.GetLogger(ctx).Warnf(
-			"getSummary: content for knowledge %s has insufficient text after stripping image markup (len=%d); skipping LLM call",
-			knowledge.ID, len([]rune(strings.TrimSpace(stripImageMarkup(chunkContents)))),
+			"getSummary: content for knowledge %s has insufficient text after stripping image markup (real_text_runes=%d, min=%d); skipping LLM call",
+			knowledge.ID, realTextLen, minTextContentRunes,
 		)
 		return "", errInsufficientSummaryContent
 	}
@@ -2536,12 +2537,17 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			}
 		}
 
+		// Embed only the LLM-generated summary in the indexed chunk.
+		// We deliberately omit knowledge.FileName here: filenames are an
+		// unreliable signal (e.g. "MX5280.pdf" for a scanned legal letter)
+		// and surfacing them in retrieved RAG context can re-introduce the
+		// hallucination vector this branch is meant to close.
 		summaryChunk := &types.Chunk{
 			ID:              uuid.New().String(),
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Document\n%s\n\n# Summary\n%s", knowledge.FileName, summary),
+			Content:         fmt.Sprintf("# Summary\n%s", summary),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
