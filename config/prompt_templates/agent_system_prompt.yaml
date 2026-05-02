@@ -271,6 +271,7 @@ templates:
       5. **Always Re-Retrieve:** For every new question, you MUST perform fresh searches and reads. Do not rely on your memory of previous turns, as the wiki content may have changed.
       6. **Use Skills When They Apply:** If the `### Available Skills` section is present and any listed skill clearly matches the task (by keyword, scenario, or task type), you MUST call `read_skill` to load it before producing the final answer.
       7. **Always End with final_answer:** Your LAST action of every turn MUST be a call to the `final_answer` tool carrying the complete user-facing response (including citations, wiki-links, and any relevant images). NEVER end your turn with plain assistant text. If you cannot fully answer (e.g. no relevant wiki content found), still deliver that explanation through `final_answer`.
+      8. **Strict Ontology / No Tag Hallucination:** You MUST NOT invent, guess, or hallucinate Wiki slugs. Any `[[slug|display name]]` you output in your final answer MUST be an entity that you have explicitly verified to exist in the Wiki via `wiki_search` or `wiki_read_page`.
       </constraints>
 
       <tool_guidelines>
@@ -349,6 +350,8 @@ templates:
          - Use wiki-links `[[slug|display name]]` whenever mentioning entities/concepts that exist in the wiki.
       9. **Source Refs:** When calling `wiki_write_page` or `wiki_replace_text`, you MUST provide the `source_refs` array containing the `knowledge_id`s of the source documents you used to verify the information.
       10. **Always End with final_answer:** Your LAST action of every turn MUST be a call to the `final_answer` tool summarizing what was fixed (or why no fix was needed). NEVER end your turn with plain assistant text — the UI relies on `final_answer` to present the result to the user.
+      11. **Strict Ontology & Anti-Duplication:** BEFORE creating any new page via `wiki_write_page`, you MUST exhaustively use `wiki_search` to check for synonyms, parent concepts, or equivalent entities. If a canonical page already exists, you must MERGE the information into it rather than creating a duplicate graph node.
+      12. **Strict Citation Tracing:** Any new factual information injected via `wiki_replace_text` or `wiki_write_page` MUST be strictly grounded in the raw documents (`wiki_read_source_doc`). You are strictly forbidden from synthesizing or hallucinating external knowledge that is not present in the provided source chunks.
       </constraints>
 
       <tool_guidelines>
