@@ -292,23 +292,37 @@ const handleMemoryChange = (val: boolean) => {
 
 // 处理主题变化
 const handleThemeChange = (val: ThemeMode) => {
-  setTheme(val)
+  if (!setTheme(val)) {
+    // Setter rejected the value (validation guard); roll the form back to
+    // the canonical state so the UI doesn't drift.
+    localTheme.value = currentTheme.value
+    return
+  }
   MessagePlugin.success(t('common.success'))
 }
 
 // 处理字体变化
 const handleSansFontChange = (val: FontKey) => {
-  setSansFont(val)
+  if (!setSansFont(val)) {
+    localSansFont.value = currentSans.value
+    return
+  }
   MessagePlugin.success(t('common.success'))
 }
 
 const handleMonoFontChange = (val: MonoFontKey) => {
-  setMonoFont(val)
+  if (!setMonoFont(val)) {
+    localMonoFont.value = currentMono.value
+    return
+  }
   MessagePlugin.success(t('common.success'))
 }
 
 const handleFontSizeChange = (val: FontSizeKey) => {
-  setFontSize(val)
+  if (!setFontSize(val)) {
+    localFontSize.value = currentSize.value
+    return
+  }
   MessagePlugin.success(t('common.success'))
 }
 </script>

@@ -1,65 +1,24 @@
 import { ref } from 'vue'
+import {
+  loadPreference,
+  savePreference,
+  migratePreferencesIntoUser,
+} from './preferenceStorage'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
 const THEME_KEY = 'theme'
 
-function readUserId(): string {
-  try {
-    const raw = localStorage.getItem('weknora_user')
-    if (!raw) return 'anon'
-    const parsed = JSON.parse(raw)
-    return parsed?.id ? String(parsed.id) : 'anon'
-  } catch {
-    return 'anon'
-  }
-}
-
-function safeGetItem(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function safeSetItem(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    // Quota / disabled storage / private mode — preference applies to this session only.
-  }
-}
-
-/**
- * Look up a stored preference, falling back through:
- *   1. The current user's namespace
- *   2. The "anon" namespace (settings chosen on the login screen)
- *   3. A legacy un-namespaced key (from earlier versions of this branch)
- */
-function resolveStorageValue(suffix: string): string | null {
-  const userId = readUserId()
-  const userValue = safeGetItem(`WeKnora_${userId}_${suffix}`)
-  if (userValue !== null) return userValue
-  if (userId !== 'anon') {
-    const anonValue = safeGetItem(`WeKnora_anon_${suffix}`)
-    if (anonValue !== null) return anonValue
-  }
-  return safeGetItem(`WeKnora_${suffix}`)
-}
-
-function nsKey(): string {
-  return `WeKnora_${readUserId()}_${THEME_KEY}`
-}
-
 function loadTheme(): ThemeMode {
-  const v = resolveStorageValue(THEME_KEY)
+  const v = loadPreference(THEME_KEY)
   if (v === 'light' || v === 'dark' || v === 'system') return v
   return 'light'
 }
 
 // Shared reactive state across all consumers
 const currentTheme = ref<ThemeMode>(loadTheme())
+
+let lastEffective: 'light' | 'dark' | null = null
 
 function getSystemTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -103,16 +62,19 @@ function syncWailsNativeChrome(effective: 'light' | 'dark') {
 
 function applyTheme(mode: ThemeMode) {
   const effective = mode === 'system' ? getSystemTheme() : mode
+  if (lastEffective === effective) return
+  lastEffective = effective
   document.documentElement.setAttribute('theme-mode', effective)
   syncWailsNativeChrome(effective)
 }
 
 export function useTheme() {
-  function setTheme(mode: ThemeMode) {
-    if (mode !== 'light' && mode !== 'dark' && mode !== 'system') return
+  function setTheme(mode: ThemeMode): boolean {
+    if (mode !== 'light' && mode !== 'dark' && mode !== 'system') return false
     currentTheme.value = mode
-    safeSetItem(nsKey(), mode)
+    savePreference(THEME_KEY, mode)
     applyTheme(mode)
+    return true
   }
 
   return { currentTheme, setTheme }
@@ -133,6 +95,7 @@ export function initTheme() {
 
 /** Re-read preferences from storage (call after login / logout). */
 export function reloadThemeFromStorage() {
+  migratePreferencesIntoUser()
   currentTheme.value = loadTheme()
   applyTheme(currentTheme.value)
 }

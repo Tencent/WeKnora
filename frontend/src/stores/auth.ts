@@ -5,10 +5,13 @@ import type { TenantInfo as TenantInfoFromAPI } from '@/api/tenant'
 import i18n from '@/i18n'
 import { reloadFontFromStorage } from '@/composables/useFont'
 import { reloadThemeFromStorage } from '@/composables/useTheme'
+import { resetMigrationLatch } from '@/composables/preferenceStorage'
 
 // Per-user UI preferences are namespaced by user id in localStorage.
 // Reload them whenever the active user changes.
 function reloadUserPreferences() {
+  // Reset the latch so migration runs once for the new active user.
+  resetMigrationLatch()
   reloadFontFromStorage()
   reloadThemeFromStorage()
 }
