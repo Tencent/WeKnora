@@ -314,7 +314,7 @@ onMounted(async () => {
 
   .section-title {
     margin: 0 0 8px 0;
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 20px;
     font-weight: 600;
     color: var(--td-text-color-primary);
@@ -322,7 +322,7 @@ onMounted(async () => {
 
   .section-desc {
     margin: 0;
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     color: var(--td-text-color-placeholder);
     line-height: 22px;
@@ -339,7 +339,7 @@ onMounted(async () => {
   .form-label {
     display: block;
     margin-bottom: 8px;
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 15px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -381,7 +381,7 @@ onMounted(async () => {
   margin-bottom: 16px;
 
   .shares-title {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 15px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -465,7 +465,7 @@ onMounted(async () => {
   gap: 8px;
 
   .org-name {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -598,7 +598,7 @@ onMounted(async () => {
   margin-bottom: 2px;
 
   .org-option-name {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 13px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -612,7 +612,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   color: var(--td-text-color-secondary);
 

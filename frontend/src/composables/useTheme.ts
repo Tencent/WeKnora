@@ -1,13 +1,24 @@
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
+import {
+  loadPreference,
+  savePreference,
+  migratePreferencesIntoUser,
+} from './preferenceStorage'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'WeKnora_theme'
+const THEME_KEY = 'theme'
+
+function loadTheme(): ThemeMode {
+  const v = loadPreference(THEME_KEY)
+  if (v === 'light' || v === 'dark' || v === 'system') return v
+  return 'light'
+}
 
 // Shared reactive state across all consumers
-const currentTheme = ref<ThemeMode>(
-  (localStorage.getItem(STORAGE_KEY) as ThemeMode) || 'light'
-)
+const currentTheme = ref<ThemeMode>(loadTheme())
+
+let lastEffective: 'light' | 'dark' | null = null
 
 function getSystemTheme(): 'light' | 'dark' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -51,15 +62,19 @@ function syncWailsNativeChrome(effective: 'light' | 'dark') {
 
 function applyTheme(mode: ThemeMode) {
   const effective = mode === 'system' ? getSystemTheme() : mode
+  if (lastEffective === effective) return
+  lastEffective = effective
   document.documentElement.setAttribute('theme-mode', effective)
   syncWailsNativeChrome(effective)
 }
 
 export function useTheme() {
-  function setTheme(mode: ThemeMode) {
+  function setTheme(mode: ThemeMode): boolean {
+    if (mode !== 'light' && mode !== 'dark' && mode !== 'system') return false
     currentTheme.value = mode
-    localStorage.setItem(STORAGE_KEY, mode)
+    savePreference(THEME_KEY, mode)
     applyTheme(mode)
+    return true
   }
 
   return { currentTheme, setTheme }
@@ -67,9 +82,8 @@ export function useTheme() {
 
 /** Call once in main.ts to initialise theme and listen for OS changes. */
 export function initTheme() {
-  const saved = (localStorage.getItem(STORAGE_KEY) as ThemeMode) || 'light'
-  currentTheme.value = saved
-  applyTheme(saved)
+  currentTheme.value = loadTheme()
+  applyTheme(currentTheme.value)
 
   // React to OS theme changes when user chose "system"
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -77,4 +91,11 @@ export function initTheme() {
       applyTheme('system')
     }
   })
+}
+
+/** Re-read preferences from storage (call after login / logout). */
+export function reloadThemeFromStorage() {
+  migratePreferencesIntoUser()
+  currentTheme.value = loadTheme()
+  applyTheme(currentTheme.value)
 }

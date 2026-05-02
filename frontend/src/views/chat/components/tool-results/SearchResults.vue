@@ -237,7 +237,7 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 }
 
 code {
-  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 10px;
   background: var(--td-bg-color-secondarycontainer);
   padding: 1px 4px;

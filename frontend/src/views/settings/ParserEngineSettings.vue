@@ -595,7 +595,7 @@ onMounted(loadAll)
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0;
-    font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+    font-family: var(--app-font-family-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

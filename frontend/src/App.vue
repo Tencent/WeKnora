@@ -190,9 +190,8 @@ html,
     height: 100%;
     margin: 0;
     padding: 0;
-    font-size: 14px;
-    font-family: Helvetica Neue, Helvetica, PingFang SC, Hiragino Sans GB,
-        Microsoft YaHei, SimSun, sans-serif;
+    font-size: calc(14px * var(--app-font-scale, 1));
+    font-family: var(--app-font-family);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background: var(--td-bg-color-page);

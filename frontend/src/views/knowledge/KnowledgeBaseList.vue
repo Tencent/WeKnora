@@ -1255,7 +1255,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   h2 {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 24px;
     font-weight: 600;
     line-height: 32px;
@@ -1304,7 +1304,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .header-subtitle {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
@@ -1349,7 +1349,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     padding: 12px 0;
     cursor: pointer;
     color: var(--td-text-color-secondary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     user-select: none;
@@ -1525,7 +1525,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   border: 1px solid var(--td-warning-color-focus);
   border-radius: 6px;
   color: var(--td-warning-color);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 14px;
   
   .t-icon {
@@ -1564,7 +1564,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .progress-title {
   color: var(--td-text-color-primary);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 600;
   line-height: 22px;
@@ -1573,7 +1573,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .progress-subtitle {
   color: var(--td-text-color-secondary);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   line-height: 18px;
 }
@@ -1796,7 +1796,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .card-title {
   color: var(--td-text-color-primary);
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 15px;
   font-weight: 600;
   line-height: 22px;
@@ -1858,7 +1858,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   line-clamp: 2;
   overflow: hidden;
   color: var(--td-text-color-secondary);
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;
@@ -2050,7 +2050,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .card-time {
   color: var(--td-text-color-placeholder);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   font-weight: 400;
 }
@@ -2072,7 +2072,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .empty-txt {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 600;
     line-height: 26px;
@@ -2081,7 +2081,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .empty-desc {
     color: var(--td-text-color-disabled);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -2149,7 +2149,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .circle-title {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 600;
     line-height: 24px;
@@ -2157,7 +2157,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .del-circle-txt {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -2175,7 +2175,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .circle-btn-txt {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -2211,7 +2211,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   background: transparent;
   color: var(--td-brand-color);
   font-size: 13px;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   cursor: pointer;
   transition: background 0.2s ease, color 0.2s ease;
 
@@ -2246,7 +2246,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
   display: flex;
   flex-direction: column;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .shared-detail-drawer-header {
@@ -2367,7 +2367,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 // 创建对话框样式优化
 .create-kb-dialog {
   .t-form-item__label {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -2375,7 +2375,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   .t-input,
   .t-textarea {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
   }
 
   .t-button--theme-primary {

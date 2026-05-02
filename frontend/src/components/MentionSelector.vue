@@ -337,7 +337,7 @@ const scrollToItem = (index: number) => {
   border-radius: var(--td-radius-default, 3px);
   color: var(--td-text-color-primary, #333);
   font-size: var(--td-font-size-body-medium, 14px);
-  font-family: var(--td-font-family, "PingFang SC");
+  font-family: var(--app-font-family);
   transition: background 0.2s cubic-bezier(0.38, 0, 0.24, 1);
 }
 

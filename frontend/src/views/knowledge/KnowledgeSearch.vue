@@ -571,7 +571,7 @@ onMounted(() => {
   h2 {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 24px;
     font-weight: 600;
     line-height: 32px;
@@ -581,7 +581,7 @@ onMounted(() => {
 .header-subtitle {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
@@ -913,7 +913,7 @@ onMounted(() => {
   font-size: 11px;
   color: var(--td-text-color-disabled);
   font-weight: 600;
-  font-family: "SF Mono", "Monaco", monospace;
+  font-family: var(--app-font-family-mono);
 }
 
 .match-badge {
@@ -935,7 +935,7 @@ onMounted(() => {
 .chunk-score {
   font-size: 11px;
   color: var(--td-text-color-placeholder);
-  font-family: "SF Mono", "Monaco", monospace;
+  font-family: var(--app-font-family-mono);
 }
 
 .chunk-content {

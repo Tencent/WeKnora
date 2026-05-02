@@ -251,7 +251,7 @@ const formatMetadataValue = (value: unknown) => {
   }
 
   .metadata-value {
-    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-family: var(--app-font-family-mono);
     color: var(--td-text-color-primary);
   }
 }
@@ -267,7 +267,7 @@ const formatMetadataValue = (value: unknown) => {
 }
 
 code {
-  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 10px;
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;

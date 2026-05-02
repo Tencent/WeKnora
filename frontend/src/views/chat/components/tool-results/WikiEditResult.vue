@@ -237,7 +237,7 @@ const headerTitle = computed(() => {
   border: 1px solid @card-border;
   border-radius: 4px;
   overflow: hidden;
-  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 12px;
 }
 
@@ -308,7 +308,7 @@ const headerTitle = computed(() => {
 }
 
 code {
-  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 11px;
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 5px;

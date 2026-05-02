@@ -764,7 +764,7 @@ onMounted(async () => {
 .readonly-value {
   color: var(--td-text-color-primary);
   font-size: 12px;
-  font-family: 'SF Mono', Monaco, Menlo, monospace;
+  font-family: var(--app-font-family-mono);
   word-break: break-all;
 }
 

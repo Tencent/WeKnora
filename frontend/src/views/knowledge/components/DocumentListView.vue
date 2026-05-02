@@ -340,7 +340,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
   height: 40px;
   font-size: 12px;
   font-weight: 500;
-  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--app-font-family);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
   border-bottom: 1px solid var(--td-component-stroke);
@@ -402,7 +402,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 
 .cell-name {
   gap: 10px;
-  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .cell-size,
@@ -481,7 +481,7 @@ const handleAction = (action: 'edit' | 'reparse' | 'move' | 'delete', item: Know
 .row-mono {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  font-family: 'PingFang SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--app-font-family);
   color: var(--td-text-color-secondary);
 }
 

@@ -144,7 +144,7 @@ const props = defineProps<{
 }
 
 code {
-  font-family: 'Monaco', 'Courier New', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 11px;
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;

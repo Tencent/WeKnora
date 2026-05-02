@@ -1655,7 +1655,7 @@ watch(currentSection, (section) => {
 
     .sidebar-title {
       margin: 0;
-      font-family: "PingFang SC", -apple-system, sans-serif;
+      font-family: var(--app-font-family);
       font-size: 18px;
       font-weight: 600;
       color: var(--td-text-color-primary);
@@ -1676,7 +1676,7 @@ watch(currentSection, (section) => {
       border-radius: 10px;
       cursor: pointer;
       transition: background 0.2s ease, color 0.2s ease;
-      font-family: "PingFang SC", -apple-system, sans-serif;
+      font-family: var(--app-font-family);
       font-size: 14px;
       color: var(--td-text-color-secondary);
       font-weight: 500;
@@ -1756,7 +1756,7 @@ watch(currentSection, (section) => {
 
     h2 {
       margin: 0 0 8px 0;
-      font-family: "PingFang SC";
+      font-family: var(--app-font-family);
       font-size: 16px;
       font-weight: 600;
       color: var(--td-text-color-primary);
@@ -1764,7 +1764,7 @@ watch(currentSection, (section) => {
 
     .section-description {
       margin: 0;
-      font-family: "PingFang SC";
+      font-family: var(--app-font-family);
       font-size: 14px;
       color: var(--td-text-color-placeholder);
       line-height: 22px;
@@ -1968,7 +1968,7 @@ watch(currentSection, (section) => {
     padding: 10px 14px;
 
     .invite-code-value {
-      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-family: var(--app-font-family-mono);
       font-size: 16px;
       font-weight: 600;
       letter-spacing: 2px;

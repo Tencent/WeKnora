@@ -555,7 +555,7 @@ onMounted(async () => {
     font-weight: 500;
     color: var(--td-text-color-primary);
     margin-bottom: 4px;
-    font-family: monospace;
+    font-family: var(--app-font-family-mono);
   }
 
   .model-meta {

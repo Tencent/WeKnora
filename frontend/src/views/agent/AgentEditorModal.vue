@@ -3629,7 +3629,7 @@ const handleSave = async () => {
 
 .sidebar-title {
   margin: 0;
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 18px;
   font-weight: 600;
   color: var(--td-text-color-primary);
@@ -3649,7 +3649,7 @@ const handleSave = async () => {
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 14px;
   color: var(--td-text-color-secondary);
 
@@ -3934,7 +3934,7 @@ const handleSave = async () => {
 .slider-value {
   width: 40px;
   text-align: right;
-  font-family: monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 14px;
   color: var(--td-text-color-primary);
 }
@@ -4480,7 +4480,7 @@ const handleSave = async () => {
 // 系统提示词输入框样式
 .system-prompt-textarea {
   width: 100%;
-  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 13px;
 
   :deep(textarea) {
@@ -4528,7 +4528,7 @@ const handleSave = async () => {
     align-items: center;
     padding: 1px 5px;
     border-radius: 3px;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-family: var(--app-font-family-mono);
     font-size: 11px;
     color: var(--td-text-color-primary, #333);
     background-color: var(--td-bg-color-secondarycontainer, #f3f3f3);
@@ -4585,7 +4585,7 @@ const handleSave = async () => {
       background: var(--td-bg-color-container-hover, #f5f7fa);
       padding: 2px 5px;
       border-radius: 3px;
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-family: var(--app-font-family-mono);
       font-size: 11px;
       color: var(--td-brand-color, #0052d9);
     }

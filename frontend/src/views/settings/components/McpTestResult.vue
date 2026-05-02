@@ -359,7 +359,7 @@ const handleClose = () => {
                 padding: 12px;
                 overflow-x: auto;
                 font-size: 12px;
-                font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+                font-family: var(--app-font-family-mono);
                 color: var(--td-text-color-primary);
                 line-height: 1.6;
                 background: transparent;

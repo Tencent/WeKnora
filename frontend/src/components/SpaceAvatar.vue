@@ -180,6 +180,6 @@ const letterStyle = computed(() => {
   color: var(--td-text-color-anti);
   font-size: 14px;
   font-weight: 600;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--app-font-family);
 }
 </style>

@@ -413,7 +413,7 @@ function handleGoToOrgSettings(orgId: string) {
   margin-bottom: 2px;
 
   .org-option-name {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 13px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -427,7 +427,7 @@ function handleGoToOrgSettings(orgId: string) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   color: var(--td-text-color-placeholder);
 

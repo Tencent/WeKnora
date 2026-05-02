@@ -421,7 +421,7 @@ onBeforeUnmount(() => {
   color: var(--td-text-color-primary);
   cursor: pointer;
   transition: all 0.15s ease;
-  font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 
