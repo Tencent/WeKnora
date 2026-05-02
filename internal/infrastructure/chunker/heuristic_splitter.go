@@ -82,8 +82,9 @@ func splitByHeuristicsImpl(text string, cfg SplitterConfig) []Chunk {
 		if accumulated > cfg.ChunkSize && curEnd-chunkStart >= minChunkSize {
 			// Flush accumulated content as a chunk, restart at curEnd.
 			out = appendChunk(out, runes, chunkStart, curEnd, &seq)
-			// Apply overlap by shifting chunkStart back a bit.
-			chunkStart = applyOverlap(curEnd, cfg.ChunkOverlap)
+			// Snap overlap start to the nearest semantic boundary or line
+			// break instead of slicing mid-line / mid-word.
+			chunkStart = applyOverlapAligned(runes, curEnd, cfg.ChunkOverlap, bounds)
 		}
 		curEnd = nextEnd
 	}
@@ -227,16 +228,42 @@ func appendOversizeBlock(out []Chunk, runes []rune, start, end int, cfg Splitter
 	return out
 }
 
-// applyOverlap shifts the next chunk's start back by `overlap` runes (but
-// not before zero) so consecutive chunks share content. Mirrors the
-// computeOverlap behavior of the legacy splitter.
-func applyOverlap(curEnd, overlap int) int {
+// applyOverlapAligned returns the rune offset where the next chunk should
+// start. The target is `curEnd - overlap`, but we snap to the nearest
+// preceding boundary (within 2x overlap) or, failing that, the previous
+// newline so chunks don't begin mid-line / mid-word. Falls back to the raw
+// target only if neither option is available.
+func applyOverlapAligned(runes []rune, curEnd, overlap int, bounds []boundary) int {
 	if overlap <= 0 {
 		return curEnd
 	}
-	start := curEnd - overlap
-	if start < 0 {
-		start = 0
+	target := curEnd - overlap
+	if target < 0 {
+		target = 0
 	}
-	return start
+	// Allowed search window: [curEnd - 2*overlap, curEnd]
+	windowStart := curEnd - 2*overlap
+	if windowStart < 0 {
+		windowStart = 0
+	}
+
+	// Prefer a semantic boundary inside the window.
+	bestBound := -1
+	for _, b := range bounds {
+		if b.runeStart >= windowStart && b.runeStart <= curEnd && b.runeStart > bestBound {
+			bestBound = b.runeStart
+		}
+	}
+	if bestBound >= 0 {
+		return bestBound
+	}
+
+	// Fallback: scan backwards from `target` to the previous newline, but
+	// not past windowStart so we keep the overlap roughly the right size.
+	for i := target; i > windowStart && i < len(runes); i-- {
+		if runes[i] == '\n' {
+			return i + 1
+		}
+	}
+	return target
 }

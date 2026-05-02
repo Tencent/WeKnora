@@ -69,17 +69,33 @@ type DocParserVLMConfig struct {
 
 type ParsedChunk struct {
 	Content string
-	Seq     int
-	Start   int
-	End     int
-	Images  []ParsedImage
-	ChunkID string // populated by processChunks with the actual DB UUID
+	// ContextHeader is an optional context string (e.g. a Markdown heading
+	// breadcrumb) that should be prepended at embedding time but is NOT
+	// part of the stored Content. Lets retrieval pipelines see section
+	// context without breaking End-Start == len(Content) invariants.
+	ContextHeader string
+	Seq           int
+	Start         int
+	End           int
+	Images        []ParsedImage
+	ChunkID       string // populated by processChunks with the actual DB UUID
 
 	// ParentIndex is set when using parent-child chunking strategy.
 	// -1 (or unset/0 for flat chunks) means this is a top-level chunk.
 	// >= 0 means this is a child chunk referencing the parent at this index
 	// in the ParentChunks slice of ProcessChunksOptions.
 	ParentIndex int
+}
+
+// EmbeddingContent returns the text that should be sent to the embedding
+// model: ContextHeader (if any) prepended to Content. Mirrors
+// chunker.Chunk.EmbeddingContent so the choice is consistent across the
+// chunker output and the indexing pipeline.
+func (c ParsedChunk) EmbeddingContent() string {
+	if c.ContextHeader == "" {
+		return c.Content
+	}
+	return c.ContextHeader + "\n\n" + c.Content
 }
 
 // ParsedParentChunk represents a parent chunk in the parent-child strategy.

@@ -163,6 +163,24 @@ type Chunk struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Soft delete marker, supports data recovery
 	DeletedAt gorm.DeletedAt `json:"deleted_at"               gorm:"index"`
+	// ContextHeader is an in-memory-only context string (e.g. a Markdown
+	// heading breadcrumb) that the indexing pipeline prepends to Content
+	// when generating embeddings. NOT persisted — populated by the chunker
+	// during initial splitting and discarded after indexing.
+	ContextHeader string `json:"-" gorm:"-"`
+}
+
+// EmbeddingContent returns the chunk content with ContextHeader prepended
+// when set. Use this where the embedding model needs section context that
+// isn't part of the literal Content.
+func (c *Chunk) EmbeddingContent() string {
+	if c == nil {
+		return ""
+	}
+	if c.ContextHeader == "" {
+		return c.Content
+	}
+	return c.ContextHeader + "\n\n" + c.Content
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.

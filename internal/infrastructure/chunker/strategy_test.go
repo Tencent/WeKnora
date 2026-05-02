@@ -48,6 +48,49 @@ func TestSplit_AutoStrategy_PicksHeadingForMarkdownDoc(t *testing.T) {
 	}
 }
 
+// TestSplit_PreservesPositionInvariantAcrossTiers ensures every chunk's
+// (Start, End, Content) triple stays consistent — End-Start must equal the
+// rune length of Content, and runes[Start:End] must equal Content. This is
+// the contract that knowledge.go:2278+ relies on for document reconstruction
+// during summary generation.
+func TestSplit_PreservesPositionInvariantAcrossTiers(t *testing.T) {
+	cases := map[string]string{
+		"heading-tier": "# Top\nintro paragraph here.\n\n## Section A\nbody A here.\n\n## Section B\nbody B here.\n\n## Section C\nbody C.",
+		"heuristic-tier": strings.Repeat("Kapitel 1: Einleitung\n", 1) + strings.Repeat("Beispieltext. ", 50) +
+			"\n\n" + strings.Repeat("Kapitel 2: Hauptteil\n", 1) + strings.Repeat("Mehr Text. ", 50),
+		"recursive-tier": strings.Repeat("plain prose without structure. ", 100),
+	}
+	cfg := SplitterConfig{ChunkSize: 300, ChunkOverlap: 30, Separators: []string{"\n\n", "\n", "。", ". "}, Strategy: StrategyAuto}
+
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			runes := []rune(doc)
+			chunks := Split(doc, cfg)
+			if len(chunks) == 0 {
+				t.Fatal("expected chunks")
+			}
+			for i, c := range chunks {
+				contentRuneLen := len([]rune(c.Content))
+				spanLen := c.End - c.Start
+				if spanLen != contentRuneLen {
+					t.Errorf("chunk %d: End(%d)-Start(%d)=%d but Content has %d runes:\n%q",
+						i, c.End, c.Start, spanLen, contentRuneLen, c.Content)
+				}
+				if c.Start < 0 || c.End > len(runes) {
+					t.Errorf("chunk %d: position out of range Start=%d End=%d totalRunes=%d",
+						i, c.Start, c.End, len(runes))
+				}
+				if c.Start >= 0 && c.End <= len(runes) {
+					sliced := string(runes[c.Start:c.End])
+					if sliced != c.Content {
+						t.Errorf("chunk %d: runes[Start:End] differs from Content", i)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestSplitParentChild_LegacyStrategy(t *testing.T) {
 	text := strings.Repeat("This is a sentence. Another one.\n\n", 50)
 	parentCfg := SplitterConfig{ChunkSize: 400, ChunkOverlap: 40, Strategy: StrategyLegacy}

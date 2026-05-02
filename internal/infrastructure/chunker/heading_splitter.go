@@ -74,35 +74,34 @@ func splitByHeadingsImpl(text string, cfg SplitterConfig) []Chunk {
 		}
 
 		bcLen := utf8.RuneCountInString(breadcrumb)
-		// Reserve some headroom (breadcrumb + 2 newlines) when fitting a section.
+		// Single-chunk section: emit as-is, breadcrumb tracked separately.
+		// The breadcrumb is delivered via Chunk.ContextHeader (not Content)
+		// to preserve End-Start == len(Content) invariants relied on by
+		// document reconstruction (knowledge.go:2278+).
 		if bcLen+2+secLen <= cfg.ChunkSize {
-			content := prependBreadcrumb(sectionContent, breadcrumb)
 			out = append(out, Chunk{
-				Content: content,
-				Seq:     seq,
-				Start:   b.runeStart,
-				End:     endRune,
+				Content:       sectionContent,
+				ContextHeader: breadcrumb,
+				Seq:           seq,
+				Start:         b.runeStart,
+				End:           endRune,
 			})
 			seq++
 			continue
 		}
 
-		// Section too large for one chunk: defer to the legacy splitter for
-		// inner segmentation, then prepend the breadcrumb to every sub-chunk.
-		// Reduce the inner budget by the breadcrumb length so the final
-		// chunk (incl. breadcrumb) still fits under cfg.ChunkSize.
-		innerCfg := cfg
-		if bcLen > 0 && innerCfg.ChunkSize > bcLen+10 {
-			innerCfg.ChunkSize -= bcLen + 2
-		}
-		subChunks := SplitText(sectionContent, innerCfg)
+		// Section too large: defer to the legacy splitter for inner
+		// segmentation. Sub-chunks inherit the same breadcrumb via
+		// ContextHeader. We do NOT shrink the inner ChunkSize budget here
+		// because the breadcrumb no longer counts against Content size.
+		subChunks := SplitText(sectionContent, cfg)
 		for _, sub := range subChunks {
-			content := prependBreadcrumb(sub.Content, breadcrumb)
 			out = append(out, Chunk{
-				Content: content,
-				Seq:     seq,
-				Start:   b.runeStart + sub.Start,
-				End:     b.runeStart + sub.End,
+				Content:       sub.Content,
+				ContextHeader: breadcrumb,
+				Seq:           seq,
+				Start:         b.runeStart + sub.Start,
+				End:           b.runeStart + sub.End,
 			})
 			seq++
 		}
@@ -189,16 +188,3 @@ func observeSubHeadings(runes []rune, primaryLevel int, h *HeadingHierarchy) {
 	}
 }
 
-// prependBreadcrumb attaches the breadcrumb to content unless content
-// already begins with that exact breadcrumb (avoid duplication when a
-// section's first line is itself the section heading).
-func prependBreadcrumb(content, breadcrumb string) string {
-	if breadcrumb == "" {
-		return content
-	}
-	trimmed := strings.TrimLeft(content, " \t\r\n")
-	if strings.HasPrefix(trimmed, breadcrumb) {
-		return content
-	}
-	return breadcrumb + "\n\n" + content
-}

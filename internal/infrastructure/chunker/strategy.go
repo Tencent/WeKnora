@@ -35,21 +35,35 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 	chain := resolveChain(text, cfg)
 	totalChars := len([]rune(text))
 
-	for _, tier := range chain {
+	var lastOut []Chunk
+	for i, tier := range chain {
 		out := runTier(tier, text, cfg)
 		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
 			return out
 		} else {
 			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
 		}
+		// Remember the legacy tier's output: we'll return it as-is below if
+		// every tier rejected — running SplitText again would just produce
+		// the same rejected result.
+		if tier == TierLegacy && i == len(chain)-1 {
+			lastOut = out
+		}
 	}
-	// Last-ditch fallback: always return *something*.
+	if lastOut != nil {
+		return lastOut
+	}
+	// Defensive last-ditch fallback (only reached if the chain didn't end on TierLegacy).
 	return SplitText(text, cfg)
 }
 
 // SplitParentChild is the strategy-aware analog of SplitTextParentChild.
 // It runs the tier selector for parent splitting, then re-splits each
 // parent into children with the small-chunk config.
+//
+// Children are forced to recursive splitting — they are sub-pieces of an
+// already-segmented parent, so re-profiling per parent would cost N extra
+// O(N) document scans without any real chance of picking a better tier.
 func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChildResult {
 	if text == "" {
 		return ParentChildResult{}
@@ -61,6 +75,12 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 	if len(parents) == 0 {
 		return ParentChildResult{}
 	}
+
+	// Pin children to the recursive tier so SplitText runs directly without
+	// the profiler/strategy chain re-deciding per parent. Preserves Tier-1
+	// breadcrumb context (already attached to each parent) since we only
+	// re-split parent content, not re-detect headings.
+	childCfg.Strategy = StrategyRecursive
 
 	var newParents []Chunk
 	var children []ChildChunk
@@ -77,6 +97,12 @@ func SplitParentChild(text string, parentCfg, childCfg SplitterConfig) ParentChi
 			sub.Seq = childSeq
 			sub.Start += parent.Start
 			sub.End += parent.Start
+			// Children inherit the parent's breadcrumb so embedding still
+			// sees the section context — but only if the child itself does
+			// not already carry one (sub-splits don't, but defensive).
+			if sub.ContextHeader == "" {
+				sub.ContextHeader = parent.ContextHeader
+			}
 			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
 			childSeq++
 		}
@@ -146,10 +172,14 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 		charBudget := CharsForTokenLimit(cfg.TokenLimit, lang)
 		if charBudget > 0 && (cfg.ChunkSize == 0 || charBudget < cfg.ChunkSize) {
 			cfg.ChunkSize = charBudget
-			if cfg.ChunkOverlap >= cfg.ChunkSize {
-				cfg.ChunkOverlap = cfg.ChunkSize / 5
-			}
 		}
+	}
+	// Guard against pathological overlap configurations: if Overlap exceeds
+	// half of ChunkSize, almost every chunk is duplicate content. Cap it at
+	// ChunkSize/2 so Overlap stays a useful smoothing band rather than a
+	// near-clone of the previous chunk.
+	if cfg.ChunkOverlap > cfg.ChunkSize/2 && cfg.ChunkSize > 0 {
+		cfg.ChunkOverlap = cfg.ChunkSize / 2
 	}
 	return cfg
 }
