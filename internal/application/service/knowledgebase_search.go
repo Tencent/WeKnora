@@ -152,7 +152,11 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 	logger.Infof(ctx, "Result count before fusion: vector=%d, keyword=%d", len(vectorResults), len(keywordResults))
 
-	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults)
+	var retrievalCfg *types.RetrievalConfig
+	if tenantInfo != nil {
+		retrievalCfg = tenantInfo.RetrievalConfig
+	}
+	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, retrievalCfg)
 
 	kb.EnsureDefaults()
 

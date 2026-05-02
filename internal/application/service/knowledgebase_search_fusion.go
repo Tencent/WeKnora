@@ -29,7 +29,8 @@ func classifyRetrievalResults(ctx context.Context, retrieveResults []*types.Retr
 }
 
 // fuseOrDeduplicate either fuses vector+keyword results via RRF or deduplicates vector-only results.
-func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*types.IndexWithScore) []*types.IndexWithScore {
+// retrievalCfg may be nil — defaults are then used for RRF parameters.
+func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*types.IndexWithScore, retrievalCfg *types.RetrievalConfig) []*types.IndexWithScore {
 	if len(keywordResults) == 0 {
 		// Vector-only: keep original embedding scores (important for FAQ)
 		result := deduplicateByScore(vectorResults)
@@ -43,7 +44,7 @@ func fuseOrDeduplicate(ctx context.Context, vectorResults, keywordResults []*typ
 		return result
 	}
 	// Hybrid: use RRF fusion to merge vector + keyword results
-	result := fuseWithRRF(ctx, vectorResults, keywordResults)
+	result := fuseWithRRF(ctx, vectorResults, keywordResults, retrievalCfg)
 	logger.Infof(ctx, "Result count after RRF fusion: %d", len(result))
 	return result
 }
@@ -77,12 +78,12 @@ func deduplicateByScore(results []*types.IndexWithScore) []*types.IndexWithScore
 }
 
 // fuseWithRRF merges vector and keyword retrieval results using Reciprocal Rank Fusion.
-// RRF score = vectorWeight/(k+vectorRank) + keywordWeight/(k+keywordRank), with k=60.
+// RRF score = vectorWeight/(k+vectorRank) + keywordWeight/(k+keywordRank).
+// k, vectorWeight and keywordWeight are sourced from retrievalCfg (with defaults).
 // The merged results are sorted by RRF score descending.
-func fuseWithRRF(ctx context.Context, vectorResults, keywordResults []*types.IndexWithScore) []*types.IndexWithScore {
-	const rrfK = 60
-	const vectorWeight = 0.7
-	const keywordWeight = 0.3
+func fuseWithRRF(ctx context.Context, vectorResults, keywordResults []*types.IndexWithScore, retrievalCfg *types.RetrievalConfig) []*types.IndexWithScore {
+	rrfK := retrievalCfg.GetEffectiveRRFK()
+	vectorWeight, keywordWeight := retrievalCfg.GetEffectiveRRFWeights()
 
 	// Build rank maps for each retriever (already sorted by score from retriever)
 	vectorRanks := make(map[string]int, len(vectorResults))
