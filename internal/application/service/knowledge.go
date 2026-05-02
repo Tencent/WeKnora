@@ -1786,17 +1786,23 @@ type ProcessChunksOptions struct {
 }
 
 // buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
+// Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
+// identical whether callers come through this path or invoke the chunker
+// directly with a zero-value config.
 func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
 	chunkCfg := chunker.SplitterConfig{
 		ChunkSize:    kb.ChunkingConfig.ChunkSize,
 		ChunkOverlap: kb.ChunkingConfig.ChunkOverlap,
 		Separators:   kb.ChunkingConfig.Separators,
+		Strategy:     kb.ChunkingConfig.Strategy,
+		TokenLimit:   kb.ChunkingConfig.TokenLimit,
+		Languages:    kb.ChunkingConfig.Languages,
 	}
 	if chunkCfg.ChunkSize <= 0 {
-		chunkCfg.ChunkSize = 512
+		chunkCfg.ChunkSize = chunker.DefaultChunkSize
 	}
 	if chunkCfg.ChunkOverlap <= 0 {
-		chunkCfg.ChunkOverlap = 50
+		chunkCfg.ChunkOverlap = chunker.DefaultChunkOverlap
 	}
 	if len(chunkCfg.Separators) == 0 {
 		chunkCfg.Separators = []string{"\n\n", "\n", "。"}

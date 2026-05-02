@@ -120,6 +120,10 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig) []Chunk {
 // ensureDefaults fills in zero-value config fields with sane defaults.
 // Mirrors buildSplitterConfig in internal/application/service/knowledge.go
 // so direct callers of this package get the same numbers.
+//
+// When cfg.TokenLimit is set, ChunkSize is clamped to the character budget
+// that fits within that token limit (with a 10% safety factor). This makes
+// chunks safe for embedding APIs that have hard token caps.
 func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
@@ -129,6 +133,19 @@ func ensureDefaults(cfg SplitterConfig) SplitterConfig {
 	}
 	if len(cfg.Separators) == 0 {
 		cfg.Separators = []string{"\n\n", "\n", "。"}
+	}
+	if cfg.TokenLimit > 0 {
+		lang := LangMixed
+		if len(cfg.Languages) > 0 {
+			lang = cfg.Languages[0]
+		}
+		charBudget := CharsForTokenLimit(cfg.TokenLimit, lang)
+		if charBudget > 0 && (cfg.ChunkSize == 0 || charBudget < cfg.ChunkSize) {
+			cfg.ChunkSize = charBudget
+			if cfg.ChunkOverlap >= cfg.ChunkSize {
+				cfg.ChunkOverlap = cfg.ChunkSize / 5
+			}
+		}
 	}
 	return cfg
 }

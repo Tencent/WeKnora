@@ -122,33 +122,41 @@ type splitUnit struct {
 	start, end int
 }
 
-// splitBySeparators splits text by separators in priority order, keeping separators.
+// splitBySeparators splits text by separators in priority order, keeping the
+// separators themselves as standalone units. Walks the separator list in
+// order: the first separator that actually splits the text wins, the rest
+// are not applied. Mirrors the recursive priority semantics of the Python
+// reference splitter (docreader/splitter/splitter.py:_split).
 func splitBySeparators(text string, separators []string) []string {
 	if len(separators) == 0 || text == "" {
 		return []string{text}
 	}
 
-	// Build regex that captures separators
-	var parts []string
 	for _, sep := range separators {
-		parts = append(parts, regexp.QuoteMeta(sep))
-	}
-	pattern := "(" + strings.Join(parts, "|") + ")"
-	re := regexp.MustCompile(pattern)
-
-	splits := re.Split(text, -1)
-	matches := re.FindAllString(text, -1)
-
-	var result []string
-	for i, s := range splits {
-		if s != "" {
-			result = append(result, s)
+		if sep == "" {
+			continue
 		}
-		if i < len(matches) && matches[i] != "" {
-			result = append(result, matches[i])
+		re := regexp.MustCompile("(" + regexp.QuoteMeta(sep) + ")")
+		splits := re.Split(text, -1)
+		matches := re.FindAllString(text, -1)
+		if len(matches) == 0 {
+			continue
+		}
+
+		var result []string
+		for i, s := range splits {
+			if s != "" {
+				result = append(result, s)
+			}
+			if i < len(matches) && matches[i] != "" {
+				result = append(result, matches[i])
+			}
+		}
+		if len(result) > 1 {
+			return result
 		}
 	}
-	return result
+	return []string{text}
 }
 
 // runeLen returns the number of runes in s.

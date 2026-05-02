@@ -151,6 +151,17 @@ type ChunkingConfig struct {
 	// ChildChunkSize is the size of child chunks used for embedding (default: 384).
 	// Only used when EnableParentChild is true.
 	ChildChunkSize int `yaml:"child_chunk_size,omitempty" json:"child_chunk_size,omitempty"`
+	// Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
+	// the historical recursive splitter; "auto" lets a profiler pick between
+	// heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
+	// "recursive" pin the tier explicitly.
+	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	// TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize
+	// as a character count.
+	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty"`
+	// Languages hints the heuristic patterns. Empty = auto-detect from content.
+	// Examples: ["de"], ["en", "zh"].
+	Languages []string `yaml:"languages,omitempty" json:"languages,omitempty"`
 }
 
 // ResolveParserEngine returns the engine name for the given file type
