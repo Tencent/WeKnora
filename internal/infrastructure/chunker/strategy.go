@@ -7,7 +7,11 @@
 // compatibility — strategy.go simply layers a tier-selector on top.
 package chunker
 
-import "github.com/Tencent/WeKnora/internal/logger"
+import (
+	"context"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+)
 
 // Strategy values for SplitterConfig.Strategy.
 const (
@@ -36,7 +40,7 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
 			return out
 		} else {
-			logger.Debugf(nil, "chunker: tier %s rejected: %s", tier, v.Reason)
+			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
 		}
 	}
 	// Last-ditch fallback: always return *something*.

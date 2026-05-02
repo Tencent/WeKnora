@@ -49,9 +49,13 @@ func (p *DocProfile) HeadingDensity() float64 {
 }
 
 // DominantHeadingLevel returns the heading level (1..6) that should drive
-// section splitting. It picks the lowest level (closest to root) that has
-// at least 3 occurrences, falling back to the most frequent level. Returns
-// 0 when no usable Markdown structure exists.
+// section splitting. Preference order:
+//  1. The lowest level (closest to root) that has at least 3 occurrences —
+//     a "real" structural backbone of the document.
+//  2. Otherwise the deepest level present at least once — gives finer-grained
+//     boundaries for small documents that just have an H1 + a few H2s.
+//
+// Returns 0 when no Markdown headings exist.
 func (p *DocProfile) DominantHeadingLevel() int {
 	if p.MdHeadingTotal == 0 {
 		return 0
@@ -61,14 +65,12 @@ func (p *DocProfile) DominantHeadingLevel() int {
 			return level
 		}
 	}
-	// fallback: most frequent level
-	bestLevel, bestCount := 0, 0
-	for level := 1; level <= 6; level++ {
-		if p.MdHeadingCounts[level] > bestCount {
-			bestLevel, bestCount = level, p.MdHeadingCounts[level]
+	for level := 6; level >= 1; level-- {
+		if p.MdHeadingCounts[level] > 0 {
+			return level
 		}
 	}
-	return bestLevel
+	return 0
 }
 
 // HeuristicMarkerTotal sums the non-Markdown structural markers.
