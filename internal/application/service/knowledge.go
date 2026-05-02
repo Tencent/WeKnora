@@ -7443,7 +7443,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 
 	if kb.ChunkingConfig.EnableParentChild {
 		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
-		pcResult := chunker.SplitTextParentChild(clean, parentCfg, childCfg)
+		pcResult := chunker.SplitParentChild(clean, parentCfg, childCfg)
 		parsed = make([]types.ParsedChunk, len(pcResult.Children))
 		for i, c := range pcResult.Children {
 			parsed[i] = types.ParsedChunk{
@@ -7460,7 +7460,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		}
 		opts.ParentChunks = parentChunks
 	} else {
-		splitChunks := chunker.SplitText(clean, chunkCfg)
+		splitChunks := chunker.Split(clean, chunkCfg)
 		parsed = make([]types.ParsedChunk, len(splitChunks))
 		for i, c := range splitChunks {
 			parsed[i] = types.ParsedChunk{
@@ -8255,7 +8255,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	if kb.ChunkingConfig.EnableParentChild {
 		parentCfg, childCfg := buildParentChildConfigs(kb.ChunkingConfig, chunkCfg)
-		pcResult := chunker.SplitTextParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
+		pcResult := chunker.SplitParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))
 		for i, c := range pcResult.Children {
 			chunks[i] = types.ParsedChunk{
@@ -8274,7 +8274,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Split document into %d parent + %d child chunks for knowledge %s",
 			len(pcResult.Parents), len(pcResult.Children), knowledge.ID)
 	} else {
-		splitChunks := chunker.SplitText(convertResult.MarkdownContent, chunkCfg)
+		splitChunks := chunker.Split(convertResult.MarkdownContent, chunkCfg)
 		chunks = make([]types.ParsedChunk, len(splitChunks))
 		for i, c := range splitChunks {
 			chunks[i] = types.ParsedChunk{

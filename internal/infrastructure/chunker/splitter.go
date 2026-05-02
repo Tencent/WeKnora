@@ -27,18 +27,35 @@ type ImageRef struct {
 	End         int
 }
 
-// SplitterConfig configures the text splitter.
+// SplitterConfig configures the text splitter. Strategy and TokenLimit are
+// honored by the strategy entry point in strategy.go; the legacy SplitText
+// path uses only ChunkSize/Overlap/Separators.
 type SplitterConfig struct {
 	ChunkSize    int
 	ChunkOverlap int
 	Separators   []string
+
+	// Strategy selects an adaptive tier. Empty = legacy (backwards-compatible).
+	// See strategy.go for valid values.
+	Strategy string
+	// TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize chars.
+	TokenLimit int
+	// Languages hints multilingual heuristic patterns. Empty = auto-detect.
+	Languages []string
 }
+
+// Default sizes used by all entry points (DefaultConfig, ensureDefaults,
+// and buildSplitterConfig in the knowledge service).
+const (
+	DefaultChunkSize    = 512
+	DefaultChunkOverlap = 80 // ≈ 15% of DefaultChunkSize
+)
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() SplitterConfig {
 	return SplitterConfig{
-		ChunkSize:    512,
-		ChunkOverlap: 64,
+		ChunkSize:    DefaultChunkSize,
+		ChunkOverlap: DefaultChunkOverlap,
 		Separators:   []string{"\n\n", "\n", "。"},
 	}
 }
