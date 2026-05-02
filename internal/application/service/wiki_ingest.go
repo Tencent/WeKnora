@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -1211,6 +1212,48 @@ func appendUnique(arr types.StringArray, s string) types.StringArray {
 		}
 	}
 	return append(arr, s)
+}
+
+// minTextContentRunes is the minimum number of non-whitespace, non-image-reference
+// runes required for content to be considered substantive enough for LLM
+// summarization or wiki extraction. Documents below this threshold (e.g. a
+// scanned PDF where OCR yielded nothing) are routed to a deterministic empty-
+// content fallback instead of being passed to the LLM, which would otherwise
+// hallucinate based on metadata alone.
+const minTextContentRunes = 50
+
+var (
+	mdImageRefRE = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+	// Strip the outer <images> wrapper before the inner <image> blocks so that
+	// nested structures like "<images><image>x</image></images>" don't leave a
+	// stray closing tag behind. RE2 has no backreferences, so we use two
+	// separate patterns instead of `<(image|images)\b...</\1>`.
+	htmlImagesBlockRE = regexp.MustCompile(`(?is)<images\b[^>]*>.*?</images>`)
+	htmlImageBlockRE  = regexp.MustCompile(`(?is)<image\b[^>]*>.*?</image>`)
+	htmlImageTagRE    = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+)
+
+// stripImageMarkup removes markdown image references, raw <img> tags, and
+// <image>/<images> XML blocks so that content consisting only of image
+// placeholders (e.g. from PDFScannedParser pages without successful VLM OCR)
+// is recognised as effectively empty.
+func stripImageMarkup(s string) string {
+	s = htmlImagesBlockRE.ReplaceAllString(s, "")
+	s = htmlImageBlockRE.ReplaceAllString(s, "")
+	s = mdImageRefRE.ReplaceAllString(s, "")
+	s = htmlImageTagRE.ReplaceAllString(s, "")
+	return s
+}
+
+// hasSufficientTextContent reports whether the given content carries enough
+// real text (after image markup is stripped) to warrant an LLM call. It is
+// the primary defence against filename-driven hallucinations on scanned PDFs.
+func hasSufficientTextContent(content string) bool {
+	stripped := strings.TrimSpace(stripImageMarkup(content))
+	if stripped == "" {
+		return false
+	}
+	return len([]rune(stripped)) >= minTextContentRunes
 }
 
 // cleanLLMJSON strips markdown code-fence wrappers and sanitizes control characters

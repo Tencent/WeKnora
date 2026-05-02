@@ -2242,6 +2242,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 // defaultMaxInputChars is the default maximum characters used as input for summary generation.
 const defaultMaxInputChars = 1024 * 24
 
+// errInsufficientSummaryContent signals that getSummary refused to call the
+// LLM because the document had no usable text after image markup was stripped
+// (typical for scanned PDFs where VLM OCR yielded nothing). Callers should
+// mark the knowledge's summary as failed instead of falling back to the first
+// chunk's raw content (which would just be a bare image reference).
+var errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
+
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
@@ -2295,21 +2302,22 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	logger.GetLogger(ctx).Infof("getSummary: content length=%d chars (max=%d) for knowledge %s",
 		len([]rune(chunkContents)), maxInputChars, knowledge.ID)
 
-	// Prepare content with metadata for summary generation
-	contentWithMetadata := chunkContents
-
-	// Add knowledge metadata if available
-	if knowledge != nil {
-		metadataIntro := fmt.Sprintf("Document Type: %s\nFile Name: %s\n", knowledge.FileType, knowledge.FileName)
-
-		// Add additional metadata if available
-		if knowledge.Type != "" {
-			metadataIntro += fmt.Sprintf("Knowledge Type: %s\n", knowledge.Type)
-		}
-
-		// Prepend metadata to content
-		contentWithMetadata = metadataIntro + "\nContent:\n" + contentWithMetadata
+	// Bail out before the LLM call when there is not enough actual text to
+	// summarise. We deliberately do not pass filename/file-type metadata to the
+	// LLM: scanned PDFs frequently carry filenames like "MX5280.pdf" (the
+	// scanner model), and feeding that to the model would invite it to
+	// hallucinate a scanner manual instead of admitting the document had no
+	// extractable text.
+	if !hasSufficientTextContent(chunkContents) {
+		logger.GetLogger(ctx).Warnf(
+			"getSummary: content for knowledge %s has insufficient text after stripping image markup (len=%d); skipping LLM call",
+			knowledge.ID, len([]rune(strings.TrimSpace(stripImageMarkup(chunkContents)))),
+		)
+		return "", errInsufficientSummaryContent
 	}
+
+	// Pass the raw chunk text to the LLM with no filename / file-type framing.
+	contentWithMetadata := chunkContents
 
 	// Determine max output tokens from config
 	maxTokens := 2048
@@ -2482,11 +2490,24 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
-		// Use first chunk content as fallback
+		// For the insufficient-content case (scanned PDF without OCR, etc.)
+		// we deliberately do NOT fall back to the first chunk's raw content,
+		// since that chunk is typically just a bare markdown image reference
+		// and surfacing it in the description is misleading.
+		if errors.Is(err, errInsufficientSummaryContent) {
+			knowledge.Description = ""
+			knowledge.SummaryStatus = types.SummaryStatusFailed
+			knowledge.UpdatedAt = time.Now()
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				logger.Errorf(ctx, "Failed to mark summary as failed: %v", updateErr)
+				return fmt.Errorf("failed to update knowledge: %w", updateErr)
+			}
+			return nil
+		}
+		// For other errors (LLM API issues etc.), fall back to the first chunk.
 		if len(textChunks) > 0 {
 			summary = textChunks[0].Content
 			if len(summary) > 500 {
-				// Use rune-based truncation to avoid cutting UTF-8 multi-byte characters
 				runes := []rune(summary)
 				if len(runes) > 500 {
 					summary = string(runes[:500])

@@ -473,6 +473,18 @@ func (s *wikiIngestService) mapOneDocument(
 	}
 	logger.Infof(ctx, "wiki ingest: doc %s chunks=%d content_len(raw=%d,truncated=%d)", knowledgeID, len(chunks), rawRuneCount, len([]rune(content)))
 
+	// Refuse to run LLM-based extraction when the document carries no real
+	// text — e.g. a scanned PDF whose pages were converted to images but where
+	// VLM OCR produced nothing usable. Without this guard the LLM would have
+	// only image markup left and would happily fabricate entities/concepts.
+	if !hasSufficientTextContent(content) {
+		logger.Warnf(ctx,
+			"wiki ingest: doc %s has insufficient text content after stripping image markup (raw_len=%d), skipping LLM extraction",
+			knowledgeID, rawRuneCount,
+		)
+		return nil, nil, nil
+	}
+
 	docTitle := knowledgeID
 	if kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID); err == nil && kn != nil && kn.Title != "" {
 		docTitle = kn.Title
@@ -547,9 +559,6 @@ func (s *wikiIngestService) mapOneDocument(
 	go func() {
 		defer wg.Done()
 		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
-			"Title":          docTitle,
-			"FileName":       docTitle,
-			"FileType":       "document",
 			"Content":        content,
 			"Language":       lang,
 			"ExtractedSlugs": slugListing,
@@ -780,7 +789,6 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	}
 
 	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
-		"Title":         docTitle,
 		"Content":       content,
 		"Language":      lang,
 		"PreviousSlugs": prevSlugsText,

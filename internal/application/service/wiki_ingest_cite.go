@@ -92,7 +92,6 @@ func (s *wikiIngestService) extractCandidateSlugs(
 
 	granularity := batchCtx.ExtractionGranularity.Normalize()
 	raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiCandidateSlugPrompt, map[string]string{
-		"Title":               docTitle,
 		"Content":             content,
 		"Language":            lang,
 		"PreviousSlugs":       prevSlugsText,
@@ -301,7 +300,6 @@ func (s *wikiIngestService) classifyChunkCitations(
 		eg.Go(func() error {
 			chunksXML := renderChunksXML(batch)
 			raw, err := s.generateWithTemplate(ectx, chatModel, agent.WikiChunkCitationPrompt, map[string]string{
-				"DocTitle":       docTitle,
 				"CandidateSlugs": candidatesXML,
 				"ChunksXML":      chunksXML,
 				"Language":       lang,

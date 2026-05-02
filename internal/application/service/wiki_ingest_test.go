@@ -106,3 +106,70 @@ func TestReconstructContentEmpty(t *testing.T) {
 		t.Errorf("Empty chunks should produce empty content, got %q", content)
 	}
 }
+
+func TestStripImageMarkup(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"plain text untouched", "Hello world.", "Hello world."},
+		{"single markdown image removed", "![alt](images/page_1.png)", ""},
+		{
+			"scanned-pdf style page references all stripped",
+			"![MX5280_page_1.png](images/MX5280_page_1.png)\n\n![MX5280_page_2.png](images/MX5280_page_2.png)",
+			"\n\n",
+		},
+		{"mixed text and image keeps text", "Intro paragraph.\n![fig](a.png)\nConclusion.", "Intro paragraph.\n\nConclusion."},
+		{"html img tag stripped", `Before <img src="x.png" alt="y"/> after`, "Before  after"},
+		{"images xml block stripped", "Body <images><image>x</image></images> tail", "Body  tail"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripImageMarkup(tt.input)
+			if got != tt.want {
+				t.Errorf("stripImageMarkup(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasSufficientTextContent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"empty string", "", false},
+		{"only whitespace", "   \n\n\t  ", false},
+		{
+			"only image references (scanned PDF without OCR)",
+			"![MX5280_page_1.png](images/MX5280_page_1.png)\n![MX5280_page_2.png](images/MX5280_page_2.png)",
+			false,
+		},
+		{"short text below threshold", "tiny", false},
+		{
+			"short text mixed with images still below threshold",
+			"![a](x.png)\nshort\n![b](y.png)",
+			false,
+		},
+		{
+			"sufficient text passes",
+			"This is a substantial paragraph of real content describing a legal matter and the parties involved.",
+			true,
+		},
+		{
+			"sufficient text mixed with images still passes",
+			"![cover](cover.png)\nThis is a substantial paragraph of real content describing a legal matter and the parties involved.\n![sig](sig.png)",
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasSufficientTextContent(tt.input)
+			if got != tt.want {
+				t.Errorf("hasSufficientTextContent(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
