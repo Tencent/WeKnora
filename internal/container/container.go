@@ -31,6 +31,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	memoryRepo "github.com/Tencent/WeKnora/internal/application/repository/memory/neo4j"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -213,6 +214,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
+	// SkillRuntime must be registered BEFORE AgentService because AgentService
+	// depends on it. Handler registration happens later (HTTP layer).
+	must(container.Provide(func() skills.SkillRuntime {
+		rt := skills.NewRuntimeFromEnv()
+		// Best-effort discovery at startup. A failed scan is logged but
+		// does not abort the container — Skills are optional.
+		if initErr := rt.Initialize(ctx); initErr != nil {
+			logger.Warnf(ctx, "[Container] skill runtime initialize: %v", initErr)
+		} else {
+			logger.Infof(ctx, "[Container] skill runtime ready (sandbox_available=%v)", rt.SandboxAvailable())
+		}
+		return rt
+	}))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -280,7 +294,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewWebSearchProviderHandler))
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
-	must(container.Provide(service.NewSkillService))
 	must(container.Provide(handler.NewSkillHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
 
