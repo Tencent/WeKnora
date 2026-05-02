@@ -1225,7 +1225,10 @@ func appendUnique(arr types.StringArray, s string) types.StringArray {
 // The threshold is intentionally low: legitimate short documents (brief
 // memos, single-line notes) must still pass. The goal is only to catch
 // the empty-image-only case.
-const minTextContentRunes = 10
+//
+// Declared as a var (not const) so tests can override it and future config
+// plumbing can adjust it at runtime without a rebuild.
+var minTextContentRunes = 10
 
 var (
 	// Markdown image references like ![alt](path) — pure visual placeholders

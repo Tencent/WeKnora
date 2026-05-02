@@ -2249,6 +2249,25 @@ const defaultMaxInputChars = 1024 * 24
 // chunk's raw content (which would just be a bare image reference).
 var errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
 
+// checkSufficientSummaryContent returns errInsufficientSummaryContent if the
+// given content does not carry enough real text (after stripping image markup)
+// for an LLM summary call, and logs a warning at the call site. Returns nil
+// when the content passes the threshold.
+//
+// Extracted so the threshold gate can be unit-tested without standing up the
+// full ProcessSummaryGeneration dependency graph.
+func checkSufficientSummaryContent(ctx context.Context, knowledgeID, content string) error {
+	realTextLen := realTextRuneCount(content)
+	if realTextLen < minTextContentRunes {
+		logger.GetLogger(ctx).Warnf(
+			"summary content check: knowledge %s has insufficient text after stripping image markup (real_text_runes=%d, min=%d); skipping LLM call",
+			knowledgeID, realTextLen, minTextContentRunes,
+		)
+		return errInsufficientSummaryContent
+	}
+	return nil
+}
+
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
@@ -2308,13 +2327,8 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// scanner model), and feeding that to the model would invite it to
 	// hallucinate a scanner manual instead of admitting the document had no
 	// extractable text.
-	realTextLen := realTextRuneCount(chunkContents)
-	if realTextLen < minTextContentRunes {
-		logger.GetLogger(ctx).Warnf(
-			"getSummary: content for knowledge %s has insufficient text after stripping image markup (real_text_runes=%d, min=%d); skipping LLM call",
-			knowledge.ID, realTextLen, minTextContentRunes,
-		)
-		return "", errInsufficientSummaryContent
+	if err := checkSufficientSummaryContent(ctx, knowledge.ID, chunkContents); err != nil {
+		return "", err
 	}
 
 	// Pass the raw chunk text to the LLM with no filename / file-type framing.
