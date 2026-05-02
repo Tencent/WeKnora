@@ -83,22 +83,55 @@ function readUserId(): string {
   }
 }
 
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Quota / disabled storage / private mode — preference applies to this session only.
+  }
+}
+
+/**
+ * Look up a stored preference, falling back through:
+ *   1. The current user's namespace
+ *   2. The "anon" namespace (settings chosen on the login screen)
+ *   3. A legacy un-namespaced key (from earlier versions of this branch)
+ */
+function resolveStorageValue(suffix: string): string | null {
+  const userId = readUserId()
+  const userValue = safeGetItem(`WeKnora_${userId}_${suffix}`)
+  if (userValue !== null) return userValue
+  if (userId !== 'anon') {
+    const anonValue = safeGetItem(`WeKnora_anon_${suffix}`)
+    if (anonValue !== null) return anonValue
+  }
+  return safeGetItem(`WeKnora_${suffix}`)
+}
+
 function nsKey(suffix: string): string {
   return `WeKnora_${readUserId()}_${suffix}`
 }
 
 function loadSans(): FontKey {
-  const v = localStorage.getItem(nsKey(SANS_KEY))
+  const v = resolveStorageValue(SANS_KEY)
   return isFontKey(v) ? v : DEFAULT_SANS
 }
 
 function loadMono(): MonoFontKey {
-  const v = localStorage.getItem(nsKey(MONO_KEY))
+  const v = resolveStorageValue(MONO_KEY)
   return isMonoFontKey(v) ? v : DEFAULT_MONO
 }
 
 function loadSize(): FontSizeKey {
-  const v = localStorage.getItem(nsKey(SIZE_KEY))
+  const v = resolveStorageValue(SIZE_KEY)
   return isFontSizeKey(v) ? v : DEFAULT_SIZE
 }
 
@@ -108,27 +141,34 @@ const currentSize = ref<FontSizeKey>(loadSize())
 
 function applyFont() {
   const root = document.documentElement
-  root.style.setProperty('--app-font-family', SANS_STACKS[currentSans.value])
-  root.style.setProperty('--app-font-family-mono', MONO_STACKS[currentMono.value])
-  root.style.setProperty('--app-font-scale', String(FONT_SCALES[currentSize.value]))
+  if (!root) return
+  const sansStack = SANS_STACKS[currentSans.value] ?? SANS_STACKS[DEFAULT_SANS]
+  const monoStack = MONO_STACKS[currentMono.value] ?? MONO_STACKS[DEFAULT_MONO]
+  const scale = FONT_SCALES[currentSize.value] ?? FONT_SCALES[DEFAULT_SIZE]
+  root.style.setProperty('--app-font-family', sansStack)
+  root.style.setProperty('--app-font-family-mono', monoStack)
+  root.style.setProperty('--app-font-scale', String(scale))
 }
 
 export function useFont() {
   function setSansFont(key: FontKey) {
+    if (!isFontKey(key)) return
     currentSans.value = key
-    localStorage.setItem(nsKey(SANS_KEY), key)
+    safeSetItem(nsKey(SANS_KEY), key)
     applyFont()
   }
 
   function setMonoFont(key: MonoFontKey) {
+    if (!isMonoFontKey(key)) return
     currentMono.value = key
-    localStorage.setItem(nsKey(MONO_KEY), key)
+    safeSetItem(nsKey(MONO_KEY), key)
     applyFont()
   }
 
   function setFontSize(key: FontSizeKey) {
+    if (!isFontSizeKey(key)) return
     currentSize.value = key
-    localStorage.setItem(nsKey(SIZE_KEY), key)
+    safeSetItem(nsKey(SIZE_KEY), key)
     applyFont()
   }
 

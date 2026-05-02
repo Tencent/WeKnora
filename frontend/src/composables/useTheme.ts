@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const STORAGE_SUFFIX = 'theme'
+const THEME_KEY = 'theme'
 
 function readUserId(): string {
   try {
@@ -15,12 +15,45 @@ function readUserId(): string {
   }
 }
 
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Quota / disabled storage / private mode — preference applies to this session only.
+  }
+}
+
+/**
+ * Look up a stored preference, falling back through:
+ *   1. The current user's namespace
+ *   2. The "anon" namespace (settings chosen on the login screen)
+ *   3. A legacy un-namespaced key (from earlier versions of this branch)
+ */
+function resolveStorageValue(suffix: string): string | null {
+  const userId = readUserId()
+  const userValue = safeGetItem(`WeKnora_${userId}_${suffix}`)
+  if (userValue !== null) return userValue
+  if (userId !== 'anon') {
+    const anonValue = safeGetItem(`WeKnora_anon_${suffix}`)
+    if (anonValue !== null) return anonValue
+  }
+  return safeGetItem(`WeKnora_${suffix}`)
+}
+
 function nsKey(): string {
-  return `WeKnora_${readUserId()}_${STORAGE_SUFFIX}`
+  return `WeKnora_${readUserId()}_${THEME_KEY}`
 }
 
 function loadTheme(): ThemeMode {
-  const v = localStorage.getItem(nsKey())
+  const v = resolveStorageValue(THEME_KEY)
   if (v === 'light' || v === 'dark' || v === 'system') return v
   return 'light'
 }
@@ -76,8 +109,9 @@ function applyTheme(mode: ThemeMode) {
 
 export function useTheme() {
   function setTheme(mode: ThemeMode) {
+    if (mode !== 'light' && mode !== 'dark' && mode !== 'system') return
     currentTheme.value = mode
-    localStorage.setItem(nsKey(), mode)
+    safeSetItem(nsKey(), mode)
     applyTheme(mode)
   }
 

@@ -106,7 +106,6 @@
         <div class="setting-control">
           <t-radio-group
             v-model="localFontSize"
-            variant="default-filled"
             @change="handleFontSizeChange"
           >
             <t-radio-button value="small">{{ $t('font.size.small') }}</t-radio-button>
@@ -160,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/settings'
@@ -195,6 +194,12 @@ const localTheme = ref<ThemeMode>(currentTheme.value)
 const localSansFont = ref<FontKey>(currentSans.value)
 const localMonoFont = ref<MonoFontKey>(currentMono.value)
 const localFontSize = ref<FontSizeKey>(currentSize.value)
+
+// Keep the form in sync if preferences change externally (e.g. on user switch).
+watch(currentTheme, (val) => { localTheme.value = val })
+watch(currentSans, (val) => { localSansFont.value = val })
+watch(currentMono, (val) => { localMonoFont.value = val })
+watch(currentSize, (val) => { localFontSize.value = val })
 
 const sansFontOptions = computed<{ value: FontKey; label: string; preview: string }[]>(() => [
   { value: 'system', label: t('font.sans.system'), preview: SANS_STACKS.system },
