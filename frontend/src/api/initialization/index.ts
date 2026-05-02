@@ -50,6 +50,14 @@ export interface InitializationConfig {
         chunkSize: number;
         chunkOverlap: number;
         separators: string[];
+        // Adaptive chunking strategy. Empty / "legacy" = classic recursive splitter.
+        // "auto" lets the backend profiler pick a tier; "heading" / "heuristic"
+        // pin the tier explicitly. See backend chunker package for details.
+        strategy?: string;
+        // Cap chunk size in approx tokens. 0 = char-based budget only.
+        tokenLimit?: number;
+        // Language hints for heuristic patterns ("de", "en", "zh"). Empty = auto-detect.
+        languages?: string[];
     };
     // Frontend-only hint for storage selection UI
     storageType?: 'cos' | 'minio';
@@ -94,6 +102,13 @@ export interface KBModelConfigRequest {
         enableParentChild?: boolean
         parentChunkSize?: number
         childChunkSize?: number
+        // Adaptive chunking strategy ("auto" | "heading" | "heuristic" | "legacy").
+        // Empty string keeps the existing backend default (legacy / no change).
+        strategy?: string
+        // Approximate token budget per chunk; 0 = char-based.
+        tokenLimit?: number
+        // Language hints for heuristic patterns. Empty = auto-detect.
+        languages?: string[]
     }
     multimodal: {
         enabled: boolean

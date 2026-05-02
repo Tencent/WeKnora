@@ -1900,7 +1900,40 @@ export default {
       parentChunkSizeLabel: 'Parent Chunk Size',
       parentChunkSizeDescription: 'Size of parent chunks that provide context (256-4096)',
       childChunkSizeLabel: 'Child Chunk Size',
-      childChunkSizeDescription: 'Size of child chunks used for embedding matching (64-1024)'
+      childChunkSizeDescription: 'Size of child chunks used for embedding matching (64-1024)',
+      strategyLabel: 'Chunking Strategy',
+      strategyDescription: 'Choose how documents are split into chunks. The Automatic mode profiles each document and picks the best strategy.',
+      strategyPlaceholder: 'Select strategy (defaults to classic recursive splitting)',
+      strategies: {
+        auto: {
+          label: 'Automatic (recommended)',
+          tooltip: 'A document profiler analyzes structure and picks heading-aware, smart-detection or classic splitting per upload.'
+        },
+        heading: {
+          label: 'Markdown-optimized',
+          tooltip: 'Splits primarily at Markdown headings (#, ##, ###). Best for clean Markdown with explicit section structure.'
+        },
+        heuristic: {
+          label: 'Smart structure detection',
+          tooltip: 'Detects page-breaks, numbered sections, multilingual chapter markers (DE/EN/ZH), all-caps titles. Ideal for PDFs without proper Markdown.'
+        },
+        legacy: {
+          label: 'Classic',
+          tooltip: 'Classic recursive splitting on separators only — the original behavior. Use this if the new strategies misbehave on your content.'
+        }
+      },
+      overlapWarning: 'Overlap is large compared to chunk size — chunks will share most of their content.',
+      advancedLabel: 'Advanced options',
+      tokenLimitLabel: 'Token limit per chunk',
+      tokenLimitDescription: 'Cap chunk size in approximate tokens. When set, chunk size is automatically reduced to stay below this token budget. 0 = off (use character size only).',
+      languagesLabel: 'Language hints',
+      languagesDescription: 'Hint which languages structure-detection patterns should look for. Leave empty for auto-detection.',
+      languagesPlaceholder: 'Auto-detect',
+      languageOptions: {
+        de: 'German',
+        en: 'English',
+        zh: 'Chinese'
+      }
     },
     multimodal: {
       title: 'Image Processing Configuration',

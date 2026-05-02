@@ -2478,6 +2478,39 @@ export default {
       parentChunkSizeDescription: "컨텍스트를 제공하는 부모 청크의 문자 수 (256-4096)",
       childChunkSizeLabel: "자식 청크 크기",
       childChunkSizeDescription: "임베딩 매칭에 사용되는 자식 청크의 문자 수 (64-1024)",
+      strategyLabel: "청킹 전략",
+      strategyDescription: "문서를 청크로 분할하는 방법을 선택합니다. 자동 모드는 문서를 프로파일링하여 최적의 전략을 선택합니다.",
+      strategyPlaceholder: "전략 선택 (기본: 클래식 재귀 분할)",
+      strategies: {
+        auto: {
+          label: "자동 (권장)",
+          tooltip: "문서 프로파일러가 구조를 분석하여 헤딩 인식, 스마트 감지 또는 클래식 분할을 선택합니다."
+        },
+        heading: {
+          label: "Markdown 최적화",
+          tooltip: "주로 Markdown 헤딩(#, ##, ###)에서 분할합니다. 명확한 섹션 구조의 Markdown에 적합합니다."
+        },
+        heuristic: {
+          label: "스마트 구조 감지",
+          tooltip: "페이지 구분자, 번호 매겨진 섹션, 다국어 챕터 마커(DE/EN/ZH), 대문자 제목을 감지합니다. Markdown 구조가 없는 PDF에 적합합니다."
+        },
+        legacy: {
+          label: "클래식",
+          tooltip: "구분자만 사용한 클래식 재귀 분할 — 원래 동작. 새 전략이 콘텐츠에서 잘못 작동하는 경우 사용하세요."
+        }
+      },
+      overlapWarning: "오버랩이 청크 크기에 비해 큽니다 — 청크가 대부분의 콘텐츠를 공유합니다.",
+      advancedLabel: "고급 옵션",
+      tokenLimitLabel: "청크당 토큰 제한",
+      tokenLimitDescription: "근사 토큰 수로 청크 크기를 제한합니다. 설정되면 토큰 예산을 유지하기 위해 청크 크기가 자동으로 축소됩니다. 0 = 끄기 (문자 크기만 사용).",
+      languagesLabel: "언어 힌트",
+      languagesDescription: "구조 감지 패턴이 찾아야 할 언어를 힌트로 제공합니다. 자동 감지를 위해 비워두세요.",
+      languagesPlaceholder: "자동 감지",
+      languageOptions: {
+        de: "독일어",
+        en: "영어",
+        zh: "중국어"
+      }
     },
     multimodal: {
       title: "이미지 처리 설정",

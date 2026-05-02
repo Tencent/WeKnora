@@ -6,6 +6,32 @@
     </div>
 
     <div class="settings-group">
+      <!-- Strategy -->
+      <div class="setting-row strategy-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.strategyLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.strategyDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-select
+            v-model="localStrategy"
+            :options="strategyOptions"
+            :placeholder="$t('knowledgeEditor.chunking.strategyPlaceholder')"
+            :clearable="true"
+            @change="handleStrategyChange"
+            style="width: 280px;"
+          />
+        </div>
+      </div>
+
+      <!-- Strategy explanation panel -->
+      <div v-if="currentStrategyInfo" class="strategy-info-panel">
+        <p>
+          <strong>{{ currentStrategyInfo.label }}:</strong>
+          {{ currentStrategyInfo.tooltip }}
+        </p>
+      </div>
+
       <!-- Chunk Size -->
       <div class="setting-row">
         <div class="setting-info">
@@ -33,6 +59,7 @@
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.overlapLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.overlapDescription') }}</p>
+          <p v-if="overlapTooHigh" class="warn">{{ $t('knowledgeEditor.chunking.overlapWarning') }}</p>
         </div>
         <div class="setting-control">
           <div class="slider-container">
@@ -127,6 +154,52 @@
           </div>
         </div>
       </div>
+
+      <!-- Advanced section toggle -->
+      <div class="advanced-toggle" @click="advancedOpen = !advancedOpen">
+        <span class="toggle-arrow" :class="{ 'open': advancedOpen }">▸</span>
+        <span>{{ $t('knowledgeEditor.chunking.advancedLabel') }}</span>
+      </div>
+
+      <div v-if="advancedOpen" class="advanced-section">
+        <!-- Token Limit -->
+        <div class="setting-row" :class="{ disabled: advancedDisabled }">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.chunking.tokenLimitLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.chunking.tokenLimitDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-input-number
+              v-model="localTokenLimit"
+              :min="0"
+              :max="8192"
+              :step="64"
+              :disabled="advancedDisabled"
+              @change="handleTokenLimitChange"
+              style="width: 200px;"
+            />
+          </div>
+        </div>
+
+        <!-- Languages -->
+        <div class="setting-row" :class="{ disabled: advancedDisabled }">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.chunking.languagesLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.chunking.languagesDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-select
+              v-model="localLanguages"
+              :options="languageOptions"
+              multiple
+              :disabled="advancedDisabled"
+              :placeholder="$t('knowledgeEditor.chunking.languagesPlaceholder')"
+              @change="handleLanguagesChange"
+              style="width: 280px;"
+            />
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -148,6 +221,12 @@ interface ChunkingConfig {
   enableParentChild: boolean
   parentChunkSize: number
   childChunkSize: number
+  // New: adaptive chunking strategy. Empty string = legacy / not set.
+  strategy?: string
+  // New: cap chunk size in approx tokens. 0 = char-based budget only.
+  tokenLimit?: number
+  // New: language hints for heuristic patterns (de/en/zh).
+  languages?: string[]
 }
 
 interface Props {
@@ -160,13 +239,60 @@ const emit = defineEmits<{
   'update:config': [value: ChunkingConfig]
 }>()
 
+const { t } = useI18n()
+
 const localChunkSize = ref(props.config.chunkSize)
 const localChunkOverlap = ref(props.config.chunkOverlap)
 const localSeparators = ref([...props.config.separators])
 const localEnableParentChild = ref(props.config.enableParentChild ?? false)
 const localParentChunkSize = ref(props.config.parentChunkSize || 4096)
 const localChildChunkSize = ref(props.config.childChunkSize || 384)
-const { t } = useI18n()
+const localStrategy = ref(props.config.strategy ?? '')
+const localTokenLimit = ref(props.config.tokenLimit ?? 0)
+const localLanguages = ref<string[]>([...(props.config.languages ?? [])])
+const advancedOpen = ref(false)
+
+const strategyOptions = computed(() => [
+  {
+    label: t('knowledgeEditor.chunking.strategies.auto.label'),
+    value: 'auto',
+    tooltip: t('knowledgeEditor.chunking.strategies.auto.tooltip')
+  },
+  {
+    label: t('knowledgeEditor.chunking.strategies.heading.label'),
+    value: 'heading',
+    tooltip: t('knowledgeEditor.chunking.strategies.heading.tooltip')
+  },
+  {
+    label: t('knowledgeEditor.chunking.strategies.heuristic.label'),
+    value: 'heuristic',
+    tooltip: t('knowledgeEditor.chunking.strategies.heuristic.tooltip')
+  },
+  {
+    label: t('knowledgeEditor.chunking.strategies.legacy.label'),
+    value: 'legacy',
+    tooltip: t('knowledgeEditor.chunking.strategies.legacy.tooltip')
+  }
+])
+
+const currentStrategyInfo = computed(() => {
+  if (!localStrategy.value) {
+    return null
+  }
+  return strategyOptions.value.find(o => o.value === localStrategy.value) ?? null
+})
+
+const advancedDisabled = computed(() => localStrategy.value === 'legacy')
+
+const overlapTooHigh = computed(
+  () => localChunkOverlap.value > 0 && localChunkOverlap.value >= localChunkSize.value / 2
+)
+
+const languageOptions = computed(() => [
+  { label: t('knowledgeEditor.chunking.languageOptions.de'), value: 'de' },
+  { label: t('knowledgeEditor.chunking.languageOptions.en'), value: 'en' },
+  { label: t('knowledgeEditor.chunking.languageOptions.zh'), value: 'zh' }
+])
 
 const separatorOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.separators.doubleNewline'), value: '\n\n' },
@@ -186,6 +312,9 @@ watch(() => props.config, (newConfig) => {
   localEnableParentChild.value = newConfig.enableParentChild ?? false
   localParentChunkSize.value = newConfig.parentChunkSize || 4096
   localChildChunkSize.value = newConfig.childChunkSize || 384
+  localStrategy.value = newConfig.strategy ?? ''
+  localTokenLimit.value = newConfig.tokenLimit ?? 0
+  localLanguages.value = [...(newConfig.languages ?? [])]
 }, { deep: true })
 
 const handleChunkSizeChange = () => { emitUpdate() }
@@ -194,6 +323,9 @@ const handleSeparatorsChange = () => { emitUpdate() }
 const handleParentChildChange = () => { emitUpdate() }
 const handleParentChunkSizeChange = () => { emitUpdate() }
 const handleChildChunkSizeChange = () => { emitUpdate() }
+const handleStrategyChange = () => { emitUpdate() }
+const handleTokenLimitChange = () => { emitUpdate() }
+const handleLanguagesChange = () => { emitUpdate() }
 
 const emitUpdate = () => {
   emit('update:config', {
@@ -203,7 +335,10 @@ const emitUpdate = () => {
     parserEngineRules: props.config.parserEngineRules,
     enableParentChild: localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
-    childChunkSize: localChildChunkSize.value
+    childChunkSize: localChildChunkSize.value,
+    strategy: localStrategy.value,
+    tokenLimit: localTokenLimit.value,
+    languages: localLanguages.value
   })
 }
 </script>
@@ -247,6 +382,37 @@ const emitUpdate = () => {
   &:last-child {
     border-bottom: none;
   }
+
+  &.disabled {
+    opacity: 0.5;
+  }
+}
+
+.strategy-row {
+  // Strategy is the most prominent setting — slight emphasis.
+  background: linear-gradient(to right, var(--td-bg-color-container-hover), transparent);
+  padding-left: 12px;
+  margin-left: -12px;
+  border-radius: 6px;
+}
+
+.strategy-info-panel {
+  margin: -8px 0 12px 12px;
+  padding: 10px 14px;
+  background: var(--td-bg-color-container-hover);
+  border-left: 3px solid var(--td-brand-color);
+  border-radius: 0 4px 4px 0;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+
+  p {
+    margin: 0;
+  }
+
+  strong {
+    color: var(--td-text-color-primary);
+  }
 }
 
 .setting-info {
@@ -267,6 +433,13 @@ const emitUpdate = () => {
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
+  }
+
+  .warn {
+    font-size: 12px;
+    color: var(--td-warning-color);
+    margin: 4px 0 0 0;
+    line-height: 1.4;
   }
 }
 
@@ -292,5 +465,36 @@ const emitUpdate = () => {
   font-weight: 500;
   min-width: 80px;
   text-align: right;
+}
+
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0 8px 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--td-text-color-secondary);
+  user-select: none;
+
+  &:hover {
+    color: var(--td-text-color-primary);
+  }
+}
+
+.toggle-arrow {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 12px;
+
+  &.open {
+    transform: rotate(90deg);
+  }
+}
+
+.advanced-section {
+  padding-left: 12px;
+  border-left: 2px solid var(--td-component-stroke);
 }
 </style>

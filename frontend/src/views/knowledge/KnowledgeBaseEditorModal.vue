@@ -490,7 +490,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       parserEngineRules: undefined as any,
       enableParentChild: true,
       parentChunkSize: 4096,
-      childChunkSize: 384
+      childChunkSize: 384,
+      // New KBs default to the adaptive auto-strategy. User can change in the UI.
+      strategy: 'auto' as string,
+      tokenLimit: 0,
+      languages: [] as string[]
     },
     storageProvider: '' as string,
     multimodalConfig: {
@@ -587,7 +591,12 @@ const loadKBData = async () => {
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
         enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
-        childChunkSize: kb.chunking_config?.child_chunk_size || 384
+        childChunkSize: kb.chunking_config?.child_chunk_size || 384,
+        // Existing KBs without strategy field render as empty (= legacy behavior).
+        // The user has to actively pick a value to opt in to the new tiers.
+        strategy: kb.chunking_config?.strategy || '',
+        tokenLimit: kb.chunking_config?.token_limit || 0,
+        languages: kb.chunking_config?.languages || []
       },
       storageProvider: (kb.storage_provider_config?.provider || kb.storage_config?.provider || 'local') as string,
       multimodalConfig: {
@@ -840,6 +849,17 @@ const buildSubmitData = () => {
       enable_parent_child: formData.value.chunkingConfig.enableParentChild,
       parent_chunk_size: formData.value.chunkingConfig.parentChunkSize,
       child_chunk_size: formData.value.chunkingConfig.childChunkSize,
+      // Adaptive chunking fields. Empty/zero values are omitted on the
+      // backend side via omitempty; we send them through unconditionally.
+      ...(formData.value.chunkingConfig.strategy
+        ? { strategy: formData.value.chunkingConfig.strategy }
+        : {}),
+      ...(formData.value.chunkingConfig.tokenLimit
+        ? { token_limit: formData.value.chunkingConfig.tokenLimit }
+        : {}),
+      ...(formData.value.chunkingConfig.languages?.length
+        ? { languages: formData.value.chunkingConfig.languages }
+        : {}),
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }
         : {})
@@ -1023,7 +1043,11 @@ const doSubmit = async () => {
           parserEngineRules: data.chunking_config.parser_engine_rules || undefined,
           enableParentChild: data.chunking_config.enable_parent_child || false,
           parentChunkSize: data.chunking_config.parent_chunk_size || 4096,
-          childChunkSize: data.chunking_config.child_chunk_size || 384
+          childChunkSize: data.chunking_config.child_chunk_size || 384,
+          // Adaptive chunking — empty / 0 / [] means "leave server default".
+          strategy: data.chunking_config.strategy || undefined,
+          tokenLimit: data.chunking_config.token_limit || undefined,
+          languages: data.chunking_config.languages?.length ? data.chunking_config.languages : undefined
         },
         multimodal: {
           enabled: !!data.vlm_config?.enabled

@@ -2437,6 +2437,39 @@ export default {
       parentChunkSizeDescription: "提供上下文的父块字符数（256-4096）",
       childChunkSizeLabel: "子块大小",
       childChunkSizeDescription: "用于向量匹配的子块字符数（64-1024）",
+      strategyLabel: "分块策略",
+      strategyDescription: "选择文档的分块方式。自动模式会分析每个文档的结构并选择最佳策略。",
+      strategyPlaceholder: "选择策略（默认使用经典递归分块）",
+      strategies: {
+        auto: {
+          label: "自动（推荐）",
+          tooltip: "文档分析器自动选择标题感知、结构检测或经典分块。"
+        },
+        heading: {
+          label: "Markdown 优化",
+          tooltip: "主要按 Markdown 标题（#、##、###）切分。适合结构清晰的 Markdown。"
+        },
+        heuristic: {
+          label: "智能结构检测",
+          tooltip: "检测分页符、编号章节、多语言章节标记（DE/EN/ZH）、全大写标题。适用于无 Markdown 结构的 PDF。"
+        },
+        legacy: {
+          label: "经典",
+          tooltip: "仅按分隔符进行经典递归分块——原始行为。如果新策略效果不佳请使用此项。"
+        }
+      },
+      overlapWarning: "重叠相对于分块大小较大——分块之间会共享大部分内容。",
+      advancedLabel: "高级选项",
+      tokenLimitLabel: "每块 Token 上限",
+      tokenLimitDescription: "按近似 Token 数限制分块大小。设置后会自动缩小分块以保持在 Token 预算内。0 = 关闭（仅按字符数）。",
+      languagesLabel: "语言提示",
+      languagesDescription: "提示结构检测模式应识别哪些语言。留空则自动检测。",
+      languagesPlaceholder: "自动检测",
+      languageOptions: {
+        de: "德语",
+        en: "英语",
+        zh: "中文"
+      }
     },
     multimodal: {
       title: "图像处理配置",
