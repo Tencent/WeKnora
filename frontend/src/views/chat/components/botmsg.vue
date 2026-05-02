@@ -386,7 +386,7 @@ onBeforeUnmount(() => {
         background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
-        font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        font-family: var(--app-font-family-mono);
         font-size: 11px;
     }
 

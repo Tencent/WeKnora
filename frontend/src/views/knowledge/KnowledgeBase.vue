@@ -2747,7 +2747,7 @@ async function createNewSession(value: string): Promise<void> {
       color: var(--td-text-color-primary);
       cursor: pointer;
       transition: all 0.2s ease;
-      font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: var(--app-font-family);
       font-size: 13px;
       -webkit-font-smoothing: antialiased;
 
@@ -2770,7 +2770,7 @@ async function createNewSession(value: string): Promise<void> {
         }
 
         .tag-hash-icon {
-          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-family: var(--app-font-family-mono);
           font-size: 16px;
           font-weight: 500;
           width: 16px;
@@ -2785,7 +2785,7 @@ async function createNewSession(value: string): Promise<void> {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: var(--app-font-family);
         font-size: 13px;
         font-weight: 400;
         line-height: 1.4;
@@ -2979,7 +2979,7 @@ async function createNewSession(value: string): Promise<void> {
   cursor: pointer;
   transition: all 0.2s ease;
   color: var(--td-text-color-primary);
-  font-family: 'PingFang SC';
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 400;
 
@@ -3267,7 +3267,7 @@ async function createNewSession(value: string): Promise<void> {
   h2 {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 24px;
     font-weight: 600;
     line-height: 32px;
@@ -3276,7 +3276,7 @@ async function createNewSession(value: string): Promise<void> {
   .document-subtitle {
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 20px;
@@ -3571,7 +3571,7 @@ async function createNewSession(value: string): Promise<void> {
 
   .circle-title {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 600;
     line-height: 24px;
@@ -3579,7 +3579,7 @@ async function createNewSession(value: string): Promise<void> {
 
   .del-circle-txt {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -3597,7 +3597,7 @@ async function createNewSession(value: string): Promise<void> {
 
   .circle-btn-txt {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -3900,7 +3900,7 @@ async function createNewSession(value: string): Promise<void> {
 
   .card-analyze-txt {
     color: var(--td-brand-color);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 11px;
     margin-left: 8px;
   }
@@ -3927,7 +3927,7 @@ async function createNewSession(value: string): Promise<void> {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 15px;
     font-weight: 600;
     letter-spacing: 0.01em;
@@ -3967,7 +3967,7 @@ async function createNewSession(value: string): Promise<void> {
     line-clamp: 2;
     overflow: hidden;
     color: var(--td-text-color-secondary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 12px;
     font-weight: 400;
     line-height: 19px;
@@ -3989,14 +3989,14 @@ async function createNewSession(value: string): Promise<void> {
 
   .card-time {
     color: var(--td-text-color-secondary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 12px;
     font-weight: 400;
   }
 
   .card-type {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 11px;
     font-weight: 500;
     padding: 0;
@@ -4022,7 +4022,7 @@ async function createNewSession(value: string): Promise<void> {
   border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   transition: opacity 0.15s ease;
 
   .card-popover-title {
@@ -4166,7 +4166,7 @@ async function createNewSession(value: string): Promise<void> {
 
 .knowledge-card-upload {
   color: var(--td-text-color-primary);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 400;
   cursor: pointer;
@@ -4189,7 +4189,7 @@ async function createNewSession(value: string): Promise<void> {
 
 .upload-described {
   color: var(--td-text-color-disabled);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   font-weight: 400;
   text-align: center;

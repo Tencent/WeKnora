@@ -270,6 +270,6 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 600;
   color: var(--td-brand-color);
-  font-family: "SF Mono", "Monaco", monospace;
+  font-family: var(--app-font-family-mono);
 }
 </style>

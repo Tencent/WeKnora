@@ -162,7 +162,7 @@
                 @blur="handleSystemPromptChange"
                 @input="handlePromptInput"
                 @keydown="handlePromptKeydown"
-                style="width: 100%; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px;"
+                style="width: 100%; font-family: var(--app-font-family-mono); font-size: 13px;"
               />
               <PromptTemplateSelector 
                 type="agentSystemPrompt" 
@@ -220,7 +220,7 @@
                     :autosize="{ minRows: 10, maxRows: 20 }"
                     :placeholder="$t('conversationSettings.systemPrompt.placeholder')"
                     @blur="handleSystemPromptNormalChange"
-                    style="width: 100%; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px;"
+                    style="width: 100%; font-family: var(--app-font-family-mono); font-size: 13px;"
                   />
                   <PromptTemplateSelector 
                     type="systemPrompt" 
@@ -246,7 +246,7 @@
                     :autosize="{ minRows: 15, maxRows: 30 }"
                     :placeholder="$t('conversationSettings.contextTemplate.placeholder')"
                     @blur="handleContextTemplateChange"
-                    style="width: 100%; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px;"
+                    style="width: 100%; font-family: var(--app-font-family-mono); font-size: 13px;"
                   />
                   <PromptTemplateSelector 
                     type="contextTemplate" 
@@ -2212,7 +2212,7 @@ const handleConversationRerankModelChange = async (value: string) => {
         background: var(--td-bg-color-container);
         padding: 2px 6px;
         border-radius: 3px;
-        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-family: var(--app-font-family-mono);
         font-size: 11px;
         color: var(--td-error-color);
         border: 1px solid var(--td-component-stroke);
@@ -2262,7 +2262,7 @@ const handleConversationRerankModelChange = async (value: string) => {
       background: var(--td-bg-color-secondarycontainer);
       padding: 2px 6px;
       border-radius: 3px;
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-family: var(--app-font-family-mono);
       font-size: 12px;
       color: var(--td-error-color);
     }

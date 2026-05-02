@@ -2199,7 +2199,7 @@ onUnmounted(() => {
 .wiki-link-tag {
   color: var(--td-brand-color);
   text-decoration: none;
-  font-family: monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 12px;
   padding: 2px 8px;
   background: rgba(7, 192, 95, 0.06);
@@ -2245,7 +2245,7 @@ onUnmounted(() => {
   }
   
   :deep(code) {
-    font-family: monospace;
+    font-family: var(--app-font-family-mono);
     font-size: 13px;
     padding: 2px 4px;
     background: var(--td-bg-color-secondarycontainer);

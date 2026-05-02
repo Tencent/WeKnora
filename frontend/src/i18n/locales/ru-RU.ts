@@ -2361,6 +2361,31 @@ export default {
     system: 'Системная',
     selectTheme: 'Выбрать тему'
   },
+  font: {
+    uiFont: 'Шрифт интерфейса',
+    uiFontDescription: 'Шрифт, используемый во всём интерфейсе (боковая панель, навигация, настройки и т. д.)',
+    monoFont: 'Моноширинный шрифт',
+    monoFontDescription: 'Шрифт для блоков кода, API-ключей и технических идентификаторов',
+    selectFont: 'Выбрать шрифт',
+    sans: {
+      system: 'Системный по умолчанию',
+      pingfang: 'PingFang SC',
+      inter: 'Inter',
+      helvetica: 'Helvetica / Arial',
+      segoe: 'Segoe UI',
+      roboto: 'Roboto',
+      sansSerif: 'Стандартный без засечек',
+    },
+    mono: {
+      system: 'Системный по умолчанию',
+      cascadia: 'Cascadia Code',
+      jetbrains: 'JetBrains Mono',
+      fira: 'Fira Code',
+      monaco: 'Monaco / Menlo',
+      consolas: 'Consolas',
+      monospace: 'Стандартный моноширинный',
+    },
+  },
   platform: {
     subtitle: 'Корпоративная платформа интеллектуального поиска документов',
     description: 'Упрощение понимания сложных документов и точного поиска',

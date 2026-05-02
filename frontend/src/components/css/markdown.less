@@ -30,7 +30,7 @@
         margin-top: 5px;
         font-weight: bold;
         color: var(--td-text-color-placeholder);
-        font-family: "PingFang SC", "Cascadia Code";
+        font-family: var(--app-font-family);
         transition: all 0.2s ease-out;
         font-size: 20px;
     }
@@ -91,7 +91,7 @@
     table {
         font-size: 14px;
         margin: 10px 0;
-        font-family: "PingFang SC", "Cascadia Code";
+        font-family: var(--app-font-family);
     }
 
     h2 {
@@ -307,7 +307,7 @@
 
     .md-image>.md-meta {
         border-radius: 3px;
-        font-family: var(--font-monospace);
+        font-family: var(--app-font-family-mono);
         padding: 2px 0 0 4px;
         font-size: 0.9em;
         color: inherit;
@@ -337,7 +337,7 @@
     .context-menu,
     .megamenu-content,
     footer {
-        font-family: var(--font-sans-serif);
+        font-family: var(--app-font-family);
     }
 
     .file-node-content:hover .file-node-icon,
@@ -436,6 +436,6 @@
     }
 
     .outline-label {
-        font-family: "Cascadia Code", "PingFang SC";
+        font-family: var(--app-font-family);
     }
 }

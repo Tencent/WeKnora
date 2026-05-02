@@ -1106,7 +1106,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     .menu_title {
         color: var(--td-text-color-secondary);
         text-overflow: ellipsis;
-        font-family: "PingFang SC";
+        font-family: var(--app-font-family);
         font-size: 14px;
         font-style: normal;
         font-weight: 600;
@@ -1118,7 +1118,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .submenu {
-        font-family: "PingFang SC";
+        font-family: var(--app-font-family);
         font-size: 14px;
         font-style: normal;
         overflow-y: auto;
@@ -1161,7 +1161,7 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     .timeline_header {
-        font-family: "PingFang SC";
+        font-family: var(--app-font-family);
         font-size: 12px;
         font-weight: 600;
         color: var(--td-text-color-disabled);

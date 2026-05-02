@@ -2543,7 +2543,7 @@ const getImgSrc = (url: string) => {
   font-size: 16px;
   font-weight: 400;
   line-height: 24px;
-  font-family: var(--td-font-family, "PingFang SC");
+  font-family: var(--app-font-family);
   padding: 12px 16px 56px 16px;
   border-radius: 0 0 12px 12px;
   border: none;
@@ -2558,7 +2558,7 @@ const getImgSrc = (url: string) => {
 
   &::placeholder {
     color: var(--td-text-color-placeholder, #00000066);
-    font-family: var(--td-font-family, "PingFang SC");
+    font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 400;
     line-height: 24px;

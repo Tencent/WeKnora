@@ -47,6 +47,56 @@
         </div>
       </div>
 
+      <!-- 界面字体 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('font.uiFont') }}</label>
+          <p class="desc">{{ $t('font.uiFontDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-select
+            v-model="localSansFont"
+            style="width: 280px;"
+            :placeholder="$t('font.selectFont')"
+            @change="handleSansFontChange"
+          >
+            <t-option
+              v-for="opt in sansFontOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :label="opt.label"
+            >
+              <span :style="{ fontFamily: opt.preview }">{{ opt.label }}</span>
+            </t-option>
+          </t-select>
+        </div>
+      </div>
+
+      <!-- 等宽字体 -->
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('font.monoFont') }}</label>
+          <p class="desc">{{ $t('font.monoFontDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-select
+            v-model="localMonoFont"
+            style="width: 280px;"
+            :placeholder="$t('font.selectFont')"
+            @change="handleMonoFontChange"
+          >
+            <t-option
+              v-for="opt in monoFontOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :label="opt.label"
+            >
+              <span :style="{ fontFamily: opt.preview }">{{ opt.label }}</span>
+            </t-option>
+          </t-select>
+        </div>
+      </div>
+
       <!-- 记忆功能开关 -->
       <div class="setting-row">
         <div class="setting-info">
@@ -98,15 +148,45 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import { getSystemInfo } from '@/api/system'
 import { useTheme, type ThemeMode } from '@/composables/useTheme'
+import {
+  useFont,
+  SANS_STACKS,
+  MONO_STACKS,
+  type FontKey,
+  type MonoFontKey,
+} from '@/composables/useFont'
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
 const authStore = useAuthStore()
 const { currentTheme, setTheme } = useTheme()
+const { currentSans, currentMono, setSansFont, setMonoFont } = useFont()
 
 // 本地状态
 const localLanguage = ref('zh-CN')
 const localTheme = ref<ThemeMode>(currentTheme.value)
+const localSansFont = ref<FontKey>(currentSans.value)
+const localMonoFont = ref<MonoFontKey>(currentMono.value)
+
+const sansFontOptions = computed<{ value: FontKey; label: string; preview: string }[]>(() => [
+  { value: 'system', label: t('font.sans.system'), preview: SANS_STACKS.system },
+  { value: 'pingfang', label: t('font.sans.pingfang'), preview: SANS_STACKS.pingfang },
+  { value: 'inter', label: t('font.sans.inter'), preview: SANS_STACKS.inter },
+  { value: 'helvetica', label: t('font.sans.helvetica'), preview: SANS_STACKS.helvetica },
+  { value: 'segoe', label: t('font.sans.segoe'), preview: SANS_STACKS.segoe },
+  { value: 'roboto', label: t('font.sans.roboto'), preview: SANS_STACKS.roboto },
+  { value: 'sans-serif', label: t('font.sans.sansSerif'), preview: SANS_STACKS['sans-serif'] },
+])
+
+const monoFontOptions = computed<{ value: MonoFontKey; label: string; preview: string }[]>(() => [
+  { value: 'system', label: t('font.mono.system'), preview: MONO_STACKS.system },
+  { value: 'cascadia', label: t('font.mono.cascadia'), preview: MONO_STACKS.cascadia },
+  { value: 'jetbrains', label: t('font.mono.jetbrains'), preview: MONO_STACKS.jetbrains },
+  { value: 'fira', label: t('font.mono.fira'), preview: MONO_STACKS.fira },
+  { value: 'monaco', label: t('font.mono.monaco'), preview: MONO_STACKS.monaco },
+  { value: 'consolas', label: t('font.mono.consolas'), preview: MONO_STACKS.consolas },
+  { value: 'monospace', label: t('font.mono.monospace'), preview: MONO_STACKS.monospace },
+])
 
 // 系统信息
 const systemInfo = ref<any>(null)
@@ -180,6 +260,17 @@ const handleMemoryChange = (val: boolean) => {
 // 处理主题变化
 const handleThemeChange = (val: ThemeMode) => {
   setTheme(val)
+  MessagePlugin.success(t('common.success'))
+}
+
+// 处理字体变化
+const handleSansFontChange = (val: FontKey) => {
+  setSansFont(val)
+  MessagePlugin.success(t('common.success'))
+}
+
+const handleMonoFontChange = (val: MonoFontKey) => {
+  setMonoFont(val)
   MessagePlugin.success(t('common.success'))
 }
 </script>

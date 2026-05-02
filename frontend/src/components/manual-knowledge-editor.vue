@@ -971,7 +971,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.t-textarea__inner) {
-  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  font-family: var(--app-font-family-mono);
   line-height: 1.6;
 }
 
@@ -997,7 +997,7 @@ onBeforeUnmount(() => {
     background: var(--td-bg-color-container-hover);
     padding: 2px 4px;
     border-radius: 4px;
-    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-family: var(--app-font-family-mono);
   }
 
   :deep(pre) {

@@ -384,7 +384,7 @@ watch(() => props.parserEngineRules, (v) => {
     background: var(--td-bg-color-secondarycontainer);
     padding: 3px 8px;
     border-radius: 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: var(--app-font-family-mono);
   }
 
   .desc {
@@ -442,7 +442,7 @@ watch(() => props.parserEngineRules, (v) => {
   font-size: 13px;
   font-weight: 600;
   color: var(--td-text-color-primary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--app-font-family-mono);
 }
 
 .engine-option-desc {

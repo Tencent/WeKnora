@@ -1283,7 +1283,7 @@ onUnmounted(() => {
   h2 {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC", system-ui, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 24px;
     font-weight: 600;
     line-height: 32px;
@@ -1341,7 +1341,7 @@ onUnmounted(() => {
 .header-subtitle {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
@@ -1392,7 +1392,7 @@ onUnmounted(() => {
     padding: 12px 0;
     cursor: pointer;
     color: var(--td-text-color-secondary);
-    font-family: "PingFang SC", system-ui, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     user-select: none;
@@ -1584,7 +1584,7 @@ onUnmounted(() => {
 
 .card-title {
   color: var(--td-text-color-primary);
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 15px;
   font-weight: 600;
   line-height: 22px;
@@ -1645,7 +1645,7 @@ onUnmounted(() => {
   line-clamp: 2;
   overflow: hidden;
   color: var(--td-text-color-secondary);
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;
@@ -1685,7 +1685,7 @@ onUnmounted(() => {
   border-radius: 5px;
   font-size: 11px;
   font-weight: 500;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   cursor: default;
   transition: background 0.2s ease;
 
@@ -1755,7 +1755,7 @@ onUnmounted(() => {
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   background: rgba(107, 114, 128, 0.08);
   color: var(--td-text-color-secondary);
 
@@ -1805,7 +1805,7 @@ onUnmounted(() => {
 
   .empty-txt {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 600;
     line-height: 26px;
@@ -1814,7 +1814,7 @@ onUnmounted(() => {
 
   .empty-desc {
     color: var(--td-text-color-disabled);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -1885,7 +1885,7 @@ onUnmounted(() => {
 
   .circle-title {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 600;
     line-height: 24px;
@@ -1893,7 +1893,7 @@ onUnmounted(() => {
 
   .del-circle-txt {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -1911,7 +1911,7 @@ onUnmounted(() => {
 
   .circle-btn-txt {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 400;
     line-height: 22px;
@@ -1940,7 +1940,7 @@ onUnmounted(() => {
 .create-org-dialog,
 .join-org-dialog {
   .t-form-item__label {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -1948,7 +1948,7 @@ onUnmounted(() => {
 
   .t-input,
   .t-textarea {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
   }
 
   .t-button--theme-primary {
@@ -2022,7 +2022,7 @@ onUnmounted(() => {
 
 .invite-preview-title {
   margin: 0;
-  font-family: "PingFang SC", -apple-system, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 18px;
   font-weight: 600;
   color: var(--td-text-color-primary);
@@ -2116,7 +2116,7 @@ onUnmounted(() => {
     user-select: none;
     position: relative;
     transition: color 0.2s ease;
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
 
     &:hover {
       color: var(--td-text-color-primary);
@@ -2201,7 +2201,7 @@ onUnmounted(() => {
 
   .searchable-empty-txt {
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC", system-ui, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 500;
     line-height: 1.5;
@@ -2295,7 +2295,7 @@ onUnmounted(() => {
 
   .searchable-card-title {
     color: var(--td-text-color-primary);
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 15px;
     font-weight: 600;
     line-height: 22px;
@@ -2329,7 +2329,7 @@ onUnmounted(() => {
     overflow: hidden;
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-family: "PingFang SC", system-ui, sans-serif;
+    font-family: var(--app-font-family);
     font-size: 12px;
     font-weight: 400;
     line-height: 1.5;
@@ -2359,7 +2359,7 @@ onUnmounted(() => {
     border-radius: 6px;
     font-size: 12px;
     font-weight: 500;
-    font-family: "PingFang SC", system-ui, sans-serif;
+    font-family: var(--app-font-family);
 
     &.member {
       background: rgba(7, 192, 95, 0.08);
@@ -2400,7 +2400,7 @@ onUnmounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0 0 16px;
     line-height: 1.55;
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
   }
   .invite-preview-input-wrap {
     margin-bottom: 12px;
@@ -2410,7 +2410,7 @@ onUnmounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0 0 20px;
     line-height: 1.5;
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
   }
   .invite-preview-error-inline {
     display: flex;
@@ -2419,7 +2419,7 @@ onUnmounted(() => {
     color: var(--td-error-color);
     font-size: 13px;
     margin-bottom: 16px;
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
   }
   .invite-preview-footer-single {
     margin: 24px 0 0;
@@ -2440,7 +2440,7 @@ onUnmounted(() => {
   .invite-preview-loading-text {
     font-size: 14px;
     color: var(--td-text-color-secondary);
-    font-family: "PingFang SC", -apple-system, sans-serif;
+    font-family: var(--app-font-family);
   }
 }
 
@@ -2461,7 +2461,7 @@ onUnmounted(() => {
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 8px;
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
   }
 
   .invite-preview-error-desc {
@@ -2469,7 +2469,7 @@ onUnmounted(() => {
     color: var(--td-text-color-secondary);
     margin: 0 0 24px;
     line-height: 1.5;
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
   }
 }
 
@@ -2543,7 +2543,7 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 4px;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   line-height: 1.3;
   letter-spacing: -0.02em;
 }
@@ -2555,7 +2555,7 @@ onUnmounted(() => {
   margin: 0;
   font-size: 12px;
   color: var(--td-text-color-placeholder);
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .preview-detail-id-label {
@@ -2563,7 +2563,7 @@ onUnmounted(() => {
 }
 
 .preview-detail-id-value {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
   color: var(--td-text-color-secondary);
@@ -2591,7 +2591,7 @@ onUnmounted(() => {
   overflow: hidden;
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.5;
@@ -2621,7 +2621,7 @@ onUnmounted(() => {
   border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
 
   &.member {
     background: rgba(7, 192, 95, 0.08);
@@ -2662,7 +2662,7 @@ onUnmounted(() => {
   gap: 10px;
   margin-bottom: 12px;
   font-size: 14px;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .preview-join-label {
@@ -2690,7 +2690,7 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--td-text-color-secondary);
   line-height: 1.5;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   margin-bottom: 16px;
 
   &.preview-join-note-warning {
@@ -2724,7 +2724,7 @@ onUnmounted(() => {
 .preview-form-label {
   display: block;
   margin-bottom: 8px;
-  font-family: "PingFang SC", system-ui, sans-serif;
+  font-family: var(--app-font-family);
   font-size: 14px;
   font-weight: 500;
   color: var(--td-text-color-secondary);

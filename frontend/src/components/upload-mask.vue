@@ -19,7 +19,7 @@ const { t } = useI18n()
 }
 .drag-txt {
     color: var(--td-brand-color);
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 24px;
     font-weight: 600;
     line-height: 26px;
@@ -31,7 +31,7 @@ const { t } = useI18n()
     width: 217px;
     color: var(--td-text-color-disabled);
     text-align: center;
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 12px;
     font-weight: 400;
 }

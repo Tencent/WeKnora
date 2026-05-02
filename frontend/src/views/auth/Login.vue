@@ -837,7 +837,7 @@ onMounted(async () => {
   font-size: 22px;
   color: rgba(255, 255, 255, 0.95);
   margin: 0 0 8px 0;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   line-height: 1.4;
   font-weight: 500;
 }
@@ -846,7 +846,7 @@ onMounted(async () => {
   font-size: 15px;
   color: rgba(255, 255, 255, 0.8);
   margin: 0 0 28px 0;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   line-height: 1.5;
 }
 
@@ -865,7 +865,7 @@ onMounted(async () => {
   color: var(--td-text-color-anti);
   font-size: 14px;
   font-weight: 500;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
 }
 
 /* Carousel */
@@ -978,7 +978,7 @@ onMounted(async () => {
   text-decoration: none;
   font-size: 13px;
   font-weight: 600;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   letter-spacing: 0.2px;
   cursor: pointer;
   position: relative;
@@ -1039,7 +1039,7 @@ onMounted(async () => {
   padding: 10px 14px;
   cursor: pointer;
   font-size: 13px;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   color: var(--td-text-color-primary);
 
   .lang-flag { font-size: 16px; flex-shrink: 0; }
@@ -1076,21 +1076,21 @@ onMounted(async () => {
     font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 6px 0;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .form-welcome {
   font-size: 13px;
   color: var(--td-text-color-secondary);
     margin: 0;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .form-subtitle {
   font-size: 13px;
   color: var(--td-text-color-secondary);
   margin: 0;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .form-content {
@@ -1099,7 +1099,7 @@ onMounted(async () => {
     color: var(--td-text-color-primary);
     font-weight: 500;
     margin-bottom: 8px;
-    font-family: "PingFang SC", sans-serif;
+    font-family: var(--app-font-family);
     display: block;
     text-align: left;
   }
@@ -1125,7 +1125,7 @@ onMounted(async () => {
       outline: none !important;
       background: transparent;
       font-size: 15px;
-      font-family: "PingFang SC", sans-serif;
+      font-family: var(--app-font-family);
       
       &:focus {
         border: none !important;
@@ -1158,7 +1158,7 @@ onMounted(async () => {
   border-radius: 8px;
   font-size: 16px;
   font-weight: 500;
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   margin: 20px 0 16px 0;
 }
 
@@ -1197,7 +1197,7 @@ onMounted(async () => {
   text-align: center;
   font-size: 14px;
   color: var(--td-text-color-secondary);
-  font-family: "PingFang SC", sans-serif;
+  font-family: var(--app-font-family);
   margin-top: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--td-component-stroke);
@@ -1232,7 +1232,7 @@ onMounted(async () => {
     margin-bottom: 12px;
     font-size: 13px;
     color: var(--td-text-color-secondary);
-    font-family: "PingFang SC", sans-serif;
+    font-family: var(--app-font-family);
 
     &:last-child {
       margin-bottom: 0;

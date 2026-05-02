@@ -172,7 +172,7 @@ const toolArguments = computed(() => props.arguments || {});
     padding: 0;
     
     .detail-output {
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+      font-family: var(--app-font-family-mono);
       font-size: 12px;
       color: var(--td-text-color-primary);
       padding: 16px;

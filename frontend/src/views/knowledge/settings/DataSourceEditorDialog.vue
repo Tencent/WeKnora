@@ -852,7 +852,7 @@ const stepTitles = computed(() => [
   border-radius: 3px;
   background: var(--td-bg-color-component);
   color: var(--td-text-color-secondary);
-  font-family: monospace;
+  font-family: var(--app-font-family-mono);
   margin-right: 4px;
 }
 

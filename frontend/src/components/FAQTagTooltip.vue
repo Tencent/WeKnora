@@ -171,7 +171,7 @@ watch(showTooltip, (newVal) => {
   border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   box-shadow: 0 0 8px 0 rgba(0, 0, 0, 0.08);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.6;
@@ -273,7 +273,7 @@ watch(showTooltip, (newVal) => {
 
 .tooltip-content {
   color: var(--td-text-color-primary);
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.6;

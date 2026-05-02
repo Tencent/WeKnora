@@ -111,7 +111,7 @@ const processedContent = computed(() => {
       flex: 1;
       
       code {
-        font-family: 'Monaco', 'Courier New', monospace;
+        font-family: var(--app-font-family-mono);
         font-size: 10px;
         background: var(--td-bg-color-secondarycontainer);
         padding: 1px 4px;

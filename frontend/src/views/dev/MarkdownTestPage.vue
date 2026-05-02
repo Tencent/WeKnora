@@ -290,7 +290,7 @@ watch(mermaidSample, doMermaid);
   max-width: 860px;
   margin: 0 auto;
   padding: 32px 24px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--app-font-family);
 }
 
 .page-title {
@@ -387,7 +387,7 @@ watch(mermaidSample, doMermaid);
 .custom-textarea {
   width: 100%;
   padding: 10px;
-  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-family: var(--app-font-family-mono);
   font-size: 13px;
   border: 1px solid var(--td-component-stroke, #ccc);
   border-radius: 6px;
@@ -431,7 +431,7 @@ watch(mermaidSample, doMermaid);
     background: var(--td-bg-color-secondarycontainer, #f5f5f5);
     padding: 2px 5px;
     border-radius: 3px;
-    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    font-family: var(--app-font-family-mono);
     font-size: 13px;
   }
   :deep(pre) {

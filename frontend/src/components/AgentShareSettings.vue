@@ -271,7 +271,7 @@ defineExpose({ loadShares })
   gap: 8px;
   margin-bottom: 16px;
   .shares-title {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 15px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -344,7 +344,7 @@ defineExpose({ loadShares })
   align-items: center;
   gap: 8px;
   .org-name {
-    font-family: "PingFang SC";
+    font-family: var(--app-font-family);
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
@@ -451,7 +451,7 @@ defineExpose({ loadShares })
   margin-bottom: 2px;
 }
 .org-option-name {
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 13px;
   font-weight: 500;
   color: var(--td-text-color-primary);
@@ -463,7 +463,7 @@ defineExpose({ loadShares })
   display: flex;
   align-items: center;
   gap: 6px;
-  font-family: "PingFang SC";
+  font-family: var(--app-font-family);
   font-size: 12px;
   color: var(--td-text-color-placeholder);
 

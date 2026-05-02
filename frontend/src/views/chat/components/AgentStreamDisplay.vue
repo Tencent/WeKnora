@@ -2413,7 +2413,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
-        font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        font-family: var(--app-font-family-mono);
         font-size: 11px;
       }
       
@@ -2962,7 +2962,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     padding: 0;
     
     .detail-output {
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
+      font-family: var(--app-font-family-mono);
       font-size: 11px;
       color: var(--td-text-color-primary);
       padding: 12px;
@@ -3199,7 +3199,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     background: var(--td-bg-color-container);
     padding: 10px;
     border-radius: 6px;
-    font-family: 'Monaco', 'Courier New', monospace;
+    font-family: var(--app-font-family-mono);
     color: var(--td-text-color-primary);
     margin: 0;
     overflow-x: auto;
@@ -3372,7 +3372,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     }
     
     code {
-      font-family: monospace;
+      font-family: var(--app-font-family-mono);
       font-size: 13px;
       padding: 2px 4px;
       background: var(--td-bg-color-secondarycontainer);

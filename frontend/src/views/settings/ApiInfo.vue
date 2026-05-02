@@ -34,7 +34,7 @@
               v-model="displayApiKey" 
               readonly 
               type="text"
-              style="width: 100%; font-family: monospace; font-size: 12px;"
+              style="width: 100%; font-family: var(--app-font-family-mono); font-size: 12px;"
             />
             <t-button 
               size="small" 
@@ -77,7 +77,7 @@
               :model-value="apiBaseUrlDisplay"
               readonly
               type="text"
-              style="width: 100%; font-family: monospace; font-size: 12px;"
+              style="width: 100%; font-family: var(--app-font-family-mono); font-size: 12px;"
             />
             <t-button
               size="small"
@@ -136,7 +136,7 @@
                 :model-value="wailsApiLanBaseURL"
                 readonly
                 type="text"
-                style="width: 100%; font-family: monospace; font-size: 12px;"
+                style="width: 100%; font-family: var(--app-font-family-mono); font-size: 12px;"
               />
               <t-button
                 size="small"
@@ -710,7 +710,7 @@ onMounted(async () => {
   }
 
   :deep(input) {
-    font-family: monospace;
+    font-family: var(--app-font-family-mono);
     font-size: 12px;
   }
 }
