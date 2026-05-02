@@ -102,6 +102,9 @@ type KBModelConfigRequest struct {
 		EnableParentChild bool                     `json:"enableParentChild"`
 		ParentChunkSize   int                      `json:"parentChunkSize,omitempty"`
 		ChildChunkSize    int                      `json:"childChunkSize,omitempty"`
+		Strategy          string                   `json:"strategy,omitempty"`
+		TokenLimit        int                      `json:"tokenLimit,omitempty"`
+		Languages         []string                 `json:"languages,omitempty"`
 	} `json:"documentSplitting"`
 
 	// 多模态配置（仅模型相关；存储引擎在 storageProvider 中配置）
@@ -319,6 +322,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if req.DocumentSplitting.ChildChunkSize > 0 {
 		kb.ChunkingConfig.ChildChunkSize = req.DocumentSplitting.ChildChunkSize
+	}
+	if req.DocumentSplitting.Strategy != "" {
+		kb.ChunkingConfig.Strategy = req.DocumentSplitting.Strategy
+	}
+	if req.DocumentSplitting.TokenLimit > 0 {
+		kb.ChunkingConfig.TokenLimit = req.DocumentSplitting.TokenLimit
+	}
+	if len(req.DocumentSplitting.Languages) > 0 {
+		kb.ChunkingConfig.Languages = req.DocumentSplitting.Languages
 	}
 
 	// 更新多模态配置
@@ -1420,11 +1432,21 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 
 	// 添加知识库的文档分割配置
 	if kb != nil {
-		config["documentSplitting"] = map[string]interface{}{
+		ds := map[string]interface{}{
 			"chunkSize":    kb.ChunkingConfig.ChunkSize,
 			"chunkOverlap": kb.ChunkingConfig.ChunkOverlap,
 			"separators":   kb.ChunkingConfig.Separators,
 		}
+		if kb.ChunkingConfig.Strategy != "" {
+			ds["strategy"] = kb.ChunkingConfig.Strategy
+		}
+		if kb.ChunkingConfig.TokenLimit > 0 {
+			ds["tokenLimit"] = kb.ChunkingConfig.TokenLimit
+		}
+		if len(kb.ChunkingConfig.Languages) > 0 {
+			ds["languages"] = kb.ChunkingConfig.Languages
+		}
+		config["documentSplitting"] = ds
 
 		// 添加多模态的存储配置信息（优先读新字段，兼容旧 cos_config）
 		effectiveProvider := kb.GetStorageProvider()
