@@ -56,7 +56,7 @@ and **parent chunks** (larger, returned to the LLM for context).
 |---------|-------|---------|-------|
 | **Enable parent-child** | toggle | on | Recommended for documents > 10 pages. Skip for short FAQs to halve storage cost. |
 | **Parent chunk size** | 512–8192 chars | 4096 (~1000 EN tokens) | Larger for long-context LLMs (Claude, GPT-4-Turbo). Smaller (1024–2048) for local LLMs with 4k contexts. |
-| **Child chunk size** | 64–2048 chars | 384 (~80 EN tokens) | 128–256 for Q&A-style precise matching. 512–1024 if your embedder accepts >1000 tokens (E5 / BGE-large). |
+| **Child chunk size** | 64–2048 chars | 384 (~95 EN tokens) | 128–256 for Q&A-style precise matching. 512–1024 if your embedder accepts >1000 tokens (E5 / BGE-large). |
 
 ### Advanced
 
@@ -114,6 +114,10 @@ configurations against the same sample before triggering a re-upload.
 
 ## API
 
+Three endpoints can write the chunking config. The KB-config update
+endpoint is the one wired to the editor UI and uses **camelCase** with a
+`documentSplitting` envelope:
+
 ```http
 PUT /api/v1/initialization/config/:kbId
 Authorization: Bearer <jwt>
@@ -138,8 +142,14 @@ The `strategy`, `tokenLimit`, and `languages` fields use pointer-based
 DTOs server-side: omitting them in the payload means "no change",
 sending an empty string / 0 / [] explicitly resets to default.
 
-The preview endpoint accepts the same payload shape under
-`POST /api/v1/chunker/preview` with an additional `text` field.
+The KB CRUD endpoints (`POST /api/v1/knowledge-bases`,
+`PUT /api/v1/knowledge-bases/:id`) take the same fields but in
+**snake_case** under a `chunking_config` envelope:
+`{ "chunking_config": { "chunk_size": 512, "chunk_overlap": 80,
+"strategy": "auto", "token_limit": 0, "languages": ["de", "en"], ... } }`.
+
+The preview endpoint at `POST /api/v1/chunker/preview` uses the snake_case
+form too and additionally takes a `text` field for the sample to chunk.
 
 ## Known trade-offs
 

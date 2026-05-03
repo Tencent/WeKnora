@@ -209,8 +209,16 @@ const runPreview = async () => {
     // The axios interceptor in utils/request.ts already unwraps the
     // outer envelope and returns the response body. So resp here is
     // { success: true, data: PreviewChunkingResponse } directly.
-    if (!resp || resp.success !== true || !resp.data) {
-      throw new Error('unexpected response shape')
+    // If the backend ever responds with 200 + { success: false, error },
+    // surface that error instead of swallowing it under a generic message.
+    if (!resp) {
+      throw new Error('empty response')
+    }
+    if (resp.success !== true) {
+      throw new Error((resp as any).error || 'preview failed')
+    }
+    if (!resp.data) {
+      throw new Error('response missing data')
     }
     result.value = resp.data
   } catch (e: any) {
