@@ -3,6 +3,7 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -118,6 +119,7 @@ func (p *MemoryPlugin) handleStorage(
 	// If streaming, subscribe to events
 	if chatManage.EventBus != nil {
 		var fullResponse string
+		var storeOnce sync.Once
 		userID := chatManage.UserID
 		sessionID := chatManage.SessionID
 		bgCtx := context.WithoutCancel(ctx)
@@ -129,15 +131,19 @@ func (p *MemoryPlugin) handleStorage(
 			}
 			fullResponse += data.Content
 			if data.Done {
-				messages := []types.Message{
-					{Role: "user", Content: chatManage.Query},
-					{Role: "assistant", Content: fullResponse},
-				}
-				go func() {
-					if err := p.memoryService.AddEpisode(bgCtx, userID, sessionID, messages); err != nil {
-						logger.Errorf(bgCtx, "failed to add episode: %v", err)
+				// Stream layer may emit Done:true twice (e.g. finish_reason chunk + EOF sentinel).
+				// qa.go dedupes with completionHandled; keep memory writes consistent with one episode only.
+				storeOnce.Do(func() {
+					messages := []types.Message{
+						{Role: "user", Content: chatManage.Query},
+						{Role: "assistant", Content: fullResponse},
 					}
-				}()
+					go func() {
+						if err := p.memoryService.AddEpisode(bgCtx, userID, sessionID, messages); err != nil {
+							logger.Errorf(bgCtx, "failed to add episode: %v", err)
+						}
+					}()
+				})
 			}
 			return nil
 		})
