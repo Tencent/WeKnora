@@ -200,6 +200,9 @@
           </div>
         </div>
       </div>
+
+      <!-- Debug panel: try a sample text against the current config without re-uploading. -->
+      <KBChunkingDebug :config="debugConfig" />
     </div>
   </div>
 </template>
@@ -207,6 +210,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import KBChunkingDebug from './KBChunkingDebug.vue'
 
 interface ParserEngineRule {
   file_types: string[]
@@ -287,6 +291,17 @@ const advancedDisabled = computed(() => localStrategy.value === 'legacy')
 const overlapTooHigh = computed(
   () => localChunkOverlap.value > 0 && localChunkOverlap.value >= localChunkSize.value / 2
 )
+
+// Live config snapshot for the debug panel — uses current local form values
+// so the panel reflects edits immediately without waiting for save.
+const debugConfig = computed(() => ({
+  chunkSize: localChunkSize.value,
+  chunkOverlap: localChunkOverlap.value,
+  separators: localSeparators.value,
+  strategy: localStrategy.value,
+  tokenLimit: localTokenLimit.value,
+  languages: localLanguages.value
+}))
 
 const languageOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.languageOptions.de'), value: 'de' },

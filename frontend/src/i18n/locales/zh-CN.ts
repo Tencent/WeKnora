@@ -2469,6 +2469,30 @@ export default {
         de: "德语",
         en: "英语",
         zh: "中文"
+      },
+      debug: {
+        toggle: "使用示例文本测试",
+        toggleHint: "无需重新上传即可对示例文本运行分块器",
+        sampleLabel: "示例文本",
+        samplePlaceholder: "粘贴 Markdown / 纯文本片段以查看当前配置的分块结果…",
+        runButton: "运行预览",
+        errorPrefix: "预览失败",
+        selectedTier: "选定策略",
+        rejected: "被拒绝的层级",
+        contextHeader: "上下文标题",
+        fallbackWarning: "策略链已穷尽 — 当前设置无法智能分块此内容",
+        profile: {
+          lines: "行",
+          chars: "字符",
+          headings: "Markdown 标题",
+          pageBreaks: "分页符",
+          chapterMarkers: "章节标记",
+          languages: "语言"
+        },
+        stats: {
+          chunks: "块",
+          truncated: "已截断；总数 {total}"
+        }
       }
     },
     multimodal: {

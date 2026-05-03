@@ -2510,6 +2510,30 @@ export default {
         de: "독일어",
         en: "영어",
         zh: "중국어"
+      },
+      debug: {
+        toggle: "샘플 텍스트로 테스트",
+        toggleHint: "재업로드 없이 샘플 텍스트에 대해 청커 실행",
+        sampleLabel: "샘플 텍스트",
+        samplePlaceholder: "현재 구성으로 어떻게 청크되는지 보려면 Markdown / 일반 텍스트 스니펫을 붙여넣으세요…",
+        runButton: "미리보기 실행",
+        errorPrefix: "미리보기 실패",
+        selectedTier: "선택된 전략",
+        rejected: "거부된 계층",
+        contextHeader: "컨텍스트 헤더",
+        fallbackWarning: "전략 체인이 모두 실패함 — 현재 설정으로는 콘텐츠를 지능적으로 분할할 수 없음",
+        profile: {
+          lines: "줄",
+          chars: "문자",
+          headings: "Markdown 제목",
+          pageBreaks: "페이지 구분",
+          chapterMarkers: "챕터 마커",
+          languages: "언어"
+        },
+        stats: {
+          chunks: "청크",
+          truncated: "잘림; 총 {total}"
+        }
       }
     },
     multimodal: {

@@ -1933,6 +1933,30 @@ export default {
         de: 'German',
         en: 'English',
         zh: 'Chinese'
+      },
+      debug: {
+        toggle: 'Test with sample text',
+        toggleHint: 'Run the chunker against sample text without re-uploading',
+        sampleLabel: 'Sample text',
+        samplePlaceholder: 'Paste a Markdown / plain-text snippet to see how the current configuration would chunk it…',
+        runButton: 'Run preview',
+        errorPrefix: 'Preview failed',
+        selectedTier: 'Selected strategy',
+        rejected: 'Rejected tiers',
+        contextHeader: 'Context header',
+        fallbackWarning: 'Strategy chain fell through — content does not split intelligently with current settings',
+        profile: {
+          lines: 'lines',
+          chars: 'chars',
+          headings: 'Markdown headings',
+          pageBreaks: 'page breaks',
+          chapterMarkers: 'chapter markers',
+          languages: 'languages'
+        },
+        stats: {
+          chunks: 'chunks',
+          truncated: 'truncated; total {total}'
+        }
       }
     },
     multimodal: {
