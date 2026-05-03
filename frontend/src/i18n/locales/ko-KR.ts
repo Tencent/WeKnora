@@ -2517,6 +2517,7 @@ export default {
         sampleLabel: "샘플 텍스트",
         samplePlaceholder: "현재 구성으로 어떻게 청크되는지 보려면 Markdown / 일반 텍스트 스니펫을 붙여넣으세요…",
         runButton: "미리보기 실행",
+        loading: "샘플에 대해 청커 실행 중…",
         errorPrefix: "미리보기 실패",
         selectedTier: "선택된 전략",
         rejected: "거부된 계층",

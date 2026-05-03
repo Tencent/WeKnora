@@ -2476,6 +2476,7 @@ export default {
         sampleLabel: "示例文本",
         samplePlaceholder: "粘贴 Markdown / 纯文本片段以查看当前配置的分块结果…",
         runButton: "运行预览",
+        loading: "正在对示例运行分块器…",
         errorPrefix: "预览失败",
         selectedTier: "选定策略",
         rejected: "被拒绝的层级",

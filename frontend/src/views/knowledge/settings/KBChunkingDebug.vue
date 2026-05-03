@@ -19,19 +19,29 @@
           <span :class="{ warn: sample.length > MAX_CHARS * 0.8 }">
             {{ sample.length }} / {{ MAX_CHARS }} {{ $t('knowledgeEditor.chunking.characters') }}
           </span>
+          <!-- type="button" prevents any accidental parent-form submit. -->
           <t-button
+            type="button"
             theme="primary"
             :loading="loading"
             :disabled="!sample || sample.length === 0"
-            @click="runPreview"
+            @click.prevent.stop="runPreview"
           >
             {{ $t('knowledgeEditor.chunking.debug.runButton') }}
           </t-button>
         </div>
       </div>
 
-      <div v-if="error" class="debug-error">
-        {{ error }}
+      <!-- Loading state — explicit so the user sees something is happening
+           even if the result block hasn't appeared yet. -->
+      <div v-if="loading" class="debug-loading">
+        <t-loading size="small" />
+        <span>{{ $t('knowledgeEditor.chunking.debug.loading') }}</span>
+      </div>
+
+      <!-- Error block: prominent so it can't be missed when an API call fails. -->
+      <div v-if="error && !loading" class="debug-error">
+        <strong>{{ $t('knowledgeEditor.chunking.debug.errorPrefix') }}:</strong> {{ error }}
       </div>
 
       <div v-if="result && !loading" class="debug-result">
@@ -196,14 +206,25 @@ const runPreview = async () => {
         languages: props.config.languages ?? []
       }
     })
-    if (!resp.success) {
-      throw new Error('preview failed')
+    // The axios interceptor in utils/request.ts already unwraps the
+    // outer envelope and returns the response body. So resp here is
+    // { success: true, data: PreviewChunkingResponse } directly.
+    if (!resp || resp.success !== true || !resp.data) {
+      throw new Error('unexpected response shape')
     }
     result.value = resp.data
   } catch (e: any) {
-    const msg = e?.message || e?.toString() || 'unknown error'
-    error.value = t('knowledgeEditor.chunking.debug.errorPrefix') + ': ' + msg
-    MessagePlugin.error(error.value)
+    // Pull a useful message out of the error shapes our request layer
+    // produces: rejected interceptor sends { status, message, ... }.
+    const msg =
+      e?.message ||
+      (typeof e === 'string' ? e : '') ||
+      'unknown error'
+    error.value = msg
+    // Console log so users can debug from DevTools too.
+    console.error('[KBChunkingDebug] previewChunking failed:', e)
+    // Toast for visibility.
+    MessagePlugin.error(t('knowledgeEditor.chunking.debug.errorPrefix') + ': ' + msg)
   } finally {
     loading.value = false
   }
@@ -309,14 +330,31 @@ const tierTheme = (tier: StrategyTier) => {
   }
 }
 
+.debug-loading {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--td-bg-color-container-hover);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--td-text-color-secondary);
+}
+
 .debug-error {
   margin-top: 12px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: var(--td-error-color-light);
   border-left: 3px solid var(--td-error-color);
   color: var(--td-error-color);
   font-size: 13px;
   border-radius: 0 4px 4px 0;
+  font-weight: 500;
+
+  strong {
+    margin-right: 4px;
+  }
 }
 
 .debug-result {
