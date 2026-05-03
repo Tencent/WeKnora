@@ -8,17 +8,28 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
 )
 
-// previewMaxChars caps the input text size so callers can't tie up the
-// server with arbitrarily large payloads. Chosen to stay well below the
-// 256 KB byte limit even for ASCII (256 KB / ~1 byte/rune).
-const previewMaxChars = 256 * 1024
+// previewMaxChars caps the input text size so a single preview request
+// cannot tie up the splitter for long. Chosen to bound worst-case CPU
+// well under the previewTimeout: at 64k runes even the heaviest tier
+// chain finishes in well under a second on commodity hardware.
+//
+// SECURITY NOTE: the splitter is CPU-bound and does NOT accept a
+// context.Context. When previewTimeout fires the handler returns to the
+// caller, but the worker goroutine keeps running until the splitter
+// finishes naturally. The 64k ceiling is the primary mitigation against
+// goroutine pile-up under repeated authenticated requests. If the
+// splitter ever gains context-awareness, the goroutine-wrapper in
+// PreviewChunking should switch to it for true cancellation.
+const previewMaxChars = 64 * 1024
 
 // previewMaxChunks caps the number of chunks returned in a single preview
 // response so the UI doesn't choke on pathological splits. Stats are
@@ -26,14 +37,15 @@ const previewMaxChars = 256 * 1024
 // avg/min/max/stddev stay representative.
 const previewMaxChunks = 500
 
-// previewTimeout caps how long the splitter is allowed to run for a single
-// preview call. CJK input at the 256k-rune ceiling can otherwise take
-// several seconds across all four tier attempts.
+// previewTimeout caps how long the handler waits for the splitter
+// goroutine before returning a 504. See note above on previewMaxChars.
 const previewTimeout = 5 * time.Second
 
 // PreviewChunkingRequest is the body shape accepted by /chunker/preview.
+// Text is checked manually below so we can return a friendlier error than
+// gin's default "Field validation for 'Text' failed on the 'required' tag".
 type PreviewChunkingRequest struct {
-	Text           string                 `json:"text" binding:"required"`
+	Text           string                 `json:"text"`
 	ChunkingConfig PreviewChunkingPayload `json:"chunking_config"`
 }
 
@@ -100,7 +112,15 @@ func PreviewChunking(c *gin.Context) {
 		return
 	}
 
-	if len([]rune(req.Text)) > previewMaxChars {
+	if strings.TrimSpace(req.Text) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"error":   "text is empty — paste a sample to preview chunking",
+		})
+		return
+	}
+
+	if utf8.RuneCountInString(req.Text) > previewMaxChars {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
 			"success": false,
 			"error":   "text exceeds preview limit",
@@ -159,24 +179,32 @@ func PreviewChunking(c *gin.Context) {
 		lang = profile.DetectedLangs[0]
 	}
 
+	// Compute rune lengths once per chunk; reused for stats and result
+	// payload below. Avoids the previous triple-pass over each chunk's
+	// content (stats + result + ApproxTokenCount each rune-counted).
+	runeLens := make([]int, len(chunks))
+	for i, ch := range chunks {
+		runeLens[i] = utf8.RuneCountInString(ch.Content)
+	}
+
 	// Compute stats over the FULL chunk set first so the metrics stay
 	// representative even when we trim the response to previewMaxChunks.
 	totalCount := len(chunks)
-	stats := computeChunkSizeStats(chunks, lang)
+	stats := computeChunkSizeStats(runeLens)
 	if totalCount > previewMaxChunks {
 		stats.TruncatedTo = totalCount
 		chunks = chunks[:previewMaxChunks]
+		runeLens = runeLens[:previewMaxChunks]
 	}
 
 	results := make([]PreviewChunkResult, 0, len(chunks))
-	for _, ch := range chunks {
-		runeLen := len([]rune(ch.Content))
+	for i, ch := range chunks {
 		results = append(results, PreviewChunkResult{
 			Seq:              ch.Seq,
 			Start:            ch.Start,
 			End:              ch.End,
-			SizeChars:        runeLen,
-			SizeTokensApprox: chunker.ApproxTokenCount(ch.Content, lang),
+			SizeChars:        runeLens[i],
+			SizeTokensApprox: chunker.ApproxTokenCountFromRuneLen(runeLens[i], lang),
 			ContextHeader:    ch.ContextHeader,
 			Content:          ch.Content,
 		})
@@ -193,23 +221,20 @@ func PreviewChunking(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
-// computeChunkSizeStats walks the full chunk slice once and returns the
-// size distribution stats. Operates directly on chunker.Chunk so we don't
-// need to materialize PreviewChunkResult before truncation.
-//
-// lang is forwarded to ApproxTokenCount only if callers extend the stats
-// later — currently the result struct only tracks chars.
-func computeChunkSizeStats(chunks []chunker.Chunk, _ string) PreviewChunkingStats {
-	stats := PreviewChunkingStats{Count: len(chunks)}
-	if len(chunks) == 0 {
+// computeChunkSizeStats summarizes count / avg / min / max / stddev from
+// a pre-computed rune-length slice. Decoupling from chunker.Chunk lets
+// the caller compute rune lengths once and reuse them for the response
+// payload (avoids a second []rune allocation per chunk).
+func computeChunkSizeStats(runeLens []int) PreviewChunkingStats {
+	stats := PreviewChunkingStats{Count: len(runeLens)}
+	if len(runeLens) == 0 {
 		return stats
 	}
 	var sum, sumSq float64
 	minLen, maxLen := math.MaxInt32, 0
-	for _, ch := range chunks {
-		l := len([]rune(ch.Content))
+	for _, l := range runeLens {
 		sum += float64(l)
-		sumSq += float64(l * l)
+		sumSq += float64(l) * float64(l)
 		if l < minLen {
 			minLen = l
 		}
@@ -217,8 +242,8 @@ func computeChunkSizeStats(chunks []chunker.Chunk, _ string) PreviewChunkingStat
 			maxLen = l
 		}
 	}
-	avg := sum / float64(len(chunks))
-	variance := sumSq/float64(len(chunks)) - avg*avg
+	avg := sum / float64(len(runeLens))
+	variance := sumSq/float64(len(runeLens)) - avg*avg
 	if variance < 0 {
 		// Float precision can push the variance slightly below zero on
 		// near-uniform inputs; clamp so sqrt doesn't return NaN.

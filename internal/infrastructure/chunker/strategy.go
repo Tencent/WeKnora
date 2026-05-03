@@ -199,8 +199,10 @@ func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *
 }
 
 // runTier dispatches the splitter implementation for the given tier.
-// Heading and heuristic tiers are stubbed in this scaffold and currently
-// fall through to the legacy splitter — they are filled in in later phases.
+// splitByHeadings / splitByHeuristics are package-level vars overridden
+// from heading_splitter.go / heuristic_splitter.go via init(); recursive
+// and legacy share the same SplitText path. The default branch is kept
+// as defensive belt-and-suspenders for future StrategyTier additions.
 func runTier(tier StrategyTier, text string, cfg SplitterConfig) []Chunk {
 	switch tier {
 	case TierHeading:

@@ -6,7 +6,10 @@
 // over-estimate token counts so that chunks stay safely under model limits.
 package chunker
 
-import "unicode"
+import (
+	"unicode"
+	"unicode/utf8"
+)
 
 // Language identifiers used by the token estimator and the heuristic splitter.
 const (
@@ -31,12 +34,23 @@ func ApproxTokenCount(s string, lang string) int {
 	if s == "" {
 		return 0
 	}
+	return ApproxTokenCountFromRuneLen(utf8.RuneCountInString(s), lang)
+}
+
+// ApproxTokenCountFromRuneLen is the allocation-free variant of
+// ApproxTokenCount when the caller has already computed the rune length.
+// Use this in hot loops where the same content's rune count would
+// otherwise be recomputed multiple times (e.g. preview endpoint emitting
+// per-chunk stats).
+func ApproxTokenCountFromRuneLen(runeLen int, lang string) int {
+	if runeLen <= 0 {
+		return 0
+	}
 	ratio, ok := charsPerToken[lang]
 	if !ok {
 		ratio = charsPerToken[LangMixed]
 	}
-	runes := []rune(s)
-	approx := float64(len(runes)) / ratio
+	approx := float64(runeLen) / ratio
 	if approx < 1 {
 		return 1
 	}

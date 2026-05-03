@@ -161,7 +161,8 @@ interface Props {
 const props = defineProps<Props>()
 const { t } = useI18n()
 
-const MAX_CHARS = 256 * 1024
+// Mirrors handler.previewMaxChars on the backend. Keep in sync.
+const MAX_CHARS = 64 * 1024
 
 const open = ref(false)
 const sample = ref('')
@@ -181,15 +182,18 @@ const runPreview = async () => {
   result.value = null
   expandedChunks.value = new Set()
   try {
+    // Send all fields explicitly (including empty / 0 / []) so the
+    // preview faithfully reflects what would happen on save. Mirrors
+    // the buildSubmitData convention in KnowledgeBaseEditorModal.
     const resp = await previewChunking({
       text: sample.value,
       chunking_config: {
         chunk_size: props.config.chunkSize,
         chunk_overlap: props.config.chunkOverlap,
         separators: props.config.separators,
-        strategy: props.config.strategy || undefined,
-        token_limit: props.config.tokenLimit || undefined,
-        languages: props.config.languages?.length ? props.config.languages : undefined
+        strategy: props.config.strategy ?? '',
+        token_limit: props.config.tokenLimit ?? 0,
+        languages: props.config.languages ?? []
       }
     })
     if (!resp.success) {

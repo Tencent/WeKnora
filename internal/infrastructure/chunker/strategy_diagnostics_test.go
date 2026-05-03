@@ -47,12 +47,52 @@ func TestSplitWithDiagnostics_EmptyText(t *testing.T) {
 	}
 }
 
-func TestSplit_DelegatesToSplitWithDiagnostics(t *testing.T) {
+// TestSplit_AndDiagnostics_AgreeOnChunks ensures Split (no diagnostics)
+// and SplitWithDiagnostics produce the same chunk set for a given input.
+// They run independent loops as of the post-audit refactor — this test
+// is the regression wall against them drifting.
+func TestSplit_AndDiagnostics_AgreeOnChunks(t *testing.T) {
 	text := "para one.\n\npara two.\n\npara three."
 	cfg := SplitterConfig{ChunkSize: 100, ChunkOverlap: 10}
 	a := Split(text, cfg)
-	b, _ := SplitWithDiagnostics(text, cfg)
+	b, diag := SplitWithDiagnostics(text, cfg)
 	if len(a) != len(b) {
-		t.Errorf("Split and SplitWithDiagnostics disagree: %d vs %d", len(a), len(b))
+		t.Fatalf("chunk count disagrees: Split=%d Diagnostics=%d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i].Content != b[i].Content || a[i].Start != b[i].Start || a[i].End != b[i].End {
+			t.Errorf("chunk %d differs:\n  Split: %+v\n  Diag : %+v", i, a[i], b[i])
+		}
+	}
+	if diag == nil {
+		t.Error("diagnostics must not be nil")
+	}
+}
+
+// TestSplitWithDiagnostics_ProfileSetForAuto verifies that auto-strategy
+// returns the DocProfile that drove tier selection — required by the
+// preview endpoint to avoid double-profiling.
+func TestSplitWithDiagnostics_ProfileSetForAuto(t *testing.T) {
+	doc := "# Top\nintro.\n\n## A\nbody A.\n\n## B\nbody B."
+	_, diag := SplitWithDiagnostics(doc, SplitterConfig{ChunkSize: 200, Strategy: StrategyAuto})
+	if diag.Profile == nil {
+		t.Fatal("auto strategy must populate diag.Profile")
+	}
+	if diag.Profile.MdHeadingTotal == 0 {
+		t.Errorf("profile should have detected headings, got %+v", diag.Profile)
+	}
+}
+
+// TestSplitWithDiagnostics_ProfileNilForExplicit verifies the inverse:
+// explicit strategies bypass profiling and leave Profile nil so the
+// preview handler knows to materialize one if it needs stats.
+func TestSplitWithDiagnostics_ProfileNilForExplicit(t *testing.T) {
+	for _, strat := range []string{StrategyHeading, StrategyHeuristic, StrategyRecursive, StrategyLegacy} {
+		t.Run(strat, func(t *testing.T) {
+			_, diag := SplitWithDiagnostics("plain text", SplitterConfig{ChunkSize: 200, Strategy: strat})
+			if diag.Profile != nil {
+				t.Errorf("strategy %q should leave Profile nil, got %+v", strat, diag.Profile)
+			}
+		})
 	}
 }
